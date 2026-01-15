@@ -7,6 +7,33 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
+  const pathname = request.nextUrl.pathname;
+
+  // Next.js dev tooling (and some dev extensions) may spam these endpoints.
+  // In some setups they 404, which causes aggressive retries and log spam.
+  // Handle them explicitly to stop the retry loop.
+  if (process.env.NODE_ENV === "development") {
+    if (pathname === "/__nextjs_original-stack-frame") {
+      return NextResponse.json({ originalStackFrame: null }, { status: 200 });
+    }
+    if (pathname === "/__nextjs_launch-editor") {
+      return new NextResponse(null, { status: 204 });
+    }
+  }
+
+  // Let Next.js internals + dev overlay endpoints through without touching Supabase.
+  // This avoids breaking dev tooling and prevents request spam.
+  const isNextInternal =
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/__nextjs") ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/favicon.ico") ||
+    pathname.match(/\.(ico|png|jpg|jpeg|svg|gif|webp|woff|woff2|ttf|eot)$/);
+
+  if (isNextInternal) {
+    return supabaseResponse;
+  }
+
   // If the env vars are not set, skip proxy check. You can remove this
   // once you setup the project.
   if (!hasEnvVars) {
@@ -25,17 +52,17 @@ export async function updateSession(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value),
+            request.cookies.set(name, value)
           );
           supabaseResponse = NextResponse.next({
             request,
           });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options),
+            supabaseResponse.cookies.set(name, value, options)
           );
         },
       },
-    },
+    }
   );
 
   // Do not run code between createServerClient and
@@ -48,10 +75,11 @@ export async function updateSession(request: NextRequest) {
   const user = data?.claims;
 
   if (
-    request.nextUrl.pathname !== "/" &&
+    pathname !== "/" &&
     !user &&
-    !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/auth")
+    !pathname.startsWith("/login") &&
+    !pathname.startsWith("/auth") &&
+    !isNextInternal
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();

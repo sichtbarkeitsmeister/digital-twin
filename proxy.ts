@@ -9,12 +9,13 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
+     * - _next (Next.js internals: static files, image optimization, HMR, etc.)
      * - favicon.ico (favicon file)
+     * Note: We do NOT exclude __nextjs* here. Next's dev overlay endpoints may rely on
+     * the proxy layer being present; we allow them through in `lib/supabase/proxy.ts`.
      * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
      * Feel free to modify this pattern to include more paths.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
