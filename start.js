@@ -4,6 +4,7 @@ process.env.NODE_ENV = "production";
 // Keep this file CommonJS-compatible by using a dynamic ESM import.
 import("next/dist/cli/next-start").then((app) => {
   app.nextStart({
+    hostname: "0.0.0.0",
     port: process.env.PORT || 3000,
   });
 });
