@@ -331,15 +331,23 @@ async function OrganisationContent({
   );
 }
 
-export default function OrganisationPage({
+function OrganisationPageInner({
   params,
 }: {
   params: Promise<{ organisationId: string }>;
 }) {
   const { organisationId } = use(params);
+  return <OrganisationContent organisationId={organisationId} />;
+}
+
+export default function OrganisationPage({
+  params,
+}: {
+  params: Promise<{ organisationId: string }>;
+}) {
   return (
     <Suspense fallback={<OrganisationFallback />}>
-      <OrganisationContent organisationId={organisationId} />
+      <OrganisationPageInner params={params} />
     </Suspense>
   );
 }
