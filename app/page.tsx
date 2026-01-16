@@ -13,7 +13,7 @@ function MarketingHome() {
         <section id="produkt" className="grid gap-6">
           <div className="grid gap-2">
             <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-              Ein Assistent, der Ihre Inhalte messbar verbessert
+              Ein Assistent, der Ihre Inhalte messbar verbessert Test
             </h2>
             <p className="max-w-3xl text-secondary">
               Von Landingpages über Produkttexte bis Blogartikel: Unsere KI
