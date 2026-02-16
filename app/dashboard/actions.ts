@@ -50,7 +50,9 @@ export async function adminCreateOrganisationAction(
     return { ok: false, message: "Could not create organisation." };
   }
 
-  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/admin/organisations");
+  revalidatePath("/dashboard/organisations");
+  revalidatePath("/dashboard/members");
   return { ok: true, message: "Organisation created." };
 }
 
@@ -171,6 +173,8 @@ export async function acceptOrganisationInviteAction(formData: FormData) {
     invite_id: parsed.data.invite_id,
   });
 
-  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/inbox");
+  revalidatePath("/dashboard/organisations");
+  revalidatePath("/dashboard/members");
 }
 

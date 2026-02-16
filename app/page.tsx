@@ -1,6 +1,5 @@
 import { Hero } from "@/components/hero";
 import Link from "next/link";
-import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { ChatMockup } from "@/app/_components/chat-mockup";
 
@@ -181,10 +180,6 @@ async function HomeContent() {
   return <ChatMockup organisations={organisations} />;
 }
 
-export default function Home() {
-  return (
-    <Suspense fallback={<MarketingHome />}>
-      <HomeContent />
-    </Suspense>
-  );
+export default async function Home() {
+  return <HomeContent />;
 }

@@ -30,17 +30,15 @@ function formatOrgRole(role: string) {
 
 function OrganisationFallback() {
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 py-10">
-      <Card>
-        <CardHeader>
-          <CardTitle>Organisation</CardTitle>
-          <CardDescription>Lade…</CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm text-secondary">
-          Inhalte werden geladen.
-        </CardContent>
-      </Card>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Organisation</CardTitle>
+        <CardDescription>Loading…</CardDescription>
+      </CardHeader>
+      <CardContent className="text-sm text-secondary">
+        Content is loading.
+      </CardContent>
+    </Card>
   );
 }
 
@@ -117,30 +115,26 @@ async function OrganisationContent({
 
   if (membersError || invitesError) {
     return (
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 py-10">
-        <Card>
-          <CardHeader>
-            <CardTitle>Fehler</CardTitle>
-            <CardDescription>
-              Konnte Organisationsdaten nicht laden.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-2 text-sm text-secondary">
-            {membersError ? (
-              <p>
-                <span className="font-semibold">Members:</span>{" "}
-                {membersError.message}
-              </p>
-            ) : null}
-            {invitesError ? (
-              <p>
-                <span className="font-semibold">Invites:</span>{" "}
-                {invitesError.message}
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Error</CardTitle>
+          <CardDescription>Could not load organisation data.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 text-sm text-secondary">
+          {membersError ? (
+            <p>
+              <span className="font-semibold">Members:</span>{" "}
+              {membersError.message}
+            </p>
+          ) : null}
+          {invitesError ? (
+            <p>
+              <span className="font-semibold">Invites:</span>{" "}
+              {invitesError.message}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
     );
   }
 
@@ -160,15 +154,15 @@ async function OrganisationContent({
   }>;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 py-10">
+    <div className="flex flex-col gap-8">
       <div className="grid gap-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
             <Link
-              href="/dashboard"
+              href="/dashboard/organisations"
               className="text-sm text-secondary hover:text-primary transition-colors"
             >
-              ← Back to dashboard
+              ← Back to organisations
             </Link>
             <h1 className="text-3xl font-bold tracking-tight">
               {organisation.name}

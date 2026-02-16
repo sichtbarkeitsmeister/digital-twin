@@ -4,7 +4,7 @@ import { Button } from "./ui/button";
 export function DashboardButton() {
   return (
     <>
-      <Link href="/dashboard">
+      <Link href="/dashboard/members" prefetch>
         <Button size="sm">
           <span>Dashboard</span>
         </Button>
