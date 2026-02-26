@@ -18,7 +18,7 @@ export function DashboardPrefetcher({
     ];
 
     if (isPlatformAdmin) {
-      routes.push("/dashboard/admin/organisations", "/dashboard/surveys/new");
+      routes.push("/dashboard/admin/organisations", "/dashboard/surveys", "/dashboard/surveys/new");
     }
 
     for (const href of routes) {

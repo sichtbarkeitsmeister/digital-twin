@@ -25,10 +25,6 @@ export function ChatMockup({ organisations }: { organisations: OrganisationOptio
   const [draft, setDraft] = useState("");
   const [hasSent, setHasSent] = useState(false);
 
-  const selectedOrg = useMemo(() => {
-    return organisations.find((o) => o.id === selectedOrgId) ?? organisations[0] ?? null;
-  }, [organisations, selectedOrgId]);
-
   return (
     <div className="min-h-[calc(100vh-4rem)] w-full">
       <div className="mx-auto w-full max-w-7xl px-4 py-6">

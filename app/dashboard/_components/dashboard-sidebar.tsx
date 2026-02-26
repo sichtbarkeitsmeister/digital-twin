@@ -17,6 +17,7 @@ type NavItem = {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   match?: (pathname: string) => boolean;
+  showDot?: boolean;
 };
 
 function isActivePath(pathname: string, href: string) {
@@ -48,11 +49,26 @@ function NavLink({ item }: { item: NavItem }) {
       />
       <Icon className={cn("h-4 w-4", active ? "text-primary" : "text-secondary")} />
       <span className="truncate">{item.label}</span>
+      {item.showDot ? (
+        <span
+          aria-label="Neue Aktivität"
+          className={cn(
+            "ml-auto h-2 w-2 rounded-full",
+            active ? "bg-primary" : "bg-red-500",
+          )}
+        />
+      ) : null}
     </Link>
   );
 }
 
-export function DashboardSidebar({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
+export function DashboardSidebar({
+  isPlatformAdmin,
+  pendingSurveyQuestionsCount,
+}: {
+  isPlatformAdmin: boolean;
+  pendingSurveyQuestionsCount: number;
+}) {
   const mainItems: NavItem[] = [
     { label: "Inbox", href: "/dashboard/inbox", icon: Inbox },
     { label: "Organisations", href: "/dashboard/organisations", icon: Building2 },
@@ -65,7 +81,12 @@ export function DashboardSidebar({ isPlatformAdmin }: { isPlatformAdmin: boolean
       href: "/dashboard/admin/organisations",
       icon: Shield,
     },
-    { label: "Survey builder", href: "/dashboard/surveys/new", icon: ClipboardPenLine },
+    {
+      label: "Umfragen",
+      href: "/dashboard/surveys",
+      icon: ClipboardPenLine,
+      showDot: pendingSurveyQuestionsCount > 0,
+    },
   ];
 
   return (

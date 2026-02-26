@@ -694,3 +694,397 @@ CREATE POLICY "org_invites_no_direct_delete"
 ON public.organisation_invites
 FOR DELETE
 USING (false);
+
+-- ============================================================
+-- Phase 3: Surveys (drafts, publishing, responses, Q&A)
+-- ============================================================
+
+-- =============================
+-- 1) Enums
+-- =============================
+DO $$ BEGIN
+  CREATE TYPE public.survey_visibility AS ENUM ('private', 'public');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.survey_response_status AS ENUM ('in_progress', 'completed');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- =============================
+-- 2) Tables
+-- =============================
+CREATE TABLE IF NOT EXISTS public.surveys (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  slug text UNIQUE,
+  visibility public.survey_visibility NOT NULL DEFAULT 'private',
+  definition jsonb NOT NULL,
+  created_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  published_at timestamptz,
+  CONSTRAINT surveys_slug_lower CHECK (slug IS NULL OR slug = lower(slug)),
+  CONSTRAINT surveys_slug_format CHECK (slug IS NULL OR slug ~ '^[a-z0-9-]+$')
+);
+
+CREATE TABLE IF NOT EXISTS public.survey_responses (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  survey_id uuid NOT NULL REFERENCES public.surveys(id) ON DELETE CASCADE,
+  status public.survey_response_status NOT NULL DEFAULT 'in_progress',
+  answers jsonb NOT NULL DEFAULT '{}'::jsonb,
+  token_hash bytea NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  completed_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS public.survey_field_questions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  survey_id uuid NOT NULL REFERENCES public.surveys(id) ON DELETE CASCADE,
+  response_id uuid NOT NULL REFERENCES public.survey_responses(id) ON DELETE CASCADE,
+  field_id text NOT NULL,
+  question text NOT NULL,
+  asked_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  answer text,
+  answered_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  answered_at timestamptz,
+  CONSTRAINT survey_field_questions_question_nonempty CHECK (length(trim(question)) > 0)
+);
+
+-- =============================
+-- 3) updated_at trigger reuse
+-- =============================
+DO $$ BEGIN
+  CREATE TRIGGER set_updated_at_surveys
+    BEFORE UPDATE ON public.surveys
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TRIGGER set_updated_at_survey_responses
+    BEFORE UPDATE ON public.survey_responses
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- =============================
+-- 4) Indexes (performance)
+-- =============================
+CREATE INDEX IF NOT EXISTS surveys_visibility_idx ON public.surveys(visibility);
+CREATE INDEX IF NOT EXISTS surveys_created_by_user_id_idx ON public.surveys(created_by_user_id);
+
+CREATE INDEX IF NOT EXISTS survey_responses_survey_id_idx ON public.survey_responses(survey_id);
+CREATE INDEX IF NOT EXISTS survey_responses_status_idx ON public.survey_responses(survey_id, status);
+
+CREATE INDEX IF NOT EXISTS survey_field_questions_response_id_idx ON public.survey_field_questions(response_id);
+CREATE INDEX IF NOT EXISTS survey_field_questions_survey_id_idx ON public.survey_field_questions(survey_id);
+CREATE INDEX IF NOT EXISTS survey_field_questions_field_id_idx ON public.survey_field_questions(field_id);
+
+-- =============================
+-- 5) RLS
+-- =============================
+ALTER TABLE public.surveys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.survey_responses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.survey_field_questions ENABLE ROW LEVEL SECURITY;
+
+-- Surveys: platform admins only (public access via RPCs)
+DROP POLICY IF EXISTS "surveys_select_platform_admin_only" ON public.surveys;
+CREATE POLICY "surveys_select_platform_admin_only"
+ON public.surveys
+FOR SELECT
+USING (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "surveys_insert_platform_admin_only" ON public.surveys;
+CREATE POLICY "surveys_insert_platform_admin_only"
+ON public.surveys
+FOR INSERT
+WITH CHECK (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "surveys_update_platform_admin_only" ON public.surveys;
+CREATE POLICY "surveys_update_platform_admin_only"
+ON public.surveys
+FOR UPDATE
+USING (public.is_platform_admin(auth.uid()))
+WITH CHECK (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "surveys_delete_platform_admin_only" ON public.surveys;
+CREATE POLICY "surveys_delete_platform_admin_only"
+ON public.surveys
+FOR DELETE
+USING (public.is_platform_admin(auth.uid()));
+
+-- Responses: admins can read/manage; public access via RPCs (token-gated)
+DROP POLICY IF EXISTS "survey_responses_select_platform_admin_only" ON public.survey_responses;
+CREATE POLICY "survey_responses_select_platform_admin_only"
+ON public.survey_responses
+FOR SELECT
+USING (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_responses_update_platform_admin_only" ON public.survey_responses;
+CREATE POLICY "survey_responses_update_platform_admin_only"
+ON public.survey_responses
+FOR UPDATE
+USING (public.is_platform_admin(auth.uid()))
+WITH CHECK (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_responses_delete_platform_admin_only" ON public.survey_responses;
+CREATE POLICY "survey_responses_delete_platform_admin_only"
+ON public.survey_responses
+FOR DELETE
+USING (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_responses_no_direct_insert" ON public.survey_responses;
+CREATE POLICY "survey_responses_no_direct_insert"
+ON public.survey_responses
+FOR INSERT
+WITH CHECK (false);
+
+-- Field questions: admins can view/answer; public create/list via RPCs
+DROP POLICY IF EXISTS "survey_field_questions_select_platform_admin_only" ON public.survey_field_questions;
+CREATE POLICY "survey_field_questions_select_platform_admin_only"
+ON public.survey_field_questions
+FOR SELECT
+USING (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_field_questions_update_platform_admin_only" ON public.survey_field_questions;
+CREATE POLICY "survey_field_questions_update_platform_admin_only"
+ON public.survey_field_questions
+FOR UPDATE
+USING (public.is_platform_admin(auth.uid()))
+WITH CHECK (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_field_questions_delete_platform_admin_only" ON public.survey_field_questions;
+CREATE POLICY "survey_field_questions_delete_platform_admin_only"
+ON public.survey_field_questions
+FOR DELETE
+USING (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_field_questions_no_direct_insert" ON public.survey_field_questions;
+CREATE POLICY "survey_field_questions_no_direct_insert"
+ON public.survey_field_questions
+FOR INSERT
+WITH CHECK (false);
+
+-- =============================
+-- 6) Public (anonymous) RPCs (SECURITY DEFINER)
+-- =============================
+
+-- Return a published survey by slug (public link)
+CREATE OR REPLACE FUNCTION public.get_public_survey_by_slug(p_slug text)
+RETURNS TABLE (
+  id uuid,
+  title text,
+  description text,
+  slug text,
+  definition jsonb,
+  published_at timestamptz
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+  SELECT s.id, s.title, s.description, s.slug, s.definition, s.published_at
+  FROM public.surveys s
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+  LIMIT 1;
+$$;
+
+-- Single-response mode: each published survey has exactly one response.
+-- The link (/s/[slug]) is the access mechanism.
+CREATE UNIQUE INDEX IF NOT EXISTS survey_responses_survey_id_unique
+  ON public.survey_responses(survey_id);
+
+-- Create (or return) the single response for a published survey.
+CREATE OR REPLACE FUNCTION public.create_public_survey_response(p_slug text)
+RETURNS TABLE (
+  response_id uuid
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+DECLARE
+  v_survey_id uuid;
+  v_response_id uuid;
+  v_token text;
+BEGIN
+  SELECT s.id INTO v_survey_id
+  FROM public.surveys s
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+  LIMIT 1;
+
+  IF v_survey_id IS NULL THEN
+    RAISE EXCEPTION 'survey_not_found';
+  END IF;
+
+  SELECT r.id INTO v_response_id
+  FROM public.survey_responses r
+  WHERE r.survey_id = v_survey_id
+  LIMIT 1;
+
+  IF v_response_id IS NULL THEN
+    -- token_hash is kept for compatibility; not used for auth in single-response mode
+    v_token := encode(extensions.gen_random_bytes(32), 'hex');
+    INSERT INTO public.survey_responses (survey_id, token_hash)
+    VALUES (v_survey_id, extensions.digest(convert_to(v_token, 'utf8'), 'sha256'::text))
+    RETURNING id INTO v_response_id;
+  END IF;
+
+  response_id := v_response_id;
+  RETURN NEXT;
+END;
+$$;
+
+-- Save answers for the single response (slug-gated). Optionally mark as completed.
+CREATE OR REPLACE FUNCTION public.save_public_survey_response(
+  p_slug text,
+  p_answers jsonb,
+  p_mark_completed boolean DEFAULT false
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+DECLARE
+  v_survey_id uuid;
+  v_response_id uuid;
+BEGIN
+  SELECT s.id INTO v_survey_id
+  FROM public.surveys s
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+  LIMIT 1;
+
+  IF v_survey_id IS NULL THEN
+    RAISE EXCEPTION 'survey_not_found';
+  END IF;
+
+  SELECT r.id INTO v_response_id
+  FROM public.survey_responses r
+  WHERE r.survey_id = v_survey_id
+  LIMIT 1;
+
+  IF v_response_id IS NULL THEN
+    RAISE EXCEPTION 'response_not_found';
+  END IF;
+
+  UPDATE public.survey_responses
+  SET answers = coalesce(p_answers, '{}'::jsonb),
+      status = CASE
+        WHEN p_mark_completed THEN 'completed'::public.survey_response_status
+        ELSE status
+      END,
+      completed_at = CASE
+        WHEN p_mark_completed THEN coalesce(completed_at, timezone('utc'::text, now()))
+        ELSE completed_at
+      END
+  WHERE id = v_response_id;
+END;
+$$;
+
+-- List Q&A entries for a specific field (slug-gated)
+CREATE OR REPLACE FUNCTION public.list_public_field_questions(
+  p_slug text,
+  p_field_id text
+)
+RETURNS TABLE (
+  id uuid,
+  field_id text,
+  question text,
+  asked_at timestamptz,
+  answer text,
+  answered_at timestamptz
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+  SELECT q.id, q.field_id, q.question, q.asked_at, q.answer, q.answered_at
+  FROM public.survey_field_questions q
+  JOIN public.surveys s ON s.id = q.survey_id
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+    AND q.field_id = p_field_id
+  ORDER BY q.asked_at ASC;
+$$;
+
+-- Ask a question on a specific field (slug-gated)
+CREATE OR REPLACE FUNCTION public.ask_public_field_question(
+  p_slug text,
+  p_field_id text,
+  p_question text
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+DECLARE
+  v_survey_id uuid;
+  v_response_id uuid;
+  v_question_id uuid;
+BEGIN
+  IF length(trim(coalesce(p_question, ''))) = 0 THEN
+    RAISE EXCEPTION 'invalid_question';
+  END IF;
+
+  SELECT s.id INTO v_survey_id
+  FROM public.surveys s
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+  LIMIT 1;
+
+  IF v_survey_id IS NULL THEN
+    RAISE EXCEPTION 'survey_not_found';
+  END IF;
+
+  SELECT r.id INTO v_response_id
+  FROM public.survey_responses r
+  WHERE r.survey_id = v_survey_id
+  LIMIT 1;
+
+  IF v_response_id IS NULL THEN
+    RAISE EXCEPTION 'response_not_found';
+  END IF;
+
+  INSERT INTO public.survey_field_questions (survey_id, response_id, field_id, question)
+  VALUES (v_survey_id, v_response_id, p_field_id, trim(p_question))
+  RETURNING id INTO v_question_id;
+
+  RETURN v_question_id;
+END;
+$$;
+
+-- Read the single response for a published survey (slug-gated)
+CREATE OR REPLACE FUNCTION public.get_public_survey_response(p_slug text)
+RETURNS TABLE (
+  answers jsonb,
+  status public.survey_response_status,
+  updated_at timestamptz,
+  completed_at timestamptz
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+  SELECT r.answers, r.status, r.updated_at, r.completed_at
+  FROM public.surveys s
+  JOIN public.survey_responses r ON r.survey_id = s.id
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+  LIMIT 1;
+$$;

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import * as React from "react";
 
 import { createClient } from "@/lib/supabase/server";
 
@@ -14,7 +15,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default async function AdminOrganisationsPage() {
+export default function AdminOrganisationsPage() {
+  return (
+    <React.Suspense fallback={<p className="text-sm text-secondary">Lade…</p>}>
+      <AdminOrganisationsPageContent />
+    </React.Suspense>
+  );
+}
+
+async function AdminOrganisationsPageContent() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -77,17 +86,13 @@ export default async function AdminOrganisationsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Survey builder</CardTitle>
-            <CardDescription>
-              Create and preview flexible multi-step surveys (local draft).
-            </CardDescription>
+            <CardTitle>Umfragen</CardTitle>
+            <CardDescription>Entwürfe erstellen, Umfragen veröffentlichen und Antworten ansehen.</CardDescription>
           </CardHeader>
           <CardContent className="flex items-center justify-between gap-3">
-            <p className="text-sm text-secondary">
-              Build steps + fields, then export JSON.
-            </p>
+            <p className="text-sm text-secondary">Entwürfe sind standardmäßig privat.</p>
             <Button asChild size="sm" variant="outline">
-              <Link href="/dashboard/surveys/new">Open</Link>
+              <Link href="/dashboard/surveys">Öffnen</Link>
             </Button>
           </CardContent>
         </Card>

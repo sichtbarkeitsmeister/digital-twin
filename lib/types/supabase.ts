@@ -88,6 +88,13 @@ export type Database = {
             referencedRelation: "organisations"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "organisation_members_user_profile_fk"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       organisations: {
@@ -147,18 +154,188 @@ export type Database = {
         }
         Relationships: []
       }
+      survey_field_questions: {
+        Row: {
+          answer: string | null
+          answered_at: string | null
+          answered_by_user_id: string | null
+          asked_at: string
+          field_id: string
+          id: string
+          question: string
+          response_id: string
+          survey_id: string
+        }
+        Insert: {
+          answer?: string | null
+          answered_at?: string | null
+          answered_by_user_id?: string | null
+          asked_at?: string
+          field_id: string
+          id?: string
+          question: string
+          response_id: string
+          survey_id: string
+        }
+        Update: {
+          answer?: string | null
+          answered_at?: string | null
+          answered_by_user_id?: string | null
+          asked_at?: string
+          field_id?: string
+          id?: string
+          question?: string
+          response_id?: string
+          survey_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "survey_field_questions_response_id_fkey"
+            columns: ["response_id"]
+            isOneToOne: false
+            referencedRelation: "survey_responses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "survey_field_questions_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      survey_responses: {
+        Row: {
+          answers: Json
+          completed_at: string | null
+          created_at: string
+          id: string
+          status: Database["public"]["Enums"]["survey_response_status"]
+          survey_id: string
+          token_hash: string
+          updated_at: string
+        }
+        Insert: {
+          answers?: Json
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          status?: Database["public"]["Enums"]["survey_response_status"]
+          survey_id: string
+          token_hash: string
+          updated_at?: string
+        }
+        Update: {
+          answers?: Json
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          status?: Database["public"]["Enums"]["survey_response_status"]
+          survey_id?: string
+          token_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "survey_responses_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      surveys: {
+        Row: {
+          created_at: string
+          created_by_user_id: string
+          definition: Json
+          description: string
+          id: string
+          published_at: string | null
+          slug: string | null
+          title: string
+          updated_at: string
+          visibility: Database["public"]["Enums"]["survey_visibility"]
+        }
+        Insert: {
+          created_at?: string
+          created_by_user_id: string
+          definition: Json
+          description?: string
+          id?: string
+          published_at?: string | null
+          slug?: string | null
+          title: string
+          updated_at?: string
+          visibility?: Database["public"]["Enums"]["survey_visibility"]
+        }
+        Update: {
+          created_at?: string
+          created_by_user_id?: string
+          definition?: Json
+          description?: string
+          id?: string
+          published_at?: string | null
+          slug?: string | null
+          title?: string
+          updated_at?: string
+          visibility?: Database["public"]["Enums"]["survey_visibility"]
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      accept_organisation_invite: {
+        Args: { invite_id: string }
+        Returns: undefined
+      }
       admin_create_organisation: {
         Args: { org_name: string; org_slug?: string; owner_email: string }
+        Returns: string
+      }
+      ask_public_field_question: {
+        Args: { p_field_id: string; p_question: string; p_slug: string }
         Returns: string
       }
       can_invite: { Args: { org_id: string }; Returns: boolean }
       can_kick: {
         Args: { org_id: string; target_user_id: string }
+        Returns: boolean
+      }
+      can_view_profile: { Args: { target_user_id: string }; Returns: boolean }
+      create_public_survey_response: {
+        Args: { p_slug: string }
+        Returns: {
+          response_id: string
+        }[]
+      }
+      get_public_survey_by_slug: {
+        Args: { p_slug: string }
+        Returns: {
+          definition: Json
+          description: string
+          id: string
+          published_at: string
+          slug: string
+          title: string
+        }[]
+      }
+      get_public_survey_response: {
+        Args: { p_slug: string }
+        Returns: {
+          answers: Json
+          completed_at: string
+          status: Database["public"]["Enums"]["survey_response_status"]
+          updated_at: string
+        }[]
+      }
+      has_pending_org_invite: {
+        Args: { invited_email: string; org_id: string }
         Returns: boolean
       }
       invite_to_organisation: {
@@ -175,9 +352,28 @@ export type Database = {
         Args: { org_id: string; target_user_id: string }
         Returns: undefined
       }
+      list_public_field_questions: {
+        Args: { p_field_id: string; p_slug: string }
+        Returns: {
+          answer: string
+          answered_at: string
+          asked_at: string
+          field_id: string
+          id: string
+          question: string
+        }[]
+      }
       my_org_role: {
         Args: { org_id: string }
         Returns: Database["public"]["Enums"]["org_role"]
+      }
+      save_public_survey_response: {
+        Args: {
+          p_answers: Json
+          p_mark_completed?: boolean
+          p_slug: string
+        }
+        Returns: undefined
       }
       transfer_organisation_ownership: {
         Args: { new_owner_user_id: string; org_id: string }
@@ -187,6 +383,8 @@ export type Database = {
     Enums: {
       invite_status: "pending" | "accepted" | "revoked"
       org_role: "owner" | "admin" | "employee"
+      survey_response_status: "in_progress" | "completed"
+      survey_visibility: "private" | "public"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -316,6 +514,8 @@ export const Constants = {
     Enums: {
       invite_status: ["pending", "accepted", "revoked"],
       org_role: ["owner", "admin", "employee"],
+      survey_response_status: ["in_progress", "completed"],
+      survey_visibility: ["private", "public"],
     },
   },
 } as const

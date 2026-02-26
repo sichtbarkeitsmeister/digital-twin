@@ -6,9 +6,11 @@ import { DashboardSidebar } from "@/app/dashboard/_components/dashboard-sidebar"
 export function DashboardShell({
   children,
   isPlatformAdmin,
+  pendingSurveyQuestionsCount,
 }: {
   children: React.ReactNode;
   isPlatformAdmin: boolean;
+  pendingSurveyQuestionsCount?: number;
 }) {
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6">
@@ -16,7 +18,10 @@ export function DashboardShell({
         <aside className="w-[280px] shrink-0">
           <div className="sticky top-6">
             <div className="rounded-lg border bg-card p-3">
-              <DashboardSidebar isPlatformAdmin={isPlatformAdmin} />
+              <DashboardSidebar
+                isPlatformAdmin={isPlatformAdmin}
+                pendingSurveyQuestionsCount={pendingSurveyQuestionsCount ?? 0}
+              />
             </div>
           </div>
         </aside>
