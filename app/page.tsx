@@ -2,6 +2,7 @@ import { Hero } from "@/components/hero";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ChatMockup } from "@/app/_components/chat-mockup";
+import { Suspense } from "react";
 
 function MarketingHome() {
   return (
@@ -180,6 +181,20 @@ async function HomeContent() {
   return <ChatMockup organisations={organisations} />;
 }
 
-export default async function Home() {
-  return <HomeContent />;
+function HomeFallback() {
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-col px-5 py-10 sm:py-14">
+      <div className="rounded-lg border bg-card p-6 text-sm text-secondary">
+        Lädt …
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<HomeFallback />}>
+      <HomeContent />
+    </Suspense>
+  );
 }

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 
 import type { Survey } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/server";
@@ -9,7 +10,15 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-export default async function PublicSurveyPage({ params }: { params: Promise<{ slug: string }> }) {
+function PublicSurveyFallback() {
+  return (
+    <div className="mx-auto w-full max-w-5xl px-4 py-8">
+      <div className="rounded-lg border bg-card p-6 text-sm text-secondary">Lädt …</div>
+    </div>
+  );
+}
+
+async function PublicSurveyContent({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const supabase = await createClient();
 
@@ -28,5 +37,13 @@ export default async function PublicSurveyPage({ params }: { params: Promise<{ s
   } as Survey;
 
   return <SurveyFill slug={row.slug} survey={survey} />;
+}
+
+export default function PublicSurveyPage(props: { params: Promise<{ slug: string }> }) {
+  return (
+    <Suspense fallback={<PublicSurveyFallback />}>
+      <PublicSurveyContent {...props} />
+    </Suspense>
+  );
 }
 
