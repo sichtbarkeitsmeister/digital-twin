@@ -91,18 +91,6 @@ export function DashboardSidebar({
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center gap-2 px-2 pt-1">
-        <div className="h-9 w-9 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">
-          DT
-        </div>
-        <div className="grid leading-tight">
-          <p className="text-sm font-semibold tracking-tight text-primary">
-            Digital Twin
-          </p>
-          <p className="text-xs text-secondary">Dashboard</p>
-        </div>
-      </div>
-
       <nav className="grid gap-1">
         {mainItems.map((item) => (
           <NavLink key={item.href} item={item} />

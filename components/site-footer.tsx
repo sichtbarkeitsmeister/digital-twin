@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 export function SiteFooter() {
   return (
     <footer className="w-full border-t">
@@ -8,26 +6,15 @@ export function SiteFooter() {
           <p>
             © DigitalTwin. Powered by{" "}
             <a
-              href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
+              href="https://www.sichtbarkeitsmeister.de/"
               target="_blank"
               className="font-semibold hover:underline"
               rel="noreferrer"
             >
-              Supabase
+              sbkm
             </a>
             .
           </p>
-          <div className="flex items-center gap-3">
-            <Link href="/#produkt" className="hover:underline">
-              Produkt
-            </Link>
-            <Link href="/#so-funktionierts" className="hover:underline">
-              So funktioniert’s
-            </Link>
-            <Link href="/#zugang" className="hover:underline">
-              Zugang
-            </Link>
-          </div>
         </div>
       </div>
     </footer>
