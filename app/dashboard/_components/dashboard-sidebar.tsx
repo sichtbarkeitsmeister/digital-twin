@@ -70,14 +70,14 @@ export function DashboardSidebar({
   pendingSurveyQuestionsCount: number;
 }) {
   const mainItems: NavItem[] = [
-    { label: "Inbox", href: "/dashboard/inbox", icon: Inbox },
-    { label: "Organisations", href: "/dashboard/organisations", icon: Building2 },
-    { label: "Members", href: "/dashboard/members", icon: Users },
+    { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
+    { label: "Organisationen", href: "/dashboard/organisations", icon: Building2 },
+    { label: "Mitglieder", href: "/dashboard/members", icon: Users },
   ];
 
   const adminItems: NavItem[] = [
     {
-      label: "Manage organisations",
+      label: "Organisationen verwalten",
       href: "/dashboard/admin/organisations",
       icon: Shield,
     },
@@ -101,7 +101,7 @@ export function DashboardSidebar({
         <div className="grid gap-2 pt-2">
           <div className="border-t pt-3">
             <p className="px-2 text-xs font-semibold uppercase tracking-wide text-secondary">
-              Admin
+              Verwaltung
             </p>
           </div>
           <nav className="grid gap-1">

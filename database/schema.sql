@@ -719,6 +719,7 @@ CREATE TABLE IF NOT EXISTS public.surveys (
   description text NOT NULL DEFAULT '',
   slug text UNIQUE,
   visibility public.survey_visibility NOT NULL DEFAULT 'private',
+  notification_emails text[] NOT NULL DEFAULT '{}'::text[],
   definition jsonb NOT NULL,
   created_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -736,7 +737,8 @@ CREATE TABLE IF NOT EXISTS public.survey_responses (
   token_hash bytea NOT NULL,
   created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
-  completed_at timestamptz
+  completed_at timestamptz,
+  completed_notification_sent_at timestamptz
 );
 
 CREATE TABLE IF NOT EXISTS public.survey_field_questions (
@@ -746,6 +748,7 @@ CREATE TABLE IF NOT EXISTS public.survey_field_questions (
   field_id text NOT NULL,
   question text NOT NULL,
   asked_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  asked_notification_sent_at timestamptz,
   answer text,
   answered_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   answered_at timestamptz,

@@ -12,12 +12,14 @@ import {
   Eye,
   Globe,
   Lock,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCcw,
   Save,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 
 import type {
@@ -36,6 +38,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -43,6 +46,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -112,6 +122,7 @@ type Props = {
   initialSurvey?: Survey;
   initialVisibility?: "private" | "public";
   initialSlug?: string | null;
+  initialNotificationEmails?: string[];
 };
 
 export function SurveyBuilder({
@@ -119,6 +130,7 @@ export function SurveyBuilder({
   initialSurvey,
   initialVisibility = "private",
   initialSlug = null,
+  initialNotificationEmails = [],
 }: Props) {
   const router = useRouter();
   const [mode, setMode] = React.useState<"edit" | "preview">("edit");
@@ -135,8 +147,16 @@ export function SurveyBuilder({
   );
   const [slug, setSlug] = React.useState<string | null>(initialSlug);
 
+  const [notificationEmails, setNotificationEmails] = React.useState<string[]>(() =>
+    normalizeEmails(initialNotificationEmails ?? []),
+  );
+  const [notificationEmailDraft, setNotificationEmailDraft] = React.useState("");
+
   const [importJson, setImportJson] = React.useState("");
   const [exportJson, setExportJson] = React.useState("");
+  const [jsonModal, setJsonModal] = React.useState<null | { mode: "export" | "import" }>(
+    null,
+  );
   const [status, setStatus] = React.useState<{
     kind: "ok" | "error";
     message: string;
@@ -367,7 +387,6 @@ export function SurveyBuilder({
   async function copyText(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      setStatus({ kind: "ok", message: "In die Zwischenablage kopiert." });
     } catch {
       setStatus({ kind: "error", message: "Kopieren fehlgeschlagen." });
     }
@@ -390,7 +409,7 @@ export function SurveyBuilder({
   function exportSurvey() {
     const json = JSON.stringify(survey, null, 2);
     setExportJson(json);
-    setStatus({ kind: "ok", message: "Export unten vorbereitet." });
+    setStatus(null);
   }
 
   function importSurveyFromText(text: string) {
@@ -398,7 +417,7 @@ export function SurveyBuilder({
       const parsedJson: unknown = JSON.parse(text);
       const parsed = surveySchema.safeParse(parsedJson);
       if (!parsed.success) {
-        const msg = parsed.error.issues[0]?.message ?? "Invalid survey JSON.";
+        const msg = parsed.error.issues[0]?.message ?? "Ungültiges Umfrage-JSON.";
         setStatus({ kind: "error", message: msg });
         return;
       }
@@ -424,12 +443,27 @@ export function SurveyBuilder({
     setStatus({ kind: "ok", message: "Entwurf zurückgesetzt." });
   }
 
+  function openJsonExport() {
+    exportSurvey();
+    setJsonModal({ mode: "export" });
+  }
+
+  function openJsonImport() {
+    setJsonModal({ mode: "import" });
+  }
+
   async function saveDraftToDatabase() {
     const wasNew = !dbSurveyId;
+    const invalid = notificationEmails.find((e) => !isValidEmail(e));
+    if (invalid) {
+      setStatus({ kind: "error", message: `Ungültige E-Mail: ${invalid}` });
+      return null;
+    }
     const res = await upsertSurveyDraftAction({
       surveyId: dbSurveyId ?? undefined,
       title: survey.title,
       description: survey.description,
+      notificationEmails,
       definition: survey,
     });
 
@@ -486,7 +520,7 @@ export function SurveyBuilder({
   return (
     <div className="grid gap-6">
       {mode === "edit" ? (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="grid gap-1">
             <p className="text-sm text-secondary">
               <Link
@@ -505,11 +539,6 @@ export function SurveyBuilder({
               „Entwurf speichern“, um in der Datenbank zu speichern.
             </p>
           </div>
-          <Button asChild variant="outline">
-            <Link href="/dashboard/surveys" prefetch>
-              Fertig
-            </Link>
-          </Button>
         </div>
       ) : null}
 
@@ -524,69 +553,84 @@ export function SurveyBuilder({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         {mode === "edit" ? (
           <>
-            <Button onClick={saveDraftToDatabase} variant="outline">
-              <Save className="mr-2 h-4 w-4" />
-              Entwurf speichern
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {visibility === "public" ? (
+                <Button onClick={makePrivate} variant="secondary">
+                  <Lock className="mr-2 h-4 w-4" />
+                  Privat machen
+                </Button>
+              ) : (
+                <Button onClick={publishSurvey}>
+                  <Globe className="mr-2 h-4 w-4" />
+                  Veröffentlichen
+                </Button>
+              )}
 
-            {visibility === "public" ? (
-              <Button onClick={makePrivate} variant="secondary">
-                <Lock className="mr-2 h-4 w-4" />
-                Privat machen
-              </Button>
-            ) : (
-              <Button onClick={publishSurvey}>
-                <Globe className="mr-2 h-4 w-4" />
-                Veröffentlichen
-              </Button>
-            )}
+              {visibility === "public" && slug ? (
+                <Button
+                  onClick={() => {
+                    const path = `/s/${slug}`;
+                    copyText(`${window.location.origin}${path}`);
+                  }}
+                  variant="outline"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Öffentlichen Link kopieren
+                </Button>
+              ) : null}
 
-            {visibility === "public" && slug ? (
-              <Button
-                onClick={() => {
-                  const path = `/s/${slug}`;
-                  copyText(`${window.location.origin}${path}`);
-                }}
-                variant="outline"
-              >
-                <Copy className="mr-2 h-4 w-4" />
-                Öffentlichen Link kopieren
+              <Button onClick={enterPreview} variant="secondary">
+                <Eye className="mr-2 h-4 w-4" />
+                Vorschau
               </Button>
-            ) : null}
 
-            <Button onClick={enterPreview} variant="secondary">
-              <Eye className="mr-2 h-4 w-4" />
-              Vorschau
-            </Button>
-            <Button onClick={exportSurvey} variant="outline">
-              <Download className="mr-2 h-4 w-4" />
-              JSON exportieren
-            </Button>
-            <Button
-              onClick={() => {
-                if (!importJson.trim()) {
-                  setStatus({
-                    kind: "error",
-                    message: "Bitte zuerst JSON in das Import-Feld einfügen.",
-                  });
-                  return;
-                }
-                importSurveyFromText(importJson);
-              }}
-              variant="outline"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              JSON importieren
-            </Button>
-            <Button onClick={resetDraft} variant="ghost">
-              <RefreshCcw className="mr-2 h-4 w-4" />
-              Entwurf zurücksetzen
-            </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="Mehr Aktionen"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={openJsonExport}>
+                    <Download className="h-4 w-4" />
+                    JSON exportieren
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={openJsonImport}>
+                    <Upload className="h-4 w-4" />
+                    JSON importieren
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={resetDraft}>
+                    <RefreshCcw className="h-4 w-4" />
+                    Entwurf zurücksetzen
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <Button onClick={saveDraftToDatabase}>
+                <Save className="mr-2 h-4 w-4" />
+                {visibility === "public" ? "Speichern" : "Entwurf speichern"}
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/dashboard/surveys" prefetch>
+                  Fertig
+                </Link>
+              </Button>
+            </div>
           </>
-        ) : null}
+        ) : (
+          <div />
+        )}
       </div>
 
       {mode === "edit" ? (
@@ -618,6 +662,132 @@ export function SurveyBuilder({
                 />
               </div>
 
+              <div className="grid gap-2">
+                <Label htmlFor="survey_notifications">Benachrichtigungs-E-Mails</Label>
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Input
+                      id="survey_notifications"
+                      value={notificationEmailDraft}
+                      onChange={(e) => setNotificationEmailDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        const next = parseNotificationEmailsFromText(
+                          notificationEmailDraft,
+                        );
+                        if (next.length === 0) return;
+                        const invalid = next.find((x) => !isValidEmail(x));
+                        if (invalid) {
+                          setStatus({
+                            kind: "error",
+                            message: `Ungültige E-Mail: ${invalid}`,
+                          });
+                          return;
+                        }
+                        setNotificationEmails((prev) =>
+                          normalizeEmails([...prev, ...next]),
+                        );
+                        setNotificationEmailDraft("");
+                        setStatus(null);
+                      }}
+                      onPaste={(e) => {
+                        const text = e.clipboardData.getData("text");
+                        const next = parseNotificationEmailsFromText(text);
+                        // If it's clearly a list, add immediately instead of pasting.
+                        if (next.length <= 1) return;
+                        e.preventDefault();
+                        const invalid = next.find((x) => !isValidEmail(x));
+                        if (invalid) {
+                          setStatus({
+                            kind: "error",
+                            message: `Ungültige E-Mail: ${invalid}`,
+                          });
+                          return;
+                        }
+                        setNotificationEmails((prev) =>
+                          normalizeEmails([...prev, ...next]),
+                        );
+                        setStatus(null);
+                      }}
+                      placeholder="E-Mail eingeben (z.B. team@example.com)"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        const next = parseNotificationEmailsFromText(
+                          notificationEmailDraft,
+                        );
+                        if (next.length === 0) return;
+                        const invalid = next.find((x) => !isValidEmail(x));
+                        if (invalid) {
+                          setStatus({
+                            kind: "error",
+                            message: `Ungültige E-Mail: ${invalid}`,
+                          });
+                          return;
+                        }
+                        setNotificationEmails((prev) =>
+                          normalizeEmails([...prev, ...next]),
+                        );
+                        setNotificationEmailDraft("");
+                        setStatus(null);
+                      }}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Hinzufügen
+                    </Button>
+                  </div>
+
+                  {notificationEmails.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {notificationEmails.map((email) => (
+                        <Badge
+                          key={email}
+                          variant="secondary"
+                          className="gap-1 pr-1"
+                        >
+                          <span className="max-w-[260px] truncate">{email}</span>
+                          <button
+                            type="button"
+                            className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                            aria-label={`E-Mail entfernen: ${email}`}
+                            onClick={() => {
+                              setNotificationEmails((prev) =>
+                                prev.filter((x) => x !== email),
+                              );
+                              setStatus(null);
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </Badge>
+                      ))}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setNotificationEmails([]);
+                          setStatus(null);
+                        }}
+                      >
+                        Alle entfernen
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-secondary">
+                      Keine Empfänger hinterlegt. Optional: füge eine oder mehrere
+                      E-Mails hinzu.
+                    </p>
+                  )}
+                </div>
+                <p className="text-xs text-secondary">
+                  Diese Empfänger bekommen eine E-Mail beim Veröffentlichen und bei Admin-Antworten.
+                </p>
+              </div>
+
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold">Schritte</p>
                 <Button onClick={addStep} size="sm" variant="outline">
@@ -642,7 +812,7 @@ export function SurveyBuilder({
                     <div className="flex items-start justify-between gap-2">
                       <div className="grid gap-0.5">
                         <p className="text-sm font-medium">
-                          {st.title || `Step ${idx + 1}`}
+                          {st.title || `Schritt ${idx + 1}`}
                         </p>
                         {st.description ? (
                           <p className="text-xs text-secondary line-clamp-2">
@@ -703,103 +873,7 @@ export function SurveyBuilder({
                 ))}
               </div>
 
-              <Card className="border-dashed">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Import / Export</CardTitle>
-                  <CardDescription>
-                    JSON einfügen oder den aktuellen Entwurf exportieren.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-3">
-                  <div className="grid gap-2">
-                    <Label htmlFor="survey_import">JSON importieren</Label>
-                    <Textarea
-                      id="survey_import"
-                      value={importJson}
-                      onChange={(e) => setImportJson(e.target.value)}
-                      placeholder='Umfrage-JSON hier einfügen (muss "version": 1 enthalten)…'
-                      className="font-mono text-xs"
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          if (!importJson.trim()) {
-                            setStatus({
-                              kind: "error",
-                              message: "Bitte zuerst JSON einfügen.",
-                            });
-                            return;
-                          }
-                          importSurveyFromText(importJson);
-                        }}
-                      >
-                        <Upload className="mr-2 h-4 w-4" />
-                        Importieren
-                      </Button>
-                      <label className="inline-flex items-center gap-2 text-sm text-secondary cursor-pointer">
-                        <input
-                          type="file"
-                          accept="application/json"
-                          className="hidden"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const text = await file.text();
-                            setImportJson(text);
-                            importSurveyFromText(text);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                        <span className="inline-flex items-center gap-2">
-                          <Upload className="h-4 w-4" />
-                          Aus Datei importieren
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="survey_export">JSON exportieren</Label>
-                    <Textarea
-                      id="survey_export"
-                      value={exportJson}
-                      onChange={(e) => setExportJson(e.target.value)}
-                      placeholder="Oben auf „JSON exportieren“ klicken, um das Feld zu füllen…"
-                      className="font-mono text-xs"
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          const json = exportJson.trim()
-                            ? exportJson
-                            : JSON.stringify(survey, null, 2);
-                          copyText(json);
-                        }}
-                      >
-                        <Copy className="mr-2 h-4 w-4" />
-                        Kopieren
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          const json = exportJson.trim()
-                            ? exportJson
-                            : JSON.stringify(survey, null, 2);
-                          downloadJson(`survey-${survey.id}.json`, json);
-                        }}
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        Herunterladen
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              {/* JSON import/export moved into modal (opened from actions menu). */}
             </CardContent>
           </Card>
 
@@ -841,27 +915,11 @@ export function SurveyBuilder({
 
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold">Felder</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                      defaultValue="text"
-                      onChange={(e) => {
-                        const type = e.target.value as SurveyFieldType;
-                        addField(currentStep.id, type);
-                        e.currentTarget.value = "text";
-                      }}
-                    >
-                      <option value="text">Textfeld hinzufügen</option>
-                      <option value="radio">Radio hinzufügen</option>
-                      <option value="checkbox">Mehrfach-Checkbox hinzufügen</option>
-                      <option value="rating">Bewertung 1–5 hinzufügen</option>
-                    </select>
-                  </div>
                 </div>
 
                 {currentStep.fields.length === 0 ? (
                   <p className="text-sm text-secondary">
-                    Noch keine Felder. Füge eins über das Dropdown oben hinzu.
+                    Noch keine Felder. Füge eins über den Button unten hinzu.
                   </p>
                 ) : (
                   <div className="grid gap-3">
@@ -924,7 +982,7 @@ export function SurveyBuilder({
                         </CardHeader>
                         <CardContent className="grid gap-4">
                           <div className="grid gap-2">
-                            <Label>Field title</Label>
+                            <Label>Feld-Titel</Label>
                             <Input
                               value={field.title}
                               onChange={(e) =>
@@ -932,11 +990,11 @@ export function SurveyBuilder({
                                   title: e.target.value,
                                 })
                               }
-                              placeholder="Question title"
+                              placeholder="z.B. Frage / Titel"
                             />
                           </div>
                           <div className="grid gap-2">
-                            <Label>Field description</Label>
+                            <Label>Feld-Beschreibung</Label>
                             <Textarea
                               value={field.description}
                               onChange={(e) =>
@@ -956,12 +1014,12 @@ export function SurveyBuilder({
                                 })
                               }
                             />
-                            Required
+                            Erforderlich
                           </label>
 
                           {field.type === "text" ? (
                             <div className="grid gap-2">
-                              <Label>Placeholder</Label>
+                              <Label>Platzhalter</Label>
                               <Input
                                 value={field.placeholder}
                                 onChange={(e) =>
@@ -976,9 +1034,9 @@ export function SurveyBuilder({
 
                           {field.type === "rating" ? (
                             <div className="grid gap-2">
-                              <Label>Scale</Label>
+                              <Label>Skala</Label>
                               <div className="text-sm text-secondary">
-                                Fixed for now: {field.scale.min}–
+                                Derzeit fest: {field.scale.min}–
                                 {field.scale.max}
                               </div>
                             </div>
@@ -1044,6 +1102,60 @@ export function SurveyBuilder({
                     ))}
                   </div>
                 )}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "mt-2 w-full rounded-lg border border-dashed px-4 py-7 text-left transition-colors",
+                        "hover:bg-accent/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-accent">
+                          <Plus className="h-5 w-5" />
+                        </div>
+                        <div className="grid">
+                          <p className="text-sm font-semibold">Feld hinzufügen</p>
+                          <p className="text-xs text-secondary">
+                            Text, Auswahl, Mehrfachauswahl oder Bewertung
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        addField(currentStep.id, "text");
+                      }}
+                    >
+                      Textfeld
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        addField(currentStep.id, "radio");
+                      }}
+                    >
+                      Einzelauswahl (Radio)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        addField(currentStep.id, "checkbox");
+                      }}
+                    >
+                      Mehrfachauswahl (Checkbox)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        addField(currentStep.id, "rating");
+                      }}
+                    >
+                      Bewertung (1–5)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </CardContent>
             </Card>
           </div>
@@ -1060,7 +1172,217 @@ export function SurveyBuilder({
           />
         </SurveyPreviewOverlay>
       )}
+
+      {jsonModal ? (
+        <JsonModal
+          mode={jsonModal.mode}
+          onClose={() => setJsonModal(null)}
+          importJson={importJson}
+          setImportJson={setImportJson}
+          exportJson={exportJson}
+          setExportJson={setExportJson}
+          onImport={() => {
+            if (!importJson.trim()) {
+              setStatus({ kind: "error", message: "Bitte zuerst JSON einfügen." });
+              return;
+            }
+            importSurveyFromText(importJson);
+            setJsonModal(null);
+          }}
+          onExportCopy={() => {
+            const json = exportJson.trim()
+              ? exportJson
+              : JSON.stringify(survey, null, 2);
+            copyText(json);
+          }}
+          onExportDownload={() => {
+            const json = exportJson.trim()
+              ? exportJson
+              : JSON.stringify(survey, null, 2);
+            downloadJson(`survey-${survey.id}.json`, json);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function parseNotificationEmailsFromText(text: string) {
+  // Accept single entry or lists separated by commas/newlines/semicolons/spaces.
+  return Array.from(
+    new Set(
+      text
+        .split(/[,\n;\s]+/g)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function isValidEmail(v: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+function normalizeEmails(list: string[]) {
+  return Array.from(
+    new Set(list.map((s) => s.trim().toLowerCase()).filter(Boolean)),
+  );
+}
+
+function JsonModal({
+  mode,
+  onClose,
+  importJson,
+  setImportJson,
+  exportJson,
+  setExportJson,
+  onImport,
+  onExportCopy,
+  onExportDownload,
+}: {
+  mode: "export" | "import";
+  onClose: () => void;
+  importJson: string;
+  setImportJson: (v: string) => void;
+  exportJson: string;
+  setExportJson: (v: string) => void;
+  onImport: () => void;
+  onExportCopy: () => void;
+  onExportDownload: () => void;
+}) {
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!mounted) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [mounted]);
+
+  React.useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[110] bg-black/50 backdrop-blur-sm"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="mx-auto flex min-h-full w-full max-w-3xl items-start justify-center px-4 py-10">
+        <Card
+          role="dialog"
+          aria-modal="true"
+          className="w-full shadow-lg"
+        >
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="grid gap-1">
+                <CardTitle>
+                  {mode === "export" ? "JSON exportieren" : "JSON importieren"}
+                </CardTitle>
+                <CardDescription>
+                  {mode === "export"
+                    ? "Kopiere oder lade den aktuellen Entwurf als JSON herunter."
+                    : "Füge Umfrage-JSON ein oder importiere es aus einer Datei."}
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label="Schließen"
+                onClick={onClose}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {mode === "export" ? (
+              <>
+                <Textarea
+                  value={exportJson}
+                  onChange={(e) => setExportJson(e.target.value)}
+                  className="font-mono text-xs min-h-[260px]"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Button type="button" variant="outline" onClick={onExportCopy}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Kopieren
+                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={onExportDownload}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Herunterladen
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={onClose}>
+                      Schließen
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <Textarea
+                  value={importJson}
+                  onChange={(e) => setImportJson(e.target.value)}
+                  placeholder='Umfrage-JSON hier einfügen (muss "version": 1 enthalten)…'
+                  className="font-mono text-xs min-h-[260px]"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="button" onClick={onImport}>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Importieren
+                    </Button>
+                    <label className="inline-flex items-center gap-2 text-sm text-secondary cursor-pointer">
+                      <input
+                        type="file"
+                        accept="application/json"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const text = await file.text();
+                          setImportJson(text);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                      <span className="inline-flex items-center gap-2">
+                        <Upload className="h-4 w-4" />
+                        Aus Datei wählen
+                      </span>
+                    </label>
+                  </div>
+                  <Button type="button" variant="secondary" onClick={onClose}>
+                    Schließen
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1213,14 +1535,32 @@ function SurveyPreview({
                         return (
                           <label
                             key={opt.id}
-                            className="flex items-center gap-2 text-sm"
+                            className={cn(
+                              "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                              selected ? "border-primary bg-primary/5" : "border-input bg-background",
+                            )}
                           >
                             <input
                               type="radio"
                               name={field.id}
                               checked={selected}
+                              className="peer sr-only"
                               onChange={() => setAnswer(field.id, opt.id)}
                             />
+                            <span
+                              aria-hidden="true"
+                              className={cn(
+                                "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
+                                selected ? "border-primary" : "border-input",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "h-2 w-2 rounded-full bg-primary transition-opacity",
+                                  selected ? "opacity-100" : "opacity-0",
+                                )}
+                              />
+                            </span>
                             {opt.label}
                           </label>
                         );
@@ -1238,7 +1578,10 @@ function SurveyPreview({
                         return (
                           <label
                             key={opt.id}
-                            className="flex items-center gap-2 text-sm"
+                            className={cn(
+                              "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                              checked ? "border-primary bg-primary/5" : "border-input bg-background",
+                            )}
                           >
                             <Checkbox
                               checked={checked}

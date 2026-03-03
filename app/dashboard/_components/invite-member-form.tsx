@@ -6,6 +6,7 @@ import { inviteToOrganisationAction } from "@/app/dashboard/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 const initialState: ActionState = { ok: true, message: "" };
 
@@ -33,16 +34,15 @@ export function InviteMemberForm({ organisationId }: { organisationId: string })
 
       <div className="grid gap-2">
         <Label htmlFor="role">Role</Label>
-        <select
+        <Select
           id="role"
           name="role"
-          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
           defaultValue="employee"
           required
         >
           <option value="employee">Employee</option>
           <option value="admin">Admin</option>
-        </select>
+        </Select>
       </div>
 
       {state.message ? (

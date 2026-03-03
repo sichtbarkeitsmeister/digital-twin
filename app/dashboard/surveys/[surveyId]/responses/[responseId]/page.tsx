@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import { answerSurveyFieldQuestionAction } from "@/app/dashboard/surveys/actions";
+import { answerSurveyFieldQuestionAction, reopenSurveyResponseAction } from "@/app/dashboard/surveys/actions";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -114,13 +114,28 @@ export default async function SurveyResponseDetailPage({
           </Link>
         </p>
         <h1 className="text-3xl font-bold tracking-tight">Antwort-Details</h1>
-        <p className="text-secondary">
-          <span className="font-medium">{survey.title}</span> ·{" "}
-          <Badge variant={response.status === "completed" ? "default" : "secondary"}>
-            {statusLabel(response.status)}
-          </Badge>{" "}
-          · {pct}% ({answeredCount}/{totalFields})
-        </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-secondary">
+            <span className="font-medium">{survey.title}</span> ·{" "}
+            <Badge variant={response.status === "completed" ? "default" : "secondary"}>
+              {statusLabel(response.status)}
+            </Badge>{" "}
+            · {pct}% ({answeredCount}/{totalFields})
+          </p>
+
+          {response.status === "completed" ? (
+            <form
+              action={async () => {
+                "use server";
+                await reopenSurveyResponseAction({ surveyId, responseId });
+              }}
+            >
+              <Button type="submit" size="sm" variant="outline">
+                Wieder öffnen
+              </Button>
+            </form>
+          ) : null}
+        </div>
       </div>
 
       <Card>

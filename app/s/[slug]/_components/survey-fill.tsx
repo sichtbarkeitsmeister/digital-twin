@@ -106,7 +106,7 @@ function FieldHelp({
     setErr(null);
     try {
       const supabase = createClient();
-      const { error } = await supabase.rpc("ask_public_field_question", {
+      const { data, error } = await supabase.rpc("ask_public_field_question", {
         p_slug: slug,
         p_field_id: field.id,
         p_question: text,
@@ -114,6 +114,15 @@ function FieldHelp({
       if (error) {
         setErr("Deine Frage konnte nicht gesendet werden.");
         return;
+      }
+      const questionId = typeof data === "string" ? data : null;
+      if (questionId) {
+        // Non-blocking: notification failures should not affect user flow.
+        void fetch("/api/notifications/survey-question-asked", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ questionId }),
+        }).catch(() => null);
       }
       setQuestion("");
       await refresh();
@@ -414,6 +423,12 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
       setStatus({ kind: "error", message: "Senden fehlgeschlagen. Bitte erneut versuchen." });
       return;
     }
+    // Non-blocking: notification failures should not affect user flow.
+    void fetch("/api/notifications/survey-completed", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug }),
+    }).catch(() => null);
     setStatus({ kind: "ok", message: "Vielen Dank! Deine Antworten wurden gesendet." });
   }
 
@@ -514,15 +529,37 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                         {field.options.map((opt) => {
                           const selected = answers[field.id] === opt.label;
                           return (
-                            <label key={opt.id} className={cn("flex items-center gap-2 text-sm", !session && "opacity-70")}>
+                            <label
+                              key={opt.id}
+                              className={cn(
+                                "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                selected ? "border-primary bg-primary/5" : "border-input bg-background",
+                                !session && "cursor-not-allowed opacity-70",
+                              )}
+                            >
                               <input
                                 type="radio"
                                 name={field.id}
                                 checked={selected}
                                 disabled={!session}
+                                className="peer sr-only"
                                 onChange={() => setAnswer(field.id, opt.label)}
                               />
-                              {opt.label}
+                              <span
+                                aria-hidden="true"
+                                className={cn(
+                                  "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
+                                  selected ? "border-primary" : "border-input",
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "h-2 w-2 rounded-full bg-primary transition-opacity",
+                                    selected ? "opacity-100" : "opacity-0",
+                                  )}
+                                />
+                              </span>
+                              <span className="min-w-0">{opt.label}</span>
                             </label>
                           );
                         })}
@@ -535,7 +572,14 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                           const set = new Set((answers[field.id] as string[]) ?? []);
                           const checked = set.has(opt.label);
                           return (
-                            <label key={opt.id} className={cn("flex items-center gap-2 text-sm", !session && "opacity-70")}>
+                            <label
+                              key={opt.id}
+                              className={cn(
+                                "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                checked ? "border-primary bg-primary/5" : "border-input bg-background",
+                                !session && "cursor-not-allowed opacity-70",
+                              )}
+                            >
                               <Checkbox
                                 checked={checked}
                                 disabled={!session}
@@ -546,7 +590,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                                   setAnswer(field.id, Array.from(nextSet));
                                 }}
                               />
-                              {opt.label}
+                              <span className="min-w-0">{opt.label}</span>
                             </label>
                           );
                         })}
