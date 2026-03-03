@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { AuthButton } from "@/components/auth-button";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import logoLight from "@/lib/public/digital-twin-logo-sbkm-simple.png";
+import logoDark from "@/lib/public/digital-twin-logo-sbkm-mint-simple.png";
 
 export function SiteHeader() {
   return (
@@ -11,8 +13,24 @@ export function SiteHeader() {
           <div className="flex items-center gap-5">
             <Link href="/" className="flex items-center" aria-label="DigitalTwin">
               <span className="sr-only">DigitalTwin</span>
-              {/* TEMP: images disabled for testing */}
-              <span className="text-sm font-semibold tracking-tight">DigitalTwin</span>
+              <img
+                src={logoLight.src}
+                width={logoLight.width}
+                height={logoLight.height}
+                alt=""
+                loading="eager"
+                decoding="async"
+                className="h-7 w-auto object-contain dark:hidden sm:h-8"
+              />
+              <img
+                src={logoDark.src}
+                width={logoDark.width}
+                height={logoDark.height}
+                alt=""
+                loading="eager"
+                decoding="async"
+                className="hidden h-7 w-auto object-contain dark:block sm:h-8"
+              />
             </Link>
           </div>
 
