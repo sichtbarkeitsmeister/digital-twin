@@ -3,9 +3,18 @@ const http = require("node:http");
 const path = require("node:path");
 
 const logPath = path.join(process.cwd(), "boot.log");
+const requestLogPath = path.join(process.cwd(), "requests.log");
 function log(line) {
   try {
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${line}\n`, "utf8");
+  } catch {
+    // ignore
+  }
+}
+
+function logRequest(line) {
+  try {
+    fs.appendFile(requestLogPath, `[${new Date().toISOString()}] ${line}\n`, "utf8", () => {});
   } catch {
     // ignore
   }
@@ -38,7 +47,26 @@ process.on("unhandledRejection", (err) => {
   await app.prepare();
   log("boot: app.prepare() complete");
 
-  const server = http.createServer((req, res) => handle(req, res));
+  const server = http.createServer((req, res) => {
+    const started = Date.now();
+    const url = req.url || "";
+
+    res.on("finish", () => {
+      const ms = Date.now() - started;
+      const status = res.statusCode;
+
+      // Log slow and error responses (skip Next internals).
+      if (!url.startsWith("/_next") && (ms >= 2000 || status >= 500)) {
+        const xfProto = req.headers["x-forwarded-proto"] || "";
+        const xfFor = req.headers["x-forwarded-for"] || "";
+        logRequest(
+          `${req.method || ""} ${url} ${status} ${ms}ms xfProto=${xfProto} xfFor=${xfFor}`,
+        );
+      }
+    });
+
+    handle(req, res);
+  });
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
