@@ -13,6 +13,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, message: "Missing questionId." }, { status: 400 });
     }
 
+    const to = parseEmailList(process.env.SURVEY_NOTIFICATIONS_TO);
+    if (to.length === 0) {
+      return NextResponse.json(
+        { ok: false, message: "Missing SURVEY_NOTIFICATIONS_TO." },
+        { status: 500 },
+      );
+    }
+
     const supabase = createServiceClient();
 
     const { data: q } = await supabase
@@ -36,7 +44,6 @@ export async function POST(req: Request) {
     const fieldTitle = fieldMeta?.title?.trim() || q.field_id;
     const fieldDescription = fieldMeta?.description?.trim() || "";
 
-    const to = parseEmailList(process.env.SURVEY_NOTIFICATIONS_TO);
     const baseUrl = getAppBaseUrl();
     const publicLink =
       survey.visibility === "public" && survey.slug ? `${baseUrl}/s/${survey.slug}` : null;
@@ -78,7 +85,19 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error("survey-question-asked notification failed", e);
-    return NextResponse.json({ ok: false, message: "Internal error." }, { status: 500 });
+    const message = errorMessage(e);
+    console.error("survey-question-asked notification failed", message, e);
+    return NextResponse.json({ ok: false, message }, { status: 500 });
   }
+}
+
+function errorMessage(e: unknown) {
+  if (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string") {
+    const msg = (e as { message: string }).message;
+    // Don't leak config values, but do surface missing-key causes.
+    if (msg.startsWith("Missing ")) return msg;
+    if (msg.includes("Invalid SMTP_PORT")) return msg;
+    return "Internal error (see server logs).";
+  }
+  return "Internal error (see server logs).";
 }

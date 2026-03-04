@@ -10,6 +10,14 @@ export async function POST(req: Request) {
     const slug = typeof body?.slug === "string" ? body.slug.trim().toLowerCase() : "";
     if (!slug) return NextResponse.json({ ok: false, message: "Missing slug." }, { status: 400 });
 
+    const to = parseEmailList(process.env.SURVEY_NOTIFICATIONS_TO);
+    if (to.length === 0) {
+      return NextResponse.json(
+        { ok: false, message: "Missing SURVEY_NOTIFICATIONS_TO." },
+        { status: 500 },
+      );
+    }
+
     const supabase = createServiceClient();
 
     const { data: survey } = await supabase
@@ -31,7 +39,6 @@ export async function POST(req: Request) {
     if (response.status !== "completed") return NextResponse.json({ ok: true, skipped: true });
     if (response.completed_notification_sent_at) return NextResponse.json({ ok: true, skipped: true });
 
-    const to = parseEmailList(process.env.SURVEY_NOTIFICATIONS_TO);
     const baseUrl = getAppBaseUrl();
     const responsesLink = `${baseUrl}/dashboard/surveys/${survey.id}/responses/${response.id}`;
 
@@ -56,7 +63,18 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error("survey-completed notification failed", e);
-    return NextResponse.json({ ok: false, message: "Internal error." }, { status: 500 });
+    const message = errorMessage(e);
+    console.error("survey-completed notification failed", message, e);
+    return NextResponse.json({ ok: false, message }, { status: 500 });
   }
+}
+
+function errorMessage(e: unknown) {
+  if (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string") {
+    const msg = (e as { message: string }).message;
+    if (msg.startsWith("Missing ")) return msg;
+    if (msg.includes("Invalid SMTP_PORT")) return msg;
+    return "Internal error (see server logs).";
+  }
+  return "Internal error (see server logs).";
 }
