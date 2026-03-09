@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import { answerSurveyFieldQuestionAction, reopenSurveyResponseAction } from "@/app/dashboard/surveys/actions";
+import { ResponseExportActions } from "./response-export-actions";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -36,7 +37,7 @@ function getTotalFields(definition: unknown): number {
 function normalizeAnswer(v: unknown) {
   if (typeof v === "string") return v;
   if (typeof v === "number") return String(v);
-  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "boolean") return v ? "Ja" : "Nein";
   if (Array.isArray(v)) return v.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(", ");
   if (v && typeof v === "object") return JSON.stringify(v);
   return "";
@@ -102,6 +103,36 @@ export default async function SurveyResponseDetailPage({
     return (questions ?? []).filter((q) => q.field_id === fieldId);
   }
 
+  const exportItems = steps.flatMap((step, stepIndex) =>
+    (step.fields ?? []).map((field: SurveyField) => ({
+      stepTitle: step.title || `Schritt ${stepIndex + 1}`,
+      fieldId: field.id,
+      fieldTitle: field.title || "Unbenannte Frage",
+      fieldDescription: field.description || null,
+      answer: normalizeAnswer(answers?.[field.id]),
+    })),
+  );
+
+  const exportPayload = {
+    survey: { id: survey.id, title: survey.title },
+    response: {
+      id: response.id,
+      status: response.status,
+      created_at: response.created_at ?? null,
+      updated_at: response.updated_at ?? null,
+      completed_at: response.completed_at ?? null,
+    },
+    items: exportItems,
+    fieldQuestions: (questions ?? []).map((q) => ({
+      id: q.id,
+      field_id: q.field_id,
+      question: q.question,
+      asked_at: q.asked_at ?? null,
+      answer: q.answer ?? null,
+      answered_at: q.answered_at ?? null,
+    })),
+  };
+
   return (
     <div className="grid gap-6">
       <div className="grid gap-1">
@@ -123,18 +154,21 @@ export default async function SurveyResponseDetailPage({
             · {pct}% ({answeredCount}/{totalFields})
           </p>
 
-          {response.status === "completed" ? (
-            <form
-              action={async () => {
-                "use server";
-                await reopenSurveyResponseAction({ surveyId, responseId });
-              }}
-            >
-              <Button type="submit" size="sm" variant="outline">
-                Wieder öffnen
-              </Button>
-            </form>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <ResponseExportActions payload={exportPayload} />
+            {response.status === "completed" ? (
+              <form
+                action={async () => {
+                  "use server";
+                  await reopenSurveyResponseAction({ surveyId, responseId });
+                }}
+              >
+                <Button type="submit" size="sm" variant="outline">
+                  Wieder öffnen
+                </Button>
+              </form>
+            ) : null}
+          </div>
         </div>
       </div>
 
