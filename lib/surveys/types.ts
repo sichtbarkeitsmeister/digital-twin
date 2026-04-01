@@ -1,6 +1,6 @@
 export type SurveyVersion = 1;
 
-export type SurveyFieldType = "text" | "radio" | "checkbox" | "rating";
+export type SurveyFieldType = "text" | "radio" | "checkbox" | "rating" | "ranking";
 
 export type SurveyOption = {
   id: string;
@@ -40,11 +40,17 @@ export type SurveyRatingField = SurveyFieldBase & {
   scale: SurveyScale; // typically {min:1,max:5}
 };
 
+export type SurveyRankingField = SurveyFieldBase & {
+  type: "ranking";
+  options: SurveyOption[];
+};
+
 export type SurveyField =
   | SurveyTextField
   | SurveyRadioField
   | SurveyCheckboxField
-  | SurveyRatingField;
+  | SurveyRatingField
+  | SurveyRankingField;
 
 export type SurveyStep = {
   id: string;

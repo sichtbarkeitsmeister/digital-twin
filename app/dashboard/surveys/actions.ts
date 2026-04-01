@@ -1,5 +1,7 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -13,6 +15,40 @@ export type ActionState<T = unknown> = {
   ok: boolean;
   message: string;
   data?: T;
+};
+
+export type SurveyExportBundle = {
+  version: 1;
+  exported_at: string;
+  survey: {
+    id: string;
+    title: string;
+    description: string;
+    visibility: "private" | "public";
+    slug: string | null;
+    notification_emails: string[];
+    definition: unknown;
+    created_at: string | null;
+    updated_at: string | null;
+    published_at: string | null;
+  };
+  responses: Array<{
+    id: string;
+    status: "in_progress" | "completed";
+    answers: unknown;
+    created_at: string | null;
+    updated_at: string | null;
+    completed_at: string | null;
+  }>;
+  fieldQuestions: Array<{
+    id: string;
+    response_id: string;
+    field_id: string;
+    question: string;
+    asked_at: string | null;
+    answer: string | null;
+    answered_at: string | null;
+  }>;
 };
 
 async function requirePlatformAdmin() {
@@ -256,6 +292,187 @@ export async function deleteSurveyAction(
 
   revalidatePath("/dashboard/surveys");
   return { ok: true, message: "Umfrage gelöscht.", data: { surveyId: parsed.data.surveyId } };
+}
+
+const exportSurveySchema = z.object({ surveyId: z.string().uuid() });
+
+export async function exportSurveyBundleAction(
+  input: z.input<typeof exportSurveySchema>,
+): Promise<ActionState<SurveyExportBundle>> {
+  const parsed = exportSurveySchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+  const { supabase } = auth;
+
+  const { data: survey } = await supabase
+    .from("surveys")
+    .select("id,title,description,visibility,slug,notification_emails,definition,created_at,updated_at,published_at")
+    .eq("id", parsed.data.surveyId)
+    .maybeSingle();
+  if (!survey) return { ok: false, message: "Umfrage nicht gefunden." };
+
+  const { data: responses } = await supabase
+    .from("survey_responses")
+    .select("id,status,answers,created_at,updated_at,completed_at")
+    .eq("survey_id", parsed.data.surveyId)
+    .order("created_at", { ascending: true });
+
+  const { data: fieldQuestions } = await supabase
+    .from("survey_field_questions")
+    .select("id,response_id,field_id,question,asked_at,answer,answered_at")
+    .eq("survey_id", parsed.data.surveyId)
+    .order("asked_at", { ascending: true });
+
+  return {
+    ok: true,
+    message: "Export erstellt.",
+    data: {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      survey: {
+        id: survey.id,
+        title: survey.title,
+        description: survey.description ?? "",
+        visibility: survey.visibility,
+        slug: survey.slug ?? null,
+        notification_emails: (survey.notification_emails ?? []) as string[],
+        definition: survey.definition,
+        created_at: survey.created_at ?? null,
+        updated_at: survey.updated_at ?? null,
+        published_at: survey.published_at ?? null,
+      },
+      responses: ((responses ?? []) as SurveyExportBundle["responses"]) ?? [],
+      fieldQuestions:
+        ((fieldQuestions ?? []) as SurveyExportBundle["fieldQuestions"]) ?? [],
+    },
+  };
+}
+
+const importResponseSchema = z.object({
+  id: z.string().optional(),
+  status: z.enum(["in_progress", "completed"]),
+  answers: z.record(z.string(), z.unknown()).default({}),
+  created_at: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
+  completed_at: z.string().nullable().optional(),
+});
+
+const importQuestionSchema = z.object({
+  id: z.string().optional(),
+  response_id: z.string().optional(),
+  field_id: z.string().min(1),
+  question: z.string().min(1),
+  asked_at: z.string().nullable().optional(),
+  answer: z.string().nullable().optional(),
+  answered_at: z.string().nullable().optional(),
+});
+
+const importBundleSchema = z.object({
+  version: z.literal(1),
+  survey: z.object({
+    title: z.string().trim().min(1, "Title is required"),
+    description: z.string().optional().default(""),
+    notification_emails: z.array(z.string()).optional().default([]),
+    definition: z.unknown(),
+  }),
+  responses: z.array(importResponseSchema).optional().default([]),
+  fieldQuestions: z.array(importQuestionSchema).optional().default([]),
+});
+
+export async function importSurveyBundleAction(
+  input: { payload: unknown },
+): Promise<ActionState<{ surveyId: string }>> {
+  const parsed = importBundleSchema.safeParse(input.payload);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültiger Import." };
+  }
+
+  const definitionParsed = surveySchema.safeParse(parsed.data.survey.definition);
+  if (!definitionParsed.success) {
+    return { ok: false, message: definitionParsed.error.issues[0]?.message ?? "Ungültige Umfrage-Definition." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
+  const { supabase, userId } = auth;
+
+  const notificationEmails = normalizeEmails(parsed.data.survey.notification_emails);
+  const invalid = notificationEmails.find((e) => !isValidEmail(e));
+  if (invalid) return { ok: false, message: `Ungültige E-Mail: ${invalid}` };
+
+  // Import into a private draft to avoid accidental public overwrite/collision.
+  const { data: createdSurvey, error: surveyError } = await supabase
+    .from("surveys")
+    .insert({
+      title: parsed.data.survey.title,
+      description: parsed.data.survey.description ?? "",
+      visibility: "private",
+      slug: null,
+      published_at: null,
+      notification_emails: notificationEmails,
+      definition: definitionParsed.data,
+      created_by_user_id: userId,
+    })
+    .select("id")
+    .single();
+  if (surveyError || !createdSurvey?.id) {
+    return { ok: false, message: "Umfrage konnte nicht importiert werden." };
+  }
+
+  const firstResponse = parsed.data.responses[0];
+  if (firstResponse) {
+    const tokenHashHex = `\\x${randomBytes(32).toString("hex")}`;
+    const { data: createdResponse, error: responseError } = await supabase
+      .from("survey_responses")
+      .insert({
+        survey_id: createdSurvey.id,
+        status: firstResponse.status,
+        answers: firstResponse.answers ?? {},
+        completed_at: firstResponse.completed_at ?? null,
+        token_hash: tokenHashHex,
+      })
+      .select("id")
+      .single();
+
+    if (responseError || !createdResponse?.id) {
+      return { ok: false, message: "Antworten konnten nicht importiert werden." };
+    }
+
+    const sourceResponseId = firstResponse.id;
+    const importQuestions = parsed.data.fieldQuestions.filter((q) =>
+      sourceResponseId ? q.response_id === sourceResponseId : true,
+    );
+
+    if (importQuestions.length > 0) {
+      const rows = importQuestions.map((q) => ({
+        survey_id: createdSurvey.id,
+        response_id: createdResponse.id,
+        field_id: q.field_id,
+        question: q.question,
+        asked_at: q.asked_at ?? undefined,
+        answer: q.answer ?? null,
+        answered_at: q.answered_at ?? null,
+      }));
+      const { error: questionError } = await supabase
+        .from("survey_field_questions")
+        .insert(rows);
+      if (questionError) {
+        return { ok: false, message: "Rückfragen konnten nicht importiert werden." };
+      }
+    }
+  }
+
+  revalidatePath("/dashboard/surveys");
+  revalidatePath(`/dashboard/surveys/${createdSurvey.id}/edit`);
+  return {
+    ok: true,
+    message: "Umfrage (inkl. Antworten) importiert.",
+    data: { surveyId: createdSurvey.id },
+  };
 }
 
 const reopenResponseSchema = z.object({

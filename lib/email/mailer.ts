@@ -16,6 +16,7 @@ export type EmailPayload = {
 };
 
 let cachedTransport: nodemailer.Transporter | null = null;
+let cachedAuthUser: string | null = null;
 
 function getTransport() {
   if (cachedTransport) return cachedTransport;
@@ -31,6 +32,7 @@ function getTransport() {
   if (!user) throw new Error("Missing SMTP_USER");
   if (!pass) throw new Error("Missing SMTP_PASS (or SMTP_PASSWORD)");
 
+  cachedAuthUser = user;
   cachedTransport = nodemailer.createTransport({
     host,
     port,
@@ -71,6 +73,9 @@ export async function sendEmail(payload: EmailPayload) {
   const transport = getTransport();
   await transport.sendMail({
     from,
+    // Some SMTP servers require the SMTP "MAIL FROM" to be owned by the authenticated user.
+    // Keep the visible From header configurable, but default the envelope sender to SMTP_USER.
+    envelope: cachedAuthUser ? { from: cachedAuthUser, to } : undefined,
     to,
     subject: payload.subject,
     text: payload.text,

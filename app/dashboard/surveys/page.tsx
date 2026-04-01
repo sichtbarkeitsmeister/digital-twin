@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { CopyToClipboardButton } from "@/app/dashboard/_components/copy-to-clipboard-button";
+import { SurveyImportButton } from "@/app/dashboard/surveys/_components/survey-import-button";
 import { SurveysToolbar } from "@/app/dashboard/surveys/_components/surveys-toolbar";
 import { SurveyRowActions } from "@/app/dashboard/surveys/_components/survey-row-actions";
 
@@ -204,9 +205,12 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
             Entwürfe sind standardmäßig privat. Veröffentliche, um per Link zu teilen.
           </p>
         </div>
-        <Button asChild>
-          <Link href="/dashboard/surveys/new">Neue Umfrage</Link>
-        </Button>
+        <div className="flex items-center justify-end gap-2 self-end sm:self-auto">
+          <SurveyImportButton />
+          <Button asChild>
+            <Link href="/dashboard/surveys/new">Neue Umfrage</Link>
+          </Button>
+        </div>
       </div>
 
       <Card>

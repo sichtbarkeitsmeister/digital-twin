@@ -34,7 +34,12 @@ function getTotalFields(definition: unknown): number {
   return getSteps(definition).reduce((sum, st) => sum + (Array.isArray(st.fields) ? st.fields.length : 0), 0);
 }
 
-function normalizeAnswer(v: unknown) {
+function normalizeAnswer(v: unknown, field?: SurveyField) {
+  if (field?.type === "ranking" && Array.isArray(v)) {
+    return v
+      .map((x, idx) => `${idx + 1}. ${typeof x === "string" ? x : JSON.stringify(x)}`)
+      .join(", ");
+  }
   if (typeof v === "string") return v;
   if (typeof v === "number") return String(v);
   if (typeof v === "boolean") return v ? "Ja" : "Nein";
@@ -109,7 +114,7 @@ export default async function SurveyResponseDetailPage({
       fieldId: field.id,
       fieldTitle: field.title || "Unbenannte Frage",
       fieldDescription: field.description || null,
-      answer: normalizeAnswer(answers?.[field.id]),
+      answer: normalizeAnswer(answers?.[field.id], field),
     })),
   );
 
@@ -186,7 +191,7 @@ export default async function SurveyResponseDetailPage({
               </div>
               <div className="grid gap-3">
                 {step.fields.map((field: SurveyField) => {
-                  const value = normalizeAnswer(answers?.[field.id]);
+                  const value = normalizeAnswer(answers?.[field.id], field);
                   const qs = fieldQuestions(field.id);
                   const hasUnanswered = qs.some((q) => !q.answer);
                   return (

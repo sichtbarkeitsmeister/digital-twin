@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { HelpCircle } from "lucide-react";
+import { GripVertical, HelpCircle } from "lucide-react";
 
 import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/client";
@@ -194,6 +194,10 @@ function FieldHelp({
 }
 
 export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
+  const [dragState, setDragState] = React.useState<{
+    fieldId: string;
+    draggingLabel: string;
+  } | null>(null);
   const [stepIndex, setStepIndex] = React.useState(0);
   const [answers, setAnswers] = React.useState<Answers>({});
   const [session, setSession] = React.useState<ResponseSession | null>(null);
@@ -222,6 +226,13 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
     if (field.type === "radio") return typeof value === "string" && value.trim().length > 0;
     if (field.type === "checkbox") return Array.isArray(value) && value.length > 0;
     if (field.type === "rating") return typeof value === "number" && Number.isFinite(value);
+    if (field.type === "ranking") {
+      return (
+        Array.isArray(value) &&
+        value.length === field.options.length &&
+        value.every((v) => typeof v === "string")
+      );
+    }
     return false;
   }
 
@@ -240,6 +251,37 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
 
   function setAnswer(fieldId: string, value: unknown) {
     setAnswers((a) => ({ ...a, [fieldId]: value }));
+  }
+
+  function getNormalizedRanking(fieldId: string, fallback: string[]) {
+    const current = answers[fieldId];
+    if (!Array.isArray(current) || !current.every((v) => typeof v === "string")) {
+      return [...fallback];
+    }
+    const result: string[] = [];
+    for (const value of current as string[]) {
+      if (!fallback.includes(value)) continue;
+      if (result.includes(value)) continue;
+      result.push(value);
+    }
+    for (const value of fallback) {
+      if (!result.includes(value)) result.push(value);
+    }
+    return result;
+  }
+
+  function setRankingPosition(
+    fieldId: string,
+    fallback: string[],
+    fromIndex: number,
+    toIndex: number,
+  ) {
+    const ranking = getNormalizedRanking(fieldId, fallback);
+    if (fromIndex === toIndex) return;
+    if (toIndex < 0 || toIndex >= ranking.length) return;
+    const [item] = ranking.splice(fromIndex, 1);
+    ranking.splice(toIndex, 0, item);
+    setAnswer(fieldId, ranking);
   }
 
   // Create or restore response session
@@ -615,6 +657,85 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                             </Button>
                           );
                         })}
+                      </div>
+                    ) : null}
+
+                    {field.type === "ranking" ? (
+                      <div className="grid gap-2">
+                        {(() => {
+                          const ranking = getNormalizedRanking(
+                            field.id,
+                            field.options.map((opt) => opt.label),
+                          );
+                          return ranking.map((label, idx) => (
+                            <div
+                              key={`${field.id}_ranking_${label}_${idx}`}
+                              draggable={!!session}
+                              onDragStart={(e) => {
+                                if (!session) return;
+                                e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData("text/plain", label);
+                                setDragState({
+                                  fieldId: field.id,
+                                  draggingLabel: label,
+                                });
+                              }}
+                              onDragOver={(e) => {
+                                if (!session) return;
+                                e.preventDefault();
+                                if (!dragState || dragState.fieldId !== field.id) return;
+                                const fromIndex = ranking.indexOf(
+                                  dragState.draggingLabel,
+                                );
+                                if (fromIndex < 0 || fromIndex === idx) return;
+                                // Live reorder while dragging so rows shift and create space.
+                                setRankingPosition(field.id, ranking, fromIndex, idx);
+                              }}
+                              onDrop={(e) => {
+                                if (!session) return;
+                                e.preventDefault();
+                                setDragState(null);
+                              }}
+                              onDragEnd={() => setDragState(null)}
+                              className={cn(
+                                "flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm transition-colors",
+                                dragState?.fieldId === field.id &&
+                                  dragState.draggingLabel === label
+                                  ? "border-primary bg-primary/10 opacity-70"
+                                  : "border-input bg-background",
+                                !session && "opacity-70",
+                              )}
+                            >
+                              <div className="flex min-w-0 items-center gap-3">
+                                <GripVertical
+                                  className={cn(
+                                    "h-4 w-4 text-secondary",
+                                    session ? "cursor-grab" : "cursor-not-allowed",
+                                  )}
+                                />
+                                <select
+                                  aria-label={`Rang für ${label}`}
+                                  value={idx + 1}
+                                  disabled={!session}
+                                  onChange={(e) => {
+                                    const toIndex = Number.parseInt(e.target.value, 10) - 1;
+                                    if (!Number.isInteger(toIndex)) return;
+                                    setRankingPosition(field.id, ranking, idx, toIndex);
+                                  }}
+                                  className="h-8 w-14 rounded-md border bg-background px-2 text-sm disabled:opacity-70"
+                                >
+                                  {ranking.map((_, rankIndex) => (
+                                    <option key={`${field.id}_rank_${rankIndex + 1}`} value={rankIndex + 1}>
+                                      {rankIndex + 1}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className="min-w-0 truncate font-medium">{label}</span>
+                              </div>
+                              <span className="text-xs text-secondary">Ziehen zum Sortieren</span>
+                            </div>
+                          ));
+                        })()}
                       </div>
                     ) : null}
 
