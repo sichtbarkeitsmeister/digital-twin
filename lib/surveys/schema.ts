@@ -44,6 +44,7 @@ export const surveyRatingFieldSchema = fieldBaseSchema.extend({
 export const surveyRankingFieldSchema = fieldBaseSchema.extend({
   type: z.literal("ranking"),
   options: z.array(surveyOptionSchema).min(2),
+  allowCustomEntries: z.boolean().optional().default(true),
 });
 
 export const surveyFieldSchema = z.discriminatedUnion("type", [

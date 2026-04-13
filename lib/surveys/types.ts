@@ -43,6 +43,8 @@ export type SurveyRatingField = SurveyFieldBase & {
 export type SurveyRankingField = SurveyFieldBase & {
   type: "ranking";
   options: SurveyOption[];
+  /** Wenn false, können Teilnehmende keine eigenen „Andere“-Einträge ergänzen. Standard: true. */
+  allowCustomEntries?: boolean;
 };
 
 export type SurveyField =

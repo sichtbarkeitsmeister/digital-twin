@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { BellRing } from "lucide-react";
 
+import { formatRankingAnswerForDisplay } from "@/lib/surveys/ranking-answer";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -35,10 +36,15 @@ function getTotalFields(definition: unknown): number {
 }
 
 function normalizeAnswer(v: unknown, field?: SurveyField) {
-  if (field?.type === "ranking" && Array.isArray(v)) {
-    return v
-      .map((x, idx) => `${idx + 1}. ${typeof x === "string" ? x : JSON.stringify(x)}`)
-      .join(", ");
+  if (field?.type === "ranking") {
+    const labels = field.options.map((o) => o.label);
+    const formatted = formatRankingAnswerForDisplay(v, labels);
+    if (formatted) return formatted;
+    if (Array.isArray(v)) {
+      return v
+        .map((x, idx) => `${idx + 1}. ${typeof x === "string" ? x : JSON.stringify(x)}`)
+        .join(", ");
+    }
   }
   if (typeof v === "string") return v;
   if (typeof v === "number") return String(v);

@@ -11,7 +11,6 @@ import {
   Download,
   Eye,
   Globe,
-  GripVertical,
   Lock,
   MoreHorizontal,
   Pencil,
@@ -30,6 +29,7 @@ import type {
   SurveyOption,
   SurveyStep,
 } from "@/lib/surveys/types";
+import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
 import { surveySchema } from "@/lib/surveys/schema";
 import {
   clearDraftSurvey,
@@ -110,6 +110,7 @@ function createDefaultField(type: SurveyFieldType): SurveyField {
     ...base,
     type: "ranking",
     options: [...options, { id: createId(), label: "Option 2" }],
+    allowCustomEntries: true,
   };
 }
 
@@ -1124,6 +1125,21 @@ export function SurveyBuilder({
                                   </div>
                                 ))}
                               </div>
+                              {field.type === "ranking" ? (
+                                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                                  <Checkbox
+                                    checked={field.allowCustomEntries !== false}
+                                    onCheckedChange={(next) =>
+                                      updateField(currentStep.id, field.id, {
+                                        allowCustomEntries: next === true,
+                                      })
+                                    }
+                                  />
+                                  <span>
+                                    Teilnehmende dürfen eigene Optionen ergänzen („Andere“)
+                                  </span>
+                                </label>
+                              ) : null}
                             </div>
                           ) : null}
                         </CardContent>
@@ -1463,11 +1479,6 @@ function SurveyPreview({
   setAnswers: React.Dispatch<React.SetStateAction<PreviewAnswers>>;
   onExitPreview: () => void;
 }) {
-  const [dragState, setDragState] = React.useState<{
-    fieldId: string;
-    draggingLabel: string;
-  } | null>(null);
-
   const steps = survey.steps;
   const step = steps[stepIndex] ?? steps[0];
   const canBack = stepIndex > 0;
@@ -1479,37 +1490,6 @@ function SurveyPreview({
 
   function setAnswer(fieldId: string, value: unknown) {
     setAnswers((a) => ({ ...a, [fieldId]: value }));
-  }
-
-  function getNormalizedRanking(fieldId: string, fallback: string[]) {
-    const current = answers[fieldId];
-    if (!Array.isArray(current) || !current.every((v) => typeof v === "string")) {
-      return [...fallback];
-    }
-    const result: string[] = [];
-    for (const value of current as string[]) {
-      if (!fallback.includes(value)) continue;
-      if (result.includes(value)) continue;
-      result.push(value);
-    }
-    for (const value of fallback) {
-      if (!result.includes(value)) result.push(value);
-    }
-    return result;
-  }
-
-  function setRankingPosition(
-    fieldId: string,
-    fallback: string[],
-    fromIndex: number,
-    toIndex: number,
-  ) {
-    const ranking = getNormalizedRanking(fieldId, fallback);
-    if (fromIndex === toIndex) return;
-    if (toIndex < 0 || toIndex >= ranking.length) return;
-    const [item] = ranking.splice(fromIndex, 1);
-    ranking.splice(toIndex, 0, item);
-    setAnswer(fieldId, ranking);
   }
 
   return (
@@ -1696,72 +1676,13 @@ function SurveyPreview({
                   ) : null}
 
                   {field.type === "ranking" ? (
-                    <div className="grid gap-2">
-                      {(() => {
-                        const ranking = getNormalizedRanking(
-                          field.id,
-                          field.options.map((opt) => opt.label),
-                        );
-                        return ranking.map((label, idx) => (
-                          <div
-                            key={`${field.id}_ranking_${label}_${idx}`}
-                            draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.effectAllowed = "move";
-                              e.dataTransfer.setData("text/plain", label);
-                              setDragState({
-                                fieldId: field.id,
-                                draggingLabel: label,
-                              });
-                            }}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              if (!dragState || dragState.fieldId !== field.id) return;
-                              const fromIndex = ranking.indexOf(
-                                dragState.draggingLabel,
-                              );
-                              if (fromIndex < 0 || fromIndex === idx) return;
-                              // Live reorder while dragging so rows shift and create space.
-                              setRankingPosition(field.id, ranking, fromIndex, idx);
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              setDragState(null);
-                            }}
-                            onDragEnd={() => setDragState(null)}
-                            className={cn(
-                              "flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm transition-colors",
-                              dragState?.fieldId === field.id &&
-                                dragState.draggingLabel === label
-                                ? "border-primary bg-primary/10 opacity-70"
-                                : "border-input bg-background",
-                            )}
-                          >
-                            <div className="flex min-w-0 items-center gap-3">
-                              <GripVertical className="h-4 w-4 text-secondary cursor-grab" />
-                              <select
-                                aria-label={`Rang für ${label}`}
-                                value={idx + 1}
-                                onChange={(e) => {
-                                  const toIndex = Number.parseInt(e.target.value, 10) - 1;
-                                  if (!Number.isInteger(toIndex)) return;
-                                  setRankingPosition(field.id, ranking, idx, toIndex);
-                                }}
-                                className="h-8 w-14 rounded-md border bg-background px-2 text-sm"
-                              >
-                                {ranking.map((_, rankIndex) => (
-                                  <option key={`${field.id}_rank_${rankIndex + 1}`} value={rankIndex + 1}>
-                                    {rankIndex + 1}
-                                  </option>
-                                ))}
-                              </select>
-                              <span className="truncate font-medium">{label}</span>
-                            </div>
-                            <span className="text-xs text-secondary">Ziehen zum Sortieren</span>
-                          </div>
-                        ));
-                      })()}
-                    </div>
+                    <SurveyRankingInput
+                      fieldId={field.id}
+                      presetLabels={field.options.map((opt) => opt.label)}
+                      value={answers[field.id]}
+                      onChange={(next) => setAnswer(field.id, next)}
+                      allowCustomEntries={field.allowCustomEntries !== false}
+                    />
                   ) : null}
                 </div>
               ))}
