@@ -29,6 +29,16 @@ import type {
   SurveyOption,
   SurveyStep,
 } from "@/lib/surveys/types";
+import {
+  addCheckboxOtherEntry,
+  buildCheckboxAnswer,
+  buildRadioAnswer,
+  getRadioOtherState,
+  parseCheckboxOtherEntries,
+  RADIO_OTHER_TOKEN,
+  removeCheckboxOtherEntry,
+  setCheckboxOtherEntryText,
+} from "@/lib/surveys/other-option";
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
 import { surveySchema } from "@/lib/surveys/schema";
 import {
@@ -104,8 +114,8 @@ function createDefaultField(type: SurveyFieldType): SurveyField {
     return { ...base, type: "rating", scale: { min: 1, max: 5 } };
   }
   const options: SurveyOption[] = [{ id: createId(), label: "Option 1" }];
-  if (type === "radio") return { ...base, type: "radio", options };
-  if (type === "checkbox") return { ...base, type: "checkbox", options };
+  if (type === "radio") return { ...base, type: "radio", options, allowOtherOption: false };
+  if (type === "checkbox") return { ...base, type: "checkbox", options, allowOtherOption: true };
   return {
     ...base,
     type: "ranking",
@@ -1016,7 +1026,7 @@ export function SurveyBuilder({
                                   title: e.target.value,
                                 })
                               }
-                              placeholder="z.B. Frage / Titel"
+                              placeholder="z.B. Frage/Notiz / Titel"
                             />
                           </div>
                           <div className="grid gap-2">
@@ -1125,6 +1135,23 @@ export function SurveyBuilder({
                                   </div>
                                 ))}
                               </div>
+                              {field.type === "radio" || field.type === "checkbox" ? (
+                                <label className="mt-1 flex cursor-pointer items-center gap-2 text-sm">
+                                  <Checkbox
+                                    checked={
+                                      field.type === "radio"
+                                        ? field.allowOtherOption === true
+                                        : field.allowOtherOption !== false
+                                    }
+                                    onCheckedChange={(next) =>
+                                      updateField(currentStep.id, field.id, {
+                                        allowOtherOption: next === true,
+                                      })
+                                    }
+                                  />
+                                  <span>„Andere“-Option zum Freitext erlauben</span>
+                                </label>
+                              ) : null}
                               {field.type === "ranking" ? (
                                 <label className="flex cursor-pointer items-center gap-2 text-sm">
                                   <Checkbox
@@ -1583,7 +1610,7 @@ function SurveyPreview({
                   {field.type === "radio" ? (
                     <div className="grid gap-2">
                       {field.options.map((opt) => {
-                        const selected = answers[field.id] === opt.id;
+                        const selected = answers[field.id] === opt.label;
                         return (
                           <label
                             key={opt.id}
@@ -1597,13 +1624,13 @@ function SurveyPreview({
                               name={field.id}
                               checked={selected}
                               className="peer sr-only"
-                              onChange={() => setAnswer(field.id, opt.id)}
+                              onChange={() => setAnswer(field.id, opt.label)}
                             />
                             <span
                               aria-hidden="true"
                               className={cn(
                                 "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
-                                selected ? "border-primary" : "border-input",
+                                selected ? "border-primary" : "border-primary/70",
                               )}
                             >
                               <span
@@ -1617,39 +1644,160 @@ function SurveyPreview({
                           </label>
                         );
                       })}
+                      {field.allowOtherOption === true ? (
+                        (() => {
+                          const presetLabels = field.options.map((opt) => opt.label);
+                          const otherState = getRadioOtherState(answers[field.id], presetLabels);
+                          return (
+                            <label
+                              className={cn(
+                                "grid cursor-pointer gap-2 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors",
+                                otherState.selected
+                                  ? "border-primary bg-primary/5"
+                                  : "border-input bg-background",
+                              )}
+                            >
+                              <span className="flex items-center gap-3">
+                                <input
+                                  type="radio"
+                                  name={field.id}
+                                  checked={otherState.selected}
+                                  className="peer sr-only"
+                                  onChange={() => setAnswer(field.id, RADIO_OTHER_TOKEN)}
+                                />
+                                <span
+                                  aria-hidden="true"
+                                  className={cn(
+                                    "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
+                                    otherState.selected ? "border-primary" : "border-primary/70",
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "h-2 w-2 rounded-full bg-primary transition-opacity",
+                                      otherState.selected ? "opacity-100" : "opacity-0",
+                                    )}
+                                  />
+                                </span>
+                                Andere
+                              </span>
+                              {otherState.selected ? (
+                                <Input
+                                  value={otherState.text}
+                                  placeholder="Eigene Option eingeben…"
+                                  onChange={(e) =>
+                                    setAnswer(field.id, buildRadioAnswer(e.target.value))
+                                  }
+                                />
+                              ) : null}
+                            </label>
+                          );
+                        })()
+                      ) : null}
                     </div>
                   ) : null}
 
                   {field.type === "checkbox" ? (
                     <div className="grid gap-2">
-                      {field.options.map((opt) => {
-                        const set = new Set(
-                          (answers[field.id] as string[]) ?? [],
-                        );
-                        const checked = set.has(opt.id);
+                      {(() => {
+                        const presetLabels = field.options.map((o) => o.label);
+                        const otherState = parseCheckboxOtherEntries(answers[field.id], presetLabels);
                         return (
-                          <label
-                            key={opt.id}
-                            className={cn(
-                              "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
-                              checked ? "border-primary bg-primary/5" : "border-input bg-background",
-                            )}
-                          >
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={(next) => {
-                                const nextSet = new Set(
-                                  (answers[field.id] as string[]) ?? [],
-                                );
-                                if (next) nextSet.add(opt.id);
-                                else nextSet.delete(opt.id);
-                                setAnswer(field.id, Array.from(nextSet));
-                              }}
-                            />
-                            {opt.label}
-                          </label>
+                          <>
+                            {field.options.map((opt) => {
+                              const checked = otherState.selectedPresets.has(opt.label);
+                              return (
+                                <label
+                                  key={opt.id}
+                                  className={cn(
+                                    "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                    checked ? "border-primary bg-primary/5" : "border-input bg-background",
+                                  )}
+                                >
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(next) => {
+                                      const nextSet = new Set(otherState.selectedPresets);
+                                      if (next) nextSet.add(opt.label);
+                                      else nextSet.delete(opt.label);
+                                      setAnswer(
+                                        field.id,
+                                        buildCheckboxAnswer(
+                                          presetLabels,
+                                          nextSet,
+                                          otherState.otherEntries,
+                                        ),
+                                      );
+                                    }}
+                                  />
+                                  {opt.label}
+                                </label>
+                              );
+                            })}
+
+                            {field.allowOtherOption !== false
+                              ? otherState.otherEntries.map((entry, entryIdx) => (
+                                  <div
+                                    key={entry.id}
+                                    className={cn(
+                                      "flex items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                      "border-primary bg-primary/5",
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked
+                                      onCheckedChange={(next) => {
+                                        if (next !== false) return;
+                                        setAnswer(
+                                          field.id,
+                                          removeCheckboxOtherEntry(
+                                            answers[field.id],
+                                            presetLabels,
+                                            entry.id,
+                                          ),
+                                        );
+                                      }}
+                                    />
+                                    <Input
+                                      value={entry.text}
+                                      placeholder={`Eigene Option ${entryIdx + 1}…`}
+                                      className="h-9 min-w-0 flex-1"
+                                      onChange={(e) =>
+                                        setAnswer(
+                                          field.id,
+                                          setCheckboxOtherEntryText(
+                                            answers[field.id],
+                                            presetLabels,
+                                            entry.id,
+                                            e.target.value,
+                                          ),
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                ))
+                              : null}
+
+                            {field.allowOtherOption !== false ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full justify-center sm:w-auto"
+                                onClick={() =>
+                                  setAnswer(
+                                    field.id,
+                                    addCheckboxOtherEntry(answers[field.id], presetLabels),
+                                  )
+                                }
+                              >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Andere / eigene Option hinzufügen
+                              </Button>
+                            ) : null}
+                          </>
                         );
-                      })}
+                      })()}
                     </div>
                   ) : null}
 

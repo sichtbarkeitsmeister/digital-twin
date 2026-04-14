@@ -70,7 +70,7 @@ export function SurveyRowActions(props: {
             Antworten
             {props.pendingCount > 0 ? (
               <span className="inline-flex items-center gap-1 text-xs text-secondary">
-                <span className="h-2 w-2 rounded-full bg-red-500" aria-label="Neue Frage" />
+                <span className="h-2 w-2 rounded-full bg-red-500" aria-label="Neue Frage/Bemerkung" />
                 {props.pendingCount}
               </span>
             ) : null}

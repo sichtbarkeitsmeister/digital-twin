@@ -25,12 +25,13 @@ export async function POST(req: Request) {
 
     const { data: q } = await supabase
       .from("survey_field_questions")
-      .select("id,survey_id,response_id,field_id,question,asked_at,asked_notification_sent_at")
+      .select("id,survey_id,response_id,field_id,kind,question,asked_at,asked_notification_sent_at")
       .eq("id", questionId)
       .maybeSingle();
 
     if (!q?.id) return NextResponse.json({ ok: true, skipped: true });
     if (q.asked_notification_sent_at) return NextResponse.json({ ok: true, skipped: true });
+    if (q.kind === "remark") return NextResponse.json({ ok: true, skipped: true });
 
     const { data: survey } = await supabase
       .from("surveys")
@@ -48,33 +49,35 @@ export async function POST(req: Request) {
     const publicLink =
       survey.visibility === "public" && survey.slug ? `${baseUrl}/s/${survey.slug}` : null;
 
+    const kindLabel = q.kind === "remark" ? "Bemerkung" : "Frage";
+
     await sendEmail({
       to,
-      subject: `Neue Frage: ${survey.title}`,
+      subject: `Neue ${kindLabel}: ${survey.title}`,
       text: [
-        `Neue Frage wurde gestellt.`,
+        `Neue ${kindLabel.toLowerCase()} wurde hinzugefügt.`,
         ``,
         `Umfrage: ${survey.title}`,
         fieldTitle ? `Feld: ${fieldTitle}` : null,
         fieldDescription ? `Beschreibung: ${fieldDescription}` : null,
-        `Frage: ${q.question}`,
+        `${kindLabel}: ${q.question}`,
         ``,
         publicLink ? `Umfrage öffnen: ${publicLink}` : null,
       ]
         .filter(Boolean)
         .join("\n"),
       html: renderBrandedEmail({
-        title: `Neue Frage: ${survey.title}`,
-        headline: "Neue Frage wurde gestellt",
-        intro: "Es gibt eine neue Frage zu einer Umfrage.",
+        title: `Neue ${kindLabel}: ${survey.title}`,
+        headline: `Neue ${kindLabel.toLowerCase()} wurde hinzugefügt`,
+        intro: `Es gibt eine neue ${kindLabel.toLowerCase()} zu einer Umfrage.`,
         details: [
           { label: "Umfrage", value: survey.title },
           ...(fieldTitle ? [{ label: "Feld", value: fieldTitle }] : []),
           ...(fieldDescription ? [{ label: "Beschreibung", value: fieldDescription }] : []),
-          { label: "Frage", value: q.question },
+          { label: kindLabel, value: q.question },
         ],
         actions: publicLink ? [{ label: "Umfrage öffnen", href: publicLink }] : [],
-        preheader: `Neue Frage: ${survey.title}`,
+        preheader: `Neue ${kindLabel}: ${survey.title}`,
       }),
     });
 

@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { CopyToClipboardButton } from "@/app/dashboard/_components/copy-to-clipboard-button";
+import { CreateSurveyFolderButton } from "@/app/dashboard/surveys/_components/create-survey-folder-button";
+import { SurveyFolderAssignmentMenu } from "@/app/dashboard/surveys/_components/survey-folder-assignment-menu";
 import { SurveyImportButton } from "@/app/dashboard/surveys/_components/survey-import-button";
 import { SurveysToolbar } from "@/app/dashboard/surveys/_components/surveys-toolbar";
 import { SurveyRowActions } from "@/app/dashboard/surveys/_components/survey-row-actions";
@@ -25,6 +27,10 @@ function firstParam(v: string | string[] | undefined) {
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
 function buildQueryString(params: Record<string, string | number | undefined>) {
@@ -122,6 +128,8 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
   const visibilityParam = firstParam(sp.visibility);
   const visibility =
     visibilityParam === "public" || visibilityParam === "private" ? visibilityParam : "all";
+  const folderParam = (firstParam(sp.folder) ?? "").toString().trim();
+  const folderFilter = folderParam === "none" || isUuid(folderParam) ? folderParam : "";
 
   const page = Math.max(1, Number.parseInt(firstParam(sp.page) ?? "1", 10) || 1);
   const pageSizeRaw = Number.parseInt(firstParam(sp.pageSize) ?? "10", 10) || 10;
@@ -129,14 +137,33 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
     ? (pageSizeRaw as 10 | 20 | 50)
     : 10;
 
+  const { data: folders } = await supabase
+    .from("survey_folders")
+    .select("id,name")
+    .order("name", { ascending: true });
+
+  const { data: folderUsage } = await supabase
+    .from("surveys")
+    .select("folder_id")
+    .not("folder_id", "is", null);
+
+  const folderCountById = new Map<string, number>();
+  for (const row of folderUsage ?? []) {
+    const fid = row.folder_id as string | null;
+    if (!fid) continue;
+    folderCountById.set(fid, (folderCountById.get(fid) ?? 0) + 1);
+  }
+
   let surveysQuery = supabase
     .from("surveys")
-    .select("id,title,description,visibility,slug,updated_at,published_at,definition", {
+    .select("id,title,description,visibility,slug,updated_at,published_at,definition,folder_id", {
       count: "exact",
     })
     .order("updated_at", { ascending: false });
 
   if (visibility !== "all") surveysQuery = surveysQuery.eq("visibility", visibility);
+  if (folderFilter === "none") surveysQuery = surveysQuery.is("folder_id", null);
+  else if (folderFilter && isUuid(folderFilter)) surveysQuery = surveysQuery.eq("folder_id", folderFilter);
 
   if (q) {
     const qSafe = q.replace(/[(),]/g, " ").trim();
@@ -158,6 +185,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
       `/dashboard/surveys${buildQueryString({
         q: q || undefined,
         visibility: visibility === "all" ? undefined : visibility,
+        folder: folderFilter || undefined,
         page: totalPages,
         pageSize,
       })}`,
@@ -188,6 +216,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
           .from("survey_field_questions")
           .select("survey_id")
           .in("survey_id", surveyIds)
+          .eq("kind", "question")
           .is("answer", null)
       : { data: [] as Array<{ survey_id: string }> };
 
@@ -195,6 +224,8 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
   for (const q of pendingQuestions ?? []) {
     pendingBySurveyId.set(q.survey_id, (pendingBySurveyId.get(q.survey_id) ?? 0) + 1);
   }
+
+  const folderNameById = new Map((folders ?? []).map((f) => [f.id, f.name] as const));
 
   return (
     <div className="grid gap-6">
@@ -207,6 +238,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
         </div>
         <div className="flex items-center justify-end gap-2 self-end sm:self-auto">
           <SurveyImportButton />
+          <CreateSurveyFolderButton />
           <Button asChild>
             <Link href="/dashboard/surveys/new">Neue Umfrage</Link>
           </Button>
@@ -238,103 +270,157 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
             </div>
           </div>
 
-          {surveys?.length ? (
-            <div className="overflow-hidden rounded-lg border">
-              <div className="divide-y">
-                {surveys.map((s) => {
-                  const isPublic = s.visibility === "public" && !!s.slug;
-                  const response = responseBySurveyId.get(s.id) ?? null;
-                  const totalFields = countTotalFields(s.definition);
-                  const answered = countAnswered(response?.answers);
-                  const pct =
-                    totalFields > 0 ? Math.min(100, Math.round((answered / totalFields) * 100)) : 0;
-                  const pendingCount = pendingBySurveyId.get(s.id) ?? 0;
-                  const responseHref = response?.id
-                    ? `/dashboard/surveys/${s.id}/responses/${response.id}`
-                    : `/dashboard/surveys/${s.id}/responses`;
-                  const editHref = `/dashboard/surveys/${s.id}/edit`;
-
-                  return (
-                    <div key={s.id} className="p-4 hover:bg-accent/30">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Link
-                              href={responseHref}
-                              className="font-semibold truncate underline-offset-4 hover:underline"
-                            >
-                              {s.title}
-                            </Link>
-
-                            <Badge variant={s.visibility === "public" ? "default" : "secondary"}>
-                              {visibilityLabel(s.visibility)}
-                            </Badge>
-
-                            {pendingCount > 0 ? (
-                              <Badge variant="destructive">
-                                Frage{pendingCount === 1 ? "" : "n"}: {pendingCount}
-                              </Badge>
-                            ) : null}
-
-                            <Badge variant="outline">{pct}%</Badge>
-
-                            <span className="text-xs text-secondary">
-                              {response?.status ? statusLabel(response.status) : "Noch keine Antwort"}
-                            </span>
-                          </div>
-
-                          <div className="mt-2 flex flex-col gap-2">
-                            <div className="h-2 w-full max-w-[420px] overflow-hidden rounded-full bg-primary/20">
-                              <div className="h-2 bg-primary" style={{ width: `${pct}%` }} />
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
-                              Aktualisiert {new Date(s.updated_at).toLocaleString()}
-                              {s.published_at ? (
-                                <>
-                                  <span>·</span>
-                                  Veröffentlicht {new Date(s.published_at).toLocaleString()}
-                                </>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          {s.description ? (
-                            <p className="mt-2 text-sm text-secondary line-clamp-2">
-                              {s.description}
-                            </p>
-                          ) : null}
-
-                          {isPublic ? (
-                            <div className="mt-2">
-                              <PublicLink slug={s.slug!} />
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="shrink-0">
-                          <SurveyRowActions
-                            surveyId={s.id}
-                            title={s.title}
-                            editHref={editHref}
-                            responseHref={responseHref}
-                            isPublic={isPublic}
-                            pendingCount={pendingCount}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+          <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+            <div className="rounded-lg border p-2">
+              <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-secondary">
+                Ordner Explorer
+              </p>
+              <div className="mt-1 grid gap-1">
+                <Link
+                  href={`/dashboard/surveys${buildQueryString({
+                    q: q || undefined,
+                    visibility: visibility === "all" ? undefined : visibility,
+                    pageSize,
+                  })}`}
+                  className={`rounded-md px-2 py-1.5 text-sm transition-colors ${
+                    !folderFilter ? "bg-accent font-medium" : "hover:bg-accent/60"
+                  }`}
+                >
+                  Alle Umfragen
+                </Link>
+                <Link
+                  href={`/dashboard/surveys${buildQueryString({
+                    q: q || undefined,
+                    visibility: visibility === "all" ? undefined : visibility,
+                    folder: "none",
+                    pageSize,
+                  })}`}
+                  className={`rounded-md px-2 py-1.5 text-sm transition-colors ${
+                    folderFilter === "none" ? "bg-accent font-medium" : "hover:bg-accent/60"
+                  }`}
+                >
+                  Ohne Ordner
+                </Link>
+                {(folders ?? []).map((folder) => (
+                  <Link
+                    key={folder.id}
+                    href={`/dashboard/surveys${buildQueryString({
+                      q: q || undefined,
+                      visibility: visibility === "all" ? undefined : visibility,
+                      folder: folder.id,
+                      pageSize,
+                    })}`}
+                    className={`flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
+                      folderFilter === folder.id ? "bg-accent font-medium" : "hover:bg-accent/60"
+                    }`}
+                  >
+                    <span className="truncate">{folder.name}</span>
+                    <span className="text-xs text-secondary">{folderCountById.get(folder.id) ?? 0}</span>
+                  </Link>
+                ))}
               </div>
             </div>
-          ) : (
+
+            {surveys?.length ? (
+              <div className="overflow-hidden rounded-lg border">
+                <div className="divide-y">
+                  {surveys.map((s) => {
+                    const isPublic = s.visibility === "public" && !!s.slug;
+                    const response = responseBySurveyId.get(s.id) ?? null;
+                    const totalFields = countTotalFields(s.definition);
+                    const answered = countAnswered(response?.answers);
+                    const pct =
+                      totalFields > 0 ? Math.min(100, Math.round((answered / totalFields) * 100)) : 0;
+                    const pendingCount = pendingBySurveyId.get(s.id) ?? 0;
+                    const responseHref = response?.id
+                      ? `/dashboard/surveys/${s.id}/responses/${response.id}`
+                      : `/dashboard/surveys/${s.id}/responses`;
+                    const editHref = `/dashboard/surveys/${s.id}/edit`;
+                    const folderLabel = s.folder_id ? (folderNameById.get(s.folder_id) ?? "Ordner") : "Ohne Ordner";
+
+                    return (
+                      <div key={s.id} className="p-4 hover:bg-accent/30">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Link
+                                href={responseHref}
+                                className="font-semibold truncate underline-offset-4 hover:underline"
+                              >
+                                {s.title}
+                              </Link>
+
+                              <Badge variant={s.visibility === "public" ? "default" : "secondary"}>
+                                {visibilityLabel(s.visibility)}
+                              </Badge>
+                              <SurveyFolderAssignmentMenu
+                                surveyId={s.id}
+                                currentFolderId={s.folder_id ?? null}
+                                folders={(folders ?? []).map((f) => ({ id: f.id, name: f.name }))}
+                              />
+
+                              {pendingCount > 0 ? (
+                                <Badge variant="destructive">Fragen/Bemerkung: {pendingCount}</Badge>
+                              ) : null}
+
+                              <Badge variant="outline">{pct}%</Badge>
+
+                              <span className="text-xs text-secondary">
+                                {response?.status ? statusLabel(response.status) : "Noch keine Antwort"}
+                              </span>
+                            </div>
+
+                            <div className="mt-2 flex flex-col gap-2">
+                              <div className="h-2 w-full max-w-[420px] overflow-hidden rounded-full bg-primary/20">
+                                <div className="h-2 bg-primary" style={{ width: `${pct}%` }} />
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+                                Aktualisiert {new Date(s.updated_at).toLocaleString()}
+                                {s.published_at ? (
+                                  <>
+                                    <span>·</span>
+                                    Veröffentlicht {new Date(s.published_at).toLocaleString()}
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            {s.description ? (
+                              <p className="mt-2 text-sm text-secondary line-clamp-2">{s.description}</p>
+                            ) : null}
+
+                            {isPublic ? (
+                              <div className="mt-2">
+                                <PublicLink slug={s.slug!} />
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div className="shrink-0">
+                            <SurveyRowActions
+                              surveyId={s.id}
+                              title={s.title}
+                              editHref={editHref}
+                              responseHref={responseHref}
+                              isPublic={isPublic}
+                              pendingCount={pendingCount}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
             <div className="text-sm text-secondary">
-              {q || visibility !== "all"
+              {q || visibility !== "all" || folderFilter
                 ? "Keine Umfragen für diese Filter."
                 : "Noch keine Umfragen. Klicke auf „Neue Umfrage“, um deinen ersten Entwurf zu erstellen."}
             </div>
-          )}
+            )}
+          </div>
 
           {total > 0 ? (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -348,6 +434,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                       href={`/dashboard/surveys${buildQueryString({
                         q: q || undefined,
                         visibility: visibility === "all" ? undefined : visibility,
+                        folder: folderFilter || undefined,
                         page: page - 1,
                         pageSize,
                       })}`}
@@ -376,6 +463,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                         href={`/dashboard/surveys${buildQueryString({
                           q: q || undefined,
                           visibility: visibility === "all" ? undefined : visibility,
+                          folder: folderFilter || undefined,
                           page: it,
                           pageSize,
                         })}`}
@@ -392,6 +480,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                       href={`/dashboard/surveys${buildQueryString({
                         q: q || undefined,
                         visibility: visibility === "all" ? undefined : visibility,
+                        folder: folderFilter || undefined,
                         page: page + 1,
                         pageSize,
                       })}`}

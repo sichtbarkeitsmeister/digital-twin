@@ -1,9 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, Plus } from "lucide-react";
 
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
+import {
+  addCheckboxOtherEntry,
+  buildCheckboxAnswer,
+  buildRadioAnswer,
+  CHECKBOX_OTHER_PREFIX,
+  CHECKBOX_OTHER_TOKEN,
+  decodeOtherValueForDisplay,
+  getRadioOtherState,
+  parseCheckboxOtherEntries,
+  RADIO_OTHER_TOKEN,
+  removeCheckboxOtherEntry,
+  setCheckboxOtherEntryText,
+} from "@/lib/surveys/other-option";
 import { isRankingAnswerValid } from "@/lib/surveys/ranking-answer";
 import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/client";
@@ -28,10 +41,18 @@ type Answers = Record<string, unknown>;
 type PublicFieldQuestion = {
   id: string;
   field_id: string;
+  kind: "question" | "remark";
   question: string;
   asked_at: string;
   answer: string | null;
   answered_at: string | null;
+};
+
+type PublicFieldRemark = {
+  id: string;
+  field_id: string;
+  remark: string;
+  updated_at: string;
 };
 
 type CreatePublicResponseRow = {
@@ -75,15 +96,26 @@ function FieldHelp({
   slug: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [mode, setMode] = React.useState<"question" | "remark">("question");
   const [question, setQuestion] = React.useState("");
+  const [remark, setRemark] = React.useState("");
   const [items, setItems] = React.useState<PublicFieldQuestion[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
+  function toggleMode(nextMode: "question" | "remark") {
+    if (open && mode === nextMode) {
+      setOpen(false);
+      return;
+    }
+    setMode(nextMode);
+    setOpen(true);
+  }
+
   async function refresh() {
     setErr(null);
     const supabase = createClient();
-    const { data, error } = await supabase.rpc("list_public_field_questions", {
+    const { data: qData, error } = await supabase.rpc("list_public_field_questions", {
       p_slug: slug,
       p_field_id: field.id,
     });
@@ -91,14 +123,21 @@ function FieldHelp({
       setErr("Fragen konnten nicht geladen werden.");
       return;
     }
-    setItems((data ?? []) as PublicFieldQuestion[]);
+    setItems((qData ?? []) as PublicFieldQuestion[]);
+
+    const { data: rData } = await supabase.rpc("get_public_field_remark", {
+      p_slug: slug,
+      p_field_id: field.id,
+    });
+    const first = (rData?.[0] ?? null) as PublicFieldRemark | null;
+    setRemark(first?.remark ?? "");
   }
 
   React.useEffect(() => {
     if (!open) return;
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, mode]);
 
   async function send() {
     const text = question.trim();
@@ -114,7 +153,7 @@ function FieldHelp({
         p_question: text,
       });
       if (error) {
-        setErr("Deine Frage konnte nicht gesendet werden.");
+        setErr("Deine Frage/Bemerkung konnte nicht gesendet werden.");
         return;
       }
       const questionId = typeof data === "string" ? data : null;
@@ -133,62 +172,111 @@ function FieldHelp({
     }
   }
 
+  async function saveRemark() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.rpc("upsert_public_field_remark", {
+        p_slug: slug,
+        p_field_id: field.id,
+        p_remark: remark,
+      });
+      if (error) {
+        setErr("Deine Bemerkung konnte nicht gespeichert werden.");
+        return;
+      }
+      await refresh();
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="mt-2">
       <button
         type="button"
         className="inline-flex items-center gap-2 text-sm text-secondary hover:text-primary transition-colors"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => toggleMode("question")}
       >
         <HelpCircle className="h-4 w-4" />
         Frage stellen
+      </button>
+      <button
+        type="button"
+        className="ml-3 inline-flex items-center gap-2 text-sm text-secondary hover:text-primary transition-colors"
+        onClick={() => toggleMode("remark")}
+      >
+        <HelpCircle className="h-4 w-4" />
+        {remark.trim() ? "Bemerkung bearbeiten" : "Bemerkung hinzufügen"}
       </button>
 
       {open ? (
         <div className="mt-3 grid gap-3 rounded-lg border p-3">
           <div className="grid gap-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
-              Hilfe · {surveyTitle || "Umfrage"}
+              {mode === "remark" ? "Bemerkung" : "Frage"} · {surveyTitle || "Umfrage"}
             </p>
-            <p className="text-sm font-medium">{field.title || "Frage"}</p>
+            <p className="text-sm font-medium">{field.title || "Frage/Bemerkung"}</p>
           </div>
 
-          {items.length ? (
-            <div className="grid gap-2">
-              {items.map((it) => (
-                <div key={it.id} className="rounded-md bg-accent/30 p-3">
-                  <p className="text-sm">
-                    <span className="font-medium">Du:</span> {it.question}
-                  </p>
-                  {it.answer ? (
-                    <p className="mt-2 text-sm">
-                      <span className="font-medium">Admin:</span> {it.answer}
-                    </p>
-                  ) : (
-                    <p className="mt-2 text-xs text-secondary">Warten auf eine Admin-Antwort…</p>
-                  )}
+          {mode === "question" ? (
+            <>
+              {items.length ? (
+                <div className="grid gap-2">
+                  {items.map((it) => (
+                    <div key={it.id} className="rounded-md bg-accent/30 p-3">
+                      <p className="text-sm">
+                        <span className="font-medium">Du (Frage):</span> {it.question}
+                      </p>
+                      {it.answer ? (
+                        <p className="mt-2 text-sm">
+                          <span className="font-medium">Admin:</span> {it.answer}
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-secondary">Warten auf eine Admin-Antwort…</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-secondary">Noch keine Fragen.</p>
-          )}
+              ) : (
+                <p className="text-sm text-secondary">Noch keine Fragen.</p>
+              )}
 
-          <div className="grid gap-2">
-            <Label htmlFor={`ask_${field.id}`}>Deine Frage</Label>
-            <Textarea
-              id={`ask_${field.id}`}
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Schreibe deine Frage…"
-            />
-            <div className="flex items-center gap-2">
-              <Button type="button" size="sm" onClick={send} disabled={busy || !question.trim()}>
-                Senden
-              </Button>
-              {err ? <span className="text-xs text-red-400">{err}</span> : null}
+              <div className="grid gap-2">
+                <Label htmlFor={`ask_${field.id}`}>Deine Frage</Label>
+                <Textarea
+                  id={`ask_${field.id}`}
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="Schreibe deine Frage…"
+                />
+                <div className="flex items-center gap-2">
+                  <Button type="button" size="sm" onClick={send} disabled={busy || !question.trim()}>
+                    Senden
+                  </Button>
+                  {err ? <span className="text-xs text-red-400">{err}</span> : null}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="grid gap-2">
+              <Label htmlFor={`remark_${field.id}`}>Bemerkung</Label>
+              <Textarea
+                id={`remark_${field.id}`}
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                placeholder="Schreibe deine Bemerkung…"
+              />
+              <div className="flex items-center gap-2">
+                <Button type="button" size="sm" onClick={saveRemark} disabled={busy}>
+                  Speichern
+                </Button>
+                {err ? <span className="text-xs text-red-400">{err}</span> : null}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       ) : null}
     </div>
@@ -221,8 +309,28 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
 
   function isFilled(field: SurveyField, value: unknown) {
     if (field.type === "text") return typeof value === "string" && value.trim().length > 0;
-    if (field.type === "radio") return typeof value === "string" && value.trim().length > 0;
-    if (field.type === "checkbox") return Array.isArray(value) && value.length > 0;
+    if (field.type === "radio") {
+      if (typeof value !== "string") return false;
+      const raw = value.trim();
+      if (!raw.length) return false;
+      if (raw === RADIO_OTHER_TOKEN) return false;
+      const presetSet = new Set(field.options.map((o) => o.label));
+      if (presetSet.has(value)) return true;
+      return field.allowOtherOption === true;
+    }
+    if (field.type === "checkbox") {
+      if (!Array.isArray(value)) return false;
+      const presetSet = new Set(field.options.map((o) => o.label));
+      return value.some((entry) => {
+        if (typeof entry !== "string") return false;
+        if (presetSet.has(entry)) return true;
+        if (entry === CHECKBOX_OTHER_TOKEN) return false;
+        if (entry.startsWith(CHECKBOX_OTHER_PREFIX)) {
+          return decodeOtherValueForDisplay(entry).trim().length > 0;
+        }
+        return field.allowOtherOption !== false && entry.trim().length > 0;
+      });
+    }
     if (field.type === "rating") return typeof value === "number" && Number.isFinite(value);
     if (field.type === "ranking") {
       return isRankingAnswerValid(
@@ -512,14 +620,14 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
           </CardHeader>
           <CardContent className="grid gap-4">
             {step.fields.length === 0 ? (
-              <p className="text-sm text-secondary">Keine Fragen in diesem Schritt.</p>
+              <p className="text-sm text-secondary">Keine Fragen/Bemerkung in diesem Schritt.</p>
             ) : (
               <div className="grid gap-5">
                 {step.fields.map((field) => (
                   <div key={field.id} className="grid gap-2">
                     <div className="grid gap-1">
                       <p className="text-sm font-semibold">
-                        {field.title || "Unbenannte Frage"}{" "}
+                        {field.title || "Unbenannte Frage/Bemerkung"}{" "}
                         {field.required ? <span className="text-red-400">*</span> : null}
                       </p>
                       {field.description ? <p className="text-sm text-secondary">{field.description}</p> : null}
@@ -558,7 +666,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                                 aria-hidden="true"
                                 className={cn(
                                   "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
-                                  selected ? "border-primary" : "border-input",
+                                  selected ? "border-primary" : "border-primary/70",
                                 )}
                               >
                                 <span
@@ -572,37 +680,169 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                             </label>
                           );
                         })}
+                        {field.allowOtherOption === true ? (
+                          (() => {
+                            const presetLabels = field.options.map((opt) => opt.label);
+                            const otherState = getRadioOtherState(answers[field.id], presetLabels);
+                            return (
+                              <label
+                                className={cn(
+                                  "grid cursor-pointer gap-2 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors",
+                                  otherState.selected
+                                    ? "border-primary bg-primary/5"
+                                    : "border-input bg-background",
+                                  !session && "cursor-not-allowed opacity-70",
+                                )}
+                              >
+                                <span className="flex items-center gap-3">
+                                  <input
+                                    type="radio"
+                                    name={field.id}
+                                    checked={otherState.selected}
+                                    disabled={!session}
+                                    className="peer sr-only"
+                                    onChange={() => setAnswer(field.id, RADIO_OTHER_TOKEN)}
+                                  />
+                                  <span
+                                    aria-hidden="true"
+                                    className={cn(
+                                      "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
+                                      otherState.selected ? "border-primary" : "border-primary/70",
+                                    )}
+                                  >
+                                    <span
+                                      className={cn(
+                                        "h-2 w-2 rounded-full bg-primary transition-opacity",
+                                        otherState.selected ? "opacity-100" : "opacity-0",
+                                      )}
+                                    />
+                                  </span>
+                                  <span>Andere</span>
+                                </span>
+                                {otherState.selected ? (
+                                  <Input
+                                    value={otherState.text}
+                                    disabled={!session}
+                                    placeholder="Eigene Option eingeben…"
+                                    onChange={(e) =>
+                                      setAnswer(field.id, buildRadioAnswer(e.target.value))
+                                    }
+                                  />
+                                ) : null}
+                              </label>
+                            );
+                          })()
+                        ) : null}
                       </div>
                     ) : null}
 
                     {field.type === "checkbox" ? (
                       <div className="grid gap-2">
-                        {field.options.map((opt) => {
-                          const set = new Set((answers[field.id] as string[]) ?? []);
-                          const checked = set.has(opt.label);
+                        {(() => {
+                          const presetLabels = field.options.map((o) => o.label);
+                          const otherState = parseCheckboxOtherEntries(answers[field.id], presetLabels);
                           return (
-                            <label
-                              key={opt.id}
-                              className={cn(
-                                "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
-                                checked ? "border-primary bg-primary/5" : "border-input bg-background",
-                                !session && "cursor-not-allowed opacity-70",
-                              )}
-                            >
-                              <Checkbox
-                                checked={checked}
-                                disabled={!session}
-                                onCheckedChange={(next) => {
-                                  const nextSet = new Set((answers[field.id] as string[]) ?? []);
-                                  if (next) nextSet.add(opt.label);
-                                  else nextSet.delete(opt.label);
-                                  setAnswer(field.id, Array.from(nextSet));
-                                }}
-                              />
-                              <span className="min-w-0">{opt.label}</span>
-                            </label>
+                            <>
+                              {field.options.map((opt) => {
+                                const checked = otherState.selectedPresets.has(opt.label);
+                                return (
+                                  <label
+                                    key={opt.id}
+                                    className={cn(
+                                      "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                      checked ? "border-primary bg-primary/5" : "border-input bg-background",
+                                      !session && "cursor-not-allowed opacity-70",
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      disabled={!session}
+                                      onCheckedChange={(next) => {
+                                        const nextSet = new Set(otherState.selectedPresets);
+                                        if (next) nextSet.add(opt.label);
+                                        else nextSet.delete(opt.label);
+                                        setAnswer(
+                                          field.id,
+                                          buildCheckboxAnswer(
+                                            presetLabels,
+                                            nextSet,
+                                            otherState.otherEntries,
+                                          ),
+                                        );
+                                      }}
+                                    />
+                                    <span className="min-w-0">{opt.label}</span>
+                                  </label>
+                                );
+                              })}
+
+                              {field.allowOtherOption !== false
+                                ? otherState.otherEntries.map((entry, entryIdx) => (
+                                    <div
+                                      key={entry.id}
+                                      className={cn(
+                                        "flex items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                        "border-primary bg-primary/5",
+                                        !session && "cursor-not-allowed opacity-70",
+                                      )}
+                                    >
+                                      <Checkbox
+                                        checked
+                                        disabled={!session}
+                                        onCheckedChange={(next) => {
+                                          if (next !== false) return;
+                                          setAnswer(
+                                            field.id,
+                                            removeCheckboxOtherEntry(
+                                              answers[field.id],
+                                              presetLabels,
+                                              entry.id,
+                                            ),
+                                          );
+                                        }}
+                                      />
+                                      <Input
+                                        value={entry.text}
+                                        disabled={!session}
+                                        placeholder={`Eigene Option ${entryIdx + 1}…`}
+                                        className="h-9 min-w-0 flex-1"
+                                        onChange={(e) =>
+                                          setAnswer(
+                                            field.id,
+                                            setCheckboxOtherEntryText(
+                                              answers[field.id],
+                                              presetLabels,
+                                              entry.id,
+                                              e.target.value,
+                                            ),
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                  ))
+                                : null}
+
+                              {field.allowOtherOption !== false ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={!session}
+                                  className="w-full justify-center sm:w-auto"
+                                  onClick={() =>
+                                    setAnswer(
+                                      field.id,
+                                      addCheckboxOtherEntry(answers[field.id], presetLabels),
+                                    )
+                                  }
+                                >
+                                  <Plus className="mr-2 h-4 w-4" />
+                                  Andere / eigene Option hinzufügen
+                                </Button>
+                              ) : null}
+                            </>
                           );
-                        })}
+                        })()}
                       </div>
                     ) : null}
 

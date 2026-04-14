@@ -713,8 +713,19 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- =============================
 -- 2) Tables
 -- =============================
+CREATE TABLE IF NOT EXISTS public.survey_folders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  created_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT survey_folders_name_nonempty CHECK (length(trim(name)) > 0),
+  CONSTRAINT survey_folders_name_unique UNIQUE (name)
+);
+
 CREATE TABLE IF NOT EXISTS public.surveys (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  folder_id uuid REFERENCES public.survey_folders(id) ON DELETE SET NULL,
   title text NOT NULL,
   description text NOT NULL DEFAULT '',
   slug text UNIQUE,
@@ -746,18 +757,27 @@ CREATE TABLE IF NOT EXISTS public.survey_field_questions (
   survey_id uuid NOT NULL REFERENCES public.surveys(id) ON DELETE CASCADE,
   response_id uuid NOT NULL REFERENCES public.survey_responses(id) ON DELETE CASCADE,
   field_id text NOT NULL,
+  kind text NOT NULL DEFAULT 'question',
   question text NOT NULL,
   asked_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
   asked_notification_sent_at timestamptz,
   answer text,
   answered_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   answered_at timestamptz,
-  CONSTRAINT survey_field_questions_question_nonempty CHECK (length(trim(question)) > 0)
+  CONSTRAINT survey_field_questions_question_nonempty CHECK (length(trim(question)) > 0),
+  CONSTRAINT survey_field_questions_kind_valid CHECK (kind IN ('question', 'remark'))
 );
 
 -- =============================
 -- 3) updated_at trigger reuse
 -- =============================
+DO $$ BEGIN
+  CREATE TRIGGER set_updated_at_survey_folders
+    BEFORE UPDATE ON public.survey_folders
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 DO $$ BEGIN
   CREATE TRIGGER set_updated_at_surveys
     BEFORE UPDATE ON public.surveys
@@ -775,8 +795,12 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- =============================
 -- 4) Indexes (performance)
 -- =============================
+CREATE INDEX IF NOT EXISTS survey_folders_created_by_user_id_idx ON public.survey_folders(created_by_user_id);
+CREATE INDEX IF NOT EXISTS survey_folders_name_idx ON public.survey_folders(name);
+
 CREATE INDEX IF NOT EXISTS surveys_visibility_idx ON public.surveys(visibility);
 CREATE INDEX IF NOT EXISTS surveys_created_by_user_id_idx ON public.surveys(created_by_user_id);
+CREATE INDEX IF NOT EXISTS surveys_folder_id_idx ON public.surveys(folder_id);
 
 CREATE INDEX IF NOT EXISTS survey_responses_survey_id_idx ON public.survey_responses(survey_id);
 CREATE INDEX IF NOT EXISTS survey_responses_status_idx ON public.survey_responses(survey_id, status);
@@ -784,15 +808,45 @@ CREATE INDEX IF NOT EXISTS survey_responses_status_idx ON public.survey_response
 CREATE INDEX IF NOT EXISTS survey_field_questions_response_id_idx ON public.survey_field_questions(response_id);
 CREATE INDEX IF NOT EXISTS survey_field_questions_survey_id_idx ON public.survey_field_questions(survey_id);
 CREATE INDEX IF NOT EXISTS survey_field_questions_field_id_idx ON public.survey_field_questions(field_id);
+CREATE INDEX IF NOT EXISTS survey_field_questions_kind_idx ON public.survey_field_questions(kind);
+CREATE UNIQUE INDEX IF NOT EXISTS survey_field_questions_remark_unique_idx
+  ON public.survey_field_questions(response_id, field_id)
+  WHERE kind = 'remark';
 
 -- =============================
 -- 5) RLS
 -- =============================
 ALTER TABLE public.surveys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.survey_folders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.survey_responses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.survey_field_questions ENABLE ROW LEVEL SECURITY;
 
 -- Surveys: platform admins only (public access via RPCs)
+DROP POLICY IF EXISTS "survey_folders_select_platform_admin_only" ON public.survey_folders;
+CREATE POLICY "survey_folders_select_platform_admin_only"
+ON public.survey_folders
+FOR SELECT
+USING (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_folders_insert_platform_admin_only" ON public.survey_folders;
+CREATE POLICY "survey_folders_insert_platform_admin_only"
+ON public.survey_folders
+FOR INSERT
+WITH CHECK (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_folders_update_platform_admin_only" ON public.survey_folders;
+CREATE POLICY "survey_folders_update_platform_admin_only"
+ON public.survey_folders
+FOR UPDATE
+USING (public.is_platform_admin(auth.uid()))
+WITH CHECK (public.is_platform_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "survey_folders_delete_platform_admin_only" ON public.survey_folders;
+CREATE POLICY "survey_folders_delete_platform_admin_only"
+ON public.survey_folders
+FOR DELETE
+USING (public.is_platform_admin(auth.uid()));
+
 DROP POLICY IF EXISTS "surveys_select_platform_admin_only" ON public.surveys;
 CREATE POLICY "surveys_select_platform_admin_only"
 ON public.surveys
@@ -1002,6 +1056,7 @@ CREATE OR REPLACE FUNCTION public.list_public_field_questions(
 RETURNS TABLE (
   id uuid,
   field_id text,
+  kind text,
   question text,
   asked_at timestamptz,
   answer text,
@@ -1013,12 +1068,13 @@ SECURITY DEFINER
 SET search_path = public, extensions, pg_temp
 SET row_security = off
 AS $$
-  SELECT q.id, q.field_id, q.question, q.asked_at, q.answer, q.answered_at
+  SELECT q.id, q.field_id, q.kind, q.question, q.asked_at, q.answer, q.answered_at
   FROM public.survey_field_questions q
   JOIN public.surveys s ON s.id = q.survey_id
   WHERE s.visibility = 'public'
     AND s.slug = lower(trim(p_slug))
     AND q.field_id = p_field_id
+    AND q.kind = 'question'
   ORDER BY q.asked_at ASC;
 $$;
 
@@ -1026,7 +1082,8 @@ $$;
 CREATE OR REPLACE FUNCTION public.ask_public_field_question(
   p_slug text,
   p_field_id text,
-  p_question text
+  p_question text,
+  p_kind text DEFAULT 'question'
 )
 RETURNS uuid
 LANGUAGE plpgsql
@@ -1039,8 +1096,13 @@ DECLARE
   v_response_id uuid;
   v_question_id uuid;
 BEGIN
+  p_kind := lower(trim(coalesce(p_kind, 'question')));
+
   IF length(trim(coalesce(p_question, ''))) = 0 THEN
     RAISE EXCEPTION 'invalid_question';
+  END IF;
+  IF p_kind NOT IN ('question', 'remark') THEN
+    RAISE EXCEPTION 'invalid_kind';
   END IF;
 
   SELECT s.id INTO v_survey_id
@@ -1062,11 +1124,124 @@ BEGIN
     RAISE EXCEPTION 'response_not_found';
   END IF;
 
-  INSERT INTO public.survey_field_questions (survey_id, response_id, field_id, question)
-  VALUES (v_survey_id, v_response_id, p_field_id, trim(p_question))
+  INSERT INTO public.survey_field_questions (survey_id, response_id, field_id, kind, question)
+  VALUES (v_survey_id, v_response_id, p_field_id, p_kind, trim(p_question))
   RETURNING id INTO v_question_id;
 
   RETURN v_question_id;
+END;
+$$;
+
+-- Get the single editable field remark for a published survey (slug-gated)
+CREATE OR REPLACE FUNCTION public.get_public_field_remark(
+  p_slug text,
+  p_field_id text
+)
+RETURNS TABLE (
+  id uuid,
+  field_id text,
+  remark text,
+  updated_at timestamptz
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+  SELECT q.id, q.field_id, q.question AS remark, q.asked_at AS updated_at
+  FROM public.survey_field_questions q
+  JOIN public.surveys s ON s.id = q.survey_id
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+    AND q.field_id = p_field_id
+    AND q.kind = 'remark'
+  ORDER BY q.asked_at DESC
+  LIMIT 1;
+$$;
+
+-- Upsert the single editable field remark (slug-gated)
+CREATE OR REPLACE FUNCTION public.upsert_public_field_remark(
+  p_slug text,
+  p_field_id text,
+  p_remark text
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+SET row_security = off
+AS $$
+DECLARE
+  v_survey_id uuid;
+  v_response_id uuid;
+  v_remark_id uuid;
+  v_text text;
+BEGIN
+  v_text := trim(coalesce(p_remark, ''));
+
+  SELECT s.id INTO v_survey_id
+  FROM public.surveys s
+  WHERE s.visibility = 'public'
+    AND s.slug = lower(trim(p_slug))
+  LIMIT 1;
+
+  IF v_survey_id IS NULL THEN
+    RAISE EXCEPTION 'survey_not_found';
+  END IF;
+
+  SELECT r.id INTO v_response_id
+  FROM public.survey_responses r
+  WHERE r.survey_id = v_survey_id
+  LIMIT 1;
+
+  IF v_response_id IS NULL THEN
+    RAISE EXCEPTION 'response_not_found';
+  END IF;
+
+  IF v_text = '' THEN
+    DELETE FROM public.survey_field_questions
+    WHERE response_id = v_response_id
+      AND field_id = p_field_id
+      AND kind = 'remark';
+    RETURN NULL;
+  END IF;
+
+  INSERT INTO public.survey_field_questions (
+    survey_id,
+    response_id,
+    field_id,
+    kind,
+    question,
+    asked_notification_sent_at,
+    answer,
+    answered_by_user_id,
+    answered_at,
+    asked_at
+  )
+  VALUES (
+    v_survey_id,
+    v_response_id,
+    p_field_id,
+    'remark',
+    v_text,
+    timezone('utc'::text, now()),
+    v_text,
+    NULL,
+    timezone('utc'::text, now()),
+    timezone('utc'::text, now())
+  )
+  ON CONFLICT (response_id, field_id) WHERE (kind = 'remark')
+  DO UPDATE SET
+    question = EXCLUDED.question,
+    asked_at = timezone('utc'::text, now()),
+    answer = EXCLUDED.answer,
+    answered_at = timezone('utc'::text, now()),
+    answered_by_user_id = NULL,
+    asked_notification_sent_at = timezone('utc'::text, now())
+  RETURNING id INTO v_remark_id;
+
+  RETURN v_remark_id;
 END;
 $$;
 

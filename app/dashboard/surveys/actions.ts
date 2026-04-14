@@ -44,6 +44,7 @@ export type SurveyExportBundle = {
     id: string;
     response_id: string;
     field_id: string;
+    kind: "question" | "remark";
     question: string;
     asked_at: string | null;
     answer: string | null;
@@ -294,6 +295,104 @@ export async function deleteSurveyAction(
   return { ok: true, message: "Umfrage gelöscht.", data: { surveyId: parsed.data.surveyId } };
 }
 
+const createSurveyFolderSchema = z.object({
+  name: z.string().trim().min(1, "Ordnername ist erforderlich.").max(80, "Maximal 80 Zeichen."),
+});
+
+export async function createSurveyFolderAction(
+  input: z.input<typeof createSurveyFolderSchema>,
+): Promise<ActionState<{ folderId: string }>> {
+  const parsed = createSurveyFolderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
+  const { supabase, userId } = auth;
+
+  const folderName = parsed.data.name;
+  const { data: existing } = await supabase
+    .from("survey_folders")
+    .select("id,name")
+    .ilike("name", folderName)
+    .maybeSingle();
+  if (existing?.id) {
+    return { ok: false, message: `Ordner „${existing.name}“ existiert bereits.` };
+  }
+
+  const { data, error } = await supabase
+    .from("survey_folders")
+    .insert({
+      name: folderName,
+      created_by_user_id: userId,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data?.id) return { ok: false, message: "Ordner konnte nicht erstellt werden." };
+
+  revalidatePath("/dashboard/surveys");
+  return { ok: true, message: "Ordner erstellt.", data: { folderId: data.id } };
+}
+
+const assignSurveyFolderSchema = z.object({
+  surveyId: z.string().uuid(),
+  folderId: z.string().uuid().nullable(),
+});
+
+export async function assignSurveyFolderAction(
+  input: z.input<typeof assignSurveyFolderSchema>,
+): Promise<ActionState<{ surveyId: string }>> {
+  const parsed = assignSurveyFolderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+  const { supabase } = auth;
+
+  if (parsed.data.folderId) {
+    const { data: folderExists } = await supabase
+      .from("survey_folders")
+      .select("id")
+      .eq("id", parsed.data.folderId)
+      .maybeSingle();
+    if (!folderExists) return { ok: false, message: "Ordner nicht gefunden." };
+  }
+
+  const { error } = await supabase
+    .from("surveys")
+    .update({ folder_id: parsed.data.folderId })
+    .eq("id", parsed.data.surveyId);
+  if (error) return { ok: false, message: "Ordner-Zuordnung konnte nicht gespeichert werden." };
+
+  revalidatePath("/dashboard/surveys");
+  return { ok: true, message: "Ordner aktualisiert.", data: { surveyId: parsed.data.surveyId } };
+}
+
+const deleteSurveyFolderSchema = z.object({ folderId: z.string().uuid() });
+
+export async function deleteSurveyFolderAction(
+  input: z.input<typeof deleteSurveyFolderSchema>,
+): Promise<ActionState<{ folderId: string }>> {
+  const parsed = deleteSurveyFolderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+  const { supabase } = auth;
+
+  const { error } = await supabase.from("survey_folders").delete().eq("id", parsed.data.folderId);
+  if (error) return { ok: false, message: "Ordner konnte nicht gelöscht werden." };
+
+  revalidatePath("/dashboard/surveys");
+  return { ok: true, message: "Ordner gelöscht.", data: { folderId: parsed.data.folderId } };
+}
+
 const exportSurveySchema = z.object({ surveyId: z.string().uuid() });
 
 export async function exportSurveyBundleAction(
@@ -323,7 +422,7 @@ export async function exportSurveyBundleAction(
 
   const { data: fieldQuestions } = await supabase
     .from("survey_field_questions")
-    .select("id,response_id,field_id,question,asked_at,answer,answered_at")
+    .select("id,response_id,field_id,kind,question,asked_at,answer,answered_at")
     .eq("survey_id", parsed.data.surveyId)
     .order("asked_at", { ascending: true });
 
@@ -365,6 +464,7 @@ const importQuestionSchema = z.object({
   id: z.string().optional(),
   response_id: z.string().optional(),
   field_id: z.string().min(1),
+  kind: z.enum(["question", "remark"]).optional().default("question"),
   question: z.string().min(1),
   asked_at: z.string().nullable().optional(),
   answer: z.string().nullable().optional(),
@@ -452,6 +552,7 @@ export async function importSurveyBundleAction(
         survey_id: createdSurvey.id,
         response_id: createdResponse.id,
         field_id: q.field_id,
+        kind: q.kind ?? "question",
         question: q.question,
         asked_at: q.asked_at ?? undefined,
         answer: q.answer ?? null,
@@ -531,16 +632,21 @@ export async function answerSurveyFieldQuestionAction(
       answered_by_user_id: userId,
     })
     .eq("id", parsed.data.questionId)
-    .select("id,survey_id,response_id,field_id,question")
+    .eq("kind", "question")
+    .select("id,survey_id,response_id,field_id,kind,question")
     .maybeSingle();
 
   if (error) return { ok: false, message: "Antwort konnte nicht gespeichert werden." };
+  if (!updatedQuestion) {
+    return { ok: false, message: "Bemerkungen sind nur informativ und müssen nicht beantwortet werden." };
+  }
 
   try {
     const qRow = updatedQuestion;
     if (qRow && typeof qRow === "object") {
       const surveyId = (qRow as { survey_id?: string }).survey_id;
       const questionText = (qRow as { question?: string }).question ?? "";
+      const questionKind = (qRow as { kind?: string }).kind === "remark" ? "remark" : "question";
       const fieldId = (qRow as { field_id?: string }).field_id ?? "";
 
       if (surveyId) {
@@ -559,15 +665,16 @@ export async function answerSurveyFieldQuestionAction(
           const fieldTitle = fieldMeta?.title?.trim() || fieldId || "—";
           const fieldDescription = fieldMeta?.description?.trim() || "";
 
+          const kindLabel = questionKind === "remark" ? "Bemerkung" : "Frage";
           const subject = `Admin-Antwort: ${survey?.title ?? "Umfrage"}`;
           const text = [
             `Hallo,`,
             ``,
-            `ein Admin hat eine Frage beantwortet.`,
+            `ein Admin hat eine ${kindLabel.toLowerCase()} beantwortet.`,
             fieldTitle ? `Feld: ${fieldTitle}` : null,
             fieldDescription ? `Beschreibung: ${fieldDescription}` : null,
             ``,
-            `Nutzer-Frage: ${questionText || "—"}`,
+            `Nutzer-${kindLabel}: ${questionText || "—"}`,
             ``,
             `Admin-Antwort: ${parsed.data.answer}`,
             ``,
@@ -580,12 +687,12 @@ export async function answerSurveyFieldQuestionAction(
             ${renderBrandedEmail({
               title: subject,
               headline: "Admin-Antwort",
-              intro: "Ein Admin hat eine Frage beantwortet.",
+              intro: `Ein Admin hat eine ${kindLabel.toLowerCase()} beantwortet.`,
               details: [
                 { label: "Umfrage", value: survey?.title ?? "Umfrage" },
                 ...(fieldTitle ? [{ label: "Feld", value: fieldTitle }] : []),
                 ...(fieldDescription ? [{ label: "Beschreibung", value: fieldDescription }] : []),
-                { label: "Nutzer-Frage", value: questionText || "—" },
+                { label: `Nutzer-${kindLabel}`, value: questionText || "—" },
                 { label: "Admin-Antwort", value: parsed.data.answer },
               ],
               actions: [

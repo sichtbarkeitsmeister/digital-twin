@@ -29,11 +29,13 @@ export const surveyTextFieldSchema = fieldBaseSchema.extend({
 export const surveyRadioFieldSchema = fieldBaseSchema.extend({
   type: z.literal("radio"),
   options: z.array(surveyOptionSchema).min(1),
+  allowOtherOption: z.boolean().optional().default(false),
 });
 
 export const surveyCheckboxFieldSchema = fieldBaseSchema.extend({
   type: z.literal("checkbox"),
   options: z.array(surveyOptionSchema).min(1),
+  allowOtherOption: z.boolean().optional().default(true),
 });
 
 export const surveyRatingFieldSchema = fieldBaseSchema.extend({

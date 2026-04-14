@@ -130,7 +130,7 @@ Standard-URL lokal: `http://localhost:3000`
 
 - Entwuerfe koennen privat oder oeffentlich sein (`surveys.visibility`).
 - Oeffentliche Surveys laufen ueber Slug (`/s/[slug]`) und DB-RPCs.
-- Fragen/Antworten pro Feld werden in `survey_field_questions` gespeichert.
+- Fragen/Notizen und Antworten pro Feld werden in `survey_field_questions` gespeichert.
 
 ### Benachrichtigungen
 

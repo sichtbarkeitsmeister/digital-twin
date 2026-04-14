@@ -130,7 +130,12 @@ export function SurveysToolbar(props: {
         type="button"
         size="sm"
         variant="ghost"
-        disabled={isPending && query.trim() === "" && visibility === "" && pageSize === 10}
+        disabled={
+          isPending &&
+          query.trim() === "" &&
+          visibility === "" &&
+          pageSize === 10
+        }
         onClick={() => {
           setQuery("");
           setVisibility("");

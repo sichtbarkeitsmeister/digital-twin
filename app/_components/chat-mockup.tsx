@@ -171,7 +171,7 @@ export function ChatMockup({ organisations }: { organisations: OrganisationOptio
               <div className="flex items-center gap-3 rounded-2xl border bg-background/30 px-4 py-3">
                 <input
                   className="h-10 flex-1 bg-transparent text-sm text-primary placeholder:text-secondary focus:outline-none"
-                  placeholder="Stelle eine Frage…"
+                  placeholder="Stelle eine Frage/Notiz…"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                 />

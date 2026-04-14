@@ -28,11 +28,15 @@ export type SurveyTextField = SurveyFieldBase & {
 export type SurveyRadioField = SurveyFieldBase & {
   type: "radio";
   options: SurveyOption[];
+  /** Wenn true, können Teilnehmende eine freie "Andere"-Option eingeben. Standard: false. */
+  allowOtherOption?: boolean;
 };
 
 export type SurveyCheckboxField = SurveyFieldBase & {
   type: "checkbox";
   options: SurveyOption[];
+  /** Wenn true, können Teilnehmende eine freie "Andere"-Option eingeben. Standard: true. */
+  allowOtherOption?: boolean;
 };
 
 export type SurveyRatingField = SurveyFieldBase & {

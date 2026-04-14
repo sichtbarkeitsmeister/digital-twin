@@ -2,6 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { BellRing } from "lucide-react";
 
+import {
+  CHECKBOX_OTHER_PREFIX,
+  CHECKBOX_OTHER_TOKEN,
+  decodeOtherValueForDisplay,
+  RADIO_OTHER_TOKEN,
+} from "@/lib/surveys/other-option";
 import { formatRankingAnswerForDisplay } from "@/lib/surveys/ranking-answer";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/server";
@@ -45,6 +51,31 @@ function normalizeAnswer(v: unknown, field?: SurveyField) {
         .map((x, idx) => `${idx + 1}. ${typeof x === "string" ? x : JSON.stringify(x)}`)
         .join(", ");
     }
+  }
+  if (field?.type === "radio" && typeof v === "string") {
+    const presetLabels = new Set(field.options.map((o) => o.label));
+    if (presetLabels.has(v)) return v;
+    const text = decodeOtherValueForDisplay(v).trim();
+    const base = text.length > 0 ? text : "Andere";
+    return `${base} (benutzererstellt)`;
+  }
+  if (field?.type === "checkbox" && Array.isArray(v)) {
+    return v
+      .map((x) => {
+        if (typeof x !== "string") return JSON.stringify(x);
+        const presetLabels = new Set(field.options.map((o) => o.label));
+        if (presetLabels.has(x)) return x;
+        const isOtherToken = x === CHECKBOX_OTHER_TOKEN || x === RADIO_OTHER_TOKEN;
+        const isPrefixedOther = x.startsWith(CHECKBOX_OTHER_PREFIX);
+        const decoded = decodeOtherValueForDisplay(x).trim();
+        if (isOtherToken || isPrefixedOther) {
+          const base = decoded.length > 0 ? decoded : "Andere";
+          return `${base} (benutzererstellt)`;
+        }
+        return decoded.length > 0 ? `${decoded} (benutzererstellt)` : "";
+      })
+      .filter((x) => x.trim().length > 0)
+      .join(", ");
   }
   if (typeof v === "string") return v;
   if (typeof v === "number") return String(v);
@@ -100,7 +131,7 @@ export default async function SurveyResponseDetailPage({
 
   const { data: questions } = await supabase
     .from("survey_field_questions")
-    .select("id,field_id,question,asked_at,answer,answered_at,answered_by_user_id")
+    .select("id,field_id,kind,question,asked_at,answer,answered_at,answered_by_user_id")
     .eq("response_id", responseId)
     .order("asked_at", { ascending: true });
 
@@ -118,7 +149,7 @@ export default async function SurveyResponseDetailPage({
     (step.fields ?? []).map((field: SurveyField) => ({
       stepTitle: step.title || `Schritt ${stepIndex + 1}`,
       fieldId: field.id,
-      fieldTitle: field.title || "Unbenannte Frage",
+      fieldTitle: field.title || "Unbenannte Frage/Bemerkung",
       fieldDescription: field.description || null,
       answer: normalizeAnswer(answers?.[field.id], field),
     })),
@@ -137,6 +168,7 @@ export default async function SurveyResponseDetailPage({
     fieldQuestions: (questions ?? []).map((q) => ({
       id: q.id,
       field_id: q.field_id,
+      kind: (q.kind === "remark" ? "remark" : "question") as "question" | "remark",
       question: q.question,
       asked_at: q.asked_at ?? null,
       answer: q.answer ?? null,
@@ -199,15 +231,15 @@ export default async function SurveyResponseDetailPage({
                 {step.fields.map((field: SurveyField) => {
                   const value = normalizeAnswer(answers?.[field.id], field);
                   const qs = fieldQuestions(field.id);
-                  const hasUnanswered = qs.some((q) => !q.answer);
+                  const hasUnanswered = qs.some((q) => q.kind !== "remark" && !q.answer);
                   return (
                     <div key={field.id} className="rounded-lg border p-4">
                       <div className="grid gap-1">
                         <div className="flex items-center gap-2">
-                          <p className="font-medium">{field.title || "Unbenannte Frage"}</p>
+                          <p className="font-medium">{field.title || "Unbenannte Frage/Bemerkung"}</p>
                           {hasUnanswered ? (
                             <span
-                              aria-label="Neue Frage"
+                              aria-label="Neue Frage/Bemerkung"
                               className="h-2 w-2 rounded-full bg-red-500"
                             />
                           ) : null}
@@ -223,18 +255,21 @@ export default async function SurveyResponseDetailPage({
 
                       {qs.length ? (
                         <div className="mt-4 grid gap-3">
-                          <p className="text-sm font-semibold">Fragen</p>
+                          <p className="text-sm font-semibold">Fragen & Bemerkungen</p>
                           {qs.map((q) => (
                             <div key={q.id} className="rounded-md bg-accent/30 p-3">
                               <p className="text-sm">
                                 <span className="inline-flex items-center gap-2">
-                                  {q.answer ? null : (
+                                  {q.kind !== "remark" && !q.answer ? (
                                     <BellRing className="h-4 w-4 text-red-500" aria-hidden />
-                                  )}
-                                  <span className="font-medium">Nutzer:</span> {q.question}
+                                  ) : null}
+                                  <span className="font-medium">
+                                    Nutzer ({q.kind === "remark" ? "Bemerkung" : "Frage"}):
+                                  </span>{" "}
+                                  {q.question}
                                 </span>
                               </p>
-                              {q.answer ? (
+                              {q.kind === "remark" ? null : q.answer ? (
                                 <p className="mt-2 text-sm">
                                   <span className="font-medium">Admin:</span> {q.answer}
                                 </p>
