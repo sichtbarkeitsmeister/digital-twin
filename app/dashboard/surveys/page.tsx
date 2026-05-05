@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 import { CopyToClipboardButton } from "@/app/dashboard/_components/copy-to-clipboard-button";
 import { CreateSurveyFolderButton } from "@/app/dashboard/surveys/_components/create-survey-folder-button";
+import { DeleteSurveyFolderButton } from "@/app/dashboard/surveys/_components/delete-survey-folder-button";
 import { SurveyFolderAssignmentMenu } from "@/app/dashboard/surveys/_components/survey-folder-assignment-menu";
 import { SurveyImportButton } from "@/app/dashboard/surveys/_components/survey-import-button";
 import { SurveysToolbar } from "@/app/dashboard/surveys/_components/surveys-toolbar";
@@ -302,21 +303,28 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                   Ohne Ordner
                 </Link>
                 {(folders ?? []).map((folder) => (
-                  <Link
+                  <div
                     key={folder.id}
-                    href={`/dashboard/surveys${buildQueryString({
-                      q: q || undefined,
-                      visibility: visibility === "all" ? undefined : visibility,
-                      folder: folder.id,
-                      pageSize,
-                    })}`}
-                    className={`flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
-                      folderFilter === folder.id ? "bg-accent font-medium" : "hover:bg-accent/60"
+                    className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 transition-colors ${
+                      folderFilter === folder.id ? "bg-accent" : "hover:bg-accent/60"
                     }`}
                   >
-                    <span className="truncate">{folder.name}</span>
-                    <span className="text-xs text-secondary">{folderCountById.get(folder.id) ?? 0}</span>
-                  </Link>
+                    <Link
+                      href={`/dashboard/surveys${buildQueryString({
+                        q: q || undefined,
+                        visibility: visibility === "all" ? undefined : visibility,
+                        folder: folder.id,
+                        pageSize,
+                      })}`}
+                      className={`flex min-w-0 flex-1 items-center gap-2 text-sm ${
+                        folderFilter === folder.id ? "font-medium" : ""
+                      }`}
+                    >
+                      <span className="text-xs text-secondary">{folderCountById.get(folder.id) ?? 0}</span>
+                      <span className="truncate">{folder.name}</span>
+                    </Link>
+                    <DeleteSurveyFolderButton folderId={folder.id} folderName={folder.name} />
+                  </div>
                 ))}
               </div>
             </div>

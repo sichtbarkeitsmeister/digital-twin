@@ -7,7 +7,7 @@ import logoDark from "@/lib/public/digital-twin-logo-sbkm-mint-simple.png";
 
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/70 backdrop-blur">
+    <header className="sticky top-0 z-50 w-full border-b bg-background">
       <div className="mx-auto flex w-full max-w-6xl px-5">
         <nav className="flex h-16 w-full items-center justify-between">
           <div className="flex items-center gap-5">

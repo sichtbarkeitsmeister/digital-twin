@@ -23,7 +23,8 @@ const fieldBaseSchema = z.object({
 
 export const surveyTextFieldSchema = fieldBaseSchema.extend({
   type: z.literal("text"),
-  placeholder: z.string(),
+  // Legacy compatibility: older surveys may still contain per-field placeholder.
+  placeholder: z.string().optional().default(""),
 });
 
 export const surveyRadioFieldSchema = fieldBaseSchema.extend({
@@ -69,6 +70,9 @@ export const surveySchemaV1 = z.object({
   id: idSchema,
   title: z.string(),
   description: z.string(),
+  infoTextEnabled: z.boolean().optional().default(false),
+  infoText: z.string().optional().default(""),
+  answerPlaceholder: z.string().optional().default("Deine Antwort…"),
   steps: z.array(surveyStepSchema).min(1),
 });
 

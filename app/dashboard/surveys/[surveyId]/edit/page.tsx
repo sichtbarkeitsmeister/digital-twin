@@ -44,6 +44,19 @@ export default async function EditSurveyPage({
     redirect("/dashboard/surveys");
   }
 
+  const { data: latestResponses } = await supabase
+    .from("survey_responses")
+    .select("answers,updated_at")
+    .eq("survey_id", surveyId)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  const latestAnswersRaw = latestResponses?.[0]?.answers;
+  const initialResponseAnswers =
+    latestAnswersRaw && typeof latestAnswersRaw === "object" && !Array.isArray(latestAnswersRaw)
+      ? (latestAnswersRaw as Record<string, unknown>)
+      : {};
+
   return (
     <SurveyBuilder
       surveyId={survey.id}
@@ -51,6 +64,7 @@ export default async function EditSurveyPage({
       initialVisibility={survey.visibility === "public" ? "public" : "private"}
       initialSlug={survey.slug}
       initialNotificationEmails={(survey.notification_emails ?? []) as string[]}
+      initialResponseAnswers={initialResponseAnswers}
     />
   );
 }

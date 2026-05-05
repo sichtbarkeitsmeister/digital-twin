@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { HelpCircle, Plus } from "lucide-react";
+import { HelpCircle, Info, Plus, X } from "lucide-react";
 
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
+import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
 import {
   addCheckboxOtherEntry,
   buildCheckboxAnswer,
@@ -76,14 +77,6 @@ function answersStorageKey(slug: string) {
 
 function getStep(survey: Survey, idx: number): SurveyStep {
   return survey.steps[idx] ?? survey.steps[0]!;
-}
-
-function countFields(survey: Survey) {
-  return survey.steps.reduce((sum, st) => sum + st.fields.length, 0);
-}
-
-function countAnswered(answers: Answers) {
-  return Object.keys(answers).length;
 }
 
 function FieldHelp({
@@ -195,30 +188,32 @@ function FieldHelp({
 
   return (
     <div className="mt-2">
-      <button
-        type="button"
-        className="inline-flex items-center gap-2 text-sm text-secondary hover:text-primary transition-colors"
-        onClick={() => toggleMode("question")}
-      >
-        <HelpCircle className="h-4 w-4" />
-        Frage stellen
-      </button>
-      <button
-        type="button"
-        className="ml-3 inline-flex items-center gap-2 text-sm text-secondary hover:text-primary transition-colors"
-        onClick={() => toggleMode("remark")}
-      >
-        <HelpCircle className="h-4 w-4" />
-        {remark.trim() ? "Bemerkung bearbeiten" : "Bemerkung hinzufügen"}
-      </button>
+      <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <button
+          type="button"
+          className="inline-flex h-10 items-center gap-2 rounded-md border border-dashed px-3 text-sm text-secondary transition-colors hover:text-primary sm:h-auto sm:border-0 sm:px-0"
+          onClick={() => toggleMode("question")}
+        >
+          <HelpCircle className="h-4 w-4" />
+          Frage stellen
+        </button>
+        <button
+          type="button"
+          className="inline-flex h-10 items-center gap-2 rounded-md border border-dashed px-3 text-sm text-secondary transition-colors hover:text-primary sm:ml-3 sm:h-auto sm:border-0 sm:px-0"
+          onClick={() => toggleMode("remark")}
+        >
+          <HelpCircle className="h-4 w-4" />
+          {remark.trim() ? "Bemerkung bearbeiten" : "Bemerkung hinzufügen"}
+        </button>
+      </div>
 
       {open ? (
-        <div className="mt-3 grid gap-3 rounded-lg border p-3">
+        <div className="mt-3 grid gap-3 rounded-lg border p-3 sm:p-4">
           <div className="grid gap-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
               {mode === "remark" ? "Bemerkung" : "Frage"} · {surveyTitle || "Umfrage"}
             </p>
-            <p className="text-sm font-medium">{field.title || "Frage/Bemerkung"}</p>
+            <p className="text-base font-medium sm:text-sm">{field.title || "Frage/Bemerkung"}</p>
           </div>
 
           {mode === "question" ? (
@@ -227,11 +222,11 @@ function FieldHelp({
                 <div className="grid gap-2">
                   {items.map((it) => (
                     <div key={it.id} className="rounded-md bg-accent/30 p-3">
-                      <p className="text-sm">
+                      <p className="text-base sm:text-sm">
                         <span className="font-medium">Du (Frage):</span> {it.question}
                       </p>
                       {it.answer ? (
-                        <p className="mt-2 text-sm">
+                        <p className="mt-2 text-base sm:text-sm">
                           <span className="font-medium">Admin:</span> {it.answer}
                         </p>
                       ) : (
@@ -251,6 +246,7 @@ function FieldHelp({
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   placeholder="Schreibe deine Frage…"
+                  className="text-base sm:text-sm"
                 />
                 <div className="flex items-center gap-2">
                   <Button type="button" size="sm" onClick={send} disabled={busy || !question.trim()}>
@@ -268,6 +264,7 @@ function FieldHelp({
                 value={remark}
                 onChange={(e) => setRemark(e.target.value)}
                 placeholder="Schreibe deine Bemerkung…"
+                className="text-base sm:text-sm"
               />
               <div className="flex items-center gap-2">
                 <Button type="button" size="sm" onClick={saveRemark} disabled={busy}>
@@ -285,6 +282,8 @@ function FieldHelp({
 
 export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
   const [stepIndex, setStepIndex] = React.useState(0);
+  const [isInfoOpen, setIsInfoOpen] = React.useState(false);
+  const [mobileCompactProgress, setMobileCompactProgress] = React.useState(0);
   const [answers, setAnswers] = React.useState<Answers>({});
   const [session, setSession] = React.useState<ResponseSession | null>(null);
   const [hydrated, setHydrated] = React.useState(false);
@@ -300,12 +299,53 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
 
   const steps = survey.steps;
   const step = getStep(survey, stepIndex);
+  const isInfoIntroStep = survey.infoTextEnabled === true && stepIndex === 0;
+  const visibleFields =
+    isInfoIntroStep ? [] : step.fields;
   const canBack = stepIndex > 0;
   const canNext = stepIndex < steps.length - 1;
+  const hasInfoText = survey.infoTextEnabled === true && (survey.infoText?.trim().length ?? 0) > 0;
 
-  const total = Math.max(countFields(survey), 1);
-  const answered = countAnswered(answers);
-  const pct = Math.min(100, Math.round((answered / total) * 100));
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }, [stepIndex]);
+
+  React.useEffect(() => {
+    setIsInfoOpen(false);
+  }, [stepIndex]);
+
+  React.useEffect(() => {
+    const computeProgress = () => {
+      if (window.innerWidth >= 1024) {
+        setMobileCompactProgress(0);
+        return;
+      }
+      // Linear interpolation instead of state switching prevents oscillation.
+      const startY = 8;
+      const endY = 88;
+      const raw = (window.scrollY - startY) / (endY - startY);
+      const next = Math.max(0, Math.min(1, raw));
+      setMobileCompactProgress((prev) => (Math.abs(prev - next) < 0.01 ? prev : next));
+    };
+
+    let raf = 0;
+    const onViewportChange = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        computeProgress();
+      });
+    };
+
+    computeProgress();
+    window.addEventListener("scroll", onViewportChange, { passive: true });
+    window.addEventListener("resize", onViewportChange);
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onViewportChange);
+      window.removeEventListener("resize", onViewportChange);
+    };
+  }, []);
 
   function isFilled(field: SurveyField, value: unknown) {
     if (field.type === "text") return typeof value === "string" && value.trim().length > 0;
@@ -354,6 +394,17 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
     }
     return missing;
   }
+
+  const missingRequiredStepIndices = survey.steps.flatMap((st, idx) => {
+    const hasMissingRequired = st.fields.some(
+      (field) => field.required && !isFilled(field, answers[field.id]),
+    );
+    return hasMissingRequired ? [idx] : [];
+  });
+
+  const missingRequiredInCurrentStep = visibleFields.filter(
+    (field) => field.required && !isFilled(field, answers[field.id]),
+  ).length;
 
   function setAnswer(fieldId: string, value: unknown) {
     setAnswers((a) => ({ ...a, [fieldId]: value }));
@@ -567,17 +618,30 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8">
+    <div className="mx-auto w-full max-w-5xl overflow-x-clip px-1.5 py-6 sm:px-3 sm:py-8 lg:snap-none snap-y snap-mandatory">
       <div className="grid gap-6">
-        <div className="sticky top-0 z-40 -mx-4 px-4 py-3 bg-background/80 backdrop-blur border-b">
-          <div className="grid gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="grid gap-0.5">
+        <div className="sticky top-16 z-50 -mx-1.5 border-b bg-background/90 px-1.5 py-3 backdrop-blur sm:-mx-3 sm:px-3">
+          <div
+            className="grid transition-all duration-150 ease-out"
+            style={{
+              rowGap: `${12 - mobileCompactProgress * 5}px`,
+            }}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-1 sm:gap-3">
+              <div className="grid min-w-0 gap-0.5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-secondary">Umfrage</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm text-secondary">{survey.title || "Umfrage"}</p>
-                  <Badge variant="secondary">Öffentlich</Badge>
-                  <Badge variant="outline">{pct}%</Badge>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <p
+                    className="min-w-0 flex-1 truncate whitespace-nowrap text-secondary transition-all duration-150"
+                    style={{ fontSize: `${14 - mobileCompactProgress * 2}px` }}
+                  >
+                    {survey.title || "Umfrage"}
+                  </p>
+                  {missingRequiredInCurrentStep > 0 ? (
+                    <Badge variant="outline" className="hidden border-red-300 text-red-400 lg:inline-flex">
+                      {missingRequiredInCurrentStep} Pflichtfeld(er) offen
+                    </Badge>
+                  ) : null}
                 </div>
               </div>
               <div />
@@ -585,17 +649,58 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
 
             {status.kind === "error" ? <p className="text-sm text-red-400">{status.message}</p> : null}
 
-            <SurveyProgress steps={steps} currentStepIndex={stepIndex} />
+            <SurveyProgress
+              steps={steps}
+              currentStepIndex={stepIndex}
+              compactProgress={mobileCompactProgress}
+              onStepChange={setStepIndex}
+              missingStepIndices={missingRequiredStepIndices}
+              currentStepMissingRequiredCount={missingRequiredInCurrentStep}
+            />
 
-            <div className="flex items-center justify-between gap-2">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
                 disabled={!canBack}
                 onClick={() => setStepIndex(stepIndex - 1)}
+                className="w-full border-border/80 bg-card text-sm shadow-sm transition-all duration-150 hover:bg-accent/80"
+                style={{
+                  height: `${42 - mobileCompactProgress * 5}px`,
+                  fontSize: `${14 - mobileCompactProgress * 2}px`,
+                }}
               >
                 Zurück
               </Button>
+              {hasInfoText && stepIndex >= 1 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsInfoOpen(true)}
+                  aria-label="Fragebogen Information anzeigen"
+                  className="border-border/70 bg-card text-secondary shadow-sm transition-all duration-150 hover:bg-accent/80"
+                  style={{
+                    height: `${40 - mobileCompactProgress * 5}px`,
+                    width: `${40 - mobileCompactProgress * 5}px`,
+                  }}
+                >
+                  <Info
+                    className="transition-all duration-150"
+                    style={{
+                      height: `${16 - mobileCompactProgress * 2}px`,
+                      width: `${16 - mobileCompactProgress * 2}px`,
+                    }}
+                  />
+                </Button>
+              ) : (
+                <div
+                  style={{
+                    height: `${40 - mobileCompactProgress * 5}px`,
+                    width: `${40 - mobileCompactProgress * 5}px`,
+                  }}
+                />
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -603,6 +708,11 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                 onClick={() => {
                   if (canNext) setStepIndex(stepIndex + 1);
                   else void submit();
+                }}
+                className="w-full border-border/80 bg-card text-sm shadow-sm transition-all duration-150 hover:bg-accent/80"
+                style={{
+                  height: `${42 - mobileCompactProgress * 5}px`,
+                  fontSize: `${14 - mobileCompactProgress * 2}px`,
                 }}
               >
                 {canNext ? "Weiter" : "Senden"}
@@ -612,32 +722,55 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
         </div>
 
         {survey.description ? <p className="text-secondary">{survey.description}</p> : null}
+        {hasInfoText && stepIndex === 0 ? (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Info</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FormattedInfoText text={survey.infoText ?? ""} />
+            </CardContent>
+          </Card>
+        ) : null}
 
+        {!isInfoIntroStep ? (
         <Card>
           <CardHeader>
             <CardTitle>{step.title || `Schritt ${stepIndex + 1}`}</CardTitle>
             {step.description ? <CardDescription>{step.description}</CardDescription> : null}
           </CardHeader>
-          <CardContent className="grid gap-4">
-            {step.fields.length === 0 ? (
+          <CardContent className="grid gap-4 px-3 pb-4 pt-0 sm:p-6 sm:pt-0">
+            {visibleFields.length === 0 ? (
               <p className="text-sm text-secondary">Keine Fragen/Bemerkung in diesem Schritt.</p>
             ) : (
-              <div className="grid gap-5">
-                {step.fields.map((field) => (
-                  <div key={field.id} className="grid gap-2">
+              <div className="grid gap-4 lg:gap-5">
+                {visibleFields.map((field) => (
+                  <div
+                    key={field.id}
+                    className={cn(
+                      "grid snap-start gap-3 overflow-x-clip rounded-xl border bg-card/30 p-2.5 lg:overflow-visible lg:p-4",
+                      field.required && !isFilled(field, answers[field.id])
+                        ? "border border-red-300/60 bg-red-500/5"
+                        : "",
+                    )}
+                  >
                     <div className="grid gap-1">
-                      <p className="text-sm font-semibold">
-                        {field.title || "Unbenannte Frage/Bemerkung"}{" "}
+                      <p className="text-lg font-semibold lg:text-sm">
+                        {field.title || "Unbenanntes Feld"}{" "}
                         {field.required ? <span className="text-red-400">*</span> : null}
                       </p>
-                      {field.description ? <p className="text-sm text-secondary">{field.description}</p> : null}
+                      {field.description ? <p className="text-base text-secondary lg:text-sm">{field.description}</p> : null}
+                      {field.required && !isFilled(field, answers[field.id]) ? (
+                        <p className="text-sm text-red-400 lg:text-xs">Pflichtfeld noch nicht beantwortet.</p>
+                      ) : null}
                     </div>
 
                     {field.type === "text" ? (
                       <Input
                         value={(answers[field.id] as string) ?? ""}
                         onChange={(e) => setAnswer(field.id, e.target.value)}
-                        placeholder={field.placeholder || "Deine Antwort…"}
+                        placeholder={survey.answerPlaceholder?.trim() || "Deine Antwort…"}
+                        className="h-11 text-base lg:h-9 lg:text-sm"
                       />
                     ) : null}
 
@@ -649,7 +782,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                             <label
                               key={opt.id}
                               className={cn(
-                                "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                "flex cursor-pointer items-center gap-3 rounded-md border px-2.5 py-2.5 text-base shadow-sm transition-colors hover:bg-accent lg:px-3 lg:py-2 lg:text-sm",
                                 selected ? "border-primary bg-primary/5" : "border-input bg-background",
                                 !session && "cursor-not-allowed opacity-70",
                               )}
@@ -687,7 +820,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                             return (
                               <label
                                 className={cn(
-                                  "grid cursor-pointer gap-2 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors",
+                                  "grid cursor-pointer gap-2 rounded-md border px-2.5 py-2.5 text-base shadow-sm transition-colors lg:px-3 lg:py-2 lg:text-sm",
                                   otherState.selected
                                     ? "border-primary bg-primary/5"
                                     : "border-input bg-background",
@@ -724,6 +857,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                                     value={otherState.text}
                                     disabled={!session}
                                     placeholder="Eigene Option eingeben…"
+                                    className="h-11 text-base lg:h-9 lg:text-sm"
                                     onChange={(e) =>
                                       setAnswer(field.id, buildRadioAnswer(e.target.value))
                                     }
@@ -749,7 +883,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                                   <label
                                     key={opt.id}
                                     className={cn(
-                                      "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                      "flex cursor-pointer items-center gap-3 rounded-md border px-2.5 py-2.5 text-base shadow-sm transition-colors hover:bg-accent lg:px-3 lg:py-2 lg:text-sm",
                                       checked ? "border-primary bg-primary/5" : "border-input bg-background",
                                       !session && "cursor-not-allowed opacity-70",
                                     )}
@@ -805,7 +939,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                                         value={entry.text}
                                         disabled={!session}
                                         placeholder={`Eigene Option ${entryIdx + 1}…`}
-                                        className="h-9 min-w-0 flex-1"
+                                        className="h-11 min-w-0 flex-1 text-base lg:h-9 lg:text-sm"
                                         onChange={(e) =>
                                           setAnswer(
                                             field.id,
@@ -828,7 +962,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                                   variant="outline"
                                   size="sm"
                                   disabled={!session}
-                                  className="w-full justify-center sm:w-auto"
+                                  className="h-11 w-full justify-center text-base lg:h-9 lg:w-auto lg:text-sm"
                                   onClick={() =>
                                     setAnswer(
                                       field.id,
@@ -858,6 +992,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                               variant={selected ? "default" : "outline"}
                               size="sm"
                               disabled={!session}
+                              className="h-11 min-w-11 text-base lg:h-9 lg:min-w-9 lg:text-sm"
                               onClick={() => setAnswer(field.id, value)}
                             >
                               {value}
@@ -901,6 +1036,38 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
             )}
           </CardContent>
         </Card>
+        ) : null}
+        {hasInfoText && isInfoOpen ? (
+          <div
+            className="fixed inset-0 z-[120] bg-black/50 p-4 backdrop-blur-sm"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setIsInfoOpen(false);
+            }}
+          >
+            <div className="mx-auto flex min-h-full w-full max-w-3xl items-center px-4">
+              <Card className="w-full">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-base">Info</CardTitle>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Info schließen"
+                      onClick={() => setIsInfoOpen(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <FormattedInfoText text={survey.infoText ?? ""} />
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : null}
+
       </div>
     </div>
   );

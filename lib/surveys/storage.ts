@@ -3,10 +3,15 @@ import { surveySchema } from "@/lib/surveys/schema";
 
 const STORAGE_KEY = "dt_survey_draft_v1";
 
-export function loadDraftSurvey(): Survey | null {
+function buildStorageKey(draftId?: string) {
+  if (!draftId) return STORAGE_KEY;
+  return `${STORAGE_KEY}:${draftId}`;
+}
+
+export function loadDraftSurvey(draftId?: string): Survey | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(buildStorageKey(draftId));
     if (!raw) return null;
     const parsedJson: unknown = JSON.parse(raw);
     const parsed = surveySchema.safeParse(parsedJson);
@@ -17,19 +22,22 @@ export function loadDraftSurvey(): Survey | null {
   }
 }
 
-export function saveDraftSurvey(survey: Survey) {
+export function saveDraftSurvey(survey: Survey, draftId?: string) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(survey, null, 2));
+    window.localStorage.setItem(
+      buildStorageKey(draftId),
+      JSON.stringify(survey, null, 2),
+    );
   } catch {
     // ignore quota / privacy mode
   }
 }
 
-export function clearDraftSurvey() {
+export function clearDraftSurvey(draftId?: string) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(buildStorageKey(draftId));
   } catch {
     // ignore
   }

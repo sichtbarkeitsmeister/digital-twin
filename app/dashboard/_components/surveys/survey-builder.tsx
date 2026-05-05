@@ -7,10 +7,12 @@ import { useRouter } from "next/navigation";
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   Copy,
   Download,
   Eye,
   Globe,
+  Info,
   Lock,
   MoreHorizontal,
   Pencil,
@@ -40,6 +42,9 @@ import {
   setCheckboxOtherEntryText,
 } from "@/lib/surveys/other-option";
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
+import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
+import { RichTextEditor } from "@/components/surveys/rich-text-editor";
+import { formatRankingAnswerForDisplay } from "@/lib/surveys/ranking-answer";
 import { surveySchema } from "@/lib/surveys/schema";
 import {
   clearDraftSurvey,
@@ -72,6 +77,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SurveyProgress } from "@/app/dashboard/_components/surveys/survey-progress";
 import {
   publishSurveyAction,
+  updateSurveySlugAction,
   unpublishSurveyAction,
   upsertSurveyDraftAction,
 } from "@/app/dashboard/surveys/actions";
@@ -89,6 +95,9 @@ function createDefaultSurvey(): Survey {
     id: createId(),
     title: "",
     description: "",
+    answerPlaceholder: "Deine Antwort…",
+    infoTextEnabled: false,
+    infoText: "",
     steps: [
       {
         id: createId(),
@@ -108,19 +117,103 @@ function createDefaultField(type: SurveyFieldType): SurveyField {
     required: false,
   };
   if (type === "text") {
-    return { ...base, type: "text", placeholder: "" };
+    return { ...base, type: "text" };
   }
   if (type === "rating") {
     return { ...base, type: "rating", scale: { min: 1, max: 5 } };
   }
   const options: SurveyOption[] = [{ id: createId(), label: "Option 1" }];
-  if (type === "radio") return { ...base, type: "radio", options, allowOtherOption: false };
-  if (type === "checkbox") return { ...base, type: "checkbox", options, allowOtherOption: true };
+  if (type === "radio")
+    return { ...base, type: "radio", options, allowOtherOption: false };
+  if (type === "checkbox")
+    return { ...base, type: "checkbox", options, allowOtherOption: true };
   return {
     ...base,
     type: "ranking",
     options: [...options, { id: createId(), label: "Option 2" }],
     allowCustomEntries: true,
+  };
+}
+
+function getOptionsFromField(
+  field: SurveyField,
+  minCount: number,
+): SurveyOption[] {
+  const source =
+    field.type === "radio" ||
+    field.type === "checkbox" ||
+    field.type === "ranking"
+      ? field.options.map((opt) => ({ ...opt }))
+      : [{ id: createId(), label: "Option 1" }];
+  const next = [...source];
+  while (next.length < minCount) {
+    next.push({ id: createId(), label: `Option ${next.length + 1}` });
+  }
+  return next;
+}
+
+function convertFieldType(
+  field: SurveyField,
+  nextType: SurveyFieldType,
+): SurveyField {
+  if (field.type === nextType) return field;
+
+  const base = {
+    id: field.id,
+    title: field.title,
+    description: field.description,
+    required: field.required,
+  };
+
+  if (nextType === "text") {
+    return {
+      ...base,
+      type: "text",
+    };
+  }
+
+  if (nextType === "rating") {
+    return {
+      ...base,
+      type: "rating",
+      scale: field.type === "rating" ? field.scale : { min: 1, max: 5 },
+    };
+  }
+
+  if (nextType === "radio") {
+    const options = getOptionsFromField(field, 1);
+    const allowOtherOption =
+      field.type === "radio" || field.type === "checkbox"
+        ? field.allowOtherOption === true
+        : false;
+    return {
+      ...base,
+      type: "radio",
+      options,
+      allowOtherOption,
+    };
+  }
+
+  if (nextType === "checkbox") {
+    const options = getOptionsFromField(field, 1);
+    const allowOtherOption =
+      field.type === "radio" || field.type === "checkbox"
+        ? field.allowOtherOption !== false
+        : true;
+    return {
+      ...base,
+      type: "checkbox",
+      options,
+      allowOtherOption,
+    };
+  }
+
+  return {
+    ...base,
+    type: "ranking",
+    options: getOptionsFromField(field, 2),
+    allowCustomEntries:
+      field.type === "ranking" ? field.allowCustomEntries !== false : true,
   };
 }
 
@@ -133,6 +226,7 @@ function moveItem<T>(arr: T[], from: number, to: number) {
 }
 
 type PreviewAnswers = Record<string, unknown>;
+type ActiveResponseEditor = { stepId: string; fieldId: string } | null;
 
 type Props = {
   surveyId?: string;
@@ -140,6 +234,7 @@ type Props = {
   initialVisibility?: "private" | "public";
   initialSlug?: string | null;
   initialNotificationEmails?: string[];
+  initialResponseAnswers?: Record<string, unknown>;
 };
 
 export function SurveyBuilder({
@@ -148,6 +243,7 @@ export function SurveyBuilder({
   initialVisibility = "private",
   initialSlug = null,
   initialNotificationEmails = [],
+  initialResponseAnswers = {},
 }: Props) {
   const router = useRouter();
   const [mode, setMode] = React.useState<"edit" | "preview">("edit");
@@ -163,17 +259,19 @@ export function SurveyBuilder({
     initialVisibility,
   );
   const [slug, setSlug] = React.useState<string | null>(initialSlug);
+  const [slugDraft, setSlugDraft] = React.useState(initialSlug ?? "");
 
-  const [notificationEmails, setNotificationEmails] = React.useState<string[]>(() =>
-    normalizeEmails(initialNotificationEmails ?? []),
+  const [notificationEmails, setNotificationEmails] = React.useState<string[]>(
+    () => normalizeEmails(initialNotificationEmails ?? []),
   );
-  const [notificationEmailDraft, setNotificationEmailDraft] = React.useState("");
+  const [notificationEmailDraft, setNotificationEmailDraft] =
+    React.useState("");
 
   const [importJson, setImportJson] = React.useState("");
   const [exportJson, setExportJson] = React.useState("");
-  const [jsonModal, setJsonModal] = React.useState<null | { mode: "export" | "import" }>(
-    null,
-  );
+  const [jsonModal, setJsonModal] = React.useState<null | {
+    mode: "export" | "import";
+  }>(null);
   const [status, setStatus] = React.useState<{
     kind: "ok" | "error";
     message: string;
@@ -181,27 +279,108 @@ export function SurveyBuilder({
 
   const [previewStepIndex, setPreviewStepIndex] = React.useState(0);
   const [previewAnswers, setPreviewAnswers] = React.useState<PreviewAnswers>(
-    {},
+    () => initialResponseAnswers ?? {},
   );
+  const [activeResponseEditor, setActiveResponseEditor] =
+    React.useState<ActiveResponseEditor>(null);
+  const resetBaselineRef = React.useRef<string | null>(null);
+  const draftStorageId = dbSurveyId ?? initialSurveyId ?? "new";
+  const reloadRestoreFlagKey = `dt_survey_restore_on_reload:${draftStorageId}`;
+  const previewAnswersStorageKey = `dt_survey_preview_answers_v1:${draftStorageId}`;
+
+  React.useEffect(() => {
+    function markReloadRestore() {
+      try {
+        window.sessionStorage.setItem(reloadRestoreFlagKey, "1");
+      } catch {
+        // ignore
+      }
+    }
+    window.addEventListener("beforeunload", markReloadRestore);
+    return () => window.removeEventListener("beforeunload", markReloadRestore);
+  }, [reloadRestoreFlagKey]);
 
   // Initial load
   React.useEffect(() => {
-    if (initialSurvey) return;
-    const draft = loadDraftSurvey();
+    let shouldRestore = false;
+    if (typeof window !== "undefined") {
+      try {
+        const flag = window.sessionStorage.getItem(reloadRestoreFlagKey);
+        window.sessionStorage.removeItem(reloadRestoreFlagKey);
+        shouldRestore = flag === "1";
+      } catch {
+        shouldRestore = false;
+      }
+    }
+    const draft = shouldRestore ? loadDraftSurvey(draftStorageId) : null;
     if (draft) {
       setSurvey(draft);
       setCurrentStepIndex(0);
-      setStatus({ kind: "ok", message: "Entwurf aus dem lokalen Speicher geladen." });
+      setStatus({
+        kind: "ok",
+        message: "Entwurf aus dem lokalen Speicher geladen.",
+      });
+      return;
     }
-  }, [initialSurvey]);
+    if (initialSurvey) {
+      setSurvey(initialSurvey);
+    }
+    try {
+      const rawPreviewAnswers = window.localStorage.getItem(
+        previewAnswersStorageKey,
+      );
+      if (!rawPreviewAnswers) return;
+      const parsed = JSON.parse(rawPreviewAnswers) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const localAnswers = parsed as PreviewAnswers;
+        const hasLocalValues = Object.keys(localAnswers).length > 0;
+        if (!hasLocalValues) return;
+        setPreviewAnswers((prev) => ({
+          ...prev,
+          ...localAnswers,
+        }));
+      }
+    } catch {
+      // ignore
+    }
+  }, [
+    initialSurvey,
+    draftStorageId,
+    reloadRestoreFlagKey,
+    previewAnswersStorageKey,
+  ]);
+
+  React.useEffect(() => {
+    const hasCurrentValues = Object.keys(previewAnswers).length > 0;
+    const hasInitialValues =
+      Object.keys(initialResponseAnswers ?? {}).length > 0;
+    if (hasCurrentValues || !hasInitialValues) return;
+    setPreviewAnswers(initialResponseAnswers);
+  }, [initialResponseAnswers, previewAnswers]);
 
   // Autosave (debounced)
   React.useEffect(() => {
+    if (resetBaselineRef.current) {
+      const current = JSON.stringify(survey);
+      if (current === resetBaselineRef.current) return;
+      resetBaselineRef.current = null;
+    }
     const handle = window.setTimeout(() => {
-      saveDraftSurvey(survey);
+      saveDraftSurvey(survey, draftStorageId);
     }, 400);
     return () => window.clearTimeout(handle);
-  }, [survey]);
+  }, [survey, draftStorageId]);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        previewAnswersStorageKey,
+        JSON.stringify(previewAnswers),
+      );
+    } catch {
+      // ignore
+    }
+  }, [previewAnswers, previewAnswersStorageKey]);
 
   // Keep indices safe when steps change
   React.useEffect(() => {
@@ -213,8 +392,25 @@ export function SurveyBuilder({
     );
   }, [survey.steps.length]);
 
+  React.useEffect(() => {
+    if (mode !== "edit") return;
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }, [currentStepIndex, mode]);
+
+  React.useEffect(() => {
+    setSlugDraft(slug ?? "");
+  }, [slug]);
+
   const steps = survey.steps;
   const currentStep = steps[currentStepIndex] ?? steps[0];
+  const isInfoIntroEditStep =
+    survey.infoTextEnabled === true && currentStepIndex === 0;
+  const activeResponseField =
+    activeResponseEditor == null
+      ? null
+      : survey.steps
+          .find((s) => s.id === activeResponseEditor.stepId)
+          ?.fields.find((f) => f.id === activeResponseEditor.fieldId) ?? null;
 
   function updateSurvey(patch: Partial<Survey>) {
     setSurvey((s) => ({ ...s, ...patch }));
@@ -240,6 +436,49 @@ export function SurveyBuilder({
     });
     setCurrentStepIndex(steps.length);
     setStatus(null);
+  }
+
+  function enableInfoTextMode() {
+    setSurvey((s) => {
+      if (s.infoTextEnabled === true) return s;
+      const introStep: SurveyStep = {
+        id: createId(),
+        title: "Info",
+        description: "",
+        fields: [],
+      };
+
+      return {
+        ...s,
+        infoTextEnabled: true,
+        steps: [introStep, ...s.steps],
+      };
+    });
+    setCurrentStepIndex((idx) => idx);
+  }
+
+  function disableInfoTextMode() {
+    setSurvey((s) => {
+      if (s.infoTextEnabled !== true) return s;
+      const [, ...rest] = s.steps;
+      const nextSteps =
+        rest.length > 0
+          ? rest
+          : [
+              {
+                id: createId(),
+                title: "Schritt 1",
+                description: "",
+                fields: [],
+              } satisfies SurveyStep,
+            ];
+      return {
+        ...s,
+        infoTextEnabled: false,
+        steps: nextSteps,
+      };
+    });
+    setCurrentStepIndex((idx) => Math.max(0, idx - 1));
   }
 
   function removeStep(stepId: string) {
@@ -288,6 +527,25 @@ export function SurveyBuilder({
           ...st,
           fields: st.fields.map((f) =>
             f.id === fieldId ? ({ ...f, ...patch } as SurveyField) : f,
+          ),
+        };
+      }),
+    }));
+  }
+
+  function changeFieldType(
+    stepId: string,
+    fieldId: string,
+    nextType: SurveyFieldType,
+  ) {
+    setSurvey((s) => ({
+      ...s,
+      steps: s.steps.map((st) => {
+        if (st.id !== stepId) return st;
+        return {
+          ...st,
+          fields: st.fields.map((f) =>
+            f.id === fieldId ? convertFieldType(f, nextType) : f,
           ),
         };
       }),
@@ -453,7 +711,8 @@ export function SurveyBuilder({
       const parsedJson: unknown = JSON.parse(text);
       const parsed = surveySchema.safeParse(parsedJson);
       if (!parsed.success) {
-        const msg = parsed.error.issues[0]?.message ?? "Ungültiges Umfrage-JSON.";
+        const msg =
+          parsed.error.issues[0]?.message ?? "Ungültiges Umfrage-JSON.";
         setStatus({ kind: "error", message: msg });
         return;
       }
@@ -467,15 +726,21 @@ export function SurveyBuilder({
   }
 
   function resetDraft() {
-    clearDraftSurvey();
-    setSurvey(createDefaultSurvey());
+    clearDraftSurvey(draftStorageId);
+    try {
+      window.localStorage.removeItem(previewAnswersStorageKey);
+    } catch {
+      // ignore
+    }
+    const nextSurvey = createDefaultSurvey();
+    resetBaselineRef.current = JSON.stringify(nextSurvey);
+    setSurvey(nextSurvey);
     setCurrentStepIndex(0);
     setPreviewAnswers({});
     setImportJson("");
     setExportJson("");
-    setDbSurveyId(null);
-    setVisibility("private");
-    setSlug(null);
+    setNotificationEmails([]);
+    setNotificationEmailDraft("");
     setStatus({ kind: "ok", message: "Entwurf zurückgesetzt." });
   }
 
@@ -537,9 +802,30 @@ export function SurveyBuilder({
     });
   }
 
+  async function saveSlug() {
+    const id = dbSurveyId ?? (await saveDraftToDatabase());
+    if (!id) return;
+    const normalized = slugDraft.trim().toLowerCase();
+    if (!normalized) {
+      setStatus({ kind: "error", message: "Bitte eine URL eingeben." });
+      return;
+    }
+    const res = await updateSurveySlugAction({ surveyId: id, slug: normalized });
+    if (!res.ok || !res.data?.slug) {
+      setStatus({ kind: "error", message: res.message });
+      return;
+    }
+    setSlug(res.data.slug);
+    setSlugDraft(res.data.slug);
+    setStatus({ kind: "ok", message: res.message });
+  }
+
   async function makePrivate() {
     if (!dbSurveyId) {
-      setStatus({ kind: "error", message: "Bitte zuerst den Entwurf speichern." });
+      setStatus({
+        kind: "error",
+        message: "Bitte zuerst den Entwurf speichern.",
+      });
       return;
     }
 
@@ -555,29 +841,6 @@ export function SurveyBuilder({
 
   return (
     <div className="grid gap-6">
-      {mode === "edit" ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="grid gap-1">
-            <p className="text-sm text-secondary">
-              <Link
-                href="/dashboard/surveys"
-                prefetch
-                className="hover:text-primary transition-colors"
-              >
-                ← Zurück zu Umfragen
-              </Link>
-            </p>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Umfrage-Builder
-            </h1>
-            <p className="text-secondary">
-              Erstelle flexible Umfragen mit mehreren Schritten. Der Entwurf wird lokal automatisch gespeichert; nutze
-              „Entwurf speichern“, um in der Datenbank zu speichern.
-            </p>
-          </div>
-        </div>
-      ) : null}
-
       {status ? (
         <div
           className={cn(
@@ -589,123 +852,738 @@ export function SurveyBuilder({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {mode === "edit" ? (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              {visibility === "public" ? (
-                <Button onClick={makePrivate} variant="secondary">
-                  <Lock className="mr-2 h-4 w-4" />
-                  Privat machen
-                </Button>
-              ) : (
-                <Button onClick={publishSurvey}>
-                  <Globe className="mr-2 h-4 w-4" />
-                  Veröffentlichen
-                </Button>
-              )}
+      {mode === "edit" ? (
+        <div className="mx-auto w-full max-w-5xl px-4 py-2">
+          <div className="grid gap-6">
+            <div className="sticky top-0 z-40 -mx-4 border-b bg-background/90 px-4 py-3 backdrop-blur">
+              <div className="grid gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="grid gap-0.5">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+                      Editable Preview
+                    </p>
+                    <p className="text-sm text-secondary">
+                      <Link
+                        href="/dashboard/surveys"
+                        prefetch
+                        className="hover:text-primary transition-colors"
+                      >
+                        ← Zurück zu Umfragen
+                      </Link>
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {visibility === "public" ? (
+                      <Button
+                        onClick={makePrivate}
+                        variant="secondary"
+                        size="sm"
+                      >
+                        <Lock className="mr-2 h-4 w-4" />
+                        Privat
+                      </Button>
+                    ) : (
+                      <Button onClick={publishSurvey} size="sm">
+                        <Globe className="mr-2 h-4 w-4" />
+                        Veröffentlichen
+                      </Button>
+                    )}
+                    {visibility === "public" && slug ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          copyText(`${window.location.origin}/s/${slug}`)
+                        }
+                      >
+                        <Copy className="mr-2 h-4 w-4" />
+                        Link kopieren
+                      </Button>
+                    ) : null}
+                    <Button onClick={enterPreview} variant="outline" size="sm">
+                      <Eye className="mr-2 h-4 w-4" />
+                      Vorschau
+                    </Button>
+                    <Button onClick={saveDraftToDatabase} size="sm">
+                      <Save className="mr-2 h-4 w-4" />
+                      Speichern
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label="Mehr Aktionen"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={openJsonExport}>
+                          <Download className="h-4 w-4" />
+                          JSON exportieren
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={openJsonImport}>
+                          <Upload className="h-4 w-4" />
+                          JSON importieren
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={resetDraft}>
+                          <RefreshCcw className="h-4 w-4" />
+                          Entwurf zurücksetzen
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
 
-              {visibility === "public" && slug ? (
-                <Button
-                  onClick={() => {
-                    const path = `/s/${slug}`;
-                    copyText(`${window.location.origin}${path}`);
-                  }}
-                  variant="outline"
-                >
-                  <Copy className="mr-2 h-4 w-4" />
-                  Öffentlichen Link kopieren
-                </Button>
-              ) : null}
+                <SurveyProgress
+                  steps={steps}
+                  currentStepIndex={currentStepIndex}
+                  onStepChange={setCurrentStepIndex}
+                />
 
-              <Button onClick={enterPreview} variant="secondary">
-                <Eye className="mr-2 h-4 w-4" />
-                Vorschau
-              </Button>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+                <div className="flex items-center justify-between gap-2">
                   <Button
                     type="button"
                     variant="outline"
-                    size="icon"
-                    aria-label="Mehr Aktionen"
+                    disabled={currentStepIndex === 0}
+                    onClick={() =>
+                      setCurrentStepIndex((idx) => Math.max(0, idx - 1))
+                    }
                   >
-                    <MoreHorizontal className="h-4 w-4" />
+                    Zurück
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={openJsonExport}>
-                    <Download className="h-4 w-4" />
-                    JSON exportieren
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={openJsonImport}>
-                    <Upload className="h-4 w-4" />
-                    JSON importieren
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={resetDraft}>
-                    <RefreshCcw className="h-4 w-4" />
-                    Entwurf zurücksetzen
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  <Badge variant="outline">
+                    Schritt {currentStepIndex + 1} / {steps.length}
+                  </Badge>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={currentStepIndex >= steps.length - 1}
+                    onClick={() =>
+                      setCurrentStepIndex((idx) =>
+                        Math.min(steps.length - 1, idx + 1),
+                      )
+                    }
+                  >
+                    Weiter
+                  </Button>
+                </div>
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-              <Button onClick={saveDraftToDatabase}>
-                <Save className="mr-2 h-4 w-4" />
-                {visibility === "public" ? "Speichern" : "Entwurf speichern"}
-              </Button>
-              <Button asChild variant="outline">
-                <Link href="/dashboard/surveys" prefetch>
-                  Fertig
-                </Link>
-              </Button>
-            </div>
-          </>
-        ) : (
-          <div />
-        )}
-      </div>
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="w-full">
+                  <Input
+                    value={survey.title}
+                    onChange={(e) => updateSurvey({ title: e.target.value })}
+                    placeholder="Umfrage-Titel"
+                    className="h-10 border-0 px-0 text-xl font-semibold shadow-none focus-visible:ring-0"
+                  />
+                </CardTitle>
+                <CardDescription className="w-full">
+                  <div className="grid gap-3">
+                    <Textarea
+                      value={survey.description}
+                      onChange={(e) =>
+                        updateSurvey({ description: e.target.value })
+                      }
+                      placeholder="Beschreibung der Umfrage (optional)"
+                      className="min-h-[70px] border-0 px-0 shadow-none focus-visible:ring-0"
+                    />
+                    {currentStepIndex === 0 ? (
+                      <div className="grid gap-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="flex cursor-pointer items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={survey.infoTextEnabled === true}
+                              onCheckedChange={(checked) => {
+                                if (checked === true) {
+                                  enableInfoTextMode();
+                                  return;
+                                }
+                                disableInfoTextMode();
+                              }}
+                            />
+                            Infotext aktivieren (nur auf Seite 1)
+                          </label>
+                        </div>
+                        {survey.infoTextEnabled === true ? (
+                          <>
+                            <RichTextEditor
+                              value={survey.infoText ?? ""}
+                              onChange={(next) =>
+                                updateSurvey({ infoText: next })
+                              }
+                              disabled={false}
+                            />
+                          </>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={survey.infoTextEnabled === true}
+                            onCheckedChange={(checked) => {
+                              if (checked === true) {
+                                enableInfoTextMode();
+                                return;
+                              }
+                              disableInfoTextMode();
+                            }}
+                          />
+                          Infotext aktivieren (nur auf Seite 1)
+                        </label>
+                        {survey.infoTextEnabled === true ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setCurrentStepIndex(0)}
+                            className="text-secondary hover:text-primary"
+                          >
+                            Infotext auf Seite 1 bearbeiten
+                          </Button>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </CardDescription>
+              </CardHeader>
+            </Card>
 
-      {mode === "edit" ? (
-        <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Umfrage</CardTitle>
-              <CardDescription>Titel/Beschreibung und Schritte.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="survey_title">Titel</Label>
-                <Input
-                  id="survey_title"
-                  value={survey.title}
-                  onChange={(e) => updateSurvey({ title: e.target.value })}
-                  placeholder="z.B. Kunden-Onboarding-Umfrage"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="survey_desc">Beschreibung</Label>
-                <Textarea
-                  id="survey_desc"
-                  value={survey.description}
-                  onChange={(e) =>
-                    updateSurvey({ description: e.target.value })
-                  }
-                  placeholder="Optionale kurze Beschreibung…"
-                />
-              </div>
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  {isInfoIntroEditStep ? (
+                    <div className="grid min-w-0 flex-1 gap-1">
+                      <p className="text-lg font-semibold">Infoseite</p>
+                      <p className="text-sm text-secondary">
+                        Schritt 1 ist für den Infotext reserviert.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid min-w-0 flex-1 gap-2">
+                      <Input
+                        value={currentStep?.title ?? ""}
+                        onChange={(e) =>
+                          updateStep(currentStep.id, { title: e.target.value })
+                        }
+                        placeholder={`Schritt ${currentStepIndex + 1}`}
+                        className="h-9 border-0 px-0 text-lg font-semibold shadow-none focus-visible:ring-0"
+                      />
+                      <Textarea
+                        value={currentStep?.description ?? ""}
+                        onChange={(e) =>
+                          updateStep(currentStep.id, {
+                            description: e.target.value,
+                          })
+                        }
+                        placeholder="Schrittbeschreibung (optional)"
+                        className="min-h-[64px] border-0 px-0 shadow-none focus-visible:ring-0"
+                      />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1">
+                    {!isInfoIntroEditStep ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => moveStep(currentStepIndex, -1)}
+                          disabled={currentStepIndex === 0}
+                          aria-label="Schritt nach oben"
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => moveStep(currentStepIndex, 1)}
+                          disabled={currentStepIndex >= steps.length - 1}
+                          aria-label="Schritt nach unten"
+                        >
+                          <ArrowDown className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeStep(currentStep.id)}
+                          disabled={steps.length <= 1}
+                          aria-label="Schritt löschen"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addStep}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Schritt
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
 
-              <div className="grid gap-2">
-                <Label htmlFor="survey_notifications">Benachrichtigungs-E-Mails</Label>
-                <div className="flex flex-col gap-2">
+              <CardContent className="grid gap-5">
+                {survey.infoTextEnabled === true && currentStepIndex === 0 ? (
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-secondary">
+                    Schritt 1 ist als Infoseite reserviert. Fragen starten ab
+                    Schritt 2.
+                  </div>
+                ) : currentStep.fields.length === 0 ? (
+                  <p className="text-sm text-secondary">
+                    Keine Felder in diesem Schritt.
+                  </p>
+                ) : (
+                  currentStep.fields.map((field, fieldIndex) => (
+                    <div
+                      key={field.id}
+                      className="grid gap-3 rounded-lg border p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="grid min-w-0 flex-1 gap-2">
+                          <Input
+                            value={field.title}
+                            onChange={(e) =>
+                              updateField(currentStep.id, field.id, {
+                                title: e.target.value,
+                              })
+                            }
+                            placeholder="Fragetitel"
+                            className="h-9 border-0 px-0 text-base font-medium shadow-none focus-visible:ring-0"
+                          />
+                          <Textarea
+                            value={field.description}
+                            onChange={(e) =>
+                              updateField(currentStep.id, field.id, {
+                                description: e.target.value,
+                              })
+                            }
+                            placeholder="Fragebeschreibung (optional)"
+                            className="min-h-[56px] border-0 px-0 shadow-none focus-visible:ring-0"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "mr-1",
+                              hasFieldAnswer(field, previewAnswers[field.id])
+                                ? "border-emerald-300 text-emerald-400"
+                                : "border-border text-secondary",
+                            )}
+                          >
+                            {hasFieldAnswer(field, previewAnswers[field.id])
+                              ? "Beantwortet"
+                              : "Offen"}
+                          </Badge>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button type="button" variant="outline" size="sm">
+                                Typ: {field.type}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  changeFieldType(
+                                    currentStep.id,
+                                    field.id,
+                                    "text",
+                                  )
+                                }
+                              >
+                                Text
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  changeFieldType(
+                                    currentStep.id,
+                                    field.id,
+                                    "radio",
+                                  )
+                                }
+                              >
+                                Radio
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  changeFieldType(
+                                    currentStep.id,
+                                    field.id,
+                                    "checkbox",
+                                  )
+                                }
+                              >
+                                Checkbox
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  changeFieldType(
+                                    currentStep.id,
+                                    field.id,
+                                    "rating",
+                                  )
+                                }
+                              >
+                                Bewertung
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  changeFieldType(
+                                    currentStep.id,
+                                    field.id,
+                                    "ranking",
+                                  )
+                                }
+                              >
+                                Ranking
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              moveField(currentStep.id, fieldIndex, -1)
+                            }
+                            disabled={fieldIndex === 0}
+                            aria-label="Feld nach oben"
+                          >
+                            <ArrowUp className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              moveField(currentStep.id, fieldIndex, 1)
+                            }
+                            disabled={
+                              fieldIndex === currentStep.fields.length - 1
+                            }
+                            aria-label="Feld nach unten"
+                          >
+                            <ArrowDown className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              removeField(currentStep.id, field.id)
+                            }
+                            aria-label="Feld löschen"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      <label className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={field.required}
+                          onCheckedChange={(checked) =>
+                            updateField(currentStep.id, field.id, {
+                              required: Boolean(checked),
+                            })
+                          }
+                        />
+                        Pflichtfeld
+                      </label>
+
+                      {field.type === "rating" ? (
+                        <div className="rounded-md border bg-accent/20 px-3 py-2 text-sm text-secondary">
+                          Bewertungsskala: {field.scale.min} - {field.scale.max}
+                        </div>
+                      ) : null}
+
+                      {field.type === "text" ? (
+                        <div className="grid gap-2">
+                          <Label htmlFor={`answer_preview_${field.id}`}>
+                            Antwort
+                          </Label>
+                          <Input
+                            id={`answer_preview_${field.id}`}
+                            value={(previewAnswers[field.id] as string) ?? ""}
+                            onChange={(e) =>
+                              setPreviewAnswers((prev) => ({
+                                ...prev,
+                                [field.id]: e.target.value,
+                              }))
+                            }
+                            placeholder=""
+                          />
+                        </div>
+                      ) : null}
+
+                      {field.type !== "text" ? (
+                        <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+                          <p className="min-w-0 flex-1 truncate text-xs text-secondary">
+                            {summarizeFieldAnswer(field, previewAnswers[field.id])}
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="shrink-0"
+                            onClick={() =>
+                              setActiveResponseEditor({
+                                stepId: currentStep.id,
+                                fieldId: field.id,
+                              })
+                            }
+                          >
+                            Antwort bearbeiten
+                          </Button>
+                        </div>
+                      ) : null}
+
+                      {field.type === "radio" ||
+                      field.type === "checkbox" ||
+                      field.type === "ranking" ? (
+                        <div className="grid gap-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Label>Optionen</Label>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                addOption(currentStep.id, field.id)
+                              }
+                            >
+                              <Plus className="mr-2 h-4 w-4" />
+                              Option
+                            </Button>
+                          </div>
+                          {field.options.map((opt) => (
+                            <div
+                              key={opt.id}
+                              className="flex items-center gap-2"
+                            >
+                              {field.type !== "ranking" ? (
+                                <span
+                                  className={cn(
+                                    "inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px]",
+                                    field.type === "radio" &&
+                                      previewAnswers[field.id] === opt.label
+                                      ? "border-emerald-300 text-emerald-400"
+                                      : field.type === "checkbox" &&
+                                          Array.isArray(previewAnswers[field.id]) &&
+                                          (previewAnswers[field.id] as string[]).includes(opt.label)
+                                        ? "border-emerald-300 text-emerald-400"
+                                        : "border-border text-transparent",
+                                  )}
+                                  aria-hidden="true"
+                                >
+                                  <Check className="h-3 w-3" />
+                                </span>
+                              ) : (
+                                <span className="inline-flex h-5 w-5 items-center justify-center text-xs text-secondary">
+                                  {(() => {
+                                    const formatted = formatRankingAnswerForDisplay(
+                                      previewAnswers[field.id],
+                                      field.options.map((o) => o.label),
+                                    );
+                                    if (!formatted) return "•";
+                                    const parts = formatted.split(", ");
+                                    const idx = parts.findIndex((p) =>
+                                      p.replace(/^\d+\.\s*/, "") === opt.label,
+                                    );
+                                    return idx >= 0 ? idx + 1 : "•";
+                                  })()}
+                                </span>
+                              )}
+                              <Input
+                                value={opt.label}
+                                onChange={(e) =>
+                                  updateOption(
+                                    currentStep.id,
+                                    field.id,
+                                    opt.id,
+                                    {
+                                      label: e.target.value,
+                                    },
+                                  )
+                                }
+                                placeholder="Option"
+                              />
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() =>
+                                  removeOption(currentStep.id, field.id, opt.id)
+                                }
+                                disabled={
+                                  field.options.length <=
+                                  (field.type === "ranking" ? 2 : 1)
+                                }
+                                aria-label="Option entfernen"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                          {field.type !== "ranking" ? (
+                            <label className="flex cursor-pointer items-center gap-2 text-sm">
+                              <Checkbox
+                                checked={
+                                  field.type === "radio"
+                                    ? field.allowOtherOption === true
+                                    : field.allowOtherOption !== false
+                                }
+                                onCheckedChange={(next) =>
+                                  updateField(currentStep.id, field.id, {
+                                    allowOtherOption: next === true,
+                                  })
+                                }
+                              />
+                              <span>Andere-Option erlauben</span>
+                            </label>
+                          ) : (
+                            <label className="flex cursor-pointer items-center gap-2 text-sm">
+                              <Checkbox
+                                checked={field.allowCustomEntries !== false}
+                                onCheckedChange={(next) =>
+                                  updateField(currentStep.id, field.id, {
+                                    allowCustomEntries: next === true,
+                                  })
+                                }
+                              />
+                              <span>Eigene Ranking-Optionen erlauben</span>
+                            </label>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+
+                {!(
+                  survey.infoTextEnabled === true && currentStepIndex === 0
+                ) ? (
+                  <div className="grid gap-2 rounded-lg border border-dashed p-3">
+                    <p className="text-sm font-semibold">Feld hinzufügen</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addField(currentStep.id, "text")}
+                      >
+                        Text
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addField(currentStep.id, "radio")}
+                      >
+                        Radio
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addField(currentStep.id, "checkbox")}
+                      >
+                        Checkbox
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addField(currentStep.id, "rating")}
+                      >
+                        Bewertung
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addField(currentStep.id, "ranking")}
+                      >
+                        Ranking
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Builder Tools</CardTitle>
+                <CardDescription>
+                  Zusatzoptionen für Benachrichtigungen und Schritt-Navigation.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="survey_answer_placeholder">
+                    Platzhalter Text (alle Textfelder)
+                  </Label>
+                  <Input
+                    id="survey_answer_placeholder"
+                    value={survey.answerPlaceholder ?? ""}
+                    onChange={(e) =>
+                      updateSurvey({ answerPlaceholder: e.target.value })
+                    }
+                    placeholder="Deine Antwort…"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="survey_public_slug">Öffentliche URL</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border px-2 py-1">
+                      <span className="text-xs text-secondary">/s/</span>
+                      <Input
+                        id="survey_public_slug"
+                        value={slugDraft}
+                        onChange={(e) => setSlugDraft(e.target.value)}
+                        placeholder="meine-umfrage"
+                        className="h-8 min-w-0 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={saveSlug}
+                      className="sm:shrink-0"
+                    >
+                      URL speichern
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="survey_notifications">
+                    Benachrichtigungs-E-Mails
+                  </Label>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <Input
                       id="survey_notifications"
                       value={notificationEmailDraft}
-                      onChange={(e) => setNotificationEmailDraft(e.target.value)}
+                      onChange={(e) =>
+                        setNotificationEmailDraft(e.target.value)
+                      }
                       onKeyDown={(e) => {
                         if (e.key !== "Enter") return;
                         e.preventDefault();
@@ -727,26 +1605,7 @@ export function SurveyBuilder({
                         setNotificationEmailDraft("");
                         setStatus(null);
                       }}
-                      onPaste={(e) => {
-                        const text = e.clipboardData.getData("text");
-                        const next = parseNotificationEmailsFromText(text);
-                        // If it's clearly a list, add immediately instead of pasting.
-                        if (next.length <= 1) return;
-                        e.preventDefault();
-                        const invalid = next.find((x) => !isValidEmail(x));
-                        if (invalid) {
-                          setStatus({
-                            kind: "error",
-                            message: `Ungültige E-Mail: ${invalid}`,
-                          });
-                          return;
-                        }
-                        setNotificationEmails((prev) =>
-                          normalizeEmails([...prev, ...next]),
-                        );
-                        setStatus(null);
-                      }}
-                      placeholder="E-Mail eingeben (z.B. team@example.com)"
+                      placeholder="team@example.com"
                     />
                     <Button
                       type="button"
@@ -775,7 +1634,6 @@ export function SurveyBuilder({
                       Hinzufügen
                     </Button>
                   </div>
-
                   {notificationEmails.length ? (
                     <div className="flex flex-wrap gap-2">
                       {notificationEmails.map((email) => (
@@ -784,7 +1642,9 @@ export function SurveyBuilder({
                           variant="secondary"
                           className="gap-1 pr-1"
                         >
-                          <span className="max-w-[260px] truncate">{email}</span>
+                          <span className="max-w-[220px] truncate">
+                            {email}
+                          </span>
                           <button
                             type="button"
                             className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
@@ -800,441 +1660,13 @@ export function SurveyBuilder({
                           </button>
                         </Badge>
                       ))}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setNotificationEmails([]);
-                          setStatus(null);
-                        }}
-                      >
-                        Alle entfernen
-                      </Button>
                     </div>
                   ) : (
                     <p className="text-xs text-secondary">
-                      Keine Empfänger hinterlegt. Optional: füge eine oder mehrere
-                      E-Mails hinzu.
+                      Keine Empfänger hinterlegt.
                     </p>
                   )}
                 </div>
-                <p className="text-xs text-secondary">
-                  Diese Empfänger bekommen eine E-Mail beim Veröffentlichen und bei Admin-Antworten.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">Schritte</p>
-                <Button onClick={addStep} size="sm" variant="outline">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Schritt hinzufügen
-                </Button>
-              </div>
-
-              <div className="grid gap-2">
-                {steps.map((st, idx) => (
-                  <button
-                    key={st.id}
-                    type="button"
-                    onClick={() => setCurrentStepIndex(idx)}
-                    className={cn(
-                      "w-full text-left rounded-lg border px-3 py-2 transition-colors",
-                      idx === currentStepIndex
-                        ? "bg-accent"
-                        : "hover:bg-accent/50",
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="grid gap-0.5">
-                        <p className="text-sm font-medium">
-                          {st.title || `Schritt ${idx + 1}`}
-                        </p>
-                        {st.description ? (
-                          <p className="text-xs text-secondary line-clamp-2">
-                            {st.description}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-secondary">
-                            Keine Beschreibung
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            moveStep(idx, -1);
-                          }}
-                          disabled={idx === 0}
-                          aria-label="Schritt nach oben"
-                        >
-                          <ArrowUp className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            moveStep(idx, 1);
-                          }}
-                          disabled={idx === steps.length - 1}
-                          aria-label="Schritt nach unten"
-                        >
-                          <ArrowDown className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            removeStep(st.id);
-                          }}
-                          disabled={steps.length <= 1}
-                          aria-label="Schritt löschen"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {/* JSON import/export moved into modal (opened from actions menu). */}
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  {currentStep?.title || `Schritt ${currentStepIndex + 1}`}
-                </CardTitle>
-                <CardDescription>
-                  Schritt-Titel, Beschreibung und Felder bearbeiten.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="step_title">Schritt-Titel</Label>
-                  <Input
-                    id="step_title"
-                    value={currentStep?.title ?? ""}
-                    onChange={(e) =>
-                      updateStep(currentStep.id, { title: e.target.value })
-                    }
-                    placeholder={`Schritt ${currentStepIndex + 1}`}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="step_desc">Schritt-Beschreibung</Label>
-                  <Textarea
-                    id="step_desc"
-                    value={currentStep?.description ?? ""}
-                    onChange={(e) =>
-                      updateStep(currentStep.id, {
-                        description: e.target.value,
-                      })
-                    }
-                    placeholder="Optionale Schritt-Beschreibung…"
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">Felder</p>
-                </div>
-
-                {currentStep.fields.length === 0 ? (
-                  <p className="text-sm text-secondary">
-                    Noch keine Felder. Füge eins über den Button unten hinzu.
-                  </p>
-                ) : (
-                  <div className="grid gap-3">
-                    {currentStep.fields.map((field, fieldIndex) => (
-                      <Card key={field.id}>
-                        <CardHeader className="pb-3">
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div className="grid gap-1">
-                              <CardTitle className="text-base">
-                                {field.title || "Unbenanntes Feld"}
-                              </CardTitle>
-                              <CardDescription>
-                                Typ:{" "}
-                                <span className="font-medium">
-                                  {field.type}
-                                </span>
-                                {field.required ? " · erforderlich" : ""}
-                              </CardDescription>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() =>
-                                  moveField(currentStep.id, fieldIndex, -1)
-                                }
-                                disabled={fieldIndex === 0}
-                                aria-label="Feld nach oben"
-                              >
-                                <ArrowUp className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() =>
-                                  moveField(currentStep.id, fieldIndex, 1)
-                                }
-                                disabled={
-                                  fieldIndex === currentStep.fields.length - 1
-                                }
-                                aria-label="Feld nach unten"
-                              >
-                                <ArrowDown className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() =>
-                                  removeField(currentStep.id, field.id)
-                                }
-                                aria-label="Feld löschen"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="grid gap-4">
-                          <div className="grid gap-2">
-                            <Label>Feld-Titel</Label>
-                            <Input
-                              value={field.title}
-                              onChange={(e) =>
-                                updateField(currentStep.id, field.id, {
-                                  title: e.target.value,
-                                })
-                              }
-                              placeholder="z.B. Frage/Notiz / Titel"
-                            />
-                          </div>
-                          <div className="grid gap-2">
-                            <Label>Feld-Beschreibung</Label>
-                            <Textarea
-                              value={field.description}
-                              onChange={(e) =>
-                                updateField(currentStep.id, field.id, {
-                                  description: e.target.value,
-                                })
-                              }
-                              placeholder="Optionaler Hinweis / Beschreibung…"
-                            />
-                          </div>
-                          <label className="flex items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={field.required}
-                              onCheckedChange={(checked) =>
-                                updateField(currentStep.id, field.id, {
-                                  required: Boolean(checked),
-                                })
-                              }
-                            />
-                            Erforderlich
-                          </label>
-
-                          {field.type === "text" ? (
-                            <div className="grid gap-2">
-                              <Label>Platzhalter</Label>
-                              <Input
-                                value={field.placeholder}
-                                onChange={(e) =>
-                                  updateField(currentStep.id, field.id, {
-                                    placeholder: e.target.value,
-                                  })
-                                }
-                                placeholder="z.B. Deine Antwort…"
-                              />
-                            </div>
-                          ) : null}
-
-                          {field.type === "rating" ? (
-                            <div className="grid gap-2">
-                              <Label>Skala</Label>
-                              <div className="text-sm text-secondary">
-                                Derzeit fest: {field.scale.min}–
-                                {field.scale.max}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {field.type === "radio" ||
-                          field.type === "checkbox" ||
-                          field.type === "ranking" ? (
-                            <div className="grid gap-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <Label>Optionen</Label>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    addOption(currentStep.id, field.id)
-                                  }
-                                >
-                                  <Plus className="mr-2 h-4 w-4" />
-                                  Option hinzufügen
-                                </Button>
-                              </div>
-                              <div className="grid gap-2">
-                                {field.options.map((opt) => (
-                                  <div
-                                    key={opt.id}
-                                    className="flex items-center gap-2"
-                                  >
-                                    <Input
-                                      value={opt.label}
-                                      onChange={(e) =>
-                                        updateOption(
-                                          currentStep.id,
-                                          field.id,
-                                          opt.id,
-                                          { label: e.target.value },
-                                        )
-                                      }
-                                    />
-                                    <Button
-                                      type="button"
-                                      size="icon"
-                                      variant="ghost"
-                                      onClick={() =>
-                                        removeOption(
-                                          currentStep.id,
-                                          field.id,
-                                          opt.id,
-                                        )
-                                      }
-                                      disabled={
-                                        field.options.length <=
-                                        (field.type === "ranking" ? 2 : 1)
-                                      }
-                                      aria-label="Option entfernen"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                              </div>
-                              {field.type === "radio" || field.type === "checkbox" ? (
-                                <label className="mt-1 flex cursor-pointer items-center gap-2 text-sm">
-                                  <Checkbox
-                                    checked={
-                                      field.type === "radio"
-                                        ? field.allowOtherOption === true
-                                        : field.allowOtherOption !== false
-                                    }
-                                    onCheckedChange={(next) =>
-                                      updateField(currentStep.id, field.id, {
-                                        allowOtherOption: next === true,
-                                      })
-                                    }
-                                  />
-                                  <span>„Andere“-Option zum Freitext erlauben</span>
-                                </label>
-                              ) : null}
-                              {field.type === "ranking" ? (
-                                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                                  <Checkbox
-                                    checked={field.allowCustomEntries !== false}
-                                    onCheckedChange={(next) =>
-                                      updateField(currentStep.id, field.id, {
-                                        allowCustomEntries: next === true,
-                                      })
-                                    }
-                                  />
-                                  <span>
-                                    Teilnehmende dürfen eigene Optionen ergänzen („Andere“)
-                                  </span>
-                                </label>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className={cn(
-                        "mt-2 w-full rounded-lg border border-dashed px-4 py-7 text-left transition-colors",
-                        "hover:bg-accent/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-accent">
-                          <Plus className="h-5 w-5" />
-                        </div>
-                        <div className="grid">
-                          <p className="text-sm font-semibold">Feld hinzufügen</p>
-                          <p className="text-xs text-secondary">
-                            Text, Auswahl, Mehrfachauswahl, Bewertung oder Ranking
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        addField(currentStep.id, "text");
-                      }}
-                    >
-                      Textfeld
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        addField(currentStep.id, "radio");
-                      }}
-                    >
-                      Einzelauswahl (Radio)
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        addField(currentStep.id, "checkbox");
-                      }}
-                    >
-                      Mehrfachauswahl (Checkbox)
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        addField(currentStep.id, "rating");
-                      }}
-                    >
-                      Bewertung (1–5)
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        addField(currentStep.id, "ranking");
-                      }}
-                    >
-                      Ranking (Reihenfolge)
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
               </CardContent>
             </Card>
           </div>
@@ -1252,6 +1684,158 @@ export function SurveyBuilder({
         </SurveyPreviewOverlay>
       )}
 
+      {activeResponseEditor && activeResponseField ? (
+        <div
+          className="fixed inset-0 z-[120] bg-black/50 p-4 backdrop-blur-sm"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setActiveResponseEditor(null);
+          }}
+        >
+          <div className="mx-auto flex min-h-full w-full max-w-3xl items-center px-4">
+            <Card className="w-full">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-base">
+                    Antwort bearbeiten: {activeResponseField.title || "Unbenanntes Feld"}
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Schließen"
+                    onClick={() => setActiveResponseEditor(null)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                {activeResponseField.type === "radio" ? (
+                  <div className="grid gap-2">
+                    {activeResponseField.options.map((opt) => {
+                      const selected = previewAnswers[activeResponseField.id] === opt.label;
+                      return (
+                        <label
+                          key={opt.id}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                            selected ? "border-primary bg-primary/5" : "border-input bg-background",
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name={activeResponseField.id}
+                            checked={selected}
+                            className="peer sr-only"
+                            onChange={() =>
+                              setPreviewAnswers((prev) => ({
+                                ...prev,
+                                [activeResponseField.id]: opt.label,
+                              }))
+                            }
+                          />
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
+                              selected ? "border-primary" : "border-primary/70",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full bg-primary transition-opacity",
+                                selected ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                          </span>
+                          {opt.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {activeResponseField.type === "checkbox" ? (
+                  <div className="grid gap-2">
+                    {activeResponseField.options.map((opt) => {
+                      const current = Array.isArray(previewAnswers[activeResponseField.id])
+                        ? (previewAnswers[activeResponseField.id] as string[])
+                        : [];
+                      const checked = current.includes(opt.label);
+                      return (
+                        <label
+                          key={opt.id}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                            checked ? "border-primary bg-primary/5" : "border-input bg-background",
+                          )}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(next) => {
+                              const set = new Set(current);
+                              if (next) set.add(opt.label);
+                              else set.delete(opt.label);
+                              setPreviewAnswers((prev) => ({
+                                ...prev,
+                                [activeResponseField.id]: Array.from(set),
+                              }));
+                            }}
+                          />
+                          {opt.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {activeResponseField.type === "rating" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {Array.from({
+                      length: activeResponseField.scale.max - activeResponseField.scale.min + 1,
+                    }).map((_, i) => {
+                      const value = activeResponseField.scale.min + i;
+                      const selected = previewAnswers[activeResponseField.id] === value;
+                      return (
+                        <Button
+                          key={value}
+                          type="button"
+                          variant={selected ? "default" : "outline"}
+                          size="sm"
+                          onClick={() =>
+                            setPreviewAnswers((prev) => ({
+                              ...prev,
+                              [activeResponseField.id]: value,
+                            }))
+                          }
+                        >
+                          {value}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {activeResponseField.type === "ranking" ? (
+                  <SurveyRankingInput
+                    fieldId={activeResponseField.id}
+                    presetLabels={activeResponseField.options.map((opt) => opt.label)}
+                    value={previewAnswers[activeResponseField.id]}
+                    onChange={(next) =>
+                      setPreviewAnswers((prev) => ({
+                        ...prev,
+                        [activeResponseField.id]: next,
+                      }))
+                    }
+                    allowCustomEntries={activeResponseField.allowCustomEntries !== false}
+                  />
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
       {jsonModal ? (
         <JsonModal
           mode={jsonModal.mode}
@@ -1262,7 +1846,10 @@ export function SurveyBuilder({
           setExportJson={setExportJson}
           onImport={() => {
             if (!importJson.trim()) {
-              setStatus({ kind: "error", message: "Bitte zuerst JSON einfügen." });
+              setStatus({
+                kind: "error",
+                message: "Bitte zuerst JSON einfügen.",
+              });
               return;
             }
             importSurveyFromText(importJson);
@@ -1306,6 +1893,50 @@ function normalizeEmails(list: string[]) {
   return Array.from(
     new Set(list.map((s) => s.trim().toLowerCase()).filter(Boolean)),
   );
+}
+
+function summarizeFieldAnswer(field: SurveyField, value: unknown) {
+  if (field.type === "text") {
+    return typeof value === "string" && value.trim() ? value.trim() : "Keine Antwort";
+  }
+  if (field.type === "radio") {
+    if (typeof value !== "string" || !value.trim()) return "Nichts gewählt";
+    return `Gewählt: ${value}`;
+  }
+  if (field.type === "checkbox") {
+    if (!Array.isArray(value) || value.length === 0) return "Nichts gewählt";
+    const labels = value.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+    if (!labels.length) return "Nichts gewählt";
+    return `Gewählt: ${labels.slice(0, 2).join(", ")}${labels.length > 2 ? ` +${labels.length - 2}` : ""}`;
+  }
+  if (field.type === "rating") {
+    return typeof value === "number" ? `Bewertung: ${value}` : "Keine Bewertung";
+  }
+  if (field.type === "ranking") {
+    const labels = formatRankingAnswerForDisplay(value, field.options.map((o) => o.label));
+    if (!labels) return "Kein Ranking";
+    const parts = labels.split(", ");
+    return `Ranking: ${parts.slice(0, 2).join(", ")}${parts.length > 2 ? ` +${parts.length - 2}` : ""}`;
+  }
+  return "Keine Antwort";
+}
+
+function hasFieldAnswer(field: SurveyField, value: unknown) {
+  if (field.type === "text") return typeof value === "string" && value.trim().length > 0;
+  if (field.type === "radio") return typeof value === "string" && value.trim().length > 0;
+  if (field.type === "checkbox") {
+    return (
+      Array.isArray(value) &&
+      value.some((x) => typeof x === "string" && x.trim().length > 0)
+    );
+  }
+  if (field.type === "rating") return typeof value === "number" && Number.isFinite(value);
+  if (field.type === "ranking") {
+    return Boolean(
+      formatRankingAnswerForDisplay(value, field.options.map((o) => o.label)),
+    );
+  }
+  return false;
 }
 
 function JsonModal({
@@ -1362,11 +1993,7 @@ function JsonModal({
       }}
     >
       <div className="mx-auto flex min-h-full w-full max-w-3xl items-start justify-center px-4 py-10">
-        <Card
-          role="dialog"
-          aria-modal="true"
-          className="w-full shadow-lg"
-        >
+        <Card role="dialog" aria-modal="true" className="w-full shadow-lg">
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-3">
               <div className="grid gap-1">
@@ -1399,7 +2026,11 @@ function JsonModal({
                   className="font-mono text-xs min-h-[260px]"
                 />
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Button type="button" variant="outline" onClick={onExportCopy}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onExportCopy}
+                  >
                     <Copy className="mr-2 h-4 w-4" />
                     Kopieren
                   </Button>
@@ -1508,11 +2139,21 @@ function SurveyPreview({
 }) {
   const steps = survey.steps;
   const step = steps[stepIndex] ?? steps[0];
+  const isInfoIntroStep = survey.infoTextEnabled === true && stepIndex === 0;
+  const visibleFields = isInfoIntroStep ? [] : step.fields;
   const canBack = stepIndex > 0;
   const canNext = stepIndex < steps.length - 1;
+  const hasInfoText =
+    survey.infoTextEnabled === true &&
+    (survey.infoText?.trim().length ?? 0) > 0;
+  const [isInfoOpen, setIsInfoOpen] = React.useState(false);
 
   React.useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }, [stepIndex]);
+
+  React.useEffect(() => {
+    setIsInfoOpen(false);
   }, [stepIndex]);
 
   function setAnswer(fieldId: string, value: unknown) {
@@ -1538,7 +2179,11 @@ function SurveyPreview({
             </Button>
           </div>
 
-          <SurveyProgress steps={steps} currentStepIndex={stepIndex} />
+          <SurveyProgress
+            steps={steps}
+            currentStepIndex={stepIndex}
+            onStepChange={setStepIndex}
+          />
 
           <div className="flex items-center justify-between gap-2">
             <Button
@@ -1549,7 +2194,20 @@ function SurveyPreview({
             >
               Zurück
             </Button>
-            <div />
+            {hasInfoText && stepIndex >= 1 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsInfoOpen(true)}
+                aria-label="Infotext anzeigen"
+              >
+                <Info className="mr-2 h-4 w-4" />
+                Fragebogen Information
+              </Button>
+            ) : (
+              <div />
+            )}
             <Button
               type="button"
               variant="outline"
@@ -1570,294 +2228,344 @@ function SurveyPreview({
           ) : null}
         </CardHeader>
       </Card>
+      {hasInfoText && stepIndex === 0 ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Info</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FormattedInfoText text={survey.infoText ?? ""} />
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{step?.title || `Schritt ${stepIndex + 1}`}</CardTitle>
-          {step?.description ? (
-            <CardDescription>{step.description}</CardDescription>
-          ) : null}
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          {step.fields.length === 0 ? (
-            <p className="text-sm text-secondary">Keine Felder in diesem Schritt.</p>
-          ) : (
-            <div className="grid gap-4">
-              {step.fields.map((field) => (
-                <div key={field.id} className="grid gap-2">
-                  <div className="grid gap-1">
-                    <p className="text-sm font-semibold">
-                      {field.title || "Unbenanntes Feld"}{" "}
-                      {field.required ? (
-                        <span className="text-red-400">*</span>
-                      ) : null}
-                    </p>
-                    {field.description ? (
-                      <p className="text-sm text-secondary">
-                        {field.description}
+      {!isInfoIntroStep ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{step?.title || `Schritt ${stepIndex + 1}`}</CardTitle>
+            {step?.description ? (
+              <CardDescription>{step.description}</CardDescription>
+            ) : null}
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            {visibleFields.length === 0 ? (
+              <p className="text-sm text-secondary">
+                Keine Felder in diesem Schritt.
+              </p>
+            ) : (
+              <div className="grid gap-4">
+                {visibleFields.map((field) => (
+                  <div key={field.id} className="grid gap-2">
+                    <div className="grid gap-1">
+                      <p className="text-sm font-semibold">
+                        {field.title || "Unbenanntes Feld"}{" "}
+                        {field.required ? (
+                          <span className="text-red-400">*</span>
+                        ) : null}
                       </p>
+                      {field.description ? (
+                        <p className="text-sm text-secondary">
+                          {field.description}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    {field.type === "text" ? (
+                      <Input
+                        value={(answers[field.id] as string) ?? ""}
+                        onChange={(e) => setAnswer(field.id, e.target.value)}
+                        placeholder={
+                          survey.answerPlaceholder?.trim() || "Deine Antwort…"
+                        }
+                      />
                     ) : null}
-                  </div>
 
-                  {field.type === "text" ? (
-                    <Input
-                      value={(answers[field.id] as string) ?? ""}
-                      onChange={(e) => setAnswer(field.id, e.target.value)}
-                      placeholder={field.placeholder || "Deine Antwort…"}
-                    />
-                  ) : null}
-
-                  {field.type === "radio" ? (
-                    <div className="grid gap-2">
-                      {field.options.map((opt) => {
-                        const selected = answers[field.id] === opt.label;
-                        return (
-                          <label
-                            key={opt.id}
-                            className={cn(
-                              "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
-                              selected ? "border-primary bg-primary/5" : "border-input bg-background",
-                            )}
-                          >
-                            <input
-                              type="radio"
-                              name={field.id}
-                              checked={selected}
-                              className="peer sr-only"
-                              onChange={() => setAnswer(field.id, opt.label)}
-                            />
-                            <span
-                              aria-hidden="true"
-                              className={cn(
-                                "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
-                                selected ? "border-primary" : "border-primary/70",
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  "h-2 w-2 rounded-full bg-primary transition-opacity",
-                                  selected ? "opacity-100" : "opacity-0",
-                                )}
-                              />
-                            </span>
-                            {opt.label}
-                          </label>
-                        );
-                      })}
-                      {field.allowOtherOption === true ? (
-                        (() => {
-                          const presetLabels = field.options.map((opt) => opt.label);
-                          const otherState = getRadioOtherState(answers[field.id], presetLabels);
+                    {field.type === "radio" ? (
+                      <div className="grid gap-2">
+                        {field.options.map((opt) => {
+                          const selected = answers[field.id] === opt.label;
                           return (
                             <label
+                              key={opt.id}
                               className={cn(
-                                "grid cursor-pointer gap-2 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors",
-                                otherState.selected
+                                "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                selected
                                   ? "border-primary bg-primary/5"
                                   : "border-input bg-background",
                               )}
                             >
-                              <span className="flex items-center gap-3">
-                                <input
-                                  type="radio"
-                                  name={field.id}
-                                  checked={otherState.selected}
-                                  className="peer sr-only"
-                                  onChange={() => setAnswer(field.id, RADIO_OTHER_TOKEN)}
-                                />
+                              <input
+                                type="radio"
+                                name={field.id}
+                                checked={selected}
+                                className="peer sr-only"
+                                onChange={() => setAnswer(field.id, opt.label)}
+                              />
+                              <span
+                                aria-hidden="true"
+                                className={cn(
+                                  "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
+                                  selected
+                                    ? "border-primary"
+                                    : "border-primary/70",
+                                )}
+                              >
                                 <span
-                                  aria-hidden="true"
                                   className={cn(
-                                    "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
-                                    otherState.selected ? "border-primary" : "border-primary/70",
+                                    "h-2 w-2 rounded-full bg-primary transition-opacity",
+                                    selected ? "opacity-100" : "opacity-0",
                                   )}
-                                >
-                                  <span
-                                    className={cn(
-                                      "h-2 w-2 rounded-full bg-primary transition-opacity",
-                                      otherState.selected ? "opacity-100" : "opacity-0",
-                                    )}
-                                  />
-                                </span>
-                                Andere
-                              </span>
-                              {otherState.selected ? (
-                                <Input
-                                  value={otherState.text}
-                                  placeholder="Eigene Option eingeben…"
-                                  onChange={(e) =>
-                                    setAnswer(field.id, buildRadioAnswer(e.target.value))
-                                  }
                                 />
-                              ) : null}
+                              </span>
+                              {opt.label}
                             </label>
                           );
-                        })()
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {field.type === "checkbox" ? (
-                    <div className="grid gap-2">
-                      {(() => {
-                        const presetLabels = field.options.map((o) => o.label);
-                        const otherState = parseCheckboxOtherEntries(answers[field.id], presetLabels);
-                        return (
-                          <>
-                            {field.options.map((opt) => {
-                              const checked = otherState.selectedPresets.has(opt.label);
+                        })}
+                        {field.allowOtherOption === true
+                          ? (() => {
+                              const presetLabels = field.options.map(
+                                (opt) => opt.label,
+                              );
+                              const otherState = getRadioOtherState(
+                                answers[field.id],
+                                presetLabels,
+                              );
                               return (
                                 <label
-                                  key={opt.id}
                                   className={cn(
-                                    "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
-                                    checked ? "border-primary bg-primary/5" : "border-input bg-background",
+                                    "grid cursor-pointer gap-2 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors",
+                                    otherState.selected
+                                      ? "border-primary bg-primary/5"
+                                      : "border-input bg-background",
                                   )}
                                 >
-                                  <Checkbox
-                                    checked={checked}
-                                    onCheckedChange={(next) => {
-                                      const nextSet = new Set(otherState.selectedPresets);
-                                      if (next) nextSet.add(opt.label);
-                                      else nextSet.delete(opt.label);
-                                      setAnswer(
-                                        field.id,
-                                        buildCheckboxAnswer(
-                                          presetLabels,
-                                          nextSet,
-                                          otherState.otherEntries,
-                                        ),
-                                      );
-                                    }}
-                                  />
-                                  {opt.label}
+                                  <span className="flex items-center gap-3">
+                                    <input
+                                      type="radio"
+                                      name={field.id}
+                                      checked={otherState.selected}
+                                      className="peer sr-only"
+                                      onChange={() =>
+                                        setAnswer(field.id, RADIO_OTHER_TOKEN)
+                                      }
+                                    />
+                                    <span
+                                      aria-hidden="true"
+                                      className={cn(
+                                        "flex h-4 w-4 items-center justify-center rounded-full border bg-background",
+                                        otherState.selected
+                                          ? "border-primary"
+                                          : "border-primary/70",
+                                      )}
+                                    >
+                                      <span
+                                        className={cn(
+                                          "h-2 w-2 rounded-full bg-primary transition-opacity",
+                                          otherState.selected
+                                            ? "opacity-100"
+                                            : "opacity-0",
+                                        )}
+                                      />
+                                    </span>
+                                    Andere
+                                  </span>
+                                  {otherState.selected ? (
+                                    <Input
+                                      value={otherState.text}
+                                      placeholder="Eigene Option eingeben…"
+                                      onChange={(e) =>
+                                        setAnswer(
+                                          field.id,
+                                          buildRadioAnswer(e.target.value),
+                                        )
+                                      }
+                                    />
+                                  ) : null}
                                 </label>
                               );
-                            })}
+                            })()
+                          : null}
+                      </div>
+                    ) : null}
 
-                            {field.allowOtherOption !== false
-                              ? otherState.otherEntries.map((entry, entryIdx) => (
-                                  <div
-                                    key={entry.id}
+                    {field.type === "checkbox" ? (
+                      <div className="grid gap-2">
+                        {(() => {
+                          const presetLabels = field.options.map(
+                            (o) => o.label,
+                          );
+                          const otherState = parseCheckboxOtherEntries(
+                            answers[field.id],
+                            presetLabels,
+                          );
+                          return (
+                            <>
+                              {field.options.map((opt) => {
+                                const checked = otherState.selectedPresets.has(
+                                  opt.label,
+                                );
+                                return (
+                                  <label
+                                    key={opt.id}
                                     className={cn(
-                                      "flex items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
-                                      "border-primary bg-primary/5",
+                                      "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                      checked
+                                        ? "border-primary bg-primary/5"
+                                        : "border-input bg-background",
                                     )}
                                   >
                                     <Checkbox
-                                      checked
+                                      checked={checked}
                                       onCheckedChange={(next) => {
-                                        if (next !== false) return;
+                                        const nextSet = new Set(
+                                          otherState.selectedPresets,
+                                        );
+                                        if (next) nextSet.add(opt.label);
+                                        else nextSet.delete(opt.label);
                                         setAnswer(
                                           field.id,
-                                          removeCheckboxOtherEntry(
-                                            answers[field.id],
+                                          buildCheckboxAnswer(
                                             presetLabels,
-                                            entry.id,
+                                            nextSet,
+                                            otherState.otherEntries,
                                           ),
                                         );
                                       }}
                                     />
-                                    <Input
-                                      value={entry.text}
-                                      placeholder={`Eigene Option ${entryIdx + 1}…`}
-                                      className="h-9 min-w-0 flex-1"
-                                      onChange={(e) =>
-                                        setAnswer(
-                                          field.id,
-                                          setCheckboxOtherEntryText(
-                                            answers[field.id],
-                                            presetLabels,
-                                            entry.id,
-                                            e.target.value,
-                                          ),
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                ))
-                              : null}
+                                    {opt.label}
+                                  </label>
+                                );
+                              })}
 
-                            {field.allowOtherOption !== false ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="w-full justify-center sm:w-auto"
-                                onClick={() =>
-                                  setAnswer(
-                                    field.id,
-                                    addCheckboxOtherEntry(answers[field.id], presetLabels),
+                              {field.allowOtherOption !== false
+                                ? otherState.otherEntries.map(
+                                    (entry, entryIdx) => (
+                                      <div
+                                        key={entry.id}
+                                        className={cn(
+                                          "flex items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
+                                          "border-primary bg-primary/5",
+                                        )}
+                                      >
+                                        <Checkbox
+                                          checked
+                                          onCheckedChange={(next) => {
+                                            if (next !== false) return;
+                                            setAnswer(
+                                              field.id,
+                                              removeCheckboxOtherEntry(
+                                                answers[field.id],
+                                                presetLabels,
+                                                entry.id,
+                                              ),
+                                            );
+                                          }}
+                                        />
+                                        <Input
+                                          value={entry.text}
+                                          placeholder={`Eigene Option ${entryIdx + 1}…`}
+                                          className="h-9 min-w-0 flex-1"
+                                          onChange={(e) =>
+                                            setAnswer(
+                                              field.id,
+                                              setCheckboxOtherEntryText(
+                                                answers[field.id],
+                                                presetLabels,
+                                                entry.id,
+                                                e.target.value,
+                                              ),
+                                            )
+                                          }
+                                        />
+                                      </div>
+                                    ),
                                   )
-                                }
-                              >
-                                <Plus className="mr-2 h-4 w-4" />
-                                Andere / eigene Option hinzufügen
-                              </Button>
-                            ) : null}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  ) : null}
+                                : null}
 
-                  {field.type === "rating" ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      {Array.from({
-                        length: field.scale.max - field.scale.min + 1,
-                      }).map((_, i) => {
-                        const value = field.scale.min + i;
-                        const selected = answers[field.id] === value;
-                        return (
-                          <Button
-                            key={value}
-                            type="button"
-                            variant={selected ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setAnswer(field.id, value)}
-                          >
-                            {value}
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+                              {field.allowOtherOption !== false ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="w-full justify-center sm:w-auto"
+                                  onClick={() =>
+                                    setAnswer(
+                                      field.id,
+                                      addCheckboxOtherEntry(
+                                        answers[field.id],
+                                        presetLabels,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  <Plus className="mr-2 h-4 w-4" />
+                                  Andere / eigene Option hinzufügen
+                                </Button>
+                              ) : null}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    ) : null}
 
-                  {field.type === "ranking" ? (
-                    <SurveyRankingInput
-                      fieldId={field.id}
-                      presetLabels={field.options.map((opt) => opt.label)}
-                      value={answers[field.id]}
-                      onChange={(next) => setAnswer(field.id, next)}
-                      allowCustomEntries={field.allowCustomEntries !== false}
-                    />
-                  ) : null}
-                </div>
-              ))}
+                    {field.type === "rating" ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {Array.from({
+                          length: field.scale.max - field.scale.min + 1,
+                        }).map((_, i) => {
+                          const value = field.scale.min + i;
+                          const selected = answers[field.id] === value;
+                          return (
+                            <Button
+                              key={value}
+                              type="button"
+                              variant={selected ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setAnswer(field.id, value)}
+                            >
+                              {value}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    {field.type === "ranking" ? (
+                      <SurveyRankingInput
+                        fieldId={field.id}
+                        presetLabels={field.options.map((opt) => opt.label)}
+                        value={answers[field.id]}
+                        onChange={(next) => setAnswer(field.id, next)}
+                        allowCustomEntries={field.allowCustomEntries !== false}
+                      />
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!canBack}
+                onClick={() => setStepIndex(stepIndex - 1)}
+              >
+                Zurück
+              </Button>
+              <div />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!canNext}
+                onClick={() => setStepIndex(stepIndex + 1)}
+              >
+                Weiter
+              </Button>
             </div>
-          )}
-
-          <div className="flex items-center justify-between gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!canBack}
-              onClick={() => setStepIndex(stepIndex - 1)}
-            >
-              Zurück
-            </Button>
-            <div />
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!canNext}
-              onClick={() => setStepIndex(stepIndex + 1)}
-            >
-              Weiter
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="flex items-center justify-end">
         <Button onClick={onExitPreview} variant="secondary">
@@ -1865,6 +2573,36 @@ function SurveyPreview({
           Vorschau schließen
         </Button>
       </div>
+      {hasInfoText && isInfoOpen ? (
+        <div
+          className="fixed inset-0 z-[120] bg-black/50 p-4 backdrop-blur-sm"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setIsInfoOpen(false);
+          }}
+        >
+          <div className="mx-auto flex min-h-full w-full max-w-3xl items-center px-4">
+            <Card className="w-full">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-base">Info</CardTitle>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Info schließen"
+                    onClick={() => setIsInfoOpen(false)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <FormattedInfoText text={survey.infoText ?? ""} />
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -35,4 +35,3 @@ export function DashboardShell({
     </div>
   );
 }
-

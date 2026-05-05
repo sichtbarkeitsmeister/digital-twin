@@ -247,6 +247,64 @@ export async function publishSurveyAction(
   return { ok: true, message: "Umfrage veröffentlicht.", data: { surveyId: existing.id, slug } };
 }
 
+const updateSlugSchema = z.object({
+  surveyId: z.string().uuid(),
+  slug: z
+    .string()
+    .trim()
+    .min(1, "URL-Slug ist erforderlich.")
+    .max(64, "URL-Slug darf maximal 64 Zeichen haben.")
+    .regex(/^[a-z0-9-]+$/, "URL-Slug darf nur Kleinbuchstaben, Zahlen und Bindestriche enthalten."),
+});
+
+export async function updateSurveySlugAction(
+  input: z.input<typeof updateSlugSchema>,
+): Promise<ActionState<{ surveyId: string; slug: string }>> {
+  const parsed = updateSlugSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+  const { supabase } = auth;
+
+  const nextSlug = parsed.data.slug.toLowerCase();
+
+  const { data: existingCollision } = await supabase
+    .from("surveys")
+    .select("id")
+    .eq("slug", nextSlug)
+    .neq("id", parsed.data.surveyId)
+    .maybeSingle();
+  if (existingCollision?.id) {
+    return { ok: false, message: "Diese URL ist bereits vergeben." };
+  }
+
+  const { data: currentSurvey } = await supabase
+    .from("surveys")
+    .select("slug")
+    .eq("id", parsed.data.surveyId)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from("surveys")
+    .update({ slug: nextSlug })
+    .eq("id", parsed.data.surveyId);
+  if (error) return { ok: false, message: "URL konnte nicht gespeichert werden." };
+
+  revalidatePath("/dashboard/surveys");
+  revalidatePath(`/dashboard/surveys/${parsed.data.surveyId}/edit`);
+  if (currentSurvey?.slug) revalidatePath(`/s/${currentSurvey.slug}`);
+  revalidatePath(`/s/${nextSlug}`);
+
+  return {
+    ok: true,
+    message: "URL gespeichert.",
+    data: { surveyId: parsed.data.surveyId, slug: nextSlug },
+  };
+}
+
 const unpublishSchema = z.object({ surveyId: z.string().uuid() });
 
 export async function unpublishSurveyAction(
@@ -385,6 +443,15 @@ export async function deleteSurveyFolderAction(
   const auth = await requirePlatformAdmin();
   if (!auth.ok) return { ok: false, message: auth.message };
   const { supabase } = auth;
+
+  // Keep surveys, only remove folder assignment before deleting folder.
+  const { error: unassignError } = await supabase
+    .from("surveys")
+    .update({ folder_id: null })
+    .eq("folder_id", parsed.data.folderId);
+  if (unassignError) {
+    return { ok: false, message: "Ordner-Zuordnung konnte nicht entfernt werden." };
+  }
 
   const { error } = await supabase.from("survey_folders").delete().eq("id", parsed.data.folderId);
   if (error) return { ok: false, message: "Ordner konnte nicht gelöscht werden." };

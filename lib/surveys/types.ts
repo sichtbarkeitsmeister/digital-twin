@@ -22,7 +22,6 @@ export type SurveyFieldBase = {
 
 export type SurveyTextField = SurveyFieldBase & {
   type: "text";
-  placeholder: string;
 };
 
 export type SurveyRadioField = SurveyFieldBase & {
@@ -70,6 +69,12 @@ export type Survey = {
   id: string;
   title: string;
   description: string;
+  /** Enables display of infotext on the first page. Default: false. */
+  infoTextEnabled?: boolean;
+  /** Optional formatted infotext shown on first page when enabled. */
+  infoText?: string;
+  /** Global placeholder used by all text fields. */
+  answerPlaceholder?: string;
   steps: SurveyStep[];
 };
 
