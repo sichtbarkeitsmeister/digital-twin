@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type WheelEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 import { ArrowUp, PanelLeftOpen, Plus, Settings, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -12,8 +20,14 @@ import {
 import { SURVEY_AI_MAX_ASSISTANT_RULES_CHARS } from "@/lib/settings/survey-ai-server";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { SurveyAiChatList, type AiChatListItem } from "@/components/surveys/survey-ai-chat-list";
-import { SurveyAiChatThread, type AiChatMessage } from "@/components/surveys/survey-ai-chat-thread";
+import {
+  SurveyAiChatList,
+  type AiChatListItem,
+} from "@/components/surveys/survey-ai-chat-list";
+import {
+  SurveyAiChatThread,
+  type AiChatMessage,
+} from "@/components/surveys/survey-ai-chat-thread";
 import type { AiChatAction } from "@/components/surveys/survey-ai-action-trace";
 import { countSurveyDeletesInProposal } from "@/lib/ai/survey-assistant-types";
 
@@ -32,16 +46,18 @@ type AttachmentDraft = {
   textContent?: string;
 };
 
-export function SurveyAiChatShell(props: {
-  pageContext: PageContext;
-}) {
+export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
-  const [showArchived, setShowArchived] = useState(getSurveyAiShowArchivedDefault());
-  const [autoNavigate, setAutoNavigate] = useState(getSurveyAiAutoNavigateDefault());
+  const [showArchived, setShowArchived] = useState(
+    getSurveyAiShowArchivedDefault(),
+  );
+  const [autoNavigate, setAutoNavigate] = useState(
+    getSurveyAiAutoNavigateDefault(),
+  );
 
   const [chats, setChats] = useState<AiChatListItem[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -131,8 +147,12 @@ export function SurveyAiChatShell(props: {
           ? "Du erstellst gerade eine neue Umfrage."
           : "Du bearbeitest gerade eine bestehende Umfrage.";
     const details = [
-      props.pageContext.surveyId ? `Survey-ID: ${props.pageContext.surveyId}` : null,
-      props.pageContext.visibility ? `Sichtbarkeit: ${props.pageContext.visibility}` : null,
+      props.pageContext.surveyId
+        ? `Survey-ID: ${props.pageContext.surveyId}`
+        : null,
+      props.pageContext.visibility
+        ? `Sichtbarkeit: ${props.pageContext.visibility}`
+        : null,
       props.pageContext.slug ? `Slug: ${props.pageContext.slug}` : null,
     ]
       .filter(Boolean)
@@ -140,71 +160,83 @@ export function SurveyAiChatShell(props: {
     return details ? `${pageLabel} ${details}` : pageLabel;
   }, [props.pageContext]);
 
-  const handleShellWheelCapture = useCallback((e: WheelEvent<HTMLDivElement>) => {
-    const root = shellRef.current;
-    if (!root) return;
+  const handleShellWheelCapture = useCallback(
+    (e: WheelEvent<HTMLDivElement>) => {
+      const root = shellRef.current;
+      if (!root) return;
 
-    const target = e.target as HTMLElement | null;
-    if (!target || !root.contains(target)) return;
+      const target = e.target as HTMLElement | null;
+      if (!target || !root.contains(target)) return;
 
-    const isScrollable = (el: HTMLElement) => {
-      const style = window.getComputedStyle(el);
-      const overflowY = style.overflowY;
-      return (
-        (overflowY === "auto" || overflowY === "scroll") &&
-        el.scrollHeight > el.clientHeight
-      );
-    };
+      const isScrollable = (el: HTMLElement) => {
+        const style = window.getComputedStyle(el);
+        const overflowY = style.overflowY;
+        return (
+          (overflowY === "auto" || overflowY === "scroll") &&
+          el.scrollHeight > el.clientHeight
+        );
+      };
 
-    let current: HTMLElement | null = target;
-    let scrollContainer: HTMLElement | null = null;
-    while (current && current !== root) {
-      if (isScrollable(current)) {
-        scrollContainer = current;
-        break;
+      let current: HTMLElement | null = target;
+      let scrollContainer: HTMLElement | null = null;
+      while (current && current !== root) {
+        if (isScrollable(current)) {
+          scrollContainer = current;
+          break;
+        }
+        current = current.parentElement;
       }
-      current = current.parentElement;
-    }
 
-    if (!scrollContainer && messagesViewportRef.current) {
-      scrollContainer = messagesViewportRef.current;
-    }
+      if (!scrollContainer && messagesViewportRef.current) {
+        scrollContainer = messagesViewportRef.current;
+      }
 
-    if (scrollContainer) {
-      scrollContainer.scrollTop += e.deltaY;
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  }, []);
+      if (scrollContainer) {
+        scrollContainer.scrollTop += e.deltaY;
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    [],
+  );
 
-  const loadChats = useCallback(async (nextQuery = query, nextShowArchived = showArchived) => {
-    const sp = new URLSearchParams();
-    if (nextQuery.trim()) sp.set("q", nextQuery.trim());
-    if (nextShowArchived) sp.set("includeArchived", "1");
-    const res = await fetch(`/api/ai/chats?${sp.toString()}`, { cache: "no-store" });
-    const data = (await res.json()) as { ok: boolean; chats?: AiChatListItem[]; message?: string };
-    if (!res.ok || !data.ok) {
-      setStatus(data.message ?? "Chats konnten nicht geladen werden.");
-      finishInitialLoading();
-      return;
-    }
-    const nextChats = data.chats ?? [];
-    setChats(nextChats);
-    const preferredId = selectedChatId ?? preferredChatIdRef.current;
-    if (preferredId && nextChats.some((chat) => chat.id === preferredId)) {
-      if (selectedChatId !== preferredId) {
-        setSelectedChatId(preferredId);
+  const loadChats = useCallback(
+    async (nextQuery = query, nextShowArchived = showArchived) => {
+      const sp = new URLSearchParams();
+      if (nextQuery.trim()) sp.set("q", nextQuery.trim());
+      if (nextShowArchived) sp.set("includeArchived", "1");
+      const res = await fetch(`/api/ai/chats?${sp.toString()}`, {
+        cache: "no-store",
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        chats?: AiChatListItem[];
+        message?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setStatus(data.message ?? "Chats konnten nicht geladen werden.");
+        finishInitialLoading();
+        return;
+      }
+      const nextChats = data.chats ?? [];
+      setChats(nextChats);
+      const preferredId = selectedChatId ?? preferredChatIdRef.current;
+      if (preferredId && nextChats.some((chat) => chat.id === preferredId)) {
+        if (selectedChatId !== preferredId) {
+          setSelectedChatId(preferredId);
+        }
+        finishInitialLoading();
+        return;
+      }
+      if (nextChats.length > 0) {
+        setSelectedChatId(nextChats[0]?.id ?? null);
+      } else if (selectedChatId) {
+        setSelectedChatId(null);
       }
       finishInitialLoading();
-      return;
-    }
-    if (nextChats.length > 0) {
-      setSelectedChatId(nextChats[0]?.id ?? null);
-    } else if (selectedChatId) {
-      setSelectedChatId(null);
-    }
-    finishInitialLoading();
-  }, [finishInitialLoading, query, selectedChatId, showArchived]);
+    },
+    [finishInitialLoading, query, selectedChatId, showArchived],
+  );
 
   const loadChat = useCallback(async (chatId: string) => {
     const res = await fetch(`/api/ai/chats/${chatId}`, { cache: "no-store" });
@@ -220,7 +252,9 @@ export function SurveyAiChatShell(props: {
       return;
     }
     const nextTitle =
-      typeof data.chat?.title === "string" && data.chat.title.trim() ? data.chat.title.trim() : null;
+      typeof data.chat?.title === "string" && data.chat.title.trim()
+        ? data.chat.title.trim()
+        : null;
     if (nextTitle) {
       setChats((prev) =>
         prev.some((c) => c.id === chatId)
@@ -231,7 +265,9 @@ export function SurveyAiChatShell(props: {
     setMessages((data.messages ?? []) as AiChatMessage[]);
     setActions((data.actions ?? []) as AiChatAction[]);
     const rules =
-      typeof data.chat?.assistant_rules === "string" ? data.chat.assistant_rules : "";
+      typeof data.chat?.assistant_rules === "string"
+        ? data.chat.assistant_rules
+        : "";
     setChatAssistantRules(rules);
     lastPersistedAssistantRulesRef.current = rules;
   }, []);
@@ -259,7 +295,11 @@ export function SurveyAiChatShell(props: {
             body: JSON.stringify({ assistantRules: rulesForPatch }),
           });
           const data = (await res.json()) as { ok: boolean; message?: string };
-          if (res.ok && data.ok && selectedChatIdRef.current === chatIdForPatch) {
+          if (
+            res.ok &&
+            data.ok &&
+            selectedChatIdRef.current === chatIdForPatch
+          ) {
             lastPersistedAssistantRulesRef.current = rulesForPatch;
           } else if (data.message) {
             setStatus(data.message);
@@ -298,7 +338,11 @@ export function SurveyAiChatShell(props: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    const data = (await res.json()) as { ok: boolean; chat?: AiChatListItem; message?: string };
+    const data = (await res.json()) as {
+      ok: boolean;
+      chat?: AiChatListItem;
+      message?: string;
+    };
     if (!res.ok || !data.ok || !data.chat) {
       setStatus(data.message ?? "Chat konnte nicht erstellt werden.");
       return;
@@ -353,7 +397,11 @@ export function SurveyAiChatShell(props: {
         mimeType: f.type || "application/octet-stream",
         sizeBytes: f.size,
       };
-      if (f.type.startsWith("text/") || f.type.includes("json") || f.name.endsWith(".md")) {
+      if (
+        f.type.startsWith("text/") ||
+        f.type.includes("json") ||
+        f.name.endsWith(".md")
+      ) {
         try {
           draft.textContent = (await f.text()).slice(0, 20000);
         } catch {
@@ -380,7 +428,11 @@ export function SurveyAiChatShell(props: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const data = (await res.json()) as { ok: boolean; chat?: AiChatListItem; message?: string };
+      const data = (await res.json()) as {
+        ok: boolean;
+        chat?: AiChatListItem;
+        message?: string;
+      };
       if (!res.ok || !data.ok || !data.chat) {
         setStatus(data.message ?? "Chat konnte nicht erstellt werden.");
         return;
@@ -419,7 +471,9 @@ export function SurveyAiChatShell(props: {
         }),
       });
       if (!res.ok || !res.body) {
-        const data = (await res.json().catch(() => null)) as { message?: string } | null;
+        const data = (await res.json().catch(() => null)) as {
+          message?: string;
+        } | null;
         setStatus(data?.message ?? "Nachricht konnte nicht gesendet werden.");
         setIsBusy(false);
         return;
@@ -439,7 +493,10 @@ export function SurveyAiChatShell(props: {
           const dataMatch = evt.match(/^data:\s*(.+)$/m);
           if (!eventMatch || !dataMatch) continue;
           const eventName = eventMatch[1]?.trim();
-          const payload = JSON.parse(dataMatch[1] ?? "{}") as Record<string, unknown>;
+          const payload = JSON.parse(dataMatch[1] ?? "{}") as Record<
+            string,
+            unknown
+          >;
           if (eventName === "status") {
             const nextStatus =
               typeof payload.message === "string" && payload.message.trim()
@@ -478,7 +535,10 @@ export function SurveyAiChatShell(props: {
     );
   }
 
-  async function maybeTriggerAutoFixForFailedAction(actionId: string, failureMessage: string) {
+  async function maybeTriggerAutoFixForFailedAction(
+    actionId: string,
+    failureMessage: string,
+  ) {
     if (!isLikelyDuplicateIdFailure(failureMessage)) return;
     const shouldFix = window.confirm(
       "Die Aktion ist wegen doppelter IDs fehlgeschlagen. Soll ich die KI automatisch einen korrigierten Vorschlag mit eindeutigen IDs erstellen lassen?",
@@ -489,7 +549,8 @@ export function SurveyAiChatShell(props: {
       relatedAction &&
       relatedAction.proposal_json &&
       typeof relatedAction.proposal_json === "object" &&
-      typeof (relatedAction.proposal_json as { kind?: unknown }).kind === "string"
+      typeof (relatedAction.proposal_json as { kind?: unknown }).kind ===
+        "string"
         ? String((relatedAction.proposal_json as { kind: string }).kind)
         : "unbekannt";
     const fixPrompt =
@@ -505,21 +566,33 @@ export function SurveyAiChatShell(props: {
     if (!selectedChatId) return;
     const proposalSource = actions.find((a) => a.id === actionId);
     const deleteCount =
-      proposalSource?.proposal_json != null ? countSurveyDeletesInProposal(proposalSource.proposal_json) : 0;
+      proposalSource?.proposal_json != null
+        ? countSurveyDeletesInProposal(proposalSource.proposal_json)
+        : 0;
     if (deleteCount > 1) {
-      const confirmed = window.confirm(`${deleteCount} Umfragen löschen — wirklich?`);
+      const confirmed = window.confirm(
+        `${deleteCount} Umfragen löschen — wirklich?`,
+      );
       if (!confirmed) return;
     }
     setPendingActionId(actionId);
-    const res = await fetch(`/api/ai/chats/${selectedChatId}/actions/${actionId}/apply`, {
-      method: "POST",
-    });
-    const data = (await res.json()) as { ok: boolean; message: string; navigateTo?: string | null };
+    const res = await fetch(
+      `/api/ai/chats/${selectedChatId}/actions/${actionId}/apply`,
+      {
+        method: "POST",
+      },
+    );
+    const data = (await res.json()) as {
+      ok: boolean;
+      message: string;
+      navigateTo?: string | null;
+    };
     setStatus(data.message);
     if (!data.ok) {
       await maybeTriggerAutoFixForFailedAction(actionId, data.message);
     }
-    if (data.ok && autoNavigate && data.navigateTo) router.push(data.navigateTo);
+    if (data.ok && autoNavigate && data.navigateTo)
+      router.push(data.navigateTo);
     if (data.ok) router.refresh();
     await loadChat(selectedChatId);
     await loadChats();
@@ -529,9 +602,12 @@ export function SurveyAiChatShell(props: {
   async function revertAction(actionId: string) {
     if (!selectedChatId) return;
     setPendingActionId(actionId);
-    const res = await fetch(`/api/ai/chats/${selectedChatId}/actions/${actionId}/revert`, {
-      method: "POST",
-    });
+    const res = await fetch(
+      `/api/ai/chats/${selectedChatId}/actions/${actionId}/revert`,
+      {
+        method: "POST",
+      },
+    );
     const data = (await res.json()) as { ok: boolean; message: string };
     setStatus(data.message);
     if (data.ok) router.refresh();
@@ -543,9 +619,12 @@ export function SurveyAiChatShell(props: {
   async function rejectAction(actionId: string) {
     if (!selectedChatId) return;
     setPendingActionId(actionId);
-    const res = await fetch(`/api/ai/chats/${selectedChatId}/actions/${actionId}/reject`, {
-      method: "POST",
-    });
+    const res = await fetch(
+      `/api/ai/chats/${selectedChatId}/actions/${actionId}/reject`,
+      {
+        method: "POST",
+      },
+    );
     const data = (await res.json()) as { ok: boolean; message: string };
     setStatus(data.message);
     await loadChat(selectedChatId);
@@ -557,7 +636,9 @@ export function SurveyAiChatShell(props: {
     <div
       ref={shellRef}
       className={`grid h-full min-h-0 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-xl overscroll-contain ${
-        sidebarCollapsed ? "grid-cols-[54px_minmax(0,1fr)]" : "grid-cols-[280px_minmax(0,1fr)]"
+        sidebarCollapsed
+          ? "grid-cols-[54px_minmax(0,1fr)]"
+          : "grid-cols-[280px_minmax(0,1fr)]"
       }`}
       onWheelCapture={handleShellWheelCapture}
     >
@@ -581,7 +662,9 @@ export function SurveyAiChatShell(props: {
               onClick={() => {
                 router.push("/settings#survey-ai-settings");
                 window.requestAnimationFrame(() => {
-                  document.getElementById("survey-ai-settings")?.scrollIntoView({ behavior: "smooth" });
+                  document
+                    .getElementById("survey-ai-settings")
+                    ?.scrollIntoView({ behavior: "smooth" });
                 });
               }}
               aria-label="Survey-KI-Einstellungen öffnen"
@@ -618,11 +701,18 @@ export function SurveyAiChatShell(props: {
       )}
 
       <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-transparent">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-card/85 px-4 py-3 backdrop-blur">
-          <div>
-            <p className="text-sm font-semibold">{headerChatTitle ?? "Survey KI"}</p>
-            <p className="text-xs text-secondary">{contextSummary}</p>
-            {status ? <p className="mt-1 text-xs text-secondary">{status}</p> : null}
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-card/85 px-4 py-3 backdrop-blur">
+          <div className="min-w-0 shrink">
+            <p
+              className="truncate text-sm font-semibold"
+              title={headerChatTitle ?? "Survey KI"}
+            >
+              {headerChatTitle ?? "Survey KI"}
+            </p>
+            <p className="truncate text-xs text-secondary">{contextSummary}</p>
+            {status ? (
+              <p className="mt-1 text-xs text-secondary">{status}</p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2 text-xs">
             <Button
@@ -635,7 +725,9 @@ export function SurveyAiChatShell(props: {
               onClick={() => {
                 router.push("/settings#survey-ai-settings");
                 window.requestAnimationFrame(() => {
-                  document.getElementById("survey-ai-settings")?.scrollIntoView({ behavior: "smooth" });
+                  document
+                    .getElementById("survey-ai-settings")
+                    ?.scrollIntoView({ behavior: "smooth" });
                 });
               }}
             >
@@ -795,12 +887,16 @@ export function SurveyAiChatShell(props: {
             >
               <div className="flex shrink-0 items-start justify-between gap-2 border-b border-border/70 pb-3">
                 <div className="min-w-0">
-                  <p id="chat-context-panel-title" className="text-sm font-semibold">
+                  <p
+                    id="chat-context-panel-title"
+                    className="text-sm font-semibold"
+                  >
                     Chat-Kontext
                   </p>
                   <p className="text-xs text-secondary">
-                    Zusätzliche Anweisungen nur für diesen Chat. Ergänzt die globalen Regeln unter
-                    Einstellungen und speichert automatisch.
+                    Zusätzliche Anweisungen nur für diesen Chat. Ergänzt die
+                    globalen Regeln unter Einstellungen und speichert
+                    automatisch.
                   </p>
                 </div>
                 <Button
@@ -819,12 +915,13 @@ export function SurveyAiChatShell(props: {
                   value={chatAssistantRules}
                   maxLength={SURVEY_AI_MAX_ASSISTANT_RULES_CHARS}
                   onChange={(e) => setChatAssistantRules(e.target.value)}
-                  placeholder='z. B. „Nur Ordner XY“ oder „Antworten in Stichpunkten“'
+                  placeholder="z. B. „Nur Ordner XY“ oder „Antworten in Stichpunkten“"
                   className="min-h-[220px] flex-1 resize-none border border-input bg-muted text-foreground placeholder:text-muted-foreground shadow-sm text-sm leading-relaxed focus-visible:ring-1 focus-visible:ring-ring"
                   aria-label="Chat-Kontext"
                 />
                 <p className="mt-2 shrink-0 text-right text-[11px] text-secondary">
-                  {chatAssistantRules.length}/{SURVEY_AI_MAX_ASSISTANT_RULES_CHARS}
+                  {chatAssistantRules.length}/
+                  {SURVEY_AI_MAX_ASSISTANT_RULES_CHARS}
                 </p>
               </div>
             </div>
@@ -834,4 +931,3 @@ export function SurveyAiChatShell(props: {
     </div>
   );
 }
-

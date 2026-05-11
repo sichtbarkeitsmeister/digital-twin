@@ -1,6 +1,14 @@
 "use client";
 
-import { Archive, PanelLeftClose, Pencil, Plus, Search, Settings2, Trash2 } from "lucide-react";
+import {
+  Archive,
+  PanelLeftClose,
+  Pencil,
+  Plus,
+  Search,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,7 +36,7 @@ export function SurveyAiChatList(props: {
   chatSettingsOpenForId: string | null;
 }) {
   return (
-    <div className="grid h-full grid-rows-[auto_auto_auto_1fr] border-r border-border/70 bg-muted/35 backdrop-blur">
+    <div className="grid h-full min-w-0 grid-rows-[auto_auto_auto_1fr] border-r border-border/70 bg-muted/35 backdrop-blur">
       <div className="flex items-center justify-between gap-2 p-3">
         <p className="text-sm font-semibold">Chats</p>
         <Button
@@ -53,19 +61,25 @@ export function SurveyAiChatList(props: {
         </div>
       </div>
       <div className="px-3 pb-2">
-        <Button type="button" size="sm" className="w-full justify-center gap-1" onClick={props.onCreateChat}>
+        <Button
+          type="button"
+          size="sm"
+          className="w-full justify-center gap-1"
+          onClick={props.onCreateChat}
+        >
           <Plus className="h-4 w-4" />
           Neuer Chat
         </Button>
       </div>
-      <div className="scrollbar-subtle overflow-y-auto px-2 pb-2">
-        <div className="grid gap-1">
+      <div className="scrollbar-subtle min-w-0 overflow-y-auto px-2 pb-2">
+        <div className="grid min-w-0 gap-1">
           {props.chats.map((chat) => {
             const selected = props.selectedChatId === chat.id;
+            const titleText = chat.title || "Neuer Chat";
             return (
               <div
                 key={chat.id}
-                className={`relative rounded-2xl border p-2.5 transition ${
+                className={`relative min-w-0 rounded-2xl border p-2.5 transition ${
                   selected
                     ? "border-primary/35 bg-primary/12 shadow-sm"
                     : "border-border/80 bg-card/80 hover:border-border hover:bg-card"
@@ -75,18 +89,27 @@ export function SurveyAiChatList(props: {
                   type="button"
                   className="absolute inset-0 z-0 rounded-2xl"
                   onClick={() => props.onSelectChat(chat.id)}
-                  aria-label={`Chat öffnen: ${chat.title || "Neuer Chat"}`}
+                  aria-label={`Chat öffnen: ${titleText}`}
                 />
-                <div className="pointer-events-none relative z-10">
-                  <p className="truncate text-sm font-medium">{chat.title || "Neuer Chat"}</p>
-                  <p className="text-[11px] text-secondary">{new Date(chat.updated_at).toLocaleString()}</p>
+                <div className="pointer-events-none relative z-10 min-w-0">
+                  <p
+                    className="truncate text-sm font-medium"
+                    title={titleText}
+                  >
+                    {titleText}
+                  </p>
+                  <p className="text-[11px] text-secondary">
+                    {new Date(chat.updated_at).toLocaleString()}
+                  </p>
                 </div>
                 <div className="relative z-10 mt-2 flex w-full items-center gap-1 pointer-events-none">
                   <Button
                     type="button"
                     size="icon"
                     variant={
-                      props.chatSettingsOpenForId === chat.id ? "secondary" : "ghost"
+                      props.chatSettingsOpenForId === chat.id
+                        ? "secondary"
+                        : "ghost"
                     }
                     className="pointer-events-auto h-7 w-7 shrink-0"
                     onClick={(e) => {
@@ -141,11 +164,12 @@ export function SurveyAiChatList(props: {
             );
           })}
           {props.chats.length === 0 ? (
-            <p className="px-2 py-4 text-xs text-secondary">Keine Chats gefunden.</p>
+            <p className="px-2 py-4 text-xs text-secondary">
+              Keine Chats gefunden.
+            </p>
           ) : null}
         </div>
       </div>
     </div>
   );
 }
-
