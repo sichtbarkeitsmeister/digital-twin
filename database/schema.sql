@@ -736,6 +736,8 @@ CREATE TABLE IF NOT EXISTS public.surveys (
   created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
   published_at timestamptz,
+  deleted_at timestamptz,
+  deleted_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   CONSTRAINT surveys_slug_lower CHECK (slug IS NULL OR slug = lower(slug)),
   CONSTRAINT surveys_slug_format CHECK (slug IS NULL OR slug ~ '^[a-z0-9-]+$')
 );
@@ -801,6 +803,7 @@ CREATE INDEX IF NOT EXISTS survey_folders_name_idx ON public.survey_folders(name
 CREATE INDEX IF NOT EXISTS surveys_visibility_idx ON public.surveys(visibility);
 CREATE INDEX IF NOT EXISTS surveys_created_by_user_id_idx ON public.surveys(created_by_user_id);
 CREATE INDEX IF NOT EXISTS surveys_folder_id_idx ON public.surveys(folder_id);
+CREATE INDEX IF NOT EXISTS surveys_deleted_at_idx ON public.surveys(deleted_at);
 
 CREATE INDEX IF NOT EXISTS survey_responses_survey_id_idx ON public.survey_responses(survey_id);
 CREATE INDEX IF NOT EXISTS survey_responses_status_idx ON public.survey_responses(survey_id, status);
@@ -947,6 +950,7 @@ AS $$
   SELECT s.id, s.title, s.description, s.slug, s.definition, s.published_at
   FROM public.surveys s
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
   LIMIT 1;
 $$;
@@ -974,6 +978,7 @@ BEGIN
   SELECT s.id INTO v_survey_id
   FROM public.surveys s
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
   LIMIT 1;
 
@@ -1018,6 +1023,7 @@ BEGIN
   SELECT s.id INTO v_survey_id
   FROM public.surveys s
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
   LIMIT 1;
 
@@ -1072,6 +1078,7 @@ AS $$
   FROM public.survey_field_questions q
   JOIN public.surveys s ON s.id = q.survey_id
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
     AND q.field_id = p_field_id
     AND q.kind = 'question'
@@ -1108,6 +1115,7 @@ BEGIN
   SELECT s.id INTO v_survey_id
   FROM public.surveys s
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
   LIMIT 1;
 
@@ -1153,6 +1161,7 @@ AS $$
   FROM public.survey_field_questions q
   JOIN public.surveys s ON s.id = q.survey_id
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
     AND q.field_id = p_field_id
     AND q.kind = 'remark'
@@ -1183,6 +1192,7 @@ BEGIN
   SELECT s.id INTO v_survey_id
   FROM public.surveys s
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
   LIMIT 1;
 
@@ -1263,6 +1273,7 @@ AS $$
   FROM public.surveys s
   JOIN public.survey_responses r ON r.survey_id = s.id
   WHERE s.visibility = 'public'
+    AND s.deleted_at IS NULL
     AND s.slug = lower(trim(p_slug))
   LIMIT 1;
 $$;

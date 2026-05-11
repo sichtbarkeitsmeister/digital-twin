@@ -12,6 +12,7 @@ import { CreateSurveyFolderButton } from "@/app/dashboard/surveys/_components/cr
 import { DeleteSurveyFolderButton } from "@/app/dashboard/surveys/_components/delete-survey-folder-button";
 import { SurveyFolderAssignmentMenu } from "@/app/dashboard/surveys/_components/survey-folder-assignment-menu";
 import { SurveyImportButton } from "@/app/dashboard/surveys/_components/survey-import-button";
+import { SurveysAiAssistant } from "@/app/dashboard/surveys/_components/surveys-ai-assistant";
 import { SurveysToolbar } from "@/app/dashboard/surveys/_components/surveys-toolbar";
 import { SurveyRowActions } from "@/app/dashboard/surveys/_components/survey-row-actions";
 
@@ -146,6 +147,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
   const { data: folderUsage } = await supabase
     .from("surveys")
     .select("folder_id")
+    .is("deleted_at", null)
     .not("folder_id", "is", null);
 
   const folderCountById = new Map<string, number>();
@@ -160,6 +162,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
     .select("id,title,description,visibility,slug,updated_at,published_at,definition,folder_id", {
       count: "exact",
     })
+    .is("deleted_at", null)
     .order("updated_at", { ascending: false });
 
   if (visibility !== "all") surveysQuery = surveysQuery.eq("visibility", visibility);
@@ -225,8 +228,6 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
   for (const q of pendingQuestions ?? []) {
     pendingBySurveyId.set(q.survey_id, (pendingBySurveyId.get(q.survey_id) ?? 0) + 1);
   }
-
-  const folderNameById = new Map((folders ?? []).map((f) => [f.id, f.name] as const));
 
   return (
     <div className="grid gap-6">
@@ -344,8 +345,6 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                       ? `/dashboard/surveys/${s.id}/responses/${response.id}`
                       : `/dashboard/surveys/${s.id}/responses`;
                     const editHref = `/dashboard/surveys/${s.id}/edit`;
-                    const folderLabel = s.folder_id ? (folderNameById.get(s.folder_id) ?? "Ordner") : "Ohne Ordner";
-
                     return (
                       <div key={s.id} className="p-4 hover:bg-accent/30">
                         <div className="flex items-start justify-between gap-4">
@@ -506,6 +505,16 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
           ) : null}
         </CardContent>
       </Card>
+      <SurveysAiAssistant
+        surveys={(surveys ?? []).map((s) => ({
+          id: s.id,
+          title: s.title,
+          description: s.description ?? "",
+          visibility: s.visibility,
+          folderId: s.folder_id ?? null,
+        }))}
+        folders={(folders ?? []).map((f) => ({ id: f.id, name: f.name }))}
+      />
     </div>
   );
 }

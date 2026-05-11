@@ -154,7 +154,8 @@ export async function upsertSurveyDraftAction(
         notification_emails: notificationEmails,
         definition: definitionParsed.data,
       })
-      .eq("id", parsed.data.surveyId);
+      .eq("id", parsed.data.surveyId)
+      .is("deleted_at", null);
 
     if (error) return { ok: false, message: "Entwurf konnte nicht gespeichert werden." };
 
@@ -201,6 +202,7 @@ export async function publishSurveyAction(
     .from("surveys")
     .select("id,title,slug,published_at,visibility,notification_emails")
     .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null)
     .single();
 
   if (getError || !existing) return { ok: false, message: "Umfrage nicht gefunden." };
@@ -212,7 +214,8 @@ export async function publishSurveyAction(
   const { error } = await supabase
     .from("surveys")
     .update({ visibility: "public", slug, published_at: publishedAt })
-    .eq("id", existing.id);
+    .eq("id", existing.id)
+    .is("deleted_at", null);
 
   if (error) return { ok: false, message: "Umfrage konnte nicht veröffentlicht werden." };
 
@@ -285,12 +288,14 @@ export async function updateSurveySlugAction(
     .from("surveys")
     .select("slug")
     .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null)
     .maybeSingle();
 
   const { error } = await supabase
     .from("surveys")
     .update({ slug: nextSlug })
-    .eq("id", parsed.data.surveyId);
+    .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null);
   if (error) return { ok: false, message: "URL konnte nicht gespeichert werden." };
 
   revalidatePath("/dashboard/surveys");
@@ -323,7 +328,8 @@ export async function unpublishSurveyAction(
   const { error } = await supabase
     .from("surveys")
     .update({ visibility: "private" })
-    .eq("id", parsed.data.surveyId);
+    .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null);
 
   if (error) return { ok: false, message: "Umfrage konnte nicht privat gemacht werden." };
 
@@ -343,14 +349,43 @@ export async function deleteSurveyAction(
   }
 
   const auth = await requirePlatformAdmin();
-  if (!auth.ok) return { ok: false, message: auth.message };
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
 
-  const { supabase } = auth;
-  const { error } = await supabase.from("surveys").delete().eq("id", parsed.data.surveyId);
+  const { supabase, userId } = auth;
+  const { error } = await supabase
+    .from("surveys")
+    .update({ deleted_at: new Date().toISOString(), deleted_by_user_id: userId })
+    .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null);
   if (error) return { ok: false, message: "Umfrage konnte nicht gelöscht werden." };
 
   revalidatePath("/dashboard/surveys");
-  return { ok: true, message: "Umfrage gelöscht.", data: { surveyId: parsed.data.surveyId } };
+  return { ok: true, message: "Umfrage gelöscht (archiviert).", data: { surveyId: parsed.data.surveyId } };
+}
+
+const restoreSurveySchema = z.object({ surveyId: z.string().uuid() });
+
+export async function restoreSurveyAction(
+  input: z.input<typeof restoreSurveySchema>,
+): Promise<ActionState<{ surveyId: string }>> {
+  const parsed = restoreSurveySchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+
+  const { supabase } = auth;
+  const { error } = await supabase
+    .from("surveys")
+    .update({ deleted_at: null, deleted_by_user_id: null })
+    .eq("id", parsed.data.surveyId);
+  if (error) return { ok: false, message: "Umfrage konnte nicht wiederhergestellt werden." };
+
+  revalidatePath("/dashboard/surveys");
+  revalidatePath(`/dashboard/surveys/${parsed.data.surveyId}/edit`);
+  return { ok: true, message: "Umfrage wiederhergestellt.", data: { surveyId: parsed.data.surveyId } };
 }
 
 const createSurveyFolderSchema = z.object({
@@ -394,6 +429,55 @@ export async function createSurveyFolderAction(
   return { ok: true, message: "Ordner erstellt.", data: { folderId: data.id } };
 }
 
+const updateSurveyFolderSchema = z.object({
+  folderId: z.string().uuid(),
+  name: z.string().trim().min(1, "Ordnername ist erforderlich.").max(80, "Maximal 80 Zeichen."),
+});
+
+export async function updateSurveyFolderAction(
+  input: z.input<typeof updateSurveyFolderSchema>,
+): Promise<ActionState<{ folderId: string }>> {
+  const parsed = updateSurveyFolderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+  const { supabase } = auth;
+
+  const { data: folder } = await supabase
+    .from("survey_folders")
+    .select("id,name")
+    .eq("id", parsed.data.folderId)
+    .maybeSingle();
+  if (!folder) return { ok: false, message: "Ordner nicht gefunden." };
+
+  const newName = parsed.data.name;
+  if (folder.name.toLowerCase() === newName.toLowerCase()) {
+    return { ok: true, message: "Keine Änderung.", data: { folderId: folder.id } };
+  }
+
+  const { data: nameConflict } = await supabase
+    .from("survey_folders")
+    .select("id,name")
+    .ilike("name", newName)
+    .neq("id", parsed.data.folderId)
+    .maybeSingle();
+  if (nameConflict?.id) {
+    return { ok: false, message: `Ordner „${nameConflict.name}“ existiert bereits.` };
+  }
+
+  const { error } = await supabase
+    .from("survey_folders")
+    .update({ name: newName })
+    .eq("id", parsed.data.folderId);
+  if (error) return { ok: false, message: "Ordner konnte nicht umbenannt werden." };
+
+  revalidatePath("/dashboard/surveys");
+  return { ok: true, message: "Ordner umbenannt.", data: { folderId: parsed.data.folderId } };
+}
+
 const assignSurveyFolderSchema = z.object({
   surveyId: z.string().uuid(),
   folderId: z.string().uuid().nullable(),
@@ -423,11 +507,49 @@ export async function assignSurveyFolderAction(
   const { error } = await supabase
     .from("surveys")
     .update({ folder_id: parsed.data.folderId })
-    .eq("id", parsed.data.surveyId);
+    .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null);
   if (error) return { ok: false, message: "Ordner-Zuordnung konnte nicht gespeichert werden." };
 
   revalidatePath("/dashboard/surveys");
   return { ok: true, message: "Ordner aktualisiert.", data: { surveyId: parsed.data.surveyId } };
+}
+
+const updateSurveyMetadataSchema = z.object({
+  surveyId: z.string().uuid(),
+  title: z.string().trim().min(1).optional(),
+  description: z.string().trim().optional(),
+});
+
+export async function updateSurveyMetadataAction(
+  input: z.input<typeof updateSurveyMetadataSchema>,
+): Promise<ActionState<{ surveyId: string }>> {
+  const parsed = updateSurveyMetadataSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+  const { supabase } = auth;
+
+  const patch: { title?: string; description?: string } = {};
+  if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+  if (parsed.data.description !== undefined) patch.description = parsed.data.description;
+  if (!("title" in patch) && !("description" in patch)) {
+    return { ok: false, message: "Keine Änderungen übergeben." };
+  }
+
+  const { error } = await supabase
+    .from("surveys")
+    .update(patch)
+    .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null);
+  if (error) return { ok: false, message: "Metadaten konnten nicht gespeichert werden." };
+
+  revalidatePath("/dashboard/surveys");
+  revalidatePath(`/dashboard/surveys/${parsed.data.surveyId}/edit`);
+  return { ok: true, message: "Metadaten aktualisiert.", data: { surveyId: parsed.data.surveyId } };
 }
 
 const deleteSurveyFolderSchema = z.object({ folderId: z.string().uuid() });
@@ -478,6 +600,7 @@ export async function exportSurveyBundleAction(
     .from("surveys")
     .select("id,title,description,visibility,slug,notification_emails,definition,created_at,updated_at,published_at")
     .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null)
     .maybeSingle();
   if (!survey) return { ok: false, message: "Umfrage nicht gefunden." };
 
@@ -721,6 +844,7 @@ export async function answerSurveyFieldQuestionAction(
           .from("surveys")
           .select("title,slug,notification_emails,definition")
           .eq("id", surveyId)
+          .is("deleted_at", null)
           .maybeSingle();
 
         const recipients = ((survey?.notification_emails ?? []) as string[]).filter(Boolean);

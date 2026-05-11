@@ -39,6 +39,7 @@ export default async function SurveyResponsesPage({
     .from("surveys")
     .select("id")
     .eq("id", surveyId)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!survey) return notFound();

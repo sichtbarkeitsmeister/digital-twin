@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Suspense } from "react";
+import { SurveyAiSettingsCard } from "@/app/settings/survey-ai-settings-card";
 
 async function SettingsContent() {
   const supabase = await createClient();
@@ -40,10 +41,7 @@ async function SettingsContent() {
 export default function SettingsPage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-5 py-10">
-      <div className="grid gap-1">
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-secondary">Aktuell sind die Einstellungen nur lesbar.</p>
-      </div>
+      <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
 
       <Suspense
         fallback={
@@ -57,6 +55,7 @@ export default function SettingsPage() {
       >
         <SettingsContent />
       </Suspense>
+      <SurveyAiSettingsCard />
     </div>
   );
 }

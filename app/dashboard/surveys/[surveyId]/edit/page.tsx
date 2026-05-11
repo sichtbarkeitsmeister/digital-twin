@@ -38,6 +38,7 @@ export default async function EditSurveyPage({
     .from("surveys")
     .select("id,definition,visibility,slug,notification_emails")
     .eq("id", surveyId)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!survey?.definition) {

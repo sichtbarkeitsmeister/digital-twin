@@ -37,6 +37,7 @@ export async function POST(req: Request) {
       .from("surveys")
       .select("id,title,slug,visibility,definition")
       .eq("id", q.survey_id)
+      .is("deleted_at", null)
       .maybeSingle();
 
     if (!survey?.id) return NextResponse.json({ ok: true, skipped: true });

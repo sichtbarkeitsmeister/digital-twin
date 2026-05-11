@@ -154,6 +154,30 @@ export type Database = {
         }
         Relationships: []
       }
+      survey_ai_user_preferences: {
+        Row: {
+          auto_navigate: boolean
+          global_assistant_rules: string
+          show_archived_chats: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_navigate?: boolean
+          global_assistant_rules?: string
+          show_archived_chats?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auto_navigate?: boolean
+          global_assistant_rules?: string
+          show_archived_chats?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       survey_field_questions: {
         Row: {
           answer: string | null
