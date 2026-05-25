@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 
 import { runDueJobs } from "@/lib/jobs/runner";
 
-export const dynamic = "force-dynamic";
-
 function isAuthorised(req: Request) {
   const expected = process.env.JOBS_WORKER_TOKEN?.trim();
   if (!expected) return false;
