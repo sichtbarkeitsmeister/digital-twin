@@ -1,18 +1,14 @@
+@import url("https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /*
-      Brand constants (HSL)
-      Deep Indigo: #2E2E50 -> 240 27% 24.7%
-      Mint:        #64FDC2 -> 157 97.5% 69.2%
-    */
     --brand-deep: 240 27% 24.7%;
     --brand-mint: 157 97.5% 69.2%;
 
-    /* Light mode */
     --background: 0 0% 100%;
     --foreground: var(--brand-deep);
     --card: 0 0% 100%;
@@ -20,11 +16,9 @@
     --popover: 0 0% 100%;
     --popover-foreground: var(--brand-deep);
 
-    /* Action / emphasis (Mint must be paired with Deep Indigo) */
     --primary: var(--brand-mint);
     --primary-foreground: var(--brand-deep);
 
-    /* Surfaces */
     --secondary: 240 30% 96%;
     --secondary-foreground: var(--brand-deep);
     --muted: 240 22% 94%;
@@ -43,9 +37,11 @@
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --radius: 1rem;
+
+    --font-clash: "Clash Display", system-ui, sans-serif;
   }
+
   .dark {
-    /* Dark mode */
     --background: var(--brand-deep);
     --foreground: 0 0% 98%;
     --card: 240 26% 18%;
@@ -53,11 +49,9 @@
     --popover: 240 26% 18%;
     --popover-foreground: 0 0% 98%;
 
-    /* Action / emphasis */
     --primary: var(--brand-mint);
     --primary-foreground: var(--brand-deep);
 
-    /* Surfaces */
     --secondary: 240 20% 16%;
     --secondary-foreground: 0 0% 98%;
     --muted: 240 20% 16%;
@@ -76,22 +70,21 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+
+  ::selection {
+    @apply bg-sbkm-mint text-sbkm-navy;
   }
 }
 
 @layer utilities {
-  /*
-    Semantic alias utilities (meaning-first)
-    - Primary/secondary here refer to content hierarchy (not brand).
-  */
   .text-primary {
     color: hsl(var(--foreground));
   }
@@ -109,7 +102,6 @@
     background-color: hsl(var(--card));
   }
 
-  /* Brand accents (Mint) */
   .text-brand {
     color: hsl(var(--brand-mint));
   }
@@ -118,6 +110,40 @@
   }
   .ring-brand {
     --tw-ring-color: hsl(var(--brand-mint));
+  }
+
+  .bg-dt-page {
+    background-color: #eaf7f1;
+    background-image: url("/assets/dt-bg-gradient.svg");
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: top center;
+    background-attachment: fixed;
+  }
+
+  .dark .bg-dt-page-dark {
+    background-color: #1a1a30;
+    background-image:
+      radial-gradient(70% 50% at 0% 0%, rgba(100, 253, 194, 0.14) 0%, transparent 60%),
+      radial-gradient(60% 40% at 100% 100%, rgba(100, 253, 194, 0.08) 0%, transparent 60%);
+    background-attachment: fixed;
+  }
+
+  .bg-dt-dashboard {
+    background-color: #eaf7f1;
+    background-image: url("/assets/dt-bg-gradient.svg");
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: top center;
+    background-attachment: fixed;
+  }
+
+  .dark .bg-dt-dashboard-dark {
+    background-color: #0e0e22;
+    background-image:
+      radial-gradient(80% 50% at 0% 0%, rgba(100, 253, 194, 0.1) 0%, transparent 60%),
+      radial-gradient(60% 40% at 100% 100%, rgba(74, 141, 255, 0.12) 0%, transparent 60%);
+    background-attachment: fixed;
   }
 
   .scrollbar-subtle {

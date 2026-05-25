@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { Button } from "./ui/button";
 import { createClient } from "@/lib/supabase/server";
+import { Suspense } from "react";
+
+import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DashboardButton } from "@/components/dashboard-button";
 import { UserMenu } from "@/components/user-menu";
 
@@ -17,10 +19,8 @@ export async function AuthButton() {
       <UserMenu />
     </div>
   ) : (
-    <div className="flex gap-2">
-      <Button asChild size="sm" variant={"outline"}>
-        <Link href="/auth/login">Anmelden</Link>
-      </Button>
-    </div>
+    <DtPillButton asChild variant="outline" size="sm">
+      <Link href="/auth/login">Anmelden</Link>
+    </DtPillButton>
   );
 }

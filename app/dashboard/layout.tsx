@@ -12,7 +12,13 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <React.Suspense fallback={<div className="p-6 text-sm text-secondary">Lade…</div>}>
+    <React.Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center p-6 text-sm text-sbkm-ink-600">
+          Lade…
+        </div>
+      }
+    >
       <DashboardLayoutContent>{children}</DashboardLayoutContent>
     </React.Suspense>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { HelpCircle, Info, Plus, X } from "lucide-react";
+import { HelpCircle, Plus, X } from "lucide-react";
 
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
 import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
@@ -23,7 +23,6 @@ import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,7 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-import { SurveyProgress } from "@/app/dashboard/_components/surveys/survey-progress";
+import { SurveyFillHeader } from "@/app/s/[slug]/_components/survey-fill-header";
 
 type ResponseSession = {
   responseId: string;
@@ -618,112 +617,34 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl overflow-x-clip px-1.5 py-6 sm:px-3 sm:py-8 lg:snap-none snap-y snap-mandatory">
-      <div className="grid gap-6">
-        <div className="sticky top-16 z-50 -mx-1.5 border-b bg-background/90 px-1.5 py-3 backdrop-blur sm:-mx-3 sm:px-3">
-          <div
-            className="grid transition-all duration-150 ease-out"
-            style={{
-              rowGap: `${12 - mobileCompactProgress * 5}px`,
-            }}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-1 sm:gap-3">
-              <div className="grid min-w-0 gap-0.5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-secondary">Umfrage</p>
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <p
-                    className="min-w-0 flex-1 truncate whitespace-nowrap text-secondary transition-all duration-150"
-                    style={{ fontSize: `${14 - mobileCompactProgress * 2}px` }}
-                  >
-                    {survey.title || "Umfrage"}
-                  </p>
-                  {missingRequiredInCurrentStep > 0 ? (
-                    <Badge variant="outline" className="hidden border-red-300 text-red-400 lg:inline-flex">
-                      {missingRequiredInCurrentStep} Pflichtfeld(er) offen
-                    </Badge>
-                  ) : null}
-                </div>
-              </div>
-              <div />
-            </div>
+    <div className="mx-auto w-full max-w-5xl overflow-x-clip px-3 py-5 sm:px-5 sm:py-8 lg:snap-none snap-y snap-mandatory">
+      <div className="grid gap-5 sm:gap-6">
+        <SurveyFillHeader
+          title={survey.title || "Umfrage"}
+          steps={steps}
+          stepIndex={stepIndex}
+          canBack={canBack}
+          canNext={canNext}
+          showInfoButton={hasInfoText && stepIndex >= 1}
+          missingRequiredInCurrentStep={missingRequiredInCurrentStep}
+          missingRequiredStepIndices={missingRequiredStepIndices}
+          mobileCompactProgress={mobileCompactProgress}
+          isLoading={!session || status.kind === "loading"}
+          errorMessage={status.kind === "error" ? status.message : undefined}
+          onBack={() => setStepIndex(stepIndex - 1)}
+          onNext={() => setStepIndex(stepIndex + 1)}
+          onSubmit={() => void submit()}
+          onInfoOpen={() => setIsInfoOpen(true)}
+          onStepChange={setStepIndex}
+        />
 
-            {status.kind === "error" ? <p className="text-sm text-red-400">{status.message}</p> : null}
-
-            <SurveyProgress
-              steps={steps}
-              currentStepIndex={stepIndex}
-              compactProgress={mobileCompactProgress}
-              onStepChange={setStepIndex}
-              missingStepIndices={missingRequiredStepIndices}
-              currentStepMissingRequiredCount={missingRequiredInCurrentStep}
-            />
-
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!canBack}
-                onClick={() => setStepIndex(stepIndex - 1)}
-                className="w-full border-border/80 bg-card text-sm shadow-sm transition-all duration-150 hover:bg-accent/80"
-                style={{
-                  height: `${42 - mobileCompactProgress * 5}px`,
-                  fontSize: `${14 - mobileCompactProgress * 2}px`,
-                }}
-              >
-                Zurück
-              </Button>
-              {hasInfoText && stepIndex >= 1 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setIsInfoOpen(true)}
-                  aria-label="Fragebogen Information anzeigen"
-                  className="border-border/70 bg-card text-secondary shadow-sm transition-all duration-150 hover:bg-accent/80"
-                  style={{
-                    height: `${40 - mobileCompactProgress * 5}px`,
-                    width: `${40 - mobileCompactProgress * 5}px`,
-                  }}
-                >
-                  <Info
-                    className="transition-all duration-150"
-                    style={{
-                      height: `${16 - mobileCompactProgress * 2}px`,
-                      width: `${16 - mobileCompactProgress * 2}px`,
-                    }}
-                  />
-                </Button>
-              ) : (
-                <div
-                  style={{
-                    height: `${40 - mobileCompactProgress * 5}px`,
-                    width: `${40 - mobileCompactProgress * 5}px`,
-                  }}
-                />
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!session || status.kind === "loading"}
-                onClick={() => {
-                  if (canNext) setStepIndex(stepIndex + 1);
-                  else void submit();
-                }}
-                className="w-full border-border/80 bg-card text-sm shadow-sm transition-all duration-150 hover:bg-accent/80"
-                style={{
-                  height: `${42 - mobileCompactProgress * 5}px`,
-                  fontSize: `${14 - mobileCompactProgress * 2}px`,
-                }}
-              >
-                {canNext ? "Weiter" : "Senden"}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {survey.description ? <p className="text-secondary">{survey.description}</p> : null}
+        {survey.description ? (
+          <p className="text-sm leading-relaxed text-sbkm-ink-600 dark:text-white/70 sm:text-base">
+            {survey.description}
+          </p>
+        ) : null}
         {hasInfoText && stepIndex === 0 ? (
-          <Card>
+          <Card className="rounded-dt border-sbkm-navy/10 bg-white/55 shadow-dt backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06]">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Info</CardTitle>
             </CardHeader>
@@ -734,7 +655,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
         ) : null}
 
         {!isInfoIntroStep ? (
-        <Card>
+        <Card className="rounded-dt border-sbkm-navy/10 bg-white/55 shadow-dt backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06]">
           <CardHeader>
             <CardTitle>{step.title || `Schritt ${stepIndex + 1}`}</CardTitle>
             {step.description ? <CardDescription>{step.description}</CardDescription> : null}

@@ -13,7 +13,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function PublicSurveyFallback() {
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8">
-      <div className="rounded-lg border bg-card p-6 text-sm text-secondary">Lädt …</div>
+      <div className="rounded-dt border border-sbkm-navy/10 bg-white/55 p-6 text-sm text-sbkm-ink-600 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] dark:text-white/70">
+        Lädt …
+      </div>
     </div>
   );
 }

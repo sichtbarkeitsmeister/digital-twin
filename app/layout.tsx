@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
 import { ThemeProvider } from "next-themes";
-import { SiteFooter } from "@/components/site-footer";
-import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -11,15 +9,16 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Next.js and Supabase Starter Kit",
-  description: "The fastest way to build apps with Next.js and Supabase",
+  title: "DigitalTwin — Schreiben. Prüfen. Veröffentlichen.",
+  description:
+    "Minimal, schnell und fokussiert — dein digitaler Zwilling übernimmt Recherche, Markenstimme-Check und Veröffentlichung.",
 };
 
 const poppins = Poppins({
   variable: "--font-poppins",
   display: "swap",
   subsets: ["latin"],
-  weight: ["200", "300", "400", "600", "700"],
+  weight: ["100", "400", "700"],
 });
 
 export default function RootLayout({
@@ -28,19 +27,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${poppins.className} antialiased`}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <div className="min-h-screen background-primary text-primary flex flex-col">
-            <SiteHeader />
-            <div className="flex-1">{children}</div>
-            <SiteFooter />
-          </div>
+    <html lang="de" suppressHydrationWarning>
+      <body className={`${poppins.variable} font-sans antialiased`}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          {children}
         </ThemeProvider>
       </body>
     </html>

@@ -1,11 +1,17 @@
-import { LoginForm } from "@/components/login-form";
+import { Suspense } from "react";
 
-export default function Page() {
+import { AuthCard } from "@/components/dt/auth-card";
+
+function AuthFallback() {
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <LoginForm />
-      </div>
-    </div>
+    <div className="h-[420px] w-full max-w-[520px] animate-pulse rounded-dt-lg bg-white/40 backdrop-blur-xl" />
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<AuthFallback />}>
+      <AuthCard defaultTab="signin" />
+    </Suspense>
   );
 }

@@ -30,9 +30,7 @@ function isActivePath(pathname: string, href: string) {
 
 function NavLink({ item }: { item: NavItem }) {
   const pathname = usePathname();
-  const active = item.match
-    ? item.match(pathname)
-    : isActivePath(pathname, item.href);
+  const active = item.match ? item.match(pathname) : isActivePath(pathname, item.href);
   const Icon = item.icon;
 
   return (
@@ -41,21 +39,16 @@ function NavLink({ item }: { item: NavItem }) {
       prefetch
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
-        "hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        active ? "bg-accent text-accent-foreground" : "text-secondary",
+        "group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-2.5 text-sm font-medium transition-colors",
+        active
+          ? "bg-sbkm-navy text-white shadow-dt dark:bg-sbkm-mint dark:text-sbkm-navy"
+          : "text-sbkm-ink-700 hover:bg-sbkm-navy/[0.06] dark:text-white/75 dark:hover:bg-white/10",
       )}
     >
-      <span
-        className={cn(
-          "absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-transparent",
-          active ? "bg-primary" : "group-hover:bg-primary/40",
-        )}
-      />
       <Icon
         className={cn(
           "h-4 w-4 shrink-0",
-          active ? "text-primary" : "text-secondary",
+          active ? "text-sbkm-mint dark:text-sbkm-navy" : "text-sbkm-ink-500 dark:text-white/60",
         )}
       />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -64,7 +57,7 @@ function NavLink({ item }: { item: NavItem }) {
           aria-label="Neue Aktivität"
           className={cn(
             "ml-auto h-2 w-2 rounded-full",
-            active ? "bg-primary" : "bg-red-500",
+            active ? "bg-sbkm-mint dark:bg-sbkm-navy" : "bg-red-500",
           )}
         />
       ) : null}
@@ -84,11 +77,7 @@ export function DashboardSidebar({
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
     { label: "Leads", href: "/dashboard/leads", icon: Sparkles },
-    {
-      label: "Organisationen",
-      href: "/dashboard/organisations",
-      icon: Building2,
-    },
+    { label: "Organisationen", href: "/dashboard/organisations", icon: Building2 },
     { label: "Mitglieder", href: "/dashboard/members", icon: Users },
     ...(canManageIntegrations
       ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
@@ -101,11 +90,7 @@ export function DashboardSidebar({
       href: "/dashboard/admin/organisations",
       icon: Shield,
     },
-    {
-      label: "Jobs runner",
-      href: "/dashboard/admin/jobs",
-      icon: Workflow,
-    },
+    { label: "Jobs runner", href: "/dashboard/admin/jobs", icon: Workflow },
     {
       label: "Umfragen",
       href: "/dashboard/surveys",
@@ -115,7 +100,7 @@ export function DashboardSidebar({
   ];
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-4">
       <nav className="grid gap-1">
         {mainItems.map((item) => (
           <NavLink key={item.href} item={item} />
@@ -124,8 +109,8 @@ export function DashboardSidebar({
 
       {isPlatformAdmin ? (
         <div className="grid gap-2 pt-2">
-          <div className="border-t pt-3">
-            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-secondary">
+          <div className="border-t border-sbkm-navy/10 pt-3 dark:border-white/10">
+            <p className="px-2 text-[11px] font-bold uppercase tracking-[0.14em] text-sbkm-ink-500">
               Verwaltung
             </p>
           </div>

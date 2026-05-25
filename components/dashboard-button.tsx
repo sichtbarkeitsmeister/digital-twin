@@ -1,14 +1,13 @@
 import Link from "next/link";
-import { Button } from "./ui/button";
+
+import { DtPillButton } from "@/components/dt/dt-pill-button";
 
 export function DashboardButton() {
   return (
-    <>
+    <DtPillButton asChild size="sm" variant="solid">
       <Link href="/dashboard/members" prefetch>
-        <Button size="sm">
-          <span>Dashboard</span>
-        </Button>
+        Dashboard
       </Link>
-    </>
+    </DtPillButton>
   );
 }

@@ -1,32 +1,15 @@
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { DtGlassCard, DtHeading } from "@/components/dt";
 
 export default function Page() {
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-2xl">
-                Thank you for signing up!
-              </CardTitle>
-              <CardDescription>Check your email to confirm</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Check your email for a magic link. Click the link to complete
-                your sign up and sign in.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
+    <DtGlassCard className="w-full max-w-[520px]" padding="lg">
+      <DtHeading as="h1" variant="h4">
+        Fast geschafft.
+      </DtHeading>
+      <p className="mt-3 text-sm leading-normal text-sbkm-ink-600 dark:text-white/70">
+        Prüfe dein Postfach — wir haben dir einen Magic Link geschickt. Klicke auf
+        den Link in der E-Mail, um deinen Zugang abzuschließen.
+      </p>
+    </DtGlassCard>
   );
 }
