@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { AI_CHAT_ATTACHMENTS_BUCKET, isSkippedStoragePath } from "@/lib/ai/chat-attachments";
 import { requireAuthUser, getChatOrNull } from "@/lib/ai/chat-db";
 import { SURVEY_AI_MAX_ASSISTANT_RULES_CHARS } from "@/lib/settings/survey-ai-server";
 
@@ -60,6 +61,22 @@ export async function GET(_: Request, context: { params: Promise<{ chatId: strin
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true });
 
+  const attachmentsWithSignedUrls = await Promise.all(
+    (attachments ?? []).map(async (row) => {
+      if (isSkippedStoragePath(row.storage_path)) {
+        return { ...row, signed_url: null as string | null };
+      }
+      const { data, error } = await auth.supabase.storage
+        .from(AI_CHAT_ATTACHMENTS_BUCKET)
+        .createSignedUrl(row.storage_path, 3600);
+      if (error) {
+        console.warn("ai_chat_attachment signed url:", row.storage_path, error.message);
+        return { ...row, signed_url: null };
+      }
+      return { ...row, signed_url: data.signedUrl };
+    }),
+  );
+
   return NextResponse.json({
     ok: true,
     chat,
@@ -72,7 +89,7 @@ export async function GET(_: Request, context: { params: Promise<{ chatId: strin
         proposal_survey_title: surveyId ? surveyTitleById.get(surveyId) ?? null : null,
       };
     }),
-    attachments: attachments ?? [],
+    attachments: attachmentsWithSignedUrls,
   });
 }
 
@@ -121,6 +138,19 @@ export async function DELETE(_: Request, context: { params: Promise<{ chatId: st
     return NextResponse.json({ ok: false, message: "Not authenticated." }, { status: 401 });
   }
   const { chatId } = await context.params;
+
+  const { data: attachRows } = await auth.supabase
+    .from("ai_chat_attachments")
+    .select("storage_path")
+    .eq("chat_id", chatId);
+
+  const objectPaths =
+    attachRows?.map((r) => r.storage_path).filter((p) => p && !isSkippedStoragePath(p)) ?? [];
+
+  if (objectPaths.length > 0) {
+    const rm = await auth.supabase.storage.from(AI_CHAT_ATTACHMENTS_BUCKET).remove(objectPaths);
+    if (rm.error) console.warn("ai_chat_attachments storage cleanup", rm.error);
+  }
 
   const { error } = await auth.supabase
     .from("ai_chats")

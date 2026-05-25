@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 import { DashboardShell } from "@/app/dashboard/_components/dashboard-shell";
+import { userCanManageAnyIntegrations } from "@/lib/dashboard/org-context";
 
 export default function DashboardLayout({
   children,
@@ -35,6 +36,9 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     .maybeSingle();
 
   const isPlatformAdmin = profile?.role === "admin";
+  const canManageIntegrations = isPlatformAdmin
+    ? true
+    : await userCanManageAnyIntegrations(user.id);
   const pendingSurveyQuestionsCount = isPlatformAdmin
     ? (
         await supabase
@@ -47,6 +51,7 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
   return (
     <DashboardShell
       isPlatformAdmin={isPlatformAdmin}
+      canManageIntegrations={canManageIntegrations}
       pendingSurveyQuestionsCount={pendingSurveyQuestionsCount}
     >
       {children}

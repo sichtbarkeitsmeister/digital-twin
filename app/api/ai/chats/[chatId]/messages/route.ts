@@ -3,8 +3,25 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { buildGlobalSurveyChatSystemPrompt, toAnthropicMessages } from "@/lib/ai/chat-context";
+import { buildGlobalSurveyChatSystemPrompt } from "@/lib/ai/chat-context";
+import {
+  AI_CHAT_ATTACHMENTS_BUCKET,
+  attachmentStorageObjectPath,
+  decodeBase64Strict,
+  isMultimodalMediaType,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_ATTACHMENT_BASE64_CHARS,
+  MAX_MULTIMODAL_TOTAL_BYTES,
+  normalizeMimeType,
+  sanitizeStorageFileSegment,
+} from "@/lib/ai/chat-attachments";
 import { requireAuthUser, getChatOrNull } from "@/lib/ai/chat-db";
+import {
+  hydrateHistoryForAnthropic,
+  stripLegacyAttachmentSuffix,
+  type DbAttachmentRow,
+  type DbChatMessageRow,
+} from "@/lib/ai/chat-history-anthropic";
 import { createSseStream, sseHeaders } from "@/lib/ai/chat-stream";
 import { surveyAiProposalSchema } from "@/lib/ai/survey-assistant-types";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
@@ -14,27 +31,171 @@ const MAX_CANDIDATE_SURVEY_CONTEXTS = 8;
 const RAW_HISTORY_LIMIT = 10;
 const HISTORY_SUMMARY_CHAR_LIMIT = 2400;
 
-const requestSchema = z.object({
-  content: z.string().trim().min(1).max(12000),
-  pageContext: z.object({
-    page: z.enum(["survey_list", "survey_builder_new", "survey_builder_edit"]),
-    surveyId: z.string().uuid().nullable().optional(),
-    visibility: z.enum(["private", "public"]).optional(),
-    slug: z.string().nullable().optional(),
-    notificationEmails: z.array(z.string()).optional(),
-  }),
-  attachments: z
-    .array(
-      z.object({
-        fileName: z.string().min(1).max(255),
-        mimeType: z.string().min(1).max(120),
-        sizeBytes: z.number().int().nonnegative().max(10 * 1024 * 1024),
-        textContent: z.string().max(20000).optional(),
-      }),
-    )
-    .optional()
-    .default([]),
-});
+const attachmentInboundSchema = z
+  .object({
+    fileName: z.string().min(1).max(255),
+    mimeType: z.string().min(1).max(120),
+    sizeBytes: z.number().int().nonnegative().max(10 * 1024 * 1024),
+    textContent: z.string().max(20000).optional(),
+    dataBase64: z.string().max(MAX_ATTACHMENT_BASE64_CHARS).optional(),
+  })
+  .superRefine((a, ctx) => {
+    const norm = normalizeMimeType(a.mimeType);
+    if (isMultimodalMediaType(norm) && !a.dataBase64?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Für die Datei „${a.fileName}“ (${norm}) fehlt dataBase64.`,
+        path: ["dataBase64"],
+      });
+    }
+  });
+
+const requestSchema = z
+  .object({
+    content: z.string().trim().min(1).max(12000),
+    pageContext: z.object({
+      page: z.enum(["survey_list", "survey_builder_new", "survey_builder_edit"]),
+      surveyId: z.string().uuid().nullable().optional(),
+      visibility: z.enum(["private", "public"]).optional(),
+      slug: z.string().nullable().optional(),
+      notificationEmails: z.array(z.string()).optional(),
+    }),
+    attachments: z.array(attachmentInboundSchema).optional().default([]),
+  })
+  .superRefine((data, ctx) => {
+    const list = data.attachments ?? [];
+    if (list.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Höchstens ${MAX_ATTACHMENTS_PER_MESSAGE} Anhänge pro Nachricht.`,
+        path: ["attachments"],
+      });
+      return;
+    }
+    let multimodalTotal = 0;
+    for (let i = 0; i < list.length; i += 1) {
+      const a = list[i]!;
+      const norm = normalizeMimeType(a.mimeType);
+      if (!isMultimodalMediaType(norm)) continue;
+      if (!a.dataBase64?.trim()) continue;
+      try {
+        const bytes = decodeBase64Strict(a.dataBase64.trim());
+        if (Math.abs(bytes.length - a.sizeBytes) > 1) {
+          ctx.addIssue({
+            code: "custom",
+            message: `Dateigröße für „${a.fileName}“ stimmt nicht mit sizeBytes überein.`,
+            path: ["attachments", i, "sizeBytes"],
+          });
+        } else {
+          multimodalTotal += bytes.length;
+        }
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          message: `Base64 für „${a.fileName}“ ist ungültig oder zu groß.`,
+          path: ["attachments", i, "dataBase64"],
+        });
+      }
+    }
+    if (multimodalTotal > MAX_MULTIMODAL_TOTAL_BYTES) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Summe der Mediendateien überschreitet das Grenzlimit.",
+        path: ["attachments"],
+      });
+    }
+  });
+
+type InboundAttachment = z.infer<typeof attachmentInboundSchema>;
+
+type PersistAttachmentsResult =
+  | { ok: true }
+  | { ok: false; uploadedPaths: string[]; message: string };
+
+async function persistAiChatAttachments(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  chatId: string;
+  messageId: string;
+  attachments: InboundAttachment[];
+}): Promise<PersistAttachmentsResult> {
+  const uploadedPaths: string[] = [];
+  const rows: Array<{
+    chat_id: string;
+    message_id: string;
+    storage_path: string;
+    file_name: string;
+    mime_type: string;
+    size_bytes: number;
+  }> = [];
+
+  try {
+    for (let i = 0; i < params.attachments.length; i += 1) {
+      const a = params.attachments[i]!;
+      const norm = normalizeMimeType(a.mimeType);
+      const safeName = sanitizeStorageFileSegment(a.fileName);
+      const unique = `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`;
+
+      if (isMultimodalMediaType(norm)) {
+        const rawB64 = a.dataBase64!.trim().replace(/\s/g, "");
+        const bytes = decodeBase64Strict(rawB64);
+        const path = attachmentStorageObjectPath({
+          userId: params.userId,
+          chatId: params.chatId,
+          messageId: params.messageId,
+          safeFileName: safeName,
+          uniqueSuffix: unique,
+        });
+        const { error: upErr } = await params.supabase.storage
+          .from(AI_CHAT_ATTACHMENTS_BUCKET)
+          .upload(path, bytes, { contentType: norm, upsert: false });
+        if (upErr) {
+          return { ok: false, uploadedPaths, message: upErr.message };
+        }
+        uploadedPaths.push(path);
+        rows.push({
+          chat_id: params.chatId,
+          message_id: params.messageId,
+          storage_path: path,
+          file_name: a.fileName,
+          mime_type: a.mimeType,
+          size_bytes: a.sizeBytes,
+        });
+      } else {
+        rows.push({
+          chat_id: params.chatId,
+          message_id: params.messageId,
+          storage_path: `meta-only/${params.messageId}/${unique}_${safeName}`,
+          file_name: a.fileName,
+          mime_type: a.mimeType,
+          size_bytes: a.sizeBytes,
+        });
+      }
+    }
+
+    if (rows.length > 0) {
+      const { error: insErr } = await params.supabase.from("ai_chat_attachments").insert(rows);
+      if (insErr) {
+        return { ok: false, uploadedPaths, message: insErr.message };
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Anhang-Verarbeitung fehlgeschlagen.";
+    return { ok: false, uploadedPaths, message };
+  }
+}
+
+async function rollbackUserMessageAndStorage(input: {
+  supabase: SupabaseClient;
+  messageId: string;
+  storagePaths: string[];
+}) {
+  if (input.storagePaths.length > 0) {
+    await input.supabase.storage.from(AI_CHAT_ATTACHMENTS_BUCKET).remove(input.storagePaths);
+  }
+  await input.supabase.from("ai_chat_messages").delete().eq("id", input.messageId);
+}
 
 function extractText(resp: Anthropic.Messages.Message) {
   return resp.content
@@ -135,7 +296,7 @@ async function ensureValidAssistantOutput(input: {
   anthropic: Anthropic;
   model: string;
   systemPrompt: string;
-  baseMessages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  baseMessages: Anthropic.MessageParam[];
   assistantText: string;
 }) {
   const initialParsed = tryParseJsonObject(input.assistantText);
@@ -180,7 +341,7 @@ async function ensureValidAssistantOutput(input: {
       model: input.model,
       max_tokens: 16384,
       system: input.systemPrompt,
-      messages: toAnthropicMessages([
+      messages: [
         ...input.baseMessages,
         { role: "assistant", content: input.assistantText },
         {
@@ -189,7 +350,7 @@ async function ensureValidAssistantOutput(input: {
             "Deine letzte Antwort war nicht als valides JSON parsebar. Erzeuge jetzt die gleiche Aktion erneut, " +
             "aber gib ausschließlich EIN valides JSON-Objekt zurück. Kein Text davor/danach, keine Markdown-Code-Fences.",
         },
-      ]),
+      ],
     });
     const regeneratedText = extractText(regenerate).trim();
     const regeneratedParsed = tryParseJsonObject(regeneratedText);
@@ -432,7 +593,7 @@ async function completeAssistantTextWithContinuation(input: {
   anthropic: Anthropic;
   model: string;
   systemPrompt: string;
-  baseMessages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  baseMessages: Anthropic.MessageParam[];
   initialResponse: Anthropic.Messages.Message;
 }) {
   let fullText = extractText(input.initialResponse);
@@ -445,7 +606,7 @@ async function completeAssistantTextWithContinuation(input: {
       model: input.model,
       max_tokens: 16384,
       system: input.systemPrompt,
-      messages: toAnthropicMessages([
+      messages: [
         ...input.baseMessages,
         { role: "assistant", content: fullText },
         {
@@ -453,7 +614,7 @@ async function completeAssistantTextWithContinuation(input: {
           content:
             "Fahre exakt dort fort, wo du aufgehört hast. Wiederhole nichts und beende die Antwort vollständig.",
         },
-      ]),
+      ],
     });
 
     const nextText = extractText(continuation);
@@ -490,17 +651,13 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     sizeBytes: a.sizeBytes,
     textPreview: (a.textContent ?? "").slice(0, 1500),
   }));
-  const attachmentPrefix =
-    attachmentSummaries.length > 0
-      ? `\n\nAnhang-Zusammenfassung:\n${JSON.stringify(attachmentSummaries)}`
-      : "";
 
   const { data: insertedUserMessage, error: userMsgError } = await auth.supabase
     .from("ai_chat_messages")
     .insert({
       chat_id: chatId,
       role: "user",
-      content: `${parsed.data.content}${attachmentPrefix}`,
+      content: parsed.data.content,
       metadata: {
         pageContext: parsed.data.pageContext,
         attachments: attachmentSummaries,
@@ -508,9 +665,33 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     })
     .select("id,chat_id,role,content,metadata,created_at")
     .single();
+
   if (userMsgError || !insertedUserMessage) {
     return NextResponse.json({ ok: false, message: "Nachricht konnte nicht gespeichert werden." }, { status: 500 });
   }
+
+  if (attachments.length > 0) {
+    const persistResult = await persistAiChatAttachments({
+      supabase: auth.supabase,
+      userId: auth.userId,
+      chatId,
+      messageId: insertedUserMessage.id,
+      attachments,
+    });
+
+    if (!persistResult.ok) {
+      await rollbackUserMessageAndStorage({
+        supabase: auth.supabase,
+        messageId: insertedUserMessage.id,
+        storagePaths: persistResult.uploadedPaths,
+      });
+      return NextResponse.json(
+        { ok: false, message: persistResult.message || "Anhänge konnten nicht gespeichert werden." },
+        { status: 400 },
+      );
+    }
+  }
+
   await auth.supabase
     .from("ai_chats")
     .update({ updated_at: new Date().toISOString() })
@@ -521,31 +702,78 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
   const globalAssistantRules = prefsResult.ok ? prefsResult.prefs.global_assistant_rules.trim() : "";
   const assistantRulesFromChat = (chat.assistant_rules ?? "").trim();
 
-  if (attachmentSummaries.length > 0) {
-    await auth.supabase.from("ai_chat_attachments").insert(
-      attachmentSummaries.map((a) => ({
-        chat_id: chatId,
-        message_id: insertedUserMessage.id,
-        storage_path: `inline/${insertedUserMessage.id}/${a.fileName}`,
-        file_name: a.fileName,
-        mime_type: a.mimeType,
-        size_bytes: a.sizeBytes,
-      })),
-    );
-  }
-
   const { data: chatMessages } = await auth.supabase
     .from("ai_chat_messages")
-    .select("id,role,content,created_at")
+    .select("id,role,content,metadata,created_at")
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true });
-  const fullHistory = (chatMessages ?? []).map((m) => ({
-    role: m.role as "user" | "assistant" | "system",
+
+  const dbRowsFull: DbChatMessageRow[] = (chatMessages ?? []).map((m) => ({
+    id: m.id,
+    role: m.role,
     content: m.content,
+    metadata: m.metadata,
   }));
-  const rawHistory = fullHistory.slice(-RAW_HISTORY_LIMIT);
-  const summaryHistory = fullHistory.slice(0, Math.max(0, fullHistory.length - RAW_HISTORY_LIMIT));
-  const conversationSummary = buildConversationSummary(summaryHistory);
+
+  const fullHistoryPlain = dbRowsFull.map((m) => ({
+    role: m.role as "user" | "assistant" | "system",
+    content: stripLegacyAttachmentSuffix(m.content),
+  }));
+
+  const rawDbSlice = dbRowsFull.slice(-RAW_HISTORY_LIMIT);
+  const summaryDbSlice = dbRowsFull.slice(0, Math.max(0, dbRowsFull.length - RAW_HISTORY_LIMIT));
+  const summaryForModel = summaryDbSlice.map((m) => ({
+    role: m.role as "user" | "assistant" | "system",
+    content: stripLegacyAttachmentSuffix(m.content),
+  }));
+  const conversationSummary = buildConversationSummary(summaryForModel);
+
+  const rawSliceIds = rawDbSlice.map((m) => m.id);
+  let attachRowsScoped: Array<{
+    message_id: string | null;
+    storage_path: string;
+    mime_type: string;
+    file_name: string;
+  }> = [];
+  if (rawSliceIds.length > 0) {
+    const { data: attData } = await auth.supabase
+      .from("ai_chat_attachments")
+      .select("message_id,storage_path,mime_type,file_name")
+      .eq("chat_id", chatId)
+      .in("message_id", rawSliceIds);
+    attachRowsScoped = attData ?? [];
+  }
+
+  const attachmentsByMessageId = new Map<string, DbAttachmentRow[]>();
+  for (const r of attachRowsScoped) {
+    const mid = r.message_id as string | null;
+    if (!mid) continue;
+    const arr = attachmentsByMessageId.get(mid) ?? [];
+    arr.push({
+      message_id: mid,
+      storage_path: r.storage_path,
+      mime_type: r.mime_type,
+      file_name: r.file_name,
+    });
+    attachmentsByMessageId.set(mid, arr);
+  }
+
+  let anthropicHistory: Anthropic.MessageParam[];
+  try {
+    anthropicHistory = await hydrateHistoryForAnthropic({
+      supabase: auth.supabase,
+      messages: rawDbSlice,
+      attachmentsByMessageId,
+    });
+  } catch (e) {
+    console.error("hydrateHistoryForAnthropic failed; using text-only history", e);
+    anthropicHistory = rawDbSlice
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: stripLegacyAttachmentSuffix(m.content),
+      }));
+  }
 
   const { data: surveys } = await auth.supabase
     .from("surveys")
@@ -641,29 +869,31 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
   }
   const preferredModel = process.env.ANTHROPIC_SURVEY_MODEL?.trim() || MODEL_FALLBACKS[0];
   const modelsToTry = Array.from(new Set([preferredModel, ...MODEL_FALLBACKS]));
-  const anthropic = new Anthropic({ apiKey });
+  const anthropic = new Anthropic({
+    apiKey,
+    defaultHeaders: { "anthropic-beta": "pdfs-2024-09-25" },
+  });
 
   await maybeAutoTitleAiChat({
     supabase: auth.supabase,
     userId: auth.userId,
     chatId,
     title: chat.title,
-    messages: fullHistory,
+    messages: fullHistoryPlain,
     anthropic,
     modelsToTry,
   });
 
   const stream = createSseStream(async (emit) => {
     emit("status", { message: "Ich lese kurz den bisherigen Chatverlauf..." });
-    const selectedHistory: Array<{ role: "user" | "assistant" | "system"; content: string }> = rawHistory;
 
     emit("meta", {
       pageContext: parsed.data.pageContext,
       modelCandidates: modelsToTry,
-      fullHistoryCount: fullHistory.length,
-      selectedHistoryCount: selectedHistory.length,
-      summarizedHistoryCount: summaryHistory.length,
-      contextTruncated: summaryHistory.length > 0,
+      fullHistoryCount: fullHistoryPlain.length,
+      selectedHistoryCount: anthropicHistory.length,
+      summarizedHistoryCount: summaryDbSlice.length,
+      contextTruncated: summaryDbSlice.length > 0,
     });
     emit("status", { message: "Ich formuliere gerade die beste Antwort..." });
 
@@ -676,7 +906,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           model,
           max_tokens: 16384,
           system: systemPrompt,
-          messages: toAnthropicMessages(selectedHistory),
+          messages: anthropicHistory,
         });
         selectedModel = model;
         break;
@@ -700,7 +930,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       anthropic,
       model: selectedModel,
       systemPrompt,
-      baseMessages: selectedHistory,
+      baseMessages: anthropicHistory,
       initialResponse: response,
     });
     emit("status", { message: "Ich prüfe das Format für dich..." });
@@ -708,7 +938,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       anthropic,
       model: selectedModel,
       systemPrompt,
-      baseMessages: selectedHistory,
+      baseMessages: anthropicHistory,
       assistantText: rawAssistantText,
     });
     const assistantText = ensuredAssistant.assistantText;

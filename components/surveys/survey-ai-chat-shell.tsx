@@ -9,7 +9,7 @@ import {
   useState,
   type WheelEvent,
 } from "react";
-import { ArrowUp, PanelLeftOpen, Plus, Settings, X } from "lucide-react";
+import { ArrowUp, FileImage, FileType, PanelLeftOpen, Plus, Settings, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -27,9 +27,18 @@ import {
 import {
   SurveyAiChatThread,
   type AiChatMessage,
+  type AiChatStoredAttachment,
 } from "@/components/surveys/survey-ai-chat-thread";
 import type { AiChatAction } from "@/components/surveys/survey-ai-action-trace";
 import { countSurveyDeletesInProposal } from "@/lib/ai/survey-assistant-types";
+import {
+  isSurveyAiMultimodalMime,
+  isSurveyAiMultimodalImageMime,
+  normalizeSurveyAiMime,
+  SURVEY_AI_ATTACHMENT_ACCEPT_ATTR,
+  SURVEY_AI_MAX_ATTACHMENT_BYTES,
+  SURVEY_AI_MAX_ATTACHMENTS,
+} from "@/lib/ai/survey-ai-attachments-shared";
 
 type PageContext = {
   page: "survey_list" | "survey_builder_new" | "survey_builder_edit";
@@ -44,7 +53,38 @@ type AttachmentDraft = {
   mimeType: string;
   sizeBytes: number;
   textContent?: string;
+  dataBase64?: string;
+  /** Lokale Vorschau nur im Composer / optimistische Bubble */
+  previewObjectUrl?: string;
 };
+
+function guessMimeFromFile(file: File): string {
+  if (file.type?.trim()) return file.type.trim();
+  const n = file.name.toLowerCase();
+  if (n.endsWith(".pdf")) return "application/pdf";
+  if (n.endsWith(".png")) return "image/png";
+  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+  if (n.endsWith(".gif")) return "image/gif";
+  if (n.endsWith(".webp")) return "image/webp";
+  if (n.endsWith(".md")) return "text/markdown";
+  if (n.endsWith(".json")) return "application/json";
+  if (n.endsWith(".txt")) return "text/plain";
+  if (n.endsWith(".csv")) return "text/csv";
+  return "application/octet-stream";
+}
+
+function readFileAsBase64Payload(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const s = String(r.result ?? "");
+      const comma = s.indexOf(",");
+      resolve(comma >= 0 ? s.slice(comma + 1) : s);
+    };
+    r.onerror = () => reject(r.error ?? new Error("read failed"));
+    r.readAsDataURL(file);
+  });
+}
 
 export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   const router = useRouter();
@@ -65,6 +105,14 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   const [actions, setActions] = useState<AiChatAction[]>([]);
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+  const attachmentsLenRef = useRef(0);
+  useEffect(() => {
+    attachmentsLenRef.current = attachments.length;
+  }, [attachments]);
+  const [chatAttachmentsByMessage, setChatAttachmentsByMessage] = useState<
+    Map<string, AiChatStoredAttachment[]>
+  >(new Map());
+  const [dropHighlight, setDropHighlight] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -245,6 +293,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       chat?: { title?: string; assistant_rules?: string | null };
       messages?: AiChatMessage[];
       actions?: AiChatAction[];
+      attachments?: AiChatStoredAttachment[];
       message?: string;
     };
     if (!res.ok || !data.ok) {
@@ -264,6 +313,15 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
     }
     setMessages((data.messages ?? []) as AiChatMessage[]);
     setActions((data.actions ?? []) as AiChatAction[]);
+    const byMsg = new Map<string, AiChatStoredAttachment[]>();
+    for (const row of data.attachments ?? []) {
+      const mid = row.message_id;
+      if (!mid) continue;
+      const list = byMsg.get(mid) ?? [];
+      list.push(row);
+      byMsg.set(mid, list);
+    }
+    setChatAttachmentsByMessage(byMsg);
     const rules =
       typeof data.chat?.assistant_rules === "string"
         ? data.chat.assistant_rules
@@ -277,7 +335,11 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   }, [loadChats]);
 
   useEffect(() => {
-    if (!selectedChatId) return;
+    if (!selectedChatId) {
+      setChatAttachmentsByMessage(new Map());
+      return;
+    }
+    setChatAttachmentsByMessage(new Map());
     void loadChat(selectedChatId);
   }, [loadChat, selectedChatId]);
 
@@ -388,29 +450,92 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
     }
   }
 
-  async function onAddAttachments(files: FileList | null) {
-    if (!files) return;
-    const next: AttachmentDraft[] = [];
-    for (const f of Array.from(files)) {
+  function revokeDraftPreview(d: AttachmentDraft) {
+    if (d.previewObjectUrl) URL.revokeObjectURL(d.previewObjectUrl);
+  }
+
+  function removeComposerAttachment(index: number) {
+    setAttachments((prev) => {
+      const copy = [...prev];
+      const removed = copy.splice(index, 1)[0];
+      if (removed) revokeDraftPreview(removed);
+      return copy;
+    });
+  }
+
+  async function processFilesForAttachments(fileArray: File[]) {
+    const incoming = fileArray.filter(Boolean);
+    if (incoming.length === 0) return;
+
+    if (attachmentsLenRef.current >= SURVEY_AI_MAX_ATTACHMENTS) {
+      setStatus(`Höchstens ${SURVEY_AI_MAX_ATTACHMENTS} Anhänge pro Nachricht.`);
+      return;
+    }
+
+    const slots = SURVEY_AI_MAX_ATTACHMENTS - attachmentsLenRef.current;
+    const drafts: AttachmentDraft[] = [];
+    for (const f of incoming) {
+      if (drafts.length >= slots) break;
+      const rawMime = guessMimeFromFile(f);
+      const mimeNorm = normalizeSurveyAiMime(rawMime);
+
+      if (f.size > SURVEY_AI_MAX_ATTACHMENT_BYTES) {
+        setStatus(
+          `„${f.name}“ ist zu groß (max. ${Math.round(SURVEY_AI_MAX_ATTACHMENT_BYTES / (1024 * 1024))} MB).`,
+        );
+        continue;
+      }
+
       const draft: AttachmentDraft = {
         fileName: f.name,
-        mimeType: f.type || "application/octet-stream",
+        mimeType: rawMime || mimeNorm,
         sizeBytes: f.size,
       };
-      if (
-        f.type.startsWith("text/") ||
-        f.type.includes("json") ||
-        f.name.endsWith(".md")
+
+      if (isSurveyAiMultimodalMime(mimeNorm)) {
+        try {
+          draft.dataBase64 = await readFileAsBase64Payload(f);
+          if (isSurveyAiMultimodalImageMime(mimeNorm)) {
+            draft.previewObjectUrl = URL.createObjectURL(f);
+          }
+        } catch {
+          setStatus(`„${f.name}“ konnte nicht gelesen werden.`);
+          continue;
+        }
+      } else if (
+        mimeNorm.startsWith("text/") ||
+        mimeNorm.includes("json") ||
+        f.name.toLowerCase().endsWith(".md") ||
+        mimeNorm === "application/json"
       ) {
         try {
           draft.textContent = (await f.text()).slice(0, 20000);
         } catch {
-          // ignore text parse failures
+          /* ignore */
         }
       }
-      next.push(draft);
+
+      drafts.push(draft);
     }
-    setAttachments((prev) => [...prev, ...next]);
+
+    if (drafts.length === 0) return;
+
+    setAttachments((prev) => {
+      const remain = SURVEY_AI_MAX_ATTACHMENTS - prev.length;
+      if (remain <= 0) {
+        drafts.forEach((d) => revokeDraftPreview(d));
+        return prev;
+      }
+      const take = drafts.slice(0, remain);
+      const drop = drafts.slice(remain);
+      drop.forEach((d) => revokeDraftPreview(d));
+      return [...prev, ...take];
+    });
+  }
+
+  async function onAddAttachmentsFromFileList(files: FileList | null) {
+    if (!files?.length) return;
+    await processFilesForAttachments(Array.from(files));
   }
 
   async function sendPrompt() {
@@ -421,6 +546,10 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
     const promptText = (forcedPrompt ?? prompt).trim();
     if (!promptText) return;
     const outgoingAttachments = [...attachments];
+    const previewUrlsToCleanup = outgoingAttachments
+      .map((a) => a.previewObjectUrl)
+      .filter((u): u is string => Boolean(u));
+
     let targetChatId = selectedChatId;
     if (!targetChatId) {
       const res = await fetch("/api/ai/chats", {
@@ -451,7 +580,14 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         id: optimisticUserId,
         role: "user",
         content: promptText,
-        metadata: {},
+        metadata: {
+          attachments: outgoingAttachments.map((a) => ({
+            fileName: a.fileName,
+            mimeType: a.mimeType,
+            sizeBytes: a.sizeBytes,
+            ...(a.previewObjectUrl ? { previewUrl: a.previewObjectUrl } : {}),
+          })),
+        },
         created_at: new Date().toISOString(),
       },
     ]);
@@ -475,7 +611,6 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
           message?: string;
         } | null;
         setStatus(data?.message ?? "Nachricht konnte nicht gesendet werden.");
-        setIsBusy(false);
         return;
       }
 
@@ -515,6 +650,9 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       }
       await loadChats();
       await loadChat(targetChatId);
+      for (const u of previewUrlsToCleanup) {
+        URL.revokeObjectURL(u);
+      }
     } catch {
       setStatus("Nachricht konnte nicht gesendet werden.");
       setThinkingStatus(null);
@@ -779,7 +917,42 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         </div>
 
         <div className="relative min-h-0 overflow-hidden">
-          <div className="relative z-0 flex h-full min-h-0 flex-col">
+          <div
+            className={`relative z-0 flex h-full min-h-0 flex-col transition-colors ${dropHighlight && selectedChatId ? "bg-primary/[0.04]" : ""}`}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (selectedChatId && e.dataTransfer.types.includes("Files")) setDropHighlight(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              const rel = e.relatedTarget as Node | null;
+              if (!e.currentTarget.contains(rel)) setDropHighlight(false);
+            }}
+            onDragOver={(e) => {
+              if (!selectedChatId) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDropHighlight(false);
+              if (!selectedChatId) return;
+              const fl = e.dataTransfer.files;
+              if (fl?.length) void processFilesForAttachments(Array.from(fl));
+            }}
+          >
+            {dropHighlight && selectedChatId ? (
+              <div
+                className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-background/55 backdrop-blur-[1px]"
+                aria-hidden
+              >
+                <div className="rounded-xl border-2 border-dashed border-primary/45 bg-card/95 px-6 py-4 text-center shadow-lg">
+                  <p className="text-sm font-semibold text-foreground">Dateien hier ablegen</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Loslassen zum Anfügen</p>
+                </div>
+              </div>
+            ) : null}
             <div
               ref={messagesViewportRef}
               className="scrollbar-subtle min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background p-4"
@@ -795,6 +968,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
                   <SurveyAiChatThread
                     messages={messages}
                     actions={actions}
+                    attachmentsByMessageId={chatAttachmentsByMessage}
                     isAssistantThinking={isBusy}
                     thinkingStatus={thinkingStatus}
                     pendingActionId={pendingActionId}
@@ -815,14 +989,45 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
                 <div className="rounded-[28px] border border-border bg-card p-2 shadow-xl">
                   {attachments.length > 0 ? (
                     <div className="flex flex-wrap gap-2 px-2 pb-2">
-                      {attachments.map((a, i) => (
-                        <span
-                          key={`${a.fileName}-${i}`}
-                          className="rounded border border-border bg-muted px-2 py-1 text-xs text-secondary"
-                        >
-                          {a.fileName}
-                        </span>
-                      ))}
+                      {attachments.map((a, i) => {
+                        const m = normalizeSurveyAiMime(a.mimeType);
+                        const showThumb =
+                          Boolean(a.previewObjectUrl) && isSurveyAiMultimodalImageMime(m);
+                        const Icon =
+                          normalizeSurveyAiMime(a.mimeType) === "application/pdf"
+                            ? FileType
+                            : FileImage;
+                        return (
+                          <div
+                            key={`${a.fileName}-${i}`}
+                            className="relative flex max-w-[200px] items-center gap-2 rounded-xl border border-border bg-muted/60 py-1.5 pl-1.5 pr-7 text-xs"
+                          >
+                            {showThumb && a.previewObjectUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={a.previewObjectUrl}
+                                alt=""
+                                className="h-10 w-10 shrink-0 rounded-lg object-cover"
+                              />
+                            ) : (
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+                                <Icon className="h-5 w-5 text-muted-foreground" aria-hidden />
+                              </span>
+                            )}
+                            <span className="min-w-0 truncate text-secondary" title={a.fileName}>
+                              {a.fileName}
+                            </span>
+                            <button
+                              type="button"
+                              className="absolute right-1 top-1 rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label={`Anhang „${a.fileName}“ entfernen`}
+                              onClick={() => removeComposerAttachment(i)}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : null}
                   <div className="flex items-center gap-2 px-1">
@@ -831,9 +1036,10 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
                         ref={fileInputRef}
                         type="file"
                         multiple
+                        accept={SURVEY_AI_ATTACHMENT_ACCEPT_ATTR}
                         className="hidden"
                         onChange={(e) => {
-                          void onAddAttachments(e.currentTarget.files);
+                          void onAddAttachmentsFromFileList(e.currentTarget.files);
                           e.currentTarget.value = "";
                         }}
                       />
@@ -851,6 +1057,22 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
                       rows={1}
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
+                      onPaste={(e) => {
+                        const items = e.clipboardData?.items;
+                        if (!items?.length || !selectedChatId) return;
+                        const pastedFiles: File[] = [];
+                        for (let i = 0; i < items.length; i += 1) {
+                          const item = items[i];
+                          if (item?.kind === "file") {
+                            const f = item.getAsFile();
+                            if (f) pastedFiles.push(f);
+                          }
+                        }
+                        if (pastedFiles.length > 0) {
+                          e.preventDefault();
+                          void processFilesForAttachments(pastedFiles);
+                        }
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();

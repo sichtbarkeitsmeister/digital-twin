@@ -19,9 +19,11 @@ export type OrganisationOption = {
 export function OrganisationSwitcher({
   organisations,
   selectedOrganisationId,
+  orgPath = "/dashboard/members",
 }: {
   organisations: OrganisationOption[];
   selectedOrganisationId: string | null;
+  orgPath?: string;
 }) {
   const selected =
     organisations.find((o) => o.id === selectedOrganisationId) ?? null;
@@ -42,7 +44,7 @@ export function OrganisationSwitcher({
         ) : (
           organisations.map((org) => (
             <DropdownMenuItem key={org.id} asChild>
-              <Link href={`/dashboard/members?org=${org.id}`}>{org.name}</Link>
+              <Link href={`${orgPath}?org=${org.id}`}>{org.name}</Link>
             </DropdownMenuItem>
           ))
         )}

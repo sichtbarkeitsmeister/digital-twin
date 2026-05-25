@@ -6,8 +6,11 @@ import {
   Building2,
   ClipboardPenLine,
   Inbox,
+  Plug,
   Shield,
+  Sparkles,
   Users,
+  Workflow,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -71,19 +74,25 @@ function NavLink({ item }: { item: NavItem }) {
 
 export function DashboardSidebar({
   isPlatformAdmin,
+  canManageIntegrations,
   pendingSurveyQuestionsCount,
 }: {
   isPlatformAdmin: boolean;
+  canManageIntegrations: boolean;
   pendingSurveyQuestionsCount: number;
 }) {
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
+    { label: "Leads", href: "/dashboard/leads", icon: Sparkles },
     {
       label: "Organisationen",
       href: "/dashboard/organisations",
       icon: Building2,
     },
     { label: "Mitglieder", href: "/dashboard/members", icon: Users },
+    ...(canManageIntegrations
+      ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
+      : []),
   ];
 
   const adminItems: NavItem[] = [
@@ -91,6 +100,11 @@ export function DashboardSidebar({
       label: "Organisationen verwalten",
       href: "/dashboard/admin/organisations",
       icon: Shield,
+    },
+    {
+      label: "Jobs runner",
+      href: "/dashboard/admin/jobs",
+      icon: Workflow,
     },
     {
       label: "Umfragen",

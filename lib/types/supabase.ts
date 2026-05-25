@@ -14,6 +14,527 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_chat_actions: {
+        Row: {
+          chat_id: string
+          created_at: string
+          execution_result: Json | null
+          execution_status: string
+          id: string
+          message_id: string | null
+          proposal_json: Json
+          proposal_kind: string
+          revert_payload: Json | null
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          execution_result?: Json | null
+          execution_status?: string
+          id?: string
+          message_id?: string | null
+          proposal_json: Json
+          proposal_kind: string
+          revert_payload?: Json | null
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          execution_result?: Json | null
+          execution_status?: string
+          id?: string
+          message_id?: string | null
+          proposal_json?: Json
+          proposal_kind?: string
+          revert_payload?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_actions_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_chat_actions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_chat_attachments: {
+        Row: {
+          chat_id: string
+          created_at: string
+          file_name: string
+          id: string
+          message_id: string | null
+          mime_type: string
+          size_bytes: number
+          storage_path: string
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          file_name: string
+          id?: string
+          message_id?: string | null
+          mime_type: string
+          size_bytes: number
+          storage_path: string
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          file_name?: string
+          id?: string
+          message_id?: string | null
+          mime_type?: string
+          size_bytes?: number
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_attachments_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_chat_attachments_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_chat_messages: {
+        Row: {
+          chat_id: string
+          content: string
+          created_at: string
+          id: string
+          metadata: Json
+          role: string
+        }
+        Insert: {
+          chat_id: string
+          content?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          role: string
+        }
+        Update: {
+          chat_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_messages_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_chats: {
+        Row: {
+          archived_at: string | null
+          assistant_rules: string
+          created_at: string
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          assistant_rules?: string
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          assistant_rules?: string
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: []
+      }
+      companies: {
+        Row: {
+          agent_status: string
+          approval_mode_override: string | null
+          channel_preference: string
+          city: string | null
+          country: string | null
+          created_at: string
+          domain: string
+          first_seen_at: string
+          id: string
+          industry: string | null
+          last_seen_at: string
+          metadata: Json
+          name: string | null
+          organisation_id: string
+          region: string | null
+          size_range: string | null
+          source: string
+          updated_at: string
+          visit_count: number
+        }
+        Insert: {
+          agent_status?: string
+          approval_mode_override?: string | null
+          channel_preference?: string
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          domain: string
+          first_seen_at?: string
+          id?: string
+          industry?: string | null
+          last_seen_at?: string
+          metadata?: Json
+          name?: string | null
+          organisation_id: string
+          region?: string | null
+          size_range?: string | null
+          source?: string
+          updated_at?: string
+          visit_count?: number
+        }
+        Update: {
+          agent_status?: string
+          approval_mode_override?: string | null
+          channel_preference?: string
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          domain?: string
+          first_seen_at?: string
+          id?: string
+          industry?: string | null
+          last_seen_at?: string
+          metadata?: Json
+          name?: string | null
+          organisation_id?: string
+          region?: string | null
+          size_range?: string | null
+          source?: string
+          updated_at?: string
+          visit_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "companies_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contacts: {
+        Row: {
+          company_id: string
+          created_at: string
+          do_not_contact: boolean
+          email: string | null
+          email_verified: boolean
+          first_name: string | null
+          full_name: string | null
+          id: string
+          is_primary: boolean
+          last_name: string | null
+          linkedin_url: string | null
+          metadata: Json
+          organisation_id: string
+          phone: string | null
+          score: number | null
+          seniority: string | null
+          source: string
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          do_not_contact?: boolean
+          email?: string | null
+          email_verified?: boolean
+          first_name?: string | null
+          full_name?: string | null
+          id?: string
+          is_primary?: boolean
+          last_name?: string | null
+          linkedin_url?: string | null
+          metadata?: Json
+          organisation_id: string
+          phone?: string | null
+          score?: number | null
+          seniority?: string | null
+          source?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          do_not_contact?: boolean
+          email?: string | null
+          email_verified?: boolean
+          first_name?: string | null
+          full_name?: string | null
+          id?: string
+          is_primary?: boolean
+          last_name?: string | null
+          linkedin_url?: string | null
+          metadata?: Json
+          organisation_id?: string
+          phone?: string | null
+          score?: number | null
+          seniority?: string | null
+          source?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      integration_raw_events: {
+        Row: {
+          body_json: Json | null
+          body_raw: string | null
+          headers: Json
+          http_method: string | null
+          id: string
+          integration_id: string | null
+          match_status: string
+          organisation_id: string | null
+          path: string | null
+          processed_at: string | null
+          provider: string
+          query: Json
+          received_at: string
+          signature_header: string | null
+          source_ip: string | null
+        }
+        Insert: {
+          body_json?: Json | null
+          body_raw?: string | null
+          headers?: Json
+          http_method?: string | null
+          id?: string
+          integration_id?: string | null
+          match_status: string
+          organisation_id?: string | null
+          path?: string | null
+          processed_at?: string | null
+          provider: string
+          query?: Json
+          received_at?: string
+          signature_header?: string | null
+          source_ip?: string | null
+        }
+        Update: {
+          body_json?: Json | null
+          body_raw?: string | null
+          headers?: Json
+          http_method?: string | null
+          id?: string
+          integration_id?: string | null
+          match_status?: string
+          organisation_id?: string | null
+          path?: string | null
+          processed_at?: string | null
+          provider?: string
+          query?: Json
+          received_at?: string
+          signature_header?: string | null
+          source_ip?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_raw_events_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "org_integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "integration_raw_events_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jobs: {
+        Row: {
+          attempts: number
+          completed_at: string | null
+          created_at: string
+          dedupe_key: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          organisation_id: string | null
+          payload: Json
+          result: Json | null
+          run_after: string
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          dedupe_key?: string | null
+          id?: string
+          kind: string
+          last_error?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          organisation_id?: string | null
+          payload?: Json
+          result?: Json | null
+          run_after?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          dedupe_key?: string | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          organisation_id?: string | null
+          payload?: Json
+          result?: Json | null
+          run_after?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jobs_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      org_integrations: {
+        Row: {
+          config: Json
+          created_at: string
+          created_by_user_id: string
+          id: string
+          organisation_id: string
+          provider: string
+          secrets: Json
+          status: string
+          updated_at: string
+          webhook_token: string | null
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          created_by_user_id: string
+          id?: string
+          organisation_id: string
+          provider: string
+          secrets?: Json
+          status?: string
+          updated_at?: string
+          webhook_token?: string | null
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          created_by_user_id?: string
+          id?: string
+          organisation_id?: string
+          provider?: string
+          secrets?: Json
+          status?: string
+          updated_at?: string
+          webhook_token?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_integrations_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organisation_invites: {
         Row: {
           accepted_at: string | null
@@ -184,8 +705,10 @@ export type Database = {
           answered_at: string | null
           answered_by_user_id: string | null
           asked_at: string
+          asked_notification_sent_at: string | null
           field_id: string
           id: string
+          kind: string
           question: string
           response_id: string
           survey_id: string
@@ -195,8 +718,10 @@ export type Database = {
           answered_at?: string | null
           answered_by_user_id?: string | null
           asked_at?: string
+          asked_notification_sent_at?: string | null
           field_id: string
           id?: string
+          kind?: string
           question: string
           response_id: string
           survey_id: string
@@ -206,8 +731,10 @@ export type Database = {
           answered_at?: string | null
           answered_by_user_id?: string | null
           asked_at?: string
+          asked_notification_sent_at?: string | null
           field_id?: string
           id?: string
+          kind?: string
           question?: string
           response_id?: string
           survey_id?: string
@@ -229,10 +756,35 @@ export type Database = {
           },
         ]
       }
+      survey_folders: {
+        Row: {
+          created_at: string
+          created_by_user_id: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_user_id: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by_user_id?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       survey_responses: {
         Row: {
           answers: Json
           completed_at: string | null
+          completed_notification_sent_at: string | null
           created_at: string
           id: string
           status: Database["public"]["Enums"]["survey_response_status"]
@@ -243,6 +795,7 @@ export type Database = {
         Insert: {
           answers?: Json
           completed_at?: string | null
+          completed_notification_sent_at?: string | null
           created_at?: string
           id?: string
           status?: Database["public"]["Enums"]["survey_response_status"]
@@ -253,6 +806,7 @@ export type Database = {
         Update: {
           answers?: Json
           completed_at?: string | null
+          completed_notification_sent_at?: string | null
           created_at?: string
           id?: string
           status?: Database["public"]["Enums"]["survey_response_status"]
@@ -275,8 +829,12 @@ export type Database = {
           created_at: string
           created_by_user_id: string
           definition: Json
+          deleted_at: string | null
+          deleted_by_user_id: string | null
           description: string
+          folder_id: string | null
           id: string
+          notification_emails: string[]
           published_at: string | null
           slug: string | null
           title: string
@@ -287,8 +845,12 @@ export type Database = {
           created_at?: string
           created_by_user_id: string
           definition: Json
+          deleted_at?: string | null
+          deleted_by_user_id?: string | null
           description?: string
+          folder_id?: string | null
           id?: string
+          notification_emails?: string[]
           published_at?: string | null
           slug?: string | null
           title: string
@@ -299,15 +861,91 @@ export type Database = {
           created_at?: string
           created_by_user_id?: string
           definition?: Json
+          deleted_at?: string | null
+          deleted_by_user_id?: string | null
           description?: string
+          folder_id?: string | null
           id?: string
+          notification_emails?: string[]
           published_at?: string | null
           slug?: string | null
           title?: string
           updated_at?: string
           visibility?: Database["public"]["Enums"]["survey_visibility"]
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "surveys_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "survey_folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      visits: {
+        Row: {
+          company_id: string
+          created_at: string
+          duration_s: number | null
+          id: string
+          metadata: Json
+          organisation_id: string
+          pages: Json
+          raw_event_id: string | null
+          referrer: string | null
+          source: string
+          visited_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          duration_s?: number | null
+          id?: string
+          metadata?: Json
+          organisation_id: string
+          pages?: Json
+          raw_event_id?: string | null
+          referrer?: string | null
+          source?: string
+          visited_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          duration_s?: number | null
+          id?: string
+          metadata?: Json
+          organisation_id?: string
+          pages?: Json
+          raw_event_id?: string | null
+          referrer?: string | null
+          source?: string
+          visited_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visits_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visits_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visits_raw_event_id_fkey"
+            columns: ["raw_event_id"]
+            isOneToOne: false
+            referencedRelation: "integration_raw_events"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -323,7 +961,12 @@ export type Database = {
         Returns: string
       }
       ask_public_field_question: {
-        Args: { p_field_id: string; p_question: string; p_slug: string }
+        Args: {
+          p_field_id: string
+          p_kind?: string
+          p_question: string
+          p_slug: string
+        }
         Returns: string
       }
       can_invite: { Args: { org_id: string }; Returns: boolean }
@@ -332,10 +975,47 @@ export type Database = {
         Returns: boolean
       }
       can_view_profile: { Args: { target_user_id: string }; Returns: boolean }
+      claim_due_jobs: {
+        Args: { p_batch: number; p_now: string; p_worker: string }
+        Returns: {
+          attempts: number
+          completed_at: string | null
+          created_at: string
+          dedupe_key: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          organisation_id: string | null
+          payload: Json
+          result: Json | null
+          run_after: string
+          started_at: string | null
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       create_public_survey_response: {
         Args: { p_slug: string }
         Returns: {
           response_id: string
+        }[]
+      }
+      get_public_field_remark: {
+        Args: { p_field_id: string; p_slug: string }
+        Returns: {
+          field_id: string
+          id: string
+          remark: string
+          updated_at: string
         }[]
       }
       get_public_survey_by_slug: {
@@ -372,6 +1052,7 @@ export type Database = {
       }
       is_org_member: { Args: { org_id: string; uid: string }; Returns: boolean }
       is_platform_admin: { Args: { uid: string }; Returns: boolean }
+      jobs_cron_tick: { Args: never; Returns: undefined }
       kick_from_organisation: {
         Args: { org_id: string; target_user_id: string }
         Returns: undefined
@@ -384,6 +1065,7 @@ export type Database = {
           asked_at: string
           field_id: string
           id: string
+          kind: string
           question: string
         }[]
       }
@@ -392,16 +1074,16 @@ export type Database = {
         Returns: Database["public"]["Enums"]["org_role"]
       }
       save_public_survey_response: {
-        Args: {
-          p_answers: Json
-          p_mark_completed?: boolean
-          p_slug: string
-        }
+        Args: { p_answers: Json; p_mark_completed?: boolean; p_slug: string }
         Returns: undefined
       }
       transfer_organisation_ownership: {
         Args: { new_owner_user_id: string; org_id: string }
         Returns: undefined
+      }
+      upsert_public_field_remark: {
+        Args: { p_field_id: string; p_remark: string; p_slug: string }
+        Returns: string
       }
     }
     Enums: {

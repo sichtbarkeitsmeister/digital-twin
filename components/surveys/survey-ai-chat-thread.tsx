@@ -1,10 +1,14 @@
 "use client";
 
-import { CheckCircle2, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, FileImage, FileText, FileType, Sparkles, XCircle } from "lucide-react";
 
 import type { AiChatAction } from "@/components/surveys/survey-ai-action-trace";
 import { SurveyAiActionTrace } from "@/components/surveys/survey-ai-action-trace";
 import { SurveyChatMarkdown } from "@/components/surveys/survey-chat-markdown";
+import {
+  isSurveyAiMultimodalImageMime,
+  normalizeSurveyAiMime,
+} from "@/lib/ai/survey-ai-attachments-shared";
 
 export type AiChatMessage = {
   id: string;
@@ -13,6 +17,129 @@ export type AiChatMessage = {
   metadata: Record<string, unknown>;
   created_at: string;
 };
+
+/** From GET /api/ai/chats/:id — includes short-lived signed_url for thumbnails */
+export type AiChatStoredAttachment = {
+  id?: string;
+  message_id?: string | null;
+  file_name: string;
+  mime_type: string;
+  size_bytes?: number;
+  signed_url?: string | null;
+};
+
+function formatAttachmentSize(bytes?: number): string {
+  if (bytes == null || Number.isNaN(bytes)) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function metadataAttachments(md: Record<string, unknown>): Array<{
+  fileName: string;
+  mimeType: string;
+  sizeBytes?: number;
+  previewUrl?: string;
+}> {
+  const raw = md.attachments;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const o = entry as Record<string, unknown>;
+      const fileName = typeof o.fileName === "string" ? o.fileName : "";
+      const mimeType = typeof o.mimeType === "string" ? o.mimeType : "application/octet-stream";
+      const sizeBytes =
+        typeof o.sizeBytes === "number" && Number.isFinite(o.sizeBytes) ? o.sizeBytes : undefined;
+      const previewUrl = typeof o.previewUrl === "string" ? o.previewUrl : undefined;
+      if (!fileName) return null;
+      return { fileName, mimeType, sizeBytes, previewUrl };
+    })
+    .filter((v): v is NonNullable<typeof v> => v != null);
+}
+
+function AttachmentThumbStack(props: {
+  items: Array<{
+    fileName: string;
+    mimeNorm: string;
+    sizeBytes?: number;
+    imageSrc?: string | null;
+  }>;
+}) {
+  if (props.items.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {props.items.map((item, idx) => {
+        const Icon = item.mimeNorm === "application/pdf" ? FileType : FileText;
+        const isImg = isSurveyAiMultimodalImageMime(item.mimeNorm);
+        return (
+          <div
+            key={`${item.fileName}-${idx}`}
+            className="flex max-w-[200px] items-start gap-2 rounded-xl border border-border/80 bg-background/70 p-2"
+          >
+            {isImg && item.imageSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element -- signed/blob URLs only
+              <img
+                src={item.imageSrc}
+                alt=""
+                className="h-14 w-14 shrink-0 rounded-lg object-cover"
+              />
+            ) : (
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-muted">
+                {isImg ? (
+                  <FileImage className="h-6 w-6 text-muted-foreground" aria-hidden />
+                ) : (
+                  <Icon className="h-6 w-6 text-muted-foreground" aria-hidden />
+                )}
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-foreground" title={item.fileName}>
+                {item.fileName}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                {normalizeSurveyAiMime(item.mimeNorm)}
+                {formatAttachmentSize(item.sizeBytes) ? ` · ${formatAttachmentSize(item.sizeBytes)}` : ""}
+              </p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function UserMessageAttachments(props: {
+  msgId: string;
+  metadata: Record<string, unknown>;
+  attachmentsByMessageId?: Map<string, AiChatStoredAttachment[]>;
+}) {
+  const stored = props.attachmentsByMessageId?.get(props.msgId) ?? [];
+  const meta = metadataAttachments(props.metadata);
+
+  const items =
+    stored.length > 0
+      ? stored.map((s) => ({
+          fileName: s.file_name,
+          mimeNorm: normalizeSurveyAiMime(s.mime_type),
+          sizeBytes: typeof s.size_bytes === "number" ? s.size_bytes : undefined,
+          imageSrc:
+            isSurveyAiMultimodalImageMime(s.mime_type) && s.signed_url
+              ? s.signed_url
+              : undefined,
+        }))
+      : meta.map((m) => ({
+          fileName: m.fileName,
+          mimeNorm: normalizeSurveyAiMime(m.mimeType),
+          sizeBytes: m.sizeBytes,
+          imageSrc:
+            isSurveyAiMultimodalImageMime(m.mimeType) && m.previewUrl
+              ? m.previewUrl
+              : undefined,
+        }));
+
+  return <AttachmentThumbStack items={items} />;
+}
 
 function parseProposal(content: string) {
   try {
@@ -200,6 +327,7 @@ function getActionStateLabel(action: AiChatAction | null) {
 export function SurveyAiChatThread(props: {
   messages: AiChatMessage[];
   actions: AiChatAction[];
+  attachmentsByMessageId?: Map<string, AiChatStoredAttachment[]>;
   isAssistantThinking: boolean;
   thinkingStatus: string | null;
   pendingActionId: string | null;
@@ -254,7 +382,16 @@ export function SurveyAiChatThread(props: {
               ) : msg.role === "assistant" ? (
                 <SurveyChatMarkdown content={msg.content} />
               ) : (
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                <>
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {isUser ? (
+                    <UserMessageAttachments
+                      msgId={msg.id}
+                      metadata={msg.metadata}
+                      attachmentsByMessageId={props.attachmentsByMessageId}
+                    />
+                  ) : null}
+                </>
               )}
               <p className="mt-2 text-[11px] text-secondary">{new Date(msg.created_at).toLocaleString()}</p>
             </div>

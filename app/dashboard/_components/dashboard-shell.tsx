@@ -6,10 +6,12 @@ import { DashboardSidebar } from "@/app/dashboard/_components/dashboard-sidebar"
 export function DashboardShell({
   children,
   isPlatformAdmin,
+  canManageIntegrations,
   pendingSurveyQuestionsCount,
 }: {
   children: React.ReactNode;
   isPlatformAdmin: boolean;
+  canManageIntegrations: boolean;
   pendingSurveyQuestionsCount?: number;
 }) {
   return (
@@ -20,6 +22,7 @@ export function DashboardShell({
             <div className="rounded-lg border bg-card p-3">
               <DashboardSidebar
                 isPlatformAdmin={isPlatformAdmin}
+                canManageIntegrations={canManageIntegrations}
                 pendingSurveyQuestionsCount={pendingSurveyQuestionsCount ?? 0}
               />
             </div>

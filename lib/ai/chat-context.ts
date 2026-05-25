@@ -1,10 +1,3 @@
-import type Anthropic from "@anthropic-ai/sdk";
-
-type ChatMessage = {
-  role: "user" | "assistant" | "system";
-  content: string;
-};
-
 type SurveySnapshot = {
   id: string;
   title: string;
@@ -167,19 +160,8 @@ export function buildGlobalSurveyChatSystemPrompt(input: {
     `Known surveys: ${JSON.stringify(surveys)}`,
     `Candidate survey contexts for edits (use these for full-definition modifications): ${JSON.stringify(candidateSurveyContexts)}`,
     `Known folders: ${JSON.stringify(folders)}`,
+    "Du kannst Bilder (JPEG, PNG, GIF, WebP) und PDF-Anhänge der Nutzernachricht sehen, sofern diese im aktuellen und in jüngeren Verlaufs-Turns über Storage gespeichert und an das Modell übergeben werden.",
     `Attachment summaries (current user message): ${JSON.stringify(attachmentSummaries)}`,
   ].join("\n");
-}
-
-export function toAnthropicMessages(messages: ChatMessage[]): Anthropic.MessageParam[] {
-  return messages
-    .filter(
-      (m): m is { role: "user" | "assistant"; content: string } =>
-        m.role === "user" || m.role === "assistant",
-    )
-    .map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
 }
 
