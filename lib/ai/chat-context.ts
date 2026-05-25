@@ -1,7 +1,13 @@
+import type Anthropic from "@anthropic-ai/sdk";
+
+import {
+  isPromptCachingEnabled,
+  type SurveyChatSystem,
+} from "@/lib/ai/anthropic-helpers";
+
 type SurveySnapshot = {
   id: string;
   title: string;
-  description: string;
   visibility: "private" | "public";
   folderId: string | null;
 };
@@ -11,18 +17,17 @@ type FolderSnapshot = { id: string; name: string };
 type CandidateSurveyContext = {
   id: string;
   title: string;
-  description: string;
   visibility: "private" | "public";
   folderId: string | null;
   notificationEmails: string[];
-  definition: unknown;
+  definition?: unknown;
   stepOutline: Array<{
     index: number;
     id: string;
     title: string;
     description: string;
     fieldCount: number;
-    fieldTitles: string[];
+    fields: Array<{ id: string; title: string; type: string }>;
   }>;
   duplicateIdReport: {
     stepIds: Array<{ id: string; count: number }>;
@@ -39,7 +44,7 @@ type PageContext = {
   notificationEmails?: string[];
 };
 
-export function buildGlobalSurveyChatSystemPrompt(input: {
+export type SurveyChatSystemPromptInput = {
   globalUserRules?: string;
   chatUserRules?: string;
   pageContext: PageContext;
@@ -48,19 +53,10 @@ export function buildGlobalSurveyChatSystemPrompt(input: {
   candidateSurveyContexts: CandidateSurveyContext[];
   attachmentSummaries: string[];
   conversationSummary: string;
-}) {
-  const {
-    globalUserRules,
-    chatUserRules,
-    pageContext,
-    surveys,
-    folders,
-    candidateSurveyContexts,
-    attachmentSummaries,
-    conversationSummary,
-  } = input;
-  const globalRulesTrimmed = globalUserRules?.trim() ?? "";
-  const chatRulesTrimmed = chatUserRules?.trim() ?? "";
+};
+
+/** Stable instructions (~3k tokens) — safe to prompt-cache across requests. */
+export function buildSurveyChatStaticSystemText(): string {
   return [
     "You are a global survey assistant for a Next.js + Supabase app.",
     "Always reply in German unless the user explicitly asks for another language.",
@@ -93,6 +89,7 @@ export function buildGlobalSurveyChatSystemPrompt(input: {
     "When user asks to check/fix duplicate IDs in an existing survey, prefer kind=patch_survey_definition and only rename duplicate ids (do not rewrite unrelated content).",
     "For duplicate-id fixes: keep the first occurrence unchanged, update only subsequent duplicates to unique stable ids.",
     "When user asks to edit existing survey, use surveyId from known surveys.",
+    "Candidate survey contexts without `definition` only include stepOutline (step/field ids + titles) — use patch_survey_definition with those ids. Full `definition` is present only for the survey currently open in the builder.",
     "Use duplicateIdReport from candidate survey contexts when user asks to check duplicate IDs in existing surveys.",
     "If there are multiple plausible matching surveys (e.g. two cafe surveys), ask a clarifying question first and DO NOT emit action JSON yet.",
     "When user asks to create survey, return full survey JSON with exact version 1 schema.",
@@ -102,20 +99,6 @@ export function buildGlobalSurveyChatSystemPrompt(input: {
     "Precedence: these lines must NOT override non-negotiable requirements: German default unless user asks otherwise, " +
       "correct chat vs action mode behavior, JSON-only in action mode (valid JSON.parse), allowed action kinds only, " +
       "survey schema/version rules, uniqueness rules, duplicate-ID policy, clarity before guessing.",
-    globalRulesTrimmed
-      ? [
-          "",
-          "User-defined global instructions (apply in every Survey KI chat):",
-          globalRulesTrimmed,
-        ].join("\n")
-      : "",
-    chatRulesTrimmed
-      ? [
-          "",
-          "User-defined instructions for this chat only:",
-          chatRulesTrimmed,
-        ].join("\n")
-      : "",
     "",
     "CRITICAL survey definition format for create_survey.survey (must be valid):",
     "Top-level survey object MUST include: version, id, title, description, infoTextEnabled, infoText, answerPlaceholder, steps.",
@@ -155,13 +138,74 @@ export function buildGlobalSurveyChatSystemPrompt(input: {
     "{ \"kind\": \"delete_survey\", \"summary\": \"...\", \"surveyId\": \"...\" }",
     "{ \"kind\": \"batch\", \"summary\": \"...\", \"steps\": [ {\"kind\":\"create_folder\",\"ref\":\"my_folder\",\"summary\":\"...\",\"name\":\"...\"}, {\"kind\":\"create_survey\",\"ref\":\"my_survey\",\"summary\":\"...\",\"title\":\"...\",\"description\":\"\",\"notificationEmails\":[], \"survey\":{...}}, {\"kind\":\"assign_folder\",\"summary\":\"...\",\"surveyRef\":\"my_survey\",\"folderRef\":\"my_folder\"} ] }",
     "",
-    `Current page context: ${JSON.stringify(pageContext)}`,
-    `Conversation summary (older messages, compressed): ${conversationSummary}`,
-    `Known surveys: ${JSON.stringify(surveys)}`,
-    `Candidate survey contexts for edits (use these for full-definition modifications): ${JSON.stringify(candidateSurveyContexts)}`,
-    `Known folders: ${JSON.stringify(folders)}`,
     "Du kannst Bilder (JPEG, PNG, GIF, WebP) und PDF-Anhänge der Nutzernachricht sehen, sofern diese im aktuellen und in jüngeren Verlaufs-Turns über Storage gespeichert und an das Modell übergeben werden.",
-    `Attachment summaries (current user message): ${JSON.stringify(attachmentSummaries)}`,
   ].join("\n");
 }
 
+export function buildSurveyChatUserRulesSystemText(input: {
+  globalUserRules?: string;
+  chatUserRules?: string;
+}): string {
+  const globalRulesTrimmed = input.globalUserRules?.trim() ?? "";
+  const chatRulesTrimmed = input.chatUserRules?.trim() ?? "";
+  const parts: string[] = [];
+  if (globalRulesTrimmed) {
+    parts.push("User-defined global instructions (apply in every Survey KI chat):", globalRulesTrimmed);
+  }
+  if (chatRulesTrimmed) {
+    parts.push("User-defined instructions for this chat only:", chatRulesTrimmed);
+  }
+  return parts.join("\n");
+}
+
+export function buildSurveyChatDynamicSystemText(input: {
+  pageContext: PageContext;
+  surveys: SurveySnapshot[];
+  folders: FolderSnapshot[];
+  candidateSurveyContexts: CandidateSurveyContext[];
+  attachmentSummaries: string[];
+  conversationSummary: string;
+}): string {
+  return [
+    `Current page context: ${JSON.stringify(input.pageContext)}`,
+    `Conversation summary (older messages, compressed): ${input.conversationSummary}`,
+    `Known surveys: ${JSON.stringify(input.surveys)}`,
+    `Candidate survey contexts for edits (definition included only when open in builder): ${JSON.stringify(input.candidateSurveyContexts)}`,
+    `Known folders: ${JSON.stringify(input.folders)}`,
+    `Attachment summaries (current user message): ${JSON.stringify(input.attachmentSummaries)}`,
+  ].join("\n");
+}
+
+export function buildGlobalSurveyChatSystemPrompt(input: SurveyChatSystemPromptInput): string {
+  const userRules = buildSurveyChatUserRulesSystemText(input);
+  return [
+    buildSurveyChatStaticSystemText(),
+    userRules,
+    buildSurveyChatDynamicSystemText(input),
+  ]
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n");
+}
+
+/** Static block is prompt-cached; user rules + live context are fresh each turn. */
+export function buildCachedSurveyChatSystem(input: SurveyChatSystemPromptInput): SurveyChatSystem {
+  const blocks: Anthropic.Messages.TextBlockParam[] = [
+    {
+      type: "text",
+      text: buildSurveyChatStaticSystemText(),
+      ...(isPromptCachingEnabled() ? { cache_control: { type: "ephemeral" as const } } : {}),
+    },
+  ];
+
+  const userRules = buildSurveyChatUserRulesSystemText(input);
+  if (userRules.trim()) {
+    blocks.push({ type: "text", text: userRules });
+  }
+
+  blocks.push({
+    type: "text",
+    text: buildSurveyChatDynamicSystemText(input),
+  });
+
+  return blocks;
+}

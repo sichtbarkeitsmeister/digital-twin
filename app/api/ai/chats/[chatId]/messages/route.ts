@@ -3,7 +3,20 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { buildGlobalSurveyChatSystemPrompt } from "@/lib/ai/chat-context";
+import {
+  buildCachedSurveyChatSystem,
+  type SurveyChatSystemPromptInput,
+} from "@/lib/ai/chat-context";
+import {
+  anthropicSurveyBetaHeaders,
+  extractAnthropicText,
+  isAnthropicModelNotFoundError,
+  isMultiPhaseSurveyCreationEnabled,
+  isPromptCachingEnabled,
+  stripCodeFences,
+  tryParseJsonObject,
+  type SurveyChatSystem,
+} from "@/lib/ai/anthropic-helpers";
 import {
   AI_CHAT_ATTACHMENTS_BUCKET,
   attachmentStorageObjectPath,
@@ -23,11 +36,19 @@ import {
   type DbChatMessageRow,
 } from "@/lib/ai/chat-history-anthropic";
 import { createSseStream, sseHeaders } from "@/lib/ai/chat-stream";
+import {
+  isLargeSurveyCreationIntent,
+  resolveSurveyActionModels,
+  resolveSurveyUtilityModels,
+  selectSurveyModelsForMessage,
+} from "@/lib/ai/survey-model-config";
+import { runMultiPhaseSurveyCreation } from "@/lib/ai/survey-multiphase-create";
 import { surveyAiProposalSchema } from "@/lib/ai/survey-assistant-types";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
 
-const MODEL_FALLBACKS = ["claude-sonnet-4-20250514", "claude-3-5-sonnet-latest"] as const;
-const MAX_CANDIDATE_SURVEY_CONTEXTS = 8;
+const MAX_CANDIDATE_SURVEY_CONTEXTS = 2;
+const MAX_KNOWN_SURVEYS = 50;
+const SURVEY_RANK_POOL = 100;
 const RAW_HISTORY_LIMIT = 10;
 const HISTORY_SUMMARY_CHAR_LIMIT = 2400;
 
@@ -198,16 +219,11 @@ async function rollbackUserMessageAndStorage(input: {
 }
 
 function extractText(resp: Anthropic.Messages.Message) {
-  return resp.content
-    .filter((item): item is Anthropic.TextBlock => item.type === "text")
-    .map((item) => item.text)
-    .join("\n")
-    .trim();
+  return extractAnthropicText(resp);
 }
 
-function stripCodeFences(text: string) {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  return (fenced?.[1] ?? text).trim();
+function isModelNotFoundError(error: unknown) {
+  return isAnthropicModelNotFoundError(error);
 }
 
 function extractProposalHintFromText(text: string) {
@@ -228,74 +244,14 @@ function extractProposalHintFromText(text: string) {
   };
 }
 
-function extractFirstJsonObject(text: string) {
-  const input = stripCodeFences(text);
-  const start = input.indexOf("{");
-  if (start < 0) return null;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = start; i < input.length; i += 1) {
-    const ch = input[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") depth += 1;
-    if (ch === "}") depth -= 1;
-
-    if (depth === 0) {
-      return input.slice(start, i + 1).trim();
-    }
-  }
-
-  return null;
-}
-
-function tryParseJsonObject(text: string) {
-  try {
-    const normalized = stripCodeFences(text);
-    const parsed: unknown = JSON.parse(normalized);
-    if (parsed && typeof parsed === "object") return parsed;
-    return null;
-  } catch {
-    try {
-      const firstObject = extractFirstJsonObject(text);
-      if (!firstObject) return null;
-      const recovered: unknown = JSON.parse(firstObject);
-      return recovered && typeof recovered === "object" ? recovered : null;
-    } catch {
-      return null;
-    }
-  }
-}
-
 function hasActionJsonIntent(text: string) {
   return extractProposalHintFromText(text)?.kind != null;
 }
 
 async function ensureValidAssistantOutput(input: {
   anthropic: Anthropic;
-  model: string;
-  systemPrompt: string;
+  utilityModels: string[];
+  system: SurveyChatSystem;
   baseMessages: Anthropic.MessageParam[];
   assistantText: string;
 }) {
@@ -309,53 +265,69 @@ async function ensureValidAssistantOutput(input: {
 
   let candidate = stripCodeFences(input.assistantText);
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const repairResponse = await input.anthropic.messages.create({
-      model: input.model,
-      max_tokens: 16384,
-      system:
-        "You repair malformed JSON. Return exactly one valid JSON object only. No markdown, no prose, no code fences.",
-      messages: [
-        {
-          role: "user",
-          content:
-            `Repariere das folgende fehlerhafte JSON für eine Survey-Aktion.` +
-            `\n\nWICHTIG:` +
-            `\n- Gib NUR ein valides JSON-Objekt zurück.` +
-            `\n- Keine Erklärungen, kein Markdown, keine Code-Fences.` +
-            `\n- Behalte die fachliche Bedeutung bei.` +
-            `\n\nFehlerhafte Antwort:\n${candidate}`,
-        },
-      ],
-    });
-    const repairedText = extractText(repairResponse).trim();
-    const repairedParsed = tryParseJsonObject(repairedText);
-    if (repairedParsed) {
-      return { assistantText: repairedText, parsedJson: repairedParsed };
+    for (const utilityModel of input.utilityModels) {
+      try {
+        const repairResponse = await input.anthropic.messages.create({
+          model: utilityModel,
+          max_tokens: 8192,
+          system:
+            "You repair malformed JSON. Return exactly one valid JSON object only. No markdown, no prose, no code fences.",
+          messages: [
+            {
+              role: "user",
+              content:
+                `Repariere das folgende fehlerhafte JSON für eine Survey-Aktion.` +
+                `\n\nWICHTIG:` +
+                `\n- Gib NUR ein valides JSON-Objekt zurück.` +
+                `\n- Keine Erklärungen, kein Markdown, keine Code-Fences.` +
+                `\n- Behalte die fachliche Bedeutung bei.` +
+                `\n\nFehlerhafte Antwort:\n${candidate}`,
+            },
+          ],
+        });
+        const repairedText = extractText(repairResponse).trim();
+        const repairedParsed = tryParseJsonObject(repairedText);
+        if (repairedParsed) {
+          return { assistantText: repairedText, parsedJson: repairedParsed };
+        }
+        if (repairedText) candidate = repairedText;
+        break;
+      } catch (error) {
+        if (isModelNotFoundError(error)) continue;
+        throw error;
+      }
     }
-    if (repairedText) candidate = repairedText;
   }
 
-  // Final fallback: regenerate the answer from conversation context with strict JSON-only instructions.
+  const actionModels = resolveSurveyActionModels();
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const regenerate = await input.anthropic.messages.create({
-      model: input.model,
-      max_tokens: 16384,
-      system: input.systemPrompt,
-      messages: [
-        ...input.baseMessages,
-        { role: "assistant", content: input.assistantText },
-        {
-          role: "user",
-          content:
-            "Deine letzte Antwort war nicht als valides JSON parsebar. Erzeuge jetzt die gleiche Aktion erneut, " +
-            "aber gib ausschließlich EIN valides JSON-Objekt zurück. Kein Text davor/danach, keine Markdown-Code-Fences.",
-        },
-      ],
-    });
-    const regeneratedText = extractText(regenerate).trim();
-    const regeneratedParsed = tryParseJsonObject(regeneratedText);
-    if (regeneratedParsed) {
-      return { assistantText: regeneratedText, parsedJson: regeneratedParsed };
+    for (const actionModel of actionModels) {
+      try {
+        const regenerate = await input.anthropic.messages.create({
+          model: actionModel,
+          max_tokens: 16384,
+          system: input.system,
+          messages: [
+            ...input.baseMessages,
+            { role: "assistant", content: input.assistantText },
+            {
+              role: "user",
+              content:
+                "Deine letzte Antwort war nicht als valides JSON parsebar. Erzeuge jetzt die gleiche Aktion erneut, " +
+                "aber gib ausschließlich EIN valides JSON-Objekt zurück. Kein Text davor/danach, keine Markdown-Code-Fences.",
+            },
+          ],
+        });
+        const regeneratedText = extractText(regenerate).trim();
+        const regeneratedParsed = tryParseJsonObject(regeneratedText);
+        if (regeneratedParsed) {
+          return { assistantText: regeneratedText, parsedJson: regeneratedParsed };
+        }
+        break;
+      } catch (error) {
+        if (isModelNotFoundError(error)) continue;
+        throw error;
+      }
     }
   }
 
@@ -364,25 +336,6 @@ async function ensureValidAssistantOutput(input: {
       "Ich konnte den Vorschlag gerade nicht sauber formatieren. Schick die Anfrage bitte direkt nochmal, ich liefere dir dann einen korrekt validen JSON-Vorschlag.",
     parsedJson: null,
   };
-}
-
-function isModelNotFoundError(error: unknown) {
-  if (!error || typeof error !== "object") return false;
-  const maybe = error as {
-    status?: unknown;
-    type?: unknown;
-    error?: { type?: unknown; message?: unknown };
-  };
-  const status = typeof maybe.status === "number" ? maybe.status : null;
-  const topType = typeof maybe.type === "string" ? maybe.type : "";
-  const innerType = typeof maybe.error?.type === "string" ? maybe.error.type : "";
-  const innerMessage = typeof maybe.error?.message === "string" ? maybe.error.message : "";
-  return (
-    status === 404 &&
-    (topType === "not_found_error" ||
-      innerType === "not_found_error" ||
-      innerMessage.includes("model:"))
-  );
 }
 
 function toPromptTerms(text: string) {
@@ -407,16 +360,26 @@ function buildStepOutline(definition: unknown) {
         fields?: unknown;
       };
       const fields = Array.isArray(step.fields) ? step.fields : [];
-      const fieldTitles = fields
-        .map((f) => (f && typeof f === "object" ? (f as { title?: unknown }).title : null))
-        .filter((v): v is string => typeof v === "string");
+      const fieldSummaries = fields
+        .map((f) => {
+          if (!f || typeof f !== "object") return null;
+          const field = f as { id?: unknown; title?: unknown; type?: unknown };
+          const id = typeof field.id === "string" ? field.id : "";
+          if (!id) return null;
+          return {
+            id,
+            title: typeof field.title === "string" ? field.title : "",
+            type: typeof field.type === "string" ? field.type : "",
+          };
+        })
+        .filter((v): v is { id: string; title: string; type: string } => Boolean(v));
       return {
         index: idx + 1,
         id: typeof step.id === "string" ? step.id : `step_${idx + 1}`,
         title: typeof step.title === "string" ? step.title : "",
         description: typeof step.description === "string" ? step.description : "",
         fieldCount: fields.length,
-        fieldTitles,
+        fields: fieldSummaries,
       };
     })
     .filter((v): v is {
@@ -425,7 +388,7 @@ function buildStepOutline(definition: unknown) {
       title: string;
       description: string;
       fieldCount: number;
-      fieldTitles: string[];
+      fields: Array<{ id: string; title: string; type: string }>;
     } => Boolean(v));
 }
 
@@ -514,7 +477,6 @@ function sanitizeOneLineAiTitle(raw: string): string | null {
 
 async function generateChatTitleFromFirstThreeMessages(input: {
   anthropic: Anthropic;
-  modelsToTry: readonly string[];
   firstThree: Array<{ role: string; content: string }>;
 }): Promise<string | null> {
   const serialized = input.firstThree
@@ -528,7 +490,7 @@ async function generateChatTitleFromFirstThreeMessages(input: {
 
   const userPrompt = `Konversation (erste drei Nachrichten):\n${serialized}\n\nAntworte ausschließlich mit einem passenden deutschsprachigen Chat-Titel, sonst mit nichts.`;
 
-  for (const model of input.modelsToTry) {
+  for (const model of resolveSurveyUtilityModels()) {
     try {
       const res = await input.anthropic.messages.create({
         model,
@@ -555,7 +517,6 @@ async function maybeAutoTitleAiChat(input: {
   title: string;
   messages: Array<{ role: string; content: string }>;
   anthropic: Anthropic;
-  modelsToTry: readonly string[];
 }) {
   if (input.title.trim() !== DEFAULT_AI_CHAT_TITLE) return;
   if (input.messages.length < 3) return;
@@ -564,7 +525,6 @@ async function maybeAutoTitleAiChat(input: {
   const derived =
     (await generateChatTitleFromFirstThreeMessages({
       anthropic: input.anthropic,
-      modelsToTry: input.modelsToTry,
       firstThree,
     })) ?? deriveFallbackChatTitleFromFirstUser(input.messages);
   if (!derived) return;
@@ -592,7 +552,8 @@ function buildConversationSummary(history: Array<{ role: "user" | "assistant" | 
 async function completeAssistantTextWithContinuation(input: {
   anthropic: Anthropic;
   model: string;
-  systemPrompt: string;
+  maxTokens: number;
+  system: SurveyChatSystem;
   baseMessages: Anthropic.MessageParam[];
   initialResponse: Anthropic.Messages.Message;
 }) {
@@ -604,8 +565,8 @@ async function completeAssistantTextWithContinuation(input: {
     rounds += 1;
     const continuation = await input.anthropic.messages.create({
       model: input.model,
-      max_tokens: 16384,
-      system: input.systemPrompt,
+      max_tokens: input.maxTokens,
+      system: input.system,
       messages: [
         ...input.baseMessages,
         { role: "assistant", content: fullText },
@@ -780,63 +741,96 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     .select("id,title,description,visibility,folder_id,updated_at")
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
-    .limit(300);
+    .limit(SURVEY_RANK_POOL);
   const { data: folders } = await auth.supabase
     .from("survey_folders")
     .select("id,name")
     .order("name", { ascending: true });
 
+  const activeSurveyId = parsed.data.pageContext.surveyId ?? null;
   const terms = toPromptTerms(parsed.data.content);
-  const rankedSurveyIds = (surveys ?? [])
-    .map((s: {
-      id: string;
-      title: string;
-      description: string | null;
-      visibility: "private" | "public";
-      folder_id: string | null;
-      updated_at: string;
-    }) => {
+
+  type SurveyRankRow = {
+    id: string;
+    title: string;
+    description: string | null;
+    visibility: "private" | "public";
+    folder_id: string | null;
+    updated_at: string;
+  };
+
+  const rankedSurveys = (surveys ?? [])
+    .map((s: SurveyRankRow) => {
       const hay = `${s.title} ${s.description ?? ""}`.toLowerCase();
       const score = terms.reduce((acc, term) => (hay.includes(term) ? acc + 1 : acc), 0);
-      const currentBoost = parsed.data.pageContext.surveyId && parsed.data.pageContext.surveyId === s.id ? 3 : 0;
-      return { id: s.id, score: score + currentBoost };
+      const currentBoost = activeSurveyId && activeSurveyId === s.id ? 3 : 0;
+      return { ...s, score: score + currentBoost };
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_CANDIDATE_SURVEY_CONTEXTS)
-    .map((x) => x.id);
+    .sort(
+      (a: SurveyRankRow & { score: number }, b: SurveyRankRow & { score: number }) =>
+        b.score - a.score || b.updated_at.localeCompare(a.updated_at),
+    );
 
-  const candidateIds =
-    rankedSurveyIds.length > 0 ? rankedSurveyIds : (surveys ?? []).slice(0, MAX_CANDIDATE_SURVEY_CONTEXTS).map((s: { id: string }) => s.id);
+  const knownSurveyIds = new Set<string>();
+  if (activeSurveyId) knownSurveyIds.add(activeSurveyId);
+  for (const s of rankedSurveys) {
+    if (knownSurveyIds.size >= MAX_KNOWN_SURVEYS) break;
+    knownSurveyIds.add(s.id);
+  }
 
-  const { data: candidateSurveyContexts } = await auth.supabase
-    .from("surveys")
-    .select("id,title,description,visibility,folder_id,notification_emails,definition")
-    .in("id", candidateIds)
-    .is("deleted_at", null);
+  const candidateIdSet = new Set<string>();
+  if (activeSurveyId) candidateIdSet.add(activeSurveyId);
+  for (const s of rankedSurveys) {
+    if (candidateIdSet.size >= MAX_CANDIDATE_SURVEY_CONTEXTS) break;
+    candidateIdSet.add(s.id);
+  }
+  const candidateIds = Array.from(candidateIdSet);
 
-  const systemPrompt = buildGlobalSurveyChatSystemPrompt({
+  const { data: candidateSurveyContexts } =
+    candidateIds.length > 0
+      ? await auth.supabase
+          .from("surveys")
+          .select("id,title,description,visibility,folder_id,notification_emails,definition")
+          .in("id", candidateIds)
+          .is("deleted_at", null)
+      : { data: [] as Array<{
+          id: string;
+          title: string;
+          description: string | null;
+          visibility: "private" | "public";
+          folder_id: string | null;
+          notification_emails: string[] | null;
+          definition: unknown;
+        }> };
+
+  const lastAssistantMsg = [...fullHistoryPlain].reverse().find((m) => m.role === "assistant");
+  const recentAssistantWasAction = lastAssistantMsg
+    ? hasActionJsonIntent(lastAssistantMsg.content)
+    : false;
+  const modelSelection = selectSurveyModelsForMessage({
+    userMessage: parsed.data.content,
+    page: parsed.data.pageContext.page,
+    recentAssistantWasAction,
+  });
+
+  const systemPromptInput: SurveyChatSystemPromptInput = {
     globalUserRules: globalAssistantRules,
     chatUserRules: assistantRulesFromChat,
     pageContext: {
       page: parsed.data.pageContext.page,
-      surveyId: parsed.data.pageContext.surveyId ?? null,
+      surveyId: activeSurveyId,
       visibility: parsed.data.pageContext.visibility,
       slug: parsed.data.pageContext.slug,
       notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
     },
-    surveys: (surveys ?? []).map((s: {
-      id: string;
-      title: string;
-      description: string | null;
-      visibility: "private" | "public";
-      folder_id: string | null;
-    }) => ({
-      id: s.id,
-      title: s.title,
-      description: s.description ?? "",
-      visibility: s.visibility,
-      folderId: s.folder_id ?? null,
-    })),
+    surveys: rankedSurveys
+      .filter((s: SurveyRankRow & { score: number }) => knownSurveyIds.has(s.id))
+      .map((s: SurveyRankRow) => ({
+        id: s.id,
+        title: s.title,
+        visibility: s.visibility,
+        folderId: s.folder_id ?? null,
+      })),
     folders: (folders ?? []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name })),
     candidateSurveyContexts: (candidateSurveyContexts ?? []).map(
       (s: {
@@ -847,31 +841,40 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         folder_id: string | null;
         notification_emails: string[] | null;
         definition: unknown;
-      }) => ({
-        id: s.id,
-        title: s.title,
-        description: s.description ?? "",
-        visibility: s.visibility,
-        folderId: s.folder_id ?? null,
-        notificationEmails: s.notification_emails ?? [],
-        definition: s.definition,
-        stepOutline: buildStepOutline(s.definition),
-        duplicateIdReport: buildDuplicateIdReport(s.definition),
-      }),
+      }) => {
+        const base = {
+          id: s.id,
+          title: s.title,
+          visibility: s.visibility,
+          folderId: s.folder_id ?? null,
+          notificationEmails: s.notification_emails ?? [],
+          stepOutline: buildStepOutline(s.definition),
+          duplicateIdReport: buildDuplicateIdReport(s.definition),
+        };
+        if (activeSurveyId && s.id === activeSurveyId) {
+          return { ...base, definition: s.definition };
+        }
+        return base;
+      },
     ),
     attachmentSummaries: attachmentSummaries.map((a) => `${a.fileName} (${a.mimeType}, ${a.sizeBytes} bytes)`),
     conversationSummary,
-  });
+  };
+
+  const systemBlocks = buildCachedSurveyChatSystem(systemPromptInput);
+
+  const useMultiPhase =
+    isMultiPhaseSurveyCreationEnabled() &&
+    modelSelection.tier === "action" &&
+    isLargeSurveyCreationIntent(parsed.data.content);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ ok: false, message: "ANTHROPIC_API_KEY is not configured." }, { status: 500 });
   }
-  const preferredModel = process.env.ANTHROPIC_SURVEY_MODEL?.trim() || MODEL_FALLBACKS[0];
-  const modelsToTry = Array.from(new Set([preferredModel, ...MODEL_FALLBACKS]));
   const anthropic = new Anthropic({
     apiKey,
-    defaultHeaders: { "anthropic-beta": "pdfs-2024-09-25" },
+    defaultHeaders: anthropicSurveyBetaHeaders(),
   });
 
   await maybeAutoTitleAiChat({
@@ -881,7 +884,6 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     title: chat.title,
     messages: fullHistoryPlain,
     anthropic,
-    modelsToTry,
   });
 
   const stream = createSseStream(async (emit) => {
@@ -889,55 +891,92 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
     emit("meta", {
       pageContext: parsed.data.pageContext,
-      modelCandidates: modelsToTry,
+      modelTier: modelSelection.tier,
+      modelCandidates: modelSelection.modelsToTry,
+      promptCacheEnabled: isPromptCachingEnabled(),
+      multiPhaseRequested: useMultiPhase,
       fullHistoryCount: fullHistoryPlain.length,
       selectedHistoryCount: anthropicHistory.length,
       summarizedHistoryCount: summaryDbSlice.length,
       contextTruncated: summaryDbSlice.length > 0,
+      knownSurveyCount: knownSurveyIds.size,
+      candidateSurveyCount: candidateIds.length,
     });
-    emit("status", { message: "Ich formuliere gerade die beste Antwort..." });
 
     let response: Anthropic.Messages.Message | null = null;
     let selectedModel: string | null = null;
-    let lastError: unknown = null;
-    for (const model of modelsToTry) {
-      try {
-        response = await anthropic.messages.create({
-          model,
-          max_tokens: 16384,
-          system: systemPrompt,
-          messages: anthropicHistory,
+    let rawAssistantText: string | null = null;
+    let multiPhaseMeta: { phaseCount: number; stepCount: number } | null = null;
+
+    if (useMultiPhase) {
+      const multi = await runMultiPhaseSurveyCreation({
+        anthropic,
+        userMessage: parsed.data.content,
+        system: systemBlocks,
+        historyMessages: anthropicHistory,
+        onStatus: (message) => emit("status", { message }),
+      });
+      if (multi.ok) {
+        rawAssistantText = multi.assistantText;
+        selectedModel = multi.model;
+        multiPhaseMeta = { phaseCount: multi.phaseCount, stepCount: multi.stepCount };
+      } else {
+        emit("status", {
+          message: "Mehrphasige Erstellung fehlgeschlagen — ich versuche es in einem Schritt…",
         });
-        selectedModel = model;
-        break;
-      } catch (error) {
-        lastError = error;
-        if (isModelNotFoundError(error)) continue;
-        throw error;
+        console.warn("Multi-phase survey creation failed; falling back to single-shot", multi.message);
       }
     }
 
-    if (!response || !selectedModel) {
-      emit("error", {
-        message:
-          "AI model unavailable. Set ANTHROPIC_SURVEY_MODEL to a valid model (e.g. claude-sonnet-4-20250514).",
+    if (!rawAssistantText) {
+      emit("status", { message: "Ich formuliere gerade die beste Antwort..." });
+
+      let lastError: unknown = null;
+      for (const model of modelSelection.modelsToTry) {
+        try {
+          response = await anthropic.messages.create({
+            model,
+            max_tokens: modelSelection.maxTokens,
+            system: systemBlocks,
+            messages: anthropicHistory,
+          });
+          selectedModel = model;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (isModelNotFoundError(error)) continue;
+          throw error;
+        }
+      }
+
+      if (!response || !selectedModel) {
+        emit("error", {
+          message:
+            "AI model unavailable. Set ANTHROPIC_SURVEY_CHAT_MODEL / ANTHROPIC_SURVEY_ACTION_MODEL to valid models.",
+        });
+        console.error("Global chat model selection failed", {
+          lastError,
+          tier: modelSelection.tier,
+          modelsToTry: modelSelection.modelsToTry,
+        });
+        return;
+      }
+
+      rawAssistantText = await completeAssistantTextWithContinuation({
+        anthropic,
+        model: selectedModel,
+        maxTokens: modelSelection.maxTokens,
+        system: systemBlocks,
+        baseMessages: anthropicHistory,
+        initialResponse: response,
       });
-      console.error("Global chat model selection failed", { lastError, modelsToTry });
-      return;
     }
 
-    const rawAssistantText = await completeAssistantTextWithContinuation({
-      anthropic,
-      model: selectedModel,
-      systemPrompt,
-      baseMessages: anthropicHistory,
-      initialResponse: response,
-    });
     emit("status", { message: "Ich prüfe das Format für dich..." });
     const ensuredAssistant = await ensureValidAssistantOutput({
       anthropic,
-      model: selectedModel,
-      systemPrompt,
+      utilityModels: resolveSurveyUtilityModels(),
+      system: systemBlocks,
       baseMessages: anthropicHistory,
       assistantText: rawAssistantText,
     });
@@ -952,6 +991,9 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         content: assistantText,
         metadata: {
           selectedModel,
+          modelTier: modelSelection.tier,
+          promptCacheEnabled: isPromptCachingEnabled(),
+          multiPhase: multiPhaseMeta,
           pageContext: parsed.data.pageContext,
         },
       })
