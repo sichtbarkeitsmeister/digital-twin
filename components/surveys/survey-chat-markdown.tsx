@@ -2,6 +2,7 @@
 
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
 
@@ -10,6 +11,23 @@ function withoutNode<P extends { node?: unknown }>(props: P) {
   const { node, ...rest } = props;
   void node;
   return rest;
+}
+
+/** GFM tables need a blank line before the first row. */
+function normalizeMarkdownForGfm(content: string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+
+  for (const line of lines) {
+    const isTableRow = /^\s*\|/.test(line);
+    const prev = out[out.length - 1];
+    if (isTableRow && prev !== undefined && prev.trim() !== "" && !/^\s*\|/.test(prev)) {
+      out.push("");
+    }
+    out.push(line);
+  }
+
+  return out.join("\n");
 }
 
 const markdownComponents: Components = {
@@ -61,6 +79,29 @@ const markdownComponents: Components = {
       {...withoutNode(props)}
     />
   ),
+  table: (props) => (
+    <div className="my-3 overflow-x-auto rounded-xl border border-border/60 bg-muted/20 shadow-sm scrollbar-subtle">
+      <table className="w-full min-w-[520px] border-collapse text-[13px] leading-snug" {...withoutNode(props)} />
+    </div>
+  ),
+  thead: (props) => (
+    <thead className="bg-muted/70 text-foreground" {...withoutNode(props)} />
+  ),
+  tbody: (props) => (
+    <tbody className="divide-y divide-border/50" {...withoutNode(props)} />
+  ),
+  tr: (props) => (
+    <tr className="transition-colors even:bg-muted/25 hover:bg-muted/40" {...withoutNode(props)} />
+  ),
+  th: (props) => (
+    <th
+      className="whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-foreground"
+      {...withoutNode(props)}
+    />
+  ),
+  td: (props) => (
+    <td className="px-3 py-2.5 align-top text-foreground [&>p]:my-0" {...withoutNode(props)} />
+  ),
   code: (props) => {
     const { className: codeClassName, ...rest } = withoutNode(props);
     const inline = typeof codeClassName !== "string" || !codeClassName.includes("language-");
@@ -86,7 +127,9 @@ const markdownComponents: Components = {
 export function SurveyChatMarkdown({ content, className }: { content: string; className?: string }) {
   return (
     <div className={cn("[&_*]:break-words", className)}>
-      <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {normalizeMarkdownForGfm(content)}
+      </ReactMarkdown>
     </div>
   );
 }

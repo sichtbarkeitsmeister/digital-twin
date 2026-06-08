@@ -36,6 +36,7 @@ import {
   type DbChatMessageRow,
 } from "@/lib/ai/chat-history-anthropic";
 import { createSseStream, sseHeaders } from "@/lib/ai/chat-stream";
+import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import {
   isLargeSurveyCreationIntent,
   resolveSurveyActionModels,
@@ -813,6 +814,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     recentAssistantWasAction,
   });
 
+  const pastedWebsiteContent = await buildPastedUrlContextText(parsed.data.content);
+
   const systemPromptInput: SurveyChatSystemPromptInput = {
     globalUserRules: globalAssistantRules,
     chatUserRules: assistantRulesFromChat,
@@ -859,6 +862,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     ),
     attachmentSummaries: attachmentSummaries.map((a) => `${a.fileName} (${a.mimeType}, ${a.sizeBytes} bytes)`),
     conversationSummary,
+    pastedWebsiteContent,
   };
 
   const systemBlocks = buildCachedSurveyChatSystem(systemPromptInput);

@@ -1,0 +1,88 @@
+### DigitalTwin Portal — API examples (Checkpoint 3)
+@baseUrl = http://localhost:3000
+@supabaseUrl = https://YOUR_PROJECT.supabase.co
+@userJwt = YOUR_SUPABASE_USER_JWT
+@dtSecret = YOUR_DT_INTERNAL_WEBHOOK_SECRET
+@chatId = YOUR_CHAT_UUID
+@orgId = YOUR_ORG_UUID
+
+### List agents
+GET {{baseUrl}}/api/dt/agents?org={{orgId}}
+Cookie: sb-access-token={{userJwt}}
+
+### List chats
+GET {{baseUrl}}/api/dt/chats?org={{orgId}}&mode=default
+Cookie: sb-access-token={{userJwt}}
+
+### Create chat
+POST {{baseUrl}}/api/dt/chats
+Content-Type: application/json
+Cookie: sb-access-token={{userJwt}}
+
+{
+  "organisationId": "{{orgId}}",
+  "agentId": "AGENT_UUID",
+  "mode": "default"
+}
+
+### Send message (app → n8n when N8N_DT_CHAT_WEBHOOK set)
+POST {{baseUrl}}/api/dt/chats/{{chatId}}/messages
+Content-Type: application/json
+Authorization: Bearer {{userJwt}}
+
+{
+  "content": "Hallo, wer bist du?"
+}
+
+### Internal prompt build (n8n → app)
+POST {{baseUrl}}/api/dt/internal/build-system-prompt
+Content-Type: application/json
+X-DT-Webhook-Secret: {{dtSecret}}
+
+{
+  "userId": "USER_UUID",
+  "chatId": "{{chatId}}",
+  "ghostMode": false
+}
+
+### n8n webhook dry-run (no Anthropic call)
+POST https://sichtbarkeitsmeister.app.n8n.cloud/webhook/dt-chat?dryRun=true
+Content-Type: application/json
+Authorization: Bearer {{userJwt}}
+X-DT-Source: nextjs-prod
+
+{
+  "chatId": "{{chatId}}",
+  "organisationId": "{{orgId}}",
+  "agentId": "AGENT_UUID",
+  "mode": "default",
+  "message": "Test",
+  "userMessageId": null,
+  "ghostMode": false
+}
+
+### Verify Supabase JWT (same check n8n uses)
+GET {{supabaseUrl}}/auth/v1/user
+Authorization: Bearer {{userJwt}}
+apikey: YOUR_SUPABASE_ANON_KEY
+
+### SEO monthly stats (admin)
+GET {{baseUrl}}/api/dt/seo/stats?org={{orgId}}
+Cookie: sb-access-token={{userJwt}}
+
+### Ingest monthly stats (n8n / internal)
+POST {{baseUrl}}/api/dt/internal/seo-monthly-stats
+Content-Type: application/json
+X-DT-Webhook-Secret: {{dtSecret}}
+
+{
+  "organisationId": "{{orgId}}",
+  "periodMonth": "2026-04-01",
+  "aiClicks": 42,
+  "totalClicks": 1200,
+  "impressions": 45000,
+  "rankingsTop10": 18,
+  "rankingsTop3": 5,
+  "visibilityIndex": 12.4,
+  "rawData": { "top_keywords": ["beispiel keyword", "seo beratung"] }
+}

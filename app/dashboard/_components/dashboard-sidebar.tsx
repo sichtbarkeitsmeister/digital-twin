@@ -4,10 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Building2,
+  Bot,
   ClipboardPenLine,
   Inbox,
   Plug,
   Shield,
+  MessageCircle,
   Sparkles,
   Users,
   Workflow,
@@ -68,10 +70,14 @@ function NavLink({ item }: { item: NavItem }) {
 export function DashboardSidebar({
   isPlatformAdmin,
   canManageIntegrations,
+  canAccessDtSeo,
+  canManageDtAgents,
   pendingSurveyQuestionsCount,
 }: {
   isPlatformAdmin: boolean;
   canManageIntegrations: boolean;
+  canAccessDtSeo: boolean;
+  canManageDtAgents: boolean;
   pendingSurveyQuestionsCount: number;
 }) {
   const mainItems: NavItem[] = [
@@ -81,6 +87,42 @@ export function DashboardSidebar({
     { label: "Mitglieder", href: "/dashboard/members", icon: Users },
     ...(canManageIntegrations
       ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
+      : []),
+  ];
+
+  const verwaltungItems: NavItem[] = [
+    ...(canManageDtAgents
+      ? [
+          {
+            label: "Agenten",
+            href: "/dashboard/verwaltung/agents",
+            icon: Bot,
+            match: (pathname: string) =>
+              pathname.startsWith("/dashboard/verwaltung/agents") ||
+              pathname.startsWith("/dashboard/digital-twin/agents"),
+          },
+        ]
+      : []),
+    ...(canAccessDtSeo
+      ? [
+          {
+            label: "SEO Modus",
+            href: "/dashboard/verwaltung/seo",
+            icon: Sparkles,
+            match: (pathname: string) =>
+              pathname.startsWith("/dashboard/verwaltung/seo") ||
+              pathname.startsWith("/dashboard/digital-twin/seo"),
+          },
+        ]
+      : []),
+    ...(isPlatformAdmin
+      ? [
+          {
+            label: "DigitalTwin Admin",
+            href: "/dashboard/admin/digital-twin",
+            icon: MessageCircle,
+          },
+        ]
       : []),
   ];
 
@@ -107,7 +149,7 @@ export function DashboardSidebar({
         ))}
       </nav>
 
-      {isPlatformAdmin ? (
+      {verwaltungItems.length > 0 || isPlatformAdmin ? (
         <div className="grid gap-2 pt-2">
           <div className="border-t border-sbkm-navy/10 pt-3 dark:border-white/10">
             <p className="px-2 text-[11px] font-bold uppercase tracking-[0.14em] text-sbkm-ink-500">
@@ -115,9 +157,12 @@ export function DashboardSidebar({
             </p>
           </div>
           <nav className="grid gap-1">
-            {adminItems.map((item) => (
+            {verwaltungItems.map((item) => (
               <NavLink key={item.href} item={item} />
             ))}
+            {isPlatformAdmin
+              ? adminItems.map((item) => <NavLink key={item.href} item={item} />)
+              : null}
           </nav>
         </div>
       ) : null}

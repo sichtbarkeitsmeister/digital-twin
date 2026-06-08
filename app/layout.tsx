@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
 import { ThemeProvider } from "next-themes";
+import { DtToaster } from "@/components/dt/dt-toaster";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -31,6 +32,7 @@ export default function RootLayout({
       <body className={`${poppins.variable} font-sans antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
+          <DtToaster />
         </ThemeProvider>
       </body>
     </html>

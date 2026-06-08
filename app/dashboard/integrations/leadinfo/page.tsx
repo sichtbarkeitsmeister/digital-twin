@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
 import { LeadinfoIntegrationPanel } from "@/app/dashboard/integrations/_components/leadinfo-integration-panel";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
+import { PersistedOrganisationUrlSync } from "@/components/shared/persisted-organisation-url-sync";
 import {
   canManageOrganisation,
   getAuthenticatedUserId,
@@ -63,6 +65,11 @@ export default async function LeadinfoIntegrationPage({
 
   return (
     <div className="grid gap-6">
+      <Suspense fallback={null}>
+        <PersistedOrganisationUrlSync
+          allowedOrganisationIds={organisations.map((organisation) => organisation.id)}
+        />
+      </Suspense>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid gap-1">
           <h1 className="text-2xl font-bold tracking-tight text-primary">Leadinfo</h1>

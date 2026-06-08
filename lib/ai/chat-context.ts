@@ -4,6 +4,7 @@ import {
   isPromptCachingEnabled,
   type SurveyChatSystem,
 } from "@/lib/ai/anthropic-helpers";
+import { PASTED_URL_PROMPT_HINT_EN } from "@/lib/shared/pasted-url-context";
 
 type SurveySnapshot = {
   id: string;
@@ -53,6 +54,7 @@ export type SurveyChatSystemPromptInput = {
   candidateSurveyContexts: CandidateSurveyContext[];
   attachmentSummaries: string[];
   conversationSummary: string;
+  pastedWebsiteContent?: string | null;
 };
 
 /** Stable instructions (~3k tokens) — safe to prompt-cache across requests. */
@@ -94,6 +96,8 @@ export function buildSurveyChatStaticSystemText(): string {
     "If there are multiple plausible matching surveys (e.g. two cafe surveys), ask a clarifying question first and DO NOT emit action JSON yet.",
     "When user asks to create survey, return full survey JSON with exact version 1 schema.",
     "If request is ambiguous, ask a short clarifying question in German and do not emit action JSON.",
+    "",
+    PASTED_URL_PROMPT_HINT_EN,
     "",
     "User-defined instructions (stored by the authenticated user — follow whenever compatible below):",
     "Precedence: these lines must NOT override non-negotiable requirements: German default unless user asks otherwise, " +
@@ -165,15 +169,22 @@ export function buildSurveyChatDynamicSystemText(input: {
   candidateSurveyContexts: CandidateSurveyContext[];
   attachmentSummaries: string[];
   conversationSummary: string;
+  pastedWebsiteContent?: string | null;
 }): string {
-  return [
+  const blocks = [
     `Current page context: ${JSON.stringify(input.pageContext)}`,
     `Conversation summary (older messages, compressed): ${input.conversationSummary}`,
     `Known surveys: ${JSON.stringify(input.surveys)}`,
     `Candidate survey contexts for edits (definition included only when open in builder): ${JSON.stringify(input.candidateSurveyContexts)}`,
     `Known folders: ${JSON.stringify(input.folders)}`,
     `Attachment summaries (current user message): ${JSON.stringify(input.attachmentSummaries)}`,
-  ].join("\n");
+  ];
+
+  if (input.pastedWebsiteContent?.trim()) {
+    blocks.push(`Pasted website content (auto-fetched from URLs in the latest user message):\n${input.pastedWebsiteContent.trim()}`);
+  }
+
+  return blocks.join("\n");
 }
 
 export function buildGlobalSurveyChatSystemPrompt(input: SurveyChatSystemPromptInput): string {

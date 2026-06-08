@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 
 import { DashboardShell } from "@/app/dashboard/_components/dashboard-shell";
 import { userCanManageAnyIntegrations } from "@/lib/dashboard/org-context";
+import { userCanManageAnyDtAgents } from "@/lib/dt/org-access";
+import { userCanAccessAnyDtSeo } from "@/lib/dt/seo/access";
 
 export default function DashboardLayout({
   children,
@@ -45,6 +47,8 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
   const canManageIntegrations = isPlatformAdmin
     ? true
     : await userCanManageAnyIntegrations(user.id);
+  const canAccessDtSeo = await userCanAccessAnyDtSeo(user.id);
+  const canManageDtAgents = await userCanManageAnyDtAgents(user.id);
   const pendingSurveyQuestionsCount = isPlatformAdmin
     ? (
         await supabase
@@ -58,6 +62,8 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     <DashboardShell
       isPlatformAdmin={isPlatformAdmin}
       canManageIntegrations={canManageIntegrations}
+      canAccessDtSeo={canAccessDtSeo}
+      canManageDtAgents={canManageDtAgents}
       pendingSurveyQuestionsCount={pendingSurveyQuestionsCount}
     >
       {children}

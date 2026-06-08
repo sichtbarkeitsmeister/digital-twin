@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { ChevronsUpDown } from "lucide-react";
 
+import { writeSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
+
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -44,7 +46,12 @@ export function OrganisationSwitcher({
         ) : (
           organisations.map((org) => (
             <DropdownMenuItem key={org.id} asChild>
-              <Link href={`${orgPath}?org=${org.id}`}>{org.name}</Link>
+              <Link
+                href={`${orgPath}?org=${org.id}`}
+                onClick={() => writeSelectedOrganisationId(org.id)}
+              >
+                {org.name}
+              </Link>
             </DropdownMenuItem>
           ))
         )}

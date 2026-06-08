@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { DtSettingsCard } from "@/app/settings/dt-settings-card";
 import { SurveyAiSettingsCard } from "@/app/settings/survey-ai-settings-card";
 import { DtField, DtGlassCard, DtHeading, DtInput, DtInputWrap } from "@/components/dt";
 import { Label } from "@/components/ui/label";
@@ -56,6 +57,7 @@ export default function SettingsPage() {
       >
         <SettingsContent />
       </Suspense>
+      <DtSettingsCard />
       <SurveyAiSettingsCard />
     </div>
   );

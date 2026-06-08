@@ -1,5 +1,7 @@
 "use client";
 
+import { motion } from "framer-motion";
+
 import { cn } from "@/components/dt/cn";
 
 type DtTabsProps = {
@@ -7,37 +9,47 @@ type DtTabsProps = {
   active: string;
   onChange: (id: string) => void;
   className?: string;
+  layoutId?: string;
 };
 
-export function DtTabs({ tabs, active, onChange, className }: DtTabsProps) {
+export function DtTabs({ tabs, active, onChange, className, layoutId = "dt-tabs-pill" }: DtTabsProps) {
   return (
     <div
-      role="tablist"
       className={cn(
-        "mb-7 flex rounded-pill bg-sbkm-navy/[0.06] p-1 dark:bg-white/10",
+        "mb-7 -mx-1 overflow-x-auto px-1 scrollbar-subtle sm:mx-0 sm:overflow-visible sm:px-0",
         className,
       )}
     >
-      {tabs.map((tab) => {
-        const isActive = tab.id === active;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onChange(tab.id)}
-            className={cn(
-              "flex-1 rounded-pill px-4 py-2.5 text-[13.5px] font-bold transition-all duration-200 ease-dt",
-              isActive
-                ? "bg-sbkm-navy text-white"
-                : "bg-transparent text-sbkm-navy dark:text-white",
-            )}
-          >
-            {tab.label}
-          </button>
-        );
-      })}
+      <div
+        role="tablist"
+        className="relative flex w-max min-w-full rounded-pill bg-sbkm-navy/[0.06] p-1 dark:bg-white/10 sm:w-full"
+      >
+        {tabs.map((tab) => {
+          const isActive = tab.id === active;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => onChange(tab.id)}
+              className={cn(
+                "relative shrink-0 rounded-pill px-3 py-2 text-xs font-bold transition-colors duration-150 sm:flex-1 sm:px-4 sm:py-2.5 sm:text-[13.5px]",
+                isActive ? "text-white" : "text-sbkm-navy dark:text-white",
+              )}
+            >
+              {isActive ? (
+                <motion.span
+                  layoutId={layoutId}
+                  className="absolute inset-0 rounded-pill bg-sbkm-navy shadow-sm dark:bg-sbkm-navy"
+                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                />
+              ) : null}
+              <span className="relative z-10 whitespace-nowrap">{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
