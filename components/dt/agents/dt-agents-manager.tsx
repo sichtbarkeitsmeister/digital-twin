@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, FileSearch, Plus } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -204,6 +204,13 @@ export function DtAgentsManager(props: {
             label: o.name,
           }))}
         />
+        <Link
+          href={`/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}${editingId ? `&agent=${encodeURIComponent(editingId)}` : agents[0] ? `&agent=${encodeURIComponent(agents[0].id)}` : ""}`}
+          className="inline-flex h-10 items-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/60 px-4 text-sm font-semibold text-sbkm-navy transition hover:bg-sbkm-mint/15 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
+        >
+          <FileSearch className="size-4" aria-hidden />
+          Kontext ansehen
+        </Link>
       </div>
 
       {status ? (

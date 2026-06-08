@@ -131,7 +131,7 @@ export function DtChatComposer(props: {
             }
             rows={2}
             disabled={props.isBusy || props.disabled}
-            className="block min-h-[56px] w-full resize-none border-0 bg-transparent px-4 pb-1 pt-3.5 text-[15px] leading-relaxed text-sbkm-navy placeholder:text-sbkm-ink-500 focus:outline-none focus-visible:ring-0 disabled:cursor-not-allowed dark:text-white dark:placeholder:text-white/40"
+            className="block max-h-40 min-h-[56px] w-full resize-none border-0 bg-transparent px-4 pb-1 pt-3.5 text-[15px] leading-relaxed text-sbkm-navy placeholder:text-sbkm-ink-500 focus:outline-none focus-visible:ring-0 disabled:cursor-not-allowed dark:text-white dark:placeholder:text-white/40"
             onPaste={(e) => {
               const items = e.clipboardData?.items;
               if (!items) return;

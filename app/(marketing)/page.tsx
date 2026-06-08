@@ -55,25 +55,23 @@ async function HomeContent({
           : "team";
 
   return (
-    <div className="mx-auto w-full max-w-dt px-5 py-6 sm:px-14">
-      <div className="min-h-[calc(100dvh-11rem)]">
-        <DtChatShell
-          organisations={organisations}
-          embedded
-          fillHeight
-          initialOrgId={initialOrgId}
-          initialChatId={searchParams.chat ?? null}
-          initialScope={initialScope}
-        />
-      </div>
+    <div className="dt-home-chat mx-auto flex h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] w-full max-w-dt min-h-[480px] flex-col overflow-hidden px-5 sm:px-14">
+      <DtChatShell
+        organisations={organisations}
+        embedded
+        fillHeight
+        initialOrgId={initialOrgId}
+        initialChatId={searchParams.chat ?? null}
+        initialScope={initialScope}
+      />
     </div>
   );
 }
 
 function HomeFallback() {
   return (
-    <div className="mx-auto w-full max-w-dt px-5 py-6 sm:px-14">
-      <div className="flex min-h-[calc(100dvh-11rem)] flex-col overflow-hidden rounded-dt border border-sbkm-navy/10 bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(46,46,80,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] lg:flex-row">
+    <div className="mx-auto flex h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] w-full max-w-dt min-h-[480px] flex-col overflow-hidden px-5 sm:px-14">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-dt border border-sbkm-navy/10 bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(46,46,80,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] lg:flex-row">
         <div className="hidden w-[280px] shrink-0 border-r border-sbkm-navy/10 p-4 dark:border-white/10 lg:block">
           <div className="h-4 w-16 animate-dt-shimmer rounded bg-sbkm-navy/10 dark:bg-white/10" />
           <div className="mt-4 h-10 w-full animate-dt-shimmer rounded-pill bg-sbkm-navy/10 dark:bg-white/10" />

@@ -8,10 +8,13 @@ export default function MarketingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <DtPageShell variant="marketing" className="flex flex-col">
+    <DtPageShell
+      variant="marketing"
+      className="group/marketing flex min-h-0 flex-col has-[.dt-home-chat]:h-dvh has-[.dt-home-chat]:max-h-dvh has-[.dt-home-chat]:overflow-hidden"
+    >
       <DtMarketingHeader />
-      <div className="flex-1">{children}</div>
-      <DtFooter />
+      <div className="min-h-0 flex-1">{children}</div>
+      <DtFooter className="shrink-0 group-has-[.dt-home-chat]/marketing:hidden" />
     </DtPageShell>
   );
 }

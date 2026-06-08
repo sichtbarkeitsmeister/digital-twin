@@ -796,6 +796,35 @@ export async function reopenSurveyResponseAction(
   return { ok: true, message: "Status zurückgesetzt.", data: { responseId: parsed.data.responseId } };
 }
 
+const assignSurveyOrgSchema = z.object({
+  surveyId: z.string().uuid(),
+  organisationId: z.string().uuid(),
+});
+
+export async function assignSurveyOrganisationAction(
+  input: z.input<typeof assignSurveyOrgSchema>,
+): Promise<ActionState<{ surveyId: string }>> {
+  const parsed = assignSurveyOrgSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+
+  const { assignSurveyOrganisation } = await import("@/lib/dt/survey-to-agent-service");
+  const result = await assignSurveyOrganisation(
+    parsed.data.surveyId,
+    parsed.data.organisationId,
+  );
+  if (!result.ok) return { ok: false, message: result.message };
+
+  revalidatePath("/dashboard/surveys");
+  revalidatePath(`/dashboard/surveys/${parsed.data.surveyId}/edit`);
+  revalidatePath(`/dashboard/surveys/${parsed.data.surveyId}/responses`);
+  return { ok: true, message: result.message, data: { surveyId: parsed.data.surveyId } };
+}
+
 const answerSchema = z.object({
   questionId: z.string().uuid(),
   answer: z.string().trim().min(1, "Answer is required"),

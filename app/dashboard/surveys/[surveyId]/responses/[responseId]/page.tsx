@@ -1,14 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { BellRing } from "lucide-react";
+import { BellRing, Bot } from "lucide-react";
 
 import {
-  CHECKBOX_OTHER_PREFIX,
-  CHECKBOX_OTHER_TOKEN,
-  decodeOtherValueForDisplay,
-  RADIO_OTHER_TOKEN,
-} from "@/lib/surveys/other-option";
-import { formatRankingAnswerForDisplay } from "@/lib/surveys/ranking-answer";
+  findAgentForSurveyResponse,
+  normalizeSurveyAnswer,
+} from "@/lib/dt/survey-to-agent-context";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -42,47 +39,7 @@ function getTotalFields(definition: unknown): number {
 }
 
 function normalizeAnswer(v: unknown, field?: SurveyField) {
-  if (field?.type === "ranking") {
-    const labels = field.options.map((o) => o.label);
-    const formatted = formatRankingAnswerForDisplay(v, labels);
-    if (formatted) return formatted;
-    if (Array.isArray(v)) {
-      return v
-        .map((x, idx) => `${idx + 1}. ${typeof x === "string" ? x : JSON.stringify(x)}`)
-        .join(", ");
-    }
-  }
-  if (field?.type === "radio" && typeof v === "string") {
-    const presetLabels = new Set(field.options.map((o) => o.label));
-    if (presetLabels.has(v)) return v;
-    const text = decodeOtherValueForDisplay(v).trim();
-    const base = text.length > 0 ? text : "Andere";
-    return `${base} (benutzererstellt)`;
-  }
-  if (field?.type === "checkbox" && Array.isArray(v)) {
-    return v
-      .map((x) => {
-        if (typeof x !== "string") return JSON.stringify(x);
-        const presetLabels = new Set(field.options.map((o) => o.label));
-        if (presetLabels.has(x)) return x;
-        const isOtherToken = x === CHECKBOX_OTHER_TOKEN || x === RADIO_OTHER_TOKEN;
-        const isPrefixedOther = x.startsWith(CHECKBOX_OTHER_PREFIX);
-        const decoded = decodeOtherValueForDisplay(x).trim();
-        if (isOtherToken || isPrefixedOther) {
-          const base = decoded.length > 0 ? decoded : "Andere";
-          return `${base} (benutzererstellt)`;
-        }
-        return decoded.length > 0 ? `${decoded} (benutzererstellt)` : "";
-      })
-      .filter((x) => x.trim().length > 0)
-      .join(", ");
-  }
-  if (typeof v === "string") return v;
-  if (typeof v === "number") return String(v);
-  if (typeof v === "boolean") return v ? "Ja" : "Nein";
-  if (Array.isArray(v)) return v.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(", ");
-  if (v && typeof v === "object") return JSON.stringify(v);
-  return "";
+  return normalizeSurveyAnswer(v, field);
 }
 
 export default async function SurveyResponseDetailPage({
@@ -129,6 +86,11 @@ export default async function SurveyResponseDetailPage({
     .eq("survey_id", surveyId)
     .maybeSingle();
   if (!response) return notFound();
+
+  const existingAgent =
+    response.status === "completed"
+      ? await findAgentForSurveyResponse(responseId)
+      : null;
 
   const { data: questions } = await supabase
     .from("survey_field_questions")
@@ -200,6 +162,26 @@ export default async function SurveyResponseDetailPage({
 
           <div className="flex flex-wrap items-center gap-2">
             <ResponseExportActions payload={exportPayload} />
+            {response.status === "completed" && existingAgent ? (
+              <Button asChild size="sm" variant="secondary">
+                <Link
+                  href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(existingAgent.organisation_id)}`}
+                >
+                  <Bot className="size-4" aria-hidden />
+                  Agent ansehen ({existingAgent.name})
+                </Link>
+              </Button>
+            ) : null}
+            {response.status === "completed" && !existingAgent ? (
+              <Button asChild size="sm">
+                <Link
+                  href={`/dashboard/surveys/${surveyId}/responses/${responseId}/create-agent`}
+                >
+                  <Bot className="size-4" aria-hidden />
+                  In Agent umwandeln
+                </Link>
+              </Button>
+            ) : null}
             {response.status === "completed" ? (
               <form
                 action={async () => {

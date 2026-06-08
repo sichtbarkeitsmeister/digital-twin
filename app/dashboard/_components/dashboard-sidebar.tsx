@@ -6,6 +6,7 @@ import {
   Building2,
   Bot,
   ClipboardPenLine,
+  FileSearch,
   Inbox,
   Plug,
   Shield,
@@ -100,6 +101,13 @@ export function DashboardSidebar({
             match: (pathname: string) =>
               pathname.startsWith("/dashboard/verwaltung/agents") ||
               pathname.startsWith("/dashboard/digital-twin/agents"),
+          },
+          {
+            label: "Agent-Kontext",
+            href: "/dashboard/verwaltung/agent-kontext",
+            icon: FileSearch,
+            match: (pathname: string) =>
+              pathname.startsWith("/dashboard/verwaltung/agent-kontext"),
           },
         ]
       : []),

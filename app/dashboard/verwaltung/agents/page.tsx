@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { DtAgentsManager } from "@/components/dt/agents/dt-agents-manager";
-import { isPlatformAdmin } from "@/lib/dt/org-access";
-import { loadDtUserOrganisations } from "@/lib/dt/load-user-organisations";
+import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function VerwaltungAgentsPage() {
@@ -13,21 +12,7 @@ export default async function VerwaltungAgentsPage() {
 
   if (!user) redirect("/auth/login");
 
-  const platformAdmin = await isPlatformAdmin(supabase, user.id);
-  const { organisations } = await loadDtUserOrganisations(user.id);
-
-  const adminOrgs = organisations
-    .filter((o) => o.canManageAgents)
-    .map((o) => ({ id: o.id, name: o.name }));
-
-  if (adminOrgs.length === 0 && platformAdmin) {
-    const { data: allOrgs } = await supabase
-      .from("organisations")
-      .select("id,name")
-      .order("name", { ascending: true })
-      .limit(50);
-    for (const o of allOrgs ?? []) adminOrgs.push({ id: o.id, name: o.name });
-  }
+  const { organisations: adminOrgs } = await loadDtManageOrganisations(user.id);
 
   if (adminOrgs.length === 0) {
     redirect("/dashboard");

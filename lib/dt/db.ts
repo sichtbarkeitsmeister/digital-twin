@@ -139,6 +139,20 @@ export async function subscribeDtAgentTemplate(params: {
   return { agentId, error: agentId ? null : "Agent konnte nicht angelegt werden." };
 }
 
+export async function createDtPersonaAgent(params: {
+  organisationId: string;
+  payload: Record<string, unknown>;
+}): Promise<{ agentId: string | null; error: string | null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("dt_create_persona_agent", {
+    p_organisation_id: params.organisationId,
+    p_payload: params.payload,
+  });
+  if (error) return { agentId: null, error: error.message };
+  const agentId = typeof data === "string" ? data : null;
+  return { agentId, error: agentId ? null : "Agent konnte nicht angelegt werden." };
+}
+
 export async function updateDtAgent(params: {
   agentId: string;
   patch: Record<string, unknown>;

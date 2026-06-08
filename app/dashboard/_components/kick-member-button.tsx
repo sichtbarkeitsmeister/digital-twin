@@ -23,8 +23,8 @@ export function KickMemberButton({
     <form action={formAction} className="flex items-center gap-2">
       <input type="hidden" name="organisation_id" value={organisationId} />
       <input type="hidden" name="target_user_id" value={targetUserId} />
-      <Button type="submit" size="sm" variant="destructive" disabled={pending}>
-        {pending ? "Removing…" : "Kick"}
+      <Button type="submit" size="sm" variant="destructive" disabled={pending} className="transition-transform duration-150 active:scale-[0.98]">
+        {pending ? "Entfernen…" : "Entfernen"}
       </Button>
       {state.message && !state.ok ? (
         <span className="text-xs text-red-400">{state.message}</span>

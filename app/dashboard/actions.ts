@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 export type ActionState = {
   ok: boolean;
@@ -10,15 +11,19 @@ export type ActionState = {
 };
 
 const adminCreateOrganisationSchema = z.object({
-  org_name: z.string().trim().min(2, "Organisation name is required"),
-  owner_email: z.string().trim().toLowerCase().email("Invalid owner email"),
+  org_name: z.string().trim().min(2, "Organisationsname ist erforderlich"),
+  owner_email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Bitte eine gültige E-Mail-Adresse eingeben"),
   org_slug: z
     .string()
     .trim()
     .toLowerCase()
-    .regex(/^[a-z0-9-]+$/, "Slug can only contain a-z, 0-9 and hyphens")
-    .min(2, "Slug is too short")
-    .max(64, "Slug is too long")
+    .regex(/^[a-z0-9-]+$/, "Slug: nur a-z, 0-9 und Bindestriche")
+    .min(2, "Slug ist zu kurz")
+    .max(64, "Slug ist zu lang")
     .optional()
     .or(z.literal("")),
 });
@@ -34,7 +39,7 @@ export async function adminCreateOrganisationAction(
   });
 
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
   }
 
   const { org_name, owner_email, org_slug } = parsed.data;
@@ -47,13 +52,13 @@ export async function adminCreateOrganisationAction(
   });
 
   if (error) {
-    return { ok: false, message: "Could not create organisation." };
+    return { ok: false, message: "Organisation konnte nicht erstellt werden." };
   }
 
   revalidatePath("/dashboard/admin/organisations");
   revalidatePath("/dashboard/organisations");
   revalidatePath("/dashboard/members");
-  return { ok: true, message: "Organisation created." };
+  return { ok: true, message: "Organisation wurde angelegt." };
 }
 
 const inviteSchema = z.object({
@@ -125,7 +130,11 @@ export async function kickFromOrganisationAction(
 
 const transferSchema = z.object({
   organisation_id: z.string().uuid(),
-  new_owner_user_id: z.string().uuid(),
+  new_owner_email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Bitte eine gültige E-Mail-Adresse eingeben."),
 });
 
 export async function transferOwnershipAction(
@@ -134,25 +143,60 @@ export async function transferOwnershipAction(
 ): Promise<ActionState> {
   const parsed = transferSchema.safeParse({
     organisation_id: formData.get("organisation_id"),
-    new_owner_user_id: formData.get("new_owner_user_id"),
+    new_owner_email: formData.get("new_owner_email"),
   });
 
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
   }
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user?.id) {
+    return { ok: false, message: "Nicht angemeldet." };
+  }
+
+  const service = createServiceClient();
+  const { data: profile, error: profileError } = await service
+    .from("profiles")
+    .select("id, email")
+    .eq("email", parsed.data.new_owner_email)
+    .maybeSingle();
+
+  if (profileError) {
+    return { ok: false, message: "E-Mail konnte nicht geprüft werden." };
+  }
+
+  if (!profile?.id) {
+    return {
+      ok: false,
+      message:
+        "Kein Konto mit dieser E-Mail gefunden. Die Person muss sich zuerst registrieren.",
+    };
+  }
+
+  if (profile.id === user.id) {
+    return { ok: false, message: "Du bist bereits Inhaber dieser Organisation." };
+  }
+
   const { error } = await supabase.rpc("transfer_organisation_ownership", {
     org_id: parsed.data.organisation_id,
-    new_owner_user_id: parsed.data.new_owner_user_id,
+    new_owner_user_id: profile.id,
   });
 
   if (error) {
-    return { ok: false, message: "Could not transfer ownership." };
+    return { ok: false, message: "Ownership konnte nicht übertragen werden." };
   }
 
   revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
-  return { ok: true, message: "Ownership transferred." };
+  revalidatePath("/dashboard/organisations");
+  return {
+    ok: true,
+    message: `Ownership wurde an ${profile.email ?? parsed.data.new_owner_email} übertragen.`,
+  };
 }
 
 const acceptInviteSchema = z.object({

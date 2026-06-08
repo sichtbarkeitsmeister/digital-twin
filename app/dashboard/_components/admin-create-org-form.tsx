@@ -18,7 +18,7 @@ export function AdminCreateOrgForm() {
   return (
     <form action={formAction} className="grid gap-4">
       <div className="grid gap-2">
-        <Label htmlFor="org_name">Organisation name</Label>
+        <Label htmlFor="org_name">Organisationsname</Label>
         <Input
           id="org_name"
           name="org_name"
@@ -37,32 +37,44 @@ export function AdminCreateOrgForm() {
           autoComplete="off"
         />
         <p className="text-xs text-secondary">
-          Nur Kleinbuchstaben, Zahlen und Bindestriche.
+          Nur Kleinbuchstaben, Zahlen und Bindestriche. Wird in URLs verwendet.
         </p>
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="owner_email">Initial owner email</Label>
+        <Label htmlFor="owner_email">E-Mail des Inhabers</Label>
         <Input
           id="owner_email"
           name="owner_email"
           type="email"
-          placeholder="owner@acme.com"
+          placeholder="inhaber@firma.de"
           autoComplete="email"
           required
         />
+        <p className="text-xs text-secondary">
+          Die Person braucht ein bestehendes Konto und wird automatisch
+          Inhaber.
+        </p>
       </div>
 
       {state.message ? (
-        <p className={state.ok ? "text-sm text-secondary" : "text-sm text-red-400"}>
+        <p
+          className={
+            state.ok ? "text-sm text-secondary" : "text-sm text-red-400"
+          }
+          role={state.ok ? "status" : "alert"}
+        >
           {state.message}
         </p>
       ) : null}
 
-      <Button type="submit" disabled={pending}>
-        {pending ? "Creating…" : "Create organisation"}
+      <Button
+        type="submit"
+        disabled={pending}
+        className="transition-transform duration-150 active:scale-[0.98]"
+      >
+        {pending ? "Wird erstellt …" : "Organisation anlegen"}
       </Button>
     </form>
   );
 }
-

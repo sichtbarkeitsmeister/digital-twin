@@ -24,29 +24,39 @@ export function TransferOwnershipForm({
       <input type="hidden" name="organisation_id" value={organisationId} />
 
       <div className="grid gap-2">
-        <Label htmlFor="new_owner_user_id">New owner user id</Label>
+        <Label htmlFor="new_owner_email">E-Mail des neuen Inhabers</Label>
         <Input
-          id="new_owner_user_id"
-          name="new_owner_user_id"
-          placeholder="uuid…"
-          autoComplete="off"
+          id="new_owner_email"
+          name="new_owner_email"
+          type="email"
+          placeholder="kollege@firma.de"
+          autoComplete="email"
           required
         />
         <p className="text-xs text-secondary">
-          Tipp: nutze eine User-ID aus der Mitgliederliste.
+          Die Person braucht ein bestehendes Konto. Sie wird automatisch
+          Inhaber und erhält volle Rechte.
         </p>
       </div>
 
       {state.message ? (
-        <p className={state.ok ? "text-sm text-secondary" : "text-sm text-red-400"}>
+        <p
+          className={
+            state.ok ? "text-sm text-secondary" : "text-sm text-red-400"
+          }
+        >
           {state.message}
         </p>
       ) : null}
 
-      <Button type="submit" disabled={pending} variant="secondary">
-        {pending ? "Transferring…" : "Transfer ownership"}
+      <Button
+        type="submit"
+        disabled={pending}
+        variant="destructive"
+        className="transition-transform duration-150 active:scale-[0.98]"
+      >
+        {pending ? "Wird übertragen…" : "Ownership übertragen"}
       </Button>
     </form>
   );
 }
-

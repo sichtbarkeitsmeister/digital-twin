@@ -840,6 +840,7 @@ export type Database = {
           title: string
           updated_at: string
           visibility: Database["public"]["Enums"]["survey_visibility"]
+          organisation_id: string | null
         }
         Insert: {
           created_at?: string
@@ -856,6 +857,7 @@ export type Database = {
           title: string
           updated_at?: string
           visibility?: Database["public"]["Enums"]["survey_visibility"]
+          organisation_id?: string | null
         }
         Update: {
           created_at?: string
@@ -872,6 +874,7 @@ export type Database = {
           title?: string
           updated_at?: string
           visibility?: Database["public"]["Enums"]["survey_visibility"]
+          organisation_id?: string | null
         }
         Relationships: [
           {

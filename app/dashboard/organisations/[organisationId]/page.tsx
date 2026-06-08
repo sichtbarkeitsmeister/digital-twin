@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense, use } from "react";
+import { Calendar, Crown, Mail, Users } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
+import {
+  formatOrgDate,
+  formatOrgRole,
+  memberDisplayName,
+  memberInitials,
+} from "@/lib/dashboard/organisation-ui";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -15,30 +22,20 @@ import {
 import { InviteMemberForm } from "@/app/dashboard/_components/invite-member-form";
 import { TransferOwnershipForm } from "@/app/dashboard/_components/transfer-ownership-form";
 import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button";
-
-function shortId(id: string) {
-  if (id.length <= 12) return id;
-  return `${id.slice(0, 8)}…${id.slice(-4)}`;
-}
-
-function formatOrgRole(role: string) {
-  if (role === "owner") return "Owner";
-  if (role === "admin") return "Admin";
-  if (role === "employee") return "Employee";
-  return role;
-}
+import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 
 function OrganisationFallback() {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Organisation</CardTitle>
-        <CardDescription>Loading…</CardDescription>
-      </CardHeader>
-      <CardContent className="text-sm text-secondary">
-        Content is loading.
-      </CardContent>
-    </Card>
+    <OrganisationPageShell>
+      <div className="grid gap-3">
+        <div className="h-8 w-48 animate-pulse rounded-md bg-muted" />
+        <div className="h-4 w-72 animate-pulse rounded-md bg-muted/70" />
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="h-64 animate-pulse rounded-xl bg-muted/50" />
+          <div className="h-64 animate-pulse rounded-xl bg-muted/50" />
+        </div>
+      </div>
+    </OrganisationPageShell>
   );
 }
 
@@ -92,6 +89,16 @@ async function OrganisationContent({
     notFound();
   }
 
+  let ownerEmail: string | null = null;
+  if (organisation.owner_user_id) {
+    const { data: ownerProfile } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", organisation.owner_user_id)
+      .maybeSingle();
+    ownerEmail = ownerProfile?.email ?? null;
+  }
+
   const canManage =
     isPlatformAdmin || myOrgRole === "owner" || myOrgRole === "admin";
   const canTransferOwnership = isPlatformAdmin || myOrgRole === "owner";
@@ -115,26 +122,20 @@ async function OrganisationContent({
 
   if (membersError || invitesError) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Error</CardTitle>
-          <CardDescription>Could not load organisation data.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2 text-sm text-secondary">
-          {membersError ? (
-            <p>
-              <span className="font-semibold">Members:</span>{" "}
-              {membersError.message}
-            </p>
-          ) : null}
-          {invitesError ? (
-            <p>
-              <span className="font-semibold">Invites:</span>{" "}
-              {invitesError.message}
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+      <OrganisationPageShell>
+        <Card>
+          <CardHeader>
+            <CardTitle>Fehler</CardTitle>
+            <CardDescription>
+              Organisationsdaten konnten nicht geladen werden.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2 text-sm text-secondary">
+            {membersError ? <p>Mitglieder: {membersError.message}</p> : null}
+            {invitesError ? <p>Einladungen: {invitesError.message}</p> : null}
+          </CardContent>
+        </Card>
+      </OrganisationPageShell>
     );
   }
 
@@ -154,58 +155,102 @@ async function OrganisationContent({
   }>;
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="grid gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-col gap-1">
-            <Link
-              href="/dashboard/organisations"
-              className="text-sm text-secondary hover:text-primary transition-colors"
-            >
-              ← Back to organisations
-            </Link>
-            <h1 className="text-3xl font-bold tracking-tight">
+    <OrganisationPageShell>
+      <div className="grid gap-4">
+        <Link
+          href="/dashboard/organisations"
+          className="inline-flex w-fit text-sm text-secondary transition-colors duration-150 hover:text-primary"
+        >
+          ← Zurück zu Organisationen
+        </Link>
+
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="grid gap-2">
+            <h1 className="text-3xl font-bold tracking-tight text-primary">
               {organisation.name}
             </h1>
-            <p className="text-secondary text-sm">
-              Organisation ID:{" "}
-              <span className="text-primary">{organisation.id}</span>
-            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-secondary">
+              {organisation.slug ? (
+                <span>{organisation.slug}</span>
+              ) : null}
+              <span className="inline-flex items-center gap-1.5">
+                <Calendar className="size-3.5" aria-hidden />
+                Erstellt {formatOrgDate(organisation.created_at)}
+              </span>
+              {ownerEmail ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Crown className="size-3.5" aria-hidden />
+                  Inhaber: {ownerEmail}
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {isPlatformAdmin ? (
-              <Badge>Platform admin</Badge>
+              <Badge>Plattform-Admin</Badge>
             ) : (
               <Badge variant="outline">{formatOrgRole(myOrgRole ?? "")}</Badge>
             )}
-            {organisation.slug ? (
-              <Badge variant="secondary">{organisation.slug}</Badge>
-            ) : null}
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="relative overflow-hidden rounded-xl border border-border/80 bg-card px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+            <div className="flex items-center gap-3">
+              <Users className="size-4 text-secondary" aria-hidden />
+              <div>
+                <p className="text-xs text-secondary">Mitglieder</p>
+                <p className="text-xl font-semibold tabular-nums tracking-tight">
+                  {members.length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="relative overflow-hidden rounded-xl border border-border/80 bg-card px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+            <div className="flex items-center gap-3">
+              <Mail className="size-4 text-secondary" aria-hidden />
+              <div>
+                <p className="text-xs text-secondary">Offene Einladungen</p>
+                <p className="text-xl font-semibold tabular-nums tracking-tight">
+                  {invites.length}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">
           <CardHeader>
-            <CardTitle>Members</CardTitle>
+            <CardTitle className="tracking-tight">Mitglieder</CardTitle>
             <CardDescription>
-              {members.length} Mitglied{members.length === 1 ? "" : "er"}
+              {members.length} Mitglied{members.length === 1 ? "" : "er"} in
+              dieser Organisation
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             {members.length === 0 ? (
-              <p className="text-sm text-secondary">Keine Mitglieder.</p>
+              <div className="rounded-lg border border-dashed px-4 py-8 text-center">
+                <Users className="mx-auto mb-2 size-5 text-secondary" />
+                <p className="text-sm font-medium text-primary">
+                  Noch keine Mitglieder
+                </p>
+                <p className="mt-1 text-sm text-secondary">
+                  Lade Kolleginnen und Kollegen per E-Mail ein.
+                </p>
+              </div>
             ) : (
               <div className="grid gap-2">
                 {members.map((member) => {
                   const isSelf = member.user_id === userId;
                   const profileObj = Array.isArray(member.profiles)
-                    ? member.profiles[0] ?? null
-                    : member.profiles ?? null;
-                  const label = profileObj?.email
-                    ? profileObj.email
-                    : `User ${shortId(member.user_id)}`;
+                    ? (member.profiles[0] ?? null)
+                    : (member.profiles ?? null);
+                  const email = profileObj?.email ?? null;
+                  const label = memberDisplayName(email);
 
                   const canKickThis = (() => {
                     if (!canManage) return false;
@@ -221,21 +266,28 @@ async function OrganisationContent({
                   return (
                     <div
                       key={member.user_id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/80 px-3 py-2.5 transition-colors duration-150 hover:bg-muted/30"
                     >
-                      <div className="grid gap-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-medium">{label}</span>
-                          {isSelf ? (
-                            <Badge variant="secondary">You</Badge>
-                          ) : null}
-                          <Badge variant="outline">
-                            {formatOrgRole(member.org_role)}
-                          </Badge>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                          {memberInitials(email)}
                         </div>
-                        <p className="text-xs text-secondary">
-                          User-ID: {member.user_id}
-                        </p>
+                        <div className="min-w-0 grid gap-0.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-sm font-medium">
+                              {label}
+                            </span>
+                            {isSelf ? (
+                              <Badge variant="secondary">Du</Badge>
+                            ) : null}
+                            <Badge variant="outline">
+                              {formatOrgRole(member.org_role)}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-secondary">
+                            Beigetreten {formatOrgDate(member.created_at)}
+                          </p>
+                        </div>
                       </div>
 
                       {canKickThis ? (
@@ -252,32 +304,42 @@ async function OrganisationContent({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">
           <CardHeader>
-            <CardTitle>Invites</CardTitle>
-            <CardDescription>{invites.length} ausstehend</CardDescription>
+            <CardTitle className="tracking-tight">Einladungen</CardTitle>
+            <CardDescription>
+              {invites.length} ausstehende Einladung
+              {invites.length === 1 ? "" : "en"}
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             {invites.length === 0 ? (
-              <p className="text-sm text-secondary">
-                Keine ausstehenden Einladungen.
-              </p>
+              <div className="rounded-lg border border-dashed px-4 py-8 text-center">
+                <Mail className="mx-auto mb-2 size-5 text-secondary" />
+                <p className="text-sm font-medium text-primary">
+                  Keine offenen Einladungen
+                </p>
+                <p className="mt-1 text-sm text-secondary">
+                  Neue Einladungen erscheinen hier, bis sie angenommen werden.
+                </p>
+              </div>
             ) : (
               <div className="grid gap-2">
                 {invites.map((invite) => (
                   <div
                     key={invite.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2.5 transition-colors duration-150 hover:bg-muted/30"
                   >
-                    <div className="grid gap-1">
+                    <div className="grid gap-0.5">
                       <span className="text-sm font-medium">
                         {invite.email}
                       </span>
                       <p className="text-xs text-secondary">
-                        Eingeladen als {formatOrgRole(invite.org_role)}
+                        Als {formatOrgRole(invite.org_role)} ·{" "}
+                        {formatOrgDate(invite.created_at)}
                       </p>
                     </div>
-                    <Badge variant="secondary">Pending</Badge>
+                    <Badge variant="secondary">Ausstehend</Badge>
                   </div>
                 ))}
               </div>
@@ -288,12 +350,14 @@ async function OrganisationContent({
 
       {canManage ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
+          <Card className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">
             <CardHeader>
-              <CardTitle>Invite member</CardTitle>
+              <CardTitle className="tracking-tight">
+                Mitglied einladen
+              </CardTitle>
               <CardDescription>
                 Einladungen werden sofort als Mitglied eingetragen, wenn die
-                E-Mail bereits einen Account hat.
+                E-Mail bereits ein Konto hat.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -301,12 +365,12 @@ async function OrganisationContent({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">
             <CardHeader>
-              <CardTitle>Ownership</CardTitle>
+              <CardTitle className="tracking-tight">Ownership</CardTitle>
               <CardDescription>
-                Ownership kann nur vom Owner oder Plattform-Admin übertragen
-                werden.
+                Ownership kann nur vom Inhaber oder Plattform-Admin per
+                E-Mail-Adresse übertragen werden.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
@@ -321,7 +385,7 @@ async function OrganisationContent({
           </Card>
         </div>
       ) : null}
-    </div>
+    </OrganisationPageShell>
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { FileSearch, Plus } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
 import { DtSelect } from "@/components/dt/dt-select";
@@ -18,6 +18,7 @@ export function DtAgentSwitcher(props: {
   onSelect: (id: string) => void;
   disabled?: boolean;
   manageAgentsHref?: string | null;
+  contextHref?: string | null;
 }) {
   const manageLink = props.manageAgentsHref ? (
     <Link
@@ -29,6 +30,24 @@ export function DtAgentSwitcher(props: {
       <Plus className="h-4 w-4" aria-hidden />
     </Link>
   ) : null;
+
+  const contextLink = props.contextHref ? (
+    <Link
+      href={props.contextHref}
+      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-pill border border-sbkm-navy/15 bg-white/60 text-sbkm-navy transition hover:bg-sbkm-mint/20 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
+      title="Agent-Kontext ansehen"
+      aria-label="Agent-Kontext ansehen"
+    >
+      <FileSearch className="h-4 w-4" aria-hidden />
+    </Link>
+  ) : null;
+
+  const trailingActions = (
+    <>
+      {contextLink}
+      {manageLink}
+    </>
+  );
 
   if (props.agents.length <= 1) {
     const a = props.agents[0];
@@ -42,6 +61,7 @@ export function DtAgentSwitcher(props: {
           ) : null}
         </p>
         {manageLink}
+        {contextLink}
       </div>
     );
   }
@@ -64,7 +84,7 @@ export function DtAgentSwitcher(props: {
             description: a.role ?? undefined,
           }))}
         />
-        {manageLink}
+        {trailingActions}
       </div>
     );
   }
@@ -91,7 +111,7 @@ export function DtAgentSwitcher(props: {
           </button>
         );
       })}
-      {manageLink}
+      {trailingActions}
     </div>
   );
 }

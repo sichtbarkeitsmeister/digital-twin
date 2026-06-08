@@ -35,14 +35,14 @@ export function OrganisationSwitcher({
       <DropdownMenuTrigger asChild>
         <Button variant="outline" className="justify-between gap-2">
           <span className="truncate">
-            {selected ? selected.name : "Select organisation"}
+            {selected ? selected.name : "Organisation wählen"}
           </span>
           <ChevronsUpDown className="h-4 w-4 opacity-70" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[260px]">
         {organisations.length === 0 ? (
-          <DropdownMenuItem disabled>No organisations</DropdownMenuItem>
+          <DropdownMenuItem disabled>Keine Organisationen</DropdownMenuItem>
         ) : (
           organisations.map((org) => (
             <DropdownMenuItem key={org.id} asChild>

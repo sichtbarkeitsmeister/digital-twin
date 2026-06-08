@@ -1,10 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Building2, Mail, Users } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
-
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -12,6 +10,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+
+import { OrganisationEmptyState } from "@/app/dashboard/_components/organisations/organisation-empty-state";
+import {
+  OrganisationListGrid,
+  type OrganisationListItem,
+} from "@/app/dashboard/_components/organisations/organisation-list-grid";
+import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 
 type MembershipRow = {
   organisation_id: string;
@@ -43,13 +48,6 @@ type InviteRow = {
   created_at: string;
 };
 
-function formatOrgRole(role: string) {
-  if (role === "owner") return "Owner";
-  if (role === "admin") return "Admin";
-  if (role === "employee") return "Employee";
-  return role;
-}
-
 export default async function OrganisationsPage() {
   const supabase = await createClient();
   const {
@@ -67,21 +65,25 @@ export default async function OrganisationsPage() {
   const { data: membershipsRaw, error: membershipsError } = await supabase
     .from("organisation_members")
     .select(
-      "organisation_id, org_role, organisations ( id, name, slug, owner_user_id, created_at )"
+      "organisation_id, org_role, organisations ( id, name, slug, owner_user_id, created_at )",
     )
     .eq("user_id", userId);
 
   if (membershipsError) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Error</CardTitle>
-          <CardDescription>Could not load organisations.</CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm text-secondary">
-          {membershipsError.message}
-        </CardContent>
-      </Card>
+      <OrganisationPageShell>
+        <Card>
+          <CardHeader>
+            <CardTitle>Fehler</CardTitle>
+            <CardDescription>
+              Organisationen konnten nicht geladen werden.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-secondary">
+            {membershipsError.message}
+          </CardContent>
+        </Card>
+      </OrganisationPageShell>
     );
   }
 
@@ -118,114 +120,99 @@ export default async function OrganisationsPage() {
     for (const member of members) {
       memberCountByOrg.set(
         member.organisation_id,
-        (memberCountByOrg.get(member.organisation_id) ?? 0) + 1
+        (memberCountByOrg.get(member.organisation_id) ?? 0) + 1,
       );
     }
   }
 
+  const totalMembers = [...memberCountByOrg.values()].reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const totalPendingInvites = [...pendingInvitesByOrg.values()].reduce(
+    (sum, invites) => sum + invites.length,
+    0,
+  );
+
+  const listItems: OrganisationListItem[] = memberships.map((membership) => {
+    const org = Array.isArray(membership.organisations)
+      ? (membership.organisations[0] ?? null)
+      : (membership.organisations ?? null);
+    const pendingInvites =
+      pendingInvitesByOrg.get(membership.organisation_id) ?? [];
+
+    return {
+      organisationId: membership.organisation_id,
+      name: org?.name ?? "Organisation",
+      slug: org?.slug ?? null,
+      orgRole: membership.org_role,
+      memberCount: memberCountByOrg.get(membership.organisation_id) ?? 0,
+      pendingInviteCount: pendingInvites.length,
+      createdAt: org?.created_at ?? "",
+      pendingInvites: pendingInvites.map((invite) => ({
+        email: invite.email,
+        orgRole: invite.org_role,
+      })),
+    };
+  });
+
   return (
-    <div className="grid gap-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <OrganisationPageShell>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="grid gap-1">
           <h1 className="text-2xl font-bold tracking-tight text-primary">
-            Organisations
+            Organisationen
           </h1>
-          <p className="text-secondary">
-            Signed in as <span className="text-primary">{email}</span>
+          <p className="text-sm text-secondary">
+            Angemeldet als{" "}
+            <span className="font-medium text-primary">{email}</span>
           </p>
         </div>
-        <Badge variant="secondary">{memberships.length}</Badge>
+        <Badge variant="secondary" className="tabular-nums">
+          {memberships.length} Organisation
+          {memberships.length === 1 ? "" : "en"}
+        </Badge>
       </div>
 
-      {memberships.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>No organisations yet</CardTitle>
-            <CardDescription>
-              You’ll show up here once you’ve been invited.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm text-secondary">
-            If you think this is a mistake, ask your organisation owner/admin
-            for an invite.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {memberships.map((membership) => {
-            const org = Array.isArray(membership.organisations)
-              ? membership.organisations[0] ?? null
-              : membership.organisations ?? null;
-            const pendingInvites =
-              pendingInvitesByOrg.get(membership.organisation_id) ?? [];
-            const memberCount =
-              memberCountByOrg.get(membership.organisation_id) ?? 0;
-
-            return (
-              <Card key={membership.organisation_id}>
-                <CardHeader>
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <CardTitle className="text-base">
-                      {org?.name ?? "Organisation"}
-                    </CardTitle>
-                    <Badge variant="outline">
-                      {formatOrgRole(membership.org_role)}
-                    </Badge>
-                  </div>
-                  <CardDescription>
-                    {memberCount} member{memberCount === 1 ? "" : "s"}
-                    {pendingInvites.length > 0
-                      ? ` · ${pendingInvites.length} pending invite${
-                          pendingInvites.length === 1 ? "" : "s"
-                        }`
-                      : ""}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <Button asChild variant="secondary" size="sm">
-                      <Link
-                        href={`/dashboard/organisations/${membership.organisation_id}`}
-                      >
-                        Open
-                      </Link>
-                    </Button>
-                  </div>
-
-                  {pendingInvites.length > 0 ? (
-                    <div className="grid gap-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
-                        Pending invites
-                      </p>
-                      <div className="grid gap-2">
-                        {pendingInvites.slice(0, 3).map((invite) => (
-                          <div
-                            key={invite.id}
-                            className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
-                          >
-                            <span className="truncate">{invite.email}</span>
-                            <Badge variant="secondary">
-                              {formatOrgRole(invite.org_role)}
-                            </Badge>
-                          </div>
-                        ))}
-                        {pendingInvites.length > 3 ? (
-                          <p className="text-xs text-secondary">
-                            +{pendingInvites.length - 3} more
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-secondary">No pending invites.</p>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
+      {memberships.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              label: "Organisationen",
+              value: memberships.length,
+              icon: Building2,
+            },
+            { label: "Mitglieder gesamt", value: totalMembers, icon: Users },
+            {
+              label: "Offene Einladungen",
+              value: totalPendingInvites,
+              icon: Mail,
+            },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="relative overflow-hidden rounded-xl border border-border/80 bg-card px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]"
+            >
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+              <div className="flex items-center gap-3">
+                <stat.icon className="size-4 text-secondary" aria-hidden />
+                <div>
+                  <p className="text-xs text-secondary">{stat.label}</p>
+                  <p className="text-xl font-semibold tabular-nums tracking-tight text-primary">
+                    {stat.value}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
+      ) : null}
+
+      {memberships.length === 0 ? (
+        <OrganisationEmptyState />
+      ) : (
+        <OrganisationListGrid organisations={listItems} />
       )}
-    </div>
+    </OrganisationPageShell>
   );
 }
-

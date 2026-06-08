@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -126,6 +127,17 @@ export function DtSeoWorkspace(props: {
           });
         }}
       />
+
+      {tab === "chat" && seoEnabled && canManage ? (
+        <div className="flex shrink-0 justify-end">
+          <Link
+            href={`/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}&mode=seo`}
+            className="text-xs font-semibold text-sbkm-navy underline-offset-2 transition hover:text-sbkm-mint hover:underline dark:text-white/70 dark:hover:text-sbkm-mint"
+          >
+            Welcher Kontext fließt in den SEO-Chat ein?
+          </Link>
+        </div>
+      ) : null}
 
       {tab === "chat" && seoEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

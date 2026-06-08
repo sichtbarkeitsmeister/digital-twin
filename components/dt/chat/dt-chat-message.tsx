@@ -168,10 +168,12 @@ export function DtChatMessage(props: {
     >
       <div
         className={cn(
-          "max-w-[min(720px,92%)] rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm",
+          "max-w-[min(720px,92%)] min-w-0 overflow-hidden break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm",
           isUser
             ? "bg-sbkm-navy text-white shadow-[0_1px_2px_rgba(0,0,0,0.06),0_8px_20px_rgba(46,46,80,0.12)]"
             : "border border-sbkm-navy/10 bg-white/80 text-sbkm-navy dark:border-white/10 dark:bg-white/[0.08] dark:text-white",
+          !isUser &&
+            "[&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full",
         )}
       >
         {props.showAuthor && isUser && props.authorLabel ? (

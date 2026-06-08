@@ -147,6 +147,15 @@ export function DtChatShell(props: {
       : "default";
   const selectedOrg = props.organisations.find((o) => o.id === selectedOrgId);
   const canManageAgents = Boolean(selectedOrg?.canManageAgents);
+  const contextMode = props.seoMode
+    ? "seo"
+    : chatScope === "team"
+      ? "team"
+      : "default";
+  const contextHref =
+    canManageAgents && selectedOrgId && selectedAgentId
+      ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}`
+      : null;
 
   const refreshChats = useCallback(async () => {
     if (!selectedOrgId || ghostMode) return;
@@ -749,7 +758,12 @@ export function DtChatShell(props: {
             className={cn(
               "flex min-h-0 min-w-0 flex-col overflow-hidden",
               props.fillHeight
-                ? "h-full max-h-full w-full shrink-0 lg:w-[280px]"
+                ? cn(
+                    "shrink-0 lg:h-full lg:max-h-full lg:w-[280px]",
+                    props.embedded
+                      ? "max-h-[min(220px,34dvh)] w-full lg:max-h-full"
+                      : "h-full max-h-full w-full",
+                  )
                 : "h-full max-h-full lg:min-h-0",
             )}
           >
@@ -803,6 +817,7 @@ export function DtChatShell(props: {
           <main
             className={cn(
               "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-dt border border-sbkm-navy/10 bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(46,46,80,0.08)] backdrop-blur-xl before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:z-20 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/25 before:to-transparent dark:border-white/10 dark:bg-white/[0.06] dark:before:via-white/20",
+              props.fillHeight && "h-full max-h-full min-h-0",
               !props.fillHeight && "min-h-[680px]",
             )}
           >
@@ -815,6 +830,7 @@ export function DtChatShell(props: {
                 manageAgentsHref={
                   canManageAgents ? "/dashboard/verwaltung/agents" : null
                 }
+                contextHref={contextHref}
               />
               {activeChat?.title && !ghostMode ? (
                 <p className="truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55">
