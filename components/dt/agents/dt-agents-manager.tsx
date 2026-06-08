@@ -202,7 +202,6 @@ export function DtAgentsManager(props: {
           options={props.organisations.map((o) => ({
             value: o.id,
             label: o.name,
-            description: o.slug ?? undefined,
           }))}
         />
       </div>
