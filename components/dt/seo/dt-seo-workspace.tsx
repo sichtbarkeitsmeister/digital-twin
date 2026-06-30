@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -10,8 +9,6 @@ import { DtSeoConfigForm } from "@/components/dt/seo/dt-seo-config-form";
 import { DtSeoReportsPanel } from "@/components/dt/seo/dt-seo-reports-panel";
 import { DtSeoStatsOverview } from "@/components/dt/seo/dt-seo-stats-overview";
 import { DtSeoTaskBoard } from "@/components/dt/seo/dt-seo-task-board";
-import { PersistedOrganisationUrlSync } from "@/components/shared/persisted-organisation-url-sync";
-import { DtSelect } from "@/components/dt/dt-select";
 import { DtTabs } from "@/components/dt/dt-tabs";
 import { cn } from "@/components/dt/cn";
 import type { DtSeoOrganisation } from "@/lib/dt/load-seo-organisations";
@@ -20,6 +17,7 @@ export function DtSeoWorkspace(props: {
   organisations: DtSeoOrganisation[];
   initialOrgId: string;
   initialChatId?: string | null;
+  currentUserId: string;
   isPlatformAdmin: boolean;
 }) {
   const searchParams = useSearchParams();
@@ -34,7 +32,7 @@ export function DtSeoWorkspace(props: {
   const initialChatId = searchParams.get("chat") ?? props.initialChatId ?? null;
 
   const selected = props.organisations.find((o) => o.id === orgId) ?? props.organisations[0];
-  const canManage = Boolean(selected?.canManageAgents);
+  const canManage = props.isPlatformAdmin;
   const seoEnabled = Boolean(selected?.seoEnabled);
   const chatFocus = tab === "chat";
 
@@ -60,48 +58,14 @@ export function DtSeoWorkspace(props: {
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-col",
+        "flex min-w-0 flex-col px-3 pt-3 sm:px-5 sm:pt-4",
         chatFocus
-          ? "h-full min-h-0 flex-1 gap-2 overflow-hidden"
-          : "min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto scrollbar-subtle sm:gap-6",
+          ? "h-full min-h-0 flex-1 overflow-hidden"
+          : "min-h-0 flex-1 overflow-y-auto scrollbar-subtle",
       )}
     >
-      <PersistedOrganisationUrlSync
-        allowedOrganisationIds={props.organisations.map((organisation) => organisation.id)}
-      />
-      {!chatFocus ? (
-        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold tracking-tight text-sbkm-navy sm:text-2xl dark:text-white">
-              SEO DigitalTwin
-            </h1>
-            <p className="text-sm text-sbkm-ink-600 dark:text-white/60">
-              Berater-Chat, Aufgaben, Reports und Konfiguration.
-            </p>
-          </div>
-          <DtSelect
-            className="w-full sm:w-auto"
-            label="Organisation"
-            labelClassName="font-semibold normal-case tracking-normal text-sbkm-ink-600 dark:text-white/55"
-            triggerClassName="w-full min-w-0 sm:min-w-[220px]"
-            fullWidth
-            menuMaxHeight="max-h-72"
-            value={orgId}
-            onValueChange={(id) => writeUrl({ org: id, chat: null, tab })}
-            options={props.organisations.map((o) => ({
-              value: o.id,
-              label: o.name,
-              description:
-                !o.seoEnabled && props.isPlatformAdmin
-                  ? "SEO deaktiviert"
-                  : o.slug ?? undefined,
-            }))}
-          />
-        </div>
-      ) : null}
-
       {!seoEnabled ? (
-        <p className="shrink-0 rounded-dt border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+        <p className="mb-3 shrink-0 rounded-dt border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
           SEO ist für diese Organisation deaktiviert.
           {props.isPlatformAdmin
             ? " Aktiviere es unter Einstellungen."
@@ -110,7 +74,7 @@ export function DtSeoWorkspace(props: {
       ) : null}
 
       <DtTabs
-        className={cn("mb-4 shrink-0 sm:mb-7", chatFocus && "mb-0")}
+        className="mb-3 shrink-0 sm:mb-4"
         layoutId="seo-workspace-tab"
         tabs={[
           { id: "chat", label: "Chat" },
@@ -122,33 +86,28 @@ export function DtSeoWorkspace(props: {
         active={tab}
         onChange={(id) => {
           writeUrl({
+            org: orgId,
             tab: id as typeof tab,
             ...(id !== "chat" ? { chat: null } : {}),
           });
         }}
       />
 
-      {tab === "chat" && seoEnabled && canManage ? (
-        <div className="flex shrink-0 justify-end">
-          <Link
-            href={`/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}&mode=seo`}
-            className="text-xs font-semibold text-sbkm-navy underline-offset-2 transition hover:text-sbkm-mint hover:underline dark:text-white/70 dark:hover:text-sbkm-mint"
-          >
-            Welcher Kontext fließt in den SEO-Chat ein?
-          </Link>
-        </div>
-      ) : null}
-
       {tab === "chat" && seoEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <DtChatShell
             key={orgId}
             organisations={chatOrgs}
+            currentUserId={props.currentUserId}
             initialOrgId={orgId}
             initialChatId={initialChatId}
-            initialScope="mine"
+            initialScope="all"
+            embedded
             seoMode
+            chromeless
             fillHeight
+            lockOrganisation
+            adminOversight={canManage}
             onSaveTaskProposal={async ({ organisationId, chatId, messageId, proposal }) => {
               const res = await fetch("/api/dt/seo/tasks", {
                 method: "POST",
@@ -203,20 +162,32 @@ export function DtSeoWorkspace(props: {
         </div>
       ) : null}
 
-      {tab === "stats" && seoEnabled ? <DtSeoStatsOverview organisationId={orgId} /> : null}
+      {tab === "stats" && seoEnabled ? (
+        <div className="min-h-0 flex-1">
+          <DtSeoStatsOverview organisationId={orgId} />
+        </div>
+      ) : null}
 
-      {tab === "tasks" && seoEnabled ? <DtSeoTaskBoard organisationId={orgId} /> : null}
+      {tab === "tasks" && seoEnabled ? (
+        <div className="min-h-0 flex-1">
+          <DtSeoTaskBoard organisationId={orgId} />
+        </div>
+      ) : null}
 
       {tab === "reports" && seoEnabled ? (
-        <DtSeoReportsPanel organisationId={orgId} canTrigger={canManage} />
+        <div className="min-h-0 flex-1">
+          <DtSeoReportsPanel organisationId={orgId} canTrigger={canManage} />
+        </div>
       ) : null}
 
       {tab === "settings" ? (
-        <DtSeoConfigForm
-          organisationId={orgId}
-          canEdit={canManage || props.isPlatformAdmin}
-          isPlatformAdmin={props.isPlatformAdmin}
-        />
+        <div className="min-h-0 flex-1">
+          <DtSeoConfigForm
+            organisationId={orgId}
+            canEdit={props.isPlatformAdmin}
+            isPlatformAdmin={props.isPlatformAdmin}
+          />
+        </div>
       ) : null}
     </div>
   );

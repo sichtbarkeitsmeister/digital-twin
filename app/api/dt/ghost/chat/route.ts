@@ -9,6 +9,8 @@ import {
 import { assembleDtChatEphemeral } from "@/lib/dt/assemble-chat-prompt";
 import { appendEphemeralAttachmentsToMessages } from "@/lib/dt/hydrate-ephemeral-attachments";
 import { requireAuthUser } from "@/lib/dt/db";
+import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
+import { createServiceClient } from "@/lib/supabase/service";
 
 const historySchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -73,6 +75,20 @@ export async function POST(req: Request) {
       messages,
       mode: "ghost",
     });
+
+    if (direct.usage.inputTokens > 0 || direct.usage.outputTokens > 0) {
+      const service = createServiceClient();
+      await recordLlmUsageEvent(service, {
+        organisationId: parsed.data.organisationId,
+        userId: auth.userId,
+        agentId: parsed.data.agentId,
+        mode: "ghost",
+        via: "ghost",
+        model: direct.model,
+        inputTokens: direct.usage.inputTokens,
+        outputTokens: direct.usage.outputTokens,
+      });
+    }
 
     return NextResponse.json({
       ok: true,

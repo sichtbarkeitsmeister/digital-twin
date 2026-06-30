@@ -192,33 +192,155 @@ if (dryRun) {
   ];
 }
 
-const anthropicRes = await httpJson({
-  method: "POST",
-  url: "https://api.anthropic.com/v1/messages",
-  headers: {
-    "Content-Type": "application/json",
-    "x-api-key": anthropicKey,
-    "anthropic-version": "2023-06-01",
-  },
-  body: {
-    model: promptJson.model,
-    max_tokens: mode === "seo" ? 8192 : 4096,
-    system: promptJson.system,
-    messages: promptJson.messages,
-  },
-});
-const anthropicJson = anthropicRes.data;
-if (!anthropicRes.ok) {
-  return [
-    {
-      json: {
-        ok: false,
-        message: "Anthropic call failed.",
-        statusCode: 500,
-        detail: anthropicJson,
+// On-demand website retrieval tools (SEO mode). The full page text is NOT in
+// the prompt — the model pulls only what it needs via these tools, so we don't
+// burn tokens dumping every page body into context.
+const seoTools = [
+  {
+    name: "search_website_content",
+    description:
+      "Durchsucht den vollständigen Text ALLER gecrawlten Unterseiten der Organisation nach Stichworten und liefert die relevantesten Treffer mit kurzem Auszug und URL. Nutze dies, bevor du Aussagen über Inhalte der Website triffst.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Suchbegriffe / Stichworte." },
       },
+      required: ["query"],
     },
-  ];
+  },
+  {
+    name: "read_website_page",
+    description:
+      "Liefert den vollständigen Textinhalt einer einzelnen gecrawlten Seite anhand ihrer URL. Nutze dies, wenn du eine konkrete Seite im Detail brauchst.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Die exakte URL der gewünschten Unterseite." },
+      },
+      required: ["url"],
+    },
+  },
+];
+
+async function runSeoTool(name, input) {
+  const args = input || {};
+  try {
+    if (name === "search_website_content") {
+      const q = String(args.query || "").trim();
+      if (!q) return "Kein Suchbegriff angegeben.";
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: { organisationId, action: "search", query: q },
+      });
+      if (!r.ok || !r.data?.ok) return "Suche fehlgeschlagen.";
+      const hits = r.data.hits || [];
+      if (!hits.length) return `Keine Treffer für „${q}“.`;
+      return hits
+        .map((h, i) => `${i + 1}. ${h.title || h.url}\n   URL: ${h.url}\n   Auszug: ${h.snippet}`)
+        .join("\n\n");
+    }
+    if (name === "read_website_page") {
+      const u = String(args.url || "").trim();
+      if (!u) return "Keine URL angegeben.";
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: { organisationId, action: "read", url: u },
+      });
+      if (!r.ok || !r.data?.ok) return "Abruf fehlgeschlagen.";
+      if (!r.data.found || !r.data.page) return `Keine gecrawlte Seite für ${u} gefunden.`;
+      const p = r.data.page;
+      return `Inhalt von ${p.url}${p.title ? ` (${p.title})` : ""}:\n\n${p.content || "(kein Text)"}`;
+    }
+    return `Unbekanntes Werkzeug: ${name}`;
+  } catch (err) {
+    return `Fehler beim Abrufen: ${err?.message || "unbekannt"}`;
+  }
+}
+
+const maxTokens = mode === "seo" ? 8192 : 4096;
+const useTools = mode === "seo";
+const convo = Array.isArray(promptJson.messages) ? promptJson.messages.slice() : [];
+let anthropicJson = null;
+let totalInputTokens = 0;
+let totalOutputTokens = 0;
+
+function addUsage(u) {
+  if (!u) return;
+  totalInputTokens += u.input_tokens || 0;
+  totalOutputTokens += u.output_tokens || 0;
+}
+
+for (let round = 0; round < 4; round++) {
+  const callBody = {
+    model: promptJson.model,
+    max_tokens: maxTokens,
+    system: promptJson.system,
+    messages: convo,
+  };
+  if (useTools) callBody.tools = seoTools;
+
+  const res = await httpJson({
+    method: "POST",
+    url: "https://api.anthropic.com/v1/messages",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: callBody,
+  });
+  if (!res.ok) {
+    return [
+      {
+        json: {
+          ok: false,
+          message: "Anthropic call failed.",
+          statusCode: 500,
+          detail: res.data,
+        },
+      },
+    ];
+  }
+  anthropicJson = res.data;
+  addUsage(anthropicJson.usage);
+
+  if (!useTools || anthropicJson.stop_reason !== "tool_use") break;
+
+  const toolUses = (anthropicJson.content || []).filter((b) => b.type === "tool_use");
+  convo.push({ role: "assistant", content: anthropicJson.content });
+  const toolResults = [];
+  for (const tu of toolUses) {
+    const out = await runSeoTool(tu.name, tu.input);
+    toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: out });
+  }
+  convo.push({ role: "user", content: toolResults });
+}
+
+// Tool budget exhausted but model still wants a tool — force a final answer.
+if (useTools && anthropicJson && anthropicJson.stop_reason === "tool_use") {
+  const finalRes = await httpJson({
+    method: "POST",
+    url: "https://api.anthropic.com/v1/messages",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: {
+      model: promptJson.model,
+      max_tokens: maxTokens,
+      system: promptJson.system,
+      messages: convo,
+    },
+  });
+  if (finalRes.ok) {
+    anthropicJson = finalRes.data;
+    addUsage(anthropicJson.usage);
+  }
 }
 
 const assistantText = (anthropicJson.content || [])
@@ -245,6 +367,8 @@ if (!ghostMode) {
         stop_reason: anthropicJson.stop_reason ?? null,
       },
       model: promptJson.model,
+      token_count_in: totalInputTokens || null,
+      token_count_out: totalOutputTokens || null,
     },
   });
   if (!insertAssistant.ok || !Array.isArray(insertAssistant.data) || !insertAssistant.data[0]?.id) {
@@ -280,6 +404,11 @@ return [
       assistantMessage: assistantText,
       finishReason: anthropicJson.stop_reason ?? null,
       title,
+      model: promptJson.model,
+      usage: {
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+      },
       statusCode: 200,
     },
   },

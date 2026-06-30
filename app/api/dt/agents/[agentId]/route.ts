@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { deleteDtAgent, requireAuthUser, updateDtAgent } from "@/lib/dt/db";
-import { canManageDtAgents } from "@/lib/dt/org-access";
+import { canDirectlyEditDtAgents } from "@/lib/dt/org-access";
 
 const patchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -58,13 +58,16 @@ export async function PATCH(
     return NextResponse.json({ ok: false, message: "Agent nicht gefunden." }, { status: 404 });
   }
 
-  const allowed = await canManageDtAgents(
-    auth.supabase,
-    auth.userId,
-    existing.organisation_id,
-  );
+  const allowed = await canDirectlyEditDtAgents(auth.supabase, auth.userId);
   if (!allowed) {
-    return NextResponse.json({ ok: false, message: "Keine Berechtigung." }, { status: 403 });
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "Direkte Bearbeitung ist nur für Administratoren möglich. Bitte eine Änderungsanfrage senden.",
+      },
+      { status: 403 },
+    );
   }
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
@@ -141,13 +144,15 @@ export async function DELETE(
     return NextResponse.json({ ok: false, message: "Agent nicht gefunden." }, { status: 404 });
   }
 
-  const allowed = await canManageDtAgents(
-    auth.supabase,
-    auth.userId,
-    existing.organisation_id,
-  );
+  const allowed = await canDirectlyEditDtAgents(auth.supabase, auth.userId);
   if (!allowed) {
-    return NextResponse.json({ ok: false, message: "Keine Berechtigung." }, { status: 403 });
+    return NextResponse.json(
+      {
+        ok: false,
+        message: "Agenten können nur von Administratoren entfernt werden.",
+      },
+      { status: 403 },
+    );
   }
 
   const deleted = await deleteDtAgent(agentId);

@@ -9,6 +9,7 @@ import { DtLogo } from "@/components/dt/dt-logo";
 import { DtNavLink } from "@/components/dt/dt-nav-link";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtThemeToggle } from "@/components/dt/dt-theme-toggle";
+import { createClient } from "@/lib/supabase/client";
 
 const navItems = [
   { href: "#pipeline", label: "Wie es funktioniert" },
@@ -23,6 +24,22 @@ export function DtMarketingHeaderClient({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+    void supabase.auth.getSession().then(({ data }) => {
+      setIsAuthenticated(Boolean(data.session?.user));
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(Boolean(session?.user));
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const showMarketingNav = !isAuthenticated;
 
   useEffect(() => {
     let lastY = window.scrollY;
@@ -60,35 +77,43 @@ export function DtMarketingHeaderClient({
     <>
       <header
         className={cn(
-          "sticky top-0 z-30 flex items-center justify-between border-b border-sbkm-navy/[0.08] bg-white/45 px-5 py-2.5 backdrop-blur-[28px] backdrop-saturate-[180%] transition-[transform,opacity] duration-[380ms] ease-dt dark:border-white/10 dark:bg-sbkm-ink-900/55 sm:px-14",
+          "sticky top-0 z-30 flex shrink-0 items-center justify-between border-b border-sbkm-navy/[0.08] bg-white/45 px-5 py-2.5 backdrop-blur-[28px] backdrop-saturate-[180%] transition-[transform,opacity] duration-[380ms] ease-dt dark:border-white/10 dark:bg-sbkm-ink-900/55 sm:px-14",
+          "group-has-[.dt-home-chat]/marketing:hidden",
           hidden && !menuOpen && "-translate-y-[110%] opacity-0",
         )}
       >
         <DtLogo size="header" />
 
-        <nav className="hidden items-center gap-7 lg:flex">
-          {navItems.map((item) => (
-            <DtNavLink key={item.href} href={item.href}>
-              {item.label}
-            </DtNavLink>
-          ))}
-        </nav>
+        {showMarketingNav ? (
+          <nav className="hidden items-center gap-7 lg:flex">
+            {navItems.map((item) => (
+              <DtNavLink key={item.href} href={item.href}>
+                {item.label}
+              </DtNavLink>
+            ))}
+          </nav>
+        ) : null}
 
         <div className="flex items-center gap-3">
           <DtThemeToggle />
-          <div className="hidden sm:block">{authSlot}</div>
-          <button
-            type="button"
-            className="inline-grid h-11 w-11 place-items-center rounded-pill bg-white/60 text-sbkm-navy hover:bg-sbkm-navy/10 dark:bg-white/10 dark:text-white lg:hidden"
-            aria-label="Menü öffnen"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}
-          >
-            <Menu className="h-[22px] w-[22px]" strokeWidth={2} />
-          </button>
+          <div className={cn(showMarketingNav ? "hidden sm:block" : "block")}>
+            {authSlot}
+          </div>
+          {showMarketingNav ? (
+            <button
+              type="button"
+              className="inline-grid h-11 w-11 place-items-center rounded-pill bg-white/60 text-sbkm-navy hover:bg-sbkm-navy/10 dark:bg-white/10 dark:text-white lg:hidden"
+              aria-label="Menü öffnen"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
+            >
+              <Menu className="h-[22px] w-[22px]" strokeWidth={2} />
+            </button>
+          ) : null}
         </div>
       </header>
 
+      {showMarketingNav ? (
       <div
         className={cn(
           "fixed inset-0 z-[60] flex flex-col bg-white/85 px-6 pb-8 pt-[18px] backdrop-blur-[32px] backdrop-saturate-[180%] transition-[opacity,transform] duration-200 ease-dt dark:bg-sbkm-ink-900/92 lg:hidden",
@@ -138,6 +163,7 @@ export function DtMarketingHeaderClient({
           </DtPillButton>
         </div>
       </div>
+      ) : null}
     </>
   );
 }

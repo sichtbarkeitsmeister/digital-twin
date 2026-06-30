@@ -23,6 +23,10 @@ export default async function SeoReportDetailPage({
   const sp = await searchParams;
   const platformAdmin = await isPlatformAdmin(supabase, user.id);
 
+  if (!platformAdmin) {
+    redirect("/dashboard");
+  }
+
   return (
     <Suspense
       fallback={

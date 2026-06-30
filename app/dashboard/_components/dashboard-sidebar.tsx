@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BarChart3,
   Building2,
   Bot,
+  ClipboardList,
   ClipboardPenLine,
   FileSearch,
   Inbox,
@@ -71,15 +73,17 @@ function NavLink({ item }: { item: NavItem }) {
 export function DashboardSidebar({
   isPlatformAdmin,
   canManageIntegrations,
-  canAccessDtSeo,
   canManageDtAgents,
+  canViewDtUsage,
   pendingSurveyQuestionsCount,
+  pendingAgentEditRequestsCount,
 }: {
   isPlatformAdmin: boolean;
   canManageIntegrations: boolean;
-  canAccessDtSeo: boolean;
   canManageDtAgents: boolean;
+  canViewDtUsage: boolean;
   pendingSurveyQuestionsCount: number;
+  pendingAgentEditRequestsCount: number;
 }) {
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
@@ -111,7 +115,7 @@ export function DashboardSidebar({
           },
         ]
       : []),
-    ...(canAccessDtSeo
+    ...(isPlatformAdmin
       ? [
           {
             label: "SEO Modus",
@@ -120,6 +124,16 @@ export function DashboardSidebar({
             match: (pathname: string) =>
               pathname.startsWith("/dashboard/verwaltung/seo") ||
               pathname.startsWith("/dashboard/digital-twin/seo"),
+          },
+        ]
+      : []),
+    ...(canViewDtUsage
+      ? [
+          {
+            label: "Token-Nutzung",
+            href: "/dashboard/verwaltung/usage",
+            icon: BarChart3,
+            match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/usage"),
           },
         ]
       : []),
@@ -135,6 +149,13 @@ export function DashboardSidebar({
   ];
 
   const adminItems: NavItem[] = [
+    {
+      label: "Agent-Anfragen",
+      href: "/dashboard/admin/agent-requests",
+      icon: ClipboardList,
+      showDot: pendingAgentEditRequestsCount > 0,
+      match: (pathname: string) => pathname.startsWith("/dashboard/admin/agent-requests"),
+    },
     {
       label: "Organisationen verwalten",
       href: "/dashboard/admin/organisations",

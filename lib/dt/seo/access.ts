@@ -1,15 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadOrgConfig } from "@/lib/dt/db";
-import { canManageDtAgents, isPlatformAdmin } from "@/lib/dt/org-access";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 
-/** Org owner/admin or platform admin — required for SEO mode. */
+/** Platform admin only — required for SEO mode. */
 export async function canAccessDtSeo(
   supabase: SupabaseClient,
   userId: string,
-  organisationId: string,
+  _organisationId: string,
 ): Promise<boolean> {
-  return canManageDtAgents(supabase, userId, organisationId);
+  return isPlatformAdmin(supabase, userId);
 }
 
 export async function requireDtSeoAccess(
@@ -21,7 +21,7 @@ export async function requireDtSeoAccess(
   if (!allowed) {
     return {
       ok: false,
-      message: "SEO-Modus ist nur für Administratoren verfügbar.",
+      message: "SEO-Modus ist nur für Plattform-Administratoren verfügbar.",
       status: 403,
     };
   }
@@ -45,21 +45,5 @@ export async function requireDtSeoAccess(
 
 export async function userCanAccessAnyDtSeo(userId: string): Promise<boolean> {
   const supabase = await import("@/lib/supabase/server").then((m) => m.createClient());
-  if (await isPlatformAdmin(supabase, userId)) return true;
-
-  const { data: memberships } = await supabase
-    .from("organisation_members")
-    .select("organisation_id, org_role")
-    .eq("user_id", userId)
-    .in("org_role", ["owner", "admin"]);
-
-  if (!memberships?.length) return false;
-
-  const ids = memberships.map((m) => m.organisation_id);
-  const { data: configs } = await supabase
-    .from("dt_org_config")
-    .select("organisation_id,seo_enabled,disabled")
-    .in("organisation_id", ids);
-
-  return (configs ?? []).some((c) => c.seo_enabled && !c.disabled);
+  return isPlatformAdmin(supabase, userId);
 }

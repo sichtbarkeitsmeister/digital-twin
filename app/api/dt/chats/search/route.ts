@@ -1,19 +1,30 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { requireAuthUser } from "@/lib/dt/db";
+import { dtChatTeamOrFilter, dtChatVisibleOrFilter, requireAuthUser } from "@/lib/dt/db";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 
 const querySchema = z.object({
   org: z.string().uuid(),
-  mode: z.enum(["default", "seo", "team", "ghost"]).default("default"),
+  scope: z.enum(["mine", "team", "all", "org"]).optional(),
+  mode: z.enum(["default", "seo", "team", "ghost"]).optional(),
   q: z.string().trim().min(1).max(120),
   includeArchived: z
     .string()
     .optional()
     .transform((v) => v === "1" || v === "true"),
+  oversight: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
+  owner: z.string().uuid().optional(),
+  /** @deprecated use scope=mine */
+  mine: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
 });
-
 function escapeIlike(term: string): string {
   return term.replace(/[%_\\]/g, (c) => `\\${c}`);
 }
@@ -35,16 +46,33 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const parsed = querySchema.safeParse({
     org: url.searchParams.get("org"),
-    mode: url.searchParams.get("mode") ?? "default",
+    scope: url.searchParams.get("scope") ?? undefined,
+    mode: url.searchParams.get("mode") ?? undefined,
     q: url.searchParams.get("q") ?? "",
     includeArchived: url.searchParams.get("archived") ?? undefined,
+    oversight: url.searchParams.get("oversight") ?? undefined,
+    owner: url.searchParams.get("owner") ?? undefined,
+    mine: url.searchParams.get("mine") ?? undefined,
   });
 
   if (!parsed.success) {
     return NextResponse.json({ ok: false, message: "Ungültige Suchparameter." }, { status: 400 });
   }
 
-  if (parsed.data.mode === "seo" && auth.userId) {
+  const adminOversight = parsed.data.scope === "org" || parsed.data.oversight === true;
+  if (adminOversight && auth.userId) {
+    if (!(await isPlatformAdmin(auth.supabase, auth.userId))) {
+      return NextResponse.json({ ok: false, message: "Keine Berechtigung." }, { status: 403 });
+    }
+  }
+
+  const listScope: "mine" | "team" | "all" | "org" =
+    parsed.data.scope ??
+    (parsed.data.mine ? "mine" : parsed.data.mode === "team" ? "team" : "all");
+
+  const chatMode = parsed.data.mode ?? "default";
+
+  if (chatMode === "seo" && auth.userId && !adminOversight) {
     const gate = await requireDtSeoAccess(auth.supabase, auth.userId, parsed.data.org);
     if (!gate.ok) {
       return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
@@ -57,10 +85,28 @@ export async function GET(req: Request) {
     .from("dt_chats")
     .select("id,title,updated_at,archived_at")
     .eq("organisation_id", parsed.data.org)
-    .eq("mode", parsed.data.mode)
     .ilike("title", pattern)
     .order("updated_at", { ascending: false })
     .limit(15);
+
+  if (adminOversight && listScope === "org") {
+    if (parsed.data.owner) {
+      chatsQuery = chatsQuery.eq("owner_user_id", parsed.data.owner);
+    }
+  } else if (chatMode === "seo") {
+    chatsQuery = chatsQuery.eq("mode", "seo");
+  } else if (listScope === "mine") {
+    chatsQuery = chatsQuery
+      .eq("mode", "default")
+      .eq("owner_user_id", auth.userId!)
+      .is("legacy_session_id", null);
+  } else if (listScope === "team") {
+    chatsQuery = chatsQuery.or(dtChatTeamOrFilter());
+  } else if (listScope === "all") {
+    chatsQuery = chatsQuery.or(dtChatVisibleOrFilter(auth.userId!));
+  } else {
+    chatsQuery = chatsQuery.eq("mode", chatMode);
+  }
 
   if (!parsed.data.includeArchived) {
     chatsQuery = chatsQuery.is("archived_at", null);
@@ -72,10 +118,28 @@ export async function GET(req: Request) {
     .from("dt_chat_messages")
     .select("chat_id, content, dt_chats!inner(id, title, updated_at, archived_at, organisation_id, mode)")
     .eq("dt_chats.organisation_id", parsed.data.org)
-    .eq("dt_chats.mode", parsed.data.mode)
     .ilike("content", pattern)
     .order("created_at", { ascending: false })
     .limit(30);
+
+  if (adminOversight && listScope === "org") {
+    if (parsed.data.owner) {
+      msgQuery = msgQuery.eq("dt_chats.owner_user_id", parsed.data.owner);
+    }
+  } else if (chatMode === "seo") {
+    msgQuery = msgQuery.eq("dt_chats.mode", "seo");
+  } else if (listScope === "mine") {
+    msgQuery = msgQuery
+      .eq("dt_chats.mode", "default")
+      .eq("dt_chats.owner_user_id", auth.userId!)
+      .is("dt_chats.legacy_session_id", null);
+  } else if (listScope === "team") {
+    msgQuery = msgQuery.or(dtChatTeamOrFilter("dt_chats"));
+  } else if (listScope === "all") {
+    msgQuery = msgQuery.or(dtChatVisibleOrFilter(auth.userId!, "dt_chats"));
+  } else {
+    msgQuery = msgQuery.eq("dt_chats.mode", chatMode);
+  }
 
   if (!parsed.data.includeArchived) {
     msgQuery = msgQuery.is("dt_chats.archived_at", null);

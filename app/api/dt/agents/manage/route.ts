@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { loadAgentsForOrgManage, requireAuthUser } from "@/lib/dt/db";
-import { canManageDtAgents } from "@/lib/dt/org-access";
+import { canDirectlyEditDtAgents, canManageDtAgents } from "@/lib/dt/org-access";
 
 const querySchema = z.object({
   org: z.string().uuid(),
@@ -30,5 +30,6 @@ export async function GET(req: Request) {
   }
 
   const agents = await loadAgentsForOrgManage(parsed.data.org);
-  return NextResponse.json({ ok: true, agents });
+  const canDirectlyEdit = await canDirectlyEditDtAgents(auth.supabase, auth.userId);
+  return NextResponse.json({ ok: true, agents, canDirectlyEdit });
 }

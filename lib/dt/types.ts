@@ -61,7 +61,9 @@ export type DtSeoReportRow = {
   triggered_by_user_id?: string | null;
   recipient_type: string;
   recipient_email: string;
-  state: "idle" | "queued" | "running" | "done" | "error";
+  send_to_owner?: boolean;
+  owner_sent_at?: string | null;
+  state: "idle" | "queued" | "running" | "done" | "error" | "cancelled";
   state_message: string | null;
   url?: string | null;
   focus_keyword?: string | null;
@@ -86,8 +88,21 @@ export type DtSitePageRow = {
   title: string | null;
   h1: string | null;
   meta_description: string | null;
+  text_content?: string | null;
   is_excluded: boolean;
   crawled_at: string;
+};
+
+export type DtSeoTaskTimeEntryRow = {
+  id: string;
+  task_id: string;
+  organisation_id: string;
+  user_id: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  note: string | null;
+  created_at: string;
 };
 
 export type DtChatRow = {
@@ -99,6 +114,7 @@ export type DtChatRow = {
   title: string;
   archived_at: string | null;
   pinned: boolean;
+  shared_to_team_at: string | null;
   created_at: string;
   updated_at: string;
 };

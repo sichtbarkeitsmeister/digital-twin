@@ -10,8 +10,38 @@ import { cn } from "@/components/dt/cn";
 import type { DtStoredAttachment } from "@/lib/dt/client-attachments";
 
 import type { DtSeoChatTaskProposal, DtSeoTaskProposalMatchRow } from "@/lib/dt/seo/chat-task-proposals";
+import type { DtChatParticipant } from "@/lib/dt/oversight";
 
 const SCROLL_BOTTOM_THRESHOLD = 96;
+
+function ParticipantHeader(props: { participants: DtChatParticipant[] }) {
+  if (props.participants.length === 0) return null;
+
+  const names = props.participants.map((p) => p.label).join(", ");
+
+  return (
+    <div className="mx-auto mb-4 flex w-full min-w-0 max-w-3xl flex-wrap items-center gap-2 rounded-dt border border-sbkm-navy/10 bg-white/55 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.05]">
+      <div className="flex -space-x-2">
+        {props.participants.slice(0, 4).map((p) => (
+          <span
+            key={p.id}
+            title={p.label}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sbkm-mint/30 text-[10px] font-bold uppercase text-sbkm-navy ring-2 ring-white dark:ring-sbkm-ink-900"
+          >
+            {p.label.slice(0, 1)}
+          </span>
+        ))}
+      </div>
+      <p className="min-w-0 flex-1 text-sbkm-ink-600 dark:text-white/60">
+        <span className="font-semibold tabular-nums text-sbkm-navy dark:text-white">
+          {props.participants.length} Personen
+        </span>
+        {": "}
+        <span className="text-sbkm-ink-600 dark:text-white/55">{names}</span>
+      </p>
+    </div>
+  );
+}
 
 export function DtChatThread(props: {
   messages: DtChatMessageItem[];
@@ -20,6 +50,7 @@ export function DtChatThread(props: {
   emptyHint?: string;
   teamMode?: boolean;
   authorLabels?: Record<string, string>;
+  participants?: DtChatParticipant[];
   suggestedFollowUps?: string[];
   onSuggestedFollowUp?: (text: string) => void;
   attachmentsByMessageId?: Map<string, DtStoredAttachment[]>;
@@ -135,6 +166,9 @@ export function DtChatThread(props: {
           </div>
         ) : (
           <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-4">
+            {props.participants && props.participants.length > 0 ? (
+              <ParticipantHeader participants={props.participants} />
+            ) : null}
             {visible.map((m, i) => (
               <DtChatMessage
                 key={m.id}

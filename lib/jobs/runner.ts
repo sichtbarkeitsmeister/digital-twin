@@ -81,6 +81,9 @@ export async function runDueJobs(
       await markFailed(job, `No handler registered for kind=${job.kind}`, {
         force: true,
       });
+      if (job.kind === "seo.crawl") {
+        await markSeoCrawlDead(job, `No handler registered for kind=${job.kind}`);
+      }
       summary.dead += 1;
       continue;
     }
@@ -94,7 +97,12 @@ export async function runDueJobs(
         await markFailed(job, outcome.error, {
           force: outcome.retryable === false,
         });
-        if (outcome.retryable === false || job.attempts + 1 >= job.max_attempts) {
+        const exhausted =
+          outcome.retryable === false || job.attempts + 1 >= job.max_attempts;
+        if (exhausted && job.kind === "seo.crawl") {
+          await markSeoCrawlDead(job, outcome.error);
+        }
+        if (exhausted) {
           summary.dead += 1;
         } else {
           summary.failed += 1;
@@ -104,7 +112,11 @@ export async function runDueJobs(
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[jobs] handler ${job.kind} threw`, error);
       await markFailed(job, message);
-      if (job.attempts + 1 >= job.max_attempts) {
+      const exhausted = job.attempts + 1 >= job.max_attempts;
+      if (exhausted && job.kind === "seo.crawl") {
+        await markSeoCrawlDead(job, message);
+      }
+      if (exhausted) {
         summary.dead += 1;
       } else {
         summary.failed += 1;
@@ -180,4 +192,19 @@ async function markFailed(
       locked_by: null,
     })
     .eq("id", job.id);
+}
+
+async function markSeoCrawlDead(job: JobRow, errorMessage: string) {
+  const crawlId = (job.payload as { crawlId?: string })?.crawlId;
+  if (!crawlId) return;
+  const supabase = createServiceClient();
+  await supabase
+    .from("dt_site_crawls")
+    .update({
+      status: "error",
+      message: errorMessage.slice(0, 500),
+      finished_at: new Date().toISOString(),
+    })
+    .eq("id", crawlId)
+    .in("status", ["queued", "running"]);
 }

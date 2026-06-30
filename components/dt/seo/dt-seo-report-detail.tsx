@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -13,12 +14,14 @@ import {
   Lightbulb,
   Loader2,
   Plug,
+  Square,
   Target,
   TrendingUp,
 } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtTabs } from "@/components/dt/dt-tabs";
+import { DtSeoOwnerDeliveryBadge } from "@/components/dt/seo/dt-seo-owner-delivery-badge";
 import { DtSeoReportHtmlViewer } from "@/components/dt/seo/dt-seo-report-html-viewer";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/dt/cn";
@@ -294,6 +297,7 @@ export function DtSeoReportDetail(props: {
   const [report, setReport] = useState<DtSeoReportRow | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [stopping, setStopping] = useState(false);
   const [activeTab, setActiveTab] = useState("report");
 
   const fetchReport = useCallback(async () => {
@@ -325,6 +329,21 @@ export function DtSeoReportDetail(props: {
       cancelled = true;
     };
   }, [fetchReport]);
+
+  const stopReport = useCallback(async () => {
+    setStopping(true);
+    const res = await fetch(`/api/dt/seo/reports/${encodeURIComponent(props.reportId)}/stop`, {
+      method: "POST",
+    });
+    const json = (await res.json()) as { ok?: boolean; message?: string };
+    setStopping(false);
+    if (!json.ok) {
+      toast.error(json.message ?? "Report konnte nicht gestoppt werden.");
+    } else {
+      toast.success("Report abgebrochen.");
+    }
+    await fetchReport();
+  }, [props.reportId, fetchReport]);
 
   useEffect(() => {
     if (!report) return;
@@ -394,7 +413,9 @@ export function DtSeoReportDetail(props: {
 
   const inProgress = report.state === "queued" || report.state === "running";
   const isDone = report.state === "done";
+  const isCancelled = report.state === "cancelled";
   const isError = report.state === "error";
+  const isErrorish = isError || isCancelled;
   const runtime = durationHint(report.started_at, report.finished_at);
   const hostname = reportHostname(report.url);
 
@@ -414,6 +435,18 @@ export function DtSeoReportDetail(props: {
             label="Empfänger"
             value={`${recipientTypeLabel(report.recipient_type)} · ${report.recipient_email}`}
           />
+          {report.send_to_owner ? (
+            <MetaField
+              label="Report-E-Mail"
+              value={
+                report.owner_sent_at
+                  ? `Gesendet am ${formatDateTime(report.owner_sent_at)}`
+                  : report.state === "done"
+                    ? "Ausstehend"
+                    : "Nach Fertigstellung"
+              }
+            />
+          ) : null}
         </dl>
       </DetailsSection>
 
@@ -565,11 +598,12 @@ export function DtSeoReportDetail(props: {
                 </span>
               ) : null}
               <Badge
-                variant={isDone ? "secondary" : isError ? "destructive" : "outline"}
+                variant={isDone ? "secondary" : isErrorish ? "destructive" : "outline"}
                 className="tabular-nums"
               >
                 {reportStateLabel(report.state)}
               </Badge>
+              <DtSeoOwnerDeliveryBadge report={report} />
             </div>
           </div>
         </div>
@@ -604,29 +638,47 @@ export function DtSeoReportDetail(props: {
 
       {inProgress ? (
         <DetailCard className="border-sbkm-mint/30 bg-sbkm-mint/8 dark:bg-sbkm-mint/10">
-          <div className="flex items-center gap-3">
-            <Loader2
-              className="h-5 w-5 shrink-0 animate-spin text-sbkm-navy dark:text-white"
-              aria-hidden
-            />
-            <div>
-              <p className="text-sm font-semibold text-sbkm-navy dark:text-white">
-                Report wird erstellt …
-              </p>
-              <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-                Die Seite aktualisiert sich automatisch alle 15 Sekunden.
-              </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Loader2
+                className="h-5 w-5 shrink-0 animate-spin text-sbkm-navy dark:text-white"
+                aria-hidden
+              />
+              <div>
+                <p className="text-sm font-semibold text-sbkm-navy dark:text-white">
+                  Report wird erstellt …
+                </p>
+                <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                  Die Seite aktualisiert sich automatisch alle 15 Sekunden.
+                </p>
+              </div>
             </div>
+            <button
+              type="button"
+              disabled={stopping}
+              onClick={() => void stopReport()}
+              className="inline-flex items-center gap-1.5 rounded-pill border border-red-300 bg-red-50 px-3.5 py-2 text-sm font-semibold text-red-700 transition-colors duration-150 hover:bg-red-100 disabled:opacity-60 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
+            >
+              {stopping ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <Square className="h-4 w-4 fill-current" aria-hidden />
+              )}
+              Report stoppen
+            </button>
           </div>
         </DetailCard>
       ) : null}
 
-      {isError && report.state_message ? (
+      {isErrorish ? (
         <div
           className="rounded-dt border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
           role="alert"
         >
-          {report.state_message}
+          <p className="font-semibold">
+            {isCancelled ? "Report abgebrochen" : "Report fehlgeschlagen"}
+          </p>
+          {report.state_message ? <p className="mt-0.5">{report.state_message}</p> : null}
         </div>
       ) : null}
 

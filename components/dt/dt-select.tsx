@@ -46,11 +46,13 @@ export function DtSelect(props: {
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
   collisionPadding?: number;
+  size?: "default" | "sm";
 }) {
   const selected = props.options.find((o) => o.value === props.value);
+  const sm = props.size === "sm";
 
   return (
-    <div className={cn("grid min-w-0 gap-1", props.fullWidth && "w-full max-w-full", props.className)}>
+    <div className={cn("grid min-w-0", sm ? "gap-0" : "gap-1", props.fullWidth && "w-full max-w-full", props.className)}>
       {props.label ? (
         <span
           className={cn(
@@ -68,6 +70,7 @@ export function DtSelect(props: {
             disabled={props.disabled}
             className={cn(
               triggerBase,
+              sm && "h-8 px-2.5 text-xs font-semibold shadow-none",
               props.fullWidth && "w-full",
               props.triggerClassName,
               props.disabled && "cursor-wait opacity-50",
@@ -78,7 +81,10 @@ export function DtSelect(props: {
               {selected?.label ?? props.placeholder ?? "Auswählen …"}
             </span>
             <ChevronDown
-              className="h-4 w-4 shrink-0 text-sbkm-ink-500 dark:text-white/50"
+              className={cn(
+                "shrink-0 text-sbkm-ink-500 dark:text-white/50",
+                sm ? "h-3.5 w-3.5" : "h-4 w-4",
+              )}
               aria-hidden
             />
           </button>

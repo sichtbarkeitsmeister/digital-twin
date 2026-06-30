@@ -7,6 +7,7 @@ import { Loader2, MessageSquare, Trash2, X, FileText } from "lucide-react";
 
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
+import { DtSeoTaskTimePanel } from "@/components/dt/seo/dt-seo-task-time-panel";
 import { cn } from "@/components/dt/cn";
 import type { DtSeoTaskAssignee } from "@/lib/dt/seo/task-assignees";
 import type { DtSeoTaskRow } from "@/lib/dt/types";
@@ -110,10 +111,12 @@ export function DtSeoTaskDetailDrawer(props: {
 }) {
   const { task, open } = props;
   const [form, setForm] = useState(() => (task ? taskToForm(task) : null));
+  const [tab, setTab] = useState<"details" | "time">("details");
 
   useEffect(() => {
     if (task && open) {
       setForm(taskToForm(task));
+      setTab("details");
     }
   }, [task, open]);
 
@@ -220,7 +223,39 @@ export function DtSeoTaskDetailDrawer(props: {
               </button>
             </header>
 
+            <div
+              role="tablist"
+              aria-label="Aufgaben-Ansicht"
+              className="flex shrink-0 gap-1 border-b border-sbkm-navy/10 px-4 dark:border-white/10 sm:px-5"
+            >
+              {(
+                [
+                  { id: "details", label: "Details" },
+                  { id: "time", label: "Zeiterfassung" },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t.id}
+                  onClick={() => setTab(t.id)}
+                  className={cn(
+                    "relative -mb-px border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors duration-150",
+                    tab === t.id
+                      ? "border-sbkm-mint text-sbkm-navy dark:text-white"
+                      : "border-transparent text-sbkm-ink-500 hover:text-sbkm-navy dark:text-white/45 dark:hover:text-white",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 scrollbar-subtle sm:px-5">
+              {tab === "time" ? (
+                <DtSeoTaskTimePanel taskId={task.id} />
+              ) : (
               <div className="grid gap-5 pb-2">
                 <label className="grid gap-2">
                   <span className={labelClass}>Titel</span>
@@ -380,8 +415,10 @@ export function DtSeoTaskDetailDrawer(props: {
                   </div>
                 ) : null}
               </div>
+              )}
             </div>
 
+            {tab === "details" ? (
             <footer className="flex shrink-0 flex-col gap-3 border-t border-sbkm-navy/10 bg-sbkm-navy/[0.02] px-4 py-4 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-center sm:px-5">
               <DtPillButton
                 type="button"
@@ -412,6 +449,7 @@ export function DtSeoTaskDetailDrawer(props: {
                 Löschen
               </DtPillButton>
             </footer>
+            ) : null}
           </motion.aside>
         </motion.div>
       ) : null}

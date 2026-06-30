@@ -4,8 +4,6 @@ import { useRef } from "react";
 import { ArrowUp, Ghost, Paperclip, Square } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { DtChatDevViaPill } from "@/components/dt/chat/dt-chat-dev-via-pill";
-
 import { DtAttachmentChips } from "@/components/dt/chat/dt-attachment-chips";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { cn } from "@/components/dt/cn";
@@ -33,7 +31,6 @@ export function DtChatComposer(props: {
   onRemoveAttachment: (index: number) => void;
   dropHighlight?: boolean;
   onDragHighlight?: (v: boolean) => void;
-  lastReplyVia?: string | null;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canSend =
@@ -227,12 +224,6 @@ export function DtChatComposer(props: {
             )}
           </div>
         </div>
-
-        <p className="mt-2 text-center text-[11px] tabular-nums text-sbkm-ink-500 dark:text-white/45">
-          Bild, PDF, CSV, TXT, MD, Excel · max. {DT_MAX_ATTACHMENTS} Dateien · Enter senden, Shift+Enter
-          Zeilenumbruch
-        </p>
-        <DtChatDevViaPill via={props.lastReplyVia ?? null} />
       </div>
     </div>
   );

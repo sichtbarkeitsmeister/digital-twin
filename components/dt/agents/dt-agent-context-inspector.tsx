@@ -164,6 +164,7 @@ export function DtAgentContextInspector(props: {
   initialOrgId: string;
   initialAgentId?: string | null;
   initialMode?: DtAgentContextMode;
+  isPlatformAdmin?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -173,6 +174,7 @@ export function DtAgentContextInspector(props: {
   );
   const [mode, setMode] = useState<DtAgentContextMode>(() => {
     const m = searchParams.get("mode");
+    if (m === "seo" && !props.isPlatformAdmin) return "default";
     return m === "seo" || m === "team" ? m : (props.initialMode ?? "default");
   });
   const [agents, setAgents] = useState<AgentOption[]>([]);
@@ -182,6 +184,17 @@ export function DtAgentContextInspector(props: {
   const [bundle, setBundle] = useState<DtAgentContextBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("org");
+    if (
+      fromUrl &&
+      props.organisations.some((organisation) => organisation.id === fromUrl) &&
+      fromUrl !== orgId
+    ) {
+      setOrgId(fromUrl);
+    }
+  }, [searchParams, props.organisations, orgId]);
 
   const syncUrl = useCallback(
     (patch: { org?: string; agent?: string; mode?: DtAgentContextMode }) => {
@@ -298,20 +311,7 @@ export function DtAgentContextInspector(props: {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <DtSelect
-          label="Organisation"
-          value={orgId}
-          onValueChange={(id) => {
-            setOrgId(id);
-            syncUrl({ org: id, agent: "", mode });
-          }}
-          options={props.organisations.map((o) => ({
-            value: o.id,
-            label: o.name,
-          }))}
-          fullWidth
-        />
+      <div className="grid gap-4 sm:grid-cols-1">
         <DtSelect
           label="Agent"
           value={agentId}
@@ -336,7 +336,7 @@ export function DtAgentContextInspector(props: {
         layoutId="agent-context-mode-tab"
         tabs={[
           { id: "default", label: "Standard" },
-          { id: "seo", label: "SEO" },
+          ...(props.isPlatformAdmin ? [{ id: "seo" as const, label: "SEO" }] : []),
           { id: "team", label: "Team" },
         ]}
         active={mode}

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { verifyDtInternalWebhookSecret } from "@/lib/dt/internal-webhook";
+import { sendDtSeoReportToOwner } from "@/lib/dt/seo/notify-owner";
 import { syncSeoTasksFromReportRecommendations } from "@/lib/dt/seo/report-task-sync";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -27,6 +28,23 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
   }
 
   const supabase = createServiceClient();
+
+  // Idempotency guard: once a report has been stopped by a user (or already
+  // finished), ignore any late callbacks from n8n so the final state sticks.
+  const { data: current } = await supabase
+    .from("dt_seo_reports")
+    .select("id, state, send_to_owner, owner_sent_at")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!current) {
+    return NextResponse.json({ ok: false, message: "Report nicht gefunden." }, { status: 404 });
+  }
+
+  if (current.state === "cancelled") {
+    return NextResponse.json({ ok: true, ignored: true, report: current });
+  }
+
   const patch: Record<string, unknown> = {
     state: parsed.data.state,
     state_message: parsed.data.stateMessage ?? null,
@@ -65,6 +83,28 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
       );
     } catch (taskError) {
       console.error("[seo/report/complete] task sync failed:", taskError);
+    }
+  }
+
+  // Optionally email the finished report to the configured report recipient (once).
+  if (parsed.data.state === "done" && current.send_to_owner && !current.owner_sent_at) {
+    try {
+      const result = await sendDtSeoReportToOwner({
+        supabase,
+        organisationId: data.organisation_id,
+        reportId: id,
+        pdfPath: data.pdf_path ?? null,
+      });
+      if (result.sent) {
+        await supabase
+          .from("dt_seo_reports")
+          .update({ owner_sent_at: new Date().toISOString() })
+          .eq("id", id);
+      } else {
+        console.warn("[seo/report/complete] report email skipped:", result.reason);
+      }
+    } catch (mailError) {
+      console.error("[seo/report/complete] report email failed:", mailError);
     }
   }
 

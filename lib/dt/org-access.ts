@@ -28,6 +28,14 @@ export async function canManageDtAgents(
   return org?.owner_user_id === userId;
 }
 
+/** Only platform admins may PATCH/DELETE agents directly. Org owners submit edit requests. */
+export async function canDirectlyEditDtAgents(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<boolean> {
+  return isPlatformAdmin(supabase, userId);
+}
+
 /** Same access as agent management — owners/admins/platform admins per org. */
 export const canViewDtAgentContext = canManageDtAgents;
 

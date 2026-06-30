@@ -1,20 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, FileSearch, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { ArrowLeft, FileSearch, Plus, Send } from "lucide-react";
 
+import { DtAgentEditRequestModal } from "@/components/dt/agents/dt-agent-edit-request-modal";
+import {
+  DtAgentEditRequestsPanel,
+  DtAgentsReadOnlyBanner,
+} from "@/components/dt/agents/dt-agent-edit-requests-panel";
+import {
+  DtAgentFormFields,
+  agentFormValuesFromRow,
+  quickActionsFromForm,
+} from "@/components/dt/agents/dt-agent-form-fields";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
-import { DtSelect } from "@/components/dt/dt-select";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
-import { parseQuickActions } from "@/lib/dt/types";
-import {
-  readSelectedOrganisationId,
-  writeSelectedOrganisationId,
-} from "@/lib/shared/selected-organisation-storage";
+import type { DtAgentEditRequestRow } from "@/lib/dt/agent-edit-requests";
+import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
 
 type AgentRow = {
   id: string;
@@ -40,34 +45,77 @@ export function DtAgentsManager(props: {
   organisations: Array<{ id: string; name: string }>;
   initialOrgId: string;
 }) {
+  const searchParams = useSearchParams();
   const [orgId, setOrgId] = useState(props.initialOrgId);
   const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [canDirectlyEdit, setCanDirectlyEdit] = useState(false);
+  const [editRequests, setEditRequests] = useState<DtAgentEditRequestRow[]>([]);
+  const [requestAgent, setRequestAgent] = useState<AgentRow | null>(null);
 
   useEffect(() => {
+    const fromUrl = searchParams.get("org");
+    if (
+      fromUrl &&
+      props.organisations.some((organisation) => organisation.id === fromUrl)
+    ) {
+      setOrgId(fromUrl);
+      setEditingId(null);
+      return;
+    }
+
     const stored = readSelectedOrganisationId();
     if (stored && props.organisations.some((organisation) => organisation.id === stored)) {
       setOrgId(stored);
     }
-  }, [props.organisations]);
+  }, [searchParams, props.organisations]);
+
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editRole, setEditRole] = useState("");
-  const [editPrompt, setEditPrompt] = useState("");
-  const [editQuick, setEditQuick] = useState("");
-  const [editEnabled, setEditEnabled] = useState(true);
-  const [editPosition, setEditPosition] = useState(0);
+  const [editValues, setEditValues] = useState(agentFormValuesFromRow({
+    name: "",
+    role: null,
+    prompt_template: "",
+    quick_actions: [],
+    is_enabled: true,
+    position: 0,
+  }));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const pendingByAgentId = useMemo(() => {
+    const map = new Map<string, DtAgentEditRequestRow>();
+    for (const r of editRequests) {
+      if (r.status === "pending") map.set(r.agent_id, r);
+    }
+    return map;
+  }, [editRequests]);
+
+  const agentsById = useMemo(
+    () => new Map(agents.map((a) => [a.id, { name: a.name }])),
+    [agents],
+  );
+
+  const refreshRequests = useCallback(async () => {
+    if (!orgId) return;
+    const res = await fetch(`/api/dt/agents/edit-requests?org=${encodeURIComponent(orgId)}`);
+    const json = (await res.json()) as { ok?: boolean; requests?: DtAgentEditRequestRow[] };
+    if (json.ok && json.requests) setEditRequests(json.requests);
+  }, [orgId]);
 
   const refresh = useCallback(async () => {
     const [manageRes, templatesRes] = await Promise.all([
       fetch(`/api/dt/agents/manage?org=${encodeURIComponent(orgId)}`),
       fetch("/api/dt/agents/templates"),
+      refreshRequests(),
     ]);
 
-    const manageJson = (await manageRes.json()) as { ok?: boolean; agents?: AgentRow[] };
+    const manageJson = (await manageRes.json()) as {
+      ok?: boolean;
+      agents?: AgentRow[];
+      canDirectlyEdit?: boolean;
+    };
     if (manageJson.ok && manageJson.agents) setAgents(manageJson.agents);
+    if (manageJson.ok) setCanDirectlyEdit(Boolean(manageJson.canDirectlyEdit));
 
     const templatesJson = (await templatesRes.json()) as {
       ok?: boolean;
@@ -76,7 +124,7 @@ export function DtAgentsManager(props: {
     if (templatesJson.ok && templatesJson.templates) {
       setTemplates(templatesJson.templates);
     }
-  }, [orgId]);
+  }, [orgId, refreshRequests]);
 
   useEffect(() => {
     void refresh();
@@ -84,12 +132,7 @@ export function DtAgentsManager(props: {
 
   function startEdit(agent: AgentRow) {
     setEditingId(agent.id);
-    setEditName(agent.name);
-    setEditRole(agent.role ?? "");
-    setEditPrompt(agent.prompt_template);
-    setEditQuick(parseQuickActions(agent.quick_actions).join("\n"));
-    setEditEnabled(agent.is_enabled);
-    setEditPosition(agent.position);
+    setEditValues(agentFormValuesFromRow(agent));
     setStatus(null);
   }
 
@@ -123,20 +166,16 @@ export function DtAgentsManager(props: {
     if (!editingId) return;
     setBusy(true);
     setStatus(null);
-    const quickActions = editQuick
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
     const res = await fetch(`/api/dt/agents/${editingId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: editName,
-        role: editRole || null,
-        promptTemplate: editPrompt,
-        quickActions,
-        isEnabled: editEnabled,
-        position: editPosition,
+        name: editValues.name,
+        role: editValues.role || null,
+        promptTemplate: editValues.prompt,
+        quickActions: quickActionsFromForm(editValues.quick),
+        isEnabled: editValues.enabled,
+        position: editValues.position,
       }),
     });
     const json = (await res.json()) as { ok?: boolean; message?: string };
@@ -166,6 +205,23 @@ export function DtAgentsManager(props: {
     await refresh();
   }
 
+  async function cancelRequest(requestId: string) {
+    setBusy(true);
+    setStatus(null);
+    const res = await fetch(`/api/dt/agents/edit-requests/${requestId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "cancel" }),
+    });
+    const json = (await res.json()) as { ok?: boolean; message?: string };
+    setBusy(false);
+    if (!json.ok) {
+      setStatus(json.message ?? "Zurückziehen fehlgeschlagen.");
+      return;
+    }
+    await refresh();
+  }
+
   const subscribedSlugs = new Set(agents.map((a) => a.slug));
 
   return (
@@ -186,24 +242,11 @@ export function DtAgentsManager(props: {
             DigitalTwin-Agenten
           </h1>
           <p className="text-sm text-sbkm-ink-600 dark:text-white/60">
-            Marketplace abonnieren und Agenten pro Organisation anpassen.
+            {canDirectlyEdit
+              ? "Marketplace verwalten und Agenten direkt bearbeiten."
+              : "Marketplace-Agenten aktivieren und Änderungen bei uns anfragen."}
           </p>
         </div>
-        <DtSelect
-          label="Organisation"
-          labelClassName="font-semibold normal-case tracking-normal text-sbkm-ink-600 dark:text-white/55"
-          triggerClassName="min-w-[200px]"
-          value={orgId}
-          onValueChange={(id) => {
-            setOrgId(id);
-            writeSelectedOrganisationId(id);
-            setEditingId(null);
-          }}
-          options={props.organisations.map((o) => ({
-            value: o.id,
-            label: o.name,
-          }))}
-        />
         <Link
           href={`/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}${editingId ? `&agent=${encodeURIComponent(editingId)}` : agents[0] ? `&agent=${encodeURIComponent(agents[0].id)}` : ""}`}
           className="inline-flex h-10 items-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/60 px-4 text-sm font-semibold text-sbkm-navy transition hover:bg-sbkm-mint/15 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
@@ -213,10 +256,24 @@ export function DtAgentsManager(props: {
         </Link>
       </div>
 
+      {!canDirectlyEdit ? <DtAgentsReadOnlyBanner /> : null}
+
       {status ? (
-        <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+        <p
+          className={`text-sm ${status.includes("gesendet") || status.includes("übernommen") ? "text-sbkm-mint" : "text-red-600 dark:text-red-400"}`}
+          role="alert"
+        >
           {status}
         </p>
+      ) : null}
+
+      {!canDirectlyEdit ? (
+        <DtAgentEditRequestsPanel
+          requests={editRequests}
+          agentsById={agentsById}
+          busy={busy}
+          onCancel={cancelRequest}
+        />
       ) : null}
 
       <section className="grid gap-3">
@@ -258,103 +315,100 @@ export function DtAgentsManager(props: {
           <p className="text-sm text-sbkm-ink-600 dark:text-white/55">Noch keine Agenten.</p>
         ) : (
           <div className="grid gap-3">
-            {agents.map((agent) => (
-              <DtGlassCard key={agent.id} className="p-4">
-                {editingId === agent.id ? (
-                  <div className="grid gap-3">
-                    <input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="h-10 rounded-pill border border-sbkm-navy/15 px-3 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white"
-                      placeholder="Name"
-                    />
-                    <input
-                      value={editRole}
-                      onChange={(e) => setEditRole(e.target.value)}
-                      className="h-10 rounded-pill border border-sbkm-navy/15 px-3 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white"
-                      placeholder="Rolle"
-                    />
-                    <Textarea
-                      value={editPrompt}
-                      onChange={(e) => setEditPrompt(e.target.value)}
-                      className="min-h-[120px] text-sm"
-                      placeholder="Prompt"
-                    />
-                    <Textarea
-                      value={editQuick}
-                      onChange={(e) => setEditQuick(e.target.value)}
-                      className="min-h-[80px] text-sm"
-                      placeholder="Schnellaktionen (eine pro Zeile)"
-                    />
-                    <label className="grid gap-1 text-sm">
-                      <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-                        Reihenfolge
-                      </span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={999}
-                        value={editPosition}
-                        onChange={(e) => setEditPosition(Number(e.target.value) || 0)}
-                        className="h-10 w-24 rounded-pill border border-sbkm-navy/15 px-3 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white"
+            {agents.map((agent) => {
+              const pending = pendingByAgentId.get(agent.id);
+              return (
+                <DtGlassCard key={agent.id} className="p-4">
+                  {canDirectlyEdit && editingId === agent.id ? (
+                    <div className="grid gap-3">
+                      <DtAgentFormFields
+                        values={editValues}
+                        onChange={(patch) => setEditValues((v) => ({ ...v, ...patch }))}
+                        disabled={busy}
                       />
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={editEnabled}
-                        onCheckedChange={(v) => setEditEnabled(v === true)}
-                      />
-                      Aktiv
-                    </label>
-                    <div className="flex gap-2">
-                      <DtPillButton type="button" disabled={busy} onClick={() => void saveEdit()}>
-                        Speichern
-                      </DtPillButton>
-                      <DtPillButton
-                        type="button"
-                        variant="ghost"
-                        onClick={() => setEditingId(null)}
-                      >
-                        Abbrechen
-                      </DtPillButton>
+                      <div className="flex gap-2">
+                        <DtPillButton type="button" disabled={busy} onClick={() => void saveEdit()}>
+                          Speichern
+                        </DtPillButton>
+                        <DtPillButton
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setEditingId(null)}
+                        >
+                          Abbrechen
+                        </DtPillButton>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-sbkm-navy dark:text-white">
-                        {agent.name}
-                        {!agent.is_enabled ? (
-                          <span className="ml-2 text-xs font-normal text-sbkm-ink-500">
-                            (deaktiviert)
-                          </span>
-                        ) : null}
-                      </p>
-                      <p className="text-xs text-sbkm-ink-600 dark:text-white/50">
-                        {agent.slug} · {agent.kind}
-                        {agent.role ? ` · ${agent.role}` : ""}
-                      </p>
+                  ) : (
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold text-sbkm-navy dark:text-white">
+                            {agent.name}
+                            {!agent.is_enabled ? (
+                              <span className="ml-2 text-xs font-normal text-sbkm-ink-500">
+                                (deaktiviert)
+                              </span>
+                            ) : null}
+                          </p>
+                          {pending ? (
+                            <Badge variant="secondary">In Prüfung</Badge>
+                          ) : null}
+                        </div>
+                        <p className="text-xs text-sbkm-ink-600 dark:text-white/50">
+                          {agent.slug} · {agent.kind}
+                          {agent.role ? ` · ${agent.role}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {canDirectlyEdit ? (
+                          <>
+                            <DtPillButton type="button" onClick={() => startEdit(agent)}>
+                              Bearbeiten
+                            </DtPillButton>
+                            <DtPillButton
+                              type="button"
+                              variant="ghost"
+                              disabled={
+                                busy ||
+                                (agent.is_enabled && agents.filter((a) => a.is_enabled).length <= 1)
+                              }
+                              onClick={() => void deleteAgent(agent)}
+                            >
+                              Entfernen
+                            </DtPillButton>
+                          </>
+                        ) : (
+                          <DtPillButton
+                            type="button"
+                            disabled={busy || Boolean(pending)}
+                            className="gap-1.5"
+                            onClick={() => setRequestAgent(agent)}
+                          >
+                            <Send className="h-4 w-4" />
+                            {pending ? "Anfrage läuft" : "Änderung vorschlagen"}
+                          </DtPillButton>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <DtPillButton type="button" onClick={() => startEdit(agent)}>
-                        Bearbeiten
-                      </DtPillButton>
-                      <DtPillButton
-                        type="button"
-                        variant="ghost"
-                        disabled={busy || (agent.is_enabled && agents.filter((a) => a.is_enabled).length <= 1)}
-                        onClick={() => void deleteAgent(agent)}
-                      >
-                        Entfernen
-                      </DtPillButton>
-                    </div>
-                  </div>
-                )}
-              </DtGlassCard>
-            ))}
+                  )}
+                </DtGlassCard>
+              );
+            })}
           </div>
         )}
       </section>
+
+      <DtAgentEditRequestModal
+        open={Boolean(requestAgent)}
+        agent={requestAgent}
+        organisationId={orgId}
+        onClose={() => setRequestAgent(null)}
+        onSubmitted={() => {
+          setStatus("Änderungsanfrage gesendet — wir prüfen sie in Kürze.");
+          void refresh();
+        }}
+      />
     </div>
   );
 }

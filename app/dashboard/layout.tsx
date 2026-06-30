@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { DashboardShell } from "@/app/dashboard/_components/dashboard-shell";
 import { userCanManageAnyIntegrations } from "@/lib/dashboard/org-context";
 import { userCanManageAnyDtAgents } from "@/lib/dt/org-access";
-import { userCanAccessAnyDtSeo } from "@/lib/dt/seo/access";
+import { userCanViewAnyDtUsage } from "@/lib/dt/usage/access";
+import { countPendingDtAgentEditRequests } from "@/lib/dt/agent-edit-requests";
 
 export default function DashboardLayout({
   children,
@@ -47,8 +48,8 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
   const canManageIntegrations = isPlatformAdmin
     ? true
     : await userCanManageAnyIntegrations(user.id);
-  const canAccessDtSeo = await userCanAccessAnyDtSeo(user.id);
   const canManageDtAgents = await userCanManageAnyDtAgents(user.id);
+  const canViewDtUsage = await userCanViewAnyDtUsage(user.id);
   const pendingSurveyQuestionsCount = isPlatformAdmin
     ? (
         await supabase
@@ -58,13 +59,18 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
       ).count ?? 0
     : 0;
 
+  const pendingAgentEditRequestsCount = isPlatformAdmin
+    ? await countPendingDtAgentEditRequests(supabase)
+    : 0;
+
   return (
     <DashboardShell
       isPlatformAdmin={isPlatformAdmin}
       canManageIntegrations={canManageIntegrations}
-      canAccessDtSeo={canAccessDtSeo}
       canManageDtAgents={canManageDtAgents}
+      canViewDtUsage={canViewDtUsage}
       pendingSurveyQuestionsCount={pendingSurveyQuestionsCount}
+      pendingAgentEditRequestsCount={pendingAgentEditRequestsCount}
     >
       {children}
     </DashboardShell>

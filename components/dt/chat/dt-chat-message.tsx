@@ -121,6 +121,7 @@ export function DtChatMessage(props: {
   seoTasks?: DtSeoTaskProposalMatchRow[];
 }) {
   const isUser = props.message.role === "user";
+  const isAdminReply = props.message.metadata?.admin_reply === true;
   const metaItems = metadataAttachments(props.message.metadata);
   const storedItems = (props.storedAttachments ?? []).map((row) => {
     const mimeNorm = normalizeDtMime(row.mime_type);
@@ -177,12 +178,19 @@ export function DtChatMessage(props: {
         )}
       >
         {props.showAuthor && isUser && props.authorLabel ? (
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-white/70">
-            {props.authorLabel} ·{" "}
-            {new Date(props.message.created_at).toLocaleTimeString("de-DE", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+          <p className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/70">
+            <span>
+              {props.authorLabel} ·{" "}
+              {new Date(props.message.created_at).toLocaleTimeString("de-DE", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+            {isAdminReply ? (
+              <span className="rounded-pill bg-sbkm-mint/25 px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal text-sbkm-mint">
+                Admin
+              </span>
+            ) : null}
           </p>
         ) : null}
         {isUser ? (

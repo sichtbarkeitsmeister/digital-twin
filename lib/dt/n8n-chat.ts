@@ -2,6 +2,11 @@ import { suggestChatTitle } from "@/lib/dt/anthropic-chat";
 import type { DtChatRow } from "@/lib/dt/types";
 import type { DtMessageRow } from "@/lib/dt/types";
 
+export type DtN8nChatUsage = {
+  inputTokens: number;
+  outputTokens: number;
+};
+
 export type DtN8nChatResponse = {
   ok?: boolean;
   messageId?: string;
@@ -10,6 +15,8 @@ export type DtN8nChatResponse = {
   title?: string | null;
   assistantMessage?: string;
   message?: string;
+  model?: string | null;
+  usage?: DtN8nChatUsage;
 };
 
 export async function callDtN8nChat(params: {
@@ -70,7 +77,7 @@ export function mapN8nResultToAssistantRow(
     metadata: {
       finish_reason: n8n.finishReason ?? null,
       via: "n8n",
-      model: model ?? null,
+      model: model ?? n8n.model ?? null,
     },
     author_user_id: null,
     stopped: false,

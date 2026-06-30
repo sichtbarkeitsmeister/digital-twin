@@ -2,19 +2,25 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createDtChat, listDtChats, requireAuthUser } from "@/lib/dt/db";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { loadDtChatOwnerLabels } from "@/lib/dt/oversight";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import type { DtChatMode } from "@/lib/dt/types";
 
 const listSchema = z.object({
   org: z.string().uuid(),
-  scope: z.enum(["mine", "team", "all"]).default("mine"),
+  scope: z.enum(["mine", "team", "all", "org"]).default("mine"),
   mode: z.enum(["default", "seo", "team"]).optional(),
   archived: z
     .string()
     .optional()
     .transform((v) => v === "1" || v === "true"),
+  oversight: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
+  owner: z.string().uuid().optional(),
 });
-
 const createSchema = z.object({
   organisationId: z.string().uuid(),
   agentId: z.string().uuid(),
@@ -34,12 +40,21 @@ export async function GET(req: Request) {
     scope: url.searchParams.get("scope") ?? "mine",
     mode: url.searchParams.get("mode") ?? undefined,
     archived: url.searchParams.get("archived") ?? undefined,
+    oversight: url.searchParams.get("oversight") ?? undefined,
+    owner: url.searchParams.get("owner") ?? undefined,
   });
   if (!parsed.success) {
     return NextResponse.json({ ok: false, message: "Ungültige Parameter." }, { status: 400 });
   }
 
-  if (parsed.data.mode === "seo") {
+  const adminOversight = parsed.data.scope === "org" || parsed.data.oversight === true;
+  if (adminOversight) {
+    if (!(await isPlatformAdmin(auth.supabase, auth.userId!))) {
+      return NextResponse.json({ ok: false, message: "Keine Berechtigung." }, { status: 403 });
+    }
+  }
+
+  if (parsed.data.mode === "seo" && !adminOversight) {
     const gate = await requireDtSeoAccess(
       auth.supabase,
       auth.userId!,
@@ -55,10 +70,17 @@ export async function GET(req: Request) {
     scope: parsed.data.scope,
     userId: auth.userId!,
     includeArchived: parsed.data.archived,
-    chatMode: parsed.data.mode,
+    chatMode: adminOversight ? undefined : parsed.data.mode,
+    adminOversight,
+    ownerUserId: parsed.data.owner,
   });
 
-  return NextResponse.json({ ok: true, chats });
+  const ownerIds = [
+    ...new Set(chats.map((c) => c.owner_user_id).filter((id): id is string => Boolean(id))),
+  ];
+  const ownerLabels = adminOversight ? await loadDtChatOwnerLabels(ownerIds) : {};
+
+  return NextResponse.json({ ok: true, chats, ownerLabels });
 }
 
 export async function POST(req: Request) {
@@ -100,7 +122,7 @@ export async function POST(req: Request) {
   const { data: chat } = await auth.supabase
     .from("dt_chats")
     .select(
-      "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,created_at,updated_at",
+      "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,shared_to_team_at,created_at,updated_at",
     )
     .eq("id", chatId)
     .single();

@@ -322,7 +322,8 @@ export async function loadDtAgentContextBundle(input: {
         title: "Prüfbare Unterseiten",
         sourceLabel: "Crawl",
         sourceType: "crawl",
-        description: "Gecrawlte Seiten aus dt_site_pages (max. 40, nicht ausgeschlossen).",
+        description:
+          "Kompakter Index der gecrawlten Seiten (nur Titel + URL, nicht ausgeschlossen). Voller Text wird on-demand über die Such-/Lese-Werkzeuge geladen, nicht hier.",
         content: sitePagesText,
         isEmpty: sitePages.length === 0,
         editHref: seoSettingsHref,

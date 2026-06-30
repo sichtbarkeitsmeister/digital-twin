@@ -1,10 +1,15 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { DtAgentsManager } from "@/components/dt/agents/dt-agents-manager";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { createClient } from "@/lib/supabase/server";
 
-export default async function VerwaltungAgentsPage() {
+async function AgentsPageContent({
+  searchParams,
+}: {
+  searchParams: { org?: string };
+}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -18,7 +23,30 @@ export default async function VerwaltungAgentsPage() {
     redirect("/dashboard");
   }
 
+  const initialOrgId =
+    searchParams.org && adminOrgs.some((organisation) => organisation.id === searchParams.org)
+      ? searchParams.org
+      : adminOrgs[0]!.id;
+
   return (
-    <DtAgentsManager organisations={adminOrgs} initialOrgId={adminOrgs[0]!.id} />
+    <DtAgentsManager organisations={adminOrgs} initialOrgId={initialOrgId} />
+  );
+}
+
+export default async function VerwaltungAgentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ org?: string }>;
+}) {
+  const sp = await searchParams;
+
+  return (
+    <Suspense
+      fallback={
+        <p className="text-sm text-sbkm-ink-600 dark:text-white/70">Agenten werden geladen …</p>
+      }
+    >
+      <AgentsPageContent searchParams={sp} />
+    </Suspense>
   );
 }

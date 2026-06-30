@@ -10,18 +10,48 @@ import {
   prepareInboundAttachments,
 } from "@/lib/dt/attachments";
 import { getDtChatOrNull, requireAuthUser } from "@/lib/dt/db";
-import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import {
   callDtN8nChat,
   mapN8nResultToAssistantRow,
   resolveTitleAfterChat,
 } from "@/lib/dt/n8n-chat";
+import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
+import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import {
   buildDtSeoTaskProposalMetadata,
   parseDtSeoTaskProposalsFromText,
   stripDtSeoTaskProposalBlocks,
 } from "@/lib/dt/seo/chat-task-proposals";
 import type { DtChatMode } from "@/lib/dt/types";
+import { createServiceClient } from "@/lib/supabase/service";
+
+async function trackLlmUsage(input: {
+  organisationId: string;
+  userId: string;
+  chatId: string;
+  messageId: string | null;
+  agentId: string;
+  mode: string;
+  via: "direct" | "n8n";
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+}) {
+  const service = createServiceClient();
+  await recordLlmUsageEvent(service, {
+    organisationId: input.organisationId,
+    userId: input.userId,
+    chatId: input.chatId,
+    messageId: input.messageId,
+    agentId: input.agentId,
+    mode: input.mode,
+    via: input.via,
+    model: input.model,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+  });
+}
 
 function finalizeAssistantSeoContent(text: string, mode: DtChatMode) {
   if (mode !== "seo") {
@@ -98,6 +128,11 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
   const ghostMode = parsed.data.ghostMode ?? chat.mode === "ghost";
   const content = parsed.data.content.trim() || "(Anhang)";
   const attachmentMeta = buildAttachmentMetadataForMessage(prepared.items);
+  const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId);
+  const isAdminReply =
+    platformAdmin &&
+    chat.owner_user_id !== null &&
+    chat.owner_user_id !== auth.userId;
 
   let userRow: {
     id: string;
@@ -118,7 +153,10 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         role: "user",
         content,
         author_user_id: auth.userId,
-        metadata: { attachments: attachmentMeta },
+        metadata: {
+          attachments: attachmentMeta,
+          ...(isAdminReply ? { admin_reply: true } : {}),
+        },
       })
       .select("id,chat_id,role,content,metadata,author_user_id,stopped,created_at")
       .single();
@@ -160,7 +198,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         ghostMode,
       });
 
-      let assistantRow = mapN8nResultToAssistantRow(chatId, n8n);
+      let assistantRow = mapN8nResultToAssistantRow(chatId, n8n, n8n.model);
 
       const finalized = finalizeAssistantSeoContent(assistantRow.content, chat.mode as DtChatMode);
       assistantRow = {
@@ -172,6 +210,9 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           finalized.seoTaskProposals,
         ),
       };
+
+      const usageIn = n8n.usage?.inputTokens ?? 0;
+      const usageOut = n8n.usage?.outputTokens ?? 0;
 
       if (!ghostMode && n8n.messageId) {
         const { data: persisted } = await auth.supabase
@@ -198,6 +239,9 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
             .update({
               content: assistantRow.content,
               metadata: assistantRow.metadata,
+              token_count_in: usageIn || null,
+              token_count_out: usageOut || null,
+              model: n8n.model ?? (assistantRow.metadata.model as string | null) ?? null,
             })
             .eq("id", persisted.id);
         }
@@ -211,11 +255,28 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
             metadata: assistantRow.metadata,
             author_user_id: null,
             stopped: false,
-            model: (assistantRow.metadata.model as string | null) ?? null,
+            model: n8n.model ?? (assistantRow.metadata.model as string | null) ?? null,
+            token_count_in: usageIn || null,
+            token_count_out: usageOut || null,
           })
           .select("id,chat_id,role,content,metadata,author_user_id,stopped,created_at")
           .single();
         if (inserted) assistantRow = inserted;
+      }
+
+      if (!ghostMode && (usageIn > 0 || usageOut > 0)) {
+        await trackLlmUsage({
+          organisationId: chat.organisation_id,
+          userId: auth.userId,
+          chatId,
+          messageId: assistantRow.id,
+          agentId: chat.agent_id,
+          mode: chat.mode,
+          via: "n8n",
+          model: n8n.model ?? (assistantRow.metadata.model as string | null) ?? null,
+          inputTokens: usageIn,
+          outputTokens: usageOut,
+        });
       }
 
       const titleSuggestion = !ghostMode
@@ -250,6 +311,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       system: assembled.system,
       messages: assembled.messages,
       mode: chat.mode as DtChatMode,
+      retrieval:
+        chat.mode === "seo" ? { organisationId: chat.organisation_id } : undefined,
     });
   } catch (err) {
     console.error("[dt/chat/messages] Anthropic failed:", err);
@@ -294,6 +357,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         author_user_id: null,
         stopped: false,
         model: direct.model,
+        token_count_in: direct.usage.inputTokens || null,
+        token_count_out: direct.usage.outputTokens || null,
       })
       .select("id,chat_id,role,content,metadata,author_user_id,stopped,created_at")
       .single();
@@ -305,6 +370,21 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       );
     }
     assistantRow = data;
+
+    if (direct.usage.inputTokens > 0 || direct.usage.outputTokens > 0) {
+      await trackLlmUsage({
+        organisationId: chat.organisation_id,
+        userId: auth.userId,
+        chatId,
+        messageId: data.id,
+        agentId: chat.agent_id,
+        mode: chat.mode,
+        via: "direct",
+        model: direct.model,
+        inputTokens: direct.usage.inputTokens,
+        outputTokens: direct.usage.outputTokens,
+      });
+    }
   } else {
     assistantRow = {
       id: `ghost-${Date.now()}`,

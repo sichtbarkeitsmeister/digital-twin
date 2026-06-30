@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { DtAgentContextInspector } from "@/components/dt/agents/dt-agent-context-inspector";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
-import { userCanManageAnyDtAgents } from "@/lib/dt/org-access";
+import { isPlatformAdmin, userCanManageAnyDtAgents } from "@/lib/dt/org-access";
 import type { DtAgentContextMode } from "@/lib/dt/agent-context-inspector";
 import { createClient } from "@/lib/supabase/server";
 
@@ -39,6 +39,11 @@ async function AgentKontextPageContent({
   const canAccess = await userCanManageAnyDtAgents(user.id);
   if (!canAccess) redirect("/dashboard");
 
+  const platformAdmin = await isPlatformAdmin(supabase, user.id);
+  if (searchParams.mode === "seo" && !platformAdmin) {
+    redirect("/dashboard/verwaltung/agent-kontext");
+  }
+
   const { organisations: adminOrgs } = await loadDtManageOrganisations(user.id);
 
   if (adminOrgs.length === 0) {
@@ -63,6 +68,7 @@ async function AgentKontextPageContent({
           initialOrgId={initialOrgId}
           initialAgentId={searchParams.agent ?? null}
           initialMode={initialMode}
+          isPlatformAdmin={platformAdmin}
         />
       </Suspense>
     </OrganisationPageShell>

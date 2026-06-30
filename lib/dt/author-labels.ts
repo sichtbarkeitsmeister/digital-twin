@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { formatPersonDisplayName } from "@/lib/dt/display-name";
 
 export async function loadDtAuthorLabels(
   userIds: string[],
@@ -20,7 +21,9 @@ export async function loadDtAuthorLabels(
       continue;
     }
     const email = row.email?.trim() ?? "";
-    labels[row.id] = email.includes("@") ? email.split("@")[0]! : email || "Nutzer";
+    labels[row.id] = email.includes("@")
+      ? formatPersonDisplayName(email.split("@")[0]!)
+      : email || "Nutzer";
   }
 
   return labels;

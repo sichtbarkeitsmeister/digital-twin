@@ -173,7 +173,52 @@ export function reportStateLabel(state: string): string {
       return "Fertig";
     case "error":
       return "Fehler";
+    case "cancelled":
+      return "Abgebrochen";
     default:
       return state;
   }
+}
+
+export type OwnerDeliveryStatus = {
+  label: string;
+  title?: string;
+  tone: "sent" | "pending" | "scheduled";
+};
+
+export function resolveOwnerDeliveryStatus(report: {
+  send_to_owner?: boolean;
+  owner_sent_at?: string | null;
+  state: string;
+}): OwnerDeliveryStatus | null {
+  if (report.owner_sent_at) {
+    const when = new Date(report.owner_sent_at).toLocaleString("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return {
+      label: "Per E-Mail gesendet",
+      title: `E-Mail an die Report-E-Mail gesendet am ${when}`,
+      tone: "sent",
+    };
+  }
+  if (!report.send_to_owner) return null;
+  if (report.state === "queued" || report.state === "running") {
+    return {
+      label: "E-Mail geplant",
+      title: "Nach Fertigstellung wird die Report-E-Mail aus den SEO-Einstellungen benachrichtigt.",
+      tone: "scheduled",
+    };
+  }
+  if (report.state === "done") {
+    return {
+      label: "E-Mail-Versand ausstehend",
+      title: "Der Report ist fertig, die E-Mail an die Report-E-Mail wurde noch nicht versendet.",
+      tone: "pending",
+    };
+  }
+  return null;
 }

@@ -5,7 +5,7 @@ import {
   loadDtAgentContextBundle,
   type DtAgentContextMode,
 } from "@/lib/dt/agent-context-inspector";
-import { canViewDtAgentContext } from "@/lib/dt/org-access";
+import { canViewDtAgentContext, isPlatformAdmin } from "@/lib/dt/org-access";
 import { createClient } from "@/lib/supabase/server";
 
 const querySchema = z.object({
@@ -50,6 +50,13 @@ export async function GET(req: Request) {
   if (!allowed) {
     return NextResponse.json(
       { ok: false, message: "Keine Berechtigung." },
+      { status: 403 },
+    );
+  }
+
+  if (parsed.data.mode === "seo" && !(await isPlatformAdmin(supabase, user.id))) {
+    return NextResponse.json(
+      { ok: false, message: "SEO-Kontext ist nur für Plattform-Administratoren verfügbar." },
       { status: 403 },
     );
   }

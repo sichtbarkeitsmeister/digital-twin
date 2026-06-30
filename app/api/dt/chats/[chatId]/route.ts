@@ -4,8 +4,9 @@ import { z } from "zod";
 import { loadDtAuthorLabels } from "@/lib/dt/author-labels";
 import { DT_CHAT_ATTACHMENTS_BUCKET, isSkippedStoragePath } from "@/lib/dt/attachments";
 import { getDtChatOrNull, loadDtMessages, requireAuthUser } from "@/lib/dt/db";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { buildChatParticipants } from "@/lib/dt/oversight";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
-
 const patchSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   archived: z.boolean().optional(),
@@ -32,13 +33,17 @@ export async function GET(_: Request, context: { params: Promise<{ chatId: strin
   }
 
   const messages = await loadDtMessages(chatId);
-  const authorLabels =
-    chat.mode === "team" || chat.mode === "seo"
-      ? await loadDtAuthorLabels(
-          messages.map((m) => m.author_user_id).filter((id): id is string => Boolean(id)),
-        )
-      : {};
-
+  const platformAdmin = auth.userId
+    ? await isPlatformAdmin(auth.supabase, auth.userId)
+    : false;
+  const showAuthors =
+    chat.mode === "team" || chat.mode === "seo" || platformAdmin;
+  const authorLabels = showAuthors
+    ? await loadDtAuthorLabels(
+        messages.map((m) => m.author_user_id).filter((id): id is string => Boolean(id)),
+      )
+    : {};
+  const participants = showAuthors ? buildChatParticipants(messages, authorLabels) : [];
   const { data: attachRows } = await auth.supabase
     .from("dt_chat_attachments")
     .select("id,chat_id,message_id,storage_path,file_name,mime_type,size_bytes,created_at")
@@ -83,8 +88,8 @@ export async function GET(_: Request, context: { params: Promise<{ chatId: strin
     messages,
     attachments: attachmentsWithUrls,
     authorLabels,
-    seoTasks,
-  });
+    participants,
+    seoTasks,  });
 }
 
 export async function PATCH(req: Request, context: { params: Promise<{ chatId: string }> }) {
@@ -129,7 +134,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ chatId: s
     .update(patch)
     .eq("id", chatId)
     .select(
-      "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,created_at,updated_at",
+      "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,shared_to_team_at,created_at,updated_at",
     )
     .single();
 

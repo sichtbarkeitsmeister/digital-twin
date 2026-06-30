@@ -2,16 +2,11 @@
 
 import { usePathname } from "next/navigation";
 
-import { DashboardHero } from "@/app/dashboard/_components/dashboard-top-bar";
 import { cn } from "@/components/dt/cn";
-
-const CHAT_FOCUS_PATHS = ["/dashboard/verwaltung/seo"] as const;
+import { isSeoWorkspacePath } from "@/lib/dt/seo/dashboard-path";
 
 export function isDashboardChatFocusPath(pathname: string): boolean {
-  if (pathname.includes("/seo/reports/")) return false;
-  return CHAT_FOCUS_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`),
-  );
+  return isSeoWorkspacePath(pathname);
 }
 
 export function isSeoReportDetailPath(pathname: string): boolean {
@@ -28,12 +23,10 @@ export function DashboardMainArea({ children }: { children: React.ReactNode }) {
       className={cn(
         "mx-auto flex w-full max-w-[1700px] flex-1 flex-col",
         chatFocus
-          ? "h-full min-h-0 gap-0 overflow-hidden px-3 py-3 sm:px-5 sm:py-4"
+          ? "h-full min-h-0 gap-0 overflow-hidden"
           : "min-h-0 flex-1 gap-6 overflow-y-auto overscroll-y-contain px-4 py-6 scrollbar-subtle sm:px-8 sm:py-7",
       )}
     >
-      {!chatFocus && !reportDetail ? <DashboardHero /> : null}
-
       <div
         className={cn(
           chatFocus

@@ -5,6 +5,7 @@ import { queueDtSeoReport, requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { triggerDtSeoReportN8n } from "@/lib/dt/seo/trigger-report";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 const querySchema = z.object({
   org: z.string().uuid(),
@@ -13,6 +14,7 @@ const querySchema = z.object({
 const postSchema = z.object({
   organisationId: z.string().uuid(),
   recipientType: z.enum(["intern", "kunde"]).default("kunde"),
+  sendToOwner: z.boolean().default(false),
 });
 
 export async function GET(req: Request) {
@@ -35,7 +37,7 @@ export async function GET(req: Request) {
   const { data, error } = await auth.supabase
     .from("dt_seo_reports")
     .select(
-      "id,organisation_id,recipient_type,recipient_email,state,state_message,pdf_path,followup_due_at,started_at,finished_at,created_at,updated_at",
+      "id,organisation_id,recipient_type,recipient_email,send_to_owner,owner_sent_at,state,state_message,pdf_path,followup_due_at,started_at,finished_at,created_at,updated_at",
     )
     .eq("organisation_id", parsed.data.org)
     .order("created_at", { ascending: false })
@@ -74,6 +76,7 @@ export async function POST(req: Request) {
   const { reportId, error } = await queueDtSeoReport({
     organisationId: parsed.data.organisationId,
     recipientType: parsed.data.recipientType,
+    sendToOwner: parsed.data.sendToOwner,
   });
 
   if (!reportId) {
@@ -96,11 +99,14 @@ export async function POST(req: Request) {
   try {
     await triggerDtSeoReportN8n(reportId, token);
   } catch (err) {
-    await auth.supabase
+    // dt_seo_reports has no user UPDATE policy (RLS is select-only), so the
+    // failure state must be written with the service role.
+    await createServiceClient()
       .from("dt_seo_reports")
       .update({
         state: "error",
         state_message: err instanceof Error ? err.message : "n8n nicht erreichbar",
+        finished_at: new Date().toISOString(),
       })
       .eq("id", reportId);
     return NextResponse.json(

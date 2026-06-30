@@ -2,6 +2,7 @@ export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "dead";
 
 export type JobKind =
   | "leadinfo.normalize"
+  | "seo.crawl"
   | "apollo.enrich"
   | "outreach.draft"
   | "outreach.send"

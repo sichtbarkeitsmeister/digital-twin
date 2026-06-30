@@ -52,6 +52,7 @@ export default async function VerwaltungSeoPage({
         organisations={organisations}
         initialOrgId={initialOrgId}
         initialChatId={sp.chat ?? null}
+        currentUserId={user.id}
         isPlatformAdmin={isPlatformAdmin}
       />
     </Suspense>

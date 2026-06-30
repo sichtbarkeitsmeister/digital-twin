@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
 import { cn } from "@/components/dt/cn";
@@ -13,6 +14,12 @@ type DtTabsProps = {
 };
 
 export function DtTabs({ tabs, active, onChange, className, layoutId = "dt-tabs-pill" }: DtTabsProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <div
       className={cn(
@@ -35,15 +42,21 @@ export function DtTabs({ tabs, active, onChange, className, layoutId = "dt-tabs-
               onClick={() => onChange(tab.id)}
               className={cn(
                 "relative shrink-0 rounded-pill px-3 py-2 text-xs font-bold transition-colors duration-150 sm:flex-1 sm:px-4 sm:py-2.5 sm:text-[13.5px]",
-                isActive ? "text-white" : "text-sbkm-navy dark:text-white",
+                isActive
+                  ? "text-sbkm-navy"
+                  : "text-sbkm-navy/60 hover:text-sbkm-navy dark:text-white/50 dark:hover:text-white",
               )}
             >
               {isActive ? (
-                <motion.span
-                  layoutId={layoutId}
-                  className="absolute inset-0 rounded-pill bg-sbkm-navy shadow-sm dark:bg-sbkm-navy"
-                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                />
+                mounted ? (
+                  <motion.span
+                    layoutId={layoutId}
+                    className="absolute inset-0 rounded-pill bg-sbkm-mint shadow-sm"
+                    transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                  />
+                ) : (
+                  <span className="absolute inset-0 rounded-pill bg-sbkm-mint shadow-sm" />
+                )
               ) : null}
               <span className="relative z-10 whitespace-nowrap">{tab.label}</span>
             </button>

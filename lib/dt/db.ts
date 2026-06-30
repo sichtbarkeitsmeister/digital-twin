@@ -39,11 +39,13 @@ export async function loadOrgConfig(organisationId: string): Promise<DtOrgConfig
 export async function queueDtSeoReport(params: {
   organisationId: string;
   recipientType: "intern" | "kunde";
+  sendToOwner?: boolean;
 }): Promise<{ reportId: string | null; error: string | null }> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("dt_queue_seo_report", {
     p_organisation_id: params.organisationId,
     p_recipient_type: params.recipientType,
+    p_send_to_owner: params.sendToOwner ?? false,
   });
   if (error) return { reportId: null, error: error.message };
   const reportId = typeof data === "string" ? data : null;
@@ -54,15 +56,32 @@ export async function getDtChatOrNull(chatId: string): Promise<DtChatRow | null>
   const supabase = await createClient();
   const { data } = await supabase
     .from("dt_chats")
-    .select(
-      "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,created_at,updated_at",
-    )
+    .select(DT_CHAT_LIST_SELECT)
     .eq("id", chatId)
     .maybeSingle();
   return data as DtChatRow | null;
 }
 
-export type DtChatListScope = "mine" | "team" | "all";
+export type DtChatListScope = "mine" | "team" | "all" | "org";
+
+const DT_CHAT_LIST_SELECT =
+  "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,shared_to_team_at,created_at,updated_at";
+
+/** PostgREST `.or()` filter: team chats + personal chats shared with the org. */
+export function dtChatTeamOrFilter(tablePrefix?: string): string {
+  const p = tablePrefix ? `${tablePrefix}.` : "";
+  return `${p}mode.eq.team,${p}shared_to_team_at.not.is.null`;
+}
+
+/** PostgREST `.or()` filter: own personal chats + team/shared org chats. */
+export function dtChatVisibleOrFilter(userId: string, tablePrefix?: string): string {
+  const p = tablePrefix ? `${tablePrefix}.` : "";
+  return [
+    `and(${p}mode.eq.default,${p}owner_user_id.eq.${userId},${p}legacy_session_id.is.null)`,
+    `${p}mode.eq.team`,
+    `and(${p}mode.eq.default,${p}shared_to_team_at.not.is.null)`,
+  ].join(",");
+}
 
 export async function listDtChats(params: {
   organisationId: string;
@@ -70,29 +89,40 @@ export async function listDtChats(params: {
   userId: string;
   includeArchived?: boolean;
   chatMode?: DtChatMode;
+  /** Platform-admin oversight: list any org member's chats. */
+  adminOversight?: boolean;
+  /** Filter chats by owner (personal chats of that user). */
+  ownerUserId?: string;
 }): Promise<DtChatRow[]> {
   const supabase = await createClient();
   const modeFilter = params.chatMode ?? "default";
   let q = supabase
     .from("dt_chats")
-    .select(
-      "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,created_at,updated_at",
-    )
+    .select(DT_CHAT_LIST_SELECT)
     .eq("organisation_id", params.organisationId)
     .order("updated_at", { ascending: false });
 
-  if (params.scope === "mine" && modeFilter === "seo") {
+  if (params.adminOversight && params.scope === "org") {
+    // Oversight: every chat in the org, optionally filtered to one person.
+    if (params.ownerUserId) {
+      q = q.eq("owner_user_id", params.ownerUserId);
+    }
+  } else if (params.scope === "mine" && modeFilter === "seo") {
     q = q.eq("mode", "seo");
   } else if (params.scope === "mine") {
-    q = q.eq("mode", modeFilter).eq("owner_user_id", params.userId);
+    // Personal chats only: created by this user in-app (exclude legacy migration rows).
+    q = q
+      .eq("mode", "default")
+      .eq("owner_user_id", params.userId)
+      .is("legacy_session_id", null);
   } else if (params.scope === "team") {
-    q = q.eq("mode", "team");
+    q = q.or(dtChatTeamOrFilter());
+  } else if (params.scope === "all") {
+    q = q.or(dtChatVisibleOrFilter(params.userId));
   } else if (modeFilter === "seo") {
     q = q.eq("mode", "seo").eq("owner_user_id", params.userId);
   } else {
-    q = q.or(
-      `and(mode.eq.default,owner_user_id.eq.${params.userId}),mode.eq.team`,
-    );
+    q = q.or(dtChatVisibleOrFilter(params.userId));
   }
 
   if (!params.includeArchived) q = q.is("archived_at", null);
@@ -190,6 +220,17 @@ export async function createDtChat(params: {
   if (error) return { chatId: null, error: error.message };
   const chatId = typeof data === "string" ? data : null;
   return { chatId, error: chatId ? null : "Chat konnte nicht erstellt werden." };
+}
+
+export async function shareDtChatToTeam(
+  chatId: string,
+): Promise<{ chat: DtChatRow | null; error: string | null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("dt_share_chat_to_team", {
+    p_chat_id: chatId,
+  });
+  if (error) return { chat: null, error: error.message };
+  return { chat: (data as DtChatRow | null) ?? null, error: null };
 }
 
 export async function loadDtMessages(chatId: string): Promise<DtMessageRow[]> {
