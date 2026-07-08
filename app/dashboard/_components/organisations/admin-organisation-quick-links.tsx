@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bot, ClipboardPenLine, Workflow } from "lucide-react";
+import { ClipboardPenLine, Workflow } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,13 +13,6 @@ import {
 } from "@/components/ui/card";
 
 const links = [
-  {
-    href: "/dashboard/admin/digital-twin",
-    title: "DigitalTwin Admin",
-    description: "Twin-Status, SEO-Flags und Agenten pro Organisation.",
-    icon: Bot,
-    cta: "Übersicht",
-  },
   {
     href: "/dashboard/surveys",
     title: "Umfragen",

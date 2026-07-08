@@ -2,6 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import {
+  ensureOwnerLoginLink,
+  formatOwnerWelcomeEmailStatus,
+  sendOrgOwnerWelcomeEmail,
+} from "@/lib/email/owner-welcome";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -9,6 +14,11 @@ export type ActionState = {
   ok: boolean;
   message: string;
 };
+
+const checkboxOnSchema = z.preprocess(
+  (v) => v === "on" || v === "true" || v === true,
+  z.boolean(),
+);
 
 const adminCreateOrganisationSchema = z.object({
   org_name: z.string().trim().min(2, "Organisationsname ist erforderlich"),
@@ -26,6 +36,7 @@ const adminCreateOrganisationSchema = z.object({
     .max(64, "Slug ist zu lang")
     .optional()
     .or(z.literal("")),
+  send_welcome: checkboxOnSchema.default(true),
 });
 
 export async function adminCreateOrganisationAction(
@@ -36,15 +47,25 @@ export async function adminCreateOrganisationAction(
     org_name: formData.get("org_name"),
     owner_email: formData.get("owner_email"),
     org_slug: formData.get("org_slug"),
+    send_welcome: formData.get("send_welcome"),
   });
 
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
   }
 
-  const { org_name, owner_email, org_slug } = parsed.data;
+  const { org_name, owner_email, org_slug, send_welcome } = parsed.data;
+
+  let loginLink: Awaited<ReturnType<typeof ensureOwnerLoginLink>> = null;
+  if (send_welcome) {
+    loginLink = await ensureOwnerLoginLink(owner_email);
+  }
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const { error } = await supabase.rpc("admin_create_organisation", {
     org_name,
     owner_email,
@@ -55,10 +76,28 @@ export async function adminCreateOrganisationAction(
     return { ok: false, message: "Organisation konnte nicht erstellt werden." };
   }
 
+  let emailStatus: ReturnType<typeof formatOwnerWelcomeEmailStatus> = null;
+  if (send_welcome && loginLink) {
+    const emailResult = await sendOrgOwnerWelcomeEmail({
+      email: owner_email,
+      organisationName: org_name,
+      link: loginLink.link,
+      isNewAccount: loginLink.isNewAccount,
+      triggeredByUserId: user?.id ?? null,
+    });
+    emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
+  } else if (send_welcome) {
+    emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
+  }
+
   revalidatePath("/dashboard/admin/organisations");
+  revalidatePath("/dashboard/admin/mails");
   revalidatePath("/dashboard/organisations");
-  revalidatePath("/dashboard/members");
-  return { ok: true, message: "Organisation wurde angelegt." };
+  const baseMessage = "Organisation wurde angelegt.";
+  return {
+    ok: true,
+    message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
+  };
 }
 
 const inviteSchema = z.object({
@@ -92,7 +131,7 @@ export async function inviteToOrganisationAction(
     return { ok: false, message: "Could not invite user." };
   }
 
-  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/organisations");
   return { ok: true, message: "Invite sent." };
 }
 
@@ -124,7 +163,7 @@ export async function kickFromOrganisationAction(
     return { ok: false, message: "Could not remove member." };
   }
 
-  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/organisations");
   return { ok: true, message: "Member removed." };
 }
 
@@ -135,6 +174,7 @@ const transferSchema = z.object({
     .trim()
     .toLowerCase()
     .email("Bitte eine gültige E-Mail-Adresse eingeben."),
+  send_welcome: checkboxOnSchema.default(true),
 });
 
 export async function transferOwnershipAction(
@@ -144,6 +184,7 @@ export async function transferOwnershipAction(
   const parsed = transferSchema.safeParse({
     organisation_id: formData.get("organisation_id"),
     new_owner_email: formData.get("new_owner_email"),
+    send_welcome: formData.get("send_welcome"),
   });
 
   if (!parsed.success) {
@@ -191,11 +232,39 @@ export async function transferOwnershipAction(
     return { ok: false, message: "Ownership konnte nicht übertragen werden." };
   }
 
-  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  const { data: orgRow } = await service
+    .from("organisations")
+    .select("name")
+    .eq("id", parsed.data.organisation_id)
+    .maybeSingle();
+
+  const organisationName = orgRow?.name?.trim() || "deine Organisation";
+  const send_welcome = parsed.data.send_welcome;
+
+  let emailStatus: ReturnType<typeof formatOwnerWelcomeEmailStatus> = null;
+  if (send_welcome) {
+    const loginLink = await ensureOwnerLoginLink(parsed.data.new_owner_email);
+    if (loginLink) {
+      const emailResult = await sendOrgOwnerWelcomeEmail({
+        email: parsed.data.new_owner_email,
+        organisationName,
+        link: loginLink.link,
+        isNewAccount: loginLink.isNewAccount,
+        triggeredByUserId: user.id,
+        organisationId: parsed.data.organisation_id,
+      });
+      emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
+    } else {
+      emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
+    }
+  }
+
   revalidatePath("/dashboard/organisations");
+  revalidatePath("/dashboard/admin/mails");
+  const baseMessage = `Ownership wurde an ${profile.email ?? parsed.data.new_owner_email} übertragen.`;
   return {
     ok: true,
-    message: `Ownership wurde an ${profile.email ?? parsed.data.new_owner_email} übertragen.`,
+    message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
   };
 }
 
@@ -219,6 +288,5 @@ export async function acceptOrganisationInviteAction(formData: FormData) {
 
   revalidatePath("/dashboard/inbox");
   revalidatePath("/dashboard/organisations");
-  revalidatePath("/dashboard/members");
 }
 

@@ -21,7 +21,7 @@ export type OrganisationOption = {
 export function OrganisationSwitcher({
   organisations,
   selectedOrganisationId,
-  orgPath = "/dashboard/members",
+  orgPath = "/dashboard/organisations",
 }: {
   organisations: OrganisationOption[];
   selectedOrganisationId: string | null;

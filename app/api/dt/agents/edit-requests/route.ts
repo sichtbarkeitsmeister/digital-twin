@@ -7,6 +7,7 @@ import {
   listDtAgentEditRequestsForOrg,
   listPendingDtAgentEditRequests,
 } from "@/lib/dt/agent-edit-requests";
+import { isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { requireAuthUser } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents, canManageDtAgents, isPlatformAdmin } from "@/lib/dt/org-access";
 import { parseQuickActions } from "@/lib/dt/types";
@@ -65,7 +66,21 @@ export async function GET(req: Request) {
   }
 
   const requests = await listDtAgentEditRequestsForOrg(auth.supabase, parsed.data.org);
-  return NextResponse.json({ ok: true, requests });
+  if (await isPlatformAdmin(auth.supabase, auth.userId)) {
+    return NextResponse.json({ ok: true, requests });
+  }
+
+  const { data: orgAgents } = await auth.supabase
+    .from("dt_agents")
+    .select("id,slug,kind")
+    .eq("organisation_id", parsed.data.org);
+  const hiddenAgentIds = new Set(
+    (orgAgents ?? []).filter(isSeoAdvisorAgent).map((agent) => agent.id),
+  );
+  return NextResponse.json({
+    ok: true,
+    requests: requests.filter((request) => !hiddenAgentIds.has(request.agent_id)),
+  });
 }
 
 export async function POST(req: Request) {
@@ -103,12 +118,19 @@ export async function POST(req: Request) {
 
   const { data: agent } = await auth.supabase
     .from("dt_agents")
-    .select("id,organisation_id,name,role,prompt_template,quick_actions,is_enabled,position")
+    .select("id,organisation_id,slug,kind,name,role,prompt_template,quick_actions,is_enabled,position")
     .eq("id", parsed.data.agentId)
     .maybeSingle();
 
   if (!agent || agent.organisation_id !== parsed.data.organisationId) {
     return NextResponse.json({ ok: false, message: "Agent nicht gefunden." }, { status: 404 });
+  }
+
+  if (isSeoAdvisorAgent(agent)) {
+    return NextResponse.json(
+      { ok: false, message: "Der SEO-Berater kann nur von Administratoren bearbeitet werden." },
+      { status: 403 },
+    );
   }
 
   const proposedChanges = buildAgentProposedChanges({

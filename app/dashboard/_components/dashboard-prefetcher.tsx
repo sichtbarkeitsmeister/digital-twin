@@ -14,11 +14,16 @@ export function DashboardPrefetcher({
     const routes = [
       "/dashboard/inbox",
       "/dashboard/organisations",
-      "/dashboard/members",
+      "/dashboard/organisations",
     ];
 
     if (isPlatformAdmin) {
-      routes.push("/dashboard/admin/organisations", "/dashboard/surveys", "/dashboard/surveys/new");
+      routes.push(
+        "/dashboard/admin/organisations",
+        "/dashboard/admin/mails",
+        "/dashboard/surveys",
+        "/dashboard/surveys/new",
+      );
     }
 
     for (const href of routes) {

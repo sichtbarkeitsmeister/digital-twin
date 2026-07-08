@@ -127,7 +127,7 @@ export function OrganisationListGrid({
                 size="sm"
                 className="w-full transition-transform duration-150 active:scale-[0.98]"
               >
-                <Link href={`/dashboard/organisations/${org.organisationId}`}>
+                <Link href={`/dashboard/organisations?org=${org.organisationId}`}>
                   Organisation öffnen
                   <ArrowRight className="size-4 transition-transform duration-150 group-hover:translate-x-0.5" />
                 </Link>

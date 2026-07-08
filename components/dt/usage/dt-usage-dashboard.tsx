@@ -209,6 +209,7 @@ function UsageDailyChart(props: { days: DayRow[]; rates: CostRates }) {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
   const maxTotal = Math.max(1, ...props.days.map((d) => d.inputTokens + d.outputTokens));
   const hasAnyData = props.days.some((d) => d.inputTokens + d.outputTokens > 0);
+  const barAreaHeight = 128;
 
   const hovered = props.days.find((d) => d.date === hoveredDate);
 
@@ -255,11 +256,13 @@ function UsageDailyChart(props: { days: DayRow[]; rates: CostRates }) {
         </AnimatePresence>
       </div>
 
-      <div className="flex h-40 items-end gap-[2px] sm:gap-1">
+      <div className="flex h-40 items-stretch gap-[2px] sm:gap-1">
         {props.days.map((point, i) => {
           const total = point.inputTokens + point.outputTokens;
-          const inputH = (point.inputTokens / maxTotal) * 100;
-          const outputH = (point.outputTokens / maxTotal) * 100;
+          const inputPx =
+            total > 0 ? Math.max(2, (point.inputTokens / maxTotal) * barAreaHeight) : 0;
+          const outputPx =
+            total > 0 ? Math.max(2, (point.outputTokens / maxTotal) * barAreaHeight) : 0;
           const isEmpty = total === 0;
           const isHovered = point.date === hoveredDate;
           const showLabel = i % showLabelEvery === 0;
@@ -267,34 +270,40 @@ function UsageDailyChart(props: { days: DayRow[]; rates: CostRates }) {
           return (
             <div
               key={point.date}
-              className="group flex min-w-0 flex-1 flex-col items-center gap-1"
+              className="group flex min-w-0 flex-1 flex-col"
               onMouseEnter={() => setHoveredDate(point.date)}
               onMouseLeave={() => setHoveredDate(null)}
             >
-              <div className="flex w-full max-w-[36px] flex-1 flex-col justify-end gap-px">
+              <div
+                className="flex w-full max-w-[36px] flex-1 flex-col justify-end gap-px self-center"
+                style={{ minHeight: barAreaHeight }}
+              >
                 {!isEmpty ? (
                   <>
                     <div
                       className={`w-full rounded-t-sm transition-all duration-150 ${
                         isHovered
-                          ? "bg-sbkm-navy/45 dark:bg-white/35"
-                          : "bg-sbkm-navy/20 dark:bg-white/18"
+                          ? "bg-sbkm-navy/55 dark:bg-white/45"
+                          : "bg-sbkm-navy/30 dark:bg-white/28"
                       }`}
-                      style={{ height: `${Math.max(2, outputH)}%` }}
+                      style={{ height: outputPx }}
                     />
                     <div
                       className={`w-full transition-all duration-150 ${
-                        isHovered ? "bg-sbkm-mint" : "bg-sbkm-mint/75"
+                        isHovered ? "bg-sbkm-mint" : "bg-sbkm-mint/80"
                       }`}
-                      style={{ height: `${Math.max(2, inputH)}%` }}
+                      style={{ height: inputPx }}
                     />
                   </>
                 ) : (
-                  <div className="w-full rounded-sm" style={{ height: "2px", background: "transparent" }} />
+                  <div
+                    className="w-full rounded-sm bg-sbkm-navy/8 dark:bg-white/8"
+                    style={{ height: 2 }}
+                  />
                 )}
               </div>
               <span
-                className={`max-w-full truncate text-[9px] font-medium tabular-nums transition-colors duration-150 ${
+                className={`mt-1 max-w-full truncate text-center text-[9px] font-medium tabular-nums transition-colors duration-150 ${
                   showLabel ? "opacity-100" : "opacity-0"
                 } ${isHovered ? "text-sbkm-navy dark:text-white" : "text-sbkm-ink-500 dark:text-white/40"}`}
               >

@@ -30,6 +30,7 @@ export type DtOrgConfigRow = {
   report_recipient_email?: string | null;
   report_timeframe?: string | null;
   seo_checklist?: unknown;
+  seo_checklist_personalized?: boolean;
   videos?: unknown;
 };
 

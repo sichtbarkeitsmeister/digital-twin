@@ -11,9 +11,17 @@ type DtTabsProps = {
   onChange: (id: string) => void;
   className?: string;
   layoutId?: string;
+  disabled?: boolean;
 };
 
-export function DtTabs({ tabs, active, onChange, className, layoutId = "dt-tabs-pill" }: DtTabsProps) {
+export function DtTabs({
+  tabs,
+  active,
+  onChange,
+  className,
+  layoutId = "dt-tabs-pill",
+  disabled = false,
+}: DtTabsProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -39,9 +47,13 @@ export function DtTabs({ tabs, active, onChange, className, layoutId = "dt-tabs-
               type="button"
               role="tab"
               aria-selected={isActive}
-              onClick={() => onChange(tab.id)}
+              disabled={disabled}
+              onClick={() => {
+                if (!disabled) onChange(tab.id);
+              }}
               className={cn(
                 "relative shrink-0 rounded-pill px-3 py-2 text-xs font-bold transition-colors duration-150 sm:flex-1 sm:px-4 sm:py-2.5 sm:text-[13.5px]",
+                disabled && "cursor-default opacity-70",
                 isActive
                   ? "text-sbkm-navy"
                   : "text-sbkm-navy/60 hover:text-sbkm-navy dark:text-white/50 dark:hover:text-white",

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
+import { filterUsageEventsForOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { canViewDtUsage } from "@/lib/dt/usage/access";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -34,6 +36,13 @@ export async function GET(req: Request) {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const orgId = parsed.data.org;
   const service = createServiceClient();
+  const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId);
+
+  const { data: orgAgents } = await service
+    .from("dt_agents")
+    .select("id,name,slug,kind")
+    .eq("organisation_id", orgId);
+  const agentsById = new Map((orgAgents ?? []).map((agent) => [agent.id, agent]));
 
   const { data: events, error } = await service
     .from("dt_llm_usage_events")
@@ -49,7 +58,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
   }
 
-  const rows = events ?? [];
+  const rawRows = events ?? [];
+  const rows = platformAdmin
+    ? rawRows
+    : filterUsageEventsForOrgMembers(rawRows, agentsById);
   const chatIds = [...new Set(rows.map((r) => r.chat_id).filter(Boolean))] as string[];
   const agentIds = [...new Set(rows.map((r) => r.agent_id).filter(Boolean))] as string[];
   const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))] as string[];
@@ -67,7 +79,9 @@ export async function GET(req: Request) {
   ]);
 
   const chatById = new Map((chats ?? []).map((c) => [c.id, c]));
-  const agentById = new Map((agents ?? []).map((a) => [a.id, a]));
+  const agentById = new Map(
+    [...(orgAgents ?? []), ...(agents ?? [])].map((a) => [a.id, a]),
+  );
   const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
 
   let totalInput = 0;

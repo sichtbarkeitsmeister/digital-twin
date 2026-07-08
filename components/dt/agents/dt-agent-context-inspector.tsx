@@ -23,6 +23,7 @@ import type {
   DtAgentContextSection,
   DtAgentContextSourceType,
 } from "@/lib/dt/agent-context-inspector";
+import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
 import { estimateSectionChars } from "@/lib/dt/agent-context-inspector";
 
 type AgentOption = {
@@ -109,12 +110,13 @@ function ContextSectionCard(props: {
         <div className="border-t border-border/60 px-4 pb-4 pt-3">
           {props.section.isEmpty ? (
             <div className="rounded-lg border border-dashed px-4 py-6 text-center">
-              <p className="text-sm text-secondary">
-                Kein Inhalt für diesen Abschnitt.
-              </p>
+              <p className="text-sm text-secondary">{props.section.description}</p>
               {props.section.editHref ? (
                 <Button asChild size="sm" variant="secondary" className="mt-3">
-                  <Link href={props.section.editHref}>Quelle bearbeiten</Link>
+                  <Link href={props.section.editHref}>
+                    In SEO-Einstellungen bearbeiten
+                    <ExternalLink className="size-3" aria-hidden />
+                  </Link>
                 </Button>
               ) : null}
             </div>
@@ -144,7 +146,7 @@ function ContextSectionCard(props: {
             <span className="text-xs text-secondary">
               Quelle: {props.section.sourceLabel}
             </span>
-            {props.section.editHref ? (
+            {props.section.editHref && !props.section.isEmpty ? (
               <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs">
                 <Link href={props.section.editHref}>
                   Bearbeiten
@@ -221,8 +223,11 @@ export function DtAgentContextInspector(props: {
       agents?: AgentOption[];
     };
     if (json.ok && json.agents) {
-      setAgents(json.agents);
-      return json.agents;
+      const visible = props.isPlatformAdmin
+        ? json.agents
+        : filterAgentsHiddenFromOrgMembers(json.agents);
+      setAgents(visible);
+      return visible;
     }
     setAgents([]);
     return [];

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { loadDtAuthorLabels } from "@/lib/dt/author-labels";
+import { loadDtAuthorProfiles } from "@/lib/dt/author-labels";
 import { DT_CHAT_ATTACHMENTS_BUCKET, isSkippedStoragePath } from "@/lib/dt/attachments";
 import { getDtChatOrNull, loadDtMessages, requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
@@ -11,6 +11,7 @@ const patchSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   archived: z.boolean().optional(),
   pinned: z.boolean().optional(),
+  agentId: z.string().uuid().optional(),
 });
 
 export async function GET(_: Request, context: { params: Promise<{ chatId: string }> }) {
@@ -37,13 +38,18 @@ export async function GET(_: Request, context: { params: Promise<{ chatId: strin
     ? await isPlatformAdmin(auth.supabase, auth.userId)
     : false;
   const showAuthors =
-    chat.mode === "team" || chat.mode === "seo" || platformAdmin;
-  const authorLabels = showAuthors
-    ? await loadDtAuthorLabels(
-        messages.map((m) => m.author_user_id).filter((id): id is string => Boolean(id)),
-      )
-    : {};
-  const participants = showAuthors ? buildChatParticipants(messages, authorLabels) : [];
+    chat.mode === "team" ||
+    chat.mode === "seo" ||
+    Boolean(chat.shared_to_team_at) ||
+    platformAdmin;
+  const authorIds = messages
+    .map((m) => m.author_user_id)
+    .filter((id): id is string => Boolean(id));
+  const authorProfiles = showAuthors ? await loadDtAuthorProfiles(authorIds) : null;
+  const authorLabels = authorProfiles?.labels ?? {};
+  const participants = showAuthors
+    ? buildChatParticipants(messages, authorLabels, authorProfiles?.emails ?? {})
+    : [];
   const { data: attachRows } = await auth.supabase
     .from("dt_chat_attachments")
     .select("id,chat_id,message_id,storage_path,file_name,mime_type,size_bytes,created_at")
@@ -125,6 +131,24 @@ export async function PATCH(req: Request, context: { params: Promise<{ chatId: s
     patch.archived_at = parsed.data.archived ? new Date().toISOString() : null;
   }
   if (parsed.data.pinned !== undefined) patch.pinned = parsed.data.pinned;
+  if (parsed.data.agentId !== undefined) {
+    const { data: agent } = await auth.supabase
+      .from("dt_agents")
+      .select("id")
+      .eq("id", parsed.data.agentId)
+      .eq("organisation_id", chat.organisation_id)
+      .eq("is_enabled", true)
+      .maybeSingle();
+
+    if (!agent) {
+      return NextResponse.json(
+        { ok: false, message: "Agent nicht verfügbar." },
+        { status: 400 },
+      );
+    }
+
+    patch.agent_id = parsed.data.agentId;
+  }
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ ok: false, message: "Keine Änderungen übergeben." }, { status: 400 });
   }

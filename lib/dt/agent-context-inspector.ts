@@ -20,7 +20,13 @@ import {
   formatDtSeoTasksForPrompt,
   loadDtSeoTasksForPrompt,
 } from "@/lib/dt/seo/task-context";
+import {
+  formatSeoChecklist,
+  loadGlobalSeoChecklist,
+  resolveSeoChecklistRaw,
+} from "@/lib/dt/seo/seo-checklist";
 import { PASTED_URL_PROMPT_HINT_DE } from "@/lib/shared/pasted-url-context";
+import { resolveDtAgentPrompt } from "@/lib/dt/prompts/resolve-agent-prompt";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export type DtAgentContextSourceType =
@@ -64,21 +70,6 @@ export function estimateSectionChars(content: string): number {
   return content.trim().length;
 }
 
-function formatSeoChecklist(raw: unknown): string {
-  if (!Array.isArray(raw) || raw.length === 0) return "";
-  return raw
-    .map((item, i) => {
-      if (typeof item === "string") return `${i + 1}. ${item}`;
-      if (item && typeof item === "object" && "label" in item) {
-        const label = String((item as { label?: unknown }).label ?? "").trim();
-        if (label) return `${i + 1}. ${label}`;
-      }
-      return null;
-    })
-    .filter((line): line is string => Boolean(line))
-    .join("\n");
-}
-
 function section(
   partial: Omit<DtAgentContextSection, "isEmpty"> & { isEmpty?: boolean },
 ): DtAgentContextSection {
@@ -111,7 +102,7 @@ export async function loadDtAgentContextBundle(input: {
 
   const { data: agent } = await supabase
     .from("dt_agents")
-    .select("id, name, role, kind, prompt_template")
+    .select("id, name, role, kind, slug, prompt_template, prompt_append, uses_global_prompt, template_id")
     .eq("id", input.agentId)
     .eq("organisation_id", input.organisationId)
     .maybeSingle();
@@ -123,7 +114,7 @@ export async function loadDtAgentContextBundle(input: {
   const { data: orgConfig } = await supabase
     .from("dt_org_config")
     .select(
-      "display_name, website_url, focus_keyword, seo_checklist, sitemap_url",
+      "display_name, website_url, focus_keyword, seo_checklist, seo_checklist_personalized, sitemap_url",
     )
     .eq("organisation_id", input.organisationId)
     .maybeSingle();
@@ -133,6 +124,12 @@ export async function loadDtAgentContextBundle(input: {
     .select("global_assistant_rules")
     .eq("user_id", input.userId)
     .maybeSingle();
+
+  const resolvedPromptTemplate = await resolveDtAgentPrompt(
+    supabase,
+    agent,
+    orgConfig?.display_name ?? organisation.name,
+  );
 
   const promptMode =
     input.mode === "team" ? "team" : input.mode === "seo" ? "seo" : "default";
@@ -156,7 +153,15 @@ export async function loadDtAgentContextBundle(input: {
       : [];
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
-  const checklistText = formatSeoChecklist(orgConfig?.seo_checklist);
+  const globalSeoChecklist = isSeoOrGeo
+    ? await loadGlobalSeoChecklist(supabase)
+    : [];
+  const effectiveChecklist = resolveSeoChecklistRaw(
+    orgConfig ?? {},
+    globalSeoChecklist,
+  );
+  const checklistPersonalized = Boolean(orgConfig?.seo_checklist_personalized);
+  const checklistText = formatSeoChecklist(effectiveChecklist);
   const sitePagesText = formatDtSitePagesForPrompt(sitePages);
   const latestReportText = formatDtSeoReportForPrompt(latestSeoReport);
   const monthlyStatsText = formatDtSeoMonthlyStatsForPrompt(monthlyStatsRows);
@@ -164,7 +169,8 @@ export async function loadDtAgentContextBundle(input: {
 
   const orgQuery = encodeURIComponent(input.organisationId);
   const agentsEditHref = `/dashboard/verwaltung/agents?org=${orgQuery}`;
-  const seoSettingsHref = `/dashboard/verwaltung/seo?org=${orgQuery}&tab=settings`;
+  const seoSettingsHref = `/dashboard/verwaltung/seo?org=${orgQuery}&tab=settings#seo-checklist`;
+  const globalChecklistHref = `/dashboard/verwaltung/agents?org=${orgQuery}&view=prompts#global-seo-checklist`;
   const seoTasksHref = `/dashboard/verwaltung/seo?org=${orgQuery}&tab=tasks`;
   const reportEditHref = latestSeoReport
     ? `/dashboard/verwaltung/seo/reports/${latestSeoReport.id}`
@@ -205,13 +211,45 @@ export async function loadDtAgentContextBundle(input: {
     section({
       id: "persona",
       title: "Persona-Anweisungen",
-      sourceLabel: "Agent",
+      sourceLabel: agent.uses_global_prompt ? "Globale Vorlage" : "Eigener Prompt",
       sourceType: "agent",
-      description: "Individuelles Prompt-Template des gewählten Agenten.",
-      content: agent.prompt_template?.trim() || "Kein Prompt hinterlegt.",
+      description: agent.uses_global_prompt
+        ? "Global verwaltetes Standard-Prompt (für alle Organisationen), mit eingesetztem Organisationsnamen."
+        : "Individuelles Prompt-Template des gewählten Agenten.",
+      content: resolvedPromptTemplate.trim() || "Kein Prompt hinterlegt.",
       editHref: agentsEditHref,
     }),
   ];
+
+  const promptAppend = agent.prompt_append?.trim() ?? "";
+  if (promptAppend) {
+    sections.push(
+      section({
+        id: "prompt_append",
+        title: "Zusätzliche Anweisungen",
+        sourceLabel: "Agent",
+        sourceType: "agent",
+        description:
+          "Organisationsspezifische Ergänzungen, die auf dem Basis-Prompt aufsetzen.",
+        content: promptAppend,
+        editHref: agentsEditHref,
+      }),
+    );
+  } else {
+    sections.push(
+      section({
+        id: "prompt_append",
+        title: "Zusätzliche Anweisungen",
+        sourceLabel: "Agent",
+        sourceType: "agent",
+        description:
+          "Organisationsspezifische Ergänzungen — aktuell leer.",
+        content: "",
+        isEmpty: true,
+        editHref: agentsEditHref,
+      }),
+    );
+  }
 
   if (globalRules) {
     sections.push(
@@ -260,11 +298,13 @@ export async function loadDtAgentContextBundle(input: {
         section({
           id: "seo_checklist",
           title: "SEO-Checkliste",
-          sourceLabel: "Organisation",
-          sourceType: "organisation",
-          description: "Checkliste aus dt_org_config.seo_checklist.",
+          sourceLabel: checklistPersonalized ? "Organisation" : "Global",
+          sourceType: checklistPersonalized ? "organisation" : "system",
+          description: checklistPersonalized
+            ? "Eigene Checkliste dieser Organisation (seo_checklist_personalized)."
+            : "Globale Plattform-Checkliste für alle Organisationen ohne eigene Liste.",
           content: checklistText,
-          editHref: seoSettingsHref,
+          editHref: checklistPersonalized ? seoSettingsHref : globalChecklistHref,
         }),
       );
     } else {
@@ -272,12 +312,14 @@ export async function loadDtAgentContextBundle(input: {
         section({
           id: "seo_checklist",
           title: "SEO-Checkliste",
-          sourceLabel: "Organisation",
-          sourceType: "organisation",
-          description: "Noch keine Checkliste hinterlegt.",
+          sourceLabel: checklistPersonalized ? "Organisation" : "Global",
+          sourceType: checklistPersonalized ? "organisation" : "system",
+          description: checklistPersonalized
+            ? "Noch keine eigene Checkliste hinterlegt. In SEO-Einstellungen pflegen oder globale Liste nutzen."
+            : "Noch keine globale Checkliste hinterlegt. Unter Verwaltung → Agenten → Globale Prompts pflegen.",
           content: "",
           isEmpty: true,
-          editHref: seoSettingsHref,
+          editHref: checklistPersonalized ? seoSettingsHref : globalChecklistHref,
         }),
       );
     }
@@ -297,6 +339,18 @@ export async function loadDtAgentContextBundle(input: {
     }
   }
 
+  sections.push(
+    section({
+      id: "pasted_url_hint",
+      title: "Hinweis zu eingefügten URLs",
+      sourceLabel: "System (dynamisch)",
+      sourceType: "dynamic",
+      description:
+        "Statischer Hinweis im Prompt. Der tatsächliche Seiteninhalt wird nur eingefügt, wenn du URLs in einer Nachricht sendest — nicht hier sichtbar.",
+      content: PASTED_URL_PROMPT_HINT_DE,
+    }),
+  );
+
   if (promptMode === "seo") {
     sections.push(
       section({
@@ -307,15 +361,6 @@ export async function loadDtAgentContextBundle(input: {
         description:
           "Verhaltensregeln für SEO-Chat inkl. Aufgaben-Vorschlagsformat.",
         content: DT_SEO_MODE_INSTRUCTIONS,
-      }),
-      section({
-        id: "pasted_url_hint",
-        title: "Hinweis zu eingefügten URLs",
-        sourceLabel: "System (dynamisch)",
-        sourceType: "dynamic",
-        description:
-          "Statischer Hinweis im Prompt. Der tatsächliche Seiteninhalt wird nur eingefügt, wenn du URLs in einer Nachricht sendest — nicht hier sichtbar.",
-        content: PASTED_URL_PROMPT_HINT_DE,
       }),
       section({
         id: "site_pages",
@@ -393,15 +438,15 @@ export async function loadDtAgentContextBundle(input: {
     agent: {
       name: agent.name,
       role: agent.role,
-      prompt_template:
-        agent.prompt_template?.trim() || "Du bist ein hilfreicher Assistent.",
+      prompt_template: resolvedPromptTemplate,
+      prompt_append: agent.prompt_append,
       kind: agent.kind,
     },
     org: {
       display_name: orgConfig?.display_name ?? agent.name,
       website_url: orgConfig?.website_url,
       focus_keyword: orgConfig?.focus_keyword,
-      seo_checklist: orgConfig?.seo_checklist,
+      seo_checklist: effectiveChecklist,
       sitemap_url: orgConfig?.sitemap_url,
     },
     mode: promptMode,

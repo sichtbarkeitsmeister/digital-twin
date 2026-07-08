@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, FileSearch, Plus, Send } from "lucide-react";
+import { LayoutGroup } from "framer-motion";
+import { FileSearch, Plus, Users } from "lucide-react";
+import { toast } from "sonner";
 
 import { DtAgentEditRequestModal } from "@/components/dt/agents/dt-agent-edit-request-modal";
 import {
@@ -11,46 +13,102 @@ import {
   DtAgentsReadOnlyBanner,
 } from "@/components/dt/agents/dt-agent-edit-requests-panel";
 import {
-  DtAgentFormFields,
+  DtAgentListItem,
   agentFormValuesFromRow,
-  quickActionsFromForm,
-} from "@/components/dt/agents/dt-agent-form-fields";
-import { DtGlassCard } from "@/components/dt/dt-glass-card";
+  type DtAgentListItemRow,
+} from "@/components/dt/agents/dt-agent-list-item";
+import { DtAgentCreateWizard } from "@/components/dt/agents/dt-agent-create-wizard";
+import { DtAgentsSidebar } from "@/components/dt/agents/dt-agents-sidebar";
+import { quickActionsFromForm } from "@/components/dt/agents/dt-agent-form-fields";
+import { DtGlobalPromptsPanel } from "@/components/dt/agents/dt-global-prompts-panel";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
-import { Badge } from "@/components/ui/badge";
+import { DtGlassCard } from "@/components/dt/dt-glass-card";
+import { DtTabs } from "@/components/dt/dt-tabs";
 import type { DtAgentEditRequestRow } from "@/lib/dt/agent-edit-requests";
+import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
+import { cn } from "@/components/dt/cn";
 
-type AgentRow = {
-  id: string;
-  slug: string;
-  name: string;
-  role: string | null;
-  kind: string;
-  is_enabled: boolean;
-  position: number;
-  prompt_template: string;
-  quick_actions: unknown;
-};
+type AgentRow = DtAgentListItemRow;
 
-type TemplateRow = {
-  id: string;
-  slug: string;
-  name: string;
-  short_description: string;
-  kind: string;
-};
+type GlobalPrompts = { default: string; seo_advisor: string };
+
+type PageView = "agents" | "prompts";
+type AgentFilter = "all" | "standard" | "additional";
+
+function isProtectedAlwaysOn(agent: AgentRow): boolean {
+  return agent.is_default && agent.slug === "seo_advisor";
+}
+
+function globalPromptForAgent(agent: AgentRow, prompts: GlobalPrompts): string {
+  if (agent.slug === "seo_advisor" || agent.kind === "seo_advisor") {
+    return prompts.seo_advisor;
+  }
+  return prompts.default;
+}
+
+const SKELETON_ROW_COUNT = 6;
+const SKELETON_ROW_HEIGHT_PX = 72;
+
+function AgentsSkeleton() {
+  return (
+    <DtGlassCard variant="subtle" padding="none" className="overflow-hidden" aria-hidden>
+      {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
+        <div
+          key={i}
+          className={cn(
+            "animate-pulse bg-white/20 dark:bg-white/[0.02]",
+            i < SKELETON_ROW_COUNT - 1 && "border-b border-sbkm-navy/5 dark:border-white/5",
+          )}
+          style={{ height: SKELETON_ROW_HEIGHT_PX }}
+        />
+      ))}
+    </DtGlassCard>
+  );
+}
+
+function AgentsListSkeleton() {
+  return (
+    <div
+      className="grid gap-4"
+      style={{ minHeight: SKELETON_ROW_COUNT * SKELETON_ROW_HEIGHT_PX }}
+      aria-hidden
+    >
+      <div className="h-11 animate-pulse rounded-pill bg-sbkm-navy/[0.06] dark:bg-white/10" />
+      <AgentsSkeleton />
+    </div>
+  );
+}
+
+function AgentsSidebarSkeleton() {
+  return (
+    <aside className="grid gap-4" aria-hidden>
+      <div className="h-[148px] animate-pulse rounded-dt-lg bg-sbkm-navy/[0.04] dark:bg-white/[0.03]" />
+      <div className="h-[132px] animate-pulse rounded-dt-lg bg-sbkm-navy/[0.04] dark:bg-white/[0.03]" />
+    </aside>
+  );
+}
 
 export function DtAgentsManager(props: {
   organisations: Array<{ id: string; name: string }>;
   initialOrgId: string;
+  initialCanDirectlyEdit?: boolean;
 }) {
   const searchParams = useSearchParams();
   const [orgId, setOrgId] = useState(props.initialOrgId);
   const [agents, setAgents] = useState<AgentRow[]>([]);
-  const [canDirectlyEdit, setCanDirectlyEdit] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [canDirectlyEdit, setCanDirectlyEdit] = useState(
+    props.initialCanDirectlyEdit ?? false,
+  );
   const [editRequests, setEditRequests] = useState<DtAgentEditRequestRow[]>([]);
   const [requestAgent, setRequestAgent] = useState<AgentRow | null>(null);
+  const [pageView, setPageView] = useState<PageView>(() =>
+    searchParams.get("view") === "prompts" ? "prompts" : "agents",
+  );
+  const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
 
   useEffect(() => {
     const fromUrl = searchParams.get("org");
@@ -60,27 +118,49 @@ export function DtAgentsManager(props: {
     ) {
       setOrgId(fromUrl);
       setEditingId(null);
+      setInitialLoading(true);
       return;
     }
 
     const stored = readSelectedOrganisationId();
     if (stored && props.organisations.some((organisation) => organisation.id === stored)) {
       setOrgId(stored);
+      setInitialLoading(true);
     }
   }, [searchParams, props.organisations]);
 
-  const [templates, setTemplates] = useState<TemplateRow[]>([]);
+  useEffect(() => {
+    if (searchParams.get("view") === "prompts") {
+      setPageView("prompts");
+    }
+  }, [searchParams]);
+
+  const [createWizardOpen, setCreateWizardOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState(agentFormValuesFromRow({
     name: "",
     role: null,
     prompt_template: "",
+    prompt_append: null,
+    uses_global_prompt: false,
     quick_actions: [],
     is_enabled: true,
     position: 0,
   }));
-  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [globalPrompts, setGlobalPrompts] = useState<GlobalPrompts>({
+    default: "",
+    seo_advisor: "",
+  });
+  const [globalPromptDraft, setGlobalPromptDraft] = useState<GlobalPrompts>({
+    default: "",
+    seo_advisor: "",
+  });
+  const [globalChecklist, setGlobalChecklist] = useState("");
+  const [globalChecklistDraft, setGlobalChecklistDraft] = useState("");
+
+  const orgName =
+    props.organisations.find((o) => o.id === orgId)?.name ?? "Organisation";
 
   const pendingByAgentId = useMemo(() => {
     const map = new Map<string, DtAgentEditRequestRow>();
@@ -95,6 +175,49 @@ export function DtAgentsManager(props: {
     [agents],
   );
 
+  const { standardAgents, additionalAgents, filteredAgents } = useMemo(() => {
+    const standard = agents.filter((a) => a.is_default);
+    const additional = agents.filter((a) => !a.is_default);
+    const filtered =
+      agentFilter === "standard"
+        ? standard
+        : agentFilter === "additional"
+          ? additional
+          : agents;
+    return {
+      standardAgents: standard,
+      additionalAgents: additional,
+      filteredAgents: filtered,
+    };
+  }, [agents, agentFilter]);
+
+  const editingAgent = useMemo(
+    () => agents.find((a) => a.id === editingId) ?? null,
+    [agents, editingId],
+  );
+
+  const filterTabs = useMemo(() => {
+    const count = (n: number) => (initialLoading ? "–" : String(n));
+    return [
+      { id: "all", label: `Alle (${count(agents.length)})` },
+      { id: "standard", label: `Standard (${count(standardAgents.length)})` },
+      { id: "additional", label: `Weitere (${count(additionalAgents.length)})` },
+    ];
+  }, [
+    agents.length,
+    standardAgents.length,
+    additionalAgents.length,
+    initialLoading,
+  ]);
+
+  const pageTabs = useMemo(
+    () => [
+      { id: "agents", label: "Agenten" },
+      { id: "prompts", label: "Globale Prompts" },
+    ],
+    [],
+  );
+
   const refreshRequests = useCallback(async () => {
     if (!orgId) return;
     const res = await fetch(`/api/dt/agents/edit-requests?org=${encodeURIComponent(orgId)}`);
@@ -102,10 +225,14 @@ export function DtAgentsManager(props: {
     if (json.ok && json.requests) setEditRequests(json.requests);
   }, [orgId]);
 
-  const refresh = useCallback(async () => {
-    const [manageRes, templatesRes] = await Promise.all([
+  const refresh = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true);
+    else setInitialLoading(true);
+
+    const [manageRes, globalRes, checklistRes] = await Promise.all([
       fetch(`/api/dt/agents/manage?org=${encodeURIComponent(orgId)}`),
-      fetch("/api/dt/agents/templates"),
+      fetch("/api/dt/agents/default-prompt"),
+      fetch("/api/dt/platform-settings/seo-checklist"),
       refreshRequests(),
     ]);
 
@@ -114,16 +241,39 @@ export function DtAgentsManager(props: {
       agents?: AgentRow[];
       canDirectlyEdit?: boolean;
     };
-    if (manageJson.ok && manageJson.agents) setAgents(manageJson.agents);
+    if (manageJson.ok && manageJson.agents) {
+      const nextAgents = manageJson.canDirectlyEdit
+        ? manageJson.agents
+        : filterAgentsHiddenFromOrgMembers(manageJson.agents);
+      setAgents(nextAgents);
+    }
     if (manageJson.ok) setCanDirectlyEdit(Boolean(manageJson.canDirectlyEdit));
 
-    const templatesJson = (await templatesRes.json()) as {
+    const globalJson = (await globalRes.json()) as {
       ok?: boolean;
-      templates?: TemplateRow[];
+      prompts?: Partial<GlobalPrompts>;
     };
-    if (templatesJson.ok && templatesJson.templates) {
-      setTemplates(templatesJson.templates);
+    if (globalJson.ok && globalJson.prompts) {
+      const next: GlobalPrompts = {
+        default: globalJson.prompts.default ?? "",
+        seo_advisor: globalJson.prompts.seo_advisor ?? "",
+      };
+      setGlobalPrompts(next);
+      setGlobalPromptDraft(next);
     }
+
+    const checklistJson = (await checklistRes.json()) as {
+      ok?: boolean;
+      checklist?: unknown;
+    };
+    if (checklistJson.ok) {
+      const text = checklistToText(checklistJson.checklist);
+      setGlobalChecklist(text);
+      setGlobalChecklistDraft(text);
+    }
+
+    if (silent) setRefreshing(false);
+    else setInitialLoading(false);
   }, [orgId, refreshRequests]);
 
   useEffect(() => {
@@ -133,13 +283,13 @@ export function DtAgentsManager(props: {
   function startEdit(agent: AgentRow) {
     setEditingId(agent.id);
     setEditValues(agentFormValuesFromRow(agent));
-    setStatus(null);
+    setPageView("agents");
   }
 
   async function deleteAgent(agent: AgentRow) {
-    const enabledCount = agents.filter((a) => a.is_enabled).length;
-    if (agent.is_enabled && enabledCount <= 1) {
-      setStatus("Mindestens ein aktiver Agent muss bleiben.");
+    const enabledCountLocal = agents.filter((a) => a.is_enabled).length;
+    if (agent.is_enabled && enabledCountLocal <= 1) {
+      toast.error("Mindestens ein aktiver Agent muss bleiben.");
       return;
     }
     if (
@@ -150,64 +300,109 @@ export function DtAgentsManager(props: {
       return;
     }
     setBusy(true);
-    setStatus(null);
     const res = await fetch(`/api/dt/agents/${agent.id}`, { method: "DELETE" });
     const json = (await res.json()) as { ok?: boolean; message?: string };
     setBusy(false);
     if (!json.ok) {
-      setStatus(json.message ?? "Löschen fehlgeschlagen.");
+      toast.error(json.message ?? "Löschen fehlgeschlagen.");
       return;
     }
     if (editingId === agent.id) setEditingId(null);
-    await refresh();
+    await refresh(true);
   }
 
   async function saveEdit() {
     if (!editingId) return;
     setBusy(true);
-    setStatus(null);
+    const body: Record<string, unknown> = {
+      name: editValues.name,
+      role: editValues.role || null,
+      promptAppend: editValues.promptAppend.trim() || null,
+      quickActions: quickActionsFromForm(editValues.quick),
+      isEnabled: editValues.enabled,
+      position: editValues.position,
+    };
+    if (editingAgent?.is_default) {
+      body.usesGlobalPrompt = editValues.usesGlobalPrompt;
+      if (!editValues.usesGlobalPrompt) {
+        body.promptTemplate = editValues.prompt;
+      }
+    } else {
+      body.promptTemplate = editValues.prompt;
+    }
     const res = await fetch(`/api/dt/agents/${editingId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as { ok?: boolean; message?: string };
+    setBusy(false);
+    if (!json.ok) {
+      toast.error(json.message ?? "Speichern fehlgeschlagen.");
+      return;
+    }
+    setEditingId(null);
+    toast.success("Agent gespeichert.");
+    await refresh(true);
+  }
+
+  async function toggleEnabled(agent: AgentRow, next: boolean) {
+    setBusy(true);
+    const res = await fetch(`/api/dt/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isEnabled: next }),
+    });
+    const json = (await res.json()) as { ok?: boolean; message?: string };
+    setBusy(false);
+    if (!json.ok) {
+      toast.error(json.message ?? "Status konnte nicht geändert werden.");
+      return;
+    }
+    await refresh(true);
+  }
+
+  async function saveGlobalPrompt(slug: "default" | "seo_advisor") {
+    setBusy(true);
+    const res = await fetch("/api/dt/agents/default-prompt", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug, prompt: globalPromptDraft[slug] }),
+    });
+    const json = (await res.json()) as { ok?: boolean; message?: string };
+    setBusy(false);
+    if (!json.ok) {
+      toast.error(json.message ?? "Globaler Prompt konnte nicht gespeichert werden.");
+      return;
+    }
+    setGlobalPrompts((prev) => ({ ...prev, [slug]: globalPromptDraft[slug] }));
+    toast.success("Globaler Prompt übernommen — gilt ab sofort für alle Organisationen.");
+  }
+
+  async function saveGlobalChecklist() {
+    setBusy(true);
+    const res = await fetch("/api/dt/platform-settings/seo-checklist", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: editValues.name,
-        role: editValues.role || null,
-        promptTemplate: editValues.prompt,
-        quickActions: quickActionsFromForm(editValues.quick),
-        isEnabled: editValues.enabled,
-        position: editValues.position,
+        checklist: globalChecklistDraft
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
       }),
     });
     const json = (await res.json()) as { ok?: boolean; message?: string };
     setBusy(false);
     if (!json.ok) {
-      setStatus(json.message ?? "Speichern fehlgeschlagen.");
+      toast.error(json.message ?? "Globale Checkliste konnte nicht gespeichert werden.");
       return;
     }
-    setEditingId(null);
-    await refresh();
-  }
-
-  async function subscribeTemplate(templateId: string) {
-    setBusy(true);
-    setStatus(null);
-    const res = await fetch("/api/dt/agents/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ organisationId: orgId, templateId }),
-    });
-    const json = (await res.json()) as { ok?: boolean; message?: string };
-    setBusy(false);
-    if (!json.ok) {
-      setStatus(json.message ?? "Agent konnte nicht hinzugefügt werden.");
-      return;
-    }
-    await refresh();
+    setGlobalChecklist(globalChecklistDraft);
+    toast.success("Globale SEO-Checkliste gespeichert.");
   }
 
   async function cancelRequest(requestId: string) {
     setBusy(true);
-    setStatus(null);
     const res = await fetch(`/api/dt/agents/edit-requests/${requestId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -216,58 +411,197 @@ export function DtAgentsManager(props: {
     const json = (await res.json()) as { ok?: boolean; message?: string };
     setBusy(false);
     if (!json.ok) {
-      setStatus(json.message ?? "Zurückziehen fehlgeschlagen.");
+      toast.error(json.message ?? "Zurückziehen fehlgeschlagen.");
       return;
     }
-    await refresh();
+    await refresh(true);
   }
 
-  const subscribedSlugs = new Set(agents.map((a) => a.slug));
+  const canDisableAgent = (agent: AgentRow) =>
+    !agent.is_enabled || agents.filter((a) => a.is_enabled).length > 1;
+
+  const contextHref = `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}${editingId ? `&agent=${encodeURIComponent(editingId)}` : agents[0] ? `&agent=${encodeURIComponent(agents[0].id)}` : ""}`;
+
+  const showAdminChrome =
+    canDirectlyEdit || (initialLoading && (props.initialCanDirectlyEdit ?? false));
+
+  const agentsMainContent = (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
+      <section className="grid min-w-0 gap-4">
+        <DtTabs
+          tabs={filterTabs}
+          active={agentFilter}
+          onChange={(id) => setAgentFilter(id as AgentFilter)}
+          layoutId="agents-filter-tab"
+          className="mb-0 [&_button]:tabular-nums"
+          disabled={initialLoading}
+        />
+
+        <div className="relative">
+          {initialLoading ? (
+            <AgentsListSkeleton />
+          ) : filteredAgents.length === 0 ? (
+            <DtGlassCard
+              variant="subtle"
+              className="flex min-h-[288px] flex-col items-center justify-center gap-3 py-12 text-center"
+            >
+              <div className="flex size-12 items-center justify-center rounded-xl bg-sbkm-mint/15 text-sbkm-navy dark:text-sbkm-mint">
+                <Users className="size-6" aria-hidden />
+              </div>
+              <p className="font-semibold tracking-tight text-sbkm-navy dark:text-white">
+                {agentFilter === "additional"
+                  ? "Keine weiteren Agenten"
+                  : agentFilter === "standard"
+                    ? "Keine Standard-Agenten"
+                    : "Noch keine Agenten"}
+              </p>
+              <p className="max-w-sm text-sm text-sbkm-ink-600 dark:text-white/55">
+                {agentFilter === "additional" && canDirectlyEdit
+                  ? "Erstelle einen neuen Agenten über „Neuer Agent“."
+                  : "Standard-Agenten werden bei der Organisation automatisch angelegt."}
+              </p>
+              {agentFilter === "additional" && canDirectlyEdit ? (
+                <DtPillButton
+                  type="button"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setCreateWizardOpen(true)}
+                >
+                  <Plus className="size-4" aria-hidden />
+                  Neuer Agent
+                </DtPillButton>
+              ) : null}
+            </DtGlassCard>
+          ) : (
+            <DtGlassCard
+              variant="subtle"
+              padding="none"
+              className={cn(
+                "relative overflow-hidden transition-opacity duration-150",
+                refreshing && "opacity-60",
+              )}
+            >
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10" />
+              <LayoutGroup id="agents-list">
+                {filteredAgents.map((agent, i) => (
+                <DtAgentListItem
+                  key={agent.id}
+                  agent={agent}
+                  index={i}
+                  compact
+                  isLast={i === filteredAgents.length - 1}
+                  busy={busy || refreshing}
+                  canDirectlyEdit={canDirectlyEdit}
+                  pendingReview={Boolean(pendingByAgentId.get(agent.id))}
+                  isEditing={editingId === agent.id}
+                  editValues={editValues}
+                  onEditValuesChange={(patch) => setEditValues((v) => ({ ...v, ...patch }))}
+                  onStartEdit={() => startEdit(agent)}
+                  onSaveEdit={() => void saveEdit()}
+                  onCancelEdit={() => setEditingId(null)}
+                  onToggleEnabled={(next) => void toggleEnabled(agent, next)}
+                  onDelete={() => void deleteAgent(agent)}
+                  onRequestChange={() => setRequestAgent(agent)}
+                  canDisable={canDisableAgent(agent)}
+                  alwaysOn={isProtectedAlwaysOn(agent)}
+                  globalPromptPreview={
+                    agent.is_default
+                      ? globalPromptForAgent(agent, globalPrompts)
+                      : undefined
+                  }
+                />
+                ))}
+              </LayoutGroup>
+            </DtGlassCard>
+          )}
+
+          {refreshing ? (
+            <div
+              className="pointer-events-none absolute inset-0 z-10 rounded-dt-lg"
+              aria-hidden
+            />
+          ) : null}
+        </div>
+
+        {showAdminChrome ? (
+          <div className="grid gap-2 lg:hidden">
+            {initialLoading ? (
+              <AgentsSidebarSkeleton />
+            ) : (
+              <DtAgentsSidebar
+                busy={busy}
+                onCreateAgent={() => setCreateWizardOpen(true)}
+                onOpenGlobalPrompts={() => setPageView("prompts")}
+              />
+            )}
+          </div>
+        ) : null}
+      </section>
+
+      {showAdminChrome ? (
+        <div className="hidden lg:block">
+          {initialLoading ? (
+            <AgentsSidebarSkeleton />
+          ) : (
+            <DtAgentsSidebar
+              busy={busy}
+              onCreateAgent={() => setCreateWizardOpen(true)}
+              onOpenGlobalPrompts={() => setPageView("prompts")}
+            />
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 
   return (
-    <div className="grid gap-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-sbkm-ink-600 hover:text-sbkm-navy dark:text-white/60"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden />
-          Zurück zum Chat
-        </Link>
-      </div>
-
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-sbkm-navy dark:text-white">
-            DigitalTwin-Agenten
-          </h1>
-          <p className="text-sm text-sbkm-ink-600 dark:text-white/60">
-            {canDirectlyEdit
-              ? "Marketplace verwalten und Agenten direkt bearbeiten."
-              : "Marketplace-Agenten aktivieren und Änderungen bei uns anfragen."}
-          </p>
+    <div className="mx-auto grid max-w-6xl gap-6">
+      <header className="grid gap-4 border-b border-sbkm-navy/8 pb-6 dark:border-white/8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="grid gap-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-sbkm-ink-500 dark:text-white/40">
+              {orgName}
+            </p>
+            <h1 className="text-2xl font-bold tracking-tight text-sbkm-navy dark:text-white">
+              Agenten
+            </h1>
+            {!canDirectlyEdit ? (
+              <p className="max-w-xl text-sm text-sbkm-ink-600 dark:text-white/60">
+                {initialLoading ? (
+                  <span className="inline-block h-4 w-full max-w-md animate-pulse rounded bg-sbkm-navy/10 dark:bg-white/10" />
+                ) : (
+                  "Übersicht der verfügbaren Agenten. Änderungen als Anfrage einreichen."
+                )}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex min-h-10 flex-wrap items-center gap-2 self-start">
+            {showAdminChrome ? (
+              <DtPillButton
+                type="button"
+                size="sm"
+                className="gap-1.5"
+                disabled={initialLoading || busy}
+                onClick={() => setCreateWizardOpen(true)}
+              >
+                <Plus className="size-4" aria-hidden />
+                Neuer Agent
+              </DtPillButton>
+            ) : null}
+            <Link
+              href={contextHref}
+              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/60 px-4 text-sm font-semibold text-sbkm-navy transition hover:bg-sbkm-mint/15 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
+            >
+              <FileSearch className="size-4" aria-hidden />
+              Kontext ansehen
+            </Link>
+          </div>
         </div>
-        <Link
-          href={`/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}${editingId ? `&agent=${encodeURIComponent(editingId)}` : agents[0] ? `&agent=${encodeURIComponent(agents[0].id)}` : ""}`}
-          className="inline-flex h-10 items-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/60 px-4 text-sm font-semibold text-sbkm-navy transition hover:bg-sbkm-mint/15 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
-        >
-          <FileSearch className="size-4" aria-hidden />
-          Kontext ansehen
-        </Link>
-      </div>
+      </header>
 
-      {!canDirectlyEdit ? <DtAgentsReadOnlyBanner /> : null}
+      {!canDirectlyEdit && !initialLoading ? <DtAgentsReadOnlyBanner /> : null}
 
-      {status ? (
-        <p
-          className={`text-sm ${status.includes("gesendet") || status.includes("übernommen") ? "text-sbkm-mint" : "text-red-600 dark:text-red-400"}`}
-          role="alert"
-        >
-          {status}
-        </p>
-      ) : null}
-
-      {!canDirectlyEdit ? (
+      {!canDirectlyEdit && !initialLoading ? (
         <DtAgentEditRequestsPanel
           requests={editRequests}
           agentsById={agentsById}
@@ -276,128 +610,65 @@ export function DtAgentsManager(props: {
         />
       ) : null}
 
-      <section className="grid gap-3">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
-          Marketplace
-        </h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {templates.map((tpl) => {
-            const has = subscribedSlugs.has(tpl.slug);
-            return (
-              <DtGlassCard key={tpl.id} className="flex flex-col gap-3 p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-semibold text-sbkm-navy dark:text-white">{tpl.name}</p>
-                  <Badge variant="secondary">{tpl.kind}</Badge>
-                </div>
-                <p className="flex-1 text-xs text-sbkm-ink-600 dark:text-white/55">
-                  {tpl.short_description}
-                </p>
-                <DtPillButton
-                  type="button"
-                  disabled={busy || has}
-                  onClick={() => void subscribeTemplate(tpl.id)}
-                  className="w-full justify-center gap-2"
-                >
-                  <Plus className="h-4 w-4" aria-hidden />
-                  {has ? "Bereits aktiv" : "Abonnieren"}
-                </DtPillButton>
-              </DtGlassCard>
-            );
-          })}
-        </div>
-      </section>
+      {showAdminChrome ? (
+        <DtTabs
+          tabs={pageTabs}
+          active={pageView}
+          onChange={(id) => setPageView(id as PageView)}
+          layoutId="agents-page-tab"
+          className="mb-0"
+          disabled={initialLoading}
+        />
+      ) : null}
 
-      <section className="grid gap-3">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
-          Aktive Agenten
-        </h2>
-        {agents.length === 0 ? (
-          <p className="text-sm text-sbkm-ink-600 dark:text-white/55">Noch keine Agenten.</p>
-        ) : (
-          <div className="grid gap-3">
-            {agents.map((agent) => {
-              const pending = pendingByAgentId.get(agent.id);
-              return (
-                <DtGlassCard key={agent.id} className="p-4">
-                  {canDirectlyEdit && editingId === agent.id ? (
-                    <div className="grid gap-3">
-                      <DtAgentFormFields
-                        values={editValues}
-                        onChange={(patch) => setEditValues((v) => ({ ...v, ...patch }))}
-                        disabled={busy}
-                      />
-                      <div className="flex gap-2">
-                        <DtPillButton type="button" disabled={busy} onClick={() => void saveEdit()}>
-                          Speichern
-                        </DtPillButton>
-                        <DtPillButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setEditingId(null)}
-                        >
-                          Abbrechen
-                        </DtPillButton>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold text-sbkm-navy dark:text-white">
-                            {agent.name}
-                            {!agent.is_enabled ? (
-                              <span className="ml-2 text-xs font-normal text-sbkm-ink-500">
-                                (deaktiviert)
-                              </span>
-                            ) : null}
-                          </p>
-                          {pending ? (
-                            <Badge variant="secondary">In Prüfung</Badge>
-                          ) : null}
-                        </div>
-                        <p className="text-xs text-sbkm-ink-600 dark:text-white/50">
-                          {agent.slug} · {agent.kind}
-                          {agent.role ? ` · ${agent.role}` : ""}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {canDirectlyEdit ? (
-                          <>
-                            <DtPillButton type="button" onClick={() => startEdit(agent)}>
-                              Bearbeiten
-                            </DtPillButton>
-                            <DtPillButton
-                              type="button"
-                              variant="ghost"
-                              disabled={
-                                busy ||
-                                (agent.is_enabled && agents.filter((a) => a.is_enabled).length <= 1)
-                              }
-                              onClick={() => void deleteAgent(agent)}
-                            >
-                              Entfernen
-                            </DtPillButton>
-                          </>
-                        ) : (
-                          <DtPillButton
-                            type="button"
-                            disabled={busy || Boolean(pending)}
-                            className="gap-1.5"
-                            onClick={() => setRequestAgent(agent)}
-                          >
-                            <Send className="h-4 w-4" />
-                            {pending ? "Anfrage läuft" : "Änderung vorschlagen"}
-                          </DtPillButton>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </DtGlassCard>
-              );
-            })}
+      {showAdminChrome ? (
+        <div className="grid">
+          <div
+            className={cn(
+              "col-start-1 row-start-1 transition-opacity duration-200",
+              pageView !== "agents" && "pointer-events-none opacity-0",
+            )}
+            aria-hidden={pageView !== "agents"}
+          >
+            {agentsMainContent}
           </div>
-        )}
-      </section>
+          <div
+            className={cn(
+              "col-start-1 row-start-1 transition-opacity duration-200",
+              pageView !== "prompts" && "pointer-events-none opacity-0",
+            )}
+            aria-hidden={pageView !== "prompts"}
+          >
+            <DtGlobalPromptsPanel
+              drafts={globalPromptDraft}
+              saved={globalPrompts}
+              globalChecklistDraft={globalChecklistDraft}
+              globalChecklistSaved={globalChecklist}
+              busy={busy}
+              onDraftChange={(slug, value) =>
+                setGlobalPromptDraft((v) => ({ ...v, [slug]: value }))
+              }
+              onSave={(slug) => void saveGlobalPrompt(slug)}
+              onGlobalChecklistDraftChange={setGlobalChecklistDraft}
+              onSaveGlobalChecklist={() => void saveGlobalChecklist()}
+            />
+          </div>
+        </div>
+      ) : (
+        agentsMainContent
+      )}
+
+      <DtAgentCreateWizard
+        open={createWizardOpen}
+        organisationId={orgId}
+        organisationName={orgName}
+        onClose={() => setCreateWizardOpen(false)}
+        onCreated={() => {
+          setAgentFilter("additional");
+          toast.success("Agent wurde angelegt.");
+          void refresh(true);
+        }}
+      />
 
       <DtAgentEditRequestModal
         open={Boolean(requestAgent)}
@@ -405,8 +676,8 @@ export function DtAgentsManager(props: {
         organisationId={orgId}
         onClose={() => setRequestAgent(null)}
         onSubmitted={() => {
-          setStatus("Änderungsanfrage gesendet — wir prüfen sie in Kürze.");
-          void refresh();
+          toast.success("Änderungsanfrage gesendet — wir prüfen sie in Kürze.");
+          void refresh(true);
         }}
       />
     </div>

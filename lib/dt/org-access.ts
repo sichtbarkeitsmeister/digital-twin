@@ -28,6 +28,24 @@ export async function canManageDtAgents(
   return org?.owner_user_id === userId;
 }
 
+export async function isOrgOwner(
+  supabase: SupabaseClient,
+  userId: string,
+  organisationId: string,
+): Promise<boolean> {
+  const { data } = await supabase.rpc("my_org_role", { org_id: organisationId });
+  const role = typeof data === "string" ? data : null;
+  if (role === "owner") return true;
+
+  const { data: org } = await supabase
+    .from("organisations")
+    .select("owner_user_id")
+    .eq("id", organisationId)
+    .maybeSingle();
+
+  return org?.owner_user_id === userId;
+}
+
 /** Only platform admins may PATCH/DELETE agents directly. Org owners submit edit requests. */
 export async function canDirectlyEditDtAgents(
   supabase: SupabaseClient,

@@ -1,5 +1,7 @@
 import nodemailer from "nodemailer";
 
+import { logEmailSend } from "@/lib/email/send-log";
+
 function boolFromEnv(v: string | undefined, fallback: boolean) {
   if (v == null) return fallback;
   const s = v.trim().toLowerCase();
@@ -8,11 +10,19 @@ function boolFromEnv(v: string | undefined, fallback: boolean) {
   return fallback;
 }
 
+export type EmailSendContext = {
+  kind?: string;
+  metadata?: Record<string, unknown>;
+  triggeredByUserId?: string | null;
+  organisationId?: string | null;
+};
+
 export type EmailPayload = {
   to: string[];
   subject: string;
   text: string;
   html?: string;
+  context?: EmailSendContext;
 };
 
 let cachedTransport: nodemailer.Transporter | null = null;
@@ -68,19 +78,66 @@ export function parseEmailList(v: string | undefined): string[] {
 export async function sendEmail(payload: EmailPayload) {
   const from = getFromAddress();
   const to = Array.from(new Set(payload.to.map((x) => x.trim()).filter(Boolean)));
-  if (to.length === 0) return { ok: true as const, skipped: true as const };
-
-  const transport = getTransport();
-  await transport.sendMail({
-    from,
-    // Some SMTP servers require the SMTP "MAIL FROM" to be owned by the authenticated user.
-    // Keep the visible From header configurable, but default the envelope sender to SMTP_USER.
-    envelope: cachedAuthUser ? { from: cachedAuthUser, to } : undefined,
+  const kind = payload.context?.kind ?? "generic";
+  const logBase = {
+    kind,
     to,
     subject: payload.subject,
-    text: payload.text,
-    html: payload.html,
-  });
-  return { ok: true as const, skipped: false as const };
+    fromAddress: from,
+    metadata: payload.context?.metadata,
+    triggeredByUserId: payload.context?.triggeredByUserId ?? null,
+    organisationId: payload.context?.organisationId ?? null,
+  };
+
+  if (to.length === 0) {
+    await logEmailSend({
+      ...logBase,
+      status: "skipped",
+      errorMessage: "Kein Empfänger",
+    });
+    return { ok: true as const, skipped: true as const };
+  }
+
+  let transport: nodemailer.Transporter;
+  try {
+    transport = getTransport();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "SMTP nicht konfiguriert";
+    await logEmailSend({
+      ...logBase,
+      status: "failed",
+      errorMessage: reason,
+    });
+    throw err;
+  }
+
+  try {
+    const info = await transport.sendMail({
+      from,
+      // Some SMTP servers require the SMTP "MAIL FROM" to be owned by the authenticated user.
+      // Keep the visible From header configurable, but default the envelope sender to SMTP_USER.
+      envelope: cachedAuthUser ? { from: cachedAuthUser, to } : undefined,
+      to,
+      subject: payload.subject,
+      text: payload.text,
+      html: payload.html,
+    });
+
+    await logEmailSend({
+      ...logBase,
+      status: "sent",
+      smtpMessageId: typeof info.messageId === "string" ? info.messageId : null,
+    });
+
+    return { ok: true as const, skipped: false as const, messageId: info.messageId };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "E-Mail-Versand fehlgeschlagen";
+    await logEmailSend({
+      ...logBase,
+      status: "failed",
+      errorMessage: reason,
+    });
+    throw err;
+  }
 }
 

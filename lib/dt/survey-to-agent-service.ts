@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 
+import { updateDtAgent } from "@/lib/dt/db";
 import {
   buildSurveyResponseContextForAgent,
   findAgentForSurveyResponse,
@@ -7,6 +8,7 @@ import {
   type SurveyFieldQuestionRow,
 } from "@/lib/dt/survey-to-agent-context";
 import { generateSurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
+import { generateSurveyAgentRefinement } from "@/lib/dt/survey-refine-agent-prompt";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -148,6 +150,145 @@ export async function generateAgentPreviewFromSurvey(input: {
     organisationId: input.organisationId,
     organisationName: org.name,
   };
+}
+
+export async function generateAgentRefinementFromSurvey(input: {
+  surveyId: string;
+  responseId: string;
+  organisationId: string;
+  agentId: string;
+  extraRules?: string;
+}) {
+  const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
+  if (!bundle.ok) return bundle;
+
+  if (bundle.existingAgent) {
+    return {
+      ok: false as const,
+      status: 409,
+      message: "Für diese Antwort existiert bereits ein Agent.",
+      existingAgentId: bundle.existingAgent.id,
+    };
+  }
+
+  const supabase = createServiceClient();
+  const { data: org } = await supabase
+    .from("organisations")
+    .select("id, name")
+    .eq("id", input.organisationId)
+    .maybeSingle();
+
+  if (!org) {
+    return { ok: false as const, status: 404, message: "Organisation nicht gefunden." };
+  }
+
+  const { data: agent } = await supabase
+    .from("dt_agents")
+    .select("id, name, role, kind, slug, prompt_template, uses_global_prompt, organisation_id")
+    .eq("id", input.agentId)
+    .maybeSingle();
+
+  if (!agent || agent.organisation_id !== input.organisationId) {
+    return { ok: false as const, status: 404, message: "Agent nicht gefunden." };
+  }
+
+  const answers: Record<string, unknown> = isRecord(bundle.response.answers)
+    ? bundle.response.answers
+    : {};
+
+  const surveyContext = buildSurveyResponseContextForAgent({
+    surveyTitle: bundle.survey.title,
+    definition: bundle.survey.definition,
+    answers,
+    fieldQuestions: bundle.fieldQuestions,
+  });
+
+  const refinement = await generateSurveyAgentRefinement({
+    surveyContext,
+    organisationName: org.name,
+    agentName: agent.name,
+    agentRole: agent.role,
+    agentKind: agent.kind,
+    currentPromptTemplate: agent.prompt_template,
+    usesGlobalPrompt: Boolean(agent.uses_global_prompt),
+    extraRules: input.extraRules,
+  });
+
+  if (bundle.survey.organisation_id !== input.organisationId) {
+    await assignSurveyOrganisation(input.surveyId, input.organisationId);
+  }
+
+  return {
+    ok: true as const,
+    refinement,
+    currentPrompt: agent.prompt_template,
+    usesGlobalPrompt: Boolean(agent.uses_global_prompt),
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      role: agent.role,
+      kind: agent.kind,
+      slug: agent.slug,
+    },
+    organisationId: input.organisationId,
+    organisationName: org.name,
+  };
+}
+
+export async function applyAgentRefinementFromSurvey(input: {
+  surveyId: string;
+  responseId: string;
+  organisationId: string;
+  agentId: string;
+  promptTemplate: string;
+}) {
+  const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
+  if (!bundle.ok) return bundle;
+
+  if (bundle.existingAgent) {
+    return {
+      ok: false as const,
+      status: 409,
+      message: "Für diese Antwort existiert bereits ein Agent.",
+      existingAgentId: bundle.existingAgent.id,
+    };
+  }
+
+  const supabase = createServiceClient();
+  const { data: agent } = await supabase
+    .from("dt_agents")
+    .select("id, organisation_id, uses_global_prompt")
+    .eq("id", input.agentId)
+    .maybeSingle();
+
+  if (!agent || agent.organisation_id !== input.organisationId) {
+    return { ok: false as const, status: 404, message: "Agent nicht gefunden." };
+  }
+
+  const patch: Record<string, unknown> = {
+    prompt_template: input.promptTemplate,
+    source_survey_id: input.surveyId,
+    source_survey_response_id: input.responseId,
+  };
+
+  if (agent.uses_global_prompt) {
+    patch.uses_global_prompt = false;
+  }
+
+  const { ok, error } = await updateDtAgent({
+    agentId: input.agentId,
+    patch,
+  });
+
+  if (!ok) {
+    return {
+      ok: false as const,
+      status: 400,
+      message: mapPersonaAgentRpcError(error),
+    };
+  }
+
+  return { ok: true as const, agentId: input.agentId };
 }
 
 export function mapPersonaAgentRpcError(error: string | null): string {

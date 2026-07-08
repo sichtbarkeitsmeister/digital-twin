@@ -19,8 +19,10 @@ import {
   formatDtSeoTasksForPrompt,
   loadDtSeoTasksForPrompt,
 } from "@/lib/dt/seo/task-context";
+import { loadGlobalSeoChecklist, resolveSeoChecklistRaw } from "@/lib/dt/seo/seo-checklist";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import { buildDtSystemPrompt } from "@/lib/dt/prompts/build-system-prompt";
+import { resolveDtAgentPrompt } from "@/lib/dt/prompts/resolve-agent-prompt";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { DtChatMode, DtMessageRow } from "@/lib/dt/types";
@@ -103,6 +105,7 @@ export async function assembleDtChatFromDb(input: {
   chatId: string;
   userId: string;
   ghostMode?: boolean;
+  textMode?: boolean;
   supabase?: SupabaseClient;
 }): Promise<DtAssembledChat> {
   const supabase = input.supabase ?? createServiceClient();
@@ -119,7 +122,7 @@ export async function assembleDtChatFromDb(input: {
 
   const { data: agent } = await supabase
     .from("dt_agents")
-    .select("id,name,role,kind,prompt_template")
+    .select("id,name,role,kind,slug,prompt_template,prompt_append,uses_global_prompt,template_id")
     .eq("id", chat.agent_id)
     .maybeSingle();
 
@@ -127,9 +130,22 @@ export async function assembleDtChatFromDb(input: {
 
   const { data: orgConfig } = await supabase
     .from("dt_org_config")
-    .select("display_name,website_url,focus_keyword,seo_checklist,sitemap_url")
+    .select(
+      "display_name,website_url,focus_keyword,seo_checklist,seo_checklist_personalized,sitemap_url",
+    )
     .eq("organisation_id", chat.organisation_id)
     .maybeSingle();
+
+  const promptOrgName = orgConfig?.display_name ?? agent.name;
+  const resolvedPromptTemplate = await resolveDtAgentPrompt(supabase, agent, promptOrgName);
+
+  const mode = chat.mode as DtChatMode;
+  const promptMode = mode === "ghost" ? "default" : mode;
+  const needsSeoChecklist = promptMode === "seo" || agent.kind === "geo_advisor";
+  const globalSeoChecklist = needsSeoChecklist
+    ? await loadGlobalSeoChecklist(supabase)
+    : [];
+  const effectiveSeoChecklist = resolveSeoChecklistRaw(orgConfig ?? {}, globalSeoChecklist);
 
   const { data: prefs } = await supabase
     .from("dt_user_preferences")
@@ -163,8 +179,6 @@ export async function assembleDtChatFromDb(input: {
     metadata: m.metadata,
   }));
 
-  const mode = chat.mode as DtChatMode;
-  const promptMode = mode === "ghost" ? "default" : mode;
   const sitePages =
     promptMode === "seo"
       ? await loadDtSitePagesForPrompt(supabase, chat.organisation_id)
@@ -183,28 +197,29 @@ export async function assembleDtChatFromDb(input: {
       : [];
 
   const lastUserMessage = [...prefixed].reverse().find((m) => m.role === "user");
-  const pastedUrlsText =
-    promptMode === "seo" && lastUserMessage?.content
-      ? ((await buildPastedUrlContextText(lastUserMessage.content)) ?? undefined)
-      : undefined;
+  const pastedUrlsText = lastUserMessage?.content
+    ? ((await buildPastedUrlContextText(lastUserMessage.content)) ?? undefined)
+    : undefined;
 
   const system = buildDtSystemPrompt({
     agent: {
       name: agent.name,
       role: agent.role,
-      prompt_template: agent.prompt_template?.trim() || "Du bist ein hilfreicher Assistent.",
+      prompt_template: resolvedPromptTemplate,
+      prompt_append: agent.prompt_append,
       kind: agent.kind,
     },
     org: {
       display_name: orgConfig?.display_name ?? agent.name,
       website_url: orgConfig?.website_url,
       focus_keyword: orgConfig?.focus_keyword,
-      seo_checklist: orgConfig?.seo_checklist,
+      seo_checklist: effectiveSeoChecklist,
       sitemap_url: orgConfig?.sitemap_url,
     },
     mode: promptMode,
     globalRules: prefs?.global_assistant_rules,
     ghostMode: input.ghostMode ?? mode === "ghost",
+    textMode: input.textMode,
     sitePages,
     latestSeoReportText:
       promptMode === "seo" ? formatDtSeoReportForPrompt(latestSeoReport) : undefined,
@@ -237,22 +252,35 @@ export async function assembleDtChatEphemeral(input: {
   organisationId: string;
   agentId: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
+  content?: string;
+  textMode?: boolean;
 }): Promise<DtAssembledChat> {
   await assertUserInOrganisation(input.userId, input.organisationId);
   const supabase = createServiceClient();
 
   const { data: agent } = await supabase
     .from("dt_agents")
-    .select("id,name,role,kind,prompt_template")
+    .select("id,name,role,kind,slug,prompt_template,prompt_append,uses_global_prompt,template_id")
     .eq("id", input.agentId)
     .maybeSingle();
   if (!agent) throw new Error("Agent nicht gefunden.");
 
   const { data: orgConfig } = await supabase
     .from("dt_org_config")
-    .select("display_name,website_url,focus_keyword,seo_checklist,sitemap_url")
+    .select(
+      "display_name,website_url,focus_keyword,seo_checklist,seo_checklist_personalized,sitemap_url",
+    )
     .eq("organisation_id", input.organisationId)
     .maybeSingle();
+
+  const promptOrgName = orgConfig?.display_name ?? agent.name;
+  const resolvedPromptTemplate = await resolveDtAgentPrompt(supabase, agent, promptOrgName);
+
+  const needsSeoChecklist = agent.kind === "geo_advisor";
+  const globalSeoChecklist = needsSeoChecklist
+    ? await loadGlobalSeoChecklist(supabase)
+    : [];
+  const effectiveSeoChecklist = resolveSeoChecklistRaw(orgConfig ?? {}, globalSeoChecklist);
 
   const { data: prefs } = await supabase
     .from("dt_user_preferences")
@@ -260,23 +288,30 @@ export async function assembleDtChatEphemeral(input: {
     .eq("user_id", input.userId)
     .maybeSingle();
 
+  const pastedUrlsText = input.content?.trim()
+    ? ((await buildPastedUrlContextText(input.content)) ?? undefined)
+    : undefined;
+
   const system = buildDtSystemPrompt({
     agent: {
       name: agent.name,
       role: agent.role,
-      prompt_template: agent.prompt_template?.trim() || "Du bist ein hilfreicher Assistent.",
+      prompt_template: resolvedPromptTemplate,
+      prompt_append: agent.prompt_append,
       kind: agent.kind,
     },
     org: {
       display_name: orgConfig?.display_name ?? agent.name,
       website_url: orgConfig?.website_url,
       focus_keyword: orgConfig?.focus_keyword,
-      seo_checklist: orgConfig?.seo_checklist,
+      seo_checklist: effectiveSeoChecklist,
       sitemap_url: orgConfig?.sitemap_url,
     },
     mode: "default",
     globalRules: prefs?.global_assistant_rules,
     ghostMode: true,
+    textMode: input.textMode,
+    pastedUrlsText,
   });
 
   const messages: Anthropic.MessageParam[] = input.history

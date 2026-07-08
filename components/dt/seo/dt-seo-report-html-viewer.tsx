@@ -12,7 +12,12 @@ function wrapHtmlDocument(fragment: string): string {
   return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base target="_blank" rel="noopener noreferrer"></head><body style="margin:0;padding:16px;font-family:'Poppins',-apple-system,sans-serif;">${trimmed}</body></html>`;
 }
 
-export function DtSeoReportHtmlViewer(props: { html: string; title?: string }) {
+export function DtSeoReportHtmlViewer(props: {
+  html: string;
+  title?: string;
+  /** Compact layout for use inside modals — no toolbar, shorter iframe */
+  embedded?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const srcDoc = useMemo(() => wrapHtmlDocument(props.html), [props.html]);
 
@@ -22,6 +27,19 @@ export function DtSeoReportHtmlViewer(props: { html: string; title?: string }) {
     window.open(url, "_blank", "noopener,noreferrer");
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }, [srcDoc]);
+
+  if (props.embedded) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-sbkm-navy/12 bg-white dark:border-white/10">
+        <iframe
+          title={props.title ?? "SEO-Report"}
+          sandbox="allow-same-origin"
+          srcDoc={srcDoc}
+          className="block h-[min(52dvh,520px)] w-full border-0 bg-white"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-dt-lg border border-sbkm-navy/12 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">

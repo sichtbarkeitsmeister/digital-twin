@@ -8,6 +8,7 @@ const bodySchema = z.object({
   userId: z.string().uuid(),
   chatId: z.string().uuid(),
   ghostMode: z.boolean().optional(),
+  textMode: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
       chatId: parsed.data.chatId,
       userId: parsed.data.userId,
       ghostMode: parsed.data.ghostMode,
+      textMode: parsed.data.textMode,
     });
 
     return NextResponse.json({

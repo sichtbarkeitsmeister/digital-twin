@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import type { ActionState } from "@/app/dashboard/actions";
 import { inviteToOrganisationAction } from "@/app/dashboard/actions";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,25 @@ import { Select } from "@/components/ui/select";
 
 const initialState: ActionState = { ok: true, message: "" };
 
-export function InviteMemberForm({ organisationId }: { organisationId: string }) {
+export function InviteMemberForm({
+  organisationId,
+  onSuccess,
+}: {
+  organisationId: string;
+  onSuccess?: () => void;
+}) {
   const [state, formAction, pending] = useActionState(
     inviteToOrganisationAction,
     initialState,
   );
+  const lastMessage = useRef(state.message);
+
+  useEffect(() => {
+    if (state.message !== lastMessage.current) {
+      lastMessage.current = state.message;
+      if (state.ok && state.message) onSuccess?.();
+    }
+  }, [state, onSuccess]);
 
   return (
     <form action={formAction} className="grid gap-4">
@@ -26,21 +40,16 @@ export function InviteMemberForm({ organisationId }: { organisationId: string })
           id="invited_email"
           name="invited_email"
           type="email"
-          placeholder="colleague@company.com"
+          placeholder="kollege@firma.de"
           autoComplete="email"
           required
         />
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="role">Role</Label>
-        <Select
-          id="role"
-          name="role"
-          defaultValue="employee"
-          required
-        >
-          <option value="employee">Employee</option>
+        <Label htmlFor="role">Rolle</Label>
+        <Select id="role" name="role" defaultValue="employee" required>
+          <option value="employee">Mitarbeiter</option>
           <option value="admin">Admin</option>
         </Select>
       </div>
@@ -51,8 +60,8 @@ export function InviteMemberForm({ organisationId }: { organisationId: string })
         </p>
       ) : null}
 
-      <Button type="submit" disabled={pending}>
-        {pending ? "Sending…" : "Invite"}
+      <Button type="submit" disabled={pending} className="active:scale-[0.98]">
+        {pending ? "Wird gesendet …" : "Einladen"}
       </Button>
     </form>
   );

@@ -23,6 +23,7 @@ function roleLabel(role: string): string {
 export type DtChatParticipant = {
   id: string;
   label: string;
+  email: string | null;
   messageCount: number;
 };
 
@@ -66,12 +67,10 @@ export async function loadOrgMembersForOversight(
 
   const { data: profiles } = await service
     .from("profiles")
-    .select("id,full_name,email")
+    .select("id,email")
     .in("id", ids);
 
   for (const row of profiles ?? []) {
-    const name = row.full_name?.trim();
-    if (name) nameById.set(row.id, name);
     const email = row.email?.trim();
     if (email) emailById.set(row.id, email);
   }
@@ -129,6 +128,7 @@ export async function loadOrgMembersForOversight(
 export function buildChatParticipants(
   messages: Array<{ author_user_id: string | null; role: string }>,
   authorLabels: Record<string, string>,
+  authorEmails: Record<string, string | null> = {},
 ): DtChatParticipant[] {
   const counts = new Map<string, number>();
 
@@ -141,6 +141,7 @@ export function buildChatParticipants(
     .map(([id, messageCount]) => ({
       id,
       label: authorLabels[id] ?? "Nutzer",
+      email: authorEmails[id] ?? null,
       messageCount,
     }))
     .sort((a, b) => b.messageCount - a.messageCount);

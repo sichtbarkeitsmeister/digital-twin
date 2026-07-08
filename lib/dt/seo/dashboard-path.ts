@@ -8,6 +8,11 @@ export function isSeoDashboardPath(pathname: string): boolean {
   );
 }
 
+/** Organisation overview page with top-bar org selector. */
+export function isOrganisationDashboardPath(pathname: string): boolean {
+  return pathname === "/dashboard/organisations";
+}
+
 /** Agent management / context pages that share the dashboard org bar. */
 export function isManageOrgBarPath(pathname: string): boolean {
   return (
@@ -21,7 +26,11 @@ export function isManageOrgBarPath(pathname: string): boolean {
 }
 
 export function isDashboardOrgBarPath(pathname: string): boolean {
-  return isSeoDashboardPath(pathname) || isManageOrgBarPath(pathname);
+  return (
+    isSeoDashboardPath(pathname) ||
+    isManageOrgBarPath(pathname) ||
+    isOrganisationDashboardPath(pathname)
+  );
 }
 
 /** Main SEO workspace with tabs (chat, tasks, …) — not crawl/report sub-pages. */

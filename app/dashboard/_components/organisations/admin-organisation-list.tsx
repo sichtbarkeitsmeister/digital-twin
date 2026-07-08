@@ -166,20 +166,10 @@ export function AdminOrganisationList({
                   <Button
                     asChild
                     size="sm"
-                    variant="ghost"
-                    className="h-8 transition-transform duration-150 active:scale-[0.98]"
-                  >
-                    <Link href={`/dashboard/members?org=${org.id}`}>
-                      Mitglieder
-                    </Link>
-                  </Button>
-                  <Button
-                    asChild
-                    size="sm"
                     variant="outline"
                     className="h-8 transition-transform duration-150 active:scale-[0.98]"
                   >
-                    <Link href={`/dashboard/organisations/${org.id}`}>
+                    <Link href={`/dashboard/organisations?org=${org.id}`}>
                       Verwalten
                       <ArrowRight className="size-3.5 transition-transform duration-150 group-hover:translate-x-0.5" />
                     </Link>

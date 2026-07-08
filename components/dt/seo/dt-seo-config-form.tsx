@@ -9,6 +9,7 @@ import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { checklistToText, textToChecklist } from "@/lib/dt/seo/seo-checklist";
 
 type Config = {
   organisation_id: string;
@@ -22,6 +23,8 @@ type Config = {
   focus_keyword: string | null;
   report_recipient_email: string | null;
   report_timeframe: string;
+  seo_checklist: unknown;
+  seo_checklist_personalized: boolean;
 };
 
 type CrawlStatus = {
@@ -52,12 +55,25 @@ export function DtSeoConfigForm(props: {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [crawlInfo, setCrawlInfo] = useState<CrawlInfo | null>(null);
+  const [checklistText, setChecklistText] = useState("");
+  const [globalChecklistText, setGlobalChecklistText] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadGlobalChecklist = useCallback(async () => {
+    const res = await fetch("/api/dt/platform-settings/seo-checklist");
+    const json = (await res.json()) as { ok?: boolean; checklist?: unknown };
+    if (json.ok) {
+      setGlobalChecklistText(checklistToText(json.checklist));
+    }
+  }, []);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/dt/org-config/${props.organisationId}`);
     const json = (await res.json()) as { ok?: boolean; config?: Config };
-    if (json.ok && json.config) setConfig(json.config);
+    if (json.ok && json.config) {
+      setConfig(json.config);
+      setChecklistText(checklistToText(json.config.seo_checklist));
+    }
   }, [props.organisationId]);
 
   const loadCrawlInfo = useCallback(async () => {
@@ -86,7 +102,8 @@ export function DtSeoConfigForm(props: {
   useEffect(() => {
     void load();
     void loadCrawlInfo();
-  }, [load, loadCrawlInfo]);
+    void loadGlobalChecklist();
+  }, [load, loadCrawlInfo, loadGlobalChecklist]);
 
   useEffect(() => {
     const active = crawlInfo?.crawl && ACTIVE_CRAWL_STATUSES.has(crawlInfo.crawl.status);
@@ -121,7 +138,12 @@ export function DtSeoConfigForm(props: {
       setStatus(json.message ?? "Speichern fehlgeschlagen.");
       return;
     }
-    if (json.config) setConfig(json.config);
+    if (json.config) {
+      setConfig(json.config);
+      if (json.config.seo_checklist !== undefined) {
+        setChecklistText(checklistToText(json.config.seo_checklist));
+      }
+    }
     setStatus("Gespeichert.");
   }
 
@@ -282,6 +304,90 @@ export function DtSeoConfigForm(props: {
             onBlur={(e) => void save({ sistrixDomain: e.target.value.trim() || null })}
           />
         </div>
+      </div>
+
+      <div
+        id="seo-checklist"
+        className="grid scroll-mt-24 gap-3 border-t border-sbkm-navy/10 pt-4 dark:border-white/10"
+      >
+        <div>
+          <p className="text-sm font-semibold text-sbkm-navy dark:text-white">SEO-Checkliste</p>
+          <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
+            Fließt in den SEO-Agent-Prompt ein — global für alle Orgs oder nur für diese Organisation.
+          </p>
+        </div>
+
+        <label className="flex items-start gap-2 text-sm">
+          <Checkbox
+            checked={config.seo_checklist_personalized}
+            disabled={!props.canEdit || busy}
+            onCheckedChange={(v) => void save({ seoChecklistPersonalized: v === true })}
+          />
+          <span>
+            <span className="font-semibold text-sbkm-navy dark:text-white">
+              Eigene Checkliste für diese Organisation
+            </span>
+            <span className="mt-0.5 block text-xs text-sbkm-ink-600 dark:text-white/55">
+              {config.seo_checklist_personalized
+                ? "Nur die Punkte unten gelten für diese Organisation."
+                : "Es gilt die globale Plattform-Checkliste (unter Agenten → Globale Prompts)."}
+            </span>
+          </span>
+        </label>
+
+        {config.seo_checklist_personalized ? (
+          <>
+            <textarea
+              value={checklistText}
+              disabled={!props.canEdit || busy}
+              onChange={(e) => setChecklistText(e.target.value)}
+              rows={6}
+              placeholder={"Meta-Titel pro Seite optimieren\nH1 enthält Fokus-Keyword\nInterne Verlinkung prüfen"}
+              className="w-full resize-y rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 py-2.5 text-sm text-sbkm-navy outline-none transition focus-visible:border-sbkm-mint/45 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 disabled:opacity-60 dark:border-white/15 dark:bg-white/5 dark:text-white"
+            />
+            {props.canEdit ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs tabular-nums text-sbkm-ink-500 dark:text-white/45">
+                  {textToChecklist(checklistText).length}{" "}
+                  {textToChecklist(checklistText).length === 1 ? "Punkt" : "Punkte"}
+                </p>
+                <DtPillButton
+                  type="button"
+                  disabled={
+                    busy || checklistText === checklistToText(config.seo_checklist)
+                  }
+                  onClick={() => void save({ seoChecklist: textToChecklist(checklistText) })}
+                >
+                  Eigene Checkliste speichern
+                </DtPillButton>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="rounded-xl border border-sbkm-navy/10 bg-white/40 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+            {globalChecklistText.trim() ? (
+              <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-sbkm-navy dark:text-white/85">
+                {globalChecklistText
+                  .split("\n")
+                  .map((line, i) => `${i + 1}. ${line}`)
+                  .join("\n")}
+              </pre>
+            ) : (
+              <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+                Noch keine globale Checkliste hinterlegt.
+              </p>
+            )}
+            {props.canEdit ? (
+              <Link
+                href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(props.organisationId)}&view=prompts#global-seo-checklist`}
+                className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-sbkm-mint hover:underline"
+              >
+                Globale Checkliste bearbeiten
+                <ExternalLink className="size-3" aria-hidden />
+              </Link>
+            ) : null}
+          </div>
+        )}
       </div>
 
       {props.canEdit ? (

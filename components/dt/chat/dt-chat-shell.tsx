@@ -20,6 +20,7 @@ import {
 } from "@/components/dt/chat/dt-chat-sidebar";
 import { DtChatSkeleton } from "@/components/dt/chat/dt-chat-skeleton";
 import { DtChatThread } from "@/components/dt/chat/dt-chat-thread";
+import { DtChatParticipantsBadge } from "@/components/dt/chat/dt-chat-participants-badge";
 import type { DtChatMessageItem } from "@/components/dt/chat/dt-chat-message";
 import { DashboardButton } from "@/components/dashboard-button";
 import { DtLogo } from "@/components/dt/dt-logo";
@@ -48,6 +49,7 @@ import {
   type DtSeoChatTaskProposal,
   type DtSeoTaskProposalMatchRow,
 } from "@/lib/dt/seo/chat-task-proposals";
+import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
 
 export type DtOrgOptionWithRole = DtOrgOption & { canManageAgents?: boolean };
 
@@ -141,6 +143,7 @@ export function DtChatShell(props: {
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<DtAttachmentDraft[]>([]);
   const [ghostMode, setGhostMode] = useState(false);
+  const [textMode, setTextMode] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [dropHighlight, setDropHighlight] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -198,6 +201,13 @@ export function DtChatShell(props: {
   );
 
   const isSeoChat = activeChat?.mode === "seo";
+  const showChatAuthors = Boolean(
+    activeChat &&
+      (activeChat.mode === "team" ||
+        activeChat.mode === "seo" ||
+        activeChat.shared_to_team_at ||
+        oversightActive),
+  );
 
   const displayAgentName = selectedAgent?.name ?? "DigitalTwin";
   const chatModeForCreate: DtChatMode = props.adminOversight
@@ -258,10 +268,14 @@ export function DtChatShell(props: {
     if (!selectedOrgId) return;
     const res = await fetch(`/api/dt/agents?org=${encodeURIComponent(selectedOrgId)}`);
     const json = (await res.json()) as { ok?: boolean; agents?: DtAgentOption[] };
-    if (json.ok && json.agents?.length) {
-      setAgents(json.agents);
+    // SEO advisor is only available inside the SEO workspace (platform admins).
+    const visible = props.seoMode
+      ? (json.agents ?? [])
+      : filterAgentsHiddenFromOrgMembers(json.agents ?? []);
+    if (json.ok && visible.length) {
+      setAgents(visible);
       setSelectedAgentId((prev) =>
-        resolveDefaultAgentId(json.agents!, {
+        resolveDefaultAgentId(visible, {
           seoMode: props.seoMode,
           currentId: prev,
           hasActiveChat: Boolean(selectedChatId),
@@ -820,6 +834,7 @@ export function DtChatShell(props: {
             content: text,
             history,
             attachments: outgoingAttachments,
+            textMode,
           }),
           signal: controller.signal,
         });
@@ -856,6 +871,7 @@ export function DtChatShell(props: {
           content: text,
           attachments: outgoingAttachments,
           ghostMode: false,
+          textMode,
         }),
         signal: controller.signal,
       });
@@ -912,7 +928,40 @@ export function DtChatShell(props: {
     }
   };
 
-  const chatLocked = Boolean(!ghostMode && selectedChatId && messages.length > 0);
+  const handleSelectAgent = useCallback(
+    async (agentId: string) => {
+      if (agentId === selectedAgentId || isBusy) return;
+
+      if (!selectedChatId || ghostMode) {
+        setSelectedAgentId(agentId);
+        return;
+      }
+
+      const previousAgentId = selectedAgentId;
+      setSelectedAgentId(agentId);
+
+      const res = await fetch(`/api/dt/chats/${encodeURIComponent(selectedChatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId }),
+      });
+      const json = (await res.json()) as { ok?: boolean; message?: string; chat?: DtChatRow };
+
+      if (!res.ok || !json.ok) {
+        setSelectedAgentId(previousAgentId);
+        setStatus(json.message ?? "Agent konnte nicht gewechselt werden.");
+        return;
+      }
+
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === selectedChatId ? { ...c, agent_id: agentId } : c,
+        ),
+      );
+    },
+    [selectedAgentId, selectedChatId, ghostMode, isBusy],
+  );
+
   const chatGptLayout = Boolean(props.embedded);
   const showMarketingHeader = chatGptLayout && !props.chromeless;
   const chromelessLayout = chatGptLayout && Boolean(props.chromeless);
@@ -978,8 +1027,7 @@ export function DtChatShell(props: {
             personas={wunschkundePersonas}
             selectedAgentId={selectedAgentId}
             onSelectAgent={(id) => {
-              setSelectedAgentId(id);
-              startNewChat();
+              void handleSelectAgent(id);
             }}
           />
         ) : null
@@ -1027,8 +1075,8 @@ export function DtChatShell(props: {
               <DtAgentSwitcher
                 agents={agents}
                 selectedAgentId={selectedAgentId}
-                onSelect={setSelectedAgentId}
-                disabled={chatLocked || isBusy || ghostMode}
+                onSelect={(id) => void handleSelectAgent(id)}
+                disabled={isBusy}
                 manageAgentsHref={
                   canManageAgents ? "/dashboard/verwaltung/agents" : null
                 }
@@ -1037,6 +1085,7 @@ export function DtChatShell(props: {
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+              <DtChatParticipantsBadge participants={participants} />
               {activeChat?.title && !ghostMode ? (
                 <p className="hidden max-w-[8rem] truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55 md:block lg:max-w-[12rem]">
                   {activeChat.title}
@@ -1108,7 +1157,7 @@ export function DtChatShell(props: {
             )}
           >
             {!chatGptLayout || chromelessLayout ? (
-            <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-sbkm-navy/10 bg-white/30 px-4 py-2.5 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.03] sm:px-5 sm:py-3">
+            <header className="relative z-30 flex shrink-0 flex-wrap items-center justify-between gap-3 overflow-visible border-b border-sbkm-navy/10 bg-white/30 px-4 py-2.5 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.03] sm:px-5 sm:py-3">
               {chromelessLayout ? (
                 <button
                   type="button"
@@ -1122,18 +1171,21 @@ export function DtChatShell(props: {
               <DtAgentSwitcher
                 agents={agents}
                 selectedAgentId={selectedAgentId}
-                onSelect={setSelectedAgentId}
-                disabled={chatLocked || isBusy || ghostMode}
+                onSelect={(id) => void handleSelectAgent(id)}
+                disabled={isBusy}
                 manageAgentsHref={
                   canManageAgents ? "/dashboard/verwaltung/agents" : null
                 }
                 contextHref={contextHref}
               />
-              {activeChat?.title && !ghostMode ? (
-                <p className="truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55">
-                  {activeChat.title}
-                </p>
-              ) : null}
+              <div className="ml-auto flex min-w-0 items-center gap-2">
+                <DtChatParticipantsBadge participants={participants} />
+                {activeChat?.title && !ghostMode ? (
+                  <p className="max-w-[10rem] truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55 sm:max-w-[14rem]">
+                    {activeChat.title}
+                  </p>
+                ) : null}
+              </div>
             </header>
             ) : null}
 
@@ -1147,13 +1199,8 @@ export function DtChatShell(props: {
                   messages={messages}
                   isThinking={isBusy}
                   agentName={displayAgentName}
-                  teamMode={
-                    activeChat?.mode === "team" ||
-                    activeChat?.mode === "seo" ||
-                    oversightActive
-                  }
+                  teamMode={showChatAuthors}
                   authorLabels={authorLabels}
-                  participants={oversightActive ? participants : undefined}
                   suggestedFollowUps={quickActions}
                   onSuggestedFollowUp={(text) => setPrompt(text)}
                   seoTasks={props.seoMode || isSeoChat ? seoTasks : undefined}
@@ -1246,6 +1293,8 @@ export function DtChatShell(props: {
               disabled={!selectedAgentId || (isInitialLoading && !ghostMode)}
               ghostMode={ghostMode}
               onGhostModeChange={handleGhostToggle}
+              textMode={textMode}
+              onTextModeChange={setTextMode}
               attachments={attachments}
               onAddFiles={(files) => void processFiles(files)}
               onRemoveAttachment={(index) => {

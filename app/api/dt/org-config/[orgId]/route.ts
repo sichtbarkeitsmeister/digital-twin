@@ -19,6 +19,7 @@ const patchSchema = z.object({
     .enum(["last_7_days", "last_30_days", "last_90_days"])
     .optional(),
   seoChecklist: z.array(z.union([z.string(), z.object({ label: z.string() })])).optional(),
+  seoChecklistPersonalized: z.boolean().optional(),
 });
 
 export async function GET(
@@ -81,6 +82,9 @@ export async function PATCH(
   if (d.reportRecipientEmail !== undefined) patch.report_recipient_email = d.reportRecipientEmail;
   if (d.reportTimeframe !== undefined) patch.report_timeframe = d.reportTimeframe;
   if (d.seoChecklist !== undefined) patch.seo_checklist = d.seoChecklist;
+  if (d.seoChecklistPersonalized !== undefined) {
+    patch.seo_checklist_personalized = d.seoChecklistPersonalized;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ ok: false, message: "Keine Änderungen." }, { status: 400 });
@@ -91,7 +95,7 @@ export async function PATCH(
     .update(patch)
     .eq("organisation_id", orgId)
     .select(
-      "organisation_id,display_name,twin_provisioned,seo_enabled,disabled,website_url,footer_url,ga4_property_id,gsc_site_url,sistrix_domain,sitemap_url,focus_keyword,report_recipient_email,report_timeframe,seo_checklist,videos",
+      "organisation_id,display_name,twin_provisioned,seo_enabled,disabled,website_url,footer_url,ga4_property_id,gsc_site_url,sistrix_domain,sitemap_url,focus_keyword,report_recipient_email,report_timeframe,seo_checklist,seo_checklist_personalized,videos",
     )
     .single();
 

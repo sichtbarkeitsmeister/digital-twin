@@ -101,8 +101,8 @@ export function DtAgentsReadOnlyBanner() {
         Agenten werden von uns gepflegt
       </p>
       <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
-        Sie können Agenten aus dem Marketplace aktivieren und Änderungswünsche einreichen. Wir prüfen
-        jede Anfrage und setzen sie nach Freigabe um — in der Regel innerhalb von 1–2 Werktagen.
+        Sie können Änderungswünsche zu Ihren Agenten einreichen. Wir prüfen jede Anfrage und setzen
+        sie nach Freigabe um — in der Regel innerhalb von 1–2 Werktagen.
       </p>
     </div>
   );

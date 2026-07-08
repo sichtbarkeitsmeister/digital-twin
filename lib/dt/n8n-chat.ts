@@ -25,6 +25,7 @@ export async function callDtN8nChat(params: {
   message: string;
   userMessageId: string | null;
   ghostMode?: boolean;
+  textMode?: boolean;
 }): Promise<DtN8nChatResponse> {
   const webhook = process.env.N8N_DT_CHAT_WEBHOOK?.trim();
   if (!webhook) {
@@ -47,6 +48,7 @@ export async function callDtN8nChat(params: {
       message: params.message,
       userMessageId: params.userMessageId,
       ghostMode: params.ghostMode ?? false,
+      textMode: params.textMode ?? false,
       attachments: [],
     }),
   });

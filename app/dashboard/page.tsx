@@ -1,4 +1,4 @@
 import { redirect } from "next/navigation";
 export default function DashboardPage() {
-  redirect("/dashboard/members");
+  redirect("/dashboard/organisations");
 }

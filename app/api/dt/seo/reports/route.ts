@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { queueDtSeoReport, requireAuthUser } from "@/lib/dt/db";
-import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { requireDtSeoAccess, requireDtSeoReportAccess } from "@/lib/dt/seo/access";
 import { triggerDtSeoReportN8n } from "@/lib/dt/seo/trigger-report";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -29,7 +29,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: "Ungültige Organisation." }, { status: 400 });
   }
 
-  const gate = await requireDtSeoAccess(auth.supabase, auth.userId!, parsed.data.org);
+  const gate = await requireDtSeoReportAccess(auth.supabase, auth.userId!, parsed.data.org);
   if (!gate.ok) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }

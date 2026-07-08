@@ -52,10 +52,26 @@ export function AdminCreateOrgForm() {
           required
         />
         <p className="text-xs text-secondary">
-          Die Person braucht ein bestehendes Konto und wird automatisch
-          Inhaber.
+          Bestehendes Konto oder neue Adresse — bei Willkommens-E-Mail wird bei
+          Bedarf automatisch ein Konto angelegt und ein Anmeldelink verschickt.
         </p>
       </div>
+
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+        <input
+          type="checkbox"
+          name="send_welcome"
+          value="on"
+          defaultChecked
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border border-primary accent-primary"
+        />
+        <span className="grid gap-1">
+          <span className="text-sm font-medium">Willkommens-E-Mail an Inhaber senden</span>
+          <span className="text-xs text-secondary">
+            Enthält einen Ein-Klick-Anmeldelink zum DigitalTwin-Portal.
+          </span>
+        </span>
+      </label>
 
       {state.message ? (
         <p

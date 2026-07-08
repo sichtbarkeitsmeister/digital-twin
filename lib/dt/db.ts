@@ -29,7 +29,7 @@ export async function loadOrgConfig(organisationId: string): Promise<DtOrgConfig
   const { data } = await supabase
     .from("dt_org_config")
     .select(
-      "organisation_id,display_name,twin_provisioned,seo_enabled,disabled,website_url,footer_url,ga4_property_id,ga4_account,gsc_site_url,gsc_account,sistrix_domain,sitemap_url,focus_keyword,report_recipient_email,report_timeframe,seo_checklist,videos",
+      "organisation_id,display_name,twin_provisioned,seo_enabled,disabled,website_url,footer_url,ga4_property_id,ga4_account,gsc_site_url,gsc_account,sistrix_domain,sitemap_url,focus_keyword,report_recipient_email,report_timeframe,seo_checklist,seo_checklist_personalized,videos",
     )
     .eq("organisation_id", organisationId)
     .maybeSingle();
@@ -136,6 +136,9 @@ export async function loadAgentsForOrgManage(organisationId: string): Promise<
     DtAgentRow & {
       template_id: string | null;
       prompt_template: string;
+      prompt_append: string | null;
+      is_default: boolean;
+      uses_global_prompt: boolean;
     }
   >
 > {
@@ -143,13 +146,19 @@ export async function loadAgentsForOrgManage(organisationId: string): Promise<
   const { data } = await supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template",
+      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,is_default,uses_global_prompt",
     )
     .eq("organisation_id", organisationId)
     .order("position", { ascending: true })
     .order("name", { ascending: true });
   return (data ?? []) as Array<
-    DtAgentRow & { template_id: string | null; prompt_template: string }
+    DtAgentRow & {
+      template_id: string | null;
+      prompt_template: string;
+      prompt_append: string | null;
+      is_default: boolean;
+      uses_global_prompt: boolean;
+    }
   >;
 }
 

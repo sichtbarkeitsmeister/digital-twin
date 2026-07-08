@@ -5,12 +5,14 @@ import {
 import { buildDtChatStaticSystemText } from "@/lib/dt/prompts/system-static";
 import { PASTED_URL_PROMPT_HINT_DE } from "@/lib/shared/pasted-url-context";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
+import { formatSeoChecklist } from "@/lib/dt/seo/seo-checklist";
 import type { DtSitePageRow } from "@/lib/dt/types";
 
 export type DtPromptAgent = {
   name: string;
   role: string | null;
   prompt_template: string;
+  prompt_append?: string | null;
   kind?: string;
 };
 
@@ -33,6 +35,7 @@ export function buildDtSystemPrompt(input: {
   monthlyStatsText?: string;
   seoTasksText?: string;
   pastedUrlsText?: string;
+  textMode?: boolean;
 }): string {
   const blocks = [
     buildDtChatStaticSystemText(),
@@ -47,9 +50,15 @@ export function buildDtSystemPrompt(input: {
     input.agent.prompt_template.trim(),
   ];
 
+  if (input.agent.prompt_append?.trim()) {
+    blocks.push("", "## Zusätzliche Anweisungen", input.agent.prompt_append.trim());
+  }
+
   if (input.globalRules?.trim()) {
     blocks.push("", "## Zusätzliche Nutzerregeln", input.globalRules.trim());
   }
+
+  blocks.push("", PASTED_URL_PROMPT_HINT_DE);
 
   if (input.mode === "seo" || input.agent.kind === "geo_advisor") {
     blocks.push("", buildDtGeoGroundingText());
@@ -60,7 +69,6 @@ export function buildDtSystemPrompt(input: {
     }
     if (input.mode === "seo") {
       blocks.push("", DT_SEO_MODE_INSTRUCTIONS);
-      blocks.push("", PASTED_URL_PROMPT_HINT_DE);
       blocks.push(
         "",
         "## Prüfbare Unterseiten",
@@ -84,9 +92,6 @@ export function buildDtSystemPrompt(input: {
         input.seoTasksText?.trim() ||
           "Keine Aufgabenliste geladen — vor Task-Empfehlungen kurz prüfen, ob der Nutzer schon Aufgaben im Board hat.",
       );
-      if (input.pastedUrlsText?.trim()) {
-        blocks.push("", "## Eingefügte Webseiten", input.pastedUrlsText.trim());
-      }
     }
   }
 
@@ -102,20 +107,32 @@ export function buildDtSystemPrompt(input: {
     blocks.push("", "## Ghost-Modus", "Diese Konversation wird nicht dauerhaft gespeichert.");
   }
 
-  return blocks.filter(Boolean).join("\n");
-}
+  if (input.textMode) {
+    blocks.push(
+      "",
+      "## Text-Modus",
+      "Der Nutzer möchte SEO-optimierte, publikationsreife Texte — kein Chat, sondern fertiger Copy-Output.",
+      "",
+      "### SEO",
+      "- Fokus-Keyword und semantische Varianten natürlich einweben (Titel, erster Absatz, H2/H3).",
+      "- Suchintention treffen; scannbare Struktur mit klaren Zwischenüberschriften.",
+      "- Bei Bedarf Meta-Titel, Meta-Description und interne Verlinkungsvorschläge klar getrennt anbieten.",
+      "- Kein Keyword-Stuffing, keine künstliche Wiederholung.",
+      "",
+      "### Menschlicher Ton (Anti-AI-Slop)",
+      "- Satzlängen und Rhythmus variieren; aktiv formulieren, konkrete Details statt Füllwörter.",
+      "- Vermeide Floskeln wie „in der heutigen schnelllebigen Welt“, „darüber hinaus“, „zudem“, „es ist wichtig zu beachten“.",
+      "- Kein leerer Schlussabsatz, kein Em-Dash-Overuse, natürliches Deutsch.",
+      "",
+      "### Output",
+      "- Liefere den fertigen Text zum direkten Einfügen.",
+      "- Meta-/Titel-Vorschläge klar abtrennen, wenn du sie mitlieferst.",
+    );
+  }
 
-function formatSeoChecklist(raw: unknown): string {
-  if (!Array.isArray(raw) || raw.length === 0) return "";
-  return raw
-    .map((item, i) => {
-      if (typeof item === "string") return `${i + 1}. ${item}`;
-      if (item && typeof item === "object" && "label" in item) {
-        const label = String((item as { label?: unknown }).label ?? "").trim();
-        if (label) return `${i + 1}. ${label}`;
-      }
-      return null;
-    })
-    .filter((line): line is string => Boolean(line))
-    .join("\n");
+  if (input.pastedUrlsText?.trim()) {
+    blocks.push("", "## Eingefügte Webseiten", input.pastedUrlsText.trim());
+  }
+
+  return blocks.filter(Boolean).join("\n");
 }

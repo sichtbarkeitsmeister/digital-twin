@@ -8,6 +8,8 @@ const patchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   role: z.string().trim().max(120).nullable().optional(),
   promptTemplate: z.string().max(32_000).optional(),
+  promptAppend: z.string().max(32_000).nullable().optional(),
+  usesGlobalPrompt: z.boolean().optional(),
   quickActions: z.array(z.string().trim().min(1).max(200)).max(12).optional(),
   isEnabled: z.boolean().optional(),
   position: z.number().int().min(0).max(999).optional(),
@@ -26,7 +28,7 @@ export async function GET(
   const { data, error } = await auth.supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template",
+      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,uses_global_prompt",
     )
     .eq("id", agentId)
     .maybeSingle();
@@ -82,6 +84,10 @@ export async function PATCH(
   if (parsed.data.name !== undefined) patch.name = parsed.data.name;
   if (parsed.data.role !== undefined) patch.role = parsed.data.role;
   if (parsed.data.promptTemplate !== undefined) patch.prompt_template = parsed.data.promptTemplate;
+  if (parsed.data.promptAppend !== undefined) patch.prompt_append = parsed.data.promptAppend;
+  if (parsed.data.usesGlobalPrompt !== undefined) {
+    patch.uses_global_prompt = parsed.data.usesGlobalPrompt;
+  }
   if (parsed.data.quickActions !== undefined) patch.quick_actions = parsed.data.quickActions;
   if (parsed.data.isEnabled !== undefined) patch.is_enabled = parsed.data.isEnabled;
   if (parsed.data.position !== undefined) patch.position = parsed.data.position;
@@ -101,7 +107,7 @@ export async function PATCH(
   const { data: agent } = await auth.supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template",
+      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,uses_global_prompt",
     )
     .eq("id", agentId)
     .single();
@@ -111,6 +117,8 @@ export async function PATCH(
 
 function deleteAgentMessage(code: string | undefined): string {
   switch (code) {
+    case "default_agent_protected":
+      return "Standard-Agenten (DigitalTwin, SEO-Berater) können nicht entfernt werden.";
     case "last_enabled_agent":
       return "Mindestens ein aktiver Agent muss in der Organisation bleiben.";
     case "agent_has_chats":
@@ -157,15 +165,17 @@ export async function DELETE(
 
   const deleted = await deleteDtAgent(agentId);
   if (!deleted.ok) {
-    const code = deleted.error?.includes("last_enabled_agent")
-      ? "last_enabled_agent"
-      : deleted.error?.includes("agent_has_chats")
-        ? "agent_has_chats"
-        : deleted.error?.includes("agent_not_found")
-          ? "agent_not_found"
-          : deleted.error?.includes("forbidden")
-            ? "forbidden"
-            : undefined;
+    const code = deleted.error?.includes("default_agent_protected")
+      ? "default_agent_protected"
+      : deleted.error?.includes("last_enabled_agent")
+        ? "last_enabled_agent"
+        : deleted.error?.includes("agent_has_chats")
+          ? "agent_has_chats"
+          : deleted.error?.includes("agent_not_found")
+            ? "agent_not_found"
+            : deleted.error?.includes("forbidden")
+              ? "forbidden"
+              : undefined;
     return NextResponse.json(
       { ok: false, message: deleteAgentMessage(code) },
       { status: 400 },

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { DtAgentsManager } from "@/components/dt/agents/dt-agents-manager";
+import { canDirectlyEditDtAgents } from "@/lib/dt/org-access";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { createClient } from "@/lib/supabase/server";
 
@@ -28,8 +29,14 @@ async function AgentsPageContent({
       ? searchParams.org
       : adminOrgs[0]!.id;
 
+  const initialCanDirectlyEdit = await canDirectlyEditDtAgents(supabase, user.id);
+
   return (
-    <DtAgentsManager organisations={adminOrgs} initialOrgId={initialOrgId} />
+    <DtAgentsManager
+      organisations={adminOrgs}
+      initialOrgId={initialOrgId}
+      initialCanDirectlyEdit={initialCanDirectlyEdit}
+    />
   );
 }
 

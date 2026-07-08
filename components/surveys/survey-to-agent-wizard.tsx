@@ -1,9 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Bot, ChevronLeft, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import {
+  Bot,
+  ChevronLeft,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Wand2,
+} from "lucide-react";
 
 import { DtSelect } from "@/components/dt/dt-select";
 import { cn } from "@/components/dt/cn";
@@ -14,8 +23,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { SurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
+import type { SurveyAgentRefinePreview } from "@/lib/dt/survey-refine-agent-prompt";
 
-type WizardStep = "organisation" | "regeln" | "vorschau" | "fertig";
+type WizardMode = "create" | "refine";
+type WizardStep = "organisation" | "modus" | "regeln" | "vorschau" | "fertig";
+
+type OrgAgentOption = {
+  id: string;
+  name: string;
+  role: string | null;
+  kind: string;
+  slug: string;
+};
 
 const container = {
   hidden: { opacity: 0 },
@@ -27,6 +46,12 @@ const item = {
   show: { opacity: 1, y: 0, transition: { duration: 0.2 } },
 };
 
+function agentKindLabel(kind: string): string {
+  if (kind === "seo_advisor") return "SEO";
+  if (kind === "persona") return "Persona";
+  return kind.replace(/_/g, " ");
+}
+
 export function SurveyToAgentWizard(props: {
   surveyId: string;
   responseId: string;
@@ -37,14 +62,23 @@ export function SurveyToAgentWizard(props: {
   const needsOrg = !props.initialOrganisationId && props.organisations.length > 0;
 
   const [step, setStep] = useState<WizardStep>(
-    needsOrg ? "organisation" : "regeln",
+    needsOrg ? "organisation" : "modus",
   );
+  const [wizardMode, setWizardMode] = useState<WizardMode>("create");
   const [orgId, setOrgId] = useState(
     props.initialOrganisationId ?? props.organisations[0]?.id ?? "",
   );
+  const [agentId, setAgentId] = useState("");
+  const [orgAgents, setOrgAgents] = useState<OrgAgentOption[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(false);
   const [extraRules, setExtraRules] = useState("");
   const [preview, setPreview] = useState<SurveyAgentPreview | null>(null);
+  const [refinePreview, setRefinePreview] = useState<SurveyAgentRefinePreview | null>(null);
+  const [currentPrompt, setCurrentPrompt] = useState("");
+  const [usesGlobalPrompt, setUsesGlobalPrompt] = useState(false);
+  const [refineAgent, setRefineAgent] = useState<OrgAgentOption | null>(null);
   const [promptExpanded, setPromptExpanded] = useState(false);
+  const [currentPromptOpen, setCurrentPromptOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,11 +91,62 @@ export function SurveyToAgentWizard(props: {
 
   const responseHref = `/dashboard/surveys/${props.surveyId}/responses/${props.responseId}`;
 
+  const stepBadges = useMemo(() => {
+    const steps: WizardStep[] = needsOrg
+      ? ["organisation", "modus", "regeln", "vorschau", "fertig"]
+      : ["modus", "regeln", "vorschau", "fertig"];
+    return steps;
+  }, [needsOrg]);
+
+  useEffect(() => {
+    if (wizardMode !== "refine" || !orgId) {
+      setOrgAgents([]);
+      setAgentId("");
+      return;
+    }
+
+    let cancelled = false;
+    setAgentsLoading(true);
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/dt/agents?org=${encodeURIComponent(orgId)}`);
+        const json = (await res.json()) as {
+          ok?: boolean;
+          agents?: Array<{
+            id: string;
+            name: string;
+            role: string | null;
+            kind: string;
+            slug: string;
+          }>;
+        };
+        if (cancelled) return;
+        const agents = json.ok && json.agents ? json.agents : [];
+        setOrgAgents(agents);
+        setAgentId((prev) =>
+          prev && agents.some((a) => a.id === prev) ? prev : (agents[0]?.id ?? ""),
+        );
+      } finally {
+        if (!cancelled) setAgentsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [wizardMode, orgId]);
+
   const generatePreview = useCallback(async () => {
     if (!orgId) {
       setError("Bitte zuerst eine Organisation wählen.");
       return;
     }
+    if (wizardMode === "refine" && !agentId) {
+      setError("Bitte einen Agenten wählen.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     const res = await fetch(
@@ -72,33 +157,90 @@ export function SurveyToAgentWizard(props: {
         body: JSON.stringify({
           organisationId: orgId,
           extraRules: extraRules.trim() || undefined,
+          mode: wizardMode,
+          agentId: wizardMode === "refine" ? agentId : undefined,
         }),
       },
     );
     const json = (await res.json()) as {
       ok?: boolean;
+      mode?: WizardMode;
       preview?: SurveyAgentPreview;
+      refinement?: SurveyAgentRefinePreview;
+      currentPrompt?: string;
+      usesGlobalPrompt?: boolean;
+      agent?: OrgAgentOption;
       message?: string;
     };
     setLoading(false);
-    if (!json.ok || !json.preview) {
+
+    if (!json.ok) {
       setError(json.message ?? "Generierung fehlgeschlagen.");
       return;
     }
-    setPreview(json.preview);
+
+    if (json.mode === "refine" && json.refinement) {
+      setRefinePreview(json.refinement);
+      setCurrentPrompt(json.currentPrompt ?? "");
+      setUsesGlobalPrompt(Boolean(json.usesGlobalPrompt));
+      setRefineAgent(json.agent ?? null);
+      setPreview(null);
+    } else if (json.preview) {
+      setPreview(json.preview);
+      setRefinePreview(null);
+      setCurrentPrompt("");
+      setRefineAgent(null);
+    } else {
+      setError("Generierung fehlgeschlagen.");
+      return;
+    }
+
     setStep("vorschau");
-  }, [orgId, extraRules, props.surveyId, props.responseId]);
+  }, [orgId, agentId, wizardMode, extraRules, props.surveyId, props.responseId]);
 
   const createAgent = useCallback(async () => {
-    if (!preview || !orgId) return;
+    if (!orgId) return;
+
+    if (wizardMode === "create") {
+      if (!preview) return;
+      setCreating(true);
+      setError(null);
+      const res = await fetch(
+        `/api/surveys/${props.surveyId}/responses/${props.responseId}/create-agent`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ organisationId: orgId, agent: preview }),
+        },
+      );
+      const json = (await res.json()) as {
+        ok?: boolean;
+        agentId?: string;
+        message?: string;
+      };
+      setCreating(false);
+      if (!json.ok || !json.agentId) {
+        setError(json.message ?? "Agent konnte nicht angelegt werden.");
+        return;
+      }
+      setCreatedAgentId(json.agentId);
+      setStep("fertig");
+      return;
+    }
+
+    if (!refinePreview || !agentId) return;
     setCreating(true);
     setError(null);
     const res = await fetch(
-      `/api/surveys/${props.surveyId}/responses/${props.responseId}/create-agent`,
+      `/api/surveys/${props.surveyId}/responses/${props.responseId}/refine-agent`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ organisationId: orgId, agent: preview }),
+        body: JSON.stringify({
+          organisationId: orgId,
+          agentId,
+          promptTemplate: refinePreview.prompt_template,
+        }),
       },
     );
     const json = (await res.json()) as {
@@ -108,12 +250,20 @@ export function SurveyToAgentWizard(props: {
     };
     setCreating(false);
     if (!json.ok || !json.agentId) {
-      setError(json.message ?? "Agent konnte nicht angelegt werden.");
+      setError(json.message ?? "Agent konnte nicht aktualisiert werden.");
       return;
     }
     setCreatedAgentId(json.agentId);
     setStep("fertig");
-  }, [preview, orgId, props.surveyId, props.responseId]);
+  }, [
+    wizardMode,
+    preview,
+    refinePreview,
+    orgId,
+    agentId,
+    props.surveyId,
+    props.responseId,
+  ]);
 
   const startTestChat = useCallback(async () => {
     if (!createdAgentId || !orgId) return;
@@ -124,16 +274,29 @@ export function SurveyToAgentWizard(props: {
         organisationId: orgId,
         agentId: createdAgentId,
         mode: "default",
-        title: `Test: ${preview?.name ?? "Persona"}`,
+        title:
+          wizardMode === "refine"
+            ? `Test: ${refineAgent?.name ?? "Agent"}`
+            : `Test: ${preview?.name ?? "Persona"}`,
       }),
     });
     const json = (await res.json()) as { ok?: boolean; chatId?: string };
     if (json.ok && json.chatId) {
       window.location.href = `/?org=${encodeURIComponent(orgId)}&chat=${encodeURIComponent(json.chatId)}`;
     }
-  }, [createdAgentId, orgId, preview?.name]);
+  }, [createdAgentId, orgId, wizardMode, refineAgent?.name, preview?.name]);
 
-  const promptChars = preview?.prompt_template.trim().length ?? 0;
+  const activePrompt =
+    wizardMode === "refine"
+      ? (refinePreview?.prompt_template ?? "")
+      : (preview?.prompt_template ?? "");
+  const promptChars = activePrompt.trim().length;
+
+  const goToRegeln = () => {
+    setPreview(null);
+    setRefinePreview(null);
+    setStep("regeln");
+  };
 
   return (
     <div className="grid gap-6">
@@ -152,15 +315,12 @@ export function SurveyToAgentWizard(props: {
           </h1>
         </div>
         <p className="text-sm text-secondary">
-          {props.surveyTitle} — Persona aus Umfrage-Antworten generieren
+          {props.surveyTitle} — Persona erstellen oder bestehenden Agenten verfeinern
         </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(needsOrg
-          ? (["organisation", "regeln", "vorschau", "fertig"] as const)
-          : (["regeln", "vorschau", "fertig"] as const)
-        ).map((s) => (
+        {stepBadges.map((s) => (
           <Badge
             key={s}
             variant={step === s ? "default" : "outline"}
@@ -168,11 +328,13 @@ export function SurveyToAgentWizard(props: {
           >
             {s === "organisation"
               ? "Organisation"
-              : s === "regeln"
-                ? "Regeln"
-                : s === "vorschau"
-                  ? "Vorschau"
-                  : "Fertig"}
+              : s === "modus"
+                ? "Modus"
+                : s === "regeln"
+                  ? "Regeln"
+                  : s === "vorschau"
+                    ? "Vorschau"
+                    : "Fertig"}
           </Badge>
         ))}
       </div>
@@ -189,7 +351,7 @@ export function SurveyToAgentWizard(props: {
             <CardTitle>Organisation zuweisen</CardTitle>
             <CardDescription>
               Diese Umfrage ist noch keiner Organisation zugeordnet. Wähle die
-              Ziel-Organisation für den neuen Agenten.
+              Ziel-Organisation.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -203,24 +365,20 @@ export function SurveyToAgentWizard(props: {
               }))}
               fullWidth
             />
-            <Button
-              type="button"
-              disabled={!orgId}
-              onClick={() => setStep("regeln")}
-            >
+            <Button type="button" disabled={!orgId} onClick={() => setStep("modus")}>
               Weiter
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {step === "regeln" ? (
+      {step === "modus" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Zusatzregeln & Generierung</CardTitle>
+            <CardTitle>Was möchtest du tun?</CardTitle>
             <CardDescription>
-              Optional: Ton, Schwerpunkte oder Tabus für die KI-Erstellung.
-              {orgName ? ` Organisation: ${orgName}.` : null}
+              Neuen Persona-Agenten anlegen oder Umfrage-Erkenntnisse in einen
+              vorhandenen Agenten einarbeiten.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -236,6 +394,108 @@ export function SurveyToAgentWizard(props: {
                 fullWidth
               />
             ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setWizardMode("create")}
+                className={cn(
+                  "rounded-xl border p-4 text-left transition-colors",
+                  wizardMode === "create"
+                    ? "border-sbkm-mint bg-sbkm-mint/10"
+                    : "border-border hover:bg-muted/40",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-4" aria-hidden />
+                  <span className="font-semibold text-primary">Neuen Agent erstellen</span>
+                </div>
+                <p className="mt-2 text-sm text-secondary">
+                  Neue Persona aus der Umfrage generieren — wie bisher.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setWizardMode("refine")}
+                className={cn(
+                  "rounded-xl border p-4 text-left transition-colors",
+                  wizardMode === "refine"
+                    ? "border-sbkm-mint bg-sbkm-mint/10"
+                    : "border-border hover:bg-muted/40",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Wand2 className="size-4" aria-hidden />
+                  <span className="font-semibold text-primary">
+                    Bestehenden Agent verfeinern
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-secondary">
+                  Umfrage in einen vorhandenen Prompt einarbeiten — z. B. SEO-Advisor.
+                </p>
+              </button>
+            </div>
+
+            {wizardMode === "refine" ? (
+              <div className="grid gap-2">
+                {agentsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-secondary">
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                    Agenten werden geladen…
+                  </div>
+                ) : orgAgents.length === 0 ? (
+                  <p className="text-sm text-secondary">
+                    Keine Agenten in dieser Organisation gefunden.
+                  </p>
+                ) : (
+                  <DtSelect
+                    label="Ziel-Agent"
+                    value={agentId}
+                    onValueChange={setAgentId}
+                    options={orgAgents.map((agent) => ({
+                      value: agent.id,
+                      label: agent.name,
+                      description: [agent.role, agentKindLabel(agent.kind)]
+                        .filter(Boolean)
+                        .join(" · "),
+                    }))}
+                    fullWidth
+                  />
+                )}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              {needsOrg ? (
+                <Button type="button" variant="outline" onClick={() => setStep("organisation")}>
+                  Zurück
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                disabled={!orgId || (wizardMode === "refine" && (!agentId || agentsLoading))}
+                onClick={() => setStep("regeln")}
+              >
+                Weiter
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {step === "regeln" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Zusatzregeln & Generierung</CardTitle>
+            <CardDescription>
+              Optional: Ton, Schwerpunkte oder Tabus für die KI.
+              {orgName ? ` Organisation: ${orgName}.` : null}
+              {wizardMode === "refine" && refineAgent
+                ? ` Agent: ${refineAgent.name}.`
+                : null}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
             <div className="grid gap-2">
               <Label htmlFor="extra-rules">Extra Regeln (optional)</Label>
               <Textarea
@@ -247,18 +507,12 @@ export function SurveyToAgentWizard(props: {
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              {needsOrg ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setStep("organisation")}
-                >
-                  Zurück
-                </Button>
-              ) : null}
+              <Button type="button" variant="outline" onClick={() => setStep("modus")}>
+                Zurück
+              </Button>
               <Button
                 type="button"
-                disabled={loading || !orgId}
+                disabled={loading || !orgId || (wizardMode === "refine" && !agentId)}
                 onClick={() => void generatePreview()}
               >
                 {loading ? (
@@ -266,7 +520,7 @@ export function SurveyToAgentWizard(props: {
                 ) : (
                   <Sparkles className="size-4" aria-hidden />
                 )}
-                Agent-Vorschau generieren
+                {wizardMode === "refine" ? "Verfeinerung generieren" : "Agent-Vorschau generieren"}
               </Button>
             </div>
           </CardContent>
@@ -276,15 +530,12 @@ export function SurveyToAgentWizard(props: {
       {step === "regeln" && loading ? (
         <div className="grid gap-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-16 animate-pulse rounded-xl bg-muted/50"
-            />
+            <div key={i} className="h-16 animate-pulse rounded-xl bg-muted/50" />
           ))}
         </div>
       ) : null}
 
-      {step === "vorschau" && preview ? (
+      {step === "vorschau" && wizardMode === "create" && preview ? (
         <motion.div className="grid gap-4" variants={container} initial="hidden" animate="show">
           <motion.div variants={item}>
             <Card className="shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
@@ -298,9 +549,7 @@ export function SurveyToAgentWizard(props: {
                   <Input
                     id="agent-name"
                     value={preview.name}
-                    onChange={(e) =>
-                      setPreview({ ...preview, name: e.target.value })
-                    }
+                    onChange={(e) => setPreview({ ...preview, name: e.target.value })}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -321,9 +570,7 @@ export function SurveyToAgentWizard(props: {
                   <Input
                     id="agent-role"
                     value={preview.role}
-                    onChange={(e) =>
-                      setPreview({ ...preview, role: e.target.value })
-                    }
+                    onChange={(e) => setPreview({ ...preview, role: e.target.value })}
                   />
                 </div>
                 <div className="grid gap-2 sm:col-span-2">
@@ -358,7 +605,7 @@ export function SurveyToAgentWizard(props: {
           </motion.div>
 
           <motion.div variants={item} className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => setStep("regeln")}>
+            <Button type="button" variant="outline" onClick={goToRegeln}>
               Zurück
             </Button>
             <Button
@@ -371,10 +618,113 @@ export function SurveyToAgentWizard(props: {
               Regenerieren
             </Button>
             <Button type="button" disabled={creating} onClick={() => void createAgent()}>
-              {creating ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-              ) : null}
+              {creating ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
               Agent anlegen
+            </Button>
+          </motion.div>
+        </motion.div>
+      ) : null}
+
+      {step === "vorschau" && wizardMode === "refine" && refinePreview ? (
+        <motion.div className="grid gap-4" variants={container} initial="hidden" animate="show">
+          <motion.div variants={item}>
+            <Card className="shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
+              <CardHeader>
+                <CardTitle>
+                  Verfeinerung für {refineAgent?.name ?? "Agent"}
+                </CardTitle>
+                <CardDescription>{refinePreview.summary}</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                {usesGlobalPrompt ? (
+                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+                    Dieser Agent nutzte einen globalen Basis-Prompt. Beim Übernehmen wird
+                    der organisations-spezifische Prompt aktualisiert und die globale
+                    Synchronisation deaktiviert.
+                  </p>
+                ) : null}
+
+                <div className="flex flex-wrap gap-2">
+                  {refinePreview.changed_sections.map((section) => (
+                    <Badge key={section} variant="secondary">
+                      {section}
+                    </Badge>
+                  ))}
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="refined-prompt">Verfeinerter Prompt</Label>
+                    <span className="text-xs tabular-nums text-secondary">
+                      {promptChars.toLocaleString("de-DE")} Zeichen
+                    </span>
+                  </div>
+                  <Textarea
+                    id="refined-prompt"
+                    value={refinePreview.prompt_template}
+                    onChange={(e) =>
+                      setRefinePreview({
+                        ...refinePreview,
+                        prompt_template: e.target.value,
+                      })
+                    }
+                    className={cn(
+                      "font-mono text-xs leading-relaxed",
+                      promptExpanded ? "min-h-[480px]" : "max-h-64",
+                    )}
+                    rows={promptExpanded ? 24 : 12}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPromptExpanded((v) => !v)}
+                    className="text-left text-xs font-semibold text-primary underline-offset-2 hover:underline"
+                  >
+                    {promptExpanded ? "Weniger anzeigen" : "Vollständig anzeigen"}
+                  </button>
+                </div>
+
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPromptOpen((v) => !v)}
+                    className="flex items-center gap-2 text-sm font-medium text-secondary hover:text-primary"
+                  >
+                    {currentPromptOpen ? (
+                      <ChevronUp className="size-4" aria-hidden />
+                    ) : (
+                      <ChevronDown className="size-4" aria-hidden />
+                    )}
+                    Aktueller Prompt zum Vergleich
+                  </button>
+                  {currentPromptOpen ? (
+                    <Textarea
+                      readOnly
+                      value={currentPrompt}
+                      className="max-h-48 font-mono text-xs leading-relaxed text-secondary"
+                      rows={10}
+                    />
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div variants={item} className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={goToRegeln}>
+              Zurück
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={loading}
+              onClick={() => void generatePreview()}
+            >
+              <RefreshCw className="size-4" aria-hidden />
+              Neu generieren
+            </Button>
+            <Button type="button" disabled={creating} onClick={() => void createAgent()}>
+              {creating ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+              Agent aktualisieren
             </Button>
           </motion.div>
         </motion.div>
@@ -383,29 +733,35 @@ export function SurveyToAgentWizard(props: {
       {step === "fertig" && createdAgentId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Agent erstellt</CardTitle>
+            <CardTitle>
+              {wizardMode === "refine" ? "Agent aktualisiert" : "Agent erstellt"}
+            </CardTitle>
             <CardDescription>
-              {preview?.name ?? "Persona"} wurde für {orgName} angelegt.
+              {wizardMode === "refine"
+                ? `${refineAgent?.name ?? "Agent"} wurde mit den Umfrage-Erkenntnissen verfeinert.`
+                : `${preview?.name ?? "Persona"} wurde für ${orgName} angelegt.`}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             <Button asChild variant="secondary">
-              <Link
-                href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(orgId)}`}
-              >
+              <Link href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(orgId)}`}>
                 Agent bearbeiten
               </Link>
             </Button>
-            <Button asChild variant="secondary">
-              <Link
-                href={`/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}&agent=${encodeURIComponent(createdAgentId)}&mode=default`}
-              >
-                Kontext ansehen
-              </Link>
-            </Button>
-            <Button type="button" onClick={() => void startTestChat()}>
-              Test-Chat starten
-            </Button>
+            {wizardMode === "create" ? (
+              <>
+                <Button asChild variant="secondary">
+                  <Link
+                    href={`/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}&agent=${encodeURIComponent(createdAgentId)}&mode=default`}
+                  >
+                    Kontext ansehen
+                  </Link>
+                </Button>
+                <Button type="button" onClick={() => void startTestChat()}>
+                  Test-Chat starten
+                </Button>
+              </>
+            ) : null}
             <Button asChild variant="outline">
               <Link href={responseHref}>Zur Antwort</Link>
             </Button>

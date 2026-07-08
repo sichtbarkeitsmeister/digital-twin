@@ -15,6 +15,7 @@ export async function GET() {
     )
     .is("archived_at", null)
     .eq("is_public", true)
+    .not("slug", "in", "(default,seo_advisor,geo_advisor,wunschkunde)")
     .order("name", { ascending: true });
 
   if (error) {

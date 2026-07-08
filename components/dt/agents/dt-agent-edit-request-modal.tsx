@@ -133,8 +133,8 @@ export function DtAgentEditRequestModal(props: {
               <div className="mt-3 flex gap-2 rounded-dt border border-sbkm-mint/25 bg-sbkm-mint/10 px-3 py-2 text-xs text-sbkm-navy dark:text-white/80">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sbkm-mint" aria-hidden />
                 <span>
-                  Sie können Marketplace-Agenten aktivieren. Anpassungen am Verhalten laufen über uns —
-                  so bleibt die Qualität für alle Nutzer gleich hoch.
+                  Anpassungen am Verhalten laufen über uns — so bleibt die Qualität für alle Nutzer
+                  gleich hoch.
                 </span>
               </div>
             </div>

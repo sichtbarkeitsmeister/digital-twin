@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthUser } from "@/lib/dt/db";
-import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { requireDtSeoReportAccess } from "@/lib/dt/seo/access";
 
 export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAuthUser();
@@ -20,7 +20,7 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     return NextResponse.json({ ok: false, message: "Report nicht gefunden." }, { status: 404 });
   }
 
-  const gate = await requireDtSeoAccess(auth.supabase, auth.userId, report.organisation_id);
+  const gate = await requireDtSeoReportAccess(auth.supabase, auth.userId, report.organisation_id);
   if (!gate.ok) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }

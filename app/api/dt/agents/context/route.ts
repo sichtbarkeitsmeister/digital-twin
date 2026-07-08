@@ -5,6 +5,7 @@ import {
   loadDtAgentContextBundle,
   type DtAgentContextMode,
 } from "@/lib/dt/agent-context-inspector";
+import { isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { canViewDtAgentContext, isPlatformAdmin } from "@/lib/dt/org-access";
 import { createClient } from "@/lib/supabase/server";
 
@@ -59,6 +60,25 @@ export async function GET(req: Request) {
       { ok: false, message: "SEO-Kontext ist nur für Plattform-Administratoren verfügbar." },
       { status: 403 },
     );
+  }
+
+  const platformAdmin = await isPlatformAdmin(supabase, user.id);
+  if (!platformAdmin) {
+    const { data: agent } = await supabase
+      .from("dt_agents")
+      .select("slug,kind")
+      .eq("id", parsed.data.agent)
+      .eq("organisation_id", parsed.data.org)
+      .maybeSingle();
+    if (!agent) {
+      return NextResponse.json({ ok: false, message: "Agent nicht gefunden." }, { status: 404 });
+    }
+    if (isSeoAdvisorAgent(agent)) {
+      return NextResponse.json(
+        { ok: false, message: "Der SEO-Berater ist nur für Administratoren sichtbar." },
+        { status: 403 },
+      );
+    }
   }
 
   try {

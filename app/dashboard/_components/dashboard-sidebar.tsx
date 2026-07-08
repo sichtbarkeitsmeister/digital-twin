@@ -12,10 +12,9 @@ import {
   Inbox,
   Plug,
   Shield,
-  MessageCircle,
   Sparkles,
-  Users,
   Workflow,
+  Mail,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -88,8 +87,7 @@ export function DashboardSidebar({
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
     { label: "Leads", href: "/dashboard/leads", icon: Sparkles },
-    { label: "Organisationen", href: "/dashboard/organisations", icon: Building2 },
-    { label: "Mitglieder", href: "/dashboard/members", icon: Users },
+    { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },
     ...(canManageIntegrations
       ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
       : []),
@@ -137,15 +135,6 @@ export function DashboardSidebar({
           },
         ]
       : []),
-    ...(isPlatformAdmin
-      ? [
-          {
-            label: "DigitalTwin Admin",
-            href: "/dashboard/admin/digital-twin",
-            icon: MessageCircle,
-          },
-        ]
-      : []),
   ];
 
   const adminItems: NavItem[] = [
@@ -157,11 +146,20 @@ export function DashboardSidebar({
       match: (pathname: string) => pathname.startsWith("/dashboard/admin/agent-requests"),
     },
     {
-      label: "Organisationen verwalten",
+      label: "Plattform-Übersicht",
       href: "/dashboard/admin/organisations",
       icon: Shield,
+      match: (pathname: string) =>
+        pathname.startsWith("/dashboard/admin/organisations") ||
+        pathname.startsWith("/dashboard/admin/digital-twin"),
     },
     { label: "Jobs runner", href: "/dashboard/admin/jobs", icon: Workflow },
+    {
+      label: "E-Mails",
+      href: "/dashboard/admin/mails",
+      icon: Mail,
+      match: (pathname: string) => pathname.startsWith("/dashboard/admin/mails"),
+    },
     {
       label: "Umfragen",
       href: "/dashboard/surveys",

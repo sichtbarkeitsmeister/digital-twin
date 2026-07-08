@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
 import { loadAgentsForOrgManage, requireAuthUser } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents, canManageDtAgents } from "@/lib/dt/org-access";
 
@@ -31,5 +32,8 @@ export async function GET(req: Request) {
 
   const agents = await loadAgentsForOrgManage(parsed.data.org);
   const canDirectlyEdit = await canDirectlyEditDtAgents(auth.supabase, auth.userId);
-  return NextResponse.json({ ok: true, agents, canDirectlyEdit });
+  const visibleAgents = canDirectlyEdit
+    ? agents
+    : filterAgentsHiddenFromOrgMembers(agents);
+  return NextResponse.json({ ok: true, agents: visibleAgents, canDirectlyEdit });
 }

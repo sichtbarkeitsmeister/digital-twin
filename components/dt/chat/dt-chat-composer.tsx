@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { ArrowUp, Ghost, Paperclip, Square } from "lucide-react";
+import { ArrowUp, Ghost, Paperclip, PenLine, Square } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { DtAttachmentChips } from "@/components/dt/chat/dt-attachment-chips";
@@ -26,6 +26,8 @@ export function DtChatComposer(props: {
   disabled?: boolean;
   ghostMode: boolean;
   onGhostModeChange: (next: boolean) => void;
+  textMode: boolean;
+  onTextModeChange: (next: boolean) => void;
   attachments: DtAttachmentDraft[];
   onAddFiles: (files: File[]) => void;
   onRemoveAttachment: (index: number) => void;
@@ -115,6 +117,7 @@ export function DtChatComposer(props: {
           className={cn(
             "relative overflow-hidden rounded-2xl border border-sbkm-navy/12 bg-white/90 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(46,46,80,0.06)] transition-[box-shadow,border-color] duration-200 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/35 before:to-transparent focus-within:border-sbkm-mint/45 focus-within:shadow-[0_0_0_3px_rgba(122,255,199,0.18),0_8px_24px_rgba(46,46,80,0.08)] dark:border-white/12 dark:bg-white/[0.07] dark:before:via-white/15 dark:focus-within:border-sbkm-mint/35",
             props.ghostMode && "border-amber-400/25 dark:border-amber-400/20",
+            props.textMode && "border-violet-400/25 dark:border-violet-400/20",
             props.disabled && "opacity-60",
           )}
         >
@@ -124,7 +127,9 @@ export function DtChatComposer(props: {
             placeholder={
               props.ghostMode
                 ? "Ghost-Chat — wird nicht gespeichert …"
-                : "Nachricht an deinen DigitalTwin …"
+                : props.textMode
+                  ? "Text-Modus — SEO-Text, der menschlich klingt …"
+                  : "Nachricht an deinen DigitalTwin …"
             }
             rows={2}
             disabled={props.isBusy || props.disabled}
@@ -195,6 +200,23 @@ export function DtChatComposer(props: {
               >
                 <Ghost className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="hidden text-xs font-bold sm:inline">Ghost</span>
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={props.textMode}
+                aria-label="Text-Modus"
+                disabled={props.isBusy}
+                onClick={() => props.onTextModeChange(!props.textMode)}
+                className={cn(
+                  iconBtn,
+                  "w-auto gap-1.5 px-2.5",
+                  props.textMode &&
+                    "border-violet-400/40 bg-violet-100/90 text-violet-950 hover:bg-violet-100 dark:bg-violet-500/20 dark:text-violet-100 dark:hover:bg-violet-500/25",
+                )}
+              >
+                <PenLine className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="hidden text-xs font-bold sm:inline">Text</span>
               </button>
             </div>
 
