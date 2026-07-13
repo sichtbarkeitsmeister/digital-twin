@@ -220,6 +220,15 @@ const seoTools = [
       required: ["url"],
     },
   },
+  {
+    name: "read_full_seo_report",
+    description:
+      "Liefert die vollständigen Rohdaten (payload.raw) des letzten abgeschlossenen SEO-Reports — alle Keywords, Empfehlungen und Metriken vor der n8n-Komprimierung. Der Abschnitt „Letzter SEO-Report“ im Prompt ist nur eine Kurzfassung. Rufe dieses Werkzeug nur auf, wenn du Detailtiefe brauchst (z. B. alle Empfehlungen, vollständige Keyword-Listen, detaillierte Metriken).",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 async function runSeoTool(name, input) {
@@ -254,6 +263,16 @@ async function runSeoTool(name, input) {
       if (!r.data.found || !r.data.page) return `Keine gecrawlte Seite für ${u} gefunden.`;
       const p = r.data.page;
       return `Inhalt von ${p.url}${p.title ? ` (${p.title})` : ""}:\n\n${p.content || "(kein Text)"}`;
+    }
+    if (name === "read_full_seo_report") {
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/report-detail`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: { organisationId },
+      });
+      if (!r.ok || !r.data?.ok) return "SEO-Report-Abruf fehlgeschlagen.";
+      return r.data.report || "Kein Report-Inhalt.";
     }
     return `Unbekanntes Werkzeug: ${name}`;
   } catch (err) {

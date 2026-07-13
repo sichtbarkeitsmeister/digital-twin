@@ -133,7 +133,8 @@ export function formatDtSeoReportForPrompt(report: DtSeoReportPromptRow | null):
 
   lines.push(
     "",
-    "Dies ist der aktuellste abgeschlossene SEO-Report. Nutze diese Daten für Rankings, Keywords und Maßnahmen — erfinde keine Zahlen außerhalb dieses Reports und der monatlichen Trends.",
+    "Dies ist der aktuellste abgeschlossene SEO-Report (Kurzfassung). Nutze diese Daten für Rankings, Keywords und Maßnahmen — erfinde keine Zahlen außerhalb dieses Reports und der monatlichen Trends.",
+    "Für vollständige Rohdaten (alle Keywords, Empfehlungen, Metriken) nutze das Werkzeug `read_full_seo_report`.",
   );
 
   return lines.join("\n");

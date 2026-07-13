@@ -6,6 +6,10 @@ import {
   getDtSitePageContent,
   searchDtSitePages,
 } from "@/lib/dt/seo/search-site-pages";
+import {
+  formatSeoReportRawForTool,
+  loadLatestDtSeoReportRawForOrg,
+} from "@/lib/dt/seo/report-detail-tool";
 import { mergeUsage, sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { sanitizeForLlmText } from "@/lib/shared/sanitize-llm-text";
 import type { DtChatMode } from "@/lib/dt/types";
@@ -52,6 +56,15 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
       required: ["url"],
     },
   },
+  {
+    name: "read_full_seo_report",
+    description:
+      "Liefert die vollständigen Rohdaten (payload.raw) des letzten abgeschlossenen SEO-Reports — alle Keywords, Empfehlungen und Metriken vor der n8n-Komprimierung. Der Abschnitt „Letzter SEO-Report“ im Prompt ist nur eine Kurzfassung. Rufe dieses Werkzeug nur auf, wenn du Detailtiefe brauchst (z. B. alle Empfehlungen, vollständige Keyword-Listen, detaillierte Metriken).",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 async function runDtRetrievalTool(
@@ -79,6 +92,10 @@ async function runDtRetrievalTool(
         return `Seite ${page.url} ist gecrawlt, enthält aber keinen extrahierbaren Text (evtl. JavaScript-gerendert).`;
       }
       return `Inhalt von ${page.url}${page.title ? ` (${page.title})` : ""}:\n\n${page.content}`;
+    }
+    if (name === "read_full_seo_report") {
+      const report = await loadLatestDtSeoReportRawForOrg(organisationId);
+      return formatSeoReportRawForTool(report);
     }
     return `Unbekanntes Werkzeug: ${name}`;
   } catch (err) {
