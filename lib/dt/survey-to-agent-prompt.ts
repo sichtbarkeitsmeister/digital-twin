@@ -7,6 +7,11 @@ import {
   tryParseJsonObject,
 } from "@/lib/ai/anthropic-helpers";
 import type { PersonaReferenceExample } from "@/lib/dt/survey-to-agent-context";
+import {
+  loadSurveyAgentGlobalPrompt,
+  resolveSurveyToAgentSystemPrompt,
+  SURVEY_TO_AGENT_PROMPT_SLUG,
+} from "@/lib/dt/survey-agent-global-prompts";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 
 export const surveyAgentPreviewSchema = z.object({
@@ -24,43 +29,6 @@ export const surveyAgentPreviewSchema = z.object({
 });
 
 export type SurveyAgentPreview = z.infer<typeof surveyAgentPreviewSchema>;
-
-function buildReferenceBlock(examples: PersonaReferenceExample[]): string {
-  if (examples.length === 0) {
-    return "Keine Referenz-Agenten verfügbar — nutze die Standard-Persona-Struktur.";
-  }
-
-  return examples
-    .map(
-      (ex, i) =>
-        `### Referenz ${i + 1}: ${ex.name} (${ex.slug})\nRolle: ${ex.role ?? "—"}\navatar_data Keys: ${ex.avatarDataKeys.join(", ") || "—"}\n\nPrompt-Auszug:\n${ex.promptExcerpt}`,
-    )
-    .join("\n\n---\n\n");
-}
-
-function buildSystemPrompt(examples: PersonaReferenceExample[]): string {
-  return `Du erstellst DigitalTwin-Persona-Agenten für B2B-Kunden aus abgeschlossenen Umfrage-Antworten.
-
-Antworte NUR mit einem JSON-Objekt (kein Markdown, kein Fließtext drumherum) mit exakt diesen Feldern:
-- name: voller Personenname der Persona
-- role: kurze Rollenbeschreibung (1 Satz, für Identitätsblock)
-- slug: snake_case, max 48 Zeichen, eindeutig beschreibend (z. B. hedwig_dreirad)
-- prompt_template: langer deutscher Markdown-Prompt mit konkretem Inhalt (KEINE {{platzhalter}} — alles ausformuliert)
-- avatar_data: JSON-Objekt mit strukturierten Feldern (name_clean, rolle_kurz, alter, disg, situation, tiefste_angst, entscheidungskriterien, einwaende, text_stil, trigger_worte, negative_worte, vorerfahrungen, entscheidungsprozess, … — nur Felder die zur Persona passen)
-- quick_actions: optional, Array mit 0–4 kurzen deutschen Starter-Fragen
-- summary: ein Satz für die UI-Vorschau
-
-Struktur für prompt_template (Pflicht-Abschnitte, Inhalt aus Umfrage ableiten):
-## AKTUELLES DATUM
-Heute ist {{current_date}}. (dieser eine Platzhalter ist erlaubt)
-
-Dann: Identität, DEINE PERSÖNLICHKEIT, DEINE SITUATION, Ängste/Sorgen, Entscheidungskriterien, Vorerfahrungen, Einwände, Sprach-Stil, Entscheidungsprozess, WER MIT DIR SPRICHT (User = Mitarbeiter der Organisation), WAS DU KANNST.
-
-Die Persona simuliert typischerweise einen Kunden/Wunschkunden — der Chat-Nutzer ist ein Mitarbeiter der Organisation.
-
-Referenz-Beispiele aus dem System (Struktur und Tiefe nachahmen, Inhalt aus der Umfrage):
-${buildReferenceBlock(examples)}`;
-}
 
 export async function generateSurveyAgentPreview(input: {
   surveyContext: string;
@@ -91,7 +59,10 @@ export async function generateSurveyAgentPreview(input: {
     .filter(Boolean)
     .join("\n");
 
-  const system = buildSystemPrompt(input.referenceExamples);
+  const system = resolveSurveyToAgentSystemPrompt(
+    await loadSurveyAgentGlobalPrompt(SURVEY_TO_AGENT_PROMPT_SLUG),
+    input.referenceExamples,
+  );
 
   async function runOnce(repairHint?: string): Promise<SurveyAgentPreview | null> {
     const result = await callAnthropicFirstAvailable({

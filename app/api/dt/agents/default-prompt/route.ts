@@ -4,8 +4,12 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 
+import { SURVEY_AGENT_GLOBAL_PROMPT_SLUGS } from "@/lib/dt/survey-agent-global-prompts";
+
+const GLOBAL_PROMPT_SLUGS = ["default", "seo_advisor", ...SURVEY_AGENT_GLOBAL_PROMPT_SLUGS] as const;
+
 const patchSchema = z.object({
-  slug: z.enum(["default", "seo_advisor"]),
+  slug: z.enum(GLOBAL_PROMPT_SLUGS),
   prompt: z.string().trim().min(1).max(32_000),
 });
 
@@ -22,7 +26,7 @@ export async function GET() {
   const { data, error } = await auth.supabase
     .from("dt_agent_templates")
     .select("slug,name,default_prompt")
-    .in("slug", ["default", "seo_advisor"]);
+    .in("slug", [...GLOBAL_PROMPT_SLUGS]);
 
   if (error) {
     return NextResponse.json({ ok: false, message: error.message }, { status: 500 });

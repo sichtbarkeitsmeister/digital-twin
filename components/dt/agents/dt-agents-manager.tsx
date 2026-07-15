@@ -32,7 +32,12 @@ import { cn } from "@/components/dt/cn";
 
 type AgentRow = DtAgentListItemRow;
 
-type GlobalPrompts = { default: string; seo_advisor: string };
+type GlobalPrompts = {
+  default: string;
+  seo_advisor: string;
+  survey_to_agent: string;
+  survey_refine_agent: string;
+};
 
 type PageView = "agents" | "prompts";
 type AgentFilter = "all" | "standard" | "additional";
@@ -151,10 +156,14 @@ export function DtAgentsManager(props: {
   const [globalPrompts, setGlobalPrompts] = useState<GlobalPrompts>({
     default: "",
     seo_advisor: "",
+    survey_to_agent: "",
+    survey_refine_agent: "",
   });
   const [globalPromptDraft, setGlobalPromptDraft] = useState<GlobalPrompts>({
     default: "",
     seo_advisor: "",
+    survey_to_agent: "",
+    survey_refine_agent: "",
   });
   const [globalChecklist, setGlobalChecklist] = useState("");
   const [globalChecklistDraft, setGlobalChecklistDraft] = useState("");
@@ -257,6 +266,8 @@ export function DtAgentsManager(props: {
       const next: GlobalPrompts = {
         default: globalJson.prompts.default ?? "",
         seo_advisor: globalJson.prompts.seo_advisor ?? "",
+        survey_to_agent: globalJson.prompts.survey_to_agent ?? "",
+        survey_refine_agent: globalJson.prompts.survey_refine_agent ?? "",
       };
       setGlobalPrompts(next);
       setGlobalPromptDraft(next);
@@ -362,7 +373,7 @@ export function DtAgentsManager(props: {
     await refresh(true);
   }
 
-  async function saveGlobalPrompt(slug: "default" | "seo_advisor") {
+  async function saveGlobalPrompt(slug: keyof GlobalPrompts) {
     setBusy(true);
     const res = await fetch("/api/dt/agents/default-prompt", {
       method: "PATCH",

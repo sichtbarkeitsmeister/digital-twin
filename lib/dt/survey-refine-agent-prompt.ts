@@ -7,6 +7,10 @@ import {
   tryParseJsonObject,
 } from "@/lib/ai/anthropic-helpers";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
+import {
+  loadSurveyAgentGlobalPrompt,
+  SURVEY_REFINE_AGENT_PROMPT_SLUG,
+} from "@/lib/dt/survey-agent-global-prompts";
 
 export const surveyAgentRefineSchema = z.object({
   prompt_template: z.string().min(200).max(32_000),
@@ -15,22 +19,6 @@ export const surveyAgentRefineSchema = z.object({
 });
 
 export type SurveyAgentRefinePreview = z.infer<typeof surveyAgentRefineSchema>;
-
-function buildSystemPrompt(): string {
-  return `Du verfeinerst einen bestehenden DigitalTwin-Agenten-Prompt anhand neuer Umfrage-Erkenntnisse.
-
-Antworte NUR mit einem JSON-Objekt (kein Markdown, kein Fließtext drumherum) mit exakt diesen Feldern:
-- prompt_template: der vollständige überarbeitete deutscher Prompt (Markdown), mindestens 200 Zeichen
-- summary: ein Satz für die UI — was wurde aus der Umfrage eingearbeitet
-- changed_sections: Array kurzer deutscher Labels (z. B. "Entscheidungskriterien", "Sprach-Stil") — welche Abschnitte du angepasst oder ergänzt hast
-
-Regeln:
-- Behalte Identität, Rolle, Struktur und bestehende Fähigkeiten des Agenten bei.
-- Integriere relevante Erkenntnisse aus der Umfrage (Präferenzen, Formulierungen, Prioritäten, Einschränkungen).
-- Lösche keine wichtigen bestehenden Anweisungen; erweitere und präzisiere.
-- Keine {{platzhalter}} außer {{current_date}} falls bereits vorhanden.
-- Der Prompt muss sofort einsatzbereit sein — konkret und auf Deutsch.`;
-}
 
 export async function generateSurveyAgentRefinement(input: {
   surveyContext: string;
@@ -76,7 +64,7 @@ export async function generateSurveyAgentRefinement(input: {
     .filter(Boolean)
     .join("\n");
 
-  const system = buildSystemPrompt();
+  const system = await loadSurveyAgentGlobalPrompt(SURVEY_REFINE_AGENT_PROMPT_SLUG);
 
   async function runOnce(repairHint?: string): Promise<SurveyAgentRefinePreview | null> {
     const result = await callAnthropicFirstAvailable({

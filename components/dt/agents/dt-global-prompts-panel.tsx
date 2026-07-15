@@ -1,17 +1,22 @@
 "use client";
 
-import { CheckSquare, Globe2, Sparkles } from "lucide-react";
+import { CheckSquare, ClipboardList, Globe2, Sparkles } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Textarea } from "@/components/ui/textarea";
 import { textToChecklist } from "@/lib/dt/seo/seo-checklist";
 
-type GlobalPrompts = { default: string; seo_advisor: string };
+type GlobalPrompts = {
+  default: string;
+  seo_advisor: string;
+  survey_to_agent: string;
+  survey_refine_agent: string;
+};
 
 const PROMPT_META: Record<
   keyof GlobalPrompts,
-  { title: string; description: string; icon: typeof Sparkles }
+  { title: string; description: string; icon: typeof Sparkles; placeholder?: string }
 > = {
   default: {
     title: "DigitalTwin",
@@ -24,6 +29,20 @@ const PROMPT_META: Record<
     description:
       "Nur im SEO-Modus für Plattform-Admins. Nutzt SEO-Daten der jeweiligen Organisation.",
     icon: Globe2,
+  },
+  survey_to_agent: {
+    title: "Umfrage → Agent (Neu)",
+    description:
+      "System-Prompt, wenn aus einer abgeschlossenen Umfrage ein neuer Persona-Agent generiert wird.",
+    icon: ClipboardList,
+    placeholder:
+      "Prompt für die JSON-Ausgabe (name, role, slug, prompt_template, …). Platzhalter {{reference_examples}} für Referenz-Agenten.",
+  },
+  survey_refine_agent: {
+    title: "Umfrage → Agent (Verfeinern)",
+    description:
+      "System-Prompt, wenn ein bestehender Agent anhand neuer Umfrage-Antworten verfeinert wird.",
+    icon: ClipboardList,
   },
 };
 
@@ -49,17 +68,27 @@ export function DtGlobalPromptsPanel(props: {
           Globale Standard-Prompts
         </h2>
         <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/55">
-          Diese Prompts gelten für DigitalTwin und SEO-Berater in allen Organisationen. Änderungen
-          sind sofort aktiv — nutze{" "}
+          Diese Prompts gelten plattformweit. Agent-Prompts nutzen{" "}
           <code className="rounded bg-sbkm-navy/5 px-1 text-xs dark:bg-white/10">
             {"{{organisation}}"}
+          </code>
+          ; Umfrage-Konvertierung nutzt{" "}
+          <code className="rounded bg-sbkm-navy/5 px-1 text-xs dark:bg-white/10">
+            {"{{reference_examples}}"}
           </code>{" "}
-          als Platzhalter.
+          für Referenz-Personas.
         </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {(["default", "seo_advisor"] as const).map((slug) => {
+        {(
+          [
+            "default",
+            "seo_advisor",
+            "survey_to_agent",
+            "survey_refine_agent",
+          ] as const
+        ).map((slug) => {
           const meta = PROMPT_META[slug];
           const Icon = meta.icon;
           const dirty =
@@ -86,7 +115,7 @@ export function DtGlobalPromptsPanel(props: {
                 disabled={props.busy}
                 onChange={(e) => props.onDraftChange(slug, e.target.value)}
                 className="min-h-[200px] font-mono text-sm leading-relaxed"
-                placeholder="Prompt mit {{organisation}} als Platzhalter …"
+                placeholder={meta.placeholder ?? "Prompt …"}
               />
               <div className="flex justify-end">
                 <DtPillButton
