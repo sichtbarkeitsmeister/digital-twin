@@ -74,6 +74,7 @@ export async function generateSurveyAgentPreview(input: {
       anthropic,
       models,
       maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
+      stream: true,
       system,
       messages: [
         {

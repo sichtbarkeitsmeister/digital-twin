@@ -98,16 +98,37 @@ export function isAnthropicModelNotFoundError(error: unknown): boolean {
   );
 }
 
+/**
+ * Anthropic requires streaming for long-running requests (high max_tokens can
+ * exceed the non-streaming time limit). Auto-enable above this threshold.
+ */
+const STREAM_REQUIRED_MAX_TOKENS = 8_192;
+
 export async function callAnthropicFirstAvailable(input: {
   anthropic: Anthropic;
   models: string[];
   maxTokens: number;
   system: SurveyChatSystem;
   messages: Anthropic.MessageParam[];
+  /** Force streaming; defaults to true when maxTokens > 8192. */
+  stream?: boolean;
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
+  const useStream = input.stream ?? input.maxTokens > STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
+
   for (const model of input.models) {
     try {
+      if (useStream) {
+        const stream = input.anthropic.messages.stream({
+          model,
+          max_tokens: input.maxTokens,
+          system: input.system,
+          messages: input.messages,
+        });
+        const response = await stream.finalMessage();
+        return { response, model };
+      }
+
       const response = await input.anthropic.messages.create({
         model,
         max_tokens: input.maxTokens,
