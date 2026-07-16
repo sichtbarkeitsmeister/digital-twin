@@ -10,6 +10,7 @@ import type { PersonaReferenceExample } from "@/lib/dt/survey-to-agent-context";
 import {
   loadSurveyAgentGlobalPrompt,
   resolveSurveyToAgentSystemPrompt,
+  SURVEY_AGENT_GENERATION_MAX_TOKENS,
   SURVEY_TO_AGENT_PROMPT_SLUG,
 } from "@/lib/dt/survey-agent-global-prompts";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
@@ -22,10 +23,12 @@ export const surveyAgentPreviewSchema = z.object({
     .min(1)
     .max(48)
     .regex(/^[a-z0-9_]+$/, "Slug nur Kleinbuchstaben, Ziffern und Unterstrich."),
-  prompt_template: z.string().min(200),
+  prompt_template: z.string().min(200).max(120_000),
   avatar_data: z.record(z.string(), z.unknown()),
+  /** Internal admin notes from the global conversion prompt — ignored by create if unused. */
+  qa_hinweise: z.array(z.string()).optional(),
   quick_actions: z.array(z.string()).optional().default([]),
-  summary: z.string().min(1).max(300),
+  summary: z.string().min(1).max(1_000),
 });
 
 export type SurveyAgentPreview = z.infer<typeof surveyAgentPreviewSchema>;
@@ -42,8 +45,10 @@ export async function generateSurveyAgentPreview(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
-  const primaryModel = resolveDtAnthropicModel("default");
-  const models = [primaryModel, "claude-haiku-4-5-20251001"].filter(
+  // Prefer Sonnet for long, complete questionnaire → JSON; Haiku as fallback.
+  const primaryModel =
+    process.env.ANTHROPIC_DT_SURVEY_MODEL?.trim() || "claude-sonnet-4-6";
+  const models = [primaryModel, resolveDtAnthropicModel("default"), "claude-haiku-4-5-20251001"].filter(
     (m, i, arr) => arr.indexOf(m) === i,
   );
 
@@ -68,7 +73,7 @@ export async function generateSurveyAgentPreview(input: {
     const result = await callAnthropicFirstAvailable({
       anthropic,
       models,
-      maxTokens: 8192,
+      maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
       system,
       messages: [
         {

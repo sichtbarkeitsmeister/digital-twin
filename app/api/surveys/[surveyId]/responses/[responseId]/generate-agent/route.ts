@@ -7,6 +7,8 @@ import {
 } from "@/lib/dt/survey-to-agent-service";
 import { requireSurveyPlatformAdmin } from "@/lib/surveys/platform-admin";
 
+export const maxDuration = 300;
+
 const bodySchema = z
   .object({
     organisationId: z.string().uuid(),

@@ -9,13 +9,14 @@ import {
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import {
   loadSurveyAgentGlobalPrompt,
+  SURVEY_AGENT_GENERATION_MAX_TOKENS,
   SURVEY_REFINE_AGENT_PROMPT_SLUG,
 } from "@/lib/dt/survey-agent-global-prompts";
 
 export const surveyAgentRefineSchema = z.object({
-  prompt_template: z.string().min(200).max(32_000),
-  summary: z.string().min(1).max(300),
-  changed_sections: z.array(z.string().min(1).max(120)).min(1).max(12),
+  prompt_template: z.string().min(200).max(120_000),
+  summary: z.string().min(1).max(1_000),
+  changed_sections: z.array(z.string().min(1).max(200)).min(1).max(40),
 });
 
 export type SurveyAgentRefinePreview = z.infer<typeof surveyAgentRefineSchema>;
@@ -36,8 +37,9 @@ export async function generateSurveyAgentRefinement(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
-  const primaryModel = resolveDtAnthropicModel("default");
-  const models = [primaryModel, "claude-haiku-4-5-20251001"].filter(
+  const primaryModel =
+    process.env.ANTHROPIC_DT_SURVEY_MODEL?.trim() || "claude-sonnet-4-6";
+  const models = [primaryModel, resolveDtAnthropicModel("default"), "claude-haiku-4-5-20251001"].filter(
     (m, i, arr) => arr.indexOf(m) === i,
   );
 
@@ -70,7 +72,7 @@ export async function generateSurveyAgentRefinement(input: {
     const result = await callAnthropicFirstAvailable({
       anthropic,
       models,
-      maxTokens: 8192,
+      maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
       system,
       messages: [
         {

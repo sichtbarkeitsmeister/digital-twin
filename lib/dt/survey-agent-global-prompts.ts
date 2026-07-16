@@ -4,6 +4,9 @@ import { createServiceClient } from "@/lib/supabase/service";
 export const SURVEY_TO_AGENT_PROMPT_SLUG = "survey_to_agent" as const;
 export const SURVEY_REFINE_AGENT_PROMPT_SLUG = "survey_refine_agent" as const;
 
+/** Output budget for questionnaire → agent JSON (full survey data, no mid-JSON cut-off). */
+export const SURVEY_AGENT_GENERATION_MAX_TOKENS = 64_000;
+
 export const SURVEY_AGENT_GLOBAL_PROMPT_SLUGS = [
   SURVEY_TO_AGENT_PROMPT_SLUG,
   SURVEY_REFINE_AGENT_PROMPT_SLUG,

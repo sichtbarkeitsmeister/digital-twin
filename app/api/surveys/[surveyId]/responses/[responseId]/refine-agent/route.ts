@@ -11,8 +11,10 @@ import { requireSurveyPlatformAdmin } from "@/lib/surveys/platform-admin";
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
   agentId: z.string().uuid(),
-  promptTemplate: z.string().min(200).max(32_000),
+  promptTemplate: z.string().min(200).max(120_000),
 });
+
+export const maxDuration = 300;
 
 export async function POST(
   req: Request,
