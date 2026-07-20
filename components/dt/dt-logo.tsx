@@ -9,35 +9,49 @@ type DtLogoProps = {
 };
 
 const sizeClasses = {
-  sm: "h-16 sm:h-[4.5rem]",
-  md: "h-[4.5rem] sm:h-[5.5rem]",
-  lg: "h-[5.5rem] sm:h-[5.5rem]",
-  auth: "h-14 sm:h-16",
-  header: "h-11 sm:h-12 md:h-14",
-  sidebar: "h-11 sm:h-12",
-  compact: "h-6 max-w-[5.5rem] sm:h-7 sm:max-w-[6.5rem]",
+  sm: "h-8 sm:h-9",
+  md: "h-9 sm:h-10",
+  lg: "h-10 sm:h-11",
+  auth: "h-9 sm:h-10",
+  header: "h-8 sm:h-9 md:h-10",
+  sidebar: "h-8 sm:h-9",
+  compact: "h-6 max-w-[7.5rem] sm:h-7 sm:max-w-[8.5rem]",
 };
 
 export function DtLogo({ href = "/", className, size = "md" }: DtLogoProps) {
-  const image = (
-    <Image
-      src="/assets/digital-twin-logo.png"
-      alt="DigitalTwin"
-      width={320}
-      height={88}
-      priority
-      className={cn(
-        "w-auto object-contain dark:brightness-0 dark:invert",
-        sizeClasses[size],
-        className,
-      )}
-    />
+  const imageClassName = cn(
+    "w-auto object-contain object-left",
+    sizeClasses[size],
+    className,
   );
 
-  if (!href) return image;
+  const image = (
+    <>
+      <Image
+        src="/assets/digital-twin-logo.png"
+        alt="Digital Twin"
+        width={900}
+        height={225}
+        priority
+        className={cn(imageClassName, "dark:hidden")}
+      />
+      <Image
+        src="/assets/digital-twin-logo-dark.png"
+        alt="Digital Twin"
+        width={900}
+        height={225}
+        priority
+        className={cn(imageClassName, "hidden dark:block")}
+      />
+    </>
+  );
+
+  if (!href) {
+    return <span className="inline-flex shrink-0 items-center">{image}</span>;
+  }
 
   return (
-    <Link href={href} className="inline-flex shrink-0 items-center" aria-label="DigitalTwin">
+    <Link href={href} className="inline-flex shrink-0 items-center" aria-label="Digital Twin">
       {image}
     </Link>
   );
