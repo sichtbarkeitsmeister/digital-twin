@@ -27,19 +27,21 @@ export function DtLogo({ href = "/", className, size = "md" }: DtLogoProps) {
 
   const image = (
     <>
+      {/* digitaltwin-logo-dark = indigo wordmark for light backgrounds */}
       <Image
-        src="/assets/digital-twin-logo.png"
+        src="/assets/digitaltwin-logo-dark.png"
         alt="Digital Twin"
-        width={900}
-        height={225}
+        width={1059}
+        height={173}
         priority
         className={cn(imageClassName, "dark:hidden")}
       />
+      {/* digitaltwin-logo-white = white wordmark for dark backgrounds */}
       <Image
-        src="/assets/digital-twin-logo-dark.png"
+        src="/assets/digitaltwin-logo-white.png"
         alt="Digital Twin"
-        width={900}
-        height={225}
+        width={1059}
+        height={173}
         priority
         className={cn(imageClassName, "hidden dark:block")}
       />
