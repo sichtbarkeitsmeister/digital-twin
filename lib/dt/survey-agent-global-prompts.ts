@@ -6,20 +6,26 @@ export const SURVEY_REFINE_AGENT_PROMPT_SLUG = "survey_refine_agent" as const;
 
 /**
  * Output budget for questionnaire → agent JSON.
- * 16k is enough for a full persona prompt + avatar_data and finishes within the
- * API route maxDuration (300s). 64k previously caused multi-minute generations
- * that hit the server timeout while the UI spinner hung with no error.
- * Override with ANTHROPIC_DT_SURVEY_MAX_TOKENS if needed.
+ * Keep under ~12k so Sonnet/Haiku finish inside the API route window.
+ * Override with ANTHROPIC_DT_SURVEY_MAX_TOKENS if needed (capped at 16k).
  */
 export const SURVEY_AGENT_GENERATION_MAX_TOKENS = (() => {
   const raw = process.env.ANTHROPIC_DT_SURVEY_MAX_TOKENS?.trim();
-  const n = raw ? Number(raw) : 16_384;
-  if (!Number.isFinite(n) || n < 2_048) return 16_384;
-  return Math.min(Math.floor(n), 32_768);
+  const n = raw ? Number(raw) : 12_288;
+  if (!Number.isFinite(n) || n < 2_048) return 12_288;
+  return Math.min(Math.floor(n), 16_384);
 })();
 
-/** Soft deadline for one Anthropic attempt (under route maxDuration=300). */
-export const SURVEY_AGENT_GENERATION_TIMEOUT_MS = 240_000;
+/** Soft deadline for one Anthropic attempt (under route maxDuration). */
+export const SURVEY_AGENT_GENERATION_TIMEOUT_MS = (() => {
+  const raw = process.env.ANTHROPIC_DT_SURVEY_TIMEOUT_MS?.trim();
+  const n = raw ? Number(raw) : 180_000;
+  if (!Number.isFinite(n) || n < 30_000) return 180_000;
+  return Math.min(Math.floor(n), 700_000);
+})();
+
+/** Default model: Haiku is fast enough for large questionnaires; override with Sonnet if needed. */
+export const SURVEY_AGENT_DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
 export const SURVEY_AGENT_GLOBAL_PROMPT_SLUGS = [
   SURVEY_TO_AGENT_PROMPT_SLUG,

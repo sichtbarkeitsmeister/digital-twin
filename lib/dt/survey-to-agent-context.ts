@@ -202,7 +202,7 @@ export type PersonaReferenceExample = {
   avatarDataKeys: string[];
 };
 
-const PROMPT_EXCERPT_MAX = 2000;
+const PROMPT_EXCERPT_MAX = 500;
 
 export async function loadPersonaReferenceExamples(
   organisationId: string,
@@ -221,7 +221,7 @@ export async function loadPersonaReferenceExamples(
     (a, b) => (b.prompt_template?.length ?? 0) - (a.prompt_template?.length ?? 0),
   );
 
-  let picked = sorted.slice(0, 2);
+  let picked = sorted.slice(0, 1);
 
   if (picked.length === 0) {
     const { data: fallback } = await supabase
@@ -229,12 +229,12 @@ export async function loadPersonaReferenceExamples(
       .select("name, role, slug, prompt_template, avatar_data")
       .eq("kind", "persona")
       .order("updated_at", { ascending: false })
-      .limit(10);
+      .limit(5);
 
     const fallbackSorted = (fallback ?? []).sort(
       (a, b) => (b.prompt_template?.length ?? 0) - (a.prompt_template?.length ?? 0),
     );
-    picked = fallbackSorted.slice(0, 2);
+    picked = fallbackSorted.slice(0, 1);
   }
 
   return picked.map((row) => ({

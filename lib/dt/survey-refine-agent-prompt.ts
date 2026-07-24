@@ -9,6 +9,7 @@ import {
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import {
   loadSurveyAgentGlobalPrompt,
+  SURVEY_AGENT_DEFAULT_MODEL,
   SURVEY_AGENT_GENERATION_MAX_TOKENS,
   SURVEY_AGENT_GENERATION_TIMEOUT_MS,
   SURVEY_REFINE_AGENT_PROMPT_SLUG,
@@ -38,8 +39,7 @@ export async function generateSurveyAgentRefinement(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
-  const primaryModel =
-    process.env.ANTHROPIC_DT_SURVEY_MODEL?.trim() || "claude-sonnet-4-6";
+  const primaryModel = process.env.ANTHROPIC_DT_SURVEY_MODEL?.trim() || SURVEY_AGENT_DEFAULT_MODEL;
   const models = [primaryModel, resolveDtAnthropicModel("default"), "claude-haiku-4-5-20251001"].filter(
     (m, i, arr) => arr.indexOf(m) === i,
   );

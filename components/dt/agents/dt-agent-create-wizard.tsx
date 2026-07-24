@@ -182,7 +182,7 @@ export function DtAgentCreateWizard(props: {
             organisationId: props.organisationId,
             extraRules: extraRules.trim() || undefined,
           }),
-          signal: AbortSignal.timeout(290_000),
+          signal: AbortSignal.timeout(780_000),
         },
       );
       const json = (await res.json().catch(() => null)) as {

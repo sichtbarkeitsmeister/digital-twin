@@ -162,7 +162,7 @@ export function SurveyToAgentWizard(props: {
             mode: wizardMode,
             agentId: wizardMode === "refine" ? agentId : undefined,
           }),
-          signal: AbortSignal.timeout(290_000),
+          signal: AbortSignal.timeout(780_000),
         },
       );
       const json = (await res.json().catch(() => null)) as {
@@ -203,7 +203,7 @@ export function SurveyToAgentWizard(props: {
         err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError");
       setError(
         aborted
-          ? "Die Generierung dauert zu lange (Zeitlimit). Bitte Seite neu laden und erneut versuchen."
+          ? "Die Generierung hat das Zeitlimit überschritten. Bitte erneut versuchen — der nächste Deploy nutzt ein schnelleres Modell."
           : err instanceof Error
             ? err.message
             : "Generierung fehlgeschlagen.",
