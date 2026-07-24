@@ -73,11 +73,14 @@ export default async function SurveyResponseDetailPage({
 
   const { data: survey } = await supabase
     .from("surveys")
-    .select("id,title,definition")
+    .select("id,title,definition,purpose")
     .eq("id", surveyId)
     .is("deleted_at", null)
     .maybeSingle();
   if (!survey) return notFound();
+
+  const surveyPurpose =
+    (survey as { purpose?: string }).purpose === "anbieter" ? "anbieter" : "persona";
 
   const { data: response } = await supabase
     .from("survey_responses")
@@ -162,7 +165,7 @@ export default async function SurveyResponseDetailPage({
 
           <div className="flex flex-wrap items-center gap-2">
             <ResponseExportActions payload={exportPayload} />
-            {response.status === "completed" && existingAgent ? (
+            {response.status === "completed" && existingAgent && surveyPurpose === "persona" ? (
               <Button asChild size="sm" variant="secondary">
                 <Link
                   href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(existingAgent.organisation_id)}`}
@@ -172,13 +175,16 @@ export default async function SurveyResponseDetailPage({
                 </Link>
               </Button>
             ) : null}
-            {response.status === "completed" && !existingAgent ? (
+            {response.status === "completed" &&
+            (surveyPurpose === "anbieter" || !existingAgent) ? (
               <Button asChild size="sm">
                 <Link
                   href={`/dashboard/surveys/${surveyId}/responses/${responseId}/create-agent`}
                 >
                   <Bot className="size-4" aria-hidden />
-                  In Agent umwandeln
+                  {surveyPurpose === "anbieter"
+                    ? "In SEO-Berater übernehmen"
+                    : "In Agent umwandeln"}
                 </Link>
               </Button>
             ) : null}

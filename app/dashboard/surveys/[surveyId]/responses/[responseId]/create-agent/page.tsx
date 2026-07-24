@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { SurveyAnbieterToSeoWizard } from "@/components/surveys/survey-anbieter-to-seo-wizard";
 import { SurveyToAgentWizard } from "@/components/surveys/survey-to-agent-wizard";
 import { findAgentForSurveyResponse } from "@/lib/dt/survey-to-agent-context";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
+import { normalizeSurveyPurpose } from "@/lib/surveys/purpose";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function SurveyCreateAgentPage({
@@ -31,12 +33,14 @@ export default async function SurveyCreateAgentPage({
 
   const { data: survey } = await supabase
     .from("surveys")
-    .select("id, title, organisation_id")
+    .select("id, title, organisation_id, purpose")
     .eq("id", surveyId)
     .is("deleted_at", null)
     .maybeSingle();
 
   if (!survey) return notFound();
+
+  const purpose = normalizeSurveyPurpose((survey as { purpose?: unknown }).purpose);
 
   const { data: response } = await supabase
     .from("survey_responses")
@@ -49,13 +53,6 @@ export default async function SurveyCreateAgentPage({
 
   if (response.status !== "completed") {
     redirect(`/dashboard/surveys/${surveyId}/responses/${responseId}`);
-  }
-
-  const existingAgent = await findAgentForSurveyResponse(responseId);
-  if (existingAgent) {
-    redirect(
-      `/dashboard/verwaltung/agents?org=${encodeURIComponent(existingAgent.organisation_id)}`,
-    );
   }
 
   const { organisations } = await loadDtManageOrganisations(user.id);
@@ -71,6 +68,25 @@ export default async function SurveyCreateAgentPage({
           Keine Organisation verfügbar. Lege zuerst eine Organisation an.
         </p>
       </div>
+    );
+  }
+
+  if (purpose === "anbieter") {
+    return (
+      <SurveyAnbieterToSeoWizard
+        surveyId={surveyId}
+        responseId={responseId}
+        surveyTitle={survey.title}
+        initialOrganisationId={survey.organisation_id}
+        organisations={organisations}
+      />
+    );
+  }
+
+  const existingAgent = await findAgentForSurveyResponse(responseId);
+  if (existingAgent) {
+    redirect(
+      `/dashboard/verwaltung/agents?org=${encodeURIComponent(existingAgent.organisation_id)}`,
     );
   }
 

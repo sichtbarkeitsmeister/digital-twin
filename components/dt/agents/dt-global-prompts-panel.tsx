@@ -27,13 +27,13 @@ const PROMPT_META: Record<
   seo_advisor: {
     title: "SEO-Berater",
     description:
-      "Nur im SEO-Modus für Plattform-Admins. Nutzt SEO-Daten der jeweiligen Organisation.",
+      "Nur im SEO-Modus für Plattform-Admins. Nutzt SEO-Daten, Website-Inhalte und Anbieter-Wissen (Zusätzliche Anweisungen) der jeweiligen Organisation.",
     icon: Globe2,
   },
   survey_to_agent: {
     title: "Umfrage → Agent (Neu)",
     description:
-      "System-Prompt, wenn aus einer abgeschlossenen Umfrage ein neuer Persona-Agent generiert wird.",
+      "Nur für Kunden-Persona-Fragebögen: System-Prompt, wenn daraus ein neuer Persona-Avatar generiert wird. Anbieter-Umfragen nutzen diesen Prompt nicht.",
     icon: ClipboardList,
     placeholder:
       "Prompt für die JSON-Ausgabe (name, role, slug, prompt_template, …). Platzhalter {{reference_examples}} für Referenz-Agenten.",

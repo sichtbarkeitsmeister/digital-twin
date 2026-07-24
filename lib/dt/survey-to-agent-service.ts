@@ -19,12 +19,21 @@ export async function loadSurveyResponseBundle(surveyId: string, responseId: str
 
   const { data: survey } = await supabase
     .from("surveys")
-    .select("id, title, definition, organisation_id")
+    .select("id, title, definition, organisation_id, purpose")
     .eq("id", surveyId)
     .is("deleted_at", null)
     .maybeSingle();
 
   if (!survey) return { ok: false as const, status: 404, message: "Umfrage nicht gefunden." };
+
+  if ((survey as { purpose?: string }).purpose === "anbieter") {
+    return {
+      ok: false as const,
+      status: 400,
+      message:
+        "Anbieter-Umfragen erzeugen keinen Persona-Avatar. Bitte „In SEO-Berater übernehmen“ nutzen.",
+    };
+  }
 
   const { data: response } = await supabase
     .from("survey_responses")
