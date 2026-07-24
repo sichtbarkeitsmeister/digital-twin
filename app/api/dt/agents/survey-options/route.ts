@@ -34,7 +34,7 @@ export async function GET() {
 
   const { data: responses, error } = await supabase
     .from("survey_responses")
-    .select("id, survey_id, status, completed_at, surveys!inner(id, title, deleted_at)")
+    .select("id, survey_id, status, completed_at, surveys!inner(id, title, deleted_at, purpose)")
     .eq("status", "completed")
     .is("surveys.deleted_at", null)
     .order("completed_at", { ascending: false })
@@ -49,9 +49,13 @@ export async function GET() {
   for (const row of responses ?? []) {
     if (usedResponseIds.has(row.id)) continue;
 
-    const survey = row.surveys as { id: string; title: string } | { id: string; title: string }[];
+    const survey = row.surveys as
+      | { id: string; title: string; purpose?: string }
+      | { id: string; title: string; purpose?: string }[];
     const surveyData = Array.isArray(survey) ? survey[0] : survey;
     if (!surveyData?.title) continue;
+    // Persona avatar flow only — Anbieter surveys go to SEO knowledge.
+    if (surveyData.purpose === "anbieter") continue;
 
     options.push({
       surveyId: row.survey_id,

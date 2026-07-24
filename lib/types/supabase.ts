@@ -841,6 +841,7 @@ export type Database = {
           updated_at: string
           visibility: Database["public"]["Enums"]["survey_visibility"]
           organisation_id: string | null
+          purpose: Database["public"]["Enums"]["survey_purpose"]
         }
         Insert: {
           created_at?: string
@@ -858,6 +859,7 @@ export type Database = {
           updated_at?: string
           visibility?: Database["public"]["Enums"]["survey_visibility"]
           organisation_id?: string | null
+          purpose?: Database["public"]["Enums"]["survey_purpose"]
         }
         Update: {
           created_at?: string
@@ -875,6 +877,7 @@ export type Database = {
           updated_at?: string
           visibility?: Database["public"]["Enums"]["survey_visibility"]
           organisation_id?: string | null
+          purpose?: Database["public"]["Enums"]["survey_purpose"]
         }
         Relationships: [
           {
@@ -1094,6 +1097,7 @@ export type Database = {
       org_role: "owner" | "admin" | "employee"
       survey_response_status: "in_progress" | "completed"
       survey_visibility: "private" | "public"
+      survey_purpose: "persona" | "anbieter"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1225,6 +1229,7 @@ export const Constants = {
       org_role: ["owner", "admin", "employee"],
       survey_response_status: ["in_progress", "completed"],
       survey_visibility: ["private", "public"],
+      survey_purpose: ["persona", "anbieter"],
     },
   },
 } as const

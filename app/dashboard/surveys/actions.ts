@@ -107,6 +107,7 @@ const upsertDraftSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
   description: z.string().trim().default(""),
   notificationEmails: z.array(z.string().trim()).default([]),
+  purpose: z.enum(["persona", "anbieter"]).default("persona"),
   definition: z.unknown(),
 });
 
@@ -152,6 +153,7 @@ export async function upsertSurveyDraftAction(
         title: parsed.data.title,
         description: parsed.data.description,
         notification_emails: notificationEmails,
+        purpose: parsed.data.purpose,
         definition: definitionParsed.data,
       })
       .eq("id", parsed.data.surveyId)
@@ -172,6 +174,7 @@ export async function upsertSurveyDraftAction(
       visibility: "private",
       slug: null,
       notification_emails: notificationEmails,
+      purpose: parsed.data.purpose,
       definition: definitionParsed.data,
       created_by_user_id: userId,
     })

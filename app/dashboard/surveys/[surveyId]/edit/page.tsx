@@ -36,7 +36,7 @@ export default async function EditSurveyPage({
 
   const { data: survey } = await supabase
     .from("surveys")
-    .select("id,definition,visibility,slug,notification_emails")
+    .select("id,definition,visibility,slug,notification_emails,purpose")
     .eq("id", surveyId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -62,6 +62,9 @@ export default async function EditSurveyPage({
     <SurveyBuilder
       surveyId={survey.id}
       initialSurvey={survey.definition as unknown as Survey}
+      initialPurpose={
+        (survey as { purpose?: string }).purpose === "anbieter" ? "anbieter" : "persona"
+      }
       initialVisibility={survey.visibility === "public" ? "public" : "private"}
       initialSlug={survey.slug}
       initialNotificationEmails={(survey.notification_emails ?? []) as string[]}

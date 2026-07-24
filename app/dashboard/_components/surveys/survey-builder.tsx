@@ -47,6 +47,11 @@ import { RichTextEditor } from "@/components/surveys/rich-text-editor";
 import { formatRankingAnswerForDisplay } from "@/lib/surveys/ranking-answer";
 import { surveySchema } from "@/lib/surveys/schema";
 import {
+  normalizeSurveyPurpose,
+  surveyPurposeLabel,
+  type SurveyPurpose,
+} from "@/lib/surveys/purpose";
+import {
   clearDraftSurvey,
   loadDraftSurvey,
   saveDraftSurvey,
@@ -232,6 +237,7 @@ type ActiveResponseEditor = { stepId: string; fieldId: string } | null;
 type Props = {
   surveyId?: string;
   initialSurvey?: Survey;
+  initialPurpose?: SurveyPurpose;
   initialVisibility?: "private" | "public";
   initialSlug?: string | null;
   initialNotificationEmails?: string[];
@@ -241,6 +247,7 @@ type Props = {
 export function SurveyBuilder({
   surveyId: initialSurveyId,
   initialSurvey,
+  initialPurpose = "persona",
   initialVisibility = "private",
   initialSlug = null,
   initialNotificationEmails = [],
@@ -250,6 +257,9 @@ export function SurveyBuilder({
   const [mode, setMode] = React.useState<"edit" | "preview">("edit");
   const [survey, setSurvey] = React.useState<Survey>(
     () => initialSurvey ?? createDefaultSurvey(),
+  );
+  const [purpose, setPurpose] = React.useState<SurveyPurpose>(() =>
+    normalizeSurveyPurpose(initialPurpose),
   );
   const [currentStepIndex, setCurrentStepIndex] = React.useState(0);
 
@@ -766,6 +776,7 @@ export function SurveyBuilder({
       title: survey.title,
       description: survey.description,
       notificationEmails,
+      purpose,
       definition: survey,
     });
 
@@ -987,6 +998,25 @@ export function SurveyBuilder({
                 </CardTitle>
                 <CardDescription className="w-full">
                   <div className="grid gap-3">
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-medium text-secondary" htmlFor="survey-purpose">
+                        Zweck der Umfrage
+                      </label>
+                      <select
+                        id="survey-purpose"
+                        className="flex h-9 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                        value={purpose}
+                        onChange={(e) => setPurpose(normalizeSurveyPurpose(e.target.value))}
+                      >
+                        <option value="persona">{surveyPurposeLabel("persona")}</option>
+                        <option value="anbieter">{surveyPurposeLabel("anbieter")}</option>
+                      </select>
+                      <p className="text-xs text-secondary">
+                        {purpose === "anbieter"
+                          ? "Antworten landen 1:1 beim SEO-Berater (Unternehmenswissen) — kein Avatar."
+                          : "Antworten können in einen Kunden-Persona-Avatar umgewandelt werden."}
+                      </p>
+                    </div>
                     <Textarea
                       value={survey.description}
                       onChange={(e) =>
