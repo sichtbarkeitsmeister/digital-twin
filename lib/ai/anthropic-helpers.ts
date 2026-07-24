@@ -128,9 +128,17 @@ export async function callAnthropicFirstAvailable(input: {
 
   for (const model of input.models) {
     const controller = input.timeoutMs ? new AbortController() : null;
+    let streamHandle: { abort: () => void } | null = null;
     const timer =
       controller && input.timeoutMs
-        ? setTimeout(() => controller.abort(), input.timeoutMs)
+        ? setTimeout(() => {
+            try {
+              streamHandle?.abort();
+            } catch {
+              /* ignore */
+            }
+            controller.abort();
+          }, input.timeoutMs)
         : null;
 
     try {
@@ -144,6 +152,7 @@ export async function callAnthropicFirstAvailable(input: {
           },
           controller ? { signal: controller.signal } : undefined,
         );
+        streamHandle = stream;
         const response = await stream.finalMessage();
         return { response, model };
       }
@@ -162,7 +171,7 @@ export async function callAnthropicFirstAvailable(input: {
       lastError = error;
       if (isAbortError(error)) {
         throw new Error(
-          `KI-Generierung hat das Zeitlimit (${Math.round((input.timeoutMs ?? 0) / 1000)}s) überschritten. Bitte erneut versuchen.`,
+          `KI-Generierung hat das Zeitlimit (${Math.round((input.timeoutMs ?? 0) / 1000)}s) überschritten. Bitte erneut versuchen — bei sehr großen Fragebögen ggf. erneut klicken.`,
         );
       }
       if (isAnthropicModelNotFoundError(error)) continue;

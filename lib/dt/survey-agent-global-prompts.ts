@@ -6,20 +6,30 @@ export const SURVEY_REFINE_AGENT_PROMPT_SLUG = "survey_refine_agent" as const;
 
 /**
  * Output budget for questionnaire → agent JSON.
- * 16k is enough for a full persona prompt + avatar_data and finishes within the
- * API route maxDuration (300s). 64k previously caused multi-minute generations
- * that hit the server timeout while the UI spinner hung with no error.
+ * High enough that large surveys are not truncated mid-JSON (was raised from 8k
+ * because results were incomplete). Route maxDuration must cover generation time.
  * Override with ANTHROPIC_DT_SURVEY_MAX_TOKENS if needed.
  */
 export const SURVEY_AGENT_GENERATION_MAX_TOKENS = (() => {
   const raw = process.env.ANTHROPIC_DT_SURVEY_MAX_TOKENS?.trim();
-  const n = raw ? Number(raw) : 16_384;
-  if (!Number.isFinite(n) || n < 2_048) return 16_384;
-  return Math.min(Math.floor(n), 32_768);
+  const n = raw ? Number(raw) : 64_000;
+  if (!Number.isFinite(n) || n < 2_048) return 64_000;
+  return Math.min(Math.floor(n), 64_000);
 })();
 
-/** Soft deadline for one Anthropic attempt (under route maxDuration=300). */
-export const SURVEY_AGENT_GENERATION_TIMEOUT_MS = 240_000;
+/**
+ * Soft deadline for one Anthropic attempt.
+ * ~7.5 min — allows ~5+ min generations; stays under route maxDuration (800s).
+ */
+export const SURVEY_AGENT_GENERATION_TIMEOUT_MS = (() => {
+  const raw = process.env.ANTHROPIC_DT_SURVEY_TIMEOUT_MS?.trim();
+  const n = raw ? Number(raw) : 450_000;
+  if (!Number.isFinite(n) || n < 60_000) return 450_000;
+  return Math.min(Math.floor(n), 780_000);
+})();
+
+/** Default model: Sonnet for complete, high-quality persona prompts. */
+export const SURVEY_AGENT_DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export const SURVEY_AGENT_GLOBAL_PROMPT_SLUGS = [
   SURVEY_TO_AGENT_PROMPT_SLUG,

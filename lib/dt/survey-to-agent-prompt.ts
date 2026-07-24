@@ -10,6 +10,7 @@ import type { PersonaReferenceExample } from "@/lib/dt/survey-to-agent-context";
 import {
   loadSurveyAgentGlobalPrompt,
   resolveSurveyToAgentSystemPrompt,
+  SURVEY_AGENT_DEFAULT_MODEL,
   SURVEY_AGENT_GENERATION_MAX_TOKENS,
   SURVEY_AGENT_GENERATION_TIMEOUT_MS,
   SURVEY_TO_AGENT_PROMPT_SLUG,
@@ -34,6 +35,11 @@ export const surveyAgentPreviewSchema = z.object({
 
 export type SurveyAgentPreview = z.infer<typeof surveyAgentPreviewSchema>;
 
+function isTimeoutError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /zeitlimit|timeout|aborted/i.test(message);
+}
+
 export async function generateSurveyAgentPreview(input: {
   surveyContext: string;
   organisationName: string;
@@ -46,9 +52,9 @@ export async function generateSurveyAgentPreview(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
-  // Prefer Sonnet for long, complete questionnaire → JSON; Haiku as fallback.
-  const primaryModel =
-    process.env.ANTHROPIC_DT_SURVEY_MODEL?.trim() || "claude-sonnet-4-6";
+  // Sonnet by default — completeness/quality over speed (5+ min OK).
+  // Override with ANTHROPIC_DT_SURVEY_MODEL if needed.
+  const primaryModel = process.env.ANTHROPIC_DT_SURVEY_MODEL?.trim() || SURVEY_AGENT_DEFAULT_MODEL;
   const models = [primaryModel, resolveDtAnthropicModel("default"), "claude-haiku-4-5-20251001"].filter(
     (m, i, arr) => arr.indexOf(m) === i,
   );
@@ -62,7 +68,7 @@ export async function generateSurveyAgentPreview(input: {
     "Umfrage-Antworten:",
     input.surveyContext,
     "",
-    "Ausgabe-Hinweis: prompt_template soll vollständig und konkret sein, aber kompakt bleiben (keine Wiederholungen, kein unnötiges Auffüllen).",
+    "Ausgabe-Hinweis: prompt_template muss VOLLSTÄNDIG sein — alle beantworteten Fragen und Bemerkungen abdecken. Keine Abkürzungen zulasten der Vollständigkeit. Keine erfundenen Rankings.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -71,6 +77,8 @@ export async function generateSurveyAgentPreview(input: {
     await loadSurveyAgentGlobalPrompt(SURVEY_TO_AGENT_PROMPT_SLUG),
     input.referenceExamples,
   );
+
+  const startedAt = Date.now();
 
   async function runOnce(repairHint?: string): Promise<SurveyAgentPreview | null> {
     const result = await callAnthropicFirstAvailable({
@@ -92,6 +100,13 @@ export async function generateSurveyAgentPreview(input: {
 
     if (!result) return null;
 
+    console.info("[dt] survey-to-agent attempt finished", {
+      model: result.model,
+      stopReason: result.response.stop_reason,
+      elapsedMs: Date.now() - startedAt,
+      outputChars: extractAnthropicText(result.response).length,
+    });
+
     if (result.response.stop_reason === "max_tokens") {
       console.warn("[dt] survey-to-agent truncated at max_tokens", {
         model: result.model,
@@ -112,10 +127,19 @@ export async function generateSurveyAgentPreview(input: {
     return validated.data;
   }
 
-  let preview = await runOnce();
-  if (!preview) {
+  let preview: SurveyAgentPreview | null = null;
+  try {
+    preview = await runOnce();
+  } catch (err) {
+    if (isTimeoutError(err)) throw err;
+    throw err;
+  }
+
+  // Retry once if first attempt failed quickly (parse/truncate). Allow up to ~6 min total before skipping retry.
+  const elapsedMs = Date.now() - startedAt;
+  if (!preview && elapsedMs < 360_000) {
     preview = await runOnce(
-      "Gib gültiges JSON zurück. slug nur a-z0-9_. prompt_template mindestens 200 Zeichen, deutsch, konkret und kompakt (keine Wiederholungen). Gesamte JSON-Antwort muss vollständig in das Token-Budget passen.",
+      "Gib gültiges JSON zurück. slug nur a-z0-9_. prompt_template mindestens 200 Zeichen, deutsch, VOLLSTÄNDIG (alle echten Antworten übernehmen, nichts erfinden). Gesamte JSON-Antwort muss in das Token-Budget passen.",
     );
   }
 
