@@ -1,3 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { updateDtAgent } from "@/lib/dt/db";
 import { ensureSeoAdvisorAgent } from "@/lib/dt/seo/ensure-seo-agent";
 import {
@@ -74,16 +76,25 @@ export async function previewAnbieterSurveyForSeo(input: {
   surveyId: string;
   responseId: string;
   organisationId: string;
+  /** Prefer the authenticated request client (platform admin RLS). */
+  supabase: SupabaseClient;
 }) {
-  const bundle = await loadAnbieterBundle(input.surveyId, input.responseId);
+  const bundle = await loadAnbieterBundle(input.supabase, input.surveyId, input.responseId);
   if (!bundle.ok) return bundle;
 
-  const supabase = createServiceClient();
-  const { data: org } = await supabase
+  const { data: org, error: orgError } = await input.supabase
     .from("organisations")
     .select("id, name")
     .eq("id", input.organisationId)
     .maybeSingle();
+
+  if (orgError) {
+    return {
+      ok: false as const,
+      status: 500,
+      message: `Organisation konnte nicht geladen werden: ${orgError.message}`,
+    };
+  }
 
   if (!org) {
     return { ok: false as const, status: 404, message: "Organisation nicht gefunden." };
@@ -102,7 +113,15 @@ export async function previewAnbieterSurveyForSeo(input: {
     responseId: input.responseId,
   });
 
-  const { data: seoAgent } = await supabase
+  if (!knowledgeBody.trim()) {
+    return {
+      ok: false as const,
+      status: 400,
+      message: "Keine verwertbaren Antworten im Fragebogen gefunden.",
+    };
+  }
+
+  const { data: seoAgent } = await input.supabase
     .from("dt_agents")
     .select("id, name, prompt_append")
     .eq("organisation_id", input.organisationId)
@@ -131,12 +150,20 @@ export async function applyAnbieterSurveyToSeoAgent(input: {
   surveyId: string;
   responseId: string;
   organisationId: string;
+  supabase: SupabaseClient;
 }) {
   const preview = await previewAnbieterSurveyForSeo(input);
   if (!preview.ok) return preview;
 
-  const supabase = createServiceClient();
-  const ensured = await ensureSeoAdvisorAgent(supabase, input.organisationId);
+  // Ensure uses service role (subscribe RPC); fall back to user client if needed.
+  let ensureClient: SupabaseClient = input.supabase;
+  try {
+    ensureClient = createServiceClient();
+  } catch {
+    ensureClient = input.supabase;
+  }
+
+  const ensured = await ensureSeoAdvisorAgent(ensureClient, input.organisationId);
   if (!ensured.agentId) {
     return {
       ok: false as const,
@@ -145,11 +172,19 @@ export async function applyAnbieterSurveyToSeoAgent(input: {
     };
   }
 
-  const { data: agent } = await supabase
+  const { data: agent, error: agentError } = await input.supabase
     .from("dt_agents")
     .select("id, prompt_append, organisation_id")
     .eq("id", ensured.agentId)
     .maybeSingle();
+
+  if (agentError) {
+    return {
+      ok: false as const,
+      status: 500,
+      message: `SEO-Berater konnte nicht geladen werden: ${agentError.message}`,
+    };
+  }
 
   if (!agent || agent.organisation_id !== input.organisationId) {
     return { ok: false as const, status: 404, message: "SEO-Berater nicht gefunden." };
@@ -173,14 +208,11 @@ export async function applyAnbieterSurveyToSeoAgent(input: {
     };
   }
 
-  // Keep survey linked to org (same as persona flow).
-  if (preview.organisationId) {
-    await supabase
-      .from("surveys")
-      .update({ organisation_id: input.organisationId })
-      .eq("id", input.surveyId)
-      .is("deleted_at", null);
-  }
+  await input.supabase
+    .from("surveys")
+    .update({ organisation_id: input.organisationId })
+    .eq("id", input.surveyId)
+    .is("deleted_at", null);
 
   return {
     ok: true as const,
@@ -191,38 +223,54 @@ export async function applyAnbieterSurveyToSeoAgent(input: {
   };
 }
 
-async function loadAnbieterBundle(surveyId: string, responseId: string) {
-  const supabase = createServiceClient();
-
-  const { data: survey } = await supabase
+async function loadAnbieterBundle(
+  supabase: SupabaseClient,
+  surveyId: string,
+  responseId: string,
+) {
+  const { data: survey, error: surveyError } = await supabase
     .from("surveys")
     .select("id, title, definition, organisation_id, purpose")
     .eq("id", surveyId)
     .is("deleted_at", null)
     .maybeSingle();
 
+  if (surveyError) {
+    return {
+      ok: false as const,
+      status: 500,
+      message: `Umfrage konnte nicht geladen werden: ${surveyError.message}`,
+    };
+  }
+
   if (!survey) {
     return { ok: false as const, status: 404, message: "Umfrage nicht gefunden." };
   }
 
-  const purpose = normalizeSurveyPurpose(
-    (survey as { purpose?: unknown }).purpose,
-  );
+  const purpose = normalizeSurveyPurpose((survey as { purpose?: unknown }).purpose);
   if (purpose !== "anbieter") {
     return {
       ok: false as const,
       status: 400,
       message:
-        "Diese Umfrage ist keine Anbieter-Umfrage. Für Kunden-Personas bitte „In Agent umwandeln“ nutzen.",
+        "Diese Umfrage ist keine Anbieter-Umfrage. Bitte im Editor unter „Zweck der Umfrage“ auf „Anbieter (SEO-Wissen)“ stellen und speichern.",
     };
   }
 
-  const { data: response } = await supabase
+  const { data: response, error: responseError } = await supabase
     .from("survey_responses")
     .select("id, status, answers, completed_at")
     .eq("id", responseId)
     .eq("survey_id", surveyId)
     .maybeSingle();
+
+  if (responseError) {
+    return {
+      ok: false as const,
+      status: 500,
+      message: `Antwort konnte nicht geladen werden: ${responseError.message}`,
+    };
+  }
 
   if (!response) {
     return { ok: false as const, status: 404, message: "Antwort nicht gefunden." };
@@ -236,11 +284,15 @@ async function loadAnbieterBundle(surveyId: string, responseId: string) {
     };
   }
 
-  const { data: questions } = await supabase
+  const { data: questions, error: questionsError } = await supabase
     .from("survey_field_questions")
     .select("id, field_id, kind, question, answer")
     .eq("response_id", responseId)
     .order("asked_at", { ascending: true });
+
+  if (questionsError) {
+    console.warn("[dt] anbieter field questions:", questionsError.message);
+  }
 
   return {
     ok: true as const,

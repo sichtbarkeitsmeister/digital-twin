@@ -79,6 +79,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SurveyAiAssistant } from "@/components/surveys/survey-ai-assistant";
+import { DtSelect } from "@/components/dt/dt-select";
 
 import { SurveyProgress } from "@/app/dashboard/_components/surveys/survey-progress";
 import {
@@ -999,18 +1000,25 @@ export function SurveyBuilder({
                 <CardDescription className="w-full">
                   <div className="grid gap-3">
                     <div className="grid gap-1.5">
-                      <label className="text-xs font-medium text-secondary" htmlFor="survey-purpose">
-                        Zweck der Umfrage
-                      </label>
-                      <select
-                        id="survey-purpose"
-                        className="flex h-9 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                      <DtSelect
+                        label="Zweck der Umfrage"
+                        fullWidth
+                        elevated
                         value={purpose}
-                        onChange={(e) => setPurpose(normalizeSurveyPurpose(e.target.value))}
-                      >
-                        <option value="persona">{surveyPurposeLabel("persona")}</option>
-                        <option value="anbieter">{surveyPurposeLabel("anbieter")}</option>
-                      </select>
+                        onValueChange={(value) => setPurpose(normalizeSurveyPurpose(value))}
+                        options={[
+                          {
+                            value: "persona",
+                            label: surveyPurposeLabel("persona"),
+                            description: "Antworten → Kunden-Avatar",
+                          },
+                          {
+                            value: "anbieter",
+                            label: surveyPurposeLabel("anbieter"),
+                            description: "Antworten → SEO-Berater Wissen (1:1)",
+                          },
+                        ]}
+                      />
                       <p className="text-xs text-secondary">
                         {purpose === "anbieter"
                           ? "Antworten landen 1:1 beim SEO-Berater (Unternehmenswissen) — kein Avatar."
