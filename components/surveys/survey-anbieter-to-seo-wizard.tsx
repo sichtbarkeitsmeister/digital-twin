@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Building2, CheckCircle2, Loader2 } from "lucide-react";
+import { BookOpen, Building2, CheckCircle2, ChevronLeft, Loader2 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { DtGlassCard } from "@/components/dt/dt-glass-card";
+import { DtPillButton } from "@/components/dt/dt-pill-button";
+import { DtSelect } from "@/components/dt/dt-select";
 
 type OrgOption = { id: string; name: string };
 
@@ -19,7 +19,9 @@ type Props = {
 };
 
 export function SurveyAnbieterToSeoWizard(props: Props) {
-  const [orgId, setOrgId] = useState(props.initialOrganisationId ?? "");
+  const [orgId, setOrgId] = useState(
+    props.initialOrganisationId ?? props.organisations[0]?.id ?? "",
+  );
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -46,13 +48,30 @@ export function SurveyAnbieterToSeoWizard(props: Props) {
           body: JSON.stringify({ organisationId: orgId, action: "preview" }),
         },
       );
-      const json = (await res.json().catch(() => null)) as {
-        ok?: boolean;
-        message?: string;
-        knowledgeBody?: string;
-      } | null;
-      if (!json?.ok || !json.knowledgeBody) {
-        setError(json?.message ?? "Vorschau fehlgeschlagen.");
+      const rawText = await res.text();
+      let json: { ok?: boolean; message?: string; knowledgeBody?: string } | null = null;
+      try {
+        json = JSON.parse(rawText) as {
+          ok?: boolean;
+          message?: string;
+          knowledgeBody?: string;
+        };
+      } catch {
+        setError(
+          res.ok
+            ? "Vorschau fehlgeschlagen (ungültige Server-Antwort)."
+            : `Vorschau fehlgeschlagen (HTTP ${res.status}).`,
+        );
+        setPreview(null);
+        return;
+      }
+      if (!json?.ok) {
+        setError(json?.message?.trim() || `Vorschau fehlgeschlagen (HTTP ${res.status}).`);
+        setPreview(null);
+        return;
+      }
+      if (!json.knowledgeBody?.trim()) {
+        setError("Vorschau leer — im Fragebogen wurden keine Antworten gefunden.");
         setPreview(null);
         return;
       }
@@ -67,8 +86,7 @@ export function SurveyAnbieterToSeoWizard(props: Props) {
 
   useEffect(() => {
     if (orgId) void loadPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when org changes
-  }, [orgId]);
+  }, [orgId, loadPreview]);
 
   async function apply() {
     if (!orgId) {
@@ -111,130 +129,147 @@ export function SurveyAnbieterToSeoWizard(props: Props) {
 
   if (done) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CheckCircle2 className="size-5 text-emerald-600" aria-hidden />
-            Anbieter-Wissen übernommen
-          </CardTitle>
-          <CardDescription>
-            Die Fragebogen-Antworten liegen jetzt 1:1 in den „Zusätzlichen Anweisungen“ des
-            SEO-Beraters von {done.organisationName}.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button asChild>
-            <Link
-              href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(done.organisationId)}`}
-            >
-              SEO-Berater öffnen
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`/dashboard/surveys/${props.surveyId}/responses/${props.responseId}`}>
-              Zurück zur Antwort
-            </Link>
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="mx-auto grid max-w-3xl gap-6">
+        <DtGlassCard variant="solid" className="grid gap-4">
+          <div className="flex items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sbkm-mint/20 text-sbkm-navy dark:text-sbkm-mint">
+              <CheckCircle2 className="size-5" aria-hidden />
+            </div>
+            <div className="grid gap-1">
+              <h1 className="text-xl font-bold tracking-tight text-sbkm-navy dark:text-white">
+                Anbieter-Wissen übernommen
+              </h1>
+              <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+                Die Fragebogen-Antworten liegen jetzt 1:1 in den „Zusätzlichen Anweisungen“ des
+                SEO-Beraters von {done.organisationName}.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <DtPillButton asChild variant="mint" size="sm">
+              <Link
+                href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(done.organisationId)}`}
+              >
+                SEO-Berater öffnen
+              </Link>
+            </DtPillButton>
+            <DtPillButton asChild variant="outline" size="sm">
+              <Link href={`/dashboard/surveys/${props.surveyId}/responses/${props.responseId}`}>
+                Zurück zur Antwort
+              </Link>
+            </DtPillButton>
+          </div>
+        </DtGlassCard>
+      </div>
     );
   }
 
   return (
-    <div className="grid gap-4">
-      <div>
-        <p className="text-sm text-secondary">
-          <Link
-            href={`/dashboard/surveys/${props.surveyId}/responses/${props.responseId}`}
-            className="hover:text-primary transition-colors"
-          >
-            ← Zurück
-          </Link>
-        </p>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight">In SEO-Berater übernehmen</h1>
-        <p className="mt-1 text-sm text-secondary">
+    <div className="mx-auto grid max-w-3xl gap-6">
+      <div className="grid gap-2">
+        <Link
+          href={`/dashboard/surveys/${props.surveyId}/responses/${props.responseId}`}
+          className="inline-flex w-fit items-center gap-1 text-sm font-medium text-sbkm-ink-600 transition-colors hover:text-sbkm-navy dark:text-white/55 dark:hover:text-white"
+        >
+          <ChevronLeft className="size-4" aria-hidden />
+          Zurück
+        </Link>
+        <h1 className="text-2xl font-bold tracking-tight text-sbkm-navy dark:text-white">
+          In SEO-Berater übernehmen
+        </h1>
+        <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
           Anbieter-Fragebogen „{props.surveyTitle}“ — kein Avatar, nur Unternehmenswissen (1:1).
         </p>
       </div>
 
       {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <div className="rounded-2xl border border-red-200/80 bg-red-50/90 px-4 py-3 text-sm text-red-800 dark:border-red-400/30 dark:bg-red-950/40 dark:text-red-100">
           {error}
         </div>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Building2 className="size-4" aria-hidden />
-            Organisation
-          </CardTitle>
-          <CardDescription>
-            Der SEO-Berater dieser Organisation erhält die Fragebogen-Daten unter „Zusätzliche
-            Anweisungen“.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="anbieter-org">Organisation</Label>
-            <select
-              id="anbieter-org"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={orgId}
-              onChange={(e) => {
-                setOrgId(e.target.value);
-                setPreview(null);
-              }}
-            >
-              <option value="">Bitte wählen…</option>
-              {props.organisations.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
+      <DtGlassCard variant="solid" className="grid gap-5">
+        <div className="flex items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sbkm-mint/15 text-sbkm-navy dark:text-sbkm-mint">
+            <Building2 className="size-5" aria-hidden />
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!orgId || loading}
-              onClick={() => void loadPreview()}
-            >
-              {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              Vorschau aktualisieren
-            </Button>
-            <Button type="button" disabled={!orgId || !preview || applying} onClick={() => void apply()}>
-              {applying ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              In SEO-Berater speichern
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Wissens-Vorschau (1:1)</CardTitle>
-          <CardDescription>
-            So landen die Daten im SEO-Berater — ohne KI-Umschreibung.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading && !preview ? (
-            <p className="flex items-center gap-2 text-sm text-secondary">
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-              Vorschau wird geladen…
+          <div className="grid gap-1">
+            <h2 className="text-base font-bold text-sbkm-navy dark:text-white">Organisation</h2>
+            <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+              Der SEO-Berater dieser Organisation erhält die Fragebogen-Daten unter „Zusätzliche
+              Anweisungen“.
             </p>
-          ) : preview ? (
-            <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs leading-relaxed">
-              {preview}
-            </pre>
-          ) : (
-            <p className="text-sm text-secondary">Organisation wählen, um die Vorschau zu sehen.</p>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+
+        <DtSelect
+          label="Organisation"
+          fullWidth
+          elevated
+          menuMaxHeight="max-h-72"
+          value={orgId}
+          onValueChange={(value) => {
+            setOrgId(value);
+            setPreview(null);
+          }}
+          options={props.organisations.map((o) => ({ value: o.id, label: o.name }))}
+          placeholder="Organisation wählen …"
+        />
+
+        <div className="flex flex-wrap gap-2">
+          <DtPillButton
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!orgId || loading}
+            onClick={() => void loadPreview()}
+          >
+            {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            Vorschau aktualisieren
+          </DtPillButton>
+          <DtPillButton
+            type="button"
+            variant="mint"
+            size="sm"
+            disabled={!orgId || !preview || applying}
+            onClick={() => void apply()}
+          >
+            {applying ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            In SEO-Berater speichern
+          </DtPillButton>
+        </div>
+      </DtGlassCard>
+
+      <DtGlassCard variant="subtle" className="grid gap-4">
+        <div className="flex items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sbkm-navy/5 text-sbkm-navy dark:bg-white/10 dark:text-white">
+            <BookOpen className="size-5" aria-hidden />
+          </div>
+          <div className="grid gap-1">
+            <h2 className="text-base font-bold text-sbkm-navy dark:text-white">
+              Wissens-Vorschau (1:1)
+            </h2>
+            <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+              So landen die Daten im SEO-Berater — ohne KI-Umschreibung.
+            </p>
+          </div>
+        </div>
+
+        {loading && !preview ? (
+          <p className="flex items-center gap-2 text-sm text-sbkm-ink-600 dark:text-white/55">
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+            Vorschau wird geladen…
+          </p>
+        ) : preview ? (
+          <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-2xl border border-sbkm-navy/10 bg-white/70 p-4 text-xs leading-relaxed text-sbkm-navy shadow-sm dark:border-white/10 dark:bg-white/[0.04] dark:text-white/85">
+            {preview}
+          </pre>
+        ) : (
+          <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+            Organisation wählen, um die Vorschau zu sehen.
+          </p>
+        )}
+      </DtGlassCard>
     </div>
   );
 }

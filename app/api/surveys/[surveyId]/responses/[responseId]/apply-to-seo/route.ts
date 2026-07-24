@@ -6,6 +6,7 @@ import {
   previewAnbieterSurveyForSeo,
 } from "@/lib/dt/anbieter-to-seo";
 import { requireSurveyPlatformAdmin } from "@/lib/surveys/platform-admin";
+import { createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 60;
 
@@ -36,11 +37,14 @@ export async function POST(
   }
 
   try {
+    const supabase = await createClient();
+
     if (parsed.data.action === "apply") {
       const result = await applyAnbieterSurveyToSeoAgent({
         surveyId,
         responseId,
         organisationId: parsed.data.organisationId,
+        supabase,
       });
       if (!result.ok) {
         return NextResponse.json(
@@ -62,6 +66,7 @@ export async function POST(
       surveyId,
       responseId,
       organisationId: parsed.data.organisationId,
+      supabase,
     });
     if (!result.ok) {
       return NextResponse.json(
@@ -79,6 +84,7 @@ export async function POST(
       seoAgentName: result.seoAgentName,
     });
   } catch (err) {
+    console.error("[dt] apply-to-seo failed", err);
     const message = err instanceof Error ? err.message : "Übernahme fehlgeschlagen.";
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
