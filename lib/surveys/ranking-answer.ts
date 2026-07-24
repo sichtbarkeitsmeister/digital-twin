@@ -173,18 +173,41 @@ export function setCustomRankingLabel(
   };
 }
 
+/**
+ * True only when a ranking answer was actually stored.
+ * Missing/empty values must NOT fall through to coerceRankingState's default
+ * (all form options in definition order) — that invents fake rankings.
+ */
+export function hasStoredRankingAnswer(raw: unknown): boolean {
+  if (raw == null) return false;
+  if (typeof raw === "string") return raw.trim().length > 0;
+  if (Array.isArray(raw)) {
+    return raw.length > 0 && raw.every((x) => typeof x === "string");
+  }
+  if (isRankingPayload(raw)) {
+    return raw.items.length > 0;
+  }
+  return false;
+}
+
 export function isRankingAnswerValid(raw: unknown, presetLabels: string[], required: boolean): boolean {
+  if (!hasStoredRankingAnswer(raw)) {
+    return !required;
+  }
+
   const state = coerceRankingState(raw, presetLabels);
 
   for (const it of state.items) {
     if (it.kind === "custom" && !it.label.trim()) return false;
   }
 
-  if (!required) return true;
   return state.items.length > 0;
 }
 
 export function formatRankingAnswerForDisplay(raw: unknown, presetLabels: string[]): string {
+  // Unanswered ranking → empty string (never invent order from form options).
+  if (!hasStoredRankingAnswer(raw)) return "";
+
   const { items } = coerceRankingState(raw, presetLabels);
   if (items.length === 0) return "";
   return items
