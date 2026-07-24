@@ -14,7 +14,7 @@ const bodySchema = z.object({
   promptTemplate: z.string().min(200).max(120_000),
 });
 
-export const maxDuration = 800;
+export const maxDuration = 60;
 
 export async function POST(
   req: Request,

@@ -2,12 +2,16 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
-  generateAgentPreviewFromSurvey,
-  generateAgentRefinementFromSurvey,
+  pollAgentGenerationBatchFromSurvey,
+  startAgentGenerationBatchFromSurvey,
 } from "@/lib/dt/survey-to-agent-service";
 import { requireSurveyPlatformAdmin } from "@/lib/surveys/platform-admin";
 
-export const maxDuration = 800;
+/**
+ * Batch start/poll only — Anthropic does the long work outside Vercel.
+ * Keep this low so deploys work on Hobby (300s max) and Pro alike.
+ */
+export const maxDuration = 60;
 
 const bodySchema = z
   .object({
@@ -15,6 +19,8 @@ const bodySchema = z
     extraRules: z.string().max(4000).optional(),
     mode: z.enum(["create", "refine"]).default("create"),
     agentId: z.string().uuid().optional(),
+    /** When set, poll an existing Anthropic Message Batch instead of starting a new one. */
+    batchId: z.string().min(8).max(200).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.mode === "refine" && !data.agentId) {
@@ -48,13 +54,14 @@ export async function POST(
   }
 
   try {
-    if (parsed.data.mode === "refine") {
-      const result = await generateAgentRefinementFromSurvey({
+    if (parsed.data.batchId) {
+      const result = await pollAgentGenerationBatchFromSurvey({
         surveyId,
         responseId,
         organisationId: parsed.data.organisationId,
-        agentId: parsed.data.agentId!,
-        extraRules: parsed.data.extraRules,
+        mode: parsed.data.mode,
+        batchId: parsed.data.batchId,
+        agentId: parsed.data.agentId,
       });
 
       if (!result.ok) {
@@ -68,46 +75,88 @@ export async function POST(
         );
       }
 
+      if (result.status === "pending") {
+        return NextResponse.json({
+          ok: true,
+          status: "pending" as const,
+          batchId: result.batchId,
+          processingStatus: result.processingStatus,
+          mode: result.mode,
+          organisationId: result.organisationId,
+          organisationName: result.organisationName,
+        });
+      }
+
+      if (result.mode === "refine") {
+        return NextResponse.json({
+          ok: true,
+          status: "ready" as const,
+          mode: "refine" as const,
+          refinement: result.refinement,
+          currentPrompt: result.currentPrompt,
+          usesGlobalPrompt: result.usesGlobalPrompt,
+          agent: result.agent,
+          organisationId: result.organisationId,
+          organisationName: result.organisationName,
+        });
+      }
+
       return NextResponse.json({
         ok: true,
-        mode: "refine" as const,
-        refinement: result.refinement,
-        currentPrompt: result.currentPrompt,
-        usesGlobalPrompt: result.usesGlobalPrompt,
-        agent: result.agent,
+        status: "ready" as const,
+        mode: "create" as const,
+        preview: result.preview,
         organisationId: result.organisationId,
         organisationName: result.organisationName,
       });
     }
 
-    const result = await generateAgentPreviewFromSurvey({
+    const started = await startAgentGenerationBatchFromSurvey({
       surveyId,
       responseId,
       organisationId: parsed.data.organisationId,
+      mode: parsed.data.mode,
+      agentId: parsed.data.agentId,
       extraRules: parsed.data.extraRules,
     });
 
-    if (!result.ok) {
+    if (!started.ok) {
       return NextResponse.json(
         {
           ok: false,
-          message: result.message,
-          existingAgentId: "existingAgentId" in result ? result.existingAgentId : undefined,
+          message: started.message,
+          existingAgentId: "existingAgentId" in started ? started.existingAgentId : undefined,
         },
-        { status: result.status },
+        { status: started.status },
       );
+    }
+
+    if (started.mode === "refine") {
+      return NextResponse.json({
+        ok: true,
+        status: "pending" as const,
+        batchId: started.batchId,
+        model: started.model,
+        mode: "refine" as const,
+        currentPrompt: started.currentPrompt,
+        usesGlobalPrompt: started.usesGlobalPrompt,
+        agent: started.agent,
+        organisationId: started.organisationId,
+        organisationName: started.organisationName,
+      });
     }
 
     return NextResponse.json({
       ok: true,
+      status: "pending" as const,
+      batchId: started.batchId,
+      model: started.model,
       mode: "create" as const,
-      preview: result.preview,
-      organisationId: result.organisationId,
-      organisationName: result.organisationName,
+      organisationId: started.organisationId,
+      organisationName: started.organisationName,
     });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Generierung fehlgeschlagen.";
+    const message = err instanceof Error ? err.message : "Generierung fehlgeschlagen.";
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 }

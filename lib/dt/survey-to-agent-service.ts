@@ -2,6 +2,12 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 import { updateDtAgent } from "@/lib/dt/db";
 import {
+  pollSurveyAgentBatch,
+  startSurveyAgentCreateBatch,
+  startSurveyAgentRefineBatch,
+  type SurveyAgentBatchKind,
+} from "@/lib/dt/survey-agent-batch";
+import {
   buildSurveyResponseContextForAgent,
   findAgentForSurveyResponse,
   loadPersonaReferenceExamples,
@@ -156,6 +162,215 @@ export async function generateAgentPreviewFromSurvey(input: {
   return {
     ok: true as const,
     preview,
+    organisationId: input.organisationId,
+    organisationName: org.name,
+  };
+}
+
+/**
+ * Start async Anthropic Message Batch for create/refine.
+ * Avoids Vercel function timeouts on large Sonnet+64k runs.
+ */
+export async function startAgentGenerationBatchFromSurvey(input: {
+  surveyId: string;
+  responseId: string;
+  organisationId: string;
+  mode: SurveyAgentBatchKind;
+  agentId?: string;
+  extraRules?: string;
+}) {
+  const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
+  if (!bundle.ok) return bundle;
+
+  if (bundle.existingAgent) {
+    return {
+      ok: false as const,
+      status: 409,
+      message: "Für diese Antwort existiert bereits ein Agent.",
+      existingAgentId: bundle.existingAgent.id,
+    };
+  }
+
+  const supabase = createServiceClient();
+  const { data: org } = await supabase
+    .from("organisations")
+    .select("id, name")
+    .eq("id", input.organisationId)
+    .maybeSingle();
+
+  if (!org) {
+    return { ok: false as const, status: 404, message: "Organisation nicht gefunden." };
+  }
+
+  const answers: Record<string, unknown> = isRecord(bundle.response.answers)
+    ? bundle.response.answers
+    : {};
+
+  const surveyContext = buildSurveyResponseContextForAgent({
+    surveyTitle: bundle.survey.title,
+    definition: bundle.survey.definition,
+    answers,
+    fieldQuestions: bundle.fieldQuestions,
+  });
+
+  if (input.mode === "refine") {
+    if (!input.agentId) {
+      return { ok: false as const, status: 400, message: "agentId fehlt." };
+    }
+
+    const { data: agent } = await supabase
+      .from("dt_agents")
+      .select("id, name, role, kind, slug, prompt_template, uses_global_prompt, organisation_id")
+      .eq("id", input.agentId)
+      .maybeSingle();
+
+    if (!agent || agent.organisation_id !== input.organisationId) {
+      return { ok: false as const, status: 404, message: "Agent nicht gefunden." };
+    }
+
+    const started = await startSurveyAgentRefineBatch({
+      responseId: input.responseId,
+      surveyContext,
+      organisationName: org.name,
+      agentName: agent.name,
+      agentRole: agent.role,
+      agentKind: agent.kind,
+      currentPromptTemplate: agent.prompt_template,
+      usesGlobalPrompt: Boolean(agent.uses_global_prompt),
+      extraRules: input.extraRules,
+    });
+
+    if (bundle.survey.organisation_id !== input.organisationId) {
+      await assignSurveyOrganisation(input.surveyId, input.organisationId);
+    }
+
+    return {
+      ok: true as const,
+      status: "pending" as const,
+      batchId: started.batchId,
+      model: started.model,
+      mode: "refine" as const,
+      currentPrompt: agent.prompt_template,
+      usesGlobalPrompt: Boolean(agent.uses_global_prompt),
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        role: agent.role,
+        kind: agent.kind,
+        slug: agent.slug,
+      },
+      organisationId: input.organisationId,
+      organisationName: org.name,
+    };
+  }
+
+  const referenceExamples = await loadPersonaReferenceExamples(input.organisationId);
+  const started = await startSurveyAgentCreateBatch({
+    responseId: input.responseId,
+    surveyContext,
+    organisationName: org.name,
+    extraRules: input.extraRules,
+    referenceExamples,
+  });
+
+  if (bundle.survey.organisation_id !== input.organisationId) {
+    await assignSurveyOrganisation(input.surveyId, input.organisationId);
+  }
+
+  return {
+    ok: true as const,
+    status: "pending" as const,
+    batchId: started.batchId,
+    model: started.model,
+    mode: "create" as const,
+    organisationId: input.organisationId,
+    organisationName: org.name,
+  };
+}
+
+export async function pollAgentGenerationBatchFromSurvey(input: {
+  surveyId: string;
+  responseId: string;
+  organisationId: string;
+  mode: SurveyAgentBatchKind;
+  batchId: string;
+  agentId?: string;
+}) {
+  const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
+  if (!bundle.ok) return bundle;
+
+  const supabase = createServiceClient();
+  const { data: org } = await supabase
+    .from("organisations")
+    .select("id, name")
+    .eq("id", input.organisationId)
+    .maybeSingle();
+
+  if (!org) {
+    return { ok: false as const, status: 404, message: "Organisation nicht gefunden." };
+  }
+
+  const polled = await pollSurveyAgentBatch({
+    batchId: input.batchId,
+    kind: input.mode,
+    responseId: input.responseId,
+  });
+
+  if (polled.status === "pending") {
+    return {
+      ok: true as const,
+      status: "pending" as const,
+      batchId: input.batchId,
+      processingStatus: polled.processingStatus,
+      mode: input.mode,
+      organisationId: input.organisationId,
+      organisationName: org.name,
+    };
+  }
+
+  if (polled.status === "error") {
+    return { ok: false as const, status: 500, message: polled.message };
+  }
+
+  if (polled.kind === "create") {
+    return {
+      ok: true as const,
+      status: "ready" as const,
+      mode: "create" as const,
+      preview: polled.preview,
+      organisationId: input.organisationId,
+      organisationName: org.name,
+    };
+  }
+
+  if (!input.agentId) {
+    return { ok: false as const, status: 400, message: "agentId fehlt." };
+  }
+
+  const { data: agent } = await supabase
+    .from("dt_agents")
+    .select("id, name, role, kind, slug, prompt_template, uses_global_prompt, organisation_id")
+    .eq("id", input.agentId)
+    .maybeSingle();
+
+  if (!agent || agent.organisation_id !== input.organisationId) {
+    return { ok: false as const, status: 404, message: "Agent nicht gefunden." };
+  }
+
+  return {
+    ok: true as const,
+    status: "ready" as const,
+    mode: "refine" as const,
+    refinement: polled.refinement,
+    currentPrompt: agent.prompt_template,
+    usesGlobalPrompt: Boolean(agent.uses_global_prompt),
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      role: agent.role,
+      kind: agent.kind,
+      slug: agent.slug,
+    },
     organisationId: input.organisationId,
     organisationName: org.name,
   };
