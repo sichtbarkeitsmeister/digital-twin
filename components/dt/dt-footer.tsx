@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { cn } from "@/components/dt/cn";
 
 type DtFooterProps = {
@@ -7,9 +6,9 @@ type DtFooterProps = {
 };
 
 const defaultLinks = [
-  { href: "#", label: "Impressum" },
-  { href: "#", label: "Datenschutz" },
-  { href: "#", label: "Kontakt" },
+  { href: "https://www.sichtbarkeitsmeister.de/impressum/", label: "Impressum" },
+  { href: "https://www.sichtbarkeitsmeister.de/datenschutz/", label: "Datenschutz" },
+  { href: "https://www.sichtbarkeitsmeister.de/kontakt/", label: "Kontakt" },
 ];
 
 export function DtFooter({ className, links = defaultLinks }: DtFooterProps) {
@@ -26,13 +25,15 @@ export function DtFooter({ className, links = defaultLinks }: DtFooterProps) {
         </span>
         <div className="hidden items-center gap-6 sm:flex">
           {links.map((link) => (
-            <Link
+            <a
               key={link.label}
               href={link.href}
+              target="_blank"
+              rel="noopener noreferrer"
               className="relative px-0.5 py-1 text-sbkm-ink-600 transition-colors after:absolute after:inset-x-0.5 after:bottom-0 after:h-px after:origin-left after:scale-x-0 after:bg-sbkm-navy after:transition-transform after:duration-[420ms] after:ease-dt hover:text-sbkm-navy hover:after:scale-x-100 dark:text-white/60 dark:after:bg-sbkm-mint dark:hover:text-sbkm-mint"
             >
               {link.label}
-            </Link>
+            </a>
           ))}
         </div>
       </div>
