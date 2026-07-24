@@ -52,8 +52,8 @@ export async function generateSurveyAgentPreview(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
-  // Haiku by default (large questionnaires must finish under the route deadline).
-  // Set ANTHROPIC_DT_SURVEY_MODEL=claude-sonnet-4-6 for higher quality when needed.
+  // Sonnet by default — completeness/quality over speed (5+ min OK).
+  // Override with ANTHROPIC_DT_SURVEY_MODEL if needed.
   const primaryModel = process.env.ANTHROPIC_DT_SURVEY_MODEL?.trim() || SURVEY_AGENT_DEFAULT_MODEL;
   const models = [primaryModel, resolveDtAnthropicModel("default"), "claude-haiku-4-5-20251001"].filter(
     (m, i, arr) => arr.indexOf(m) === i,
@@ -68,7 +68,7 @@ export async function generateSurveyAgentPreview(input: {
     "Umfrage-Antworten:",
     input.surveyContext,
     "",
-    "Ausgabe-Hinweis: prompt_template vollständig und konkret, aber KOMPAKT — keine Wiederholungen, keine ausgeschriebenen Ranking-Listen doppelt (einmal im Prompt reicht), Zielgröße unter ~8000 Wörter.",
+    "Ausgabe-Hinweis: prompt_template muss VOLLSTÄNDIG sein — alle beantworteten Fragen und Bemerkungen abdecken. Keine Abkürzungen zulasten der Vollständigkeit. Keine erfundenen Rankings.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -135,11 +135,11 @@ export async function generateSurveyAgentPreview(input: {
     throw err;
   }
 
-  // Only retry if the first attempt failed quickly (parse/truncate) — never burn a 2nd full timeout.
+  // Retry once if first attempt failed quickly (parse/truncate). Allow up to ~6 min total before skipping retry.
   const elapsedMs = Date.now() - startedAt;
-  if (!preview && elapsedMs < 90_000) {
+  if (!preview && elapsedMs < 360_000) {
     preview = await runOnce(
-      "Gib gültiges JSON zurück. slug nur a-z0-9_. prompt_template mindestens 200 Zeichen, deutsch, konkret und kompakt (keine Wiederholungen). Gesamte JSON-Antwort muss vollständig in das Token-Budget passen.",
+      "Gib gültiges JSON zurück. slug nur a-z0-9_. prompt_template mindestens 200 Zeichen, deutsch, VOLLSTÄNDIG (alle echten Antworten übernehmen, nichts erfinden). Gesamte JSON-Antwort muss in das Token-Budget passen.",
     );
   }
 

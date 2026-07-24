@@ -203,7 +203,7 @@ export function SurveyToAgentWizard(props: {
         err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError");
       setError(
         aborted
-          ? "Die Generierung hat das Zeitlimit überschritten. Bitte erneut versuchen — der nächste Deploy nutzt ein schnelleres Modell."
+          ? "Die Generierung hat das Zeitlimit überschritten (große Fragebögen können bis ca. 5–8 Minuten brauchen). Bitte erneut versuchen."
           : err instanceof Error
             ? err.message
             : "Generierung fehlgeschlagen.",
