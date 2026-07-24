@@ -149,53 +149,68 @@ export function SurveyToAgentWizard(props: {
 
     setLoading(true);
     setError(null);
-    const res = await fetch(
-      `/api/surveys/${props.surveyId}/responses/${props.responseId}/generate-agent`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          organisationId: orgId,
-          extraRules: extraRules.trim() || undefined,
-          mode: wizardMode,
-          agentId: wizardMode === "refine" ? agentId : undefined,
-        }),
-      },
-    );
-    const json = (await res.json()) as {
-      ok?: boolean;
-      mode?: WizardMode;
-      preview?: SurveyAgentPreview;
-      refinement?: SurveyAgentRefinePreview;
-      currentPrompt?: string;
-      usesGlobalPrompt?: boolean;
-      agent?: OrgAgentOption;
-      message?: string;
-    };
-    setLoading(false);
+    try {
+      // Under API maxDuration (300s); fail with a clear message instead of hanging forever.
+      const res = await fetch(
+        `/api/surveys/${props.surveyId}/responses/${props.responseId}/generate-agent`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            organisationId: orgId,
+            extraRules: extraRules.trim() || undefined,
+            mode: wizardMode,
+            agentId: wizardMode === "refine" ? agentId : undefined,
+          }),
+          signal: AbortSignal.timeout(290_000),
+        },
+      );
+      const json = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        mode?: WizardMode;
+        preview?: SurveyAgentPreview;
+        refinement?: SurveyAgentRefinePreview;
+        currentPrompt?: string;
+        usesGlobalPrompt?: boolean;
+        agent?: OrgAgentOption;
+        message?: string;
+      } | null;
 
-    if (!json.ok) {
-      setError(json.message ?? "Generierung fehlgeschlagen.");
-      return;
+      if (!json?.ok) {
+        setError(json?.message ?? "Generierung fehlgeschlagen.");
+        return;
+      }
+
+      if (json.mode === "refine" && json.refinement) {
+        setRefinePreview(json.refinement);
+        setCurrentPrompt(json.currentPrompt ?? "");
+        setUsesGlobalPrompt(Boolean(json.usesGlobalPrompt));
+        setRefineAgent(json.agent ?? null);
+        setPreview(null);
+      } else if (json.preview) {
+        setPreview(json.preview);
+        setRefinePreview(null);
+        setCurrentPrompt("");
+        setRefineAgent(null);
+      } else {
+        setError("Generierung fehlgeschlagen.");
+        return;
+      }
+
+      setStep("vorschau");
+    } catch (err) {
+      const aborted =
+        err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError");
+      setError(
+        aborted
+          ? "Die Generierung dauert zu lange (Zeitlimit). Bitte Seite neu laden und erneut versuchen."
+          : err instanceof Error
+            ? err.message
+            : "Generierung fehlgeschlagen.",
+      );
+    } finally {
+      setLoading(false);
     }
-
-    if (json.mode === "refine" && json.refinement) {
-      setRefinePreview(json.refinement);
-      setCurrentPrompt(json.currentPrompt ?? "");
-      setUsesGlobalPrompt(Boolean(json.usesGlobalPrompt));
-      setRefineAgent(json.agent ?? null);
-      setPreview(null);
-    } else if (json.preview) {
-      setPreview(json.preview);
-      setRefinePreview(null);
-      setCurrentPrompt("");
-      setRefineAgent(null);
-    } else {
-      setError("Generierung fehlgeschlagen.");
-      return;
-    }
-
-    setStep("vorschau");
   }, [orgId, agentId, wizardMode, extraRules, props.surveyId, props.responseId]);
 
   const createAgent = useCallback(async () => {
