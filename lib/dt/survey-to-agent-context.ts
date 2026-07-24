@@ -4,7 +4,10 @@ import {
   decodeOtherValueForDisplay,
   RADIO_OTHER_TOKEN,
 } from "@/lib/surveys/other-option";
-import { formatRankingAnswerForDisplay } from "@/lib/surveys/ranking-answer";
+import {
+  formatRankingAnswerForDisplay,
+  hasStoredRankingAnswer,
+} from "@/lib/surveys/ranking-answer";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -26,8 +29,38 @@ export function getSurveySteps(definition: unknown): SurveyStep[] {
   return steps as SurveyStep[];
 }
 
+/** Placeholders / skip markers that must never be treated as real answers. */
+const EMPTY_ANSWER_PLACEHOLDERS = new Set([
+  "—",
+  "-",
+  "--",
+  "---",
+  "–",
+  "n/a",
+  "na",
+  "k.a.",
+  "ka",
+  "nichts",
+  "nichts.",
+  "keine angabe",
+  "keine antwort",
+  "nichts gewählt",
+  "kein ranking",
+  "keine bewertung",
+]);
+
+export function isPlaceholderOrEmptyAnswer(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return true;
+  if (EMPTY_ANSWER_PLACEHOLDERS.has(t)) return true;
+  // Only punctuation / dash placeholders
+  if (/^[\s\-—–_.…]+$/.test(t)) return true;
+  return false;
+}
+
 export function normalizeSurveyAnswer(v: unknown, field?: SurveyField): string {
   if (field?.type === "ranking") {
+    if (!hasStoredRankingAnswer(v)) return "";
     const labels = field.options.map((o) => o.label);
     const formatted = formatRankingAnswerForDisplay(v, labels);
     if (formatted) return formatted;
@@ -36,6 +69,7 @@ export function normalizeSurveyAnswer(v: unknown, field?: SurveyField): string {
         .map((x, idx) => `${idx + 1}. ${typeof x === "string" ? x : JSON.stringify(x)}`)
         .join(", ");
     }
+    return "";
   }
   if (field?.type === "radio" && typeof v === "string") {
     const presetLabels = new Set(field.options.map((o) => o.label));
@@ -72,6 +106,22 @@ export function normalizeSurveyAnswer(v: unknown, field?: SurveyField): string {
   return "";
 }
 
+function fieldHasUsableSideContent(qs: SurveyFieldQuestionRow[]): boolean {
+  return qs.some((q) => {
+    const question = q.question?.trim() ?? "";
+    const answer = q.answer?.trim() ?? "";
+    if (q.kind === "remark") {
+      return question.length > 0 || answer.length > 0;
+    }
+    // Follow-up ("Nachfrage"): only useful when answered
+    return answer.length > 0;
+  });
+}
+
+/**
+ * Builds Claude context as pure Frage–Antwort pairs.
+ * Unanswered / placeholder fields are omitted so form option lists never look like answers.
+ */
 export function buildSurveyResponseContextForAgent(input: {
   surveyTitle: string;
   definition: unknown;
@@ -79,29 +129,67 @@ export function buildSurveyResponseContextForAgent(input: {
   fieldQuestions: SurveyFieldQuestionRow[];
 }): string {
   const steps = getSurveySteps(input.definition);
-  const lines: string[] = [`# Umfrage: ${input.surveyTitle}`, ""];
+  const lines: string[] = [
+    `# Umfrage: ${input.surveyTitle}`,
+    "",
+    "Hinweis: Nachfolgend stehen nur tatsächlich beantwortete Fragen (plus Bemerkungen/Nachfragen).",
+    "Unbeantwortete Felder und reine Formular-Optionen wurden entfernt — erfinde keine Rankings oder Antworten.",
+    "",
+  ];
+
+  let includedCount = 0;
+  let skippedCount = 0;
 
   for (const [stepIndex, step] of steps.entries()) {
-    lines.push(`## ${step.title || `Schritt ${stepIndex + 1}`}`);
-    for (const field of step.fields ?? []) {
-      const answer = normalizeSurveyAnswer(input.answers[field.id], field);
-      lines.push(`### ${field.title || "Frage"}`);
-      if (field.description?.trim()) {
-        lines.push(`Beschreibung: ${field.description.trim()}`);
-      }
-      lines.push(`Antwort: ${answer.trim() || "—"}`);
+    const stepLines: string[] = [];
 
+    for (const field of step.fields ?? []) {
+      const raw = input.answers[field.id];
+      const answer = normalizeSurveyAnswer(raw, field).trim();
+      const hasUsableAnswer = answer.length > 0 && !isPlaceholderOrEmptyAnswer(answer);
       const qs = input.fieldQuestions.filter((q) => q.field_id === field.id);
+      const hasSideContent = fieldHasUsableSideContent(qs);
+
+      if (!hasUsableAnswer && !hasSideContent) {
+        skippedCount += 1;
+        continue;
+      }
+
+      includedCount += 1;
+      stepLines.push(`### ${field.title || "Frage"}`);
+      if (field.description?.trim()) {
+        stepLines.push(`Beschreibung: ${field.description.trim()}`);
+      }
+      if (hasUsableAnswer) {
+        stepLines.push(`Antwort: ${answer}`);
+      }
+
       for (const q of qs) {
         const label = q.kind === "remark" ? "Bemerkung" : "Nachfrage";
-        lines.push(`- ${label} (Admin/Teilnehmer): ${q.question}`);
-        if (q.answer?.trim()) {
-          lines.push(`  Antwort: ${q.answer.trim()}`);
+        const question = q.question?.trim() ?? "";
+        const qAnswer = q.answer?.trim() ?? "";
+        if (q.kind === "remark") {
+          if (!question && !qAnswer) continue;
+          stepLines.push(`- ${label} (Admin/Teilnehmer): ${question || "(ohne Text)"}`);
+          if (qAnswer) stepLines.push(`  Antwort: ${qAnswer}`);
+        } else if (qAnswer) {
+          stepLines.push(`- ${label} (Admin/Teilnehmer): ${question || "(ohne Text)"}`);
+          stepLines.push(`  Antwort: ${qAnswer}`);
         }
       }
-      lines.push("");
+      stepLines.push("");
+    }
+
+    if (stepLines.length > 0) {
+      lines.push(`## ${step.title || `Schritt ${stepIndex + 1}`}`);
+      lines.push(...stepLines);
     }
   }
+
+  lines.push(
+    `---`,
+    `Kontext-Statistik: ${includedCount} beantwortete Fragen übernommen, ${skippedCount} unbeantwortete/leere Felder weggelassen.`,
+  );
 
   return lines.join("\n").trim();
 }

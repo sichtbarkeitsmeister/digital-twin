@@ -11,6 +11,7 @@ import {
   loadSurveyAgentGlobalPrompt,
   resolveSurveyToAgentSystemPrompt,
   SURVEY_AGENT_GENERATION_MAX_TOKENS,
+  SURVEY_AGENT_GENERATION_TIMEOUT_MS,
   SURVEY_TO_AGENT_PROMPT_SLUG,
 } from "@/lib/dt/survey-agent-global-prompts";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
@@ -60,6 +61,8 @@ export async function generateSurveyAgentPreview(input: {
       : "",
     "Umfrage-Antworten:",
     input.surveyContext,
+    "",
+    "Ausgabe-Hinweis: prompt_template soll vollständig und konkret sein, aber kompakt bleiben (keine Wiederholungen, kein unnötiges Auffüllen).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -75,6 +78,7 @@ export async function generateSurveyAgentPreview(input: {
       models,
       maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
       stream: true,
+      timeoutMs: SURVEY_AGENT_GENERATION_TIMEOUT_MS,
       system,
       messages: [
         {
@@ -87,6 +91,14 @@ export async function generateSurveyAgentPreview(input: {
     });
 
     if (!result) return null;
+
+    if (result.response.stop_reason === "max_tokens") {
+      console.warn("[dt] survey-to-agent truncated at max_tokens", {
+        model: result.model,
+        maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
+      });
+      return null;
+    }
 
     const raw = extractAnthropicText(result.response);
     const parsed = tryParseJsonObject(raw);
@@ -103,7 +115,7 @@ export async function generateSurveyAgentPreview(input: {
   let preview = await runOnce();
   if (!preview) {
     preview = await runOnce(
-      "Gib gültiges JSON zurück. slug nur a-z0-9_. prompt_template mindestens 200 Zeichen, deutsch, konkret.",
+      "Gib gültiges JSON zurück. slug nur a-z0-9_. prompt_template mindestens 200 Zeichen, deutsch, konkret und kompakt (keine Wiederholungen). Gesamte JSON-Antwort muss vollständig in das Token-Budget passen.",
     );
   }
 

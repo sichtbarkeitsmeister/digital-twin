@@ -10,6 +10,7 @@ import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import {
   loadSurveyAgentGlobalPrompt,
   SURVEY_AGENT_GENERATION_MAX_TOKENS,
+  SURVEY_AGENT_GENERATION_TIMEOUT_MS,
   SURVEY_REFINE_AGENT_PROMPT_SLUG,
 } from "@/lib/dt/survey-agent-global-prompts";
 
@@ -74,6 +75,7 @@ export async function generateSurveyAgentRefinement(input: {
       models,
       maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
       stream: true,
+      timeoutMs: SURVEY_AGENT_GENERATION_TIMEOUT_MS,
       system,
       messages: [
         {
@@ -86,6 +88,14 @@ export async function generateSurveyAgentRefinement(input: {
     });
 
     if (!result) return null;
+
+    if (result.response.stop_reason === "max_tokens") {
+      console.warn("[dt] survey-refine truncated at max_tokens", {
+        model: result.model,
+        maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
+      });
+      return null;
+    }
 
     const raw = extractAnthropicText(result.response);
     const parsed = tryParseJsonObject(raw);
@@ -100,7 +110,7 @@ export async function generateSurveyAgentRefinement(input: {
   let preview = await runOnce();
   if (!preview) {
     preview = await runOnce(
-      "Gib gültiges JSON zurück. prompt_template mindestens 200 Zeichen, deutsch, vollständig. changed_sections mindestens ein Eintrag.",
+      "Gib gültiges JSON zurück. prompt_template mindestens 200 Zeichen, deutsch, vollständig und kompakt. changed_sections mindestens ein Eintrag. Gesamte JSON-Antwort muss in das Token-Budget passen.",
     );
   }
 

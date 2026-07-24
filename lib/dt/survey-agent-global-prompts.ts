@@ -4,8 +4,22 @@ import { createServiceClient } from "@/lib/supabase/service";
 export const SURVEY_TO_AGENT_PROMPT_SLUG = "survey_to_agent" as const;
 export const SURVEY_REFINE_AGENT_PROMPT_SLUG = "survey_refine_agent" as const;
 
-/** Output budget for questionnaire → agent JSON (full survey data, no mid-JSON cut-off). */
-export const SURVEY_AGENT_GENERATION_MAX_TOKENS = 64_000;
+/**
+ * Output budget for questionnaire → agent JSON.
+ * 16k is enough for a full persona prompt + avatar_data and finishes within the
+ * API route maxDuration (300s). 64k previously caused multi-minute generations
+ * that hit the server timeout while the UI spinner hung with no error.
+ * Override with ANTHROPIC_DT_SURVEY_MAX_TOKENS if needed.
+ */
+export const SURVEY_AGENT_GENERATION_MAX_TOKENS = (() => {
+  const raw = process.env.ANTHROPIC_DT_SURVEY_MAX_TOKENS?.trim();
+  const n = raw ? Number(raw) : 16_384;
+  if (!Number.isFinite(n) || n < 2_048) return 16_384;
+  return Math.min(Math.floor(n), 32_768);
+})();
+
+/** Soft deadline for one Anthropic attempt (under route maxDuration=300). */
+export const SURVEY_AGENT_GENERATION_TIMEOUT_MS = 240_000;
 
 export const SURVEY_AGENT_GLOBAL_PROMPT_SLUGS = [
   SURVEY_TO_AGENT_PROMPT_SLUG,
@@ -22,8 +36,16 @@ Antworte NUR mit einem JSON-Objekt (kein Markdown, kein Fließtext drumherum) mi
 - slug: snake_case, max 48 Zeichen, eindeutig beschreibend (z. B. hedwig_dreirad)
 - prompt_template: langer deutscher Markdown-Prompt mit konkretem Inhalt (KEINE {{platzhalter}} — alles ausformuliert)
 - avatar_data: JSON-Objekt mit strukturierten Feldern (name_clean, rolle_kurz, alter, disg, situation, tiefste_angst, entscheidungskriterien, einwaende, text_stil, trigger_worte, negative_worte, vorerfahrungen, entscheidungsprozess, … — nur Felder die zur Persona passen)
+- qa_hinweise: optional, Array kurzer interner Hinweise (z. B. fehlende/unklare Fragen) — nur für Admin-Auswertung, NIEMALS Inhalt von prompt_template
 - quick_actions: optional, Array mit 0–4 kurzen deutschen Starter-Fragen
 - summary: ein Satz für die UI-Vorschau
+
+Daten-Regeln (verbindlich):
+- Vollständigkeit: Jede beantwortete Frage und jede Bemerkung/Nachfrage aus dem Kontext muss im Ergebnis vorkommen (prompt_template und/oder avatar_data). Thematisch ähnliche Fragen nicht zusammenlegen oder weglassen.
+- Keine Erfindung: Nutze ausschließlich die gelieferten Frage-Antwort-Paare. Rankings, Sterne/Bewertungszahlen, Mitbewerber oder Zitate nur übernehmen, wenn sie als echte Antwort im Kontext stehen — niemals aus Formular-Optionen oder Referenz-Beispielen ableiten.
+- Selbstprüfung vor Ausgabe:
+  1) Gegen Erfindung: Jede Ranking-/Auswahlaussage im Prompt muss auf eine konkrete Antwort im Kontext zurückführbar sein.
+  2) Gegen Verlust: Jede beantwortete Frage aus dem Kontext einzeln prüfen, ob sie im Ergebnis vorkommt.
 
 Struktur für prompt_template (Pflicht-Abschnitte, Inhalt aus Umfrage ableiten):
 ## AKTUELLES DATUM

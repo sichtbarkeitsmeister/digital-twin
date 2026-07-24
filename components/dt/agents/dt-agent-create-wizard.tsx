@@ -172,29 +172,43 @@ export function DtAgentCreateWizard(props: {
     }
     setBusy(true);
     setError(null);
-    const res = await fetch(
-      `/api/surveys/${selectedOption.surveyId}/responses/${selectedOption.responseId}/generate-agent`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          organisationId: props.organisationId,
-          extraRules: extraRules.trim() || undefined,
-        }),
-      },
-    );
-    const json = (await res.json()) as {
-      ok?: boolean;
-      preview?: SurveyAgentPreview;
-      message?: string;
-    };
-    setBusy(false);
-    if (!json.ok || !json.preview) {
-      setError(json.message ?? "Generierung fehlgeschlagen.");
-      return;
+    try {
+      const res = await fetch(
+        `/api/surveys/${selectedOption.surveyId}/responses/${selectedOption.responseId}/generate-agent`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            organisationId: props.organisationId,
+            extraRules: extraRules.trim() || undefined,
+          }),
+          signal: AbortSignal.timeout(290_000),
+        },
+      );
+      const json = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        preview?: SurveyAgentPreview;
+        message?: string;
+      } | null;
+      if (!json?.ok || !json.preview) {
+        setError(json?.message ?? "Generierung fehlgeschlagen.");
+        return;
+      }
+      setPreview(json.preview);
+      setStep("survey_preview");
+    } catch (err) {
+      const aborted =
+        err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError");
+      setError(
+        aborted
+          ? "Die Generierung dauert zu lange (Zeitlimit). Bitte erneut versuchen."
+          : err instanceof Error
+            ? err.message
+            : "Generierung fehlgeschlagen.",
+      );
+    } finally {
+      setBusy(false);
     }
-    setPreview(json.preview);
-    setStep("survey_preview");
   }
 
   async function createFromSurvey() {

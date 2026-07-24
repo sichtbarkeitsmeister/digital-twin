@@ -104,6 +104,14 @@ export function isAnthropicModelNotFoundError(error: unknown): boolean {
  */
 const STREAM_REQUIRED_MAX_TOKENS = 8_192;
 
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error ? String((error as { name?: unknown }).name ?? "") : "";
+  const message =
+    "message" in error ? String((error as { message?: unknown }).message ?? "") : "";
+  return name === "AbortError" || /aborted|abort|timeout/i.test(message);
+}
+
 export async function callAnthropicFirstAvailable(input: {
   anthropic: Anthropic;
   models: string[];
@@ -112,34 +120,55 @@ export async function callAnthropicFirstAvailable(input: {
   messages: Anthropic.MessageParam[];
   /** Force streaming; defaults to true when maxTokens > 8192. */
   stream?: boolean;
+  /** Abort the request after this many ms (prevents hung UI when platform kills the route). */
+  timeoutMs?: number;
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const useStream = input.stream ?? input.maxTokens > STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
 
   for (const model of input.models) {
+    const controller = input.timeoutMs ? new AbortController() : null;
+    const timer =
+      controller && input.timeoutMs
+        ? setTimeout(() => controller.abort(), input.timeoutMs)
+        : null;
+
     try {
       if (useStream) {
-        const stream = input.anthropic.messages.stream({
-          model,
-          max_tokens: input.maxTokens,
-          system: input.system,
-          messages: input.messages,
-        });
+        const stream = input.anthropic.messages.stream(
+          {
+            model,
+            max_tokens: input.maxTokens,
+            system: input.system,
+            messages: input.messages,
+          },
+          controller ? { signal: controller.signal } : undefined,
+        );
         const response = await stream.finalMessage();
         return { response, model };
       }
 
-      const response = await input.anthropic.messages.create({
-        model,
-        max_tokens: input.maxTokens,
-        system: input.system,
-        messages: input.messages,
-      });
+      const response = await input.anthropic.messages.create(
+        {
+          model,
+          max_tokens: input.maxTokens,
+          system: input.system,
+          messages: input.messages,
+        },
+        controller ? { signal: controller.signal } : undefined,
+      );
       return { response, model };
     } catch (error) {
       lastError = error;
+      if (isAbortError(error)) {
+        throw new Error(
+          `KI-Generierung hat das Zeitlimit (${Math.round((input.timeoutMs ?? 0) / 1000)}s) überschritten. Bitte erneut versuchen.`,
+        );
+      }
       if (isAnthropicModelNotFoundError(error)) continue;
       throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
   console.error("Anthropic model selection failed", { lastError, models: input.models });
