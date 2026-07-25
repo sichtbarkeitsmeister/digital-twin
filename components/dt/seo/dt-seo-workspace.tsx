@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
@@ -30,6 +30,10 @@ export function DtSeoWorkspace(props: {
   );
   const [enabling, setEnabling] = useState(false);
   const [enableError, setEnableError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOrgFlags(Object.fromEntries(props.organisations.map((o) => [o.id, o.seoEnabled])));
+  }, [props.organisations]);
 
   const orgId = useMemo(() => {
     const fromUrl = searchParams.get("org");
