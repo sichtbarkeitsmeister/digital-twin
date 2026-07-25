@@ -172,40 +172,57 @@ export function DtAgentCreateWizard(props: {
     }
     setBusy(true);
     setError(null);
+
+    const endpoint = `/api/surveys/${selectedOption.surveyId}/responses/${selectedOption.responseId}/generate-agent`;
+    const pollMs = 4_000;
+    const deadline = Date.now() + 900_000;
+    let batchId: string | undefined;
+
     try {
-      const res = await fetch(
-        `/api/surveys/${selectedOption.surveyId}/responses/${selectedOption.responseId}/generate-agent`,
-        {
+      while (Date.now() < deadline) {
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             organisationId: props.organisationId,
-            extraRules: extraRules.trim() || undefined,
+            extraRules: batchId ? undefined : extraRules.trim() || undefined,
+            batchId,
           }),
-          signal: AbortSignal.timeout(780_000),
-        },
-      );
-      const json = (await res.json().catch(() => null)) as {
-        ok?: boolean;
-        preview?: SurveyAgentPreview;
-        message?: string;
-      } | null;
-      if (!json?.ok || !json.preview) {
-        setError(json?.message ?? "Generierung fehlgeschlagen.");
+        });
+        const json = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          status?: "pending" | "ready";
+          batchId?: string;
+          preview?: SurveyAgentPreview;
+          message?: string;
+        } | null;
+
+        if (!json?.ok) {
+          setError(json?.message ?? "Generierung fehlgeschlagen.");
+          return;
+        }
+
+        if (json.status === "pending") {
+          if (!batchId && json.batchId) batchId = json.batchId;
+          await new Promise((r) => setTimeout(r, pollMs));
+          continue;
+        }
+
+        if (json.preview) {
+          setPreview(json.preview);
+          setStep("survey_preview");
+          return;
+        }
+
+        setError("Generierung fehlgeschlagen.");
         return;
       }
-      setPreview(json.preview);
-      setStep("survey_preview");
-    } catch (err) {
-      const aborted =
-        err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError");
+
       setError(
-        aborted
-          ? "Die Generierung dauert zu lange (Zeitlimit). Bitte erneut versuchen."
-          : err instanceof Error
-            ? err.message
-            : "Generierung fehlgeschlagen.",
+        "Die Generierung dauert länger als 15 Minuten. Bitte erneut versuchen.",
       );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Generierung fehlgeschlagen.");
     } finally {
       setBusy(false);
     }
@@ -422,6 +439,12 @@ export function DtAgentCreateWizard(props: {
               placeholder="Ton, Schwerpunkte, Tabus …"
             />
           </label>
+          {busy ? (
+            <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+              Generierung läuft asynchron — große Fragebögen brauchen oft mehrere Minuten.
+              Bitte Fenster offen lassen.
+            </p>
+          ) : null}
         </div>
       ) : null}
 

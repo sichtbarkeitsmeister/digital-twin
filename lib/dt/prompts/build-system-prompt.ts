@@ -34,6 +34,8 @@ export function buildDtSystemPrompt(input: {
   latestSeoReportText?: string;
   monthlyStatsText?: string;
   seoTasksText?: string;
+  /** Digest of other SEO chats in the same organisation (cross-chat memory). */
+  otherSeoChatsText?: string;
   pastedUrlsText?: string;
   textMode?: boolean;
 }): string {
@@ -91,6 +93,12 @@ export function buildDtSystemPrompt(input: {
         "## Bestehende SEO-Aufgaben",
         input.seoTasksText?.trim() ||
           "Keine Aufgabenliste geladen — vor Task-Empfehlungen kurz prüfen, ob der Nutzer schon Aufgaben im Board hat.",
+      );
+      blocks.push(
+        "",
+        "## Andere SEO-Chats dieser Organisation",
+        input.otherSeoChatsText?.trim() ||
+          "Keine weiteren SEO-Chat-Auszüge geladen.",
       );
     }
   }
