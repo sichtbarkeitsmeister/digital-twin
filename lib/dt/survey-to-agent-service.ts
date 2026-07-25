@@ -320,7 +320,7 @@ export async function pollAgentGenerationBatchFromSurvey(input: {
     return {
       ok: true as const,
       status: "pending" as const,
-      batchId: input.batchId,
+      batchId: polled.batchId,
       processingStatus: polled.processingStatus,
       mode: input.mode,
       organisationId: input.organisationId,

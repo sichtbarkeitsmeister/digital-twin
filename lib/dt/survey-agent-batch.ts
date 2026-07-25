@@ -43,8 +43,10 @@ function modelCandidates(): string[] {
 export function surveyAgentBatchCustomId(
   kind: SurveyAgentBatchKind,
   responseId: string,
+  phase: "main" | "repair" = "main",
 ): string {
-  return `sa-${kind}-${responseId}`.slice(0, 64);
+  const prefix = phase === "repair" ? `sa-${kind[0]}r-` : `sa-${kind}-`;
+  return `${prefix}${responseId}`.slice(0, 64);
 }
 
 async function createBatchWithModelFallback(input: {
@@ -52,8 +54,10 @@ async function createBatchWithModelFallback(input: {
   customId: string;
   system: string | Anthropic.Messages.MessageCreateParams["system"];
   messages: Anthropic.MessageParam[];
+  maxTokens?: number;
 }): Promise<{ batchId: string; model: string }> {
   let lastError: unknown = null;
+  const maxTokens = input.maxTokens ?? SURVEY_AGENT_GENERATION_MAX_TOKENS;
 
   for (const model of modelCandidates()) {
     try {
@@ -63,7 +67,7 @@ async function createBatchWithModelFallback(input: {
             custom_id: input.customId,
             params: {
               model,
-              max_tokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
+              max_tokens: maxTokens,
               system: input.system,
               messages: input.messages,
             },
@@ -81,6 +85,9 @@ async function createBatchWithModelFallback(input: {
   console.error("[dt] survey-agent batch create failed", { lastError });
   throw new Error("KI-Batch konnte nicht gestartet werden. Bitte erneut versuchen.");
 }
+
+const JSON_ONLY_HINT =
+  "Antworte NUR mit einem einzigen gültigen JSON-Objekt (kein Markdown, keine Code-Fences, kein Text davor/danach). Strings müssen gültig escaped sein (Zeilenumbrüche als \\n).";
 
 export async function startSurveyAgentCreateBatch(input: {
   responseId: string;
@@ -102,6 +109,7 @@ export async function startSurveyAgentCreateBatch(input: {
     input.surveyContext,
     "",
     "Ausgabe-Hinweis: prompt_template muss VOLLSTÄNDIG sein — alle beantworteten Fragen und Bemerkungen abdecken. Keine Abkürzungen zulasten der Vollständigkeit. Keine erfundenen Rankings.",
+    JSON_ONLY_HINT,
   ]
     .filter(Boolean)
     .join("\n");
@@ -152,6 +160,8 @@ export async function startSurveyAgentRefineBatch(input: {
     "",
     "Umfrage-Antworten (neue Erkenntnisse einarbeiten):",
     input.surveyContext,
+    "",
+    JSON_ONLY_HINT,
   ]
     .filter(Boolean)
     .join("\n");
@@ -166,8 +176,43 @@ export async function startSurveyAgentRefineBatch(input: {
   });
 }
 
+async function startJsonRepairBatch(input: {
+  anthropic: Anthropic;
+  kind: SurveyAgentBatchKind;
+  responseId: string;
+  raw: string;
+  schemaHint: string;
+}): Promise<{ batchId: string; model: string }> {
+  const customId = surveyAgentBatchCustomId(input.kind, input.responseId, "repair");
+  const clipped = input.raw.length > 120_000 ? `${input.raw.slice(0, 120_000)}\n…[abgeschnitten]` : input.raw;
+
+  return createBatchWithModelFallback({
+    anthropic: input.anthropic,
+    customId,
+    maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
+    system: [
+      "Du reparierst ungültige KI-Ausgaben zu gültigem JSON.",
+      JSON_ONLY_HINT,
+      input.schemaHint,
+      "Behalte den inhaltlichen Persona-/Prompt-Inhalt so vollständig wie möglich. Erfinde keine neuen Rankings.",
+    ].join("\n"),
+    messages: [
+      {
+        role: "user",
+        content: [
+          "Die folgende Ausgabe war kein gültiges JSON bzw. entsprach nicht dem Schema.",
+          "Gib dieselbe inhaltliche Antwort als EIN gültiges JSON-Objekt zurück.",
+          "",
+          "Kaputte Ausgabe:",
+          clipped,
+        ].join("\n"),
+      },
+    ],
+  });
+}
+
 export type SurveyAgentBatchPollResult =
-  | { status: "pending"; processingStatus: string }
+  | { status: "pending"; processingStatus: string; batchId: string }
   | {
       status: "ready";
       kind: "create";
@@ -188,11 +233,16 @@ export async function pollSurveyAgentBatch(input: {
   responseId: string;
 }): Promise<SurveyAgentBatchPollResult> {
   const anthropic = getAnthropic();
-  const expectedCustomId = surveyAgentBatchCustomId(input.kind, input.responseId);
+  const mainCustomId = surveyAgentBatchCustomId(input.kind, input.responseId, "main");
+  const repairCustomId = surveyAgentBatchCustomId(input.kind, input.responseId, "repair");
 
   const batch = await anthropic.messages.batches.retrieve(input.batchId);
   if (batch.processing_status !== "ended") {
-    return { status: "pending", processingStatus: batch.processing_status };
+    return {
+      status: "pending",
+      processingStatus: batch.processing_status,
+      batchId: input.batchId,
+    };
   }
 
   const rows = await anthropic.messages.batches.results(input.batchId);
@@ -205,7 +255,7 @@ export async function pollSurveyAgentBatch(input: {
       | { type: "expired" };
   } | null = null;
   for await (const row of rows) {
-    if (row.custom_id === expectedCustomId) {
+    if (row.custom_id === mainCustomId || row.custom_id === repairCustomId) {
       matched = row;
       break;
     }
@@ -217,6 +267,8 @@ export async function pollSurveyAgentBatch(input: {
       message: "Batch-Ergebnis gehört nicht zu dieser Umfrage-Antwort.",
     };
   }
+
+  const isRepairResult = matched.custom_id === repairCustomId;
 
   if (matched.result.type === "errored") {
     const msg = matched.result.error?.error?.message ?? "KI-Batch fehlgeschlagen.";
@@ -230,50 +282,102 @@ export async function pollSurveyAgentBatch(input: {
   }
 
   const message = matched.result.message;
-  if (message.stop_reason === "max_tokens") {
+  const raw = extractAnthropicText(message);
+  const truncated = message.stop_reason === "max_tokens";
+
+  console.info("[dt] survey-agent batch finished", {
+    batchId: input.batchId,
+    kind: input.kind,
+    model: message.model,
+    stopReason: message.stop_reason,
+    outputChars: raw.length,
+    isRepairResult,
+  });
+
+  if (truncated && !tryParseJsonObject(raw)) {
     return {
       status: "error",
       message:
-        "Ausgabe wurde am Token-Limit abgeschnitten. Bitte erneut versuchen oder Token-Budget erhöhen.",
+        "Ausgabe wurde am Token-Limit abgeschnitten und ist kein gültiges JSON. Bitte erneut versuchen.",
     };
   }
 
-  const raw = extractAnthropicText(message);
   const parsed = tryParseJsonObject(raw);
-  if (!parsed) {
-    return {
-      status: "error",
-      message: "KI-Antwort war kein gültiges JSON. Bitte erneut versuchen.",
-    };
-  }
 
   if (input.kind === "create") {
-    const validated = surveyAgentPreviewSchema.safeParse(parsed);
-    if (!validated.success) {
+    const validated = parsed ? surveyAgentPreviewSchema.safeParse(parsed) : null;
+    if (validated?.success) {
       return {
-        status: "error",
-        message: "Agent-Vorschau ungültig. Bitte erneut versuchen.",
+        status: "ready",
+        kind: "create",
+        preview: validated.data,
+        model: message.model,
       };
     }
+
+    if (!isRepairResult) {
+      console.warn("[dt] survey-agent create output invalid — starting repair batch", {
+        batchId: input.batchId,
+        parseOk: Boolean(parsed),
+        issues: validated?.success === false ? validated.error.issues.slice(0, 5) : undefined,
+      });
+      const repair = await startJsonRepairBatch({
+        anthropic,
+        kind: "create",
+        responseId: input.responseId,
+        raw,
+        schemaHint:
+          "Schema-Felder: name, role, slug, prompt_template (>=200 Zeichen), avatar_data (Objekt), summary; optional qa_hinweise, quick_actions.",
+      });
+      return {
+        status: "pending",
+        processingStatus: "repairing",
+        batchId: repair.batchId,
+      };
+    }
+
+    return {
+      status: "error",
+      message: parsed
+        ? "Agent-Vorschau ungültig (auch nach JSON-Reparatur). Bitte erneut versuchen."
+        : "KI-Antwort war kein gültiges JSON (auch nach Reparatur). Bitte erneut versuchen.",
+    };
+  }
+
+  const validated = parsed ? surveyAgentRefineSchema.safeParse(parsed) : null;
+  if (validated?.success) {
     return {
       status: "ready",
-      kind: "create",
-      preview: validated.data,
+      kind: "refine",
+      refinement: validated.data,
       model: message.model,
     };
   }
 
-  const validated = surveyAgentRefineSchema.safeParse(parsed);
-  if (!validated.success) {
+  if (!isRepairResult) {
+    console.warn("[dt] survey-agent refine output invalid — starting repair batch", {
+      batchId: input.batchId,
+      parseOk: Boolean(parsed),
+    });
+    const repair = await startJsonRepairBatch({
+      anthropic,
+      kind: "refine",
+      responseId: input.responseId,
+      raw,
+      schemaHint:
+        "Schema-Felder: prompt_template (>=200 Zeichen), summary, changed_sections (Array mit mind. 1 Eintrag).",
+    });
     return {
-      status: "error",
-      message: "Verfeinerung ungültig. Bitte erneut versuchen.",
+      status: "pending",
+      processingStatus: "repairing",
+      batchId: repair.batchId,
     };
   }
+
   return {
-    status: "ready",
-    kind: "refine",
-    refinement: validated.data,
-    model: message.model,
+    status: "error",
+    message: parsed
+      ? "Verfeinerung ungültig (auch nach JSON-Reparatur). Bitte erneut versuchen."
+      : "KI-Antwort war kein gültiges JSON (auch nach Reparatur). Bitte erneut versuchen.",
   };
 }

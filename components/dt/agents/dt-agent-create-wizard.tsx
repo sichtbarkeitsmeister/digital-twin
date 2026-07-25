@@ -203,7 +203,7 @@ export function DtAgentCreateWizard(props: {
         }
 
         if (json.status === "pending") {
-          if (!batchId && json.batchId) batchId = json.batchId;
+          if (json.batchId) batchId = json.batchId;
           await new Promise((r) => setTimeout(r, pollMs));
           continue;
         }

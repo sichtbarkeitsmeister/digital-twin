@@ -15,6 +15,59 @@ export function stripCodeFences(text: string): string {
   return (fenced?.[1] ?? text).trim();
 }
 
+/** Escape raw control characters inside JSON string literals (common LLM slip). */
+export function escapeControlCharsInJsonStrings(input: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i]!;
+
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+        out += ch;
+        continue;
+      }
+      if (ch === "\n") {
+        out += "\\n";
+        continue;
+      }
+      if (ch === "\r") {
+        out += "\\r";
+        continue;
+      }
+      if (ch === "\t") {
+        out += "\\t";
+        continue;
+      }
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        out += `\\u${code.toString(16).padStart(4, "0")}`;
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+
+    if (ch === '"') inString = true;
+    out += ch;
+  }
+
+  return out;
+}
+
 export function extractFirstJsonObject(text: string): string | null {
   const input = stripCodeFences(text);
   const start = input.indexOf("{");
@@ -57,26 +110,40 @@ export function extractFirstJsonObject(text: string): string | null {
   return null;
 }
 
-export function tryParseJsonObject(text: string): Record<string, unknown> | null {
+function tryParseOnce(text: string): Record<string, unknown> | null {
   try {
-    const normalized = stripCodeFences(text);
-    const parsed: unknown = JSON.parse(normalized);
+    const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
     return null;
   } catch {
-    try {
-      const firstObject = extractFirstJsonObject(text);
-      if (!firstObject) return null;
-      const recovered: unknown = JSON.parse(firstObject);
-      return recovered && typeof recovered === "object" && !Array.isArray(recovered)
-        ? (recovered as Record<string, unknown>)
-        : null;
-    } catch {
-      return null;
-    }
+    return null;
   }
+}
+
+export function tryParseJsonObject(text: string): Record<string, unknown> | null {
+  const normalized = stripCodeFences(text)
+    .replace(/^\uFEFF/, "")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .trim();
+
+  const direct = tryParseOnce(normalized);
+  if (direct) return direct;
+
+  const escaped = tryParseOnce(escapeControlCharsInJsonStrings(normalized));
+  if (escaped) return escaped;
+
+  const firstObject = extractFirstJsonObject(normalized);
+  if (firstObject) {
+    const fromSlice = tryParseOnce(firstObject);
+    if (fromSlice) return fromSlice;
+    const fromEscapedSlice = tryParseOnce(escapeControlCharsInJsonStrings(firstObject));
+    if (fromEscapedSlice) return fromEscapedSlice;
+  }
+
+  return null;
 }
 
 export function isAnthropicModelNotFoundError(error: unknown): boolean {

@@ -190,7 +190,7 @@ export function SurveyToAgentWizard(props: {
         }
 
         if (json.status === "pending") {
-          if (!batchId && json.batchId) batchId = json.batchId;
+          if (json.batchId) batchId = json.batchId;
           if (json.mode === "refine" && !seededRefineMeta) {
             seededRefineMeta = true;
             setCurrentPrompt(json.currentPrompt ?? "");
