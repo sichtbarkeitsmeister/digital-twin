@@ -18,13 +18,13 @@ export const SURVEY_AGENT_GENERATION_MAX_TOKENS = (() => {
 })();
 
 /**
- * Soft deadline for one Anthropic attempt.
- * ~7.5 min — allows ~5+ min generations; stays under route maxDuration (800s).
+ * Soft deadline for one Anthropic *streaming* attempt (legacy sync path).
+ * Async Message Batches do not use this — they run outside the Vercel limit.
  */
 export const SURVEY_AGENT_GENERATION_TIMEOUT_MS = (() => {
   const raw = process.env.ANTHROPIC_DT_SURVEY_TIMEOUT_MS?.trim();
-  const n = raw ? Number(raw) : 450_000;
-  if (!Number.isFinite(n) || n < 60_000) return 450_000;
+  const n = raw ? Number(raw) : 270_000;
+  if (!Number.isFinite(n) || n < 60_000) return 270_000;
   return Math.min(Math.floor(n), 780_000);
 })();
 

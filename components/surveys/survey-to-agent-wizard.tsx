@@ -149,65 +149,83 @@ export function SurveyToAgentWizard(props: {
 
     setLoading(true);
     setError(null);
+
+    const endpoint = `/api/surveys/${props.surveyId}/responses/${props.responseId}/generate-agent`;
+    const pollMs = 4_000;
+    const deadline = Date.now() + 900_000; // 15 min client ceiling for Anthropic batches
+    let batchId: string | undefined;
+    let seededRefineMeta = false;
+
     try {
-      // Under API maxDuration (300s); fail with a clear message instead of hanging forever.
-      const res = await fetch(
-        `/api/surveys/${props.surveyId}/responses/${props.responseId}/generate-agent`,
-        {
+      while (Date.now() < deadline) {
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             organisationId: orgId,
-            extraRules: extraRules.trim() || undefined,
+            extraRules: batchId ? undefined : extraRules.trim() || undefined,
             mode: wizardMode,
             agentId: wizardMode === "refine" ? agentId : undefined,
+            batchId,
           }),
-          signal: AbortSignal.timeout(780_000),
-        },
-      );
-      const json = (await res.json().catch(() => null)) as {
-        ok?: boolean;
-        mode?: WizardMode;
-        preview?: SurveyAgentPreview;
-        refinement?: SurveyAgentRefinePreview;
-        currentPrompt?: string;
-        usesGlobalPrompt?: boolean;
-        agent?: OrgAgentOption;
-        message?: string;
-      } | null;
+        });
 
-      if (!json?.ok) {
-        setError(json?.message ?? "Generierung fehlgeschlagen.");
+        const json = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          status?: "pending" | "ready";
+          batchId?: string;
+          processingStatus?: string;
+          mode?: WizardMode;
+          preview?: SurveyAgentPreview;
+          refinement?: SurveyAgentRefinePreview;
+          currentPrompt?: string;
+          usesGlobalPrompt?: boolean;
+          agent?: OrgAgentOption;
+          message?: string;
+        } | null;
+
+        if (!json?.ok) {
+          setError(json?.message ?? "Generierung fehlgeschlagen.");
+          return;
+        }
+
+        if (json.status === "pending") {
+          if (!batchId && json.batchId) batchId = json.batchId;
+          if (json.mode === "refine" && !seededRefineMeta) {
+            seededRefineMeta = true;
+            setCurrentPrompt(json.currentPrompt ?? "");
+            setUsesGlobalPrompt(Boolean(json.usesGlobalPrompt));
+            setRefineAgent(json.agent ?? null);
+          }
+          await new Promise((r) => setTimeout(r, pollMs));
+          continue;
+        }
+
+        if (json.mode === "refine" && json.refinement) {
+          setRefinePreview(json.refinement);
+          setCurrentPrompt(json.currentPrompt ?? "");
+          setUsesGlobalPrompt(Boolean(json.usesGlobalPrompt));
+          setRefineAgent(json.agent ?? null);
+          setPreview(null);
+        } else if (json.preview) {
+          setPreview(json.preview);
+          setRefinePreview(null);
+          setCurrentPrompt("");
+          setRefineAgent(null);
+        } else {
+          setError("Generierung fehlgeschlagen.");
+          return;
+        }
+
+        setStep("vorschau");
         return;
       }
 
-      if (json.mode === "refine" && json.refinement) {
-        setRefinePreview(json.refinement);
-        setCurrentPrompt(json.currentPrompt ?? "");
-        setUsesGlobalPrompt(Boolean(json.usesGlobalPrompt));
-        setRefineAgent(json.agent ?? null);
-        setPreview(null);
-      } else if (json.preview) {
-        setPreview(json.preview);
-        setRefinePreview(null);
-        setCurrentPrompt("");
-        setRefineAgent(null);
-      } else {
-        setError("Generierung fehlgeschlagen.");
-        return;
-      }
-
-      setStep("vorschau");
-    } catch (err) {
-      const aborted =
-        err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError");
       setError(
-        aborted
-          ? "Die Generierung hat das Zeitlimit überschritten (große Fragebögen können bis ca. 5–8 Minuten brauchen). Bitte erneut versuchen."
-          : err instanceof Error
-            ? err.message
-            : "Generierung fehlgeschlagen.",
+        "Die Generierung dauert länger als 15 Minuten. Bitte Seite neu laden und den Status erneut prüfen — oder nochmals starten.",
       );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Generierung fehlgeschlagen.");
     } finally {
       setLoading(false);
     }
@@ -544,6 +562,10 @@ export function SurveyToAgentWizard(props: {
 
       {step === "regeln" && loading ? (
         <div className="grid gap-3">
+          <p className="text-sm text-muted-foreground">
+            Generierung läuft asynchron (Sonnet, vollständiges Token-Budget). Große Fragebögen
+            brauchen oft mehrere Minuten — bitte dieses Fenster offen lassen.
+          </p>
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="h-16 animate-pulse rounded-xl bg-muted/50" />
           ))}
