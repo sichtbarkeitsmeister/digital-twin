@@ -17,6 +17,9 @@ export function DtChatThread(props: {
   messages: DtChatMessageItem[];
   isThinking: boolean;
   agentName: string;
+  agentRole?: string | null;
+  agentDisg?: string | null;
+  agentEmoji?: string | null;
   emptyHint?: string;
   teamMode?: boolean;
   authorLabels?: Record<string, string>;
@@ -103,12 +106,26 @@ export function DtChatThread(props: {
       >
         {visible.length === 0 && !props.isThinking ? (
           <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-3 py-8 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sbkm-mint/25 text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:text-white">
-              <Sparkles className="h-6 w-6" aria-hidden />
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sbkm-mint/25 text-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:text-white">
+              {props.agentEmoji ? (
+                <span aria-hidden>{props.agentEmoji}</span>
+              ) : (
+                <Sparkles className="h-6 w-6 text-sbkm-navy dark:text-white" aria-hidden />
+              )}
             </div>
-            <p className="text-lg font-semibold tracking-tight text-sbkm-navy dark:text-white">
-              {props.agentName}
-            </p>
+            <div className="grid gap-1">
+              <p className="text-lg font-semibold tracking-tight text-sbkm-navy dark:text-white">
+                {props.agentName}
+              </p>
+              {props.agentRole ? (
+                <p className="text-sm text-sbkm-ink-600 dark:text-white/65">{props.agentRole}</p>
+              ) : null}
+              {props.agentDisg ? (
+                <p className="mx-auto w-fit rounded-full bg-sbkm-navy/5 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sbkm-ink-600 dark:bg-white/10 dark:text-white/70">
+                  {props.agentDisg}
+                </p>
+              ) : null}
+            </div>
             <p className="max-w-md text-sm text-sbkm-ink-600 dark:text-white/65">
               {props.emptyHint ??
                 "Stelle eine Frage oder wähle einen Schnelltest — dein DigitalTwin antwortet in diesem Chat."}

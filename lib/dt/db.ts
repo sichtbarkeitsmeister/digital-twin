@@ -16,7 +16,7 @@ export async function loadAgentsForOrg(organisationId: string): Promise<DtAgentR
   const supabase = await createClient();
   const { data } = await supabase
     .from("dt_agents")
-    .select("id,organisation_id,slug,name,role,kind,quick_actions,is_enabled,position")
+    .select("id,organisation_id,slug,name,role,kind,quick_actions,is_enabled,position,avatar_data")
     .eq("organisation_id", organisationId)
     .eq("is_enabled", true)
     .order("position", { ascending: true })

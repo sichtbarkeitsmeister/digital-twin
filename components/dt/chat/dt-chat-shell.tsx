@@ -27,6 +27,7 @@ import { DtLogo } from "@/components/dt/dt-logo";
 import { DtThemeToggle } from "@/components/dt/dt-theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { readDtLastChatId, writeDtLastChatId } from "@/lib/dt/client-storage";
+import { emojiForAgent, extractAgentDisg } from "@/lib/dt/agent-display";
 import {
   readSelectedOrganisationId,
   writeSelectedOrganisationId,
@@ -210,6 +211,11 @@ export function DtChatShell(props: {
   );
 
   const displayAgentName = selectedAgent?.name ?? "DigitalTwin";
+  const displayAgentRole = selectedAgent?.role ?? null;
+  const displayAgentDisg = selectedAgent
+    ? extractAgentDisg(selectedAgent.avatar_data)
+    : null;
+  const displayAgentEmoji = selectedAgent ? emojiForAgent(selectedAgent) : null;
   const chatModeForCreate: DtChatMode = props.adminOversight
     ? selectedAgent?.slug === "seo_advisor"
       ? "seo"
@@ -1199,6 +1205,9 @@ export function DtChatShell(props: {
                   messages={messages}
                   isThinking={isBusy}
                   agentName={displayAgentName}
+                  agentRole={displayAgentRole}
+                  agentDisg={displayAgentDisg}
+                  agentEmoji={displayAgentEmoji}
                   teamMode={showChatAuthors}
                   authorLabels={authorLabels}
                   suggestedFollowUps={quickActions}
