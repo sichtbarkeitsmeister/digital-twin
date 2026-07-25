@@ -10,6 +10,8 @@ export type DtAgentRow = {
   quick_actions: unknown;
   is_enabled: boolean;
   position: number;
+  /** Persona structured fields (disg, emoji, …) — optional in list queries. */
+  avatar_data?: unknown;
 };
 
 export type DtOrgConfigRow = {

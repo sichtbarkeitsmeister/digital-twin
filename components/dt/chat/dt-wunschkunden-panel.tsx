@@ -5,6 +5,7 @@ import { ChevronDown, Users } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
 import type { DtAgentOption } from "@/components/dt/chat/dt-agent-switcher";
+import { emojiForAgent, extractAgentDisg } from "@/lib/dt/agent-display";
 
 export function DtWunschkundenPanel(props: {
   personas: DtAgentOption[];
@@ -34,20 +35,31 @@ export function DtWunschkundenPanel(props: {
       </button>
       {open ? (
         <ul className="mt-2 grid gap-2">
-          {others.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                onClick={() => props.onSelectAgent(p.id)}
-                className="w-full rounded-[12px] border border-sbkm-navy/10 bg-white/50 px-3 py-2 text-left transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/10"
-              >
-                <p className="text-sm font-semibold text-sbkm-navy dark:text-white">{p.name}</p>
-                {p.role ? (
-                  <p className="text-xs text-sbkm-ink-600 dark:text-white/55">{p.role}</p>
-                ) : null}
-              </button>
-            </li>
-          ))}
+          {others.map((p) => {
+            const disg = extractAgentDisg(p.avatar_data);
+            return (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => props.onSelectAgent(p.id)}
+                  className="w-full rounded-[12px] border border-sbkm-navy/10 bg-white/50 px-3 py-2 text-left transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/10"
+                >
+                  <p className="text-sm font-semibold text-sbkm-navy dark:text-white">
+                    <span aria-hidden>{emojiForAgent(p)} </span>
+                    {p.name}
+                  </p>
+                  {p.role ? (
+                    <p className="text-xs text-sbkm-ink-600 dark:text-white/55">{p.role}</p>
+                  ) : null}
+                  {disg ? (
+                    <p className="mt-1 w-fit rounded-full bg-sbkm-navy/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sbkm-ink-600 dark:bg-white/10 dark:text-white/65">
+                      {disg}
+                    </p>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>
