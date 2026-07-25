@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -188,7 +189,39 @@ export function OrgOverviewPanel(props: {
   const canViewSeoReports = props.canViewSeoReports ?? false;
   const canManageSeo = props.canManageSeo ?? false;
   const canViewSeoAdvisor = props.canViewSeoAdvisor ?? false;
+  const router = useRouter();
   const [reportModalId, setReportModalId] = useState<string | null>(null);
+  const [seoEnabled, setSeoEnabled] = useState(overview.config.seoEnabled);
+  const [enablingSeo, setEnablingSeo] = useState(false);
+  const [seoEnableError, setSeoEnableError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSeoEnabled(overview.config.seoEnabled);
+  }, [overview.config.seoEnabled]);
+
+  async function enableSeoNow() {
+    if (!canManageSeo || enablingSeo) return;
+    setEnablingSeo(true);
+    setSeoEnableError(null);
+    try {
+      const res = await fetch(`/api/dt/org-config/${organisationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seoEnabled: true }),
+      });
+      const json = (await res.json()) as { ok?: boolean; message?: string };
+      if (!json.ok) {
+        setSeoEnableError(json.message ?? "Aktivierung fehlgeschlagen.");
+        return;
+      }
+      setSeoEnabled(true);
+      router.refresh();
+    } catch (err) {
+      setSeoEnableError(err instanceof Error ? err.message : "Aktivierung fehlgeschlagen.");
+    } finally {
+      setEnablingSeo(false);
+    }
+  }
   const openSeoTasks = overview.seoTasks.open + overview.seoTasks.inProgress;
   const visibleAgents = canViewSeoAdvisor
     ? overview.agents
@@ -232,13 +265,30 @@ export function OrgOverviewPanel(props: {
           />
           <div className="grid gap-4 p-4 sm:p-5">
             <div className="flex flex-wrap items-center gap-2">
-              {overview.config.seoEnabled ? (
+              {seoEnabled ? (
                 <Badge className="bg-sbkm-navy text-white dark:bg-sbkm-mint dark:text-sbkm-navy">
                   Aktiv
                 </Badge>
               ) : (
-                <Badge variant="outline">Inaktiv</Badge>
+                <>
+                  <Badge variant="outline">Inaktiv</Badge>
+                  {canManageSeo ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={enablingSeo}
+                      className="h-7 active:scale-[0.98]"
+                      onClick={() => void enableSeoNow()}
+                    >
+                      {enablingSeo ? "Aktiviere…" : "SEO aktivieren"}
+                    </Button>
+                  ) : null}
+                </>
               )}
+              {seoEnableError ? (
+                <span className="text-xs text-red-600 dark:text-red-400">{seoEnableError}</span>
+              ) : null}
               {overview.config.websiteUrl ? (
                 <a
                   href={overview.config.websiteUrl}

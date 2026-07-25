@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
 import { useDtSeoWorkspaceUrl } from "@/lib/dt/seo/workspace-url";
@@ -9,6 +9,7 @@ import { DtSeoConfigForm } from "@/components/dt/seo/dt-seo-config-form";
 import { DtSeoReportsPanel } from "@/components/dt/seo/dt-seo-reports-panel";
 import { DtSeoStatsOverview } from "@/components/dt/seo/dt-seo-stats-overview";
 import { DtSeoTaskBoard } from "@/components/dt/seo/dt-seo-task-board";
+import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtTabs } from "@/components/dt/dt-tabs";
 import { cn } from "@/components/dt/cn";
 import type { DtSeoOrganisation } from "@/lib/dt/load-seo-organisations";
@@ -20,8 +21,15 @@ export function DtSeoWorkspace(props: {
   currentUserId: string;
   isPlatformAdmin: boolean;
 }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { writeUrl, tab } = useDtSeoWorkspaceUrl();
+
+  const [orgFlags, setOrgFlags] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(props.organisations.map((o) => [o.id, o.seoEnabled])),
+  );
+  const [enabling, setEnabling] = useState(false);
+  const [enableError, setEnableError] = useState<string | null>(null);
 
   const orgId = useMemo(() => {
     const fromUrl = searchParams.get("org");
@@ -33,7 +41,9 @@ export function DtSeoWorkspace(props: {
 
   const selected = props.organisations.find((o) => o.id === orgId) ?? props.organisations[0];
   const canManage = props.isPlatformAdmin;
-  const seoEnabled = Boolean(selected?.seoEnabled);
+  const seoEnabled = Boolean(
+    orgFlags[orgId] ?? selected?.seoEnabled ?? false,
+  );
   const chatFocus = tab === "chat";
 
   const chatOrgs = useMemo(
@@ -46,6 +56,38 @@ export function DtSeoWorkspace(props: {
       })),
     [props.organisations],
   );
+
+  const markSeoEnabled = useCallback(
+    (organisationId: string, enabled: boolean) => {
+      setOrgFlags((prev) => ({ ...prev, [organisationId]: enabled }));
+      router.refresh();
+    },
+    [router],
+  );
+
+  const enableSeoNow = useCallback(async () => {
+    if (!canManage || !orgId) return;
+    setEnabling(true);
+    setEnableError(null);
+    try {
+      const res = await fetch(`/api/dt/org-config/${orgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seoEnabled: true }),
+      });
+      const json = (await res.json()) as { ok?: boolean; message?: string };
+      if (!json.ok) {
+        setEnableError(json.message ?? "Aktivierung fehlgeschlagen.");
+        return;
+      }
+      markSeoEnabled(orgId, true);
+      writeUrl({ org: orgId, tab: "chat" });
+    } catch (err) {
+      setEnableError(err instanceof Error ? err.message : "Aktivierung fehlgeschlagen.");
+    } finally {
+      setEnabling(false);
+    }
+  }, [canManage, orgId, markSeoEnabled, writeUrl]);
 
   if (!selected) {
     return (
@@ -65,12 +107,35 @@ export function DtSeoWorkspace(props: {
       )}
     >
       {!seoEnabled ? (
-        <p className="mb-3 shrink-0 rounded-dt border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
-          SEO ist für diese Organisation deaktiviert.
-          {props.isPlatformAdmin
-            ? " Aktiviere es unter Einstellungen."
-            : " Bitte einen Administrator kontaktieren."}
-        </p>
+        <div className="mb-3 flex shrink-0 flex-col gap-3 rounded-dt border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            SEO ist für <span className="font-semibold">{selected.name}</span> noch nicht
+            freigeschaltet.
+            {canManage
+              ? " Ohne Freischaltung sind Chat, Statistik, Aufgaben und Reports gesperrt."
+              : " Bitte einen Administrator kontaktieren."}
+          </p>
+          {canManage ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <DtPillButton
+                type="button"
+                size="sm"
+                disabled={enabling}
+                onClick={() => void enableSeoNow()}
+              >
+                {enabling ? "Aktiviere…" : "SEO jetzt aktivieren"}
+              </DtPillButton>
+              <button
+                type="button"
+                className="text-xs font-medium underline underline-offset-2"
+                onClick={() => writeUrl({ org: orgId, tab: "settings" })}
+              >
+                Zu Einstellungen
+              </button>
+            </div>
+          ) : null}
+          {enableError ? <p className="w-full text-xs text-red-700 dark:text-red-300">{enableError}</p> : null}
+        </div>
       ) : null}
 
       <DtTabs
@@ -186,6 +251,7 @@ export function DtSeoWorkspace(props: {
             organisationId={orgId}
             canEdit={props.isPlatformAdmin}
             isPlatformAdmin={props.isPlatformAdmin}
+            onSeoEnabledChange={(enabled) => markSeoEnabled(orgId, enabled)}
           />
         </div>
       ) : null}

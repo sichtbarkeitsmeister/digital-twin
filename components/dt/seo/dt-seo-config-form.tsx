@@ -50,6 +50,8 @@ export function DtSeoConfigForm(props: {
   organisationId: string;
   canEdit: boolean;
   isPlatformAdmin?: boolean;
+  /** Called after seo_enabled is saved so parent workspace can unlock tabs without full reload. */
+  onSeoEnabledChange?: (enabled: boolean) => void;
 }) {
   const [config, setConfig] = useState<Config | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -142,6 +144,9 @@ export function DtSeoConfigForm(props: {
       setConfig(json.config);
       if (json.config.seo_checklist !== undefined) {
         setChecklistText(checklistToText(json.config.seo_checklist));
+      }
+      if (typeof patch.seoEnabled === "boolean") {
+        props.onSeoEnabledChange?.(json.config.seo_enabled);
       }
     }
     setStatus("Gespeichert.");
