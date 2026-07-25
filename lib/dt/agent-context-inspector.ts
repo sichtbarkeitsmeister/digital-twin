@@ -20,6 +20,7 @@ import {
   formatDtSeoTasksForPrompt,
   loadDtSeoTasksForPrompt,
 } from "@/lib/dt/seo/task-context";
+import { loadOtherSeoChatsForPrompt } from "@/lib/dt/seo/org-chat-memory";
 import {
   formatSeoChecklist,
   loadGlobalSeoChecklist,
@@ -151,6 +152,10 @@ export async function loadDtAgentContextBundle(input: {
     promptMode === "seo"
       ? await loadDtSeoTasksForPrompt(supabase, input.organisationId)
       : [];
+  const otherSeoChatsText =
+    promptMode === "seo"
+      ? await loadOtherSeoChatsForPrompt(supabase, input.organisationId)
+      : "";
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
   const globalSeoChecklist = isSeoOrGeo
@@ -416,6 +421,18 @@ export async function loadDtAgentContextBundle(input: {
         editHref: seoTasksHref,
         meta: { taskCount: seoTaskRows.length },
       }),
+      section({
+        id: "other_seo_chats",
+        title: "Andere SEO-Chats dieser Organisation",
+        sourceLabel: "Org-Chat-Gedächtnis",
+        sourceType: "dynamic",
+        description:
+          "Auszüge aus weiteren SEO-Chats derselben Organisation — für Erinnerung an frühere Themen.",
+        content:
+          otherSeoChatsText.trim() || "Keine weiteren SEO-Chat-Auszüge geladen.",
+        isEmpty: !otherSeoChatsText.trim() || otherSeoChatsText.includes("Noch keine anderen"),
+        editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=chat`,
+      }),
     );
   }
 
@@ -455,6 +472,7 @@ export async function loadDtAgentContextBundle(input: {
     latestSeoReportText: promptMode === "seo" ? latestReportText : undefined,
     monthlyStatsText: promptMode === "seo" ? monthlyStatsText : undefined,
     seoTasksText: promptMode === "seo" ? seoTasksText : undefined,
+    otherSeoChatsText: promptMode === "seo" ? otherSeoChatsText : undefined,
   });
 
   return {
@@ -466,7 +484,7 @@ export async function loadDtAgentContextBundle(input: {
     mode: input.mode,
     sections,
     excludedNote:
-      "Nicht enthalten: Chat-Verlauf, Nachrichten-Anhänge und dynamisch eingefügte URL-Inhalte aus einzelnen Nachrichten.",
+      "Nicht enthalten: vollständiger Verlauf des aktuellen Chats, Nachrichten-Anhänge und dynamisch eingefügte URL-Inhalte. Andere SEO-Chats erscheinen als komprimierte Auszüge.",
     assembledPreviewChars: estimateSectionChars(assembled),
   };
 }

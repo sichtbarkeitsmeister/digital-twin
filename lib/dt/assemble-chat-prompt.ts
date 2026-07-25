@@ -19,6 +19,7 @@ import {
   formatDtSeoTasksForPrompt,
   loadDtSeoTasksForPrompt,
 } from "@/lib/dt/seo/task-context";
+import { loadOtherSeoChatsForPrompt } from "@/lib/dt/seo/org-chat-memory";
 import { loadGlobalSeoChecklist, resolveSeoChecklistRaw } from "@/lib/dt/seo/seo-checklist";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import { buildDtSystemPrompt } from "@/lib/dt/prompts/build-system-prompt";
@@ -195,6 +196,10 @@ export async function assembleDtChatFromDb(input: {
     promptMode === "seo"
       ? await loadDtSeoTasksForPrompt(supabase, chat.organisation_id)
       : [];
+  const otherSeoChatsText =
+    promptMode === "seo"
+      ? await loadOtherSeoChatsForPrompt(supabase, chat.organisation_id, chat.id)
+      : "";
 
   const lastUserMessage = [...prefixed].reverse().find((m) => m.role === "user");
   const pastedUrlsText = lastUserMessage?.content
@@ -229,6 +234,7 @@ export async function assembleDtChatFromDb(input: {
         : undefined,
     seoTasksText:
       promptMode === "seo" ? formatDtSeoTasksForPrompt(seoTaskRows) : undefined,
+    otherSeoChatsText: promptMode === "seo" ? otherSeoChatsText : undefined,
     pastedUrlsText,
   });
 
