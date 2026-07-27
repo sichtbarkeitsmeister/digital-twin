@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   callAnthropicFirstAvailable,
   extractAnthropicText,
-  tryParseJsonObject,
 } from "@/lib/ai/anthropic-helpers";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import {
@@ -14,6 +13,10 @@ import {
   SURVEY_AGENT_GENERATION_TIMEOUT_MS,
   SURVEY_REFINE_AGENT_PROMPT_SLUG,
 } from "@/lib/dt/survey-agent-global-prompts";
+import {
+  parseSurveyAgentRefineOutput,
+  SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS,
+} from "@/lib/dt/survey-agent-output";
 
 export const surveyAgentRefineSchema = z.object({
   prompt_template: z.string().min(200).max(120_000),
@@ -63,11 +66,18 @@ export async function generateSurveyAgentRefinement(input: {
     "",
     "Umfrage-Antworten (neue Erkenntnisse einarbeiten):",
     input.surveyContext,
+    "",
+    SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n");
 
-  const system = await loadSurveyAgentGlobalPrompt(SURVEY_REFINE_AGENT_PROMPT_SLUG);
+  const system = [
+    await loadSurveyAgentGlobalPrompt(SURVEY_REFINE_AGENT_PROMPT_SLUG),
+    "",
+    "---",
+    SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS,
+  ].join("\n");
 
   async function runOnce(repairHint?: string): Promise<SurveyAgentRefinePreview | null> {
     const result = await callAnthropicFirstAvailable({
@@ -94,23 +104,21 @@ export async function generateSurveyAgentRefinement(input: {
         model: result.model,
         maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
       });
+      const partial = parseSurveyAgentRefineOutput(extractAnthropicText(result.response), {
+        truncated: true,
+      });
+      if (partial) return partial;
       return null;
     }
 
     const raw = extractAnthropicText(result.response);
-    const parsed = tryParseJsonObject(raw);
-    if (!parsed) return null;
-
-    const validated = surveyAgentRefineSchema.safeParse(parsed);
-    if (!validated.success) return null;
-
-    return validated.data;
+    return parseSurveyAgentRefineOutput(raw);
   }
 
   let preview = await runOnce();
   if (!preview) {
     preview = await runOnce(
-      "Gib gültiges JSON zurück. prompt_template mindestens 200 Zeichen, deutsch, vollständig und kompakt. changed_sections mindestens ein Eintrag. Gesamte JSON-Antwort muss in das Token-Budget passen.",
+      "Nutze ===DT_AGENT_META=== / ===DT_AGENT_PROMPT=== / ===DT_AGENT_END===. META mit summary + changed_sections. Prompt vollständig, mind. 200 Zeichen.",
     );
   }
 

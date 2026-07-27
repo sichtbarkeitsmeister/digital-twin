@@ -3,7 +3,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   extractAnthropicText,
   isAnthropicModelNotFoundError,
-  tryParseJsonObject,
 } from "@/lib/ai/anthropic-helpers";
 import type { PersonaReferenceExample } from "@/lib/dt/survey-to-agent-context";
 import {
@@ -14,15 +13,15 @@ import {
   SURVEY_REFINE_AGENT_PROMPT_SLUG,
   SURVEY_TO_AGENT_PROMPT_SLUG,
 } from "@/lib/dt/survey-agent-global-prompts";
+import {
+  parseSurveyAgentCreateOutput,
+  parseSurveyAgentRefineOutput,
+  SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
+  SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS,
+} from "@/lib/dt/survey-agent-output";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
-import {
-  surveyAgentPreviewSchema,
-  type SurveyAgentPreview,
-} from "@/lib/dt/survey-to-agent-prompt";
-import {
-  surveyAgentRefineSchema,
-  type SurveyAgentRefinePreview,
-} from "@/lib/dt/survey-refine-agent-prompt";
+import type { SurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
+import type { SurveyAgentRefinePreview } from "@/lib/dt/survey-refine-agent-prompt";
 
 export type SurveyAgentBatchKind = "create" | "refine";
 
@@ -86,8 +85,12 @@ async function createBatchWithModelFallback(input: {
   throw new Error("KI-Batch konnte nicht gestartet werden. Bitte erneut versuchen.");
 }
 
-const JSON_ONLY_HINT =
-  "Antworte NUR mit einem einzigen gültigen JSON-Objekt (kein Markdown, keine Code-Fences, kein Text davor/danach). Strings müssen gültig escaped sein (Zeilenumbrüche als \\n).";
+function withDelimiterSystem(
+  base: string,
+  instructions: string,
+): string {
+  return `${base.trim()}\n\n---\n${instructions}`;
+}
 
 export async function startSurveyAgentCreateBatch(input: {
   responseId: string;
@@ -108,15 +111,19 @@ export async function startSurveyAgentCreateBatch(input: {
     "Umfrage-Antworten:",
     input.surveyContext,
     "",
-    "Ausgabe-Hinweis: prompt_template muss VOLLSTÄNDIG sein — jede Fact-ID aus der Pflicht-Checkliste abdecken (Inhalt übernehmen). Keine Abkürzungen zulasten der Vollständigkeit. Keine erfundenen Rankings.",
-    JSON_ONLY_HINT,
+    "Ausgabe-Hinweis: Der Prompt-Teil muss VOLLSTÄNDIG sein — jede Fact-ID aus der Pflicht-Checkliste abdecken. Keine erfundenen Rankings.",
+    "",
+    SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n");
 
-  const system = resolveSurveyToAgentSystemPrompt(
-    await loadSurveyAgentGlobalPrompt(SURVEY_TO_AGENT_PROMPT_SLUG),
-    input.referenceExamples,
+  const system = withDelimiterSystem(
+    resolveSurveyToAgentSystemPrompt(
+      await loadSurveyAgentGlobalPrompt(SURVEY_TO_AGENT_PROMPT_SLUG),
+      input.referenceExamples,
+    ),
+    SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
   );
 
   return createBatchWithModelFallback({
@@ -161,12 +168,15 @@ export async function startSurveyAgentRefineBatch(input: {
     "Umfrage-Antworten (neue Erkenntnisse einarbeiten):",
     input.surveyContext,
     "",
-    JSON_ONLY_HINT,
+    SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n");
 
-  const system = await loadSurveyAgentGlobalPrompt(SURVEY_REFINE_AGENT_PROMPT_SLUG);
+  const system = withDelimiterSystem(
+    await loadSurveyAgentGlobalPrompt(SURVEY_REFINE_AGENT_PROMPT_SLUG),
+    SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS,
+  );
 
   return createBatchWithModelFallback({
     anthropic,
@@ -176,32 +186,35 @@ export async function startSurveyAgentRefineBatch(input: {
   });
 }
 
-async function startJsonRepairBatch(input: {
+async function startFormatRepairBatch(input: {
   anthropic: Anthropic;
   kind: SurveyAgentBatchKind;
   responseId: string;
   raw: string;
-  schemaHint: string;
 }): Promise<{ batchId: string; model: string }> {
   const customId = surveyAgentBatchCustomId(input.kind, input.responseId, "repair");
   const clipped = input.raw.length > 120_000 ? `${input.raw.slice(0, 120_000)}\n…[abgeschnitten]` : input.raw;
+  const format =
+    input.kind === "create"
+      ? SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS
+      : SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS;
 
   return createBatchWithModelFallback({
     anthropic: input.anthropic,
     customId,
     maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
     system: [
-      "Du reparierst ungültige KI-Ausgaben zu gültigem JSON.",
-      JSON_ONLY_HINT,
-      input.schemaHint,
-      "Behalte den inhaltlichen Persona-/Prompt-Inhalt so vollständig wie möglich. Erfinde keine neuen Rankings.",
+      "Du reparierst eine kaputte Avatar-/Agent-Ausgabe in das verbindliche Delimiter-Format.",
+      "Behalte den inhaltlichen Prompt so vollständig wie möglich. Erfinde keine neuen Rankings.",
+      "",
+      format,
     ].join("\n"),
     messages: [
       {
         role: "user",
         content: [
-          "Die folgende Ausgabe war kein gültiges JSON bzw. entsprach nicht dem Schema.",
-          "Gib dieselbe inhaltliche Antwort als EIN gültiges JSON-Objekt zurück.",
+          "Die folgende Ausgabe war ungültig (JSON kaputt oder Format falsch).",
+          "Wandle sie in das Delimiter-Format um. META = kleines JSON ohne prompt_template; PROMPT = Markdown.",
           "",
           "Kaputte Ausgabe:",
           clipped,
@@ -292,42 +305,31 @@ export async function pollSurveyAgentBatch(input: {
     stopReason: message.stop_reason,
     outputChars: raw.length,
     isRepairResult,
+    hasDelimiterMeta: raw.includes("===DT_AGENT_META==="),
   });
 
-  if (truncated && !tryParseJsonObject(raw)) {
-    return {
-      status: "error",
-      message:
-        "Ausgabe wurde am Token-Limit abgeschnitten und ist kein gültiges JSON. Bitte erneut versuchen.",
-    };
-  }
-
-  const parsed = tryParseJsonObject(raw);
-
   if (input.kind === "create") {
-    const validated = parsed ? surveyAgentPreviewSchema.safeParse(parsed) : null;
-    if (validated?.success) {
+    const preview = parseSurveyAgentCreateOutput(raw, { truncated });
+    if (preview) {
       return {
         status: "ready",
         kind: "create",
-        preview: validated.data,
+        preview,
         model: message.model,
       };
     }
 
     if (!isRepairResult) {
-      console.warn("[dt] survey-agent create output invalid — starting repair batch", {
+      console.warn("[dt] survey-agent create output invalid — starting format repair batch", {
         batchId: input.batchId,
-        parseOk: Boolean(parsed),
-        issues: validated?.success === false ? validated.error.issues.slice(0, 5) : undefined,
+        truncated,
+        outputChars: raw.length,
       });
-      const repair = await startJsonRepairBatch({
+      const repair = await startFormatRepairBatch({
         anthropic,
         kind: "create",
         responseId: input.responseId,
         raw,
-        schemaHint:
-          "Schema-Felder: name, role, slug, prompt_template (>=200 Zeichen), avatar_data (Objekt), summary; optional qa_hinweise, quick_actions.",
       });
       return {
         status: "pending",
@@ -338,34 +340,32 @@ export async function pollSurveyAgentBatch(input: {
 
     return {
       status: "error",
-      message: parsed
-        ? "Agent-Vorschau ungültig (auch nach JSON-Reparatur). Bitte erneut versuchen."
-        : "KI-Antwort war kein gültiges JSON (auch nach Reparatur). Bitte erneut versuchen.",
+      message: truncated
+        ? "Ausgabe wurde am Token-Limit abgeschnitten und blieb ungültig. Bitte erneut versuchen."
+        : "KI-Antwort war kein gültiges Agent-Format (auch nach Reparatur). Bitte erneut versuchen.",
     };
   }
 
-  const validated = parsed ? surveyAgentRefineSchema.safeParse(parsed) : null;
-  if (validated?.success) {
+  const refinement = parseSurveyAgentRefineOutput(raw, { truncated });
+  if (refinement) {
     return {
       status: "ready",
       kind: "refine",
-      refinement: validated.data,
+      refinement,
       model: message.model,
     };
   }
 
   if (!isRepairResult) {
-    console.warn("[dt] survey-agent refine output invalid — starting repair batch", {
+    console.warn("[dt] survey-agent refine output invalid — starting format repair batch", {
       batchId: input.batchId,
-      parseOk: Boolean(parsed),
+      truncated,
     });
-    const repair = await startJsonRepairBatch({
+    const repair = await startFormatRepairBatch({
       anthropic,
       kind: "refine",
       responseId: input.responseId,
       raw,
-      schemaHint:
-        "Schema-Felder: prompt_template (>=200 Zeichen), summary, changed_sections (Array mit mind. 1 Eintrag).",
     });
     return {
       status: "pending",
@@ -376,8 +376,8 @@ export async function pollSurveyAgentBatch(input: {
 
   return {
     status: "error",
-    message: parsed
-      ? "Verfeinerung ungültig (auch nach JSON-Reparatur). Bitte erneut versuchen."
-      : "KI-Antwort war kein gültiges JSON (auch nach Reparatur). Bitte erneut versuchen.",
+    message: truncated
+      ? "Ausgabe wurde am Token-Limit abgeschnitten und blieb ungültig. Bitte erneut versuchen."
+      : "KI-Antwort war kein gültiges Agent-Format (auch nach Reparatur). Bitte erneut versuchen.",
   };
 }
