@@ -14,6 +14,12 @@ import {
 } from "@/lib/dt/survey-clarifications";
 import {
   buildSurveyResponseContextForAgent,
+  checkSurveyFactsCoverage,
+  extractSurveyFacts,
+  summarizeSurveyFactCoverage,
+  type SurveyFactCoverageSummary,
+} from "@/lib/dt/survey-facts";
+import {
   findAgentForSurveyResponse,
   loadPersonaReferenceExamples,
   type SurveyFieldQuestionRow,
@@ -386,11 +392,45 @@ export async function pollAgentGenerationBatchFromSurvey(input: {
   }
 
   if (polled.kind === "create") {
+    const answers: Record<string, unknown> = isRecord(bundle.response.answers)
+      ? bundle.response.answers
+      : {};
+    const factsBundle = extractSurveyFacts({
+      surveyTitle: bundle.survey.title,
+      definition: bundle.survey.definition,
+      answers,
+      fieldQuestions: bundle.fieldQuestions,
+    });
+    const coverageReport = checkSurveyFactsCoverage({
+      facts: factsBundle.facts,
+      texts: [
+        polled.preview.prompt_template,
+        JSON.stringify(polled.preview.avatar_data ?? {}),
+        polled.preview.summary,
+        polled.preview.name,
+        polled.preview.role,
+      ],
+    });
+    const factCoverage = summarizeSurveyFactCoverage({
+      facts: factsBundle.facts,
+      report: coverageReport,
+    });
+
+    console.info("[dt] survey-agent create coverage", {
+      responseId: input.responseId,
+      total: factCoverage.total,
+      covered: factCoverage.coveredCount,
+      weak: factCoverage.weakCount,
+      missing: factCoverage.missingCount,
+      ratio: Number(factCoverage.coverageRatio.toFixed(3)),
+    });
+
     return {
       ok: true as const,
       status: "ready" as const,
       mode: "create" as const,
       preview: polled.preview,
+      factCoverage,
       organisationId: input.organisationId,
       organisationName: org.name,
     };
