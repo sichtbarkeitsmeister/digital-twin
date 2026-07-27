@@ -329,18 +329,13 @@ export function SurveyToAgentWizard(props: {
         };
       }
       setClarificationDecisions(next);
-      if (items.length === 0) {
-        setClarificationsLoading(false);
-        await generatePreview();
-        return;
-      }
       setStep("klaerungen");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Klärungen konnten nicht geladen werden.");
     } finally {
       setClarificationsLoading(false);
     }
-  }, [orgId, props.surveyId, props.responseId, generatePreview]);
+  }, [orgId, props.surveyId, props.responseId]);
 
   const repairMissingFacts = useCallback(async () => {
     if (!orgId || !preview) return;
