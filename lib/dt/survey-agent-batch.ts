@@ -108,7 +108,7 @@ export async function startSurveyAgentCreateBatch(input: {
     "Umfrage-Antworten:",
     input.surveyContext,
     "",
-    "Ausgabe-Hinweis: prompt_template muss VOLLSTÄNDIG sein — alle beantworteten Fragen und Bemerkungen abdecken. Keine Abkürzungen zulasten der Vollständigkeit. Keine erfundenen Rankings.",
+    "Ausgabe-Hinweis: prompt_template muss VOLLSTÄNDIG sein — jede Fact-ID aus der Pflicht-Checkliste abdecken (Inhalt übernehmen). Keine Abkürzungen zulasten der Vollständigkeit. Keine erfundenen Rankings.",
     JSON_ONLY_HINT,
   ]
     .filter(Boolean)
