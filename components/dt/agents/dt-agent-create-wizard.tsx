@@ -217,6 +217,11 @@ export function DtAgentCreateWizard(props: {
         };
       }
       setClarificationDecisions(next);
+      if (items.length === 0) {
+        setBusy(false);
+        await generateSurveyPreview();
+        return;
+      }
       setStep("survey_clarifications");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Klärungen konnten nicht geladen werden.");

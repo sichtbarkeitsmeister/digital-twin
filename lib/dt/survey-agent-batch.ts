@@ -23,7 +23,7 @@ import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import type { SurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
 import type { SurveyAgentRefinePreview } from "@/lib/dt/survey-refine-agent-prompt";
 
-export type SurveyAgentBatchKind = "create" | "refine";
+export type SurveyAgentBatchKind = "create" | "refine" | "coverage";
 
 function getAnthropic(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
@@ -44,6 +44,10 @@ export function surveyAgentBatchCustomId(
   responseId: string,
   phase: "main" | "repair" = "main",
 ): string {
+  if (kind === "coverage") {
+    const prefix = phase === "repair" ? "sa-cvr-" : "sa-cv-";
+    return `${prefix}${responseId}`.slice(0, 64);
+  }
   const prefix = phase === "repair" ? `sa-${kind[0]}r-` : `sa-${kind}-`;
   return `${prefix}${responseId}`.slice(0, 64);
 }
@@ -186,6 +190,65 @@ export async function startSurveyAgentRefineBatch(input: {
   });
 }
 
+export async function startSurveyAgentCoverageRepairBatch(input: {
+  responseId: string;
+  organisationName: string;
+  currentPreview: SurveyAgentPreview;
+  missingFactsBlock: string;
+}): Promise<{ batchId: string; model: string }> {
+  const anthropic = getAnthropic();
+  const customId = surveyAgentBatchCustomId("coverage", input.responseId);
+
+  const userContent = [
+    `Organisation: ${input.organisationName}`,
+    "",
+    "Aufgabe: Ergänze den bestehenden Persona-Prompt um die fehlenden Facts.",
+    "Ändere Name/Slug/Rolle nur wenn nötig. Erfinde nichts. Keine neuen Rankings aus Formular-Optionen.",
+    "Behalte bestehende starke Abschnitte; füge fehlende Inhalte präzise und wörtlich-nah ein.",
+    "",
+    "Fehlende Facts (verbindlich übernehmen):",
+    input.missingFactsBlock,
+    "",
+    "Aktuelle META-Felder:",
+    JSON.stringify(
+      {
+        name: input.currentPreview.name,
+        role: input.currentPreview.role,
+        slug: input.currentPreview.slug,
+        avatar_data: input.currentPreview.avatar_data,
+        summary: input.currentPreview.summary,
+        quick_actions: input.currentPreview.quick_actions ?? [],
+        qa_hinweise: input.currentPreview.qa_hinweise ?? [],
+      },
+      null,
+      2,
+    ),
+    "",
+    "Aktueller prompt_template:",
+    "```",
+    input.currentPreview.prompt_template,
+    "```",
+    "",
+    SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
+  ].join("\n");
+
+  const system = withDelimiterSystem(
+    [
+      "Du ergänzt einen DigitalTwin-Persona-Prompt um fehlende Umfrage-Facts.",
+      "Nur fehlende Inhalte nachziehen — nichts erfinden, nichts weichspülen.",
+      "Ausgabe im Delimiter-Format (META ohne prompt_template, PROMPT als Markdown).",
+    ].join("\n"),
+    SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
+  );
+
+  return createBatchWithModelFallback({
+    anthropic,
+    customId,
+    system,
+    messages: [{ role: "user", content: userContent }],
+  });
+}
+
 async function startFormatRepairBatch(input: {
   anthropic: Anthropic;
   kind: SurveyAgentBatchKind;
@@ -195,9 +258,9 @@ async function startFormatRepairBatch(input: {
   const customId = surveyAgentBatchCustomId(input.kind, input.responseId, "repair");
   const clipped = input.raw.length > 120_000 ? `${input.raw.slice(0, 120_000)}\n…[abgeschnitten]` : input.raw;
   const format =
-    input.kind === "create"
-      ? SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS
-      : SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS;
+    input.kind === "refine"
+      ? SURVEY_AGENT_REFINE_DELIMITER_FORMAT_INSTRUCTIONS
+      : SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS;
 
   return createBatchWithModelFallback({
     anthropic: input.anthropic,
@@ -308,7 +371,7 @@ export async function pollSurveyAgentBatch(input: {
     hasDelimiterMeta: raw.includes("===DT_AGENT_META==="),
   });
 
-  if (input.kind === "create") {
+  if (input.kind === "create" || input.kind === "coverage") {
     const preview = parseSurveyAgentCreateOutput(raw, { truncated });
     if (preview) {
       return {
@@ -320,14 +383,15 @@ export async function pollSurveyAgentBatch(input: {
     }
 
     if (!isRepairResult) {
-      console.warn("[dt] survey-agent create output invalid — starting format repair batch", {
+      console.warn("[dt] survey-agent create/coverage output invalid — starting format repair batch", {
         batchId: input.batchId,
+        kind: input.kind,
         truncated,
         outputChars: raw.length,
       });
       const repair = await startFormatRepairBatch({
         anthropic,
-        kind: "create",
+        kind: input.kind,
         responseId: input.responseId,
         raw,
       });

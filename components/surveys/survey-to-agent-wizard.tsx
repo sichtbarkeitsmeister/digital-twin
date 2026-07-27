@@ -137,58 +137,6 @@ export function SurveyToAgentWizard(props: {
     return clarificationSources;
   }
 
-  const loadClarifications = useCallback(async () => {
-    if (!orgId) {
-      setError("Bitte zuerst eine Organisation wählen.");
-      return;
-    }
-    setClarificationsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/surveys/${props.surveyId}/responses/${props.responseId}/clarifications?organisationId=${encodeURIComponent(orgId)}`,
-      );
-      const json = (await res.json()) as {
-        ok?: boolean;
-        clarifications?: SurveyClarificationItem[];
-        sources?: SurveyClarificationSource[];
-        anbieterSources?: SurveyClarificationSource[];
-        message?: string;
-      };
-      if (!json.ok) {
-        setError(json.message ?? "Klärungen konnten nicht geladen werden.");
-        return;
-      }
-      const items = json.clarifications ?? [];
-      const sources = json.sources ?? [];
-      const anbieter = json.anbieterSources ?? [];
-      setClarifications(items);
-      setClarificationSources(sources);
-      setAnbieterSources(anbieter);
-
-      const next: Record<string, ClarificationDecision> = {};
-      for (const item of items) {
-        const pool =
-          item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
-            ? anbieter.length > 0
-              ? anbieter
-              : sources
-            : sources;
-        // Default: not approved — Freigabe must be explicit
-        next[item.id] = {
-          approved: false,
-          sourceResponseId: pool[0]?.responseId ?? "",
-        };
-      }
-      setClarificationDecisions(next);
-      setStep("klaerungen");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Klärungen konnten nicht geladen werden.");
-    } finally {
-      setClarificationsLoading(false);
-    }
-  }, [orgId, props.surveyId, props.responseId]);
-
   useEffect(() => {
     if (wizardMode !== "refine" || !orgId) {
       setOrgAgents([]);
@@ -337,6 +285,129 @@ export function SurveyToAgentWizard(props: {
     props.surveyId,
     props.responseId,
   ]);
+
+  const loadClarifications = useCallback(async () => {
+    if (!orgId) {
+      setError("Bitte zuerst eine Organisation wählen.");
+      return;
+    }
+    setClarificationsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/surveys/${props.surveyId}/responses/${props.responseId}/clarifications?organisationId=${encodeURIComponent(orgId)}`,
+      );
+      const json = (await res.json()) as {
+        ok?: boolean;
+        clarifications?: SurveyClarificationItem[];
+        sources?: SurveyClarificationSource[];
+        anbieterSources?: SurveyClarificationSource[];
+        message?: string;
+      };
+      if (!json.ok) {
+        setError(json.message ?? "Klärungen konnten nicht geladen werden.");
+        return;
+      }
+      const items = json.clarifications ?? [];
+      const sources = json.sources ?? [];
+      const anbieter = json.anbieterSources ?? [];
+      setClarifications(items);
+      setClarificationSources(sources);
+      setAnbieterSources(anbieter);
+
+      const next: Record<string, ClarificationDecision> = {};
+      for (const item of items) {
+        const pool =
+          item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
+            ? anbieter.length > 0
+              ? anbieter
+              : sources
+            : sources;
+        next[item.id] = {
+          approved: false,
+          sourceResponseId: pool[0]?.responseId ?? "",
+        };
+      }
+      setClarificationDecisions(next);
+      if (items.length === 0) {
+        setClarificationsLoading(false);
+        await generatePreview();
+        return;
+      }
+      setStep("klaerungen");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Klärungen konnten nicht geladen werden.");
+    } finally {
+      setClarificationsLoading(false);
+    }
+  }, [orgId, props.surveyId, props.responseId, generatePreview]);
+
+  const repairMissingFacts = useCallback(async () => {
+    if (!orgId || !preview) return;
+    if (!factCoverage || factCoverage.missingCount + factCoverage.weakCount === 0) {
+      setError("Keine fehlenden Facts zum Nachziehen.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const endpoint = `/api/surveys/${props.surveyId}/responses/${props.responseId}/generate-agent`;
+    const pollMs = 4_000;
+    const deadline = Date.now() + 900_000;
+    let batchId: string | undefined;
+
+    try {
+      while (Date.now() < deadline) {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            organisationId: orgId,
+            mode: "coverage",
+            batchId,
+            preview: batchId ? undefined : preview,
+          }),
+        });
+        const json = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          status?: "pending" | "ready";
+          batchId?: string;
+          preview?: SurveyAgentPreview;
+          factCoverage?: SurveyFactCoverageSummary;
+          message?: string;
+        } | null;
+
+        if (!json?.ok) {
+          setError(json?.message ?? "Coverage-Repair fehlgeschlagen.");
+          return;
+        }
+
+        if (json.status === "pending") {
+          if (json.batchId) batchId = json.batchId;
+          await new Promise((r) => setTimeout(r, pollMs));
+          continue;
+        }
+
+        if (json.preview) {
+          setPreview(json.preview);
+          setFactCoverage(json.factCoverage ?? null);
+          return;
+        }
+
+        setError("Coverage-Repair fehlgeschlagen.");
+        return;
+      }
+
+      setError(
+        "Coverage-Repair dauert länger als 15 Minuten. Bitte später erneut versuchen.",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Coverage-Repair fehlgeschlagen.");
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId, preview, factCoverage, props.surveyId, props.responseId]);
 
   const createAgent = useCallback(async () => {
     if (!orgId) return;
@@ -836,7 +907,7 @@ export function SurveyToAgentWizard(props: {
                   </CardDescription>
                 </CardHeader>
                 {factCoverage.missingCount > 0 || factCoverage.weakCount > 0 ? (
-                  <CardContent className="grid gap-2 text-sm text-secondary">
+                  <CardContent className="grid gap-3 text-sm text-secondary">
                     {factCoverage.missing.slice(0, 8).map((m) => (
                       <p key={m.factId}>
                         <span className="font-medium text-primary">{m.factId}</span>{" "}
@@ -854,6 +925,19 @@ export function SurveyToAgentWizard(props: {
                         … weitere Lücken in den Server-Logs
                       </p>
                     ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={loading}
+                      onClick={() => void repairMissingFacts()}
+                    >
+                      {loading ? (
+                        <Loader2 className="size-4 animate-spin" aria-hidden />
+                      ) : (
+                        <RefreshCw className="size-4" aria-hidden />
+                      )}
+                      Fehlende Facts nachziehen
+                    </Button>
                   </CardContent>
                 ) : null}
               </Card>

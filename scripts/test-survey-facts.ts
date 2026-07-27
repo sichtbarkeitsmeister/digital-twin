@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   checkSurveyFactsCoverage,
   extractSurveyFacts,
+  formatFactsForCoverageRepair,
   formatSurveyFactsForAgentContext,
   summarizeSurveyFactCoverage,
 } from "../lib/dt/survey-facts";
@@ -130,5 +131,14 @@ const summary = summarizeSurveyFactCoverage({
 assert.equal(summary.total, 3);
 assert.equal(summary.missingCount, 0);
 assert.ok(summary.coveredCount >= 2);
+
+const repairBlock = formatFactsForCoverageRepair({
+  facts: bundle.facts,
+  factIds: ["fact_001", "fact_003"],
+});
+assert.match(repairBlock, /fact_001/);
+assert.match(repairBlock, /1–3 Wochen/);
+assert.match(repairBlock, /fact_003/);
+assert.doesNotMatch(repairBlock, /fact_002/);
 
 console.log("survey-facts tests: ok");
