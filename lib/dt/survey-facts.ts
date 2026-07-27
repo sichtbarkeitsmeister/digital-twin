@@ -305,6 +305,61 @@ export function checkSurveyFactsCoverage(input: {
   return { total, covered, weak, missing, coverageRatio };
 }
 
+export type SurveyFactCoverageSummary = {
+  total: number;
+  coveredCount: number;
+  weakCount: number;
+  missingCount: number;
+  coverageRatio: number;
+  missing: Array<{
+    factId: string;
+    fieldTitle: string;
+    kind: SurveyFactKind;
+    valuePreview: string;
+  }>;
+  weak: Array<{
+    factId: string;
+    fieldTitle: string;
+    kind: SurveyFactKind;
+    valuePreview: string;
+  }>;
+};
+
+function valuePreview(value: string, max = 120): string {
+  const one = value.replace(/\s+/g, " ").trim();
+  return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
+}
+
+/** Compact coverage payload for API / wizard (non-blocking diagnostic). */
+export function summarizeSurveyFactCoverage(input: {
+  facts: SurveyFact[];
+  report: SurveyFactCoverageReport;
+}): SurveyFactCoverageSummary {
+  const byId = new Map(input.facts.map((f) => [f.id, f]));
+
+  function mapHits(hits: SurveyFactCoverageHit[]) {
+    return hits.map((h) => {
+      const fact = byId.get(h.factId);
+      return {
+        factId: h.factId,
+        fieldTitle: fact?.fieldTitle ?? h.factId,
+        kind: fact?.kind ?? ("answer" as SurveyFactKind),
+        valuePreview: valuePreview(fact?.value ?? ""),
+      };
+    });
+  }
+
+  return {
+    total: input.report.total,
+    coveredCount: input.report.covered.length,
+    weakCount: input.report.weak.length,
+    missingCount: input.report.missing.length,
+    coverageRatio: input.report.coverageRatio,
+    missing: mapHits(input.report.missing),
+    weak: mapHits(input.report.weak),
+  };
+}
+
 /** Drop-in context builder used by persona + anbieter paths. */
 export function buildSurveyResponseContextForAgent(input: {
   surveyTitle: string;

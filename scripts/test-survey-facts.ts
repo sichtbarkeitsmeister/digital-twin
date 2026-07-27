@@ -8,6 +8,7 @@ import {
   checkSurveyFactsCoverage,
   extractSurveyFacts,
   formatSurveyFactsForAgentContext,
+  summarizeSurveyFactCoverage,
 } from "../lib/dt/survey-facts";
 import { buildSurveyResponseContextForAgent } from "../lib/dt/survey-to-agent-context";
 
@@ -121,5 +122,13 @@ const missing = checkSurveyFactsCoverage({
   texts: ["Eine Persona ohne konkrete Angaben."],
 });
 assert.ok(missing.missing.length >= 2);
+
+const summary = summarizeSurveyFactCoverage({
+  facts: bundle.facts,
+  report: covered,
+});
+assert.equal(summary.total, 3);
+assert.equal(summary.missingCount, 0);
+assert.ok(summary.coveredCount >= 2);
 
 console.log("survey-facts tests: ok");

@@ -29,6 +29,7 @@ import type {
   SurveyClarificationResolution,
   SurveyClarificationSource,
 } from "@/lib/dt/survey-clarifications";
+import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
 
 type WizardMode = "create" | "refine";
 type WizardStep = "organisation" | "modus" | "regeln" | "klaerungen" | "vorschau" | "fertig";
@@ -90,6 +91,7 @@ export function SurveyToAgentWizard(props: {
   >({});
   const [clarificationsLoading, setClarificationsLoading] = useState(false);
   const [preview, setPreview] = useState<SurveyAgentPreview | null>(null);
+  const [factCoverage, setFactCoverage] = useState<SurveyFactCoverageSummary | null>(null);
   const [refinePreview, setRefinePreview] = useState<SurveyAgentRefinePreview | null>(null);
   const [currentPrompt, setCurrentPrompt] = useState("");
   const [usesGlobalPrompt, setUsesGlobalPrompt] = useState(false);
@@ -271,6 +273,7 @@ export function SurveyToAgentWizard(props: {
           processingStatus?: string;
           mode?: WizardMode;
           preview?: SurveyAgentPreview;
+          factCoverage?: SurveyFactCoverageSummary;
           refinement?: SurveyAgentRefinePreview;
           currentPrompt?: string;
           usesGlobalPrompt?: boolean;
@@ -301,8 +304,10 @@ export function SurveyToAgentWizard(props: {
           setUsesGlobalPrompt(Boolean(json.usesGlobalPrompt));
           setRefineAgent(json.agent ?? null);
           setPreview(null);
+          setFactCoverage(null);
         } else if (json.preview) {
           setPreview(json.preview);
+          setFactCoverage(json.factCoverage ?? null);
           setRefinePreview(null);
           setCurrentPrompt("");
           setRefineAgent(null);
@@ -429,6 +434,7 @@ export function SurveyToAgentWizard(props: {
 
   const goToKlaerungen = () => {
     setPreview(null);
+    setFactCoverage(null);
     setRefinePreview(null);
     setStep("klaerungen");
   };
@@ -806,6 +812,53 @@ export function SurveyToAgentWizard(props: {
 
       {step === "vorschau" && wizardMode === "create" && preview ? (
         <motion.div className="grid gap-4" variants={container} initial="hidden" animate="show">
+          {factCoverage ? (
+            <motion.div variants={item}>
+              <Card
+                className={cn(
+                  "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]",
+                  factCoverage.missingCount > 0
+                    ? "border-amber-500/40"
+                    : "border-sbkm-mint/40",
+                )}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Fact-Coverage</CardTitle>
+                  <CardDescription>
+                    {factCoverage.coveredCount}/{factCoverage.total} Facts klar übernommen
+                    {factCoverage.weakCount > 0
+                      ? ` · ${factCoverage.weakCount} unsicher`
+                      : ""}
+                    {factCoverage.missingCount > 0
+                      ? ` · ${factCoverage.missingCount} fehlend`
+                      : " · vollständig"}
+                    . Diagnostik — blockiert Speichern nicht.
+                  </CardDescription>
+                </CardHeader>
+                {factCoverage.missingCount > 0 || factCoverage.weakCount > 0 ? (
+                  <CardContent className="grid gap-2 text-sm text-secondary">
+                    {factCoverage.missing.slice(0, 8).map((m) => (
+                      <p key={m.factId}>
+                        <span className="font-medium text-primary">{m.factId}</span>{" "}
+                        fehlt · {m.fieldTitle}: {m.valuePreview || "—"}
+                      </p>
+                    ))}
+                    {factCoverage.weak.slice(0, 4).map((m) => (
+                      <p key={`w-${m.factId}`}>
+                        <span className="font-medium text-primary">{m.factId}</span>{" "}
+                        unsicher · {m.fieldTitle}: {m.valuePreview || "—"}
+                      </p>
+                    ))}
+                    {factCoverage.missingCount + factCoverage.weakCount > 12 ? (
+                      <p className="text-xs text-muted-foreground">
+                        … weitere Lücken in den Server-Logs
+                      </p>
+                    ) : null}
+                  </CardContent>
+                ) : null}
+              </Card>
+            </motion.div>
+          ) : null}
           <motion.div variants={item}>
             <Card className="shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
               <CardHeader>

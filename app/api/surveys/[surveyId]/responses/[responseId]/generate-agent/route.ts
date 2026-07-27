@@ -114,6 +114,7 @@ export async function POST(
         status: "ready" as const,
         mode: "create" as const,
         preview: result.preview,
+        factCoverage: "factCoverage" in result ? result.factCoverage : undefined,
         organisationId: result.organisationId,
         organisationName: result.organisationName,
       });
