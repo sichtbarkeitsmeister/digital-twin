@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   callAnthropicFirstAvailable,
   extractAnthropicText,
-  tryParseJsonObject,
 } from "@/lib/ai/anthropic-helpers";
 import type { PersonaReferenceExample } from "@/lib/dt/survey-to-agent-context";
 import {
@@ -15,6 +14,10 @@ import {
   SURVEY_AGENT_GENERATION_TIMEOUT_MS,
   SURVEY_TO_AGENT_PROMPT_SLUG,
 } from "@/lib/dt/survey-agent-global-prompts";
+import {
+  parseSurveyAgentCreateOutput,
+  SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
+} from "@/lib/dt/survey-agent-output";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 
 export const surveyAgentPreviewSchema = z.object({
@@ -68,15 +71,22 @@ export async function generateSurveyAgentPreview(input: {
     "Umfrage-Antworten:",
     input.surveyContext,
     "",
-    "Ausgabe-Hinweis: prompt_template muss VOLLSTÄNDIG sein — jede Fact-ID aus der Pflicht-Checkliste abdecken (Inhalt übernehmen). Keine Abkürzungen zulasten der Vollständigkeit. Keine erfundenen Rankings.",
+    "Ausgabe-Hinweis: Der Prompt-Teil muss VOLLSTÄNDIG sein — jede Fact-ID aus der Pflicht-Checkliste abdecken. Keine erfundenen Rankings.",
+    "",
+    SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n");
 
-  const system = resolveSurveyToAgentSystemPrompt(
-    await loadSurveyAgentGlobalPrompt(SURVEY_TO_AGENT_PROMPT_SLUG),
-    input.referenceExamples,
-  );
+  const system = [
+    resolveSurveyToAgentSystemPrompt(
+      await loadSurveyAgentGlobalPrompt(SURVEY_TO_AGENT_PROMPT_SLUG),
+      input.referenceExamples,
+    ),
+    "",
+    "---",
+    SURVEY_AGENT_DELIMITER_FORMAT_INSTRUCTIONS,
+  ].join("\n");
 
   const startedAt = Date.now();
 
@@ -112,19 +122,15 @@ export async function generateSurveyAgentPreview(input: {
         model: result.model,
         maxTokens: SURVEY_AGENT_GENERATION_MAX_TOKENS,
       });
+      const partial = parseSurveyAgentCreateOutput(extractAnthropicText(result.response), {
+        truncated: true,
+      });
+      if (partial) return partial;
       return null;
     }
 
     const raw = extractAnthropicText(result.response);
-    const parsed = tryParseJsonObject(raw);
-    if (!parsed) return null;
-
-    const validated = surveyAgentPreviewSchema.safeParse(parsed);
-    if (!validated.success) {
-      return null;
-    }
-
-    return validated.data;
+    return parseSurveyAgentCreateOutput(raw);
   }
 
   let preview: SurveyAgentPreview | null = null;
@@ -139,7 +145,7 @@ export async function generateSurveyAgentPreview(input: {
   const elapsedMs = Date.now() - startedAt;
   if (!preview && elapsedMs < 360_000) {
     preview = await runOnce(
-      "Gib gültiges JSON zurück. slug nur a-z0-9_. prompt_template mindestens 200 Zeichen, deutsch, VOLLSTÄNDIG (alle echten Antworten übernehmen, nichts erfinden). Gesamte JSON-Antwort muss in das Token-Budget passen.",
+      "Nutze das Delimiter-Format ===DT_AGENT_META=== / ===DT_AGENT_PROMPT=== / ===DT_AGENT_END===. META ohne prompt_template. Prompt vollständig, mind. 200 Zeichen, alle echten Facts, nichts erfinden.",
     );
   }
 
