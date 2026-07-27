@@ -14,9 +14,9 @@ function scopeHint(scope: SurveyClarificationImportPreview["scope"]): string {
     return "Gezielter Ausschnitt — genau diese Inhalte gehen bei Freigabe an die KI.";
   }
   if (scope === "full_survey") {
-    return "Kein einzelnes passendes Feld gefunden — bei Freigabe würde der gesamte Fragebogen als Kontext angehängt.";
+    return "Kein einzelnes passendes Feld gefunden — bitte Inhalt selbst angeben statt den ganzen Fragebogen zu übernehmen.";
   }
-  return "In der Quell-Umfrage wurden keine nutzbaren Antworten gefunden.";
+  return "Kein passendes Feld in der Quell-Umfrage gefunden — bitte Inhalt selbst angeben oder Freigabe verweigern.";
 }
 
 export function ClarificationImportPreview(props: {

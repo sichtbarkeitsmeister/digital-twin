@@ -810,10 +810,19 @@ export function SurveyToAgentWizard(props: {
                   const pool = resolved.pool;
                   const decision =
                     clarificationDecisions[item.id] ?? defaultDecisionFor(item, resolved);
+                  const selectedSourceId =
+                    decision.sourceResponseId || resolved.best?.responseId || "";
+                  const selectedPreview = selectedSourceId
+                    ? previewForClarification(item.id, selectedSourceId)
+                    : null;
+                  const sourceUsable = Boolean(
+                    selectedPreview && selectedPreview.facts.length > 0,
+                  );
                   const needsManual =
-                    decision.supplyMode === "manual" || !resolved.best;
+                    decision.supplyMode === "manual" || !resolved.best || !sourceUsable;
                   const showManualForm =
-                    needsManual && (decision.approved || !resolved.best);
+                    needsManual &&
+                    (decision.approved || !resolved.best || !sourceUsable);
                   return (
                     <div
                       key={item.id}
@@ -860,12 +869,7 @@ export function SurveyToAgentWizard(props: {
                               fullWidth
                             />
                           ) : null}
-                          <ClarificationImportPreview
-                            preview={previewForClarification(
-                              item.id,
-                              decision.sourceResponseId || resolved.best.responseId,
-                            )}
-                          />
+                          <ClarificationImportPreview preview={selectedPreview} />
                           <button
                             type="button"
                             className="justify-self-start text-xs text-muted-foreground underline-offset-2 hover:underline"
@@ -894,12 +898,17 @@ export function SurveyToAgentWizard(props: {
                                 approved: true,
                                 sourceResponseId:
                                   decision.sourceResponseId || resolved.best?.responseId || "",
-                                supplyMode: resolved.best ? decision.supplyMode || "source" : "manual",
+                                supplyMode:
+                                  resolved.best &&
+                                  decision.supplyMode !== "manual" &&
+                                  sourceUsable
+                                    ? "source"
+                                    : "manual",
                               },
                             }))
                           }
                         >
-                          {resolved.best && decision.supplyMode !== "manual"
+                          {resolved.best && decision.supplyMode !== "manual" && sourceUsable
                             ? "Gefundene Quelle freigeben"
                             : "Angabe freigeben"}
                         </Button>
