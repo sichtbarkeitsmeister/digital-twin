@@ -28,6 +28,8 @@ type SurveyOption = {
 type ClarificationDecision = {
   approved: boolean;
   sourceResponseId: string;
+  supplyMode: "source" | "manual";
+  manualText: string;
 };
 
 const fieldInputClass =
@@ -84,13 +86,62 @@ export function DtAgentCreateWizard(props: {
   const clarificationResolutions = useMemo((): SurveyClarificationResolution[] => {
     return clarifications.map((item) => {
       const decision = clarificationDecisions[item.id];
+      const approved = Boolean(decision?.approved);
+      const useManual = approved && decision?.supplyMode === "manual";
       return {
         clarificationId: item.id,
-        approved: Boolean(decision?.approved),
-        sourceResponseId: decision?.approved ? decision.sourceResponseId || null : null,
+        approved,
+        sourceResponseId:
+          approved && !useManual ? decision?.sourceResponseId || null : null,
+        manualText: useManual ? decision?.manualText?.trim() || null : null,
       };
     });
   }, [clarifications, clarificationDecisions]);
+
+  function sourcesForClarification(item: SurveyClarificationItem): SurveyClarificationSource[] {
+    const pool =
+      item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
+        ? anbieterSources.length > 0
+          ? anbieterSources
+          : clarificationSources
+        : clarificationSources;
+    const hint = item.preferredSourceHint?.trim().toLowerCase();
+    if (!hint) return pool;
+    return [...pool].sort((a, b) => {
+      const aHit = a.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
+      const bHit = b.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
+      return aHit - bHit;
+    });
+  }
+
+  function defaultDecisionFor(
+    item: SurveyClarificationItem,
+    pool: SurveyClarificationSource[],
+  ): ClarificationDecision {
+    if (pool.length > 0) {
+      return {
+        approved: false,
+        sourceResponseId: pool[0]?.responseId ?? "",
+        supplyMode: "source",
+        manualText: "",
+      };
+    }
+    return {
+      approved: false,
+      sourceResponseId: "",
+      supplyMode: "manual",
+      manualText: "",
+    };
+  }
+
+  function clarificationBlocksGenerate(): boolean {
+    return clarifications.some((item) => {
+      const d = clarificationDecisions[item.id];
+      if (!d?.approved) return false;
+      if (d.supplyMode === "manual") return !d.manualText.trim();
+      return !d.sourceResponseId;
+    });
+  }
 
   const reset = useCallback(() => {
     setStep("choose");
@@ -168,13 +219,6 @@ export function DtAgentCreateWizard(props: {
     }
   }
 
-  function sourcesForClarification(item: SurveyClarificationItem): SurveyClarificationSource[] {
-    if (item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter") {
-      return anbieterSources.length > 0 ? anbieterSources : clarificationSources;
-    }
-    return clarificationSources;
-  }
-
   async function loadClarificationsAndContinue() {
     if (!selectedOption) {
       setError("Bitte eine Umfrage wählen.");
@@ -205,16 +249,23 @@ export function DtAgentCreateWizard(props: {
       setAnbieterSources(anbieter);
       const next: Record<string, ClarificationDecision> = {};
       for (const item of items) {
-        const pool =
-          item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
-            ? anbieter.length > 0
-              ? anbieter
-              : sources
-            : sources;
-        next[item.id] = {
-          approved: false,
-          sourceResponseId: pool[0]?.responseId ?? "",
-        };
+        const pool = (() => {
+          const base =
+            item.suggestedAction === "import_anbieter_survey" ||
+            item.suggestedPurpose === "anbieter"
+              ? anbieter.length > 0
+                ? anbieter
+                : sources
+              : sources;
+          const hint = item.preferredSourceHint?.trim().toLowerCase();
+          if (!hint) return base;
+          return [...base].sort((a, b) => {
+            const aHit = a.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
+            const bHit = b.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
+            return aHit - bHit;
+          });
+        })();
+        next[item.id] = defaultDecisionFor(item, pool);
       }
       setClarificationDecisions(next);
       setStep("survey_clarifications");
@@ -405,13 +456,7 @@ export function DtAgentCreateWizard(props: {
         {step === "survey_clarifications" ? (
           <DtPillButton
             type="button"
-            disabled={
-              busy ||
-              clarifications.some((item) => {
-                const d = clarificationDecisions[item.id];
-                return Boolean(d?.approved) && !d?.sourceResponseId;
-              })
-            }
+            disabled={busy || clarificationBlocksGenerate()}
             onClick={() => void generateSurveyPreview()}
           >
             {busy ? (
@@ -566,17 +611,19 @@ export function DtAgentCreateWizard(props: {
 
       {step === "survey_clarifications" ? (
         <div className="grid gap-4">
+          <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+            Verweise wie „siehe Arbeitgeber“ werden vor der Generierung geklärt: Daten aus einer
+            Quell-Umfrage laden oder Inhalt selbst angeben.
+          </p>
           {clarifications.length === 0 ? (
             <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
               Keine Unklarheiten erkannt — Generierung kann starten.
             </p>
           ) : (
             clarifications.map((item) => {
-              const decision = clarificationDecisions[item.id] ?? {
-                approved: false,
-                sourceResponseId: "",
-              };
               const pool = sourcesForClarification(item);
+              const decision =
+                clarificationDecisions[item.id] ?? defaultDecisionFor(item, pool);
               return (
                 <div
                   key={item.id}
@@ -586,7 +633,7 @@ export function DtAgentCreateWizard(props: {
                     {item.fieldTitle}
                   </p>
                   <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-                    Bemerkung: „{item.remarkText}“
+                    Verweis: „{item.remarkText}“
                   </p>
                   <p className="text-xs text-sbkm-ink-600/80 dark:text-white/40">
                     {item.detectedIntent}
@@ -603,6 +650,8 @@ export function DtAgentCreateWizard(props: {
                             approved: true,
                             sourceResponseId:
                               decision.sourceResponseId || pool[0]?.responseId || "",
+                            supplyMode:
+                              decision.supplyMode || (pool.length > 0 ? "source" : "manual"),
                           },
                         }))
                       }
@@ -635,37 +684,106 @@ export function DtAgentCreateWizard(props: {
                     </button>
                   </div>
                   {decision.approved ? (
-                    pool.length === 0 ? (
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        Keine passende Quell-Umfrage gefunden.
-                      </p>
-                    ) : (
-                      <label className="grid gap-1 text-xs">
-                        <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-                          Quelle
-                        </span>
-                        <select
-                          value={decision.sourceResponseId}
-                          disabled={busy}
-                          onChange={(e) =>
+                    <div className="grid gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={busy || pool.length === 0}
+                          onClick={() =>
                             setClarificationDecisions((prev) => ({
                               ...prev,
                               [item.id]: {
                                 ...decision,
-                                sourceResponseId: e.target.value,
+                                supplyMode: "source",
+                                sourceResponseId:
+                                  decision.sourceResponseId || pool[0]?.responseId || "",
                               },
                             }))
                           }
-                          className={fieldInputClass}
+                          className={cn(
+                            "rounded-pill px-3 py-1.5 text-xs font-medium",
+                            decision.supplyMode === "source"
+                              ? "bg-sbkm-mint/20 text-sbkm-navy dark:text-sbkm-mint"
+                              : "bg-sbkm-navy/5 text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60",
+                          )}
                         >
-                          {pool.map((s) => (
-                            <option key={s.responseId} value={s.responseId}>
-                              {s.surveyTitle} ({s.purposeLabel})
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )
+                          Aus Umfrage laden
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            setClarificationDecisions((prev) => ({
+                              ...prev,
+                              [item.id]: { ...decision, supplyMode: "manual" },
+                            }))
+                          }
+                          className={cn(
+                            "rounded-pill px-3 py-1.5 text-xs font-medium",
+                            decision.supplyMode === "manual"
+                              ? "bg-sbkm-mint/20 text-sbkm-navy dark:text-sbkm-mint"
+                              : "bg-sbkm-navy/5 text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60",
+                          )}
+                        >
+                          Inhalt selbst angeben
+                        </button>
+                      </div>
+                      {decision.supplyMode === "source" ? (
+                        pool.length === 0 ? (
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            Keine passende Quell-Umfrage gefunden — bitte Inhalt selbst angeben.
+                          </p>
+                        ) : (
+                          <label className="grid gap-1 text-xs">
+                            <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
+                              Quelle
+                            </span>
+                            <select
+                              value={decision.sourceResponseId}
+                              disabled={busy}
+                              onChange={(e) =>
+                                setClarificationDecisions((prev) => ({
+                                  ...prev,
+                                  [item.id]: {
+                                    ...decision,
+                                    sourceResponseId: e.target.value,
+                                  },
+                                }))
+                              }
+                              className={fieldInputClass}
+                            >
+                              {pool.map((s) => (
+                                <option key={s.responseId} value={s.responseId}>
+                                  {s.surveyTitle} ({s.purposeLabel})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )
+                      ) : (
+                        <label className="grid gap-1 text-xs">
+                          <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
+                            Inhalt für „{item.fieldTitle}“
+                          </span>
+                          <textarea
+                            value={decision.manualText}
+                            disabled={busy}
+                            onChange={(e) =>
+                              setClarificationDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  ...decision,
+                                  manualText: e.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="Inhalt einfügen, der statt des Verweises übernommen werden soll…"
+                            className={fieldTextareaClass}
+                            rows={5}
+                          />
+                        </label>
+                      )}
+                    </div>
                   ) : null}
                 </div>
               );

@@ -17,6 +17,8 @@ const clarificationResolutionSchema = z.object({
   clarificationId: z.string().min(1).max(120),
   approved: z.boolean(),
   sourceResponseId: z.string().uuid().nullable().optional(),
+  /** Admin pastes content when no sibling survey is available. */
+  manualText: z.string().max(20000).nullable().optional(),
 });
 
 const bodySchema = z

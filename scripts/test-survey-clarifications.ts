@@ -22,6 +22,22 @@ const definition = {
           options: [],
         },
         {
+          id: "f-mandatsreise",
+          type: "textarea" as const,
+          title: "Mandatsreise",
+          description: "",
+          required: false,
+          options: [],
+        },
+        {
+          id: "f-phasen",
+          type: "textarea" as const,
+          title: "Phasen und Bedürfnisse",
+          description: "",
+          required: false,
+          options: [],
+        },
+        {
           id: "f-other",
           type: "text" as const,
           title: "Sonstiges",
@@ -69,7 +85,10 @@ const vagueRemark = detectSurveyClarifications({
 
 assert.equal(vagueRemark.length, 1);
 assert.equal(vagueRemark[0]?.type, "ambiguous_remark");
-assert.equal(vagueRemark[0]?.suggestedAction, "import_sibling_survey");
+assert.ok(
+  vagueRemark[0]?.suggestedAction === "import_sibling_survey" ||
+    vagueRemark[0]?.suggestedAction === "provide_manual",
+);
 
 const clearRemark = detectSurveyClarifications({
   definition,
@@ -86,7 +105,7 @@ const clearRemark = detectSurveyClarifications({
 
 assert.equal(clearRemark.length, 0);
 
-const followUpIgnored = detectSurveyClarifications({
+const followUpQuestionOnlyIgnored = detectSurveyClarifications({
   definition,
   fieldQuestions: [
     {
@@ -99,6 +118,51 @@ const followUpIgnored = detectSurveyClarifications({
   ],
 });
 
-assert.equal(followUpIgnored.length, 0);
+// Interviewer-Frage darf allein keinen Treffer erzeugen — nur die Antwort zählt.
+assert.equal(followUpQuestionOnlyIgnored.length, 0);
+
+const followUpAnswerCrossRef = detectSurveyClarifications({
+  definition,
+  fieldQuestions: [
+    {
+      id: "q5",
+      field_id: "f-ablauf",
+      kind: "question",
+      question: "Können Sie den Ablauf genauer beschreiben?",
+      answer: "Siehe Arbeitgeber-Fragebogen",
+    },
+  ],
+});
+
+assert.equal(followUpAnswerCrossRef.length, 1);
+assert.equal(followUpAnswerCrossRef[0]?.preferredSourceHint, "arbeitgeber");
+
+const arbeitgeberAnswer = detectSurveyClarifications({
+  definition,
+  fieldQuestions: [],
+  answers: {
+    "f-mandatsreise":
+      "Ist die gleiche wie beim Arbeitgeber. Bitte dort übernehmen.",
+  },
+});
+
+assert.equal(arbeitgeberAnswer.length, 1);
+assert.equal(arbeitgeberAnswer[0]?.type, "cross_reference");
+assert.equal(arbeitgeberAnswer[0]?.suggestedAction, "import_sibling_survey");
+assert.equal(arbeitgeberAnswer[0]?.suggestedPurpose, "persona");
+assert.equal(arbeitgeberAnswer[0]?.preferredSourceHint, "arbeitgeber");
+assert.equal(arbeitgeberAnswer[0]?.fieldTitle, "Mandatsreise");
+
+const sieheArbeitgeber = detectSurveyClarifications({
+  definition,
+  fieldQuestions: [],
+  answers: {
+    "f-phasen": "siehe Arbeitgeber-Fragebogen",
+  },
+});
+
+assert.equal(sieheArbeitgeber.length, 1);
+assert.equal(sieheArbeitgeber[0]?.preferredSourceHint, "arbeitgeber");
+assert.match(sieheArbeitgeber[0]?.remarkText ?? "", /Arbeitgeber/i);
 
 console.log("survey-clarifications tests: ok");

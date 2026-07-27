@@ -45,6 +45,12 @@ export async function GET(
     organisationId,
     definition: bundle.survey.definition,
     fieldQuestions: bundle.fieldQuestions,
+    answers:
+      bundle.response.answers &&
+      typeof bundle.response.answers === "object" &&
+      !Array.isArray(bundle.response.answers)
+        ? (bundle.response.answers as Record<string, unknown>)
+        : {},
   });
 
   return NextResponse.json({

@@ -1,15 +1,25 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeSurveyPurpose, surveyPurposeLabel } from "@/lib/surveys/purpose";
+import type { SurveyField } from "@/lib/surveys/types";
 
 import {
   buildSurveyResponseContextForAgent,
   getSurveySteps,
+  isPlaceholderOrEmptyAnswer,
+  normalizeSurveyAnswer,
   type SurveyFieldQuestionRow,
 } from "@/lib/dt/survey-to-agent-context";
+import {
+  extractSurveyFacts,
+  formatSurveyFactsForAgentContext,
+  type SurveyFact,
+  type SurveyFactsBundle,
+} from "@/lib/dt/survey-facts";
 
 export type SurveyClarificationSuggestedAction =
   | "import_anbieter_survey"
   | "import_sibling_survey"
+  | "provide_manual"
   | "leave_as_is";
 
 export type SurveyClarificationItem = {
@@ -22,6 +32,8 @@ export type SurveyClarificationItem = {
   detectedIntent: string;
   suggestedAction: SurveyClarificationSuggestedAction;
   suggestedPurpose: "anbieter" | "persona" | null;
+  /** Hint for the wizard: prefer surveys whose title matches this. */
+  preferredSourceHint: string | null;
 };
 
 export type SurveyClarificationSource = {
@@ -38,6 +50,8 @@ export type SurveyClarificationResolution = {
   approved: boolean;
   /** Required when approved and a sibling survey should be imported. */
   sourceResponseId?: string | null;
+  /** Admin-supplied text when no sibling source is available (or preferred). */
+  manualText?: string | null;
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -51,72 +65,255 @@ function remarkTextFromQuestion(q: SurveyFieldQuestionRow): string {
   return question || answer;
 }
 
+type PatternMatch = {
+  re: RegExp;
+  intent: string;
+  suggestedAction: SurveyClarificationSuggestedAction;
+  suggestedPurpose: "anbieter" | "persona" | null;
+  preferredSourceHint: string | null;
+  type: "cross_reference" | "ambiguous_remark";
+};
+
 /** Cross-refs that clearly point at the Anbieter-Fragebogen. */
-const ANBIETER_CROSS_REF_PATTERNS: Array<{ re: RegExp; intent: string }> = [
+const ANBIETER_CROSS_REF_PATTERNS: PatternMatch[] = [
   {
     re: /selber\s+ablauf\s+wie\s+im\s+anbieter/i,
     intent: "Gleicher Ablauf wie im Anbieter-Fragebogen übernehmen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /gleiche?r?\s+ablauf\s+wie\s+im\s+anbieter/i,
     intent: "Gleicher Ablauf wie im Anbieter-Fragebogen übernehmen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /wie\s+im\s+anbieter[\s-]*(fragebogen|umfrage)?/i,
     intent: "Verweis auf den Anbieter-Fragebogen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /wie\s+(beim?|im|der|die)\s+anbieter/i,
     intent: "Verweis auf den Anbieter-Fragebogen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /anbieter[\s-]*(fragebogen|umfrage)/i,
     intent: "Verweis auf den Anbieter-Fragebogen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /siehe\s+(den\s+)?anbieter/i,
     intent: "Verweis auf den Anbieter-Fragebogen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /übernehmen\s+(vom?|aus)\s+(dem\s+)?anbieter/i,
     intent: "Inhalte aus dem Anbieter-Fragebogen übernehmen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /analog\s+(zum?\s+)?anbieter/i,
     intent: "Analog zum Anbieter-Fragebogen übernehmen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
   },
   {
     re: /entsprechend\s+(dem?\s+)?anbieter/i,
     intent: "Entsprechend dem Anbieter-Fragebogen übernehmen",
+    suggestedAction: "import_anbieter_survey",
+    suggestedPurpose: "anbieter",
+    preferredSourceHint: "anbieter",
+    type: "cross_reference",
+  },
+];
+
+/** Cross-refs to another persona survey (e.g. Arbeitgeber ↔ Arbeitnehmer). */
+const SIBLING_CROSS_REF_PATTERNS: PatternMatch[] = [
+  {
+    re: /ist\s+die\s+gleiche\s+wie\s+beim?\s+arbeitgeber/i,
+    intent: "Gleicher Inhalt wie beim Arbeitgeber — Übernahme freigeben oder Inhalt angeben",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitgeber",
+    type: "cross_reference",
+  },
+  {
+    re: /gleiche?\s+(mandatsreise|reise|ablauf|phasen?|bedürfnisse?)?\s*wie\s+(beim?|der|die|dem)\s+arbeitgeber/i,
+    intent: "Gleicher Inhalt wie beim Arbeitgeber — Übernahme freigeben oder Inhalt angeben",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitgeber",
+    type: "cross_reference",
+  },
+  {
+    re: /wie\s+(beim?|der|die|dem|im)\s+arbeitgeber/i,
+    intent: "Verweis auf den Arbeitgeber-Fragebogen",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitgeber",
+    type: "cross_reference",
+  },
+  {
+    re: /siehe\s+(den\s+)?arbeitgeber([\s-]*(fragebogen|umfrage))?/i,
+    intent: "Verweis auf den Arbeitgeber-Fragebogen",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitgeber",
+    type: "cross_reference",
+  },
+  {
+    re: /arbeitgeber[\s-]*(fragebogen|umfrage)/i,
+    intent: "Verweis auf den Arbeitgeber-Fragebogen",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitgeber",
+    type: "cross_reference",
+  },
+  {
+    re: /(bitte\s+)?(dort|beim?\s+arbeitgeber|aus\s+dem\s+arbeitgeber).{0,40}übernehmen|übernehmen.{0,40}arbeitgeber/i,
+    intent: "Übernahme aus dem Arbeitgeber-Fragebogen gewünscht",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitgeber",
+    type: "cross_reference",
+  },
+  {
+    re: /wie\s+(beim?|der|die|dem|im)\s+arbeitnehmer/i,
+    intent: "Verweis auf den Arbeitnehmer-Fragebogen",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitnehmer",
+    type: "cross_reference",
+  },
+  {
+    re: /siehe\s+(den\s+)?arbeitnehmer([\s-]*(fragebogen|umfrage))?/i,
+    intent: "Verweis auf den Arbeitnehmer-Fragebogen",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitnehmer",
+    type: "cross_reference",
+  },
+  {
+    re: /arbeitnehmer[\s-]*(fragebogen|umfrage)/i,
+    intent: "Verweis auf den Arbeitnehmer-Fragebogen",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: "arbeitnehmer",
+    type: "cross_reference",
+  },
+  {
+    re: /siehe\s+(den\s+)?(anderen\s+)?(persona[\s-]*)?(fragebogen|umfrage)/i,
+    intent: "Verweis auf einen anderen Fragebogen — Quelle wählen oder Inhalt angeben",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: null,
+    type: "cross_reference",
+  },
+  {
+    re: /wie\s+(beim?|im|der|die)\s+anderen\s+(fragebogen|persona|umfrage)/i,
+    intent: "Verweis auf einen anderen Fragebogen — Quelle wählen oder Inhalt angeben",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: null,
+    type: "cross_reference",
+  },
+  {
+    re: /bitte\s+.*(übernehmen|übernahme)/i,
+    intent: "Übernahme-Hinweis — Quelle wählen oder Inhalt angeben",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: "persona",
+    preferredSourceHint: null,
+    type: "cross_reference",
   },
 ];
 
 /** Vague remarks that need admin judgment before inventing content. */
-const AMBIGUOUS_REMARK_PATTERNS: Array<{ re: RegExp; intent: string }> = [
+const AMBIGUOUS_REMARK_PATTERNS: PatternMatch[] = [
   {
     re: /selber\s+ablauf/i,
     intent: "„Selber Ablauf“ ohne klare Quelle — Freigabe nötig",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: null,
+    preferredSourceHint: null,
+    type: "ambiguous_remark",
   },
   {
     re: /gleiche?r?\s+ablauf/i,
     intent: "„Gleicher Ablauf“ ohne klare Quelle — Freigabe nötig",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: null,
+    preferredSourceHint: null,
+    type: "ambiguous_remark",
+  },
+  {
+    re: /gleiche?\s+wie\s+bei/i,
+    intent: "„Gleich wie bei …“ — Quelle wählen oder Inhalt angeben",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: null,
+    preferredSourceHint: null,
+    type: "ambiguous_remark",
   },
   {
     re: /siehe\s+(oben|unten|anhang|vorher|andere|anderen\s+fragebogen)/i,
     intent: "Unklarer Verweis („siehe …“) — Freigabe nötig",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: null,
+    preferredSourceHint: null,
+    type: "ambiguous_remark",
   },
   {
     re: /wie\s+(üblich|bekannt|immer|sonst)/i,
     intent: "Vage Formulierung — Freigabe nötig",
+    suggestedAction: "provide_manual",
+    suggestedPurpose: null,
+    preferredSourceHint: null,
+    type: "ambiguous_remark",
   },
   {
     re: /wie\s+beim?\s+anderen/i,
     intent: "Verweis auf „anderen“ Fragebogen — Quelle wählen",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: null,
+    preferredSourceHint: null,
+    type: "ambiguous_remark",
   },
   {
     re: /übernehmen\s+(vom?|aus)/i,
     intent: "Übernahme-Hinweis ohne klare Quelle",
+    suggestedAction: "import_sibling_survey",
+    suggestedPurpose: null,
+    preferredSourceHint: null,
+    type: "ambiguous_remark",
   },
+];
+
+const ALL_PATTERNS: PatternMatch[] = [
+  ...ANBIETER_CROSS_REF_PATTERNS,
+  ...SIBLING_CROSS_REF_PATTERNS,
+  ...AMBIGUOUS_REMARK_PATTERNS,
 ];
 
 function buildFieldTitleMap(definition: unknown): Map<string, string> {
@@ -129,59 +326,114 @@ function buildFieldTitleMap(definition: unknown): Map<string, string> {
   return map;
 }
 
+function matchText(text: string): PatternMatch | null {
+  for (const pattern of ALL_PATTERNS) {
+    if (pattern.re.test(text)) return pattern;
+  }
+  return null;
+}
+
+function toClarificationItem(input: {
+  id: string;
+  fieldId: string;
+  fieldTitle: string;
+  remarkText: string;
+  pattern: PatternMatch;
+}): SurveyClarificationItem {
+  return {
+    id: input.id,
+    type: input.pattern.type,
+    questionId: input.id.replace(/^clar-/, ""),
+    fieldId: input.fieldId,
+    fieldTitle: input.fieldTitle,
+    remarkText: input.remarkText,
+    detectedIntent: input.pattern.intent,
+    suggestedAction: input.pattern.suggestedAction,
+    suggestedPurpose: input.pattern.suggestedPurpose,
+    preferredSourceHint: input.pattern.preferredSourceHint,
+  };
+}
+
 /**
- * Detect remarks that cross-reference other surveys or are too vague to resolve alone.
+ * Detect remarks/answers that cross-reference other surveys or are too vague to resolve alone.
  * Pure heuristics (no LLM) — cheap enough to run before every generation.
+ *
+ * Scans:
+ * - Bemerkungen (kind=remark)
+ * - Nachfragen mit Antwort
+ * - Direkte Feld-Antworten (z. B. „Ist die gleiche wie beim Arbeitgeber…“)
  */
 export function detectSurveyClarifications(input: {
   definition: unknown;
   fieldQuestions: SurveyFieldQuestionRow[];
+  answers?: Record<string, unknown>;
 }): SurveyClarificationItem[] {
   const titles = buildFieldTitleMap(input.definition);
   const items: SurveyClarificationItem[] = [];
+  const seenFieldTexts = new Set<string>();
+
+  function pushIfNew(item: SurveyClarificationItem) {
+    const key = `${item.fieldId}::${item.remarkText.toLowerCase()}`;
+    if (seenFieldTexts.has(key)) return;
+    seenFieldTexts.add(key);
+    items.push(item);
+  }
 
   for (const q of input.fieldQuestions) {
-    if (q.kind !== "remark") continue;
-    const text = remarkTextFromQuestion(q);
-    if (!text) continue;
-
-    let matched: SurveyClarificationItem | null = null;
-
-    for (const pattern of ANBIETER_CROSS_REF_PATTERNS) {
-      if (!pattern.re.test(text)) continue;
-      matched = {
-        id: `clar-${q.id}`,
-        type: "cross_reference",
-        questionId: q.id,
-        fieldId: q.field_id,
-        fieldTitle: titles.get(q.field_id) ?? "Frage",
-        remarkText: text,
-        detectedIntent: pattern.intent,
-        suggestedAction: "import_anbieter_survey",
-        suggestedPurpose: "anbieter",
-      };
-      break;
-    }
-
-    if (!matched) {
-      for (const pattern of AMBIGUOUS_REMARK_PATTERNS) {
-        if (!pattern.re.test(text)) continue;
-        matched = {
+    if (q.kind === "remark") {
+      const text = remarkTextFromQuestion(q);
+      if (!text) continue;
+      const pattern = matchText(text);
+      if (!pattern) continue;
+      pushIfNew(
+        toClarificationItem({
           id: `clar-${q.id}`,
-          type: "ambiguous_remark",
-          questionId: q.id,
           fieldId: q.field_id,
           fieldTitle: titles.get(q.field_id) ?? "Frage",
           remarkText: text,
-          detectedIntent: pattern.intent,
-          suggestedAction: "import_sibling_survey",
-          suggestedPurpose: null,
-        };
-        break;
-      }
+          pattern,
+        }),
+      );
+      continue;
     }
 
-    if (matched) items.push(matched);
+    // Follow-up answers can contain cross-refs — match on the answer only,
+    // not the interviewer question (which may mention „Anbieter“ rhetorically).
+    const answer = q.answer?.trim() ?? "";
+    if (!answer || isPlaceholderOrEmptyAnswer(answer)) continue;
+    const pattern = matchText(answer);
+    if (!pattern) continue;
+    pushIfNew(
+      toClarificationItem({
+        id: `clar-${q.id}`,
+        fieldId: q.field_id,
+        fieldTitle: titles.get(q.field_id) ?? "Frage",
+        remarkText: answer,
+        pattern,
+      }),
+    );
+  }
+
+  // Direct field answers (often where "gleiche Mandatsreise wie Arbeitgeber" is typed)
+  if (input.answers) {
+    for (const step of getSurveySteps(input.definition)) {
+      for (const field of step.fields ?? []) {
+        const raw = input.answers[field.id];
+        const answer = normalizeSurveyAnswer(raw, field as SurveyField).trim();
+        if (!answer || isPlaceholderOrEmptyAnswer(answer)) continue;
+        const pattern = matchText(answer);
+        if (!pattern) continue;
+        pushIfNew(
+          toClarificationItem({
+            id: `clar-answer-${field.id}`,
+            fieldId: field.id,
+            fieldTitle: field.title?.trim() || titles.get(field.id) || "Frage",
+            remarkText: answer,
+            pattern,
+          }),
+        );
+      }
+    }
   }
 
   return items;
@@ -264,9 +516,77 @@ export async function listSiblingSurveySources(input: {
   return sources;
 }
 
+/** Prefer sources whose title matches the clarification hint (e.g. „Arbeitgeber“). */
+export function rankSourcesForClarification(
+  sources: SurveyClarificationSource[],
+  item: SurveyClarificationItem,
+): SurveyClarificationSource[] {
+  const hint = item.preferredSourceHint?.trim().toLowerCase();
+  if (!hint) return sources;
+  return [...sources].sort((a, b) => {
+    const aHit = a.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
+    const bHit = b.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
+    return aHit - bHit;
+  });
+}
+
+function tokenizeForRelevance(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-zäöüß0-9]+/i)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 4)
+    .filter(
+      (t) =>
+        ![
+          "siehe",
+          "bitte",
+          "gleiche",
+          "gleicher",
+          "gleichen",
+          "übernehmen",
+          "übernahme",
+          "fragebogen",
+          "umfrage",
+          "dort",
+          "beim",
+          "wenn",
+          "oder",
+          "auch",
+          "diese",
+          "dieser",
+          "dieses",
+        ].includes(t),
+    );
+}
+
+function filterFactsForFieldFocus(
+  bundle: SurveyFactsBundle,
+  fieldTitle: string,
+  remarkText: string,
+): SurveyFact[] {
+  const tokens = new Set([
+    ...tokenizeForRelevance(fieldTitle),
+    ...tokenizeForRelevance(remarkText),
+  ]);
+  if (tokens.size === 0) return bundle.facts;
+
+  const focused = bundle.facts.filter((f) => {
+    const hay = `${f.fieldTitle} ${f.stepTitle} ${f.label}`.toLowerCase();
+    for (const t of tokens) {
+      if (hay.includes(t)) return true;
+    }
+    return false;
+  });
+
+  return focused.length > 0 ? focused : bundle.facts;
+}
+
 async function loadCompletedResponseContext(input: {
   surveyId: string;
   responseId: string;
+  focusFieldTitle?: string;
+  focusRemarkText?: string;
 }): Promise<{ ok: true; title: string; purpose: string; context: string } | { ok: false }> {
   const supabase = createServiceClient();
 
@@ -295,12 +615,34 @@ async function loadCompletedResponseContext(input: {
     .order("asked_at", { ascending: true });
 
   const answers: Record<string, unknown> = isRecord(response.answers) ? response.answers : {};
-  const context = buildSurveyResponseContextForAgent({
-    surveyTitle: survey.title,
-    definition: survey.definition,
-    answers,
-    fieldQuestions: (questions ?? []) as SurveyFieldQuestionRow[],
-  });
+  const fieldQuestions = (questions ?? []) as SurveyFieldQuestionRow[];
+
+  let context: string;
+  if (input.focusFieldTitle || input.focusRemarkText) {
+    const bundle = extractSurveyFacts({
+      surveyTitle: survey.title,
+      definition: survey.definition,
+      answers,
+      fieldQuestions,
+    });
+    const focusedFacts = filterFactsForFieldFocus(
+      bundle,
+      input.focusFieldTitle ?? "",
+      input.focusRemarkText ?? "",
+    );
+    const focusedBundle: SurveyFactsBundle = {
+      ...bundle,
+      facts: focusedFacts,
+    };
+    context = formatSurveyFactsForAgentContext(focusedBundle);
+  } else {
+    context = buildSurveyResponseContextForAgent({
+      surveyTitle: survey.title,
+      definition: survey.definition,
+      answers,
+      fieldQuestions,
+    });
+  }
 
   return {
     ok: true,
@@ -311,7 +653,7 @@ async function loadCompletedResponseContext(input: {
 }
 
 /**
- * Apply admin Freigaben: append approved sibling survey contexts,
+ * Apply admin Freigaben: append approved sibling survey contexts or manual text,
  * and annotate rejected cross-refs so the model does not invent them.
  */
 export async function applyClarificationResolutionsToContext(input: {
@@ -351,13 +693,28 @@ export async function applyClarificationResolutionsToContext(input: {
       continue;
     }
 
+    const manualText = resolution.manualText?.trim() || "";
+    if (manualText) {
+      blocks.push(
+        [
+          "=== Freigegebene Angabe (Admin, manuell) ===",
+          `Bezug: Bemerkung zu „${item.fieldTitle}“: „${item.remarkText}“`,
+          `Erkannt: ${item.detectedIntent}`,
+          "Die folgenden Inhalte wurden vom Admin als Ersatz/Übernahme freigegeben. Nutze sie für den Bereich, auf den die Bemerkung verweist — nichts darüber hinaus erfinden.",
+          "",
+          manualText,
+        ].join("\n"),
+      );
+      continue;
+    }
+
     const sourceResponseId = resolution.sourceResponseId?.trim() || null;
     if (!sourceResponseId) {
       blocks.push(
         [
           "=== Freigabe ohne Quelle (Admin) ===",
           `Bemerkung zu „${item.fieldTitle}“: „${item.remarkText}“`,
-          "Status: Freigegeben, aber keine Quell-Umfrage gewählt — Bemerkung nur wörtlich verwenden.",
+          "Status: Freigegeben, aber keine Quell-Umfrage und kein manueller Text — Bemerkung nur wörtlich verwenden.",
         ].join("\n"),
       );
       continue;
@@ -367,6 +724,8 @@ export async function applyClarificationResolutionsToContext(input: {
     const loaded = await loadCompletedResponseContext({
       surveyId: sourceMeta?.surveyId ?? "",
       responseId: sourceResponseId,
+      focusFieldTitle: item.fieldTitle,
+      focusRemarkText: item.remarkText,
     });
 
     // If meta missing, try resolving survey_id from DB via response alone
@@ -382,6 +741,8 @@ export async function applyClarificationResolutionsToContext(input: {
         contextBlock = await loadCompletedResponseContext({
           surveyId: resp.survey_id,
           responseId: sourceResponseId,
+          focusFieldTitle: item.fieldTitle,
+          focusRemarkText: item.remarkText,
         });
       }
     }
@@ -391,7 +752,7 @@ export async function applyClarificationResolutionsToContext(input: {
         [
           "=== Freigabe fehlgeschlagen (Admin) ===",
           `Bemerkung zu „${item.fieldTitle}“: „${item.remarkText}“`,
-          "Status: Freigegebene Quelle konnte nicht geladen werden — nichts erfinden.",
+          "Status: Freigegebene Quelle konnte nicht geladen werden — nichts erfinden. Admin muss den Inhalt manuell angeben.",
         ].join("\n"),
       );
       continue;
@@ -403,7 +764,7 @@ export async function applyClarificationResolutionsToContext(input: {
         `Bezug: Bemerkung zu „${item.fieldTitle}“: „${item.remarkText}“`,
         `Erkannt: ${item.detectedIntent}`,
         `Quelle: „${contextBlock.title}“ (${surveyPurposeLabel(normalizeSurveyPurpose(contextBlock.purpose))})`,
-        "Die folgenden Inhalte wurden vom Admin zur Übernahme freigegeben. Nutze sie für den Bereich, auf den die Bemerkung verweist — nichts darüber hinaus erfinden.",
+        "Die folgenden Inhalte wurden vom Admin zur Übernahme freigegeben (fokussiert auf den verwiesenen Bereich, soweit erkennbar). Nutze sie für diesen Bereich — nichts darüber hinaus erfinden.",
         "",
         contextBlock.context,
       ].join("\n"),
@@ -420,6 +781,7 @@ export async function loadClarificationsForSurveyResponse(input: {
   organisationId: string;
   definition: unknown;
   fieldQuestions: SurveyFieldQuestionRow[];
+  answers?: Record<string, unknown>;
 }): Promise<{
   clarifications: SurveyClarificationItem[];
   sources: SurveyClarificationSource[];
@@ -428,12 +790,14 @@ export async function loadClarificationsForSurveyResponse(input: {
   const clarifications = detectSurveyClarifications({
     definition: input.definition,
     fieldQuestions: input.fieldQuestions,
+    answers: input.answers,
   });
 
   const needsAnySource = clarifications.some(
     (c) =>
       c.suggestedAction === "import_anbieter_survey" ||
-      c.suggestedAction === "import_sibling_survey",
+      c.suggestedAction === "import_sibling_survey" ||
+      c.suggestedAction === "provide_manual",
   );
 
   if (!needsAnySource) {
