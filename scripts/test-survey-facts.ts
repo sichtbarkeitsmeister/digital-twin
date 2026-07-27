@@ -124,6 +124,68 @@ const missing = checkSurveyFactsCoverage({
 });
 assert.ok(missing.missing.length >= 2);
 
+/** Paraphrase with distinctive terms should count as covered, not weak. */
+const paraphraseFact = {
+  id: "fact_p1",
+  fieldId: "fp",
+  fieldTitle: "Einwände",
+  fieldType: "text",
+  fieldDescription: null,
+  stepTitle: "Verkauf",
+  kind: "answer" as const,
+  label: "Einwände",
+  value: "Was kostet mich das? Lohnt sich das — oder ist der Aufwand größer als der Nutzen?",
+};
+const paraphraseCovered = checkSurveyFactsCoverage({
+  facts: [paraphraseFact],
+  texts: [
+    "Deine häufigsten Einwände: Du fragst zuerst was es kostet, dann ob sich der Aufwand lohnt und größer ist als der Nutzen.",
+  ],
+});
+assert.equal(paraphraseCovered.covered.length, 1);
+assert.equal(paraphraseCovered.weak.length, 0);
+
+/** Cross-ref placeholders must not create false missing/weak noise. */
+const crossRefFact = {
+  id: "fact_x1",
+  fieldId: "fx",
+  fieldTitle: "Mandatsreise",
+  fieldType: "textarea",
+  fieldDescription: null,
+  stepTitle: "Reise",
+  kind: "answer" as const,
+  label: "Mandatsreise",
+  value: "Ist die gleiche wie beim Arbeitgeber. Bitte dort übernehmen.",
+};
+const crossRefReport = checkSurveyFactsCoverage({
+  facts: [crossRefFact],
+  texts: ["Persona ohne den Verweis-Wortlaut."],
+});
+assert.equal(crossRefReport.covered.length, 1);
+assert.equal(crossRefReport.covered[0]?.matchedBy, "cross_ref_placeholder");
+assert.equal(crossRefReport.weak.length, 0);
+assert.equal(crossRefReport.missing.length, 0);
+
+/** Generic stopword overlap alone must not mark weak. */
+const stopwordNoise = checkSurveyFactsCoverage({
+  facts: [
+    {
+      id: "fact_s1",
+      fieldId: "fs",
+      fieldTitle: "Detail",
+      fieldType: "text",
+      fieldDescription: null,
+      stepTitle: "X",
+      kind: "answer",
+      label: "Detail",
+      value: "Diese und jene werden hier nicht ohne weiteres übernommen.",
+    },
+  ],
+  texts: ["Wir werden und können hier auch ohne weiteres weiterarbeiten."],
+});
+assert.equal(stopwordNoise.weak.length, 0);
+assert.equal(stopwordNoise.missing.length, 1);
+
 const summary = summarizeSurveyFactCoverage({
   facts: bundle.facts,
   report: covered,
