@@ -23,12 +23,14 @@ const bodySchema = z
   .object({
     organisationId: z.string().uuid(),
     extraRules: z.string().max(4000).optional(),
-    mode: z.enum(["create", "refine"]).default("create"),
+    mode: z.enum(["create", "refine", "coverage"]).default("create"),
     agentId: z.string().uuid().optional(),
     /** When set, poll an existing Anthropic Message Batch instead of starting a new one. */
     batchId: z.string().min(8).max(200).optional(),
     /** Admin Freigaben for ambiguous remarks / cross-refs (only on batch start). */
     clarifications: z.array(clarificationResolutionSchema).max(40).optional(),
+    /** Current preview required when mode=coverage (patch missing facts). */
+    preview: z.unknown().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.mode === "refine" && !data.agentId) {
@@ -36,6 +38,13 @@ const bodySchema = z
         code: z.ZodIssueCode.custom,
         message: "agentId ist für den Verfeinerungsmodus erforderlich.",
         path: ["agentId"],
+      });
+    }
+    if (data.mode === "coverage" && !data.batchId && data.preview == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "preview ist für Coverage-Repair erforderlich.",
+        path: ["preview"],
       });
     }
   });
@@ -112,7 +121,7 @@ export async function POST(
       return NextResponse.json({
         ok: true,
         status: "ready" as const,
-        mode: "create" as const,
+        mode: result.mode === "coverage" ? ("coverage" as const) : ("create" as const),
         preview: result.preview,
         factCoverage: "factCoverage" in result ? result.factCoverage : undefined,
         organisationId: result.organisationId,
@@ -128,6 +137,10 @@ export async function POST(
       agentId: parsed.data.agentId,
       extraRules: parsed.data.extraRules,
       clarifications: parsed.data.clarifications,
+      preview:
+        parsed.data.mode === "coverage" && parsed.data.preview != null
+          ? (parsed.data.preview as never)
+          : undefined,
     });
 
     if (!started.ok) {
@@ -161,7 +174,7 @@ export async function POST(
       status: "pending" as const,
       batchId: started.batchId,
       model: started.model,
-      mode: "create" as const,
+      mode: started.mode === "coverage" ? ("coverage" as const) : ("create" as const),
       organisationId: started.organisationId,
       organisationName: started.organisationName,
     });

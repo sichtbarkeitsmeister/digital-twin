@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { updateDtAgent } from "@/lib/dt/db";
 import {
   pollSurveyAgentBatch,
+  startSurveyAgentCoverageRepairBatch,
   startSurveyAgentCreateBatch,
   startSurveyAgentRefineBatch,
   type SurveyAgentBatchKind,
@@ -16,6 +17,7 @@ import {
   buildSurveyResponseContextForAgent,
   checkSurveyFactsCoverage,
   extractSurveyFacts,
+  formatFactsForCoverageRepair,
   summarizeSurveyFactCoverage,
   type SurveyFactCoverageSummary,
 } from "@/lib/dt/survey-facts";
@@ -24,7 +26,11 @@ import {
   loadPersonaReferenceExamples,
   type SurveyFieldQuestionRow,
 } from "@/lib/dt/survey-to-agent-context";
-import { generateSurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
+import {
+  generateSurveyAgentPreview,
+  surveyAgentPreviewSchema,
+  type SurveyAgentPreview,
+} from "@/lib/dt/survey-to-agent-prompt";
 import { generateSurveyAgentRefinement } from "@/lib/dt/survey-refine-agent-prompt";
 
 async function buildSurveyContextWithOptionalClarifications(input: {
@@ -222,7 +228,7 @@ export async function generateAgentPreviewFromSurvey(input: {
 }
 
 /**
- * Start async Anthropic Message Batch for create/refine.
+ * Start async Anthropic Message Batch for create/refine/coverage-repair.
  * Avoids Vercel function timeouts on large Sonnet+64k runs.
  */
 export async function startAgentGenerationBatchFromSurvey(input: {
@@ -233,6 +239,8 @@ export async function startAgentGenerationBatchFromSurvey(input: {
   agentId?: string;
   extraRules?: string;
   clarifications?: SurveyClarificationResolution[];
+  /** Required for mode=coverage: current preview to patch. */
+  preview?: SurveyAgentPreview;
 }) {
   const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
   if (!bundle.ok) return bundle;
@@ -260,6 +268,67 @@ export async function startAgentGenerationBatchFromSurvey(input: {
   const answers: Record<string, unknown> = isRecord(bundle.response.answers)
     ? bundle.response.answers
     : {};
+
+  if (input.mode === "coverage") {
+    const previewParsed = surveyAgentPreviewSchema.safeParse(input.preview);
+    if (!previewParsed.success) {
+      return {
+        ok: false as const,
+        status: 400,
+        message: "Für Coverage-Repair fehlt eine gültige Agent-Vorschau.",
+      };
+    }
+
+    const factsBundle = extractSurveyFacts({
+      surveyTitle: bundle.survey.title,
+      definition: bundle.survey.definition,
+      answers,
+      fieldQuestions: bundle.fieldQuestions,
+    });
+    const coverageReport = checkSurveyFactsCoverage({
+      facts: factsBundle.facts,
+      texts: [
+        previewParsed.data.prompt_template,
+        JSON.stringify(previewParsed.data.avatar_data ?? {}),
+        previewParsed.data.summary,
+        previewParsed.data.name,
+        previewParsed.data.role,
+      ],
+    });
+    const gapIds = [
+      ...coverageReport.missing.map((h) => h.factId),
+      ...coverageReport.weak.map((h) => h.factId),
+    ];
+    if (gapIds.length === 0) {
+      return {
+        ok: false as const,
+        status: 400,
+        message: "Keine fehlenden oder unsicheren Facts — Repair nicht nötig.",
+      };
+    }
+
+    const missingFactsBlock = formatFactsForCoverageRepair({
+      facts: factsBundle.facts,
+      factIds: gapIds,
+    });
+
+    const started = await startSurveyAgentCoverageRepairBatch({
+      responseId: input.responseId,
+      organisationName: org.name,
+      currentPreview: previewParsed.data,
+      missingFactsBlock,
+    });
+
+    return {
+      ok: true as const,
+      status: "pending" as const,
+      batchId: started.batchId,
+      model: started.model,
+      mode: "coverage" as const,
+      organisationId: input.organisationId,
+      organisationName: org.name,
+    };
+  }
 
   const surveyContext = await buildSurveyContextWithOptionalClarifications({
     surveyId: input.surveyId,
@@ -428,7 +497,7 @@ export async function pollAgentGenerationBatchFromSurvey(input: {
     return {
       ok: true as const,
       status: "ready" as const,
-      mode: "create" as const,
+      mode: (input.mode === "coverage" ? "coverage" : "create") as "create" | "coverage",
       preview: polled.preview,
       factCoverage,
       organisationId: input.organisationId,

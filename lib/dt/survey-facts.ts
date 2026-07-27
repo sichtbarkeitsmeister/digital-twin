@@ -360,6 +360,22 @@ export function summarizeSurveyFactCoverage(input: {
   };
 }
 
+/** Text block of missing/weak facts for a targeted repair prompt. */
+export function formatFactsForCoverageRepair(input: {
+  facts: SurveyFact[];
+  factIds: string[];
+}): string {
+  const wanted = new Set(input.factIds);
+  const lines = input.facts
+    .filter((f) => wanted.has(f.id))
+    .map((f) => {
+      const kindLabel =
+        f.kind === "remark" ? "Bemerkung" : f.kind === "follow_up" ? "Nachfrage" : "Antwort";
+      return `- ${f.id} [${kindLabel}] ${f.fieldTitle}: ${f.value.replace(/\s+/g, " ").trim()}`;
+    });
+  return lines.length > 0 ? lines.join("\n") : "(keine Facts)";
+}
+
 /** Drop-in context builder used by persona + anbieter paths. */
 export function buildSurveyResponseContextForAgent(input: {
   surveyTitle: string;
