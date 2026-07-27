@@ -24,9 +24,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { SurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
 import type { SurveyAgentRefinePreview } from "@/lib/dt/survey-refine-agent-prompt";
+import type {
+  SurveyClarificationItem,
+  SurveyClarificationResolution,
+  SurveyClarificationSource,
+} from "@/lib/dt/survey-clarifications";
 
 type WizardMode = "create" | "refine";
-type WizardStep = "organisation" | "modus" | "regeln" | "vorschau" | "fertig";
+type WizardStep = "organisation" | "modus" | "regeln" | "klaerungen" | "vorschau" | "fertig";
 
 type OrgAgentOption = {
   id: string;
@@ -34,6 +39,11 @@ type OrgAgentOption = {
   role: string | null;
   kind: string;
   slug: string;
+};
+
+type ClarificationDecision = {
+  approved: boolean;
+  sourceResponseId: string;
 };
 
 const container = {
@@ -72,6 +82,13 @@ export function SurveyToAgentWizard(props: {
   const [orgAgents, setOrgAgents] = useState<OrgAgentOption[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [extraRules, setExtraRules] = useState("");
+  const [clarifications, setClarifications] = useState<SurveyClarificationItem[]>([]);
+  const [clarificationSources, setClarificationSources] = useState<SurveyClarificationSource[]>([]);
+  const [anbieterSources, setAnbieterSources] = useState<SurveyClarificationSource[]>([]);
+  const [clarificationDecisions, setClarificationDecisions] = useState<
+    Record<string, ClarificationDecision>
+  >({});
+  const [clarificationsLoading, setClarificationsLoading] = useState(false);
   const [preview, setPreview] = useState<SurveyAgentPreview | null>(null);
   const [refinePreview, setRefinePreview] = useState<SurveyAgentRefinePreview | null>(null);
   const [currentPrompt, setCurrentPrompt] = useState("");
@@ -93,10 +110,82 @@ export function SurveyToAgentWizard(props: {
 
   const stepBadges = useMemo(() => {
     const steps: WizardStep[] = needsOrg
-      ? ["organisation", "modus", "regeln", "vorschau", "fertig"]
-      : ["modus", "regeln", "vorschau", "fertig"];
+      ? ["organisation", "modus", "regeln", "klaerungen", "vorschau", "fertig"]
+      : ["modus", "regeln", "klaerungen", "vorschau", "fertig"];
     return steps;
   }, [needsOrg]);
+
+  const clarificationResolutions = useMemo((): SurveyClarificationResolution[] => {
+    return clarifications.map((item) => {
+      const decision = clarificationDecisions[item.id];
+      return {
+        clarificationId: item.id,
+        approved: Boolean(decision?.approved),
+        sourceResponseId: decision?.approved
+          ? decision.sourceResponseId || null
+          : null,
+      };
+    });
+  }, [clarifications, clarificationDecisions]);
+
+  function sourcesForClarification(item: SurveyClarificationItem): SurveyClarificationSource[] {
+    if (item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter") {
+      return anbieterSources.length > 0 ? anbieterSources : clarificationSources;
+    }
+    return clarificationSources;
+  }
+
+  const loadClarifications = useCallback(async () => {
+    if (!orgId) {
+      setError("Bitte zuerst eine Organisation wählen.");
+      return;
+    }
+    setClarificationsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/surveys/${props.surveyId}/responses/${props.responseId}/clarifications?organisationId=${encodeURIComponent(orgId)}`,
+      );
+      const json = (await res.json()) as {
+        ok?: boolean;
+        clarifications?: SurveyClarificationItem[];
+        sources?: SurveyClarificationSource[];
+        anbieterSources?: SurveyClarificationSource[];
+        message?: string;
+      };
+      if (!json.ok) {
+        setError(json.message ?? "Klärungen konnten nicht geladen werden.");
+        return;
+      }
+      const items = json.clarifications ?? [];
+      const sources = json.sources ?? [];
+      const anbieter = json.anbieterSources ?? [];
+      setClarifications(items);
+      setClarificationSources(sources);
+      setAnbieterSources(anbieter);
+
+      const next: Record<string, ClarificationDecision> = {};
+      for (const item of items) {
+        const pool =
+          item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
+            ? anbieter.length > 0
+              ? anbieter
+              : sources
+            : sources;
+        // Default: not approved — Freigabe must be explicit
+        next[item.id] = {
+          approved: false,
+          sourceResponseId: pool[0]?.responseId ?? "",
+        };
+      }
+      setClarificationDecisions(next);
+      setStep("klaerungen");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Klärungen konnten nicht geladen werden.");
+    } finally {
+      setClarificationsLoading(false);
+    }
+  }, [orgId, props.surveyId, props.responseId]);
 
   useEffect(() => {
     if (wizardMode !== "refine" || !orgId) {
@@ -167,6 +256,11 @@ export function SurveyToAgentWizard(props: {
             mode: wizardMode,
             agentId: wizardMode === "refine" ? agentId : undefined,
             batchId,
+            clarifications: batchId
+              ? undefined
+              : clarificationResolutions.length > 0
+                ? clarificationResolutions
+                : undefined,
           }),
         });
 
@@ -229,7 +323,15 @@ export function SurveyToAgentWizard(props: {
     } finally {
       setLoading(false);
     }
-  }, [orgId, agentId, wizardMode, extraRules, props.surveyId, props.responseId]);
+  }, [
+    orgId,
+    agentId,
+    wizardMode,
+    extraRules,
+    clarificationResolutions,
+    props.surveyId,
+    props.responseId,
+  ]);
 
   const createAgent = useCallback(async () => {
     if (!orgId) return;
@@ -325,10 +427,10 @@ export function SurveyToAgentWizard(props: {
       : (preview?.prompt_template ?? "");
   const promptChars = activePrompt.trim().length;
 
-  const goToRegeln = () => {
+  const goToKlaerungen = () => {
     setPreview(null);
     setRefinePreview(null);
-    setStep("regeln");
+    setStep("klaerungen");
   };
 
   return (
@@ -365,9 +467,11 @@ export function SurveyToAgentWizard(props: {
                 ? "Modus"
                 : s === "regeln"
                   ? "Regeln"
-                  : s === "vorschau"
-                    ? "Vorschau"
-                    : "Fertig"}
+                  : s === "klaerungen"
+                    ? "Klärungen"
+                    : s === "vorschau"
+                      ? "Vorschau"
+                      : "Fertig"}
           </Badge>
         ))}
       </div>
@@ -545,7 +649,135 @@ export function SurveyToAgentWizard(props: {
               </Button>
               <Button
                 type="button"
-                disabled={loading || !orgId || (wizardMode === "refine" && !agentId)}
+                disabled={clarificationsLoading || !orgId || (wizardMode === "refine" && !agentId)}
+                onClick={() => void loadClarifications()}
+              >
+                {clarificationsLoading ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : null}
+                Weiter zu Klärungen
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {step === "klaerungen" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Klärungen & Freigaben</CardTitle>
+            <CardDescription>
+              Unklare Bemerkungen (z.&nbsp;B. „Selber Ablauf wie im Anbieter Fragebogen“) werden
+              erkannt. Ohne Freigabe übernimmt die KI keine fremden Fragebogen-Inhalte.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            {clarifications.length === 0 ? (
+              <p className="text-sm text-secondary">
+                Keine Unklarheiten erkannt — Generierung kann starten.
+              </p>
+            ) : (
+              <div className="grid gap-4">
+                {clarifications.map((item) => {
+                  const decision = clarificationDecisions[item.id] ?? {
+                    approved: false,
+                    sourceResponseId: "",
+                  };
+                  const pool = sourcesForClarification(item);
+                  return (
+                    <div
+                      key={item.id}
+                      className="grid gap-3 rounded-xl border border-border p-4"
+                    >
+                      <div className="grid gap-1">
+                        <p className="text-sm font-semibold text-primary">{item.fieldTitle}</p>
+                        <p className="text-sm text-secondary">
+                          Bemerkung: „{item.remarkText}“
+                        </p>
+                        <p className="text-xs text-muted-foreground">{item.detectedIntent}</p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={decision.approved ? "default" : "outline"}
+                          onClick={() =>
+                            setClarificationDecisions((prev) => ({
+                              ...prev,
+                              [item.id]: {
+                                ...decision,
+                                approved: true,
+                                sourceResponseId:
+                                  decision.sourceResponseId || pool[0]?.responseId || "",
+                              },
+                            }))
+                          }
+                        >
+                          Übernahme freigeben
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={!decision.approved ? "default" : "outline"}
+                          onClick={() =>
+                            setClarificationDecisions((prev) => ({
+                              ...prev,
+                              [item.id]: { ...decision, approved: false },
+                            }))
+                          }
+                        >
+                          Nicht übernehmen
+                        </Button>
+                      </div>
+
+                      {decision.approved ? (
+                        pool.length === 0 ? (
+                          <p className="text-sm text-destructive">
+                            Keine passende abgeschlossene Quell-Umfrage in dieser Organisation
+                            gefunden. Bitte zuerst den Anbieter-Fragebogen abschließen — oder
+                            Freigabe widerrufen.
+                          </p>
+                        ) : (
+                          <DtSelect
+                            label="Quelle übernehmen aus"
+                            value={decision.sourceResponseId}
+                            onValueChange={(value) =>
+                              setClarificationDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: { ...decision, sourceResponseId: value },
+                              }))
+                            }
+                            options={pool.map((s) => ({
+                              value: s.responseId,
+                              label: s.surveyTitle,
+                              description: s.purposeLabel,
+                            }))}
+                            fullWidth
+                          />
+                        )
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={() => setStep("regeln")}>
+                Zurück
+              </Button>
+              <Button
+                type="button"
+                disabled={
+                  loading ||
+                  !orgId ||
+                  (wizardMode === "refine" && !agentId) ||
+                  clarifications.some((item) => {
+                    const d = clarificationDecisions[item.id];
+                    return Boolean(d?.approved) && !d?.sourceResponseId;
+                  })
+                }
                 onClick={() => void generatePreview()}
               >
                 {loading ? (
@@ -560,7 +792,7 @@ export function SurveyToAgentWizard(props: {
         </Card>
       ) : null}
 
-      {step === "regeln" && loading ? (
+      {(step === "klaerungen" || step === "regeln") && loading ? (
         <div className="grid gap-3">
           <p className="text-sm text-muted-foreground">
             Generierung läuft asynchron (Sonnet, vollständiges Token-Budget). Große Fragebögen
@@ -642,7 +874,7 @@ export function SurveyToAgentWizard(props: {
           </motion.div>
 
           <motion.div variants={item} className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={goToRegeln}>
+            <Button type="button" variant="outline" onClick={goToKlaerungen}>
               Zurück
             </Button>
             <Button
@@ -747,7 +979,7 @@ export function SurveyToAgentWizard(props: {
           </motion.div>
 
           <motion.div variants={item} className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={goToRegeln}>
+            <Button type="button" variant="outline" onClick={goToKlaerungen}>
               Zurück
             </Button>
             <Button

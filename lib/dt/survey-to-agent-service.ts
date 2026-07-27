@@ -8,6 +8,11 @@ import {
   type SurveyAgentBatchKind,
 } from "@/lib/dt/survey-agent-batch";
 import {
+  applyClarificationResolutionsToContext,
+  loadClarificationsForSurveyResponse,
+  type SurveyClarificationResolution,
+} from "@/lib/dt/survey-clarifications";
+import {
   buildSurveyResponseContextForAgent,
   findAgentForSurveyResponse,
   loadPersonaReferenceExamples,
@@ -15,6 +20,44 @@ import {
 } from "@/lib/dt/survey-to-agent-context";
 import { generateSurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
 import { generateSurveyAgentRefinement } from "@/lib/dt/survey-refine-agent-prompt";
+
+async function buildSurveyContextWithOptionalClarifications(input: {
+  surveyId: string;
+  responseId: string;
+  organisationId: string;
+  surveyTitle: string;
+  definition: unknown;
+  answers: Record<string, unknown>;
+  fieldQuestions: SurveyFieldQuestionRow[];
+  clarifications?: SurveyClarificationResolution[];
+}): Promise<string> {
+  const base = buildSurveyResponseContextForAgent({
+    surveyTitle: input.surveyTitle,
+    definition: input.definition,
+    answers: input.answers,
+    fieldQuestions: input.fieldQuestions,
+  });
+
+  const resolutions = input.clarifications ?? [];
+  if (resolutions.length === 0) return base;
+
+  const loaded = await loadClarificationsForSurveyResponse({
+    surveyId: input.surveyId,
+    responseId: input.responseId,
+    organisationId: input.organisationId,
+    definition: input.definition,
+    fieldQuestions: input.fieldQuestions,
+  });
+
+  if (loaded.clarifications.length === 0) return base;
+
+  return applyClarificationResolutionsToContext({
+    baseContext: base,
+    clarifications: loaded.clarifications,
+    resolutions,
+    sources: loaded.sources,
+  });
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -111,6 +154,7 @@ export async function generateAgentPreviewFromSurvey(input: {
   responseId: string;
   organisationId: string;
   extraRules?: string;
+  clarifications?: SurveyClarificationResolution[];
 }) {
   const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
   if (!bundle.ok) return bundle;
@@ -139,11 +183,15 @@ export async function generateAgentPreviewFromSurvey(input: {
     ? bundle.response.answers
     : {};
 
-  const surveyContext = buildSurveyResponseContextForAgent({
+  const surveyContext = await buildSurveyContextWithOptionalClarifications({
+    surveyId: input.surveyId,
+    responseId: input.responseId,
+    organisationId: input.organisationId,
     surveyTitle: bundle.survey.title,
     definition: bundle.survey.definition,
     answers,
     fieldQuestions: bundle.fieldQuestions,
+    clarifications: input.clarifications,
   });
 
   const referenceExamples = await loadPersonaReferenceExamples(input.organisationId);
@@ -178,6 +226,7 @@ export async function startAgentGenerationBatchFromSurvey(input: {
   mode: SurveyAgentBatchKind;
   agentId?: string;
   extraRules?: string;
+  clarifications?: SurveyClarificationResolution[];
 }) {
   const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
   if (!bundle.ok) return bundle;
@@ -206,11 +255,15 @@ export async function startAgentGenerationBatchFromSurvey(input: {
     ? bundle.response.answers
     : {};
 
-  const surveyContext = buildSurveyResponseContextForAgent({
+  const surveyContext = await buildSurveyContextWithOptionalClarifications({
+    surveyId: input.surveyId,
+    responseId: input.responseId,
+    organisationId: input.organisationId,
     surveyTitle: bundle.survey.title,
     definition: bundle.survey.definition,
     answers,
     fieldQuestions: bundle.fieldQuestions,
+    clarifications: input.clarifications,
   });
 
   if (input.mode === "refine") {
@@ -382,6 +435,7 @@ export async function generateAgentRefinementFromSurvey(input: {
   organisationId: string;
   agentId: string;
   extraRules?: string;
+  clarifications?: SurveyClarificationResolution[];
 }) {
   const bundle = await loadSurveyResponseBundle(input.surveyId, input.responseId);
   if (!bundle.ok) return bundle;
@@ -420,11 +474,15 @@ export async function generateAgentRefinementFromSurvey(input: {
     ? bundle.response.answers
     : {};
 
-  const surveyContext = buildSurveyResponseContextForAgent({
+  const surveyContext = await buildSurveyContextWithOptionalClarifications({
+    surveyId: input.surveyId,
+    responseId: input.responseId,
+    organisationId: input.organisationId,
     surveyTitle: bundle.survey.title,
     definition: bundle.survey.definition,
     answers,
     fieldQuestions: bundle.fieldQuestions,
+    clarifications: input.clarifications,
   });
 
   const refinement = await generateSurveyAgentRefinement({
