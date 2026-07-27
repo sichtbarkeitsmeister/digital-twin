@@ -316,18 +316,28 @@ export type SurveyFactCoverageSummary = {
     fieldTitle: string;
     kind: SurveyFactKind;
     valuePreview: string;
+    /** Fuller text for review / prompt insertion. */
+    valueText: string;
+    matchedBy?: string;
   }>;
   weak: Array<{
     factId: string;
     fieldTitle: string;
     kind: SurveyFactKind;
     valuePreview: string;
+    valueText: string;
+    matchedBy?: string;
   }>;
 };
 
 function valuePreview(value: string, max = 120): string {
   const one = value.replace(/\s+/g, " ").trim();
   return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
+}
+
+function valueTextForReview(value: string, max = 2_000): string {
+  const t = value.trim();
+  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
 /** Compact coverage payload for API / wizard (non-blocking diagnostic). */
@@ -340,11 +350,14 @@ export function summarizeSurveyFactCoverage(input: {
   function mapHits(hits: SurveyFactCoverageHit[]) {
     return hits.map((h) => {
       const fact = byId.get(h.factId);
+      const raw = fact?.value ?? "";
       return {
         factId: h.factId,
         fieldTitle: fact?.fieldTitle ?? h.factId,
         kind: fact?.kind ?? ("answer" as SurveyFactKind),
-        valuePreview: valuePreview(fact?.value ?? ""),
+        valuePreview: valuePreview(raw),
+        valueText: valueTextForReview(raw),
+        matchedBy: h.matchedBy,
       };
     });
   }
@@ -358,6 +371,18 @@ export function summarizeSurveyFactCoverage(input: {
     missing: mapHits(input.report.missing),
     weak: mapHits(input.report.weak),
   };
+}
+
+/** Draft block an admin can insert into prompt_template for one fact. */
+export function formatFactForPromptInsertion(input: {
+  fieldTitle: string;
+  kind: SurveyFactKind;
+  valueText: string;
+}): string {
+  const kindLabel =
+    input.kind === "remark" ? "Bemerkung" : input.kind === "follow_up" ? "Nachfrage" : "Antwort";
+  const body = input.valueText.trim();
+  return `\n\n### ${input.fieldTitle}\n(${kindLabel} aus Umfrage)\n${body}\n`;
 }
 
 /** Text block of missing/weak facts for a targeted repair prompt. */
