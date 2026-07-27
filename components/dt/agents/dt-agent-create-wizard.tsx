@@ -8,7 +8,9 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSearchableOptionList } from "@/components/dt/dt-searchable-option-list";
 import { CenteredModal } from "@/components/ui/centered-modal";
 import { Textarea } from "@/components/ui/textarea";
+import { ClarificationImportPreview } from "@/components/surveys/clarification-import-preview";
 import type {
+  SurveyClarificationImportPreview,
   SurveyClarificationItem,
   SurveyClarificationResolution,
   SurveyClarificationSource,
@@ -77,6 +79,9 @@ export function DtAgentCreateWizard(props: {
   const [clarificationDecisions, setClarificationDecisions] = useState<
     Record<string, ClarificationDecision>
   >({});
+  const [clarificationPreviews, setClarificationPreviews] = useState<
+    SurveyClarificationImportPreview[]
+  >([]);
   const [preview, setPreview] = useState<SurveyAgentPreview | null>(null);
 
   const selectedOption = useMemo(
@@ -138,6 +143,18 @@ export function DtAgentCreateWizard(props: {
     });
   }
 
+  function previewForClarification(
+    clarificationId: string,
+    sourceResponseId: string,
+  ): SurveyClarificationImportPreview | null {
+    return (
+      clarificationPreviews.find(
+        (p) =>
+          p.clarificationId === clarificationId && p.sourceResponseId === sourceResponseId,
+      ) ?? null
+    );
+  }
+
   const reset = useCallback(() => {
     setStep("choose");
     setBusy(false);
@@ -155,6 +172,7 @@ export function DtAgentCreateWizard(props: {
     setClarificationSources([]);
     setAnbieterSources([]);
     setClarificationDecisions({});
+    setClarificationPreviews([]);
     setPreview(null);
   }, []);
 
@@ -230,6 +248,7 @@ export function DtAgentCreateWizard(props: {
         clarifications?: SurveyClarificationItem[];
         sources?: SurveyClarificationSource[];
         anbieterSources?: SurveyClarificationSource[];
+        previews?: SurveyClarificationImportPreview[];
         message?: string;
       };
       if (!json.ok) {
@@ -242,6 +261,7 @@ export function DtAgentCreateWizard(props: {
       setClarifications(items);
       setClarificationSources(sources);
       setAnbieterSources(anbieter);
+      setClarificationPreviews(json.previews ?? []);
       const next: Record<string, ClarificationDecision> = {};
       for (const item of items) {
         const base =
@@ -639,6 +659,58 @@ export function DtAgentCreateWizard(props: {
                   >
                     {resolved.statusMessage}
                   </p>
+                  {resolved.best && decision.supplyMode === "source" ? (
+                    <div className="grid gap-2">
+                      {pool.length > 1 ? (
+                        <label className="grid gap-1 text-xs">
+                          <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
+                            Quelle
+                          </span>
+                          <select
+                            value={decision.sourceResponseId || resolved.best.responseId}
+                            disabled={busy}
+                            onChange={(e) =>
+                              setClarificationDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  ...decision,
+                                  supplyMode: "source",
+                                  sourceResponseId: e.target.value,
+                                },
+                              }))
+                            }
+                            className={fieldInputClass}
+                          >
+                            {pool.map((s) => (
+                              <option key={s.responseId} value={s.responseId}>
+                                {s.surveyTitle} ({s.purposeLabel})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      <ClarificationImportPreview
+                        compact
+                        preview={previewForClarification(
+                          item.id,
+                          decision.sourceResponseId || resolved.best.responseId,
+                        )}
+                      />
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="justify-self-start text-xs text-sbkm-ink-600/80 underline-offset-2 hover:underline dark:text-white/40"
+                        onClick={() =>
+                          setClarificationDecisions((prev) => ({
+                            ...prev,
+                            [item.id]: { ...decision, supplyMode: "manual" },
+                          }))
+                        }
+                      >
+                        Stattdessen Inhalt selbst angeben
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -651,7 +723,9 @@ export function DtAgentCreateWizard(props: {
                             approved: true,
                             sourceResponseId:
                               decision.sourceResponseId || resolved.best?.responseId || "",
-                            supplyMode: resolved.best ? "source" : "manual",
+                            supplyMode: resolved.best
+                              ? decision.supplyMode || "source"
+                              : "manual",
                           },
                         }))
                       }
@@ -662,7 +736,9 @@ export function DtAgentCreateWizard(props: {
                           : "bg-sbkm-navy/5 text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60",
                       )}
                     >
-                      {resolved.best ? "Gefundene Quelle freigeben" : "Angabe freigeben"}
+                      {resolved.best && decision.supplyMode !== "manual"
+                        ? "Gefundene Quelle freigeben"
+                        : "Angabe freigeben"}
                     </button>
                     <button
                       type="button"
@@ -683,54 +759,6 @@ export function DtAgentCreateWizard(props: {
                       Nicht übernehmen
                     </button>
                   </div>
-                  {decision.approved && resolved.best && decision.supplyMode === "source" ? (
-                    <div className="grid gap-2">
-                      {pool.length > 1 ? (
-                        <label className="grid gap-1 text-xs">
-                          <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-                            Quelle
-                          </span>
-                          <select
-                            value={decision.sourceResponseId}
-                            disabled={busy}
-                            onChange={(e) =>
-                              setClarificationDecisions((prev) => ({
-                                ...prev,
-                                [item.id]: {
-                                  ...decision,
-                                  sourceResponseId: e.target.value,
-                                },
-                              }))
-                            }
-                            className={fieldInputClass}
-                          >
-                            {pool.map((s) => (
-                              <option key={s.responseId} value={s.responseId}>
-                                {s.surveyTitle} ({s.purposeLabel})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-                          Wird geladen aus: „{resolved.best.surveyTitle}“
-                        </p>
-                      )}
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className="justify-self-start text-xs text-sbkm-ink-600/80 underline-offset-2 hover:underline dark:text-white/40"
-                        onClick={() =>
-                          setClarificationDecisions((prev) => ({
-                            ...prev,
-                            [item.id]: { ...decision, supplyMode: "manual" },
-                          }))
-                        }
-                      >
-                        Stattdessen Inhalt selbst angeben
-                      </button>
-                    </div>
-                  ) : null}
                   {showManualForm ? (
                     <div className="grid gap-2">
                       {resolved.best && decision.supplyMode === "manual" ? (

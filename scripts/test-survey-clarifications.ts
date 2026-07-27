@@ -5,11 +5,13 @@
 import assert from "node:assert/strict";
 
 import {
+  buildImportPreviewFromBundle,
   detectSurveyClarifications,
   resolveClarificationSourcePool,
   type SurveyClarificationItem,
   type SurveyClarificationSource,
 } from "../lib/dt/survey-clarifications";
+import type { SurveyFactsBundle } from "../lib/dt/survey-facts";
 
 const definition = {
   steps: [
@@ -211,5 +213,47 @@ const missing = resolveClarificationSourcePool([], sampleItem);
 assert.equal(missing.foundMatch, false);
 assert.equal(missing.best, null);
 assert.match(missing.statusMessage, /selbst angeben/i);
+
+const employerBundle: SurveyFactsBundle = {
+  surveyTitle: "MSH Arbeitgeber",
+  skippedFieldCount: 0,
+  facts: [
+    {
+      id: "fact_001",
+      fieldId: "f1",
+      fieldTitle: "Beschreibe die typische Mandatsreise in 5–7 Schritten.",
+      fieldType: "textarea",
+      fieldDescription: null,
+      stepTitle: "Reise",
+      kind: "answer",
+      label: "Beschreibe die typische Mandatsreise in 5–7 Schritten.",
+      value: "1. Problembewusstsein\n2. Recherche\n3. Erstgespräch",
+    },
+    {
+      id: "fact_002",
+      fieldId: "f2",
+      fieldTitle: "Andere Frage",
+      fieldType: "text",
+      fieldDescription: null,
+      stepTitle: "Sonstiges",
+      kind: "answer",
+      label: "Andere Frage",
+      value: "Irrelevant",
+    },
+  ],
+};
+
+const importPreview = buildImportPreviewFromBundle({
+  clarificationId: sampleItem.id,
+  sourceResponseId: "22222222-2222-2222-2222-222222222222",
+  sourceSurveyTitle: "MSH Arbeitgeber",
+  bundle: employerBundle,
+  fieldTitle: "Beschreibe die typische Mandatsreise in 5–7 Schritten.",
+  remarkText: "Ist die gleiche wie beim Arbeitgeber.",
+});
+
+assert.equal(importPreview.scope, "focused");
+assert.equal(importPreview.facts.length, 1);
+assert.match(importPreview.facts[0]?.value ?? "", /Problembewusstsein/);
 
 console.log("survey-clarifications tests: ok");

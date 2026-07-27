@@ -3,18 +3,18 @@ import { normalizeSurveyPurpose, surveyPurposeLabel } from "@/lib/surveys/purpos
 import type { SurveyField } from "@/lib/surveys/types";
 
 import {
-  buildSurveyResponseContextForAgent,
-  getSurveySteps,
-  isPlaceholderOrEmptyAnswer,
-  normalizeSurveyAnswer,
-  type SurveyFieldQuestionRow,
-} from "@/lib/dt/survey-to-agent-context";
-import {
   extractSurveyFacts,
   formatSurveyFactsForAgentContext,
   type SurveyFact,
   type SurveyFactsBundle,
 } from "@/lib/dt/survey-facts";
+
+import {
+  getSurveySteps,
+  isPlaceholderOrEmptyAnswer,
+  normalizeSurveyAnswer,
+  type SurveyFieldQuestionRow,
+} from "@/lib/dt/survey-to-agent-context";
 
 export type SurveyClarificationSuggestedAction =
   | "import_anbieter_survey"
@@ -605,38 +605,88 @@ function tokenizeForRelevance(text: string): string[] {
           "diese",
           "dieser",
           "dieses",
+          "lange",
+          "dauert",
+          "jeder",
+          "jede",
+          "jedes",
+          "beschreibe",
+          "nennen",
+          "welche",
         ].includes(t),
     );
 }
+
+export type ClarificationFactScope = "focused" | "full_survey" | "empty";
 
 function filterFactsForFieldFocus(
   bundle: SurveyFactsBundle,
   fieldTitle: string,
   remarkText: string,
-): SurveyFact[] {
+): { facts: SurveyFact[]; scope: ClarificationFactScope } {
+  if (bundle.facts.length === 0) return { facts: [], scope: "empty" };
+
+  const titleNorm = fieldTitle.trim().toLowerCase();
+  if (titleNorm) {
+    const exact = bundle.facts.filter((f) => f.fieldTitle.toLowerCase() === titleNorm);
+    if (exact.length > 0) return { facts: exact, scope: "focused" };
+
+    const contains = bundle.facts.filter((f) => {
+      const t = f.fieldTitle.toLowerCase();
+      return t.includes(titleNorm) || titleNorm.includes(t);
+    });
+    if (contains.length > 0) return { facts: contains, scope: "focused" };
+  }
+
   const tokens = new Set([
     ...tokenizeForRelevance(fieldTitle),
     ...tokenizeForRelevance(remarkText),
   ]);
-  if (tokens.size === 0) return bundle.facts;
+  if (tokens.size === 0) {
+    return { facts: bundle.facts, scope: "full_survey" };
+  }
 
   const focused = bundle.facts.filter((f) => {
     const hay = `${f.fieldTitle} ${f.stepTitle} ${f.label}`.toLowerCase();
+    let hits = 0;
     for (const t of tokens) {
-      if (hay.includes(t)) return true;
+      if (hay.includes(t)) hits += 1;
     }
-    return false;
+    return hits > 0;
   });
 
-  return focused.length > 0 ? focused : bundle.facts;
+  if (focused.length > 0) return { facts: focused, scope: "focused" };
+  return { facts: bundle.facts, scope: "full_survey" };
 }
 
-async function loadCompletedResponseContext(input: {
+export type SurveyClarificationPreviewFact = {
+  fieldTitle: string;
+  kind: "answer" | "remark" | "follow_up";
+  label: string;
+  value: string;
+};
+
+/** What the model will receive for one clarification ↔ source pair. */
+export type SurveyClarificationImportPreview = {
+  clarificationId: string;
+  sourceResponseId: string;
+  sourceSurveyTitle: string;
+  scope: ClarificationFactScope;
+  facts: SurveyClarificationPreviewFact[];
+};
+
+const PREVIEW_VALUE_MAX = 600;
+
+function truncatePreviewValue(value: string): string {
+  const t = value.trim();
+  if (t.length <= PREVIEW_VALUE_MAX) return t;
+  return `${t.slice(0, PREVIEW_VALUE_MAX).trimEnd()}…`;
+}
+
+async function loadSourceFactsBundle(input: {
   surveyId: string;
   responseId: string;
-  focusFieldTitle?: string;
-  focusRemarkText?: string;
-}): Promise<{ ok: true; title: string; purpose: string; context: string } | { ok: false }> {
+}): Promise<{ ok: true; title: string; purpose: string; bundle: SurveyFactsBundle } | { ok: false }> {
   const supabase = createServiceClient();
 
   const { data: survey } = await supabase
@@ -665,38 +715,80 @@ async function loadCompletedResponseContext(input: {
 
   const answers: Record<string, unknown> = isRecord(response.answers) ? response.answers : {};
   const fieldQuestions = (questions ?? []) as SurveyFieldQuestionRow[];
-
-  let context: string;
-  if (input.focusFieldTitle || input.focusRemarkText) {
-    const bundle = extractSurveyFacts({
-      surveyTitle: survey.title,
-      definition: survey.definition,
-      answers,
-      fieldQuestions,
-    });
-    const focusedFacts = filterFactsForFieldFocus(
-      bundle,
-      input.focusFieldTitle ?? "",
-      input.focusRemarkText ?? "",
-    );
-    const focusedBundle: SurveyFactsBundle = {
-      ...bundle,
-      facts: focusedFacts,
-    };
-    context = formatSurveyFactsForAgentContext(focusedBundle);
-  } else {
-    context = buildSurveyResponseContextForAgent({
-      surveyTitle: survey.title,
-      definition: survey.definition,
-      answers,
-      fieldQuestions,
-    });
-  }
+  const bundle = extractSurveyFacts({
+    surveyTitle: survey.title,
+    definition: survey.definition,
+    answers,
+    fieldQuestions,
+  });
 
   return {
     ok: true,
     title: survey.title,
     purpose: normalizeSurveyPurpose(survey.purpose),
+    bundle,
+  };
+}
+
+export function buildImportPreviewFromBundle(input: {
+  clarificationId: string;
+  sourceResponseId: string;
+  sourceSurveyTitle: string;
+  bundle: SurveyFactsBundle;
+  fieldTitle: string;
+  remarkText: string;
+}): SurveyClarificationImportPreview {
+  const { facts, scope } = filterFactsForFieldFocus(
+    input.bundle,
+    input.fieldTitle,
+    input.remarkText,
+  );
+
+  return {
+    clarificationId: input.clarificationId,
+    sourceResponseId: input.sourceResponseId,
+    sourceSurveyTitle: input.sourceSurveyTitle,
+    scope,
+    facts: facts.map((f) => ({
+      fieldTitle: f.fieldTitle,
+      kind: f.kind,
+      label: f.label,
+      value: truncatePreviewValue(f.value),
+    })),
+  };
+}
+
+async function loadCompletedResponseContext(input: {
+  surveyId: string;
+  responseId: string;
+  focusFieldTitle?: string;
+  focusRemarkText?: string;
+}): Promise<{ ok: true; title: string; purpose: string; context: string } | { ok: false }> {
+  const loaded = await loadSourceFactsBundle({
+    surveyId: input.surveyId,
+    responseId: input.responseId,
+  });
+  if (!loaded.ok) return { ok: false };
+
+  let context: string;
+  if (input.focusFieldTitle || input.focusRemarkText) {
+    const { facts } = filterFactsForFieldFocus(
+      loaded.bundle,
+      input.focusFieldTitle ?? "",
+      input.focusRemarkText ?? "",
+    );
+    context = formatSurveyFactsForAgentContext({
+      ...loaded.bundle,
+      facts,
+    });
+  } else {
+    context = formatSurveyFactsForAgentContext(loaded.bundle);
+  }
+
+  return {
+    ok: true,
+    title: loaded.title,
+    purpose: loaded.purpose,
     context,
   };
 }
@@ -835,6 +927,7 @@ export async function loadClarificationsForSurveyResponse(input: {
   clarifications: SurveyClarificationItem[];
   sources: SurveyClarificationSource[];
   anbieterSources: SurveyClarificationSource[];
+  previews: SurveyClarificationImportPreview[];
 }> {
   const clarifications = detectSurveyClarifications({
     definition: input.definition,
@@ -850,7 +943,7 @@ export async function loadClarificationsForSurveyResponse(input: {
   );
 
   if (!needsAnySource) {
-    return { clarifications, sources: [], anbieterSources: [] };
+    return { clarifications, sources: [], anbieterSources: [], previews: [] };
   }
 
   const sources = await listSiblingSurveySources({
@@ -861,5 +954,50 @@ export async function loadClarificationsForSurveyResponse(input: {
 
   const anbieterSources = sources.filter((s) => s.purpose === "anbieter");
 
-  return { clarifications, sources, anbieterSources };
+  // Load each candidate source once, then build per-clarification focused previews.
+  const bundleCache = new Map<
+    string,
+    Awaited<ReturnType<typeof loadSourceFactsBundle>>
+  >();
+
+  async function cachedBundle(source: SurveyClarificationSource) {
+    const existing = bundleCache.get(source.responseId);
+    if (existing) return existing;
+    const loaded = await loadSourceFactsBundle({
+      surveyId: source.surveyId,
+      responseId: source.responseId,
+    });
+    bundleCache.set(source.responseId, loaded);
+    return loaded;
+  }
+
+  const previews: SurveyClarificationImportPreview[] = [];
+
+  for (const item of clarifications) {
+    const base =
+      item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
+        ? anbieterSources.length > 0
+          ? anbieterSources
+          : sources
+        : sources;
+    const resolved = resolveClarificationSourcePool(base, item);
+    // Preview best + up to 2 alternates so source switching still shows content.
+    const toPreview = resolved.pool.slice(0, 3);
+    for (const source of toPreview) {
+      const loaded = await cachedBundle(source);
+      if (!loaded.ok) continue;
+      previews.push(
+        buildImportPreviewFromBundle({
+          clarificationId: item.id,
+          sourceResponseId: source.responseId,
+          sourceSurveyTitle: loaded.title,
+          bundle: loaded.bundle,
+          fieldTitle: item.fieldTitle,
+          remarkText: item.remarkText,
+        }),
+      );
+    }
+  }
+
+  return { clarifications, sources, anbieterSources, previews };
 }
