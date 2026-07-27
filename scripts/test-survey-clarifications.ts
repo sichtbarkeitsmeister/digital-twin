@@ -256,4 +256,111 @@ assert.equal(importPreview.scope, "focused");
 assert.equal(importPreview.facts.length, 1);
 assert.match(importPreview.facts[0]?.value ?? "", /Problembewusstsein/);
 
+/** Regression: remark „Arbeitgeber“ must not pull every field that mentions Arbeitgeber. */
+const noisyEmployerBundle: SurveyFactsBundle = {
+  surveyTitle: "MSH Arbeitgeber",
+  skippedFieldCount: 0,
+  facts: [
+    {
+      id: "fact_a",
+      fieldId: "fa",
+      fieldTitle: "Name des digitalen Avatars für den Wunschmandanten-Typ „Arbeitgeber“",
+      fieldType: "text",
+      fieldDescription: null,
+      stepTitle: "Avatar",
+      kind: "answer",
+      label: "Name",
+      value: "Heike Meyer",
+    },
+    {
+      id: "fact_b",
+      fieldId: "fb",
+      fieldTitle: "Bevorzugte Arbeitgeber-Mandanten (Branche)",
+      fieldType: "text",
+      fieldDescription: null,
+      stepTitle: "Zielgruppe",
+      kind: "answer",
+      label: "Branche",
+      value: "Logistik",
+    },
+    {
+      id: "fact_c",
+      fieldId: "fc",
+      fieldTitle:
+        "Bitte die typische Mandatsreise eines Arbeitgeber-Mandanten in 5-7 Schritten beschreiben:",
+      fieldType: "textarea",
+      fieldDescription: null,
+      stepTitle: "Reise",
+      kind: "answer",
+      label: "Mandatsreise",
+      value: "1. Problembewusstsein 2. Recherche 3. Mandat",
+    },
+    {
+      id: "fact_d",
+      fieldId: "fd",
+      fieldTitle: "Was sind die 3 wichtigsten Fragen/Bedürfnisse in jeder Phase der Mandatsreise?",
+      fieldType: "textarea",
+      fieldDescription: null,
+      stepTitle: "Reise",
+      kind: "answer",
+      label: "Bedürfnisse",
+      value: "Phase 1: Kosten, Dauer, Erfolgschancen",
+    },
+    {
+      id: "fact_e",
+      fieldId: "fe",
+      fieldTitle: "Wie lange dauert typischerweise jede Phase der Mandatsreise?",
+      fieldType: "textarea",
+      fieldDescription: null,
+      stepTitle: "Reise",
+      kind: "answer",
+      label: "Dauer",
+      value: "Erstgespräch: 3-5 Tage",
+    },
+  ],
+};
+
+const stepsPreview = buildImportPreviewFromBundle({
+  clarificationId: "clar-steps",
+  sourceResponseId: "22222222-2222-2222-2222-222222222222",
+  sourceSurveyTitle: "MSH Arbeitgeber",
+  bundle: noisyEmployerBundle,
+  fieldTitle:
+    "Bitte die typische Mandatsreise eines Arbeitnehmer-Mandanten in 5-7 Schritten beschreiben:",
+  remarkText:
+    "Ist die gleiche wie beim Arbeitgeber. Bitte dort übernehmen, damit ich nicht noch einmal schreiben muss.",
+});
+
+assert.equal(stepsPreview.scope, "focused");
+assert.equal(stepsPreview.facts.length, 1);
+assert.match(stepsPreview.facts[0]?.fieldTitle ?? "", /Mandatsreise/);
+assert.match(stepsPreview.facts[0]?.value ?? "", /Problembewusstsein/);
+assert.doesNotMatch(stepsPreview.facts[0]?.value ?? "", /Heike Meyer/);
+
+const needsPreview = buildImportPreviewFromBundle({
+  clarificationId: "clar-needs",
+  sourceResponseId: "22222222-2222-2222-2222-222222222222",
+  sourceSurveyTitle: "MSH Arbeitgeber",
+  bundle: noisyEmployerBundle,
+  fieldTitle: "Was sind die 3 wichtigsten Fragen/Bedürfnisse in jeder Phase der Mandatsreise?",
+  remarkText: "siehe Arbeitgeber-Fragebogen",
+});
+
+assert.equal(needsPreview.scope, "focused");
+assert.equal(needsPreview.facts.length, 1);
+assert.match(needsPreview.facts[0]?.value ?? "", /Kosten/);
+
+const durationPreview = buildImportPreviewFromBundle({
+  clarificationId: "clar-duration",
+  sourceResponseId: "22222222-2222-2222-2222-222222222222",
+  sourceSurveyTitle: "MSH Arbeitgeber",
+  bundle: noisyEmployerBundle,
+  fieldTitle: "Wie lange dauert typischerweise jede Phase der Mandatsreise?",
+  remarkText: "Siehe Arbeitgeber-Fragebogen...",
+});
+
+assert.equal(durationPreview.scope, "focused");
+assert.equal(durationPreview.facts.length, 1);
+assert.match(durationPreview.facts[0]?.value ?? "", /Erstgespräch/);
+
 console.log("survey-clarifications tests: ok");

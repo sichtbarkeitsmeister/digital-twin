@@ -611,18 +611,107 @@ function tokenizeForRelevance(text: string): string[] {
           "jede",
           "jedes",
           "beschreibe",
+          "beschreiben",
           "nennen",
           "welche",
+          "was",
+          "sind",
+          "wichtigsten",
+          "typische",
+          "typischer",
+          "typisches",
+          "eines",
+          "einer",
+          "einem",
+          "noch",
+          "etwas",
+          "bisher",
+          "nicht",
+          "abgefragt",
+          "worden",
         ].includes(t),
     );
 }
 
+/** Words that point at the sibling persona — must not drive field matching. */
+const SOURCE_HINT_TOKENS = new Set([
+  "arbeitgeber",
+  "arbeitnehmer",
+  "anbieter",
+  "persona",
+  "mandant",
+  "mandanten",
+  "mandantin",
+  "wunschmandant",
+  "wunschmandanten",
+]);
+
+/**
+ * Distinctive topic tokens from the *target field title only*.
+ * Remark text is ignored here — it only says where to look, not which field.
+ */
+function distinctiveFieldTokens(fieldTitle: string): string[] {
+  return tokenizeForRelevance(fieldTitle).filter((t) => !SOURCE_HINT_TOKENS.has(t));
+}
+
+function normalizeFieldTitleForMatch(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[„“”"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/[^a-zäöüß0-9]+/i)
+    .filter((t) => t.length >= 3)
+    .filter((t) => !SOURCE_HINT_TOKENS.has(t))
+    .filter(
+      (t) =>
+        ![
+          "bitte",
+          "die",
+          "der",
+          "das",
+          "und",
+          "in",
+          "von",
+          "für",
+          "mit",
+          "eines",
+          "einer",
+          "einem",
+          "beschreibe",
+          "beschreiben",
+          "nennen",
+          "sind",
+          "was",
+          "wie",
+          "jede",
+          "jeder",
+          "jedes",
+        ].includes(t),
+    )
+    .join(" ");
+}
+
+function tokenOverlapScore(haystack: string, tokens: string[]): number {
+  let score = 0;
+  for (const t of tokens) {
+    if (!haystack.includes(t)) continue;
+    // Longer / rarer topic words weigh more (e.g. mandatsreise).
+    score += t.length >= 8 ? 3 : t.length >= 6 ? 2 : 1;
+  }
+  return score;
+}
+
 export type ClarificationFactScope = "focused" | "full_survey" | "empty";
 
+/**
+ * Pick only facts that clearly belong to the same question as the clarification.
+ * Never dump the whole sibling survey — better empty (admin pastes) than over-import.
+ */
 function filterFactsForFieldFocus(
   bundle: SurveyFactsBundle,
   fieldTitle: string,
-  remarkText: string,
+  _remarkText: string,
 ): { facts: SurveyFact[]; scope: ClarificationFactScope } {
   if (bundle.facts.length === 0) return { facts: [], scope: "empty" };
 
@@ -630,33 +719,55 @@ function filterFactsForFieldFocus(
   if (titleNorm) {
     const exact = bundle.facts.filter((f) => f.fieldTitle.toLowerCase() === titleNorm);
     if (exact.length > 0) return { facts: exact, scope: "focused" };
+  }
 
-    const contains = bundle.facts.filter((f) => {
-      const t = f.fieldTitle.toLowerCase();
-      return t.includes(titleNorm) || titleNorm.includes(t);
+  const normalizedTarget = normalizeFieldTitleForMatch(fieldTitle);
+  if (normalizedTarget.length >= 8) {
+    const byNormalized = bundle.facts.filter(
+      (f) => normalizeFieldTitleForMatch(f.fieldTitle) === normalizedTarget,
+    );
+    if (byNormalized.length > 0) return { facts: byNormalized, scope: "focused" };
+  }
+
+  // Near-containment only when one title is a clear substring of the other
+  // after role-noise stripping — avoids matching short common phrases.
+  if (normalizedTarget.length >= 12) {
+    const near = bundle.facts.filter((f) => {
+      const n = normalizeFieldTitleForMatch(f.fieldTitle);
+      if (n.length < 12) return false;
+      return n.includes(normalizedTarget) || normalizedTarget.includes(n);
     });
-    if (contains.length > 0) return { facts: contains, scope: "focused" };
+    if (near.length > 0) return { facts: near, scope: "focused" };
   }
 
-  const tokens = new Set([
-    ...tokenizeForRelevance(fieldTitle),
-    ...tokenizeForRelevance(remarkText),
-  ]);
-  if (tokens.size === 0) {
-    return { facts: bundle.facts, scope: "full_survey" };
+  const tokens = distinctiveFieldTokens(fieldTitle);
+  if (tokens.length === 0) {
+    return { facts: [], scope: "empty" };
   }
 
-  const focused = bundle.facts.filter((f) => {
-    const hay = `${f.fieldTitle} ${f.stepTitle} ${f.label}`.toLowerCase();
-    let hits = 0;
-    for (const t of tokens) {
-      if (hay.includes(t)) hits += 1;
-    }
-    return hits > 0;
+  const scored = bundle.facts.map((f) => {
+    const hay = f.fieldTitle.toLowerCase();
+    return { fact: f, score: tokenOverlapScore(hay, tokens) };
   });
 
-  if (focused.length > 0) return { facts: focused, scope: "focused" };
-  return { facts: bundle.facts, scope: "full_survey" };
+  const best = Math.max(...scored.map((s) => s.score), 0);
+  // Require a real topic hit (e.g. „mandatsreise“ alone = 3). Soft matches only → empty.
+  const minScore = Math.max(3, Math.ceil(tokens.length * 0.5));
+  if (best < minScore) {
+    return { facts: [], scope: "empty" };
+  }
+
+  const winners = scored.filter((s) => s.score === best && s.score >= minScore);
+  const winnerFieldIds = new Set(winners.map((w) => w.fact.fieldId));
+  const focused = bundle.facts.filter((f) => winnerFieldIds.has(f.fieldId));
+
+  if (focused.length === 0) return { facts: [], scope: "empty" };
+  // Safety: if somehow too many distinct fields still win, refuse the dump.
+  if (winnerFieldIds.size > 3) {
+    return { facts: [], scope: "empty" };
+  }
+
+  return { facts: focused, scope: "focused" };
 }
 
 export type SurveyClarificationPreviewFact = {
@@ -763,33 +874,49 @@ async function loadCompletedResponseContext(input: {
   responseId: string;
   focusFieldTitle?: string;
   focusRemarkText?: string;
-}): Promise<{ ok: true; title: string; purpose: string; context: string } | { ok: false }> {
+}): Promise<
+  | {
+      ok: true;
+      title: string;
+      purpose: string;
+      context: string;
+      factCount: number;
+      scope: ClarificationFactScope;
+    }
+  | { ok: false }
+> {
   const loaded = await loadSourceFactsBundle({
     surveyId: input.surveyId,
     responseId: input.responseId,
   });
   if (!loaded.ok) return { ok: false };
 
-  let context: string;
   if (input.focusFieldTitle || input.focusRemarkText) {
-    const { facts } = filterFactsForFieldFocus(
+    const { facts, scope } = filterFactsForFieldFocus(
       loaded.bundle,
       input.focusFieldTitle ?? "",
       input.focusRemarkText ?? "",
     );
-    context = formatSurveyFactsForAgentContext({
-      ...loaded.bundle,
-      facts,
-    });
-  } else {
-    context = formatSurveyFactsForAgentContext(loaded.bundle);
+    return {
+      ok: true,
+      title: loaded.title,
+      purpose: loaded.purpose,
+      context: formatSurveyFactsForAgentContext({
+        ...loaded.bundle,
+        facts,
+      }),
+      factCount: facts.length,
+      scope,
+    };
   }
 
   return {
     ok: true,
     title: loaded.title,
     purpose: loaded.purpose,
-    context,
+    context: formatSurveyFactsForAgentContext(loaded.bundle),
+    factCount: loaded.bundle.facts.length,
+    scope: "full_survey",
   };
 }
 
@@ -899,13 +1026,25 @@ export async function applyClarificationResolutionsToContext(input: {
       continue;
     }
 
+    if (contextBlock.factCount === 0 || contextBlock.scope === "empty") {
+      blocks.push(
+        [
+          "=== Freigabe ohne passenden Inhalt (Admin) ===",
+          `Bemerkung zu „${item.fieldTitle}“: „${item.remarkText}“`,
+          `Quelle: „${contextBlock.title}“`,
+          "Status: In der Quell-Umfrage wurde kein passendes Feld gefunden. Den ganzen Fragebogen nicht übernehmen — nichts erfinden. Admin muss den Inhalt manuell angeben.",
+        ].join("\n"),
+      );
+      continue;
+    }
+
     blocks.push(
       [
         "=== Freigegebene Übernahme (Admin) ===",
         `Bezug: Bemerkung zu „${item.fieldTitle}“: „${item.remarkText}“`,
         `Erkannt: ${item.detectedIntent}`,
         `Quelle: „${contextBlock.title}“ (${surveyPurposeLabel(normalizeSurveyPurpose(contextBlock.purpose))})`,
-        "Die folgenden Inhalte wurden vom Admin zur Übernahme freigegeben (fokussiert auf den verwiesenen Bereich, soweit erkennbar). Nutze sie für diesen Bereich — nichts darüber hinaus erfinden.",
+        "Die folgenden Inhalte wurden vom Admin zur Übernahme freigegeben (fokussiert auf den verwiesenen Bereich). Nutze sie für diesen Bereich — nichts darüber hinaus erfinden.",
         "",
         contextBlock.context,
       ].join("\n"),
