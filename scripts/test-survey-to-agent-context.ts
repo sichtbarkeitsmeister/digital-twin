@@ -129,9 +129,11 @@ const context = buildSurveyResponseContextForAgent({
 assert.match(context, /1–3 Wochen/);
 assert.match(context, /Alex Müller/);
 assert.match(context, /Kunde wirkte gestresst/);
+assert.match(context, /fact_001/);
+assert.match(context, /Pflicht-Checkliste/);
 assert.doesNotMatch(context, /Auslöser für den Anruf/);
 assert.doesNotMatch(context, /5,0 Sterne \/ 171 Bewertungen/);
 assert.doesNotMatch(context, /1\. Option A/);
-assert.match(context, /3 beantwortete Fragen übernommen, 1 unbeantwortete/);
+assert.match(context, /3 Facts, 1 unbeantwortete/);
 
 console.log("OK: survey-to-agent context preprocessing tests passed");

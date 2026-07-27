@@ -6,6 +6,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:survey-to-agent": "tsx scripts/test-survey-to-agent-context.ts",
+    "test:survey-facts": "tsx scripts/test-survey-facts.ts",
     "test:survey-clarifications": "tsx scripts/test-survey-clarifications.ts",
     "test:anbieter-to-seo": "tsx scripts/test-anbieter-to-seo.ts",
     "types:generate": "tsx scripts/generate-types.ts",
