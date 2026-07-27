@@ -29,6 +29,7 @@ import type {
   SurveyClarificationResolution,
   SurveyClarificationSource,
 } from "@/lib/dt/survey-clarifications";
+import { resolveClarificationSourcePool } from "@/lib/dt/survey-clarifications";
 import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
 
 type WizardMode = "create" | "refine";
@@ -134,30 +135,24 @@ export function SurveyToAgentWizard(props: {
     });
   }, [clarifications, clarificationDecisions]);
 
-  function sourcesForClarification(item: SurveyClarificationItem): SurveyClarificationSource[] {
-    const pool =
+  function resolveForClarification(item: SurveyClarificationItem) {
+    const base =
       item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
         ? anbieterSources.length > 0
           ? anbieterSources
           : clarificationSources
         : clarificationSources;
-    const hint = item.preferredSourceHint?.trim().toLowerCase();
-    if (!hint) return pool;
-    return [...pool].sort((a, b) => {
-      const aHit = a.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
-      const bHit = b.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
-      return aHit - bHit;
-    });
+    return resolveClarificationSourcePool(base, item);
   }
 
   function defaultDecisionFor(
     item: SurveyClarificationItem,
-    pool: SurveyClarificationSource[],
+    resolved: ReturnType<typeof resolveClarificationSourcePool>,
   ): ClarificationDecision {
-    if (pool.length > 0) {
+    if (resolved.best) {
       return {
         approved: false,
-        sourceResponseId: pool[0]?.responseId ?? "",
+        sourceResponseId: resolved.best.responseId,
         supplyMode: "source",
         manualText: "",
       };
@@ -359,23 +354,15 @@ export function SurveyToAgentWizard(props: {
 
       const next: Record<string, ClarificationDecision> = {};
       for (const item of items) {
-        const pool = (() => {
-          const base =
-            item.suggestedAction === "import_anbieter_survey" ||
-            item.suggestedPurpose === "anbieter"
-              ? anbieter.length > 0
-                ? anbieter
-                : sources
-              : sources;
-          const hint = item.preferredSourceHint?.trim().toLowerCase();
-          if (!hint) return base;
-          return [...base].sort((a, b) => {
-            const aHit = a.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
-            const bHit = b.surveyTitle.toLowerCase().includes(hint) ? 0 : 1;
-            return aHit - bHit;
-          });
-        })();
-        next[item.id] = defaultDecisionFor(item, pool);
+        const base =
+          item.suggestedAction === "import_anbieter_survey" ||
+          item.suggestedPurpose === "anbieter"
+            ? anbieter.length > 0
+              ? anbieter
+              : sources
+            : sources;
+        const resolved = resolveClarificationSourcePool(base, item);
+        next[item.id] = defaultDecisionFor(item, resolved);
       }
       setClarificationDecisions(next);
       setStep("klaerungen");
@@ -788,9 +775,8 @@ export function SurveyToAgentWizard(props: {
           <CardHeader>
             <CardTitle>Klärungen & Freigaben</CardTitle>
             <CardDescription>
-              Verweise wie „siehe Arbeitgeber“ oder „gleiche Mandatsreise“ werden hier vor der
-              Generierung abgefragt. Entweder übernimmt das System die Daten aus einer freigegebenen
-              Quell-Umfrage — oder du gibst den Inhalt selbst an.
+              Bei Verweisen wie „siehe Arbeitgeber“ sucht das System zuerst selbst eine passende
+              Umfrage. Nur wenn nichts gefunden wird, wirst du um den Inhalt gebeten.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -801,9 +787,14 @@ export function SurveyToAgentWizard(props: {
             ) : (
               <div className="grid gap-4">
                 {clarifications.map((item) => {
-                  const pool = sourcesForClarification(item);
+                  const resolved = resolveForClarification(item);
+                  const pool = resolved.pool;
                   const decision =
-                    clarificationDecisions[item.id] ?? defaultDecisionFor(item, pool);
+                    clarificationDecisions[item.id] ?? defaultDecisionFor(item, resolved);
+                  const needsManual =
+                    decision.supplyMode === "manual" || !resolved.best;
+                  const showManualForm =
+                    needsManual && (decision.approved || !resolved.best);
                   return (
                     <div
                       key={item.id}
@@ -815,6 +806,15 @@ export function SurveyToAgentWizard(props: {
                           Verweis: „{item.remarkText}“
                         </p>
                         <p className="text-xs text-muted-foreground">{item.detectedIntent}</p>
+                        <p
+                          className={
+                            resolved.foundMatch || resolved.best
+                              ? "text-xs text-secondary"
+                              : "text-xs text-destructive"
+                          }
+                        >
+                          {resolved.statusMessage}
+                        </p>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -829,15 +829,13 @@ export function SurveyToAgentWizard(props: {
                                 ...decision,
                                 approved: true,
                                 sourceResponseId:
-                                  decision.sourceResponseId || pool[0]?.responseId || "",
-                                supplyMode:
-                                  decision.supplyMode ||
-                                  (pool.length > 0 ? "source" : "manual"),
+                                  decision.sourceResponseId || resolved.best?.responseId || "",
+                                supplyMode: resolved.best ? "source" : "manual",
                               },
                             }))
                           }
                         >
-                          Übernahme freigeben
+                          {resolved.best ? "Gefundene Quelle freigeben" : "Angabe freigeben"}
                         </Button>
                         <Button
                           type="button"
@@ -854,16 +852,51 @@ export function SurveyToAgentWizard(props: {
                         </Button>
                       </div>
 
-                      {decision.approved ? (
-                        <div className="grid gap-3">
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant={
-                                decision.supplyMode === "source" ? "default" : "outline"
+                      {decision.approved && resolved.best && decision.supplyMode === "source" ? (
+                        <div className="grid gap-2">
+                          {pool.length > 1 ? (
+                            <DtSelect
+                              label="Quelle übernehmen aus"
+                              value={decision.sourceResponseId}
+                              onValueChange={(value) =>
+                                setClarificationDecisions((prev) => ({
+                                  ...prev,
+                                  [item.id]: { ...decision, sourceResponseId: value },
+                                }))
                               }
-                              disabled={pool.length === 0}
+                              options={pool.map((s) => ({
+                                value: s.responseId,
+                                label: s.surveyTitle,
+                                description: s.purposeLabel,
+                              }))}
+                              fullWidth
+                            />
+                          ) : (
+                            <p className="text-sm text-secondary">
+                              Wird geladen aus: „{resolved.best.surveyTitle}“
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            className="justify-self-start text-xs text-muted-foreground underline-offset-2 hover:underline"
+                            onClick={() =>
+                              setClarificationDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: { ...decision, supplyMode: "manual" },
+                              }))
+                            }
+                          >
+                            Stattdessen Inhalt selbst angeben
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {showManualForm ? (
+                        <div className="grid gap-2">
+                          {resolved.best && decision.supplyMode === "manual" ? (
+                            <button
+                              type="button"
+                              className="justify-self-start text-xs text-muted-foreground underline-offset-2 hover:underline"
                               onClick={() =>
                                 setClarificationDecisions((prev) => ({
                                   ...prev,
@@ -871,76 +904,38 @@ export function SurveyToAgentWizard(props: {
                                     ...decision,
                                     supplyMode: "source",
                                     sourceResponseId:
-                                      decision.sourceResponseId || pool[0]?.responseId || "",
+                                      decision.sourceResponseId || resolved.best?.responseId || "",
                                   },
                                 }))
                               }
                             >
-                              Aus Umfrage laden
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant={
-                                decision.supplyMode === "manual" ? "default" : "outline"
-                              }
-                              onClick={() =>
-                                setClarificationDecisions((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...decision, supplyMode: "manual" },
-                                }))
-                              }
-                            >
-                              Inhalt selbst angeben
-                            </Button>
-                          </div>
-
-                          {decision.supplyMode === "source" ? (
-                            pool.length === 0 ? (
-                              <p className="text-sm text-destructive">
-                                Keine passende abgeschlossene Quell-Umfrage gefunden. Bitte Inhalt
-                                selbst angeben — oder Freigabe widerrufen.
-                              </p>
-                            ) : (
-                              <DtSelect
-                                label="Quelle übernehmen aus"
-                                value={decision.sourceResponseId}
-                                onValueChange={(value) =>
-                                  setClarificationDecisions((prev) => ({
-                                    ...prev,
-                                    [item.id]: { ...decision, sourceResponseId: value },
-                                  }))
-                                }
-                                options={pool.map((s) => ({
-                                  value: s.responseId,
-                                  label: s.surveyTitle,
-                                  description: s.purposeLabel,
-                                }))}
-                                fullWidth
-                              />
-                            )
-                          ) : (
-                            <div className="grid gap-2">
-                              <Label htmlFor={`manual-${item.id}`}>
-                                Inhalt für „{item.fieldTitle}“
-                              </Label>
-                              <Textarea
-                                id={`manual-${item.id}`}
-                                value={decision.manualText}
-                                onChange={(e) =>
-                                  setClarificationDecisions((prev) => ({
-                                    ...prev,
-                                    [item.id]: {
-                                      ...decision,
-                                      manualText: e.target.value,
-                                    },
-                                  }))
-                                }
-                                placeholder="Hier den Inhalt einfügen, der statt des Verweises übernommen werden soll…"
-                                rows={5}
-                              />
-                            </div>
-                          )}
+                              Zurück zur gefundenen Quelle
+                            </button>
+                          ) : !resolved.best ? (
+                            <p className="text-sm text-secondary">
+                              Bitte den Inhalt eintragen, der statt des Verweises übernommen werden
+                              soll.
+                            </p>
+                          ) : null}
+                          <Label htmlFor={`manual-${item.id}`}>
+                            Inhalt für „{item.fieldTitle}“
+                          </Label>
+                          <Textarea
+                            id={`manual-${item.id}`}
+                            value={decision.manualText}
+                            onChange={(e) =>
+                              setClarificationDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  ...decision,
+                                  supplyMode: "manual",
+                                  manualText: e.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="Hier den Inhalt einfügen…"
+                            rows={5}
+                          />
                         </div>
                       ) : null}
                     </div>

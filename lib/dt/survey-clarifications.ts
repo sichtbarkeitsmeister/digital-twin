@@ -530,6 +530,55 @@ export function rankSourcesForClarification(
   });
 }
 
+/**
+ * First try to find a matching sibling survey; only fall back to asking the admin
+ * when nothing suitable exists.
+ */
+export function resolveClarificationSourcePool(
+  sources: SurveyClarificationSource[],
+  item: SurveyClarificationItem,
+): {
+  pool: SurveyClarificationSource[];
+  best: SurveyClarificationSource | null;
+  foundMatch: boolean;
+  statusMessage: string;
+} {
+  const ranked = rankSourcesForClarification(sources, item);
+  const hint = item.preferredSourceHint?.trim().toLowerCase();
+
+  if (hint) {
+    const hinted = ranked.filter((s) => s.surveyTitle.toLowerCase().includes(hint));
+    if (hinted.length > 0) {
+      return {
+        pool: hinted,
+        best: hinted[0] ?? null,
+        foundMatch: true,
+        statusMessage: `Passende Quelle gefunden: „${hinted[0]?.surveyTitle ?? ""}“.`,
+      };
+    }
+  }
+
+  if (ranked.length > 0) {
+    const label = hint
+      ? `Keine Umfrage mit „${hint}“ im Titel — nächste verfügbare Quelle vorgeschlagen.`
+      : `Passende Quell-Umfrage gefunden: „${ranked[0]?.surveyTitle ?? ""}“.`;
+    return {
+      pool: ranked,
+      best: ranked[0] ?? null,
+      foundMatch: !hint, // hint miss → not a confident auto-find
+      statusMessage: label,
+    };
+  }
+
+  const askHint = hint ? ` („${hint}“)` : "";
+  return {
+    pool: [],
+    best: null,
+    foundMatch: false,
+    statusMessage: `Keine passende abgeschlossene Umfrage gefunden${askHint}. Bitte Inhalt selbst angeben.`,
+  };
+}
+
 function tokenizeForRelevance(text: string): string[] {
   return text
     .toLowerCase()
