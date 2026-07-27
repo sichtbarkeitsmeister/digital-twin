@@ -240,9 +240,13 @@ export function SurveyToAgentWizard(props: {
     setError(null);
 
     const endpoint = `/api/surveys/${props.surveyId}/responses/${props.responseId}/generate-agent`;
+    const batchStorageKey = `dt-survey-agent-batch:${props.responseId}:${wizardMode}:${agentId || "create"}`;
     const pollMs = 4_000;
-    const deadline = Date.now() + 900_000; // 15 min client ceiling for Anthropic batches
-    let batchId: string | undefined;
+    const deadline = Date.now() + 1_800_000; // 30 min client ceiling for Anthropic batches
+    let batchId: string | undefined =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem(batchStorageKey) ?? undefined
+        : undefined;
     let seededRefineMeta = false;
 
     try {
@@ -284,7 +288,14 @@ export function SurveyToAgentWizard(props: {
         }
 
         if (json.status === "pending") {
-          if (json.batchId) batchId = json.batchId;
+          if (json.batchId) {
+            batchId = json.batchId;
+            try {
+              sessionStorage.setItem(batchStorageKey, json.batchId);
+            } catch {
+              // ignore quota / private mode
+            }
+          }
           if (json.mode === "refine" && !seededRefineMeta) {
             seededRefineMeta = true;
             setCurrentPrompt(json.currentPrompt ?? "");
@@ -293,6 +304,12 @@ export function SurveyToAgentWizard(props: {
           }
           await new Promise((r) => setTimeout(r, pollMs));
           continue;
+        }
+
+        try {
+          sessionStorage.removeItem(batchStorageKey);
+        } catch {
+          // ignore
         }
 
         if (json.mode === "refine" && json.refinement) {
@@ -316,7 +333,9 @@ export function SurveyToAgentWizard(props: {
       }
 
       setError(
-        "Die Generierung dauert länger als 15 Minuten. Bitte Seite neu laden und den Status erneut prüfen — oder nochmals starten.",
+        batchId
+          ? "Die Generierung läuft serverseitig weiter. Seite neu laden und erneut auf Generieren tippen — der laufende Batch wird fortgesetzt (kein Neustart)."
+          : "Die Generierung dauert länger als 30 Minuten. Bitte Seite neu laden und erneut prüfen — oder nochmals starten.",
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generierung fehlgeschlagen.");
@@ -692,7 +711,12 @@ export function SurveyToAgentWizard(props: {
                       <div className="grid gap-1">
                         <p className="text-sm font-semibold text-primary">{item.fieldTitle}</p>
                         <p className="text-sm text-secondary">
-                          Bemerkung: „{item.remarkText}“
+                          {item.sourceKind === "answer"
+                            ? "Antwort"
+                            : item.sourceKind === "follow_up"
+                              ? "Nachfrage"
+                              : "Bemerkung"}
+                          : „{item.remarkText}“
                         </p>
                         <p className="text-xs text-muted-foreground">{item.detectedIntent}</p>
                       </div>

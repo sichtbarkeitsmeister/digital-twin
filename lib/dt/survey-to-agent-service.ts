@@ -47,6 +47,7 @@ async function buildSurveyContextWithOptionalClarifications(input: {
     organisationId: input.organisationId,
     definition: input.definition,
     fieldQuestions: input.fieldQuestions,
+    answers: input.answers,
   });
 
   if (loaded.clarifications.length === 0) return base;

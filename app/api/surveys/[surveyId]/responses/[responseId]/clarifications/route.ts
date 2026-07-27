@@ -39,12 +39,20 @@ export async function GET(
     );
   }
 
+  const answers =
+    bundle.response.answers &&
+    typeof bundle.response.answers === "object" &&
+    !Array.isArray(bundle.response.answers)
+      ? (bundle.response.answers as Record<string, unknown>)
+      : {};
+
   const loaded = await loadClarificationsForSurveyResponse({
     surveyId,
     responseId,
     organisationId,
     definition: bundle.survey.definition,
     fieldQuestions: bundle.fieldQuestions,
+    answers,
   });
 
   return NextResponse.json({

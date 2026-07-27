@@ -52,7 +52,35 @@ assert.equal(anbieterRemark[0]?.type, "cross_reference");
 assert.equal(anbieterRemark[0]?.suggestedAction, "import_anbieter_survey");
 assert.equal(anbieterRemark[0]?.suggestedPurpose, "anbieter");
 assert.equal(anbieterRemark[0]?.fieldTitle, "Wie läuft die Anfrage ab?");
-assert.match(anbieterRemark[0]?.remarkText ?? "", /Selber Ablauf/i);
+assert.equal(anbieterRemark[0]?.sourceKind, "remark");
+
+const answerCrossRef = detectSurveyClarifications({
+  definition,
+  fieldQuestions: [],
+  answers: {
+    "f-ablauf": "Selber Ablauf wie im Anbieter Fragebogen",
+  },
+});
+
+assert.equal(answerCrossRef.length, 1);
+assert.equal(answerCrossRef[0]?.sourceKind, "answer");
+assert.equal(answerCrossRef[0]?.suggestedAction, "import_anbieter_survey");
+
+const followUpCrossRef = detectSurveyClarifications({
+  definition,
+  fieldQuestions: [
+    {
+      id: "q-fu",
+      field_id: "f-ablauf",
+      kind: "question",
+      question: "Bitte Ablauf präzisieren",
+      answer: "Wie im Anbieterfragebogen",
+    },
+  ],
+});
+
+assert.equal(followUpCrossRef.length, 1);
+assert.equal(followUpCrossRef[0]?.sourceKind, "follow_up");
 
 const vagueRemark = detectSurveyClarifications({
   definition,
@@ -86,7 +114,7 @@ const clearRemark = detectSurveyClarifications({
 
 assert.equal(clearRemark.length, 0);
 
-const followUpIgnored = detectSurveyClarifications({
+const followUpDetected = detectSurveyClarifications({
   definition,
   fieldQuestions: [
     {
@@ -99,6 +127,8 @@ const followUpIgnored = detectSurveyClarifications({
   ],
 });
 
-assert.equal(followUpIgnored.length, 0);
+assert.equal(followUpDetected.length, 1);
+assert.equal(followUpDetected[0]?.sourceKind, "follow_up");
+assert.equal(followUpDetected[0]?.suggestedAction, "import_anbieter_survey");
 
 console.log("survey-clarifications tests: ok");

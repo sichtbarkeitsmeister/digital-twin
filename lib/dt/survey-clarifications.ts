@@ -1,9 +1,12 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeSurveyPurpose, surveyPurposeLabel } from "@/lib/surveys/purpose";
+import type { SurveyField } from "@/lib/surveys/types";
 
 import {
   buildSurveyResponseContextForAgent,
   getSurveySteps,
+  isPlaceholderOrEmptyAnswer,
+  normalizeSurveyAnswer,
   type SurveyFieldQuestionRow,
 } from "@/lib/dt/survey-to-agent-context";
 
@@ -22,6 +25,8 @@ export type SurveyClarificationItem = {
   detectedIntent: string;
   suggestedAction: SurveyClarificationSuggestedAction;
   suggestedPurpose: "anbieter" | "persona" | null;
+  /** Where the ambiguous text was found. */
+  sourceKind: "remark" | "follow_up" | "answer";
 };
 
 export type SurveyClarificationSource = {
@@ -62,7 +67,7 @@ const ANBIETER_CROSS_REF_PATTERNS: Array<{ re: RegExp; intent: string }> = [
     intent: "Gleicher Ablauf wie im Anbieter-Fragebogen übernehmen",
   },
   {
-    re: /wie\s+im\s+anbieter[\s-]*(fragebogen|umfrage)?/i,
+    re: /wie\s+im\s+anbieter[\s-]*(frage?\s*bogen|umfrage)?/i,
     intent: "Verweis auf den Anbieter-Fragebogen",
   },
   {
@@ -70,7 +75,11 @@ const ANBIETER_CROSS_REF_PATTERNS: Array<{ re: RegExp; intent: string }> = [
     intent: "Verweis auf den Anbieter-Fragebogen",
   },
   {
-    re: /anbieter[\s-]*(fragebogen|umfrage)/i,
+    re: /anbieter[\s-]*(frage?\s*bogen|umfrage|bogen)/i,
+    intent: "Verweis auf den Anbieter-Fragebogen",
+  },
+  {
+    re: /anbieterfrage?\s*bogen/i,
     intent: "Verweis auf den Anbieter-Fragebogen",
   },
   {
@@ -88,6 +97,14 @@ const ANBIETER_CROSS_REF_PATTERNS: Array<{ re: RegExp; intent: string }> = [
   {
     re: /entsprechend\s+(dem?\s+)?anbieter/i,
     intent: "Entsprechend dem Anbieter-Fragebogen übernehmen",
+  },
+  {
+    re: /ablauf\s+wie\s+(im\s+|beim?\s+)?anbieter/i,
+    intent: "Ablauf wie im Anbieter-Fragebogen übernehmen",
+  },
+  {
+    re: /gleich(er|e|es)?\s+wie\s+(im\s+|beim?\s+)?anbieter/i,
+    intent: "Gleich wie im Anbieter-Fragebogen übernehmen",
   },
 ];
 
@@ -119,69 +136,117 @@ const AMBIGUOUS_REMARK_PATTERNS: Array<{ re: RegExp; intent: string }> = [
   },
 ];
 
-function buildFieldTitleMap(definition: unknown): Map<string, string> {
-  const map = new Map<string, string>();
+type MatchResult = {
+  type: "cross_reference" | "ambiguous_remark";
+  intent: string;
+  suggestedAction: SurveyClarificationSuggestedAction;
+  suggestedPurpose: "anbieter" | "persona" | null;
+};
+
+function matchClarificationText(text: string): MatchResult | null {
+  for (const pattern of ANBIETER_CROSS_REF_PATTERNS) {
+    if (!pattern.re.test(text)) continue;
+    return {
+      type: "cross_reference",
+      intent: pattern.intent,
+      suggestedAction: "import_anbieter_survey",
+      suggestedPurpose: "anbieter",
+    };
+  }
+  for (const pattern of AMBIGUOUS_REMARK_PATTERNS) {
+    if (!pattern.re.test(text)) continue;
+    return {
+      type: "ambiguous_remark",
+      intent: pattern.intent,
+      suggestedAction: "import_sibling_survey",
+      suggestedPurpose: null,
+    };
+  }
+  return null;
+}
+
+function buildFieldMaps(definition: unknown): {
+  titles: Map<string, string>;
+  fields: Map<string, SurveyField>;
+} {
+  const titles = new Map<string, string>();
+  const fields = new Map<string, SurveyField>();
   for (const step of getSurveySteps(definition)) {
     for (const field of step.fields ?? []) {
-      map.set(field.id, field.title?.trim() || "Frage");
+      titles.set(field.id, field.title?.trim() || "Frage");
+      fields.set(field.id, field);
     }
   }
-  return map;
+  return { titles, fields };
 }
 
 /**
- * Detect remarks that cross-reference other surveys or are too vague to resolve alone.
+ * Detect cross-refs / vague text in remarks, follow-ups, and field answers.
  * Pure heuristics (no LLM) — cheap enough to run before every generation.
  */
 export function detectSurveyClarifications(input: {
   definition: unknown;
   fieldQuestions: SurveyFieldQuestionRow[];
+  answers?: Record<string, unknown>;
 }): SurveyClarificationItem[] {
-  const titles = buildFieldTitleMap(input.definition);
+  const { titles, fields } = buildFieldMaps(input.definition);
   const items: SurveyClarificationItem[] = [];
+  const seenFieldTexts = new Set<string>();
+
+  function pushItem(partial: {
+    id: string;
+    questionId: string;
+    fieldId: string;
+    fieldTitle: string;
+    text: string;
+    sourceKind: SurveyClarificationItem["sourceKind"];
+  }) {
+    const key = `${partial.fieldId}::${partial.text.toLowerCase()}`;
+    if (seenFieldTexts.has(key)) return;
+    const matched = matchClarificationText(partial.text);
+    if (!matched) return;
+    seenFieldTexts.add(key);
+    items.push({
+      id: partial.id,
+      type: matched.type,
+      questionId: partial.questionId,
+      fieldId: partial.fieldId,
+      fieldTitle: partial.fieldTitle,
+      remarkText: partial.text,
+      detectedIntent: matched.intent,
+      suggestedAction: matched.suggestedAction,
+      suggestedPurpose: matched.suggestedPurpose,
+      sourceKind: partial.sourceKind,
+    });
+  }
 
   for (const q of input.fieldQuestions) {
-    if (q.kind !== "remark") continue;
     const text = remarkTextFromQuestion(q);
     if (!text) continue;
+    pushItem({
+      id: `clar-${q.id}`,
+      questionId: q.id,
+      fieldId: q.field_id,
+      fieldTitle: titles.get(q.field_id) ?? "Frage",
+      text,
+      sourceKind: q.kind === "remark" ? "remark" : "follow_up",
+    });
+  }
 
-    let matched: SurveyClarificationItem | null = null;
-
-    for (const pattern of ANBIETER_CROSS_REF_PATTERNS) {
-      if (!pattern.re.test(text)) continue;
-      matched = {
-        id: `clar-${q.id}`,
-        type: "cross_reference",
-        questionId: q.id,
-        fieldId: q.field_id,
-        fieldTitle: titles.get(q.field_id) ?? "Frage",
-        remarkText: text,
-        detectedIntent: pattern.intent,
-        suggestedAction: "import_anbieter_survey",
-        suggestedPurpose: "anbieter",
-      };
-      break;
+  if (input.answers) {
+    for (const [fieldId, raw] of Object.entries(input.answers)) {
+      const field = fields.get(fieldId);
+      const answer = normalizeSurveyAnswer(raw, field).trim();
+      if (!answer || isPlaceholderOrEmptyAnswer(answer)) continue;
+      pushItem({
+        id: `clar-answer-${fieldId}`,
+        questionId: fieldId,
+        fieldId,
+        fieldTitle: titles.get(fieldId) ?? "Frage",
+        text: answer,
+        sourceKind: "answer",
+      });
     }
-
-    if (!matched) {
-      for (const pattern of AMBIGUOUS_REMARK_PATTERNS) {
-        if (!pattern.re.test(text)) continue;
-        matched = {
-          id: `clar-${q.id}`,
-          type: "ambiguous_remark",
-          questionId: q.id,
-          fieldId: q.field_id,
-          fieldTitle: titles.get(q.field_id) ?? "Frage",
-          remarkText: text,
-          detectedIntent: pattern.intent,
-          suggestedAction: "import_sibling_survey",
-          suggestedPurpose: null,
-        };
-        break;
-      }
-    }
-
-    if (matched) items.push(matched);
   }
 
   return items;
@@ -420,6 +485,7 @@ export async function loadClarificationsForSurveyResponse(input: {
   organisationId: string;
   definition: unknown;
   fieldQuestions: SurveyFieldQuestionRow[];
+  answers?: Record<string, unknown>;
 }): Promise<{
   clarifications: SurveyClarificationItem[];
   sources: SurveyClarificationSource[];
@@ -428,6 +494,7 @@ export async function loadClarificationsForSurveyResponse(input: {
   const clarifications = detectSurveyClarifications({
     definition: input.definition,
     fieldQuestions: input.fieldQuestions,
+    answers: input.answers,
   });
 
   const needsAnySource = clarifications.some(

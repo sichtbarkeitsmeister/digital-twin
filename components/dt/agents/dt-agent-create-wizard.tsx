@@ -263,9 +263,13 @@ export function DtAgentCreateWizard(props: {
     setError(null);
 
     const endpoint = `/api/surveys/${selectedOption.surveyId}/responses/${selectedOption.responseId}/generate-agent`;
+    const batchStorageKey = `dt-survey-agent-batch:${selectedOption.responseId}:create`;
     const pollMs = 4_000;
-    const deadline = Date.now() + 900_000;
-    let batchId: string | undefined;
+    const deadline = Date.now() + 1_800_000;
+    let batchId: string | undefined =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem(batchStorageKey) ?? undefined
+        : undefined;
 
     try {
       while (Date.now() < deadline) {
@@ -297,9 +301,22 @@ export function DtAgentCreateWizard(props: {
         }
 
         if (json.status === "pending") {
-          if (json.batchId) batchId = json.batchId;
+          if (json.batchId) {
+            batchId = json.batchId;
+            try {
+              sessionStorage.setItem(batchStorageKey, json.batchId);
+            } catch {
+              // ignore
+            }
+          }
           await new Promise((r) => setTimeout(r, pollMs));
           continue;
+        }
+
+        try {
+          sessionStorage.removeItem(batchStorageKey);
+        } catch {
+          // ignore
         }
 
         if (json.preview) {
@@ -313,7 +330,9 @@ export function DtAgentCreateWizard(props: {
       }
 
       setError(
-        "Die Generierung dauert länger als 15 Minuten. Bitte erneut versuchen.",
+        batchId
+          ? "Die Generierung läuft serverseitig weiter. Modal erneut öffnen und Generieren tippen — der laufende Batch wird fortgesetzt."
+          : "Die Generierung dauert länger als 30 Minuten. Bitte erneut versuchen.",
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generierung fehlgeschlagen.");
@@ -586,7 +605,12 @@ export function DtAgentCreateWizard(props: {
                     {item.fieldTitle}
                   </p>
                   <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-                    Bemerkung: „{item.remarkText}“
+                    {item.sourceKind === "answer"
+                      ? "Antwort"
+                      : item.sourceKind === "follow_up"
+                        ? "Nachfrage"
+                        : "Bemerkung"}
+                    : „{item.remarkText}“
                   </p>
                   <p className="text-xs text-sbkm-ink-600/80 dark:text-white/40">
                     {item.detectedIntent}
