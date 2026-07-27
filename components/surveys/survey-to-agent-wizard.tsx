@@ -25,11 +25,13 @@ import { Textarea } from "@/components/ui/textarea";
 import type { SurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
 import type { SurveyAgentRefinePreview } from "@/lib/dt/survey-refine-agent-prompt";
 import type {
+  SurveyClarificationImportPreview,
   SurveyClarificationItem,
   SurveyClarificationResolution,
   SurveyClarificationSource,
 } from "@/lib/dt/survey-clarifications";
 import { resolveClarificationSourcePool } from "@/lib/dt/survey-clarifications";
+import { ClarificationImportPreview } from "@/components/surveys/clarification-import-preview";
 import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
 
 type WizardMode = "create" | "refine";
@@ -92,6 +94,9 @@ export function SurveyToAgentWizard(props: {
   const [clarificationDecisions, setClarificationDecisions] = useState<
     Record<string, ClarificationDecision>
   >({});
+  const [clarificationPreviews, setClarificationPreviews] = useState<
+    SurveyClarificationImportPreview[]
+  >([]);
   const [clarificationsLoading, setClarificationsLoading] = useState(false);
   const [preview, setPreview] = useState<SurveyAgentPreview | null>(null);
   const [factCoverage, setFactCoverage] = useState<SurveyFactCoverageSummary | null>(null);
@@ -163,6 +168,18 @@ export function SurveyToAgentWizard(props: {
       supplyMode: "manual",
       manualText: "",
     };
+  }
+
+  function previewForClarification(
+    clarificationId: string,
+    sourceResponseId: string,
+  ): SurveyClarificationImportPreview | null {
+    return (
+      clarificationPreviews.find(
+        (p) =>
+          p.clarificationId === clarificationId && p.sourceResponseId === sourceResponseId,
+      ) ?? null
+    );
   }
 
   function clarificationBlocksGenerate(): boolean {
@@ -339,6 +356,7 @@ export function SurveyToAgentWizard(props: {
         clarifications?: SurveyClarificationItem[];
         sources?: SurveyClarificationSource[];
         anbieterSources?: SurveyClarificationSource[];
+        previews?: SurveyClarificationImportPreview[];
         message?: string;
       };
       if (!json.ok) {
@@ -351,6 +369,7 @@ export function SurveyToAgentWizard(props: {
       setClarifications(items);
       setClarificationSources(sources);
       setAnbieterSources(anbieter);
+      setClarificationPreviews(json.previews ?? []);
 
       const next: Record<string, ClarificationDecision> = {};
       for (const item of items) {
@@ -817,6 +836,51 @@ export function SurveyToAgentWizard(props: {
                         </p>
                       </div>
 
+                      {resolved.best && decision.supplyMode === "source" ? (
+                        <div className="grid gap-2">
+                          {pool.length > 1 ? (
+                            <DtSelect
+                              label="Quelle übernehmen aus"
+                              value={decision.sourceResponseId || resolved.best.responseId}
+                              onValueChange={(value) =>
+                                setClarificationDecisions((prev) => ({
+                                  ...prev,
+                                  [item.id]: {
+                                    ...decision,
+                                    supplyMode: "source",
+                                    sourceResponseId: value,
+                                  },
+                                }))
+                              }
+                              options={pool.map((s) => ({
+                                value: s.responseId,
+                                label: s.surveyTitle,
+                                description: s.purposeLabel,
+                              }))}
+                              fullWidth
+                            />
+                          ) : null}
+                          <ClarificationImportPreview
+                            preview={previewForClarification(
+                              item.id,
+                              decision.sourceResponseId || resolved.best.responseId,
+                            )}
+                          />
+                          <button
+                            type="button"
+                            className="justify-self-start text-xs text-muted-foreground underline-offset-2 hover:underline"
+                            onClick={() =>
+                              setClarificationDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: { ...decision, supplyMode: "manual" },
+                              }))
+                            }
+                          >
+                            Stattdessen Inhalt selbst angeben
+                          </button>
+                        </div>
+                      ) : null}
+
                       <div className="flex flex-wrap gap-2">
                         <Button
                           type="button"
@@ -830,12 +894,14 @@ export function SurveyToAgentWizard(props: {
                                 approved: true,
                                 sourceResponseId:
                                   decision.sourceResponseId || resolved.best?.responseId || "",
-                                supplyMode: resolved.best ? "source" : "manual",
+                                supplyMode: resolved.best ? decision.supplyMode || "source" : "manual",
                               },
                             }))
                           }
                         >
-                          {resolved.best ? "Gefundene Quelle freigeben" : "Angabe freigeben"}
+                          {resolved.best && decision.supplyMode !== "manual"
+                            ? "Gefundene Quelle freigeben"
+                            : "Angabe freigeben"}
                         </Button>
                         <Button
                           type="button"
@@ -851,45 +917,6 @@ export function SurveyToAgentWizard(props: {
                           Nicht übernehmen
                         </Button>
                       </div>
-
-                      {decision.approved && resolved.best && decision.supplyMode === "source" ? (
-                        <div className="grid gap-2">
-                          {pool.length > 1 ? (
-                            <DtSelect
-                              label="Quelle übernehmen aus"
-                              value={decision.sourceResponseId}
-                              onValueChange={(value) =>
-                                setClarificationDecisions((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...decision, sourceResponseId: value },
-                                }))
-                              }
-                              options={pool.map((s) => ({
-                                value: s.responseId,
-                                label: s.surveyTitle,
-                                description: s.purposeLabel,
-                              }))}
-                              fullWidth
-                            />
-                          ) : (
-                            <p className="text-sm text-secondary">
-                              Wird geladen aus: „{resolved.best.surveyTitle}“
-                            </p>
-                          )}
-                          <button
-                            type="button"
-                            className="justify-self-start text-xs text-muted-foreground underline-offset-2 hover:underline"
-                            onClick={() =>
-                              setClarificationDecisions((prev) => ({
-                                ...prev,
-                                [item.id]: { ...decision, supplyMode: "manual" },
-                              }))
-                            }
-                          >
-                            Stattdessen Inhalt selbst angeben
-                          </button>
-                        </div>
-                      ) : null}
 
                       {showManualForm ? (
                         <div className="grid gap-2">

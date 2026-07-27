@@ -58,5 +58,6 @@ export async function GET(
     clarifications: loaded.clarifications,
     sources: loaded.sources,
     anbieterSources: loaded.anbieterSources,
+    previews: loaded.previews,
   });
 }
