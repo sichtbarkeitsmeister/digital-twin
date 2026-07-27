@@ -704,6 +704,29 @@ function tokenOverlapScore(haystack: string, tokens: string[]): number {
 
 export type ClarificationFactScope = "focused" | "full_survey" | "empty";
 
+/** Absolute safety: never hand the model more than one sibling field. */
+const MAX_IMPORT_FIELD_IDS = 1;
+const MAX_IMPORT_FACTS = 8;
+
+function factsForSingleField(
+  bundle: SurveyFactsBundle,
+  fieldId: string,
+): SurveyFact[] {
+  return bundle.facts.filter((f) => f.fieldId === fieldId).slice(0, MAX_IMPORT_FACTS);
+}
+
+/**
+ * Near-match only when titles are almost the same after role-noise stripping.
+ * Prevents short stems like „mandatsreise“ from matching a long unrelated title
+ * via naive substring checks.
+ */
+function isNearTitleMatch(a: string, b: string): boolean {
+  if (a.length < 16 || b.length < 16) return false;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  if (!longer.includes(shorter)) return false;
+  return shorter.length / longer.length >= 0.7;
+}
+
 /**
  * Pick only facts that clearly belong to the same question as the clarification.
  * Never dump the whole sibling survey — better empty (admin pastes) than over-import.
@@ -718,7 +741,12 @@ function filterFactsForFieldFocus(
   const titleNorm = fieldTitle.trim().toLowerCase();
   if (titleNorm) {
     const exact = bundle.facts.filter((f) => f.fieldTitle.toLowerCase() === titleNorm);
-    if (exact.length > 0) return { facts: exact, scope: "focused" };
+    if (exact.length > 0) {
+      return {
+        facts: factsForSingleField(bundle, exact[0]!.fieldId),
+        scope: "focused",
+      };
+    }
   }
 
   const normalizedTarget = normalizeFieldTitleForMatch(fieldTitle);
@@ -726,18 +754,31 @@ function filterFactsForFieldFocus(
     const byNormalized = bundle.facts.filter(
       (f) => normalizeFieldTitleForMatch(f.fieldTitle) === normalizedTarget,
     );
-    if (byNormalized.length > 0) return { facts: byNormalized, scope: "focused" };
+    if (byNormalized.length > 0) {
+      return {
+        facts: factsForSingleField(bundle, byNormalized[0]!.fieldId),
+        scope: "focused",
+      };
+    }
   }
 
-  // Near-containment only when one title is a clear substring of the other
-  // after role-noise stripping — avoids matching short common phrases.
-  if (normalizedTarget.length >= 12) {
-    const near = bundle.facts.filter((f) => {
-      const n = normalizeFieldTitleForMatch(f.fieldTitle);
-      if (n.length < 12) return false;
-      return n.includes(normalizedTarget) || normalizedTarget.includes(n);
-    });
-    if (near.length > 0) return { facts: near, scope: "focused" };
+  if (normalizedTarget.length >= 16) {
+    const near = bundle.facts.filter((f) =>
+      isNearTitleMatch(normalizedTarget, normalizeFieldTitleForMatch(f.fieldTitle)),
+    );
+    if (near.length > 0) {
+      // If several near-matches, prefer the highest token overlap with the target.
+      const tokens = distinctiveFieldTokens(fieldTitle);
+      const ranked = [...near].sort(
+        (a, b) =>
+          tokenOverlapScore(b.fieldTitle.toLowerCase(), tokens) -
+          tokenOverlapScore(a.fieldTitle.toLowerCase(), tokens),
+      );
+      return {
+        facts: factsForSingleField(bundle, ranked[0]!.fieldId),
+        scope: "focused",
+      };
+    }
   }
 
   const tokens = distinctiveFieldTokens(fieldTitle);
@@ -745,29 +786,34 @@ function filterFactsForFieldFocus(
     return { facts: [], scope: "empty" };
   }
 
-  const scored = bundle.facts.map((f) => {
-    const hay = f.fieldTitle.toLowerCase();
-    return { fact: f, score: tokenOverlapScore(hay, tokens) };
-  });
+  // Score per fieldId (best fact title per field), then take only the top field.
+  const bestByField = new Map<string, { score: number; fieldId: string }>();
+  for (const f of bundle.facts) {
+    const score = tokenOverlapScore(f.fieldTitle.toLowerCase(), tokens);
+    const prev = bestByField.get(f.fieldId);
+    if (!prev || score > prev.score) {
+      bestByField.set(f.fieldId, { score, fieldId: f.fieldId });
+    }
+  }
 
-  const best = Math.max(...scored.map((s) => s.score), 0);
+  const rankedFields = [...bestByField.values()].sort((a, b) => b.score - a.score);
+  const best = rankedFields[0];
   // Require a real topic hit (e.g. „mandatsreise“ alone = 3). Soft matches only → empty.
   const minScore = Math.max(3, Math.ceil(tokens.length * 0.5));
-  if (best < minScore) {
+  if (!best || best.score < minScore) {
     return { facts: [], scope: "empty" };
   }
 
-  const winners = scored.filter((s) => s.score === best && s.score >= minScore);
-  const winnerFieldIds = new Set(winners.map((w) => w.fact.fieldId));
-  const focused = bundle.facts.filter((f) => winnerFieldIds.has(f.fieldId));
-
-  if (focused.length === 0) return { facts: [], scope: "empty" };
-  // Safety: if somehow too many distinct fields still win, refuse the dump.
-  if (winnerFieldIds.size > 3) {
+  // Ambiguous: two fields tied at the top → don't guess, ask admin.
+  const tied = rankedFields.filter((r) => r.score === best.score);
+  if (tied.length > MAX_IMPORT_FIELD_IDS) {
     return { facts: [], scope: "empty" };
   }
 
-  return { facts: focused, scope: "focused" };
+  return {
+    facts: factsForSingleField(bundle, best.fieldId),
+    scope: "focused",
+  };
 }
 
 export type SurveyClarificationPreviewFact = {

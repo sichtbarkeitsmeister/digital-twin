@@ -816,7 +816,10 @@ export function SurveyToAgentWizard(props: {
                     ? previewForClarification(item.id, selectedSourceId)
                     : null;
                   const sourceUsable = Boolean(
-                    selectedPreview && selectedPreview.facts.length > 0,
+                    selectedPreview &&
+                      selectedPreview.facts.length > 0 &&
+                      selectedPreview.facts.length <= 8 &&
+                      new Set(selectedPreview.facts.map((f) => f.fieldTitle)).size <= 1,
                   );
                   const needsManual =
                     decision.supplyMode === "manual" || !resolved.best || !sourceUsable;

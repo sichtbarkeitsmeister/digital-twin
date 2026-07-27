@@ -363,4 +363,18 @@ assert.equal(durationPreview.scope, "focused");
 assert.equal(durationPreview.facts.length, 1);
 assert.match(durationPreview.facts[0]?.value ?? "", /Erstgespräch/);
 
+/** Hard cap: never return more than one sibling field, even if titles are messy. */
+const dumpGuard = buildImportPreviewFromBundle({
+  clarificationId: "clar-dump-guard",
+  sourceResponseId: "22222222-2222-2222-2222-222222222222",
+  sourceSurveyTitle: "MSH Arbeitgeber",
+  bundle: noisyEmployerBundle,
+  fieldTitle:
+    "Bitte die typische Mandatsreise eines Arbeitnehmer-Mandanten in 5-7 Schritten beschreiben:",
+  remarkText: "Ist die gleiche wie beim Arbeitgeber.",
+});
+const dumpFieldTitles = new Set(dumpGuard.facts.map((f) => f.fieldTitle));
+assert.equal(dumpFieldTitles.size, 1);
+assert.ok(dumpGuard.facts.length <= 8);
+
 console.log("survey-clarifications tests: ok");

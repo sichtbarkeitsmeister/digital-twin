@@ -9,9 +9,9 @@ function kindLabel(kind: SurveyClarificationImportPreview["facts"][number]["kind
   return "Antwort";
 }
 
-function scopeHint(scope: SurveyClarificationImportPreview["scope"]): string {
-  if (scope === "focused") {
-    return "Gezielter Ausschnitt — genau diese Inhalte gehen bei Freigabe an die KI.";
+function scopeHint(scope: SurveyClarificationImportPreview["scope"], factCount: number): string {
+  if (scope === "focused" && factCount > 0) {
+    return `Gezielter Ausschnitt (${factCount} ${factCount === 1 ? "Eintrag" : "Einträge"}) — genau diese Inhalte gehen bei Freigabe an die KI.`;
   }
   if (scope === "full_survey") {
     return "Kein einzelnes passendes Feld gefunden — bitte Inhalt selbst angeben statt den ganzen Fragebogen zu übernehmen.";
@@ -57,7 +57,7 @@ export function ClarificationImportPreview(props: {
               : "text-xs text-muted-foreground",
           )}
         >
-          {scopeHint(preview.scope)}
+          {scopeHint(preview.scope, preview.facts.length)}
         </p>
       </div>
 
