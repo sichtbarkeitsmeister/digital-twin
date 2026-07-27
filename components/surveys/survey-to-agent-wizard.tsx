@@ -32,6 +32,7 @@ import type {
 } from "@/lib/dt/survey-clarifications";
 import { resolveClarificationSourcePool } from "@/lib/dt/survey-clarifications";
 import { ClarificationImportPreview } from "@/components/surveys/clarification-import-preview";
+import { FactCoverageReview } from "@/components/surveys/fact-coverage-review";
 import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
 
 type WizardMode = "create" | "refine";
@@ -100,6 +101,10 @@ export function SurveyToAgentWizard(props: {
   const [clarificationsLoading, setClarificationsLoading] = useState(false);
   const [preview, setPreview] = useState<SurveyAgentPreview | null>(null);
   const [factCoverage, setFactCoverage] = useState<SurveyFactCoverageSummary | null>(null);
+  const [acceptedCoverageFactIds, setAcceptedCoverageFactIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [repairBusy, setRepairBusy] = useState(false);
   const [refinePreview, setRefinePreview] = useState<SurveyAgentRefinePreview | null>(null);
   const [currentPrompt, setCurrentPrompt] = useState("");
   const [usesGlobalPrompt, setUsesGlobalPrompt] = useState(false);
@@ -310,6 +315,7 @@ export function SurveyToAgentWizard(props: {
         } else if (json.preview) {
           setPreview(json.preview);
           setFactCoverage(json.factCoverage ?? null);
+          setAcceptedCoverageFactIds(new Set());
           setRefinePreview(null);
           setCurrentPrompt("");
           setRefineAgent(null);
@@ -393,12 +399,20 @@ export function SurveyToAgentWizard(props: {
   }, [orgId, props.surveyId, props.responseId]);
 
   const repairMissingFacts = useCallback(async () => {
-    if (!orgId || !preview) return;
+    if (!orgId) {
+      setError("Bitte zuerst eine Organisation wählen.");
+      return;
+    }
+    if (!preview) {
+      setError("Keine Vorschau zum Nachziehen vorhanden.");
+      return;
+    }
     if (!factCoverage || factCoverage.missingCount + factCoverage.weakCount === 0) {
       setError("Keine fehlenden Facts zum Nachziehen.");
       return;
     }
 
+    setRepairBusy(true);
     setLoading(true);
     setError(null);
 
@@ -442,6 +456,7 @@ export function SurveyToAgentWizard(props: {
         if (json.preview) {
           setPreview(json.preview);
           setFactCoverage(json.factCoverage ?? null);
+          setAcceptedCoverageFactIds(new Set());
           return;
         }
 
@@ -455,9 +470,27 @@ export function SurveyToAgentWizard(props: {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Coverage-Repair fehlgeschlagen.");
     } finally {
+      setRepairBusy(false);
       setLoading(false);
     }
   }, [orgId, preview, factCoverage, props.surveyId, props.responseId]);
+
+  function acceptCoverageFact(factId: string) {
+    setAcceptedCoverageFactIds((prev) => {
+      const next = new Set(prev);
+      next.add(factId);
+      return next;
+    });
+  }
+
+  function insertCoverageFactIntoPrompt(factId: string, insertion: string) {
+    if (!preview) return;
+    setPreview({
+      ...preview,
+      prompt_template: `${preview.prompt_template.trimEnd()}${insertion}`,
+    });
+    acceptCoverageFact(factId);
+  }
 
   const createAgent = useCallback(async () => {
     if (!orgId) return;
@@ -1047,36 +1080,33 @@ export function SurveyToAgentWizard(props: {
                   </CardDescription>
                 </CardHeader>
                 {factCoverage.missingCount > 0 || factCoverage.weakCount > 0 ? (
-                  <CardContent className="grid gap-3 text-sm text-secondary">
-                    {factCoverage.missing.slice(0, 8).map((m) => (
-                      <p key={m.factId}>
-                        <span className="font-medium text-primary">{m.factId}</span>{" "}
-                        fehlt · {m.fieldTitle}: {m.valuePreview || "—"}
-                      </p>
-                    ))}
-                    {factCoverage.weak.slice(0, 4).map((m) => (
-                      <p key={`w-${m.factId}`}>
-                        <span className="font-medium text-primary">{m.factId}</span>{" "}
-                        unsicher · {m.fieldTitle}: {m.valuePreview || "—"}
-                      </p>
-                    ))}
-                    {factCoverage.missingCount + factCoverage.weakCount > 12 ? (
-                      <p className="text-xs text-muted-foreground">
-                        … weitere Lücken in den Server-Logs
+                  <CardContent className="grid gap-4">
+                    <FactCoverageReview
+                      factCoverage={factCoverage}
+                      acceptedFactIds={acceptedCoverageFactIds}
+                      onAccept={acceptCoverageFact}
+                      onInsertIntoPrompt={insertCoverageFactIntoPrompt}
+                    />
+
+                    {repairBusy ? (
+                      <p className="text-sm text-muted-foreground">
+                        KI-Nachzug läuft asynchron (oft mehrere Minuten) — bitte Fenster offen
+                        lassen. Alternativ einzelne Facts oben mit „Anpassen“ direkt einsetzen.
                       </p>
                     ) : null}
+
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={loading}
+                      disabled={loading || repairBusy}
                       onClick={() => void repairMissingFacts()}
                     >
-                      {loading ? (
+                      {repairBusy ? (
                         <Loader2 className="size-4 animate-spin" aria-hidden />
                       ) : (
                         <RefreshCw className="size-4" aria-hidden />
                       )}
-                      Fehlende Facts nachziehen
+                      Alle offenen per KI nachziehen
                     </Button>
                   </CardContent>
                 ) : null}

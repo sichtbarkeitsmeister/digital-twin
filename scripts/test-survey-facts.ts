@@ -141,4 +141,7 @@ assert.match(repairBlock, /1–3 Wochen/);
 assert.match(repairBlock, /fact_003/);
 assert.doesNotMatch(repairBlock, /fact_002/);
 
+assert.ok(typeof summary.missing[0]?.valueText === "string" || summary.missing.length === 0);
+assert.equal(summary.weak.every((w) => typeof w.valueText === "string"), true);
+
 console.log("survey-facts tests: ok");
