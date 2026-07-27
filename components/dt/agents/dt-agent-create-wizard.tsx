@@ -8,26 +8,16 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSearchableOptionList } from "@/components/dt/dt-searchable-option-list";
 import { CenteredModal } from "@/components/ui/centered-modal";
 import { Textarea } from "@/components/ui/textarea";
-import type {
-  SurveyClarificationItem,
-  SurveyClarificationResolution,
-  SurveyClarificationSource,
-} from "@/lib/dt/survey-clarifications";
 import { slugifyAgentCandidate } from "@/lib/dt/survey-to-agent-prompt";
 import type { SurveyAgentPreview } from "@/lib/dt/survey-to-agent-prompt";
 import { cn } from "@/lib/utils";
 
-type WizardMethod = "choose" | "blank" | "survey" | "survey_clarifications" | "survey_preview";
+type WizardMethod = "choose" | "blank" | "survey" | "survey_preview";
 type SurveyOption = {
   surveyId: string;
   responseId: string;
   surveyTitle: string;
   completedAt: string | null;
-};
-
-type ClarificationDecision = {
-  approved: boolean;
-  sourceResponseId: string;
 };
 
 const fieldInputClass =
@@ -68,29 +58,12 @@ export function DtAgentCreateWizard(props: {
   const [surveysLoading, setSurveysLoading] = useState(false);
   const [selectedSurvey, setSelectedSurvey] = useState("");
   const [extraRules, setExtraRules] = useState("");
-  const [clarifications, setClarifications] = useState<SurveyClarificationItem[]>([]);
-  const [clarificationSources, setClarificationSources] = useState<SurveyClarificationSource[]>([]);
-  const [anbieterSources, setAnbieterSources] = useState<SurveyClarificationSource[]>([]);
-  const [clarificationDecisions, setClarificationDecisions] = useState<
-    Record<string, ClarificationDecision>
-  >({});
   const [preview, setPreview] = useState<SurveyAgentPreview | null>(null);
 
   const selectedOption = useMemo(
     () => surveyOptions.find((o) => o.responseId === selectedSurvey) ?? null,
     [surveyOptions, selectedSurvey],
   );
-
-  const clarificationResolutions = useMemo((): SurveyClarificationResolution[] => {
-    return clarifications.map((item) => {
-      const decision = clarificationDecisions[item.id];
-      return {
-        clarificationId: item.id,
-        approved: Boolean(decision?.approved),
-        sourceResponseId: decision?.approved ? decision.sourceResponseId || null : null,
-      };
-    });
-  }, [clarifications, clarificationDecisions]);
 
   const reset = useCallback(() => {
     setStep("choose");
@@ -105,10 +78,6 @@ export function DtAgentCreateWizard(props: {
     setSurveysLoading(false);
     setSelectedSurvey("");
     setExtraRules("");
-    setClarifications([]);
-    setClarificationSources([]);
-    setAnbieterSources([]);
-    setClarificationDecisions({});
     setPreview(null);
   }, []);
 
@@ -155,8 +124,7 @@ export function DtAgentCreateWizard(props: {
 
   function handleBack() {
     setError(null);
-    if (step === "survey_preview") setStep("survey_clarifications");
-    else if (step === "survey_clarifications") setStep("survey");
+    if (step === "survey_preview") setStep("survey");
     else if (step === "blank" || step === "survey") setStep("choose");
     else handleClose();
   }
@@ -165,63 +133,6 @@ export function DtAgentCreateWizard(props: {
     setName(value);
     if (!slug || slug === slugifyAgentCandidate(name)) {
       setSlug(slugifyAgentCandidate(value));
-    }
-  }
-
-  function sourcesForClarification(item: SurveyClarificationItem): SurveyClarificationSource[] {
-    if (item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter") {
-      return anbieterSources.length > 0 ? anbieterSources : clarificationSources;
-    }
-    return clarificationSources;
-  }
-
-  async function loadClarificationsAndContinue() {
-    if (!selectedOption) {
-      setError("Bitte eine Umfrage wählen.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/surveys/${selectedOption.surveyId}/responses/${selectedOption.responseId}/clarifications?organisationId=${encodeURIComponent(props.organisationId)}`,
-      );
-      const json = (await res.json()) as {
-        ok?: boolean;
-        clarifications?: SurveyClarificationItem[];
-        sources?: SurveyClarificationSource[];
-        anbieterSources?: SurveyClarificationSource[];
-        message?: string;
-      };
-      if (!json.ok) {
-        setError(json.message ?? "Klärungen konnten nicht geladen werden.");
-        return;
-      }
-      const items = json.clarifications ?? [];
-      const sources = json.sources ?? [];
-      const anbieter = json.anbieterSources ?? [];
-      setClarifications(items);
-      setClarificationSources(sources);
-      setAnbieterSources(anbieter);
-      const next: Record<string, ClarificationDecision> = {};
-      for (const item of items) {
-        const pool =
-          item.suggestedAction === "import_anbieter_survey" || item.suggestedPurpose === "anbieter"
-            ? anbieter.length > 0
-              ? anbieter
-              : sources
-            : sources;
-        next[item.id] = {
-          approved: false,
-          sourceResponseId: pool[0]?.responseId ?? "",
-        };
-      }
-      setClarificationDecisions(next);
-      setStep("survey_clarifications");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Klärungen konnten nicht geladen werden.");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -276,11 +187,6 @@ export function DtAgentCreateWizard(props: {
             organisationId: props.organisationId,
             extraRules: batchId ? undefined : extraRules.trim() || undefined,
             batchId,
-            clarifications: batchId
-              ? undefined
-              : clarificationResolutions.length > 0
-                ? clarificationResolutions
-                : undefined,
           }),
         });
         const json = (await res.json().catch(() => null)) as {
@@ -354,9 +260,7 @@ export function DtAgentCreateWizard(props: {
         ? "Agent leer erstellen"
         : step === "survey"
           ? "Aus Umfrage erstellen"
-          : step === "survey_clarifications"
-            ? "Klärungen & Freigaben"
-            : "Vorschau bearbeiten";
+          : "Vorschau bearbeiten";
 
   const surveySearchOptions = useMemo(
     () =>
@@ -392,26 +296,6 @@ export function DtAgentCreateWizard(props: {
           <DtPillButton
             type="button"
             disabled={busy || surveysLoading || surveyOptions.length === 0}
-            onClick={() => void loadClarificationsAndContinue()}
-          >
-            {busy ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Sparkles className="size-4" />
-            )}
-            Weiter zu Klärungen
-          </DtPillButton>
-        ) : null}
-        {step === "survey_clarifications" ? (
-          <DtPillButton
-            type="button"
-            disabled={
-              busy ||
-              clarifications.some((item) => {
-                const d = clarificationDecisions[item.id];
-                return Boolean(d?.approved) && !d?.sourceResponseId;
-              })
-            }
             onClick={() => void generateSurveyPreview()}
           >
             {busy ? (
@@ -559,121 +443,6 @@ export function DtAgentCreateWizard(props: {
             <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
               Generierung läuft asynchron — große Fragebögen brauchen oft mehrere Minuten.
               Bitte Fenster offen lassen.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {step === "survey_clarifications" ? (
-        <div className="grid gap-4">
-          {clarifications.length === 0 ? (
-            <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-              Keine Unklarheiten erkannt — Generierung kann starten.
-            </p>
-          ) : (
-            clarifications.map((item) => {
-              const decision = clarificationDecisions[item.id] ?? {
-                approved: false,
-                sourceResponseId: "",
-              };
-              const pool = sourcesForClarification(item);
-              return (
-                <div
-                  key={item.id}
-                  className="grid gap-2 rounded-xl border border-sbkm-navy/10 p-3 dark:border-white/10"
-                >
-                  <p className="text-sm font-semibold text-sbkm-navy dark:text-white">
-                    {item.fieldTitle}
-                  </p>
-                  <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-                    Bemerkung: „{item.remarkText}“
-                  </p>
-                  <p className="text-xs text-sbkm-ink-600/80 dark:text-white/40">
-                    {item.detectedIntent}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        setClarificationDecisions((prev) => ({
-                          ...prev,
-                          [item.id]: {
-                            ...decision,
-                            approved: true,
-                            sourceResponseId:
-                              decision.sourceResponseId || pool[0]?.responseId || "",
-                          },
-                        }))
-                      }
-                      className={cn(
-                        "rounded-pill px-3 py-1.5 text-xs font-medium",
-                        decision.approved
-                          ? "bg-sbkm-mint/20 text-sbkm-navy dark:text-sbkm-mint"
-                          : "bg-sbkm-navy/5 text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60",
-                      )}
-                    >
-                      Übernahme freigeben
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        setClarificationDecisions((prev) => ({
-                          ...prev,
-                          [item.id]: { ...decision, approved: false },
-                        }))
-                      }
-                      className={cn(
-                        "rounded-pill px-3 py-1.5 text-xs font-medium",
-                        !decision.approved
-                          ? "bg-sbkm-mint/20 text-sbkm-navy dark:text-sbkm-mint"
-                          : "bg-sbkm-navy/5 text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60",
-                      )}
-                    >
-                      Nicht übernehmen
-                    </button>
-                  </div>
-                  {decision.approved ? (
-                    pool.length === 0 ? (
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        Keine passende Quell-Umfrage gefunden.
-                      </p>
-                    ) : (
-                      <label className="grid gap-1 text-xs">
-                        <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-                          Quelle
-                        </span>
-                        <select
-                          value={decision.sourceResponseId}
-                          disabled={busy}
-                          onChange={(e) =>
-                            setClarificationDecisions((prev) => ({
-                              ...prev,
-                              [item.id]: {
-                                ...decision,
-                                sourceResponseId: e.target.value,
-                              },
-                            }))
-                          }
-                          className={fieldInputClass}
-                        >
-                          {pool.map((s) => (
-                            <option key={s.responseId} value={s.responseId}>
-                              {s.surveyTitle} ({s.purposeLabel})
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )
-                  ) : null}
-                </div>
-              );
-            })
-          )}
-          {busy ? (
-            <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-              Generierung läuft asynchron — bitte Fenster offen lassen.
             </p>
           ) : null}
         </div>

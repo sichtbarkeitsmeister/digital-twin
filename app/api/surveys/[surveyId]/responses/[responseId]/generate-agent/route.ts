@@ -13,12 +13,6 @@ import { requireSurveyPlatformAdmin } from "@/lib/surveys/platform-admin";
  */
 export const maxDuration = 60;
 
-const clarificationResolutionSchema = z.object({
-  clarificationId: z.string().min(1).max(120),
-  approved: z.boolean(),
-  sourceResponseId: z.string().uuid().nullable().optional(),
-});
-
 const bodySchema = z
   .object({
     organisationId: z.string().uuid(),
@@ -27,8 +21,6 @@ const bodySchema = z
     agentId: z.string().uuid().optional(),
     /** When set, poll an existing Anthropic Message Batch instead of starting a new one. */
     batchId: z.string().min(8).max(200).optional(),
-    /** Admin Freigaben for ambiguous remarks / cross-refs (only on batch start). */
-    clarifications: z.array(clarificationResolutionSchema).max(40).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.mode === "refine" && !data.agentId) {
@@ -126,7 +118,6 @@ export async function POST(
       mode: parsed.data.mode,
       agentId: parsed.data.agentId,
       extraRules: parsed.data.extraRules,
-      clarifications: parsed.data.clarifications,
     });
 
     if (!started.ok) {
