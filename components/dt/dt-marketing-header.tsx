@@ -31,7 +31,7 @@ export function DtAuthHeader() {
         asChild
         variant="ghost"
         size="sm"
-        className="hover:bg-sbkm-navy/[0.08] dark:hover:bg-white/10 dark:hover:text-white"
+        className="hover:bg-sbkm-navy/[0.08] hover:text-sbkm-navy dark:hover:bg-white/10 dark:hover:text-white"
       >
         <Link href="/" className="inline-flex items-center gap-1.5 text-[13.5px] font-medium">
           <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
