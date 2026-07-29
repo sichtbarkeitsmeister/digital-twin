@@ -50,7 +50,7 @@ import {
   type DtSeoChatTaskProposal,
   type DtSeoTaskProposalMatchRow,
 } from "@/lib/dt/seo/chat-task-proposals";
-import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { filterAgentsHiddenFromOrgMembers, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 
 export type DtOrgOptionWithRole = DtOrgOption & { canManageAgents?: boolean };
 
@@ -63,14 +63,11 @@ function pickSeoAdvisorAgentId(agents: DtAgentOption[]): string | null {
 
 function resolveDefaultAgentId(
   agents: DtAgentOption[],
-  options: { seoMode?: boolean; currentId?: string; hasActiveChat?: boolean },
+  options: { seoMode?: boolean; currentId?: string },
 ): string {
   if (agents.length === 0) return "";
 
-  if (options.seoMode && !options.hasActiveChat) {
-    return pickSeoAdvisorAgentId(agents) ?? agents[0]!.id;
-  }
-
+  // Always keep an explicit, still-valid selection (e.g. Peter after "Neuer Chat").
   if (options.currentId && agents.some((agent) => agent.id === options.currentId)) {
     return options.currentId;
   }
@@ -79,7 +76,9 @@ function resolveDefaultAgentId(
     return pickSeoAdvisorAgentId(agents) ?? agents[0]!.id;
   }
 
-  return agents[0]!.id;
+  // Outside the SEO workspace never fall back onto the SEO advisor.
+  const nonSeo = agents.find((agent) => !isSeoAdvisorAgent(agent));
+  return nonSeo?.id ?? agents[0]!.id;
 }
 
 export function DtChatShell(props: {
@@ -284,14 +283,13 @@ export function DtChatShell(props: {
         resolveDefaultAgentId(visible, {
           seoMode: props.seoMode,
           currentId: prev,
-          hasActiveChat: Boolean(selectedChatId),
         }),
       );
     } else {
       setAgents([]);
       setSelectedAgentId("");
     }
-  }, [selectedOrgId, props.seoMode, selectedChatId]);
+  }, [selectedOrgId, props.seoMode]);
 
   const refreshSeoTasks = useCallback(async () => {
     if (!selectedOrgId) return;
@@ -424,14 +422,21 @@ export function DtChatShell(props: {
             agents?: DtAgentOption[];
           };
           if (agentsJson.ok && agentsJson.agents?.length) {
-            setAgents(agentsJson.agents);
-            setSelectedAgentId((prev) =>
-              resolveDefaultAgentId(agentsJson.agents!, {
-                seoMode: props.seoMode,
-                currentId: prev,
-                hasActiveChat: false,
-              }),
-            );
+            const visible = props.seoMode
+              ? agentsJson.agents
+              : filterAgentsHiddenFromOrgMembers(agentsJson.agents);
+            if (visible.length) {
+              setAgents(visible);
+              setSelectedAgentId((prev) =>
+                resolveDefaultAgentId(visible, {
+                  seoMode: props.seoMode,
+                  currentId: prev,
+                }),
+              );
+            } else {
+              setAgents([]);
+              setSelectedAgentId("");
+            }
           } else {
             setAgents([]);
             setSelectedAgentId("");
@@ -683,10 +688,13 @@ export function DtChatShell(props: {
     clearComposerAttachments();
     setStatus(null);
     setMobileSidebarOpen(false);
-    if (props.seoMode) {
-      const seoAdvisorId = pickSeoAdvisorAgentId(agents);
-      if (seoAdvisorId) setSelectedAgentId(seoAdvisorId);
-    }
+    // Keep the currently selected avatar (e.g. Peter). Only fall back when invalid.
+    setSelectedAgentId((prev) =>
+      resolveDefaultAgentId(agents, {
+        seoMode: props.seoMode,
+        currentId: prev,
+      }),
+    );
   };
 
   const handleGhostToggle = (next: boolean) => {
@@ -1305,6 +1313,7 @@ export function DtChatShell(props: {
               textMode={textMode}
               onTextModeChange={setTextMode}
               attachments={attachments}
+              agentName={displayAgentName}
               onAddFiles={(files) => void processFiles(files)}
               onRemoveAttachment={(index) => {
                 setAttachments((prev) => {

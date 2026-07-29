@@ -178,7 +178,7 @@ export function DtChatThread(props: {
                 }
               />
             ))}
-            {props.isThinking ? <DtChatThinking /> : null}
+            {props.isThinking ? <DtChatThinking agentName={props.agentName} /> : null}
             {showFollowUps ? (
               <motion.div
                 initial={{ opacity: 0, y: 4 }}
