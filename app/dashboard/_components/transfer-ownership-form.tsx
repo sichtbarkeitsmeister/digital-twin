@@ -58,7 +58,7 @@ export function TransferOwnershipForm({
           className="mt-0.5 h-4 w-4 shrink-0 rounded border border-primary accent-primary"
         />
         <span className="grid gap-1">
-          <span className="text-sm font-medium">Willkommens-E-Mail senden</span>
+          <span className="text-sm font-medium">Einladungs-E-Mail senden</span>
           <span className="text-xs text-secondary">
             Der neue Inhaber erhält einen Ein-Klick-Anmeldelink zum Portal.
           </span>

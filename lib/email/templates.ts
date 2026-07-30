@@ -18,9 +18,12 @@ export function renderBrandedEmail(opts: {
   actions?: EmailAction[];
   footerText?: string;
   preheader?: string;
+  /** Small label above the headline (default: Benachrichtigung). Use „Einladung“ for invites. */
+  eyebrow?: string;
 }) {
   const preheader = (opts.preheader ?? "").trim();
   const intro = (opts.intro ?? "").trim();
+  const eyebrow = (opts.eyebrow ?? "Benachrichtigung").trim() || "Benachrichtigung";
   const details = (opts.details ?? []).filter((r) => r.label.trim() && r.value.trim());
   const actions = (opts.actions ?? []).filter((a) => a.label.trim() && a.href.trim());
   const footerText =
@@ -59,7 +62,7 @@ export function renderBrandedEmail(opts: {
             <tr>
               <td style="padding:0 0 14px 0;">
                 <div style="font-family:Poppins,Arial,sans-serif;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:${textSecondary};font-weight:600;">
-                  Benachrichtigung
+                  ${escapeHtml(eyebrow)}
                 </div>
               </td>
             </tr>

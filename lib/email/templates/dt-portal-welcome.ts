@@ -7,21 +7,26 @@ export function renderDtPortalWelcomeEmail(opts: {
 }) {
   const appBase = getAppBaseUrl();
   return renderBrandedEmail({
-    title: "Dein DigitalTwin-Portal ist umgezogen",
-    preheader: "Anmeldung zum neuen DigitalTwin-Portal",
-    headline: "Dein DigitalTwin-Portal ist umgezogen",
+    title: `Einladung: DigitalTwin-Portal für ${opts.organisationName}`,
+    eyebrow: "Einladung",
+    preheader: `Einladung zum DigitalTwin-Portal für ${opts.organisationName}`,
+    headline: `Einladung zum DigitalTwin-Portal`,
     intro:
-      `Hallo,\n\nfür ${opts.organisationName} ist das DigitalTwin-Portal jetzt unter digital-twin-sbkm.de erreichbar. ` +
-      "Deine bisherigen Chats und SEO-Daten werden migriert — melde dich einmal mit dem Button unten an.",
+      `Hallo,\n\ndu wurdest zum DigitalTwin-Portal für ${opts.organisationName} eingeladen. ` +
+      "Das Portal ist unter digital-twin-sbkm.de erreichbar. " +
+      "Mit dem Button unten nimmst du die Einladung an und meldest dich direkt an.",
     details: [
       { label: "Organisation", value: opts.organisationName },
       { label: "Portal", value: appBase },
+      { label: "Art", value: "Einladung / Magic Link" },
     ],
     actions: [
-      { label: "Zum Portal anmelden", href: opts.loginUrl },
-      { label: "DigitalTwin öffnen", href: appBase },
+      { label: "Einladung annehmen", href: opts.loginUrl },
+      { label: "Portal öffnen", href: appBase },
     ],
     footerText:
-      "Du erhältst diese E-Mail, weil deine Adresse für das DigitalTwin-Portal hinterlegt ist.",
+      "Das ist eine Einladungs-E-Mail zum DigitalTwin-Portal. " +
+      "Du erhältst sie, weil deine Adresse für diese Organisation hinterlegt wurde. " +
+      "Der Link ist zeitlich begrenzt — bei Bedarf kannst du auf der Login-Seite einen neuen anfordern.",
   });
 }

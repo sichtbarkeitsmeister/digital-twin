@@ -52,7 +52,7 @@ export function AdminCreateOrgForm() {
           required
         />
         <p className="text-xs text-secondary">
-          Bestehendes Konto oder neue Adresse — bei Willkommens-E-Mail wird bei
+          Bestehendes Konto oder neue Adresse — bei Einladungs-E-Mail wird bei
           Bedarf automatisch ein Konto angelegt und ein Anmeldelink verschickt.
         </p>
       </div>
@@ -66,9 +66,9 @@ export function AdminCreateOrgForm() {
           className="mt-0.5 h-4 w-4 shrink-0 rounded border border-primary accent-primary"
         />
         <span className="grid gap-1">
-          <span className="text-sm font-medium">Willkommens-E-Mail an Inhaber senden</span>
+          <span className="text-sm font-medium">Einladungs-E-Mail an Inhaber senden</span>
           <span className="text-xs text-secondary">
-            Enthält einen Ein-Klick-Anmeldelink zum DigitalTwin-Portal.
+            Einladung mit Ein-Klick-Anmeldelink zum DigitalTwin-Portal.
           </span>
         </span>
       </label>

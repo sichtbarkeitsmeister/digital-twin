@@ -7,6 +7,10 @@ import {
   searchDtSitePages,
 } from "@/lib/dt/seo/search-site-pages";
 import {
+  inspectWebsiteUrlForTool,
+  readSitemapForTool,
+} from "@/lib/dt/seo/live-site-tools";
+import {
   formatSeoReportRawForTool,
   loadLatestDtSeoReportRawForOrg,
 } from "@/lib/dt/seo/report-detail-tool";
@@ -65,6 +69,33 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
       properties: {},
     },
   },
+  {
+    name: "read_sitemap",
+    description:
+      "Liest eine Sitemap (XML, inkl. Sitemap-Index) live und listet die enthaltenen URLs. Optional Vergleich mit dem DigitalTwin-Crawl-Index. Nutze dies, wenn der Nutzer eine Sitemap schickt oder fragt, welche URLs in der Sitemap stehen. Behaupte nie, du könntest keine Sitemap lesen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sitemapUrl: {
+          type: "string",
+          description:
+            "Optionale Sitemap-URL (z. B. https://example.de/sitemap.xml). Wenn leer: Org-Sitemap bzw. Website/sitemap.xml.",
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_website_url",
+    description:
+      "Live-Check einer öffentlichen URL: HTTP-Status, Title, Meta-Robots/noindex, Canonical und ob die URL im DigitalTwin-Crawl-Index liegt. Nutze dies für Erreichbarkeit/noindex — nicht mit Google-Indexierung verwechseln.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Die zu prüfende absolute URL." },
+      },
+      required: ["url"],
+    },
+  },
 ];
 
 async function runDtRetrievalTool(
@@ -96,6 +127,15 @@ async function runDtRetrievalTool(
     if (name === "read_full_seo_report") {
       const report = await loadLatestDtSeoReportRawForOrg(organisationId);
       return formatSeoReportRawForTool(report);
+    }
+    if (name === "read_sitemap") {
+      const sitemapUrl = typeof args.sitemapUrl === "string" ? args.sitemapUrl : null;
+      return readSitemapForTool(organisationId, sitemapUrl);
+    }
+    if (name === "inspect_website_url") {
+      const url = String(args.url ?? "").trim();
+      if (!url) return "Keine URL angegeben.";
+      return inspectWebsiteUrlForTool(organisationId, url);
     }
     return `Unbekanntes Werkzeug: ${name}`;
   } catch (err) {

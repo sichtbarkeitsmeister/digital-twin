@@ -3,6 +3,10 @@ import { z } from "zod";
 
 import { verifyDtInternalWebhookSecret } from "@/lib/dt/internal-webhook";
 import {
+  inspectWebsiteUrlForTool,
+  readSitemapForTool,
+} from "@/lib/dt/seo/live-site-tools";
+import {
   getDtSitePageContent,
   searchDtSitePages,
 } from "@/lib/dt/seo/search-site-pages";
@@ -11,9 +15,10 @@ export const maxDuration = 30;
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  action: z.enum(["search", "read"]).default("search"),
+  action: z.enum(["search", "read", "sitemap", "inspect"]).default("search"),
   query: z.string().trim().min(1).max(400).optional(),
   url: z.string().trim().min(1).max(2048).optional(),
+  sitemapUrl: z.string().trim().min(1).max(2048).optional(),
   limit: z.number().int().min(1).max(10).optional(),
 });
 
@@ -21,6 +26,8 @@ const bodySchema = z.object({
  * On-demand retrieval over crawled website pages for the n8n agent.
  * - action "search": keyword search across all pages → relevant snippets.
  * - action "read": full text of a single page by URL.
+ * - action "sitemap": live-read sitemap XML (+ crawl-index sample compare).
+ * - action "inspect": live HTTP/meta check for a URL.
  * Token-light by design: callers pull only what they need.
  */
 export async function POST(req: Request) {
@@ -36,7 +43,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { organisationId, action, query, url, limit } = parsed.data;
+  const { organisationId, action, query, url, sitemapUrl, limit } = parsed.data;
 
   try {
     if (action === "read") {
@@ -48,6 +55,19 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, found: false, page: null });
       }
       return NextResponse.json({ ok: true, found: true, page });
+    }
+
+    if (action === "sitemap") {
+      const text = await readSitemapForTool(organisationId, sitemapUrl ?? url ?? null);
+      return NextResponse.json({ ok: true, text });
+    }
+
+    if (action === "inspect") {
+      if (!url) {
+        return NextResponse.json({ ok: false, message: "url erforderlich." }, { status: 400 });
+      }
+      const text = await inspectWebsiteUrlForTool(organisationId, url);
+      return NextResponse.json({ ok: true, text });
     }
 
     if (!query) {
