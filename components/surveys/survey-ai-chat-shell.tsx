@@ -773,7 +773,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   return (
     <div
       ref={shellRef}
-      className={`grid h-full min-h-0 flex-1 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-xl overscroll-contain ${
+      className={`grid h-full max-h-full min-h-0 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-xl overscroll-contain ${
         sidebarCollapsed
           ? "grid-cols-[54px_minmax(0,1fr)]"
           : "grid-cols-[280px_minmax(0,1fr)]"
@@ -838,7 +838,33 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         />
       )}
 
-      <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-transparent">
+      <div
+        className={`relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-transparent transition-colors ${
+          dropHighlight && selectedChatId ? "bg-primary/[0.04]" : ""
+        }`}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (selectedChatId && e.dataTransfer.types.includes("Files")) setDropHighlight(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          const rel = e.relatedTarget as Node | null;
+          if (!e.currentTarget.contains(rel)) setDropHighlight(false);
+        }}
+        onDragOver={(e) => {
+          if (!selectedChatId) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDropHighlight(false);
+          if (!selectedChatId) return;
+          const fl = e.dataTransfer.files;
+          if (fl?.length) void processFilesForAttachments(Array.from(fl));
+        }}
+      >
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-card/85 px-4 py-3 backdrop-blur">
           <div className="min-w-0 shrink">
             <p
@@ -916,239 +942,213 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
           </div>
         </div>
 
-        <div className="relative flex min-h-0 flex-col overflow-hidden">
-          <div
-            className={`relative z-0 flex min-h-0 flex-1 flex-col transition-colors ${dropHighlight && selectedChatId ? "bg-primary/[0.04]" : ""}`}
-            onDragEnter={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (selectedChatId && e.dataTransfer.types.includes("Files")) setDropHighlight(true);
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              const rel = e.relatedTarget as Node | null;
-              if (!e.currentTarget.contains(rel)) setDropHighlight(false);
-            }}
-            onDragOver={(e) => {
-              if (!selectedChatId) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDropHighlight(false);
-              if (!selectedChatId) return;
-              const fl = e.dataTransfer.files;
-              if (fl?.length) void processFilesForAttachments(Array.from(fl));
-            }}
-          >
-            {dropHighlight && selectedChatId ? (
-              <div
-                className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-background/55 backdrop-blur-[1px]"
-                aria-hidden
-              >
-                <div className="rounded-xl border-2 border-dashed border-primary/45 bg-card/95 px-6 py-4 text-center shadow-lg">
-                  <p className="text-sm font-semibold text-foreground">Dateien hier ablegen</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Loslassen zum Anfügen</p>
-                </div>
-              </div>
-            ) : null}
+        <div className="relative min-h-0 overflow-hidden">
+          {dropHighlight && selectedChatId ? (
             <div
-              ref={messagesViewportRef}
-              className="scrollbar-subtle min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background p-4"
+              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-background/55 backdrop-blur-[1px]"
+              aria-hidden
             >
-              <div className="mx-auto w-full max-w-4xl">
-                {isInitialLoading ? (
-                  <div className="grid gap-3 py-2">
-                    <div className="h-20 w-[78%] animate-pulse rounded-2xl bg-muted" />
-                    <div className="h-16 w-[58%] animate-pulse rounded-2xl bg-muted" />
-                    <div className="h-28 w-[84%] animate-pulse rounded-2xl bg-muted" />
-                  </div>
-                ) : selectedChatId ? (
-                  <SurveyAiChatThread
-                    messages={messages}
-                    actions={actions}
-                    attachmentsByMessageId={chatAttachmentsByMessage}
-                    isAssistantThinking={isBusy}
-                    thinkingStatus={thinkingStatus}
-                    pendingActionId={pendingActionId}
-                    onApplyAction={applyAction}
-                    onRevertAction={revertAction}
-                    onRejectAction={rejectAction}
-                  />
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-border bg-card/60 p-6 text-center text-sm text-secondary">
-                    Wähle einen Chat oder erstelle einen neuen.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="shrink-0 bg-transparent p-3">
-              <div className="mx-auto w-full max-w-4xl">
-                <div className="rounded-[28px] border border-border bg-card p-2 shadow-xl">
-                  {attachments.length > 0 ? (
-                    <div className="flex flex-wrap gap-2 px-2 pb-2">
-                      {attachments.map((a, i) => {
-                        const m = normalizeSurveyAiMime(a.mimeType);
-                        const showThumb =
-                          Boolean(a.previewObjectUrl) && isSurveyAiMultimodalImageMime(m);
-                        const Icon =
-                          normalizeSurveyAiMime(a.mimeType) === "application/pdf"
-                            ? FileType
-                            : FileImage;
-                        return (
-                          <div
-                            key={`${a.fileName}-${i}`}
-                            className="relative flex max-w-[200px] items-center gap-2 rounded-xl border border-border bg-muted/60 py-1.5 pl-1.5 pr-7 text-xs"
-                          >
-                            {showThumb && a.previewObjectUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={a.previewObjectUrl}
-                                alt=""
-                                className="h-10 w-10 shrink-0 rounded-lg object-cover"
-                              />
-                            ) : (
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-                                <Icon className="h-5 w-5 text-muted-foreground" aria-hidden />
-                              </span>
-                            )}
-                            <span className="min-w-0 truncate text-secondary" title={a.fileName}>
-                              {a.fileName}
-                            </span>
-                            <button
-                              type="button"
-                              className="absolute right-1 top-1 rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                              aria-label={`Anhang „${a.fileName}“ entfernen`}
-                              onClick={() => removeComposerAttachment(i)}
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  <div className="flex items-center gap-2 px-1">
-                    <div className="flex items-center gap-1">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept={SURVEY_AI_ATTACHMENT_ACCEPT_ATTR}
-                        className="hidden"
-                        onChange={(e) => {
-                          void onAddAttachmentsFromFileList(e.currentTarget.files);
-                          e.currentTarget.value = "";
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-9 w-9 text-secondary hover:bg-muted hover:text-foreground"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <Textarea
-                      rows={1}
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      onPaste={(e) => {
-                        const items = e.clipboardData?.items;
-                        if (!items?.length || !selectedChatId) return;
-                        const pastedFiles: File[] = [];
-                        for (let i = 0; i < items.length; i += 1) {
-                          const item = items[i];
-                          if (item?.kind === "file") {
-                            const f = item.getAsFile();
-                            if (f) pastedFiles.push(f);
-                          }
-                        }
-                        if (pastedFiles.length > 0) {
-                          e.preventDefault();
-                          void processFilesForAttachments(pastedFiles);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          if (!isBusy) {
-                            void sendPrompt();
-                          }
-                        }
-                      }}
-                      placeholder="Nachricht an den KI-Assistenten…"
-                      className="min-h-[40px] max-h-[120px] flex-1 resize-none border-0 bg-transparent px-1 py-2.5 leading-5 text-foreground placeholder:text-secondary shadow-none focus-visible:ring-0"
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      className="h-9 w-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-                      onClick={sendPrompt}
-                      disabled={isBusy || !prompt.trim()}
-                      aria-label="Senden"
-                    >
-                      <ArrowUp className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {selectedChatId && chatSettingsPanelOpen ? (
-            <div
-              className="pointer-events-auto absolute inset-0 z-[40] flex flex-col border-t border-border/60 bg-background px-4 py-3 pt-2 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="chat-context-panel-title"
-            >
-              <div className="flex shrink-0 items-start justify-between gap-2 border-b border-border/70 pb-3">
-                <div className="min-w-0">
-                  <p
-                    id="chat-context-panel-title"
-                    className="text-sm font-semibold"
-                  >
-                    Chat-Kontext
-                  </p>
-                  <p className="text-xs text-secondary">
-                    Zusätzliche Anweisungen nur für diesen Chat. Ergänzt die
-                    globalen Regeln unter Einstellungen und speichert
-                    automatisch.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 shrink-0"
-                  onClick={() => setChatSettingsPanelOpen(false)}
-                  aria-label="Schließen"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col py-3">
-                <Textarea
-                  value={chatAssistantRules}
-                  maxLength={SURVEY_AI_MAX_ASSISTANT_RULES_CHARS}
-                  onChange={(e) => setChatAssistantRules(e.target.value)}
-                  placeholder="z. B. „Nur Ordner XY“ oder „Antworten in Stichpunkten“"
-                  className="min-h-[220px] flex-1 resize-none border border-input bg-muted text-foreground placeholder:text-muted-foreground shadow-sm text-sm leading-relaxed focus-visible:ring-1 focus-visible:ring-ring"
-                  aria-label="Chat-Kontext"
-                />
-                <p className="mt-2 shrink-0 text-right text-[11px] text-secondary">
-                  {chatAssistantRules.length}/
-                  {SURVEY_AI_MAX_ASSISTANT_RULES_CHARS}
-                </p>
+              <div className="rounded-xl border-2 border-dashed border-primary/45 bg-card/95 px-6 py-4 text-center shadow-lg">
+                <p className="text-sm font-semibold text-foreground">Dateien hier ablegen</p>
+                <p className="mt-1 text-xs text-muted-foreground">Loslassen zum Anfügen</p>
               </div>
             </div>
           ) : null}
+          <div
+            ref={messagesViewportRef}
+            className="scrollbar-subtle h-full min-h-0 overflow-y-auto overscroll-contain bg-background p-4"
+          >
+            <div className="mx-auto w-full max-w-4xl">
+              {isInitialLoading ? (
+                <div className="grid gap-3 py-2">
+                  <div className="h-20 w-[78%] animate-pulse rounded-2xl bg-muted" />
+                  <div className="h-16 w-[58%] animate-pulse rounded-2xl bg-muted" />
+                  <div className="h-28 w-[84%] animate-pulse rounded-2xl bg-muted" />
+                </div>
+              ) : selectedChatId ? (
+                <SurveyAiChatThread
+                  messages={messages}
+                  actions={actions}
+                  attachmentsByMessageId={chatAttachmentsByMessage}
+                  isAssistantThinking={isBusy}
+                  thinkingStatus={thinkingStatus}
+                  pendingActionId={pendingActionId}
+                  onApplyAction={applyAction}
+                  onRevertAction={revertAction}
+                  onRejectAction={rejectAction}
+                />
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border bg-card/60 p-6 text-center text-sm text-secondary">
+                  Wähle einen Chat oder erstelle einen neuen.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
+
+        <div className="shrink-0 border-t border-border/70 bg-muted/40 p-3">
+          <div className="mx-auto w-full max-w-4xl">
+            <div className="rounded-[28px] border border-border bg-card p-2 shadow-sm">
+              {attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2 px-2 pb-2">
+                  {attachments.map((a, i) => {
+                    const m = normalizeSurveyAiMime(a.mimeType);
+                    const showThumb =
+                      Boolean(a.previewObjectUrl) && isSurveyAiMultimodalImageMime(m);
+                    const Icon =
+                      normalizeSurveyAiMime(a.mimeType) === "application/pdf"
+                        ? FileType
+                        : FileImage;
+                    return (
+                      <div
+                        key={`${a.fileName}-${i}`}
+                        className="relative flex max-w-[200px] items-center gap-2 rounded-xl border border-border bg-muted/60 py-1.5 pl-1.5 pr-7 text-xs"
+                      >
+                        {showThumb && a.previewObjectUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={a.previewObjectUrl}
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded-lg object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+                            <Icon className="h-5 w-5 text-muted-foreground" aria-hidden />
+                          </span>
+                        )}
+                        <span className="min-w-0 truncate text-secondary" title={a.fileName}>
+                          {a.fileName}
+                        </span>
+                        <button
+                          type="button"
+                          className="absolute right-1 top-1 rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          aria-label={`Anhang „${a.fileName}“ entfernen`}
+                          onClick={() => removeComposerAttachment(i)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="flex items-center gap-2 px-1">
+                <div className="flex items-center gap-1">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept={SURVEY_AI_ATTACHMENT_ACCEPT_ATTR}
+                    className="hidden"
+                    onChange={(e) => {
+                      void onAddAttachmentsFromFileList(e.currentTarget.files);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-9 w-9 text-secondary hover:bg-muted hover:text-foreground"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Textarea
+                  rows={1}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onPaste={(e) => {
+                    const items = e.clipboardData?.items;
+                    if (!items?.length || !selectedChatId) return;
+                    const pastedFiles: File[] = [];
+                    for (let i = 0; i < items.length; i += 1) {
+                      const item = items[i];
+                      if (item?.kind === "file") {
+                        const f = item.getAsFile();
+                        if (f) pastedFiles.push(f);
+                      }
+                    }
+                    if (pastedFiles.length > 0) {
+                      e.preventDefault();
+                      void processFilesForAttachments(pastedFiles);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (!isBusy) {
+                        void sendPrompt();
+                      }
+                    }
+                  }}
+                  placeholder="Nachricht an den KI-Assistenten…"
+                  className="min-h-[40px] max-h-[120px] flex-1 resize-none border-0 bg-transparent px-1 py-2.5 leading-5 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  className="h-9 w-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+                  onClick={sendPrompt}
+                  disabled={isBusy || !prompt.trim()}
+                  aria-label="Senden"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {selectedChatId && chatSettingsPanelOpen ? (
+          <div
+            className="pointer-events-auto absolute inset-0 z-[40] flex flex-col border-t border-border/60 bg-background px-4 py-3 pt-2 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="chat-context-panel-title"
+          >
+            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-border/70 pb-3">
+              <div className="min-w-0">
+                <p
+                  id="chat-context-panel-title"
+                  className="text-sm font-semibold"
+                >
+                  Chat-Kontext
+                </p>
+                <p className="text-xs text-secondary">
+                  Zusätzliche Anweisungen nur für diesen Chat. Ergänzt die
+                  globalen Regeln unter Einstellungen und speichert
+                  automatisch.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0"
+                onClick={() => setChatSettingsPanelOpen(false)}
+                aria-label="Schließen"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col py-3">
+              <Textarea
+                value={chatAssistantRules}
+                maxLength={SURVEY_AI_MAX_ASSISTANT_RULES_CHARS}
+                onChange={(e) => setChatAssistantRules(e.target.value)}
+                placeholder="z. B. „Nur Ordner XY“ oder „Antworten in Stichpunkten“"
+                className="min-h-[220px] flex-1 resize-none border border-input bg-muted text-foreground placeholder:text-muted-foreground shadow-sm text-sm leading-relaxed focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label="Chat-Kontext"
+              />
+              <p className="mt-2 shrink-0 text-right text-[11px] text-secondary">
+                {chatAssistantRules.length}/
+                {SURVEY_AI_MAX_ASSISTANT_RULES_CHARS}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
