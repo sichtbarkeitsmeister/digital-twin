@@ -611,6 +611,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       }
     };
 
+    let streamStarted = false;
     try {
       const res = await fetch(`/api/ai/chats/${targetChatId}/messages`, {
         method: "POST",
@@ -630,6 +631,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         return;
       }
 
+      streamStarted = true;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -642,14 +644,18 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         const events = buffer.split("\n\n");
         buffer = events.pop() ?? "";
         for (const evt of events) {
+          // Skip SSE comments / heartbeats (`: …`)
+          if (!evt.trim() || evt.trimStart().startsWith(":")) continue;
           const eventMatch = evt.match(/^event:\s*(.+)$/m);
           const dataMatch = evt.match(/^data:\s*(.+)$/m);
           if (!eventMatch || !dataMatch) continue;
           const eventName = eventMatch[1]?.trim();
-          const payload = JSON.parse(dataMatch[1] ?? "{}") as Record<
-            string,
-            unknown
-          >;
+          let payload: Record<string, unknown> = {};
+          try {
+            payload = JSON.parse(dataMatch[1] ?? "{}") as Record<string, unknown>;
+          } catch {
+            continue;
+          }
           if (eventName === "status") {
             const nextStatus =
               typeof payload.message === "string" && payload.message.trim()
@@ -679,8 +685,22 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         URL.revokeObjectURL(u);
       }
     } catch {
-      restoreComposerAfterFailure();
-      setStatus("Nachricht konnte nicht gesendet werden.");
+      // Once the SSE response started, the user message is already persisted —
+      // restoring the composer would hide it and look like a silent no-reply on reload.
+      if (streamStarted) {
+        try {
+          await loadChat(targetChatId);
+          await loadChats();
+        } catch {
+          /* ignore */
+        }
+        setStatus(
+          "Die Verbindung wurde unterbrochen. Bitte prüfen, ob eine Antwort vorliegt, oder die Nachricht erneut senden.",
+        );
+      } else {
+        restoreComposerAfterFailure();
+        setStatus("Nachricht konnte nicht gesendet werden.");
+      }
       setThinkingStatus(null);
     } finally {
       setIsBusy(false);

@@ -277,69 +277,64 @@ async function ensureValidAssistantOutput(input: {
 
   let candidate = stripCodeFences(input.assistantText);
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    for (const utilityModel of input.utilityModels) {
-      try {
-        const repairResponse = await input.anthropic.messages.create({
-          model: utilityModel,
-          max_tokens: 8192,
-          system:
-            "You repair malformed JSON. Return exactly one valid JSON object only. No markdown, no prose, no code fences.",
-          messages: [
-            {
-              role: "user",
-              content:
-                `Repariere das folgende fehlerhafte JSON für eine Survey-Aktion.` +
-                `\n\nWICHTIG:` +
-                `\n- Gib NUR ein valides JSON-Objekt zurück.` +
-                `\n- Keine Erklärungen, kein Markdown, keine Code-Fences.` +
-                `\n- Behalte die fachliche Bedeutung bei.` +
-                `\n\nFehlerhafte Antwort:\n${candidate}`,
-            },
-          ],
-        });
-        const repairedText = extractText(repairResponse).trim();
-        const repairedParsed = tryParseJsonObject(repairedText);
-        if (repairedParsed) {
-          return { assistantText: repairedText, parsedJson: repairedParsed };
-        }
-        if (repairedText) candidate = repairedText;
-        break;
-      } catch (error) {
-        if (isModelNotFoundError(error)) continue;
-        throw error;
-      }
+    // Truncate repair input — full 16k+ Fragebogen JSON can blow utility context.
+    const repairSource =
+      candidate.length > 120_000 ? `${candidate.slice(0, 120_000)}\n…` : candidate;
+    const repairCall = await callAnthropicFirstAvailable({
+      anthropic: input.anthropic,
+      models: input.utilityModels,
+      maxTokens: 8192,
+      system:
+        "You repair malformed JSON. Return exactly one valid JSON object only. No markdown, no prose, no code fences.",
+      messages: [
+        {
+          role: "user",
+          content:
+            `Repariere das folgende fehlerhafte JSON für eine Survey-Aktion.` +
+            `\n\nWICHTIG:` +
+            `\n- Gib NUR ein valides JSON-Objekt zurück.` +
+            `\n- Keine Erklärungen, kein Markdown, keine Code-Fences.` +
+            `\n- Behalte die fachliche Bedeutung bei.` +
+            `\n\nFehlerhafte Antwort:\n${repairSource}`,
+        },
+      ],
+      stream: true,
+      timeoutMs: 120_000,
+    });
+    if (!repairCall) break;
+    const repairedText = extractText(repairCall.response).trim();
+    const repairedParsed = tryParseJsonObject(repairedText);
+    if (repairedParsed) {
+      return { assistantText: repairedText, parsedJson: repairedParsed };
     }
+    if (repairedText) candidate = repairedText;
   }
 
   const actionModels = resolveSurveyActionModels();
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    for (const actionModel of actionModels) {
-      try {
-        const regenerate = await input.anthropic.messages.create({
-          model: actionModel,
-          max_tokens: 16384,
-          system: input.system,
-          messages: [
-            ...input.baseMessages,
-            { role: "assistant", content: input.assistantText },
-            {
-              role: "user",
-              content:
-                "Deine letzte Antwort war nicht als valides JSON parsebar. Erzeuge jetzt die gleiche Aktion erneut, " +
-                "aber gib ausschließlich EIN valides JSON-Objekt zurück. Kein Text davor/danach, keine Markdown-Code-Fences.",
-            },
-          ],
-        });
-        const regeneratedText = extractText(regenerate).trim();
-        const regeneratedParsed = tryParseJsonObject(regeneratedText);
-        if (regeneratedParsed) {
-          return { assistantText: regeneratedText, parsedJson: regeneratedParsed };
-        }
-        break;
-      } catch (error) {
-        if (isModelNotFoundError(error)) continue;
-        throw error;
-      }
+    const regenerate = await callAnthropicFirstAvailable({
+      anthropic: input.anthropic,
+      models: actionModels,
+      maxTokens: 16384,
+      system: input.system,
+      messages: [
+        ...input.baseMessages,
+        { role: "assistant", content: input.assistantText },
+        {
+          role: "user",
+          content:
+            "Deine letzte Antwort war nicht als valides JSON parsebar. Erzeuge jetzt die gleiche Aktion erneut, " +
+            "aber gib ausschließlich EIN valides JSON-Objekt zurück. Kein Text davor/danach, keine Markdown-Code-Fences.",
+        },
+      ],
+      stream: true,
+      timeoutMs: 240_000,
+    });
+    if (!regenerate) break;
+    const regeneratedText = extractText(regenerate.response).trim();
+    const regeneratedParsed = tryParseJsonObject(regeneratedText);
+    if (regeneratedParsed) {
+      return { assistantText: regeneratedText, parsedJson: regeneratedParsed };
     }
   }
 
@@ -674,218 +669,6 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     .eq("id", chatId)
     .eq("user_id", auth.userId);
 
-  const prefsResult = await ensureSurveyAiUserPreferences(auth.supabase, auth.userId);
-  const globalAssistantRules = prefsResult.ok ? prefsResult.prefs.global_assistant_rules.trim() : "";
-  const assistantRulesFromChat = (chat.assistant_rules ?? "").trim();
-
-  const { data: chatMessages } = await auth.supabase
-    .from("ai_chat_messages")
-    .select("id,role,content,metadata,created_at")
-    .eq("chat_id", chatId)
-    .order("created_at", { ascending: true });
-
-  const dbRowsFull: DbChatMessageRow[] = (chatMessages ?? []).map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-    metadata: m.metadata,
-  }));
-
-  const fullHistoryPlain = dbRowsFull.map((m) => ({
-    role: m.role as "user" | "assistant" | "system",
-    content: stripLegacyAttachmentSuffix(m.content),
-  }));
-
-  const rawDbSlice = dbRowsFull.slice(-RAW_HISTORY_LIMIT);
-  const summaryDbSlice = dbRowsFull.slice(0, Math.max(0, dbRowsFull.length - RAW_HISTORY_LIMIT));
-  const summaryForModel = summaryDbSlice.map((m) => ({
-    role: m.role as "user" | "assistant" | "system",
-    content: stripLegacyAttachmentSuffix(m.content),
-  }));
-  const conversationSummary = buildConversationSummary(summaryForModel);
-
-  const rawSliceIds = rawDbSlice.map((m) => m.id);
-  let attachRowsScoped: Array<{
-    message_id: string | null;
-    storage_path: string;
-    mime_type: string;
-    file_name: string;
-  }> = [];
-  if (rawSliceIds.length > 0) {
-    const { data: attData } = await auth.supabase
-      .from("ai_chat_attachments")
-      .select("message_id,storage_path,mime_type,file_name")
-      .eq("chat_id", chatId)
-      .in("message_id", rawSliceIds);
-    attachRowsScoped = attData ?? [];
-  }
-
-  const attachmentsByMessageId = new Map<string, DbAttachmentRow[]>();
-  for (const r of attachRowsScoped) {
-    const mid = r.message_id as string | null;
-    if (!mid) continue;
-    const arr = attachmentsByMessageId.get(mid) ?? [];
-    arr.push({
-      message_id: mid,
-      storage_path: r.storage_path,
-      mime_type: r.mime_type,
-      file_name: r.file_name,
-    });
-    attachmentsByMessageId.set(mid, arr);
-  }
-
-  let anthropicHistory: Anthropic.MessageParam[];
-  try {
-    anthropicHistory = await hydrateHistoryForAnthropic({
-      supabase: auth.supabase,
-      messages: rawDbSlice,
-      attachmentsByMessageId,
-    });
-  } catch (e) {
-    console.error("hydrateHistoryForAnthropic failed; using text-only history", e);
-    anthropicHistory = rawDbSlice
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: stripLegacyAttachmentSuffix(m.content),
-      }));
-  }
-
-  const { data: surveys } = await auth.supabase
-    .from("surveys")
-    .select("id,title,description,visibility,folder_id,updated_at")
-    .is("deleted_at", null)
-    .order("updated_at", { ascending: false })
-    .limit(SURVEY_RANK_POOL);
-  const { data: folders } = await auth.supabase
-    .from("survey_folders")
-    .select("id,name")
-    .order("name", { ascending: true });
-
-  const activeSurveyId = parsed.data.pageContext.surveyId ?? null;
-  const terms = toPromptTerms(parsed.data.content);
-
-  type SurveyRankRow = {
-    id: string;
-    title: string;
-    description: string | null;
-    visibility: "private" | "public";
-    folder_id: string | null;
-    updated_at: string;
-  };
-
-  const rankedSurveys = (surveys ?? [])
-    .map((s: SurveyRankRow) => {
-      const hay = `${s.title} ${s.description ?? ""}`.toLowerCase();
-      const score = terms.reduce((acc, term) => (hay.includes(term) ? acc + 1 : acc), 0);
-      const currentBoost = activeSurveyId && activeSurveyId === s.id ? 3 : 0;
-      return { ...s, score: score + currentBoost };
-    })
-    .sort(
-      (a: SurveyRankRow & { score: number }, b: SurveyRankRow & { score: number }) =>
-        b.score - a.score || b.updated_at.localeCompare(a.updated_at),
-    );
-
-  const knownSurveyIds = new Set<string>();
-  if (activeSurveyId) knownSurveyIds.add(activeSurveyId);
-  for (const s of rankedSurveys) {
-    if (knownSurveyIds.size >= MAX_KNOWN_SURVEYS) break;
-    knownSurveyIds.add(s.id);
-  }
-
-  const candidateIdSet = new Set<string>();
-  if (activeSurveyId) candidateIdSet.add(activeSurveyId);
-  for (const s of rankedSurveys) {
-    if (candidateIdSet.size >= MAX_CANDIDATE_SURVEY_CONTEXTS) break;
-    candidateIdSet.add(s.id);
-  }
-  const candidateIds = Array.from(candidateIdSet);
-
-  const { data: candidateSurveyContexts } =
-    candidateIds.length > 0
-      ? await auth.supabase
-          .from("surveys")
-          .select("id,title,description,visibility,folder_id,notification_emails,definition")
-          .in("id", candidateIds)
-          .is("deleted_at", null)
-      : { data: [] as Array<{
-          id: string;
-          title: string;
-          description: string | null;
-          visibility: "private" | "public";
-          folder_id: string | null;
-          notification_emails: string[] | null;
-          definition: unknown;
-        }> };
-
-  const lastAssistantMsg = [...fullHistoryPlain].reverse().find((m) => m.role === "assistant");
-  const recentAssistantWasAction = lastAssistantMsg
-    ? hasActionJsonIntent(lastAssistantMsg.content)
-    : false;
-  const modelSelection = selectSurveyModelsForMessage({
-    userMessage: parsed.data.content,
-    page: parsed.data.pageContext.page,
-    recentAssistantWasAction,
-  });
-
-  const pastedWebsiteContent = await buildPastedUrlContextText(parsed.data.content);
-
-  const systemPromptInput: SurveyChatSystemPromptInput = {
-    globalUserRules: globalAssistantRules,
-    chatUserRules: assistantRulesFromChat,
-    pageContext: {
-      page: parsed.data.pageContext.page,
-      surveyId: activeSurveyId,
-      visibility: parsed.data.pageContext.visibility,
-      slug: parsed.data.pageContext.slug,
-      notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
-    },
-    surveys: rankedSurveys
-      .filter((s: SurveyRankRow & { score: number }) => knownSurveyIds.has(s.id))
-      .map((s: SurveyRankRow) => ({
-        id: s.id,
-        title: s.title,
-        visibility: s.visibility,
-        folderId: s.folder_id ?? null,
-      })),
-    folders: (folders ?? []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name })),
-    candidateSurveyContexts: (candidateSurveyContexts ?? []).map(
-      (s: {
-        id: string;
-        title: string;
-        description: string | null;
-        visibility: "private" | "public";
-        folder_id: string | null;
-        notification_emails: string[] | null;
-        definition: unknown;
-      }) => {
-        const base = {
-          id: s.id,
-          title: s.title,
-          visibility: s.visibility,
-          folderId: s.folder_id ?? null,
-          notificationEmails: s.notification_emails ?? [],
-          stepOutline: buildStepOutline(s.definition),
-          duplicateIdReport: buildDuplicateIdReport(s.definition),
-        };
-        if (activeSurveyId && s.id === activeSurveyId) {
-          return { ...base, definition: s.definition };
-        }
-        return base;
-      },
-    ),
-    attachmentSummaries: attachmentSummaries.map((a) => `${a.fileName} (${a.mimeType}, ${a.sizeBytes} bytes)`),
-    conversationSummary,
-    pastedWebsiteContent,
-  };
-
-  const systemBlocks = buildCachedSurveyChatSystem(systemPromptInput);
-
-  const useMultiPhase =
-    isMultiPhaseSurveyCreationEnabled() &&
-    modelSelection.tier === "action" &&
-    isLargeSurveyCreationIntent(parsed.data.content);
-
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ ok: false, message: "ANTHROPIC_API_KEY is not configured." }, { status: 500 });
@@ -895,17 +678,233 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     defaultHeaders: anthropicSurveyBetaHeaders(),
   });
 
-  await maybeAutoTitleAiChat({
-    supabase: auth.supabase,
-    userId: auth.userId,
-    chatId,
-    title: chat.title,
-    messages: fullHistoryPlain,
-    anthropic,
-  });
-
+  // Start SSE immediately after the user message is persisted so proxies get a
+  // first byte quickly. Heavy prep (history, URL fetch, title, Anthropic) runs
+  // inside the stream with heartbeats + status events.
   const stream = createSseStream(async (emit) => {
     emit("status", { message: "Ich lese kurz den bisherigen Chatverlauf..." });
+
+    const prefsResult = await ensureSurveyAiUserPreferences(auth.supabase, auth.userId);
+    const globalAssistantRules = prefsResult.ok ? prefsResult.prefs.global_assistant_rules.trim() : "";
+    const assistantRulesFromChat = (chat.assistant_rules ?? "").trim();
+
+    const { data: chatMessages } = await auth.supabase
+      .from("ai_chat_messages")
+      .select("id,role,content,metadata,created_at")
+      .eq("chat_id", chatId)
+      .order("created_at", { ascending: true });
+
+    const dbRowsFull: DbChatMessageRow[] = (chatMessages ?? []).map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      metadata: m.metadata,
+    }));
+
+    const fullHistoryPlain = dbRowsFull.map((m) => ({
+      role: m.role as "user" | "assistant" | "system",
+      content: stripLegacyAttachmentSuffix(m.content),
+    }));
+
+    const rawDbSlice = dbRowsFull.slice(-RAW_HISTORY_LIMIT);
+    const summaryDbSlice = dbRowsFull.slice(0, Math.max(0, dbRowsFull.length - RAW_HISTORY_LIMIT));
+    const summaryForModel = summaryDbSlice.map((m) => ({
+      role: m.role as "user" | "assistant" | "system",
+      content: stripLegacyAttachmentSuffix(m.content),
+    }));
+    const conversationSummary = buildConversationSummary(summaryForModel);
+
+    const rawSliceIds = rawDbSlice.map((m) => m.id);
+    let attachRowsScoped: Array<{
+      message_id: string | null;
+      storage_path: string;
+      mime_type: string;
+      file_name: string;
+    }> = [];
+    if (rawSliceIds.length > 0) {
+      const { data: attData } = await auth.supabase
+        .from("ai_chat_attachments")
+        .select("message_id,storage_path,mime_type,file_name")
+        .eq("chat_id", chatId)
+        .in("message_id", rawSliceIds);
+      attachRowsScoped = attData ?? [];
+    }
+
+    const attachmentsByMessageId = new Map<string, DbAttachmentRow[]>();
+    for (const r of attachRowsScoped) {
+      const mid = r.message_id as string | null;
+      if (!mid) continue;
+      const arr = attachmentsByMessageId.get(mid) ?? [];
+      arr.push({
+        message_id: mid,
+        storage_path: r.storage_path,
+        mime_type: r.mime_type,
+        file_name: r.file_name,
+      });
+      attachmentsByMessageId.set(mid, arr);
+    }
+
+    let anthropicHistory: Anthropic.MessageParam[];
+    try {
+      anthropicHistory = await hydrateHistoryForAnthropic({
+        supabase: auth.supabase,
+        messages: rawDbSlice,
+        attachmentsByMessageId,
+      });
+    } catch (e) {
+      console.error("hydrateHistoryForAnthropic failed; using text-only history", e);
+      anthropicHistory = rawDbSlice
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: stripLegacyAttachmentSuffix(m.content),
+        }));
+    }
+
+    const { data: surveys } = await auth.supabase
+      .from("surveys")
+      .select("id,title,description,visibility,folder_id,updated_at")
+      .is("deleted_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(SURVEY_RANK_POOL);
+    const { data: folders } = await auth.supabase
+      .from("survey_folders")
+      .select("id,name")
+      .order("name", { ascending: true });
+
+    const folderSnapshots = (folders ?? []).map((f: { id: string; name: string }) => ({
+      id: f.id,
+      name: f.name,
+    }));
+
+    const activeSurveyId = parsed.data.pageContext.surveyId ?? null;
+    const terms = toPromptTerms(parsed.data.content);
+
+    type SurveyRankRow = {
+      id: string;
+      title: string;
+      description: string | null;
+      visibility: "private" | "public";
+      folder_id: string | null;
+      updated_at: string;
+    };
+
+    const rankedSurveys = (surveys ?? [])
+      .map((s: SurveyRankRow) => {
+        const hay = `${s.title} ${s.description ?? ""}`.toLowerCase();
+        const score = terms.reduce((acc, term) => (hay.includes(term) ? acc + 1 : acc), 0);
+        const currentBoost = activeSurveyId && activeSurveyId === s.id ? 3 : 0;
+        return { ...s, score: score + currentBoost };
+      })
+      .sort(
+        (a: SurveyRankRow & { score: number }, b: SurveyRankRow & { score: number }) =>
+          b.score - a.score || b.updated_at.localeCompare(a.updated_at),
+      );
+
+    const knownSurveyIds = new Set<string>();
+    if (activeSurveyId) knownSurveyIds.add(activeSurveyId);
+    for (const s of rankedSurveys) {
+      if (knownSurveyIds.size >= MAX_KNOWN_SURVEYS) break;
+      knownSurveyIds.add(s.id);
+    }
+
+    const candidateIdSet = new Set<string>();
+    if (activeSurveyId) candidateIdSet.add(activeSurveyId);
+    for (const s of rankedSurveys) {
+      if (candidateIdSet.size >= MAX_CANDIDATE_SURVEY_CONTEXTS) break;
+      candidateIdSet.add(s.id);
+    }
+    const candidateIds = Array.from(candidateIdSet);
+
+    const { data: candidateSurveyContexts } =
+      candidateIds.length > 0
+        ? await auth.supabase
+            .from("surveys")
+            .select("id,title,description,visibility,folder_id,notification_emails,definition")
+            .in("id", candidateIds)
+            .is("deleted_at", null)
+        : {
+            data: [] as Array<{
+              id: string;
+              title: string;
+              description: string | null;
+              visibility: "private" | "public";
+              folder_id: string | null;
+              notification_emails: string[] | null;
+              definition: unknown;
+            }>,
+          };
+
+    const lastAssistantMsg = [...fullHistoryPlain].reverse().find((m) => m.role === "assistant");
+    const recentAssistantWasAction = lastAssistantMsg
+      ? hasActionJsonIntent(lastAssistantMsg.content)
+      : false;
+    const modelSelection = selectSurveyModelsForMessage({
+      userMessage: parsed.data.content,
+      page: parsed.data.pageContext.page,
+      recentAssistantWasAction,
+    });
+
+    emit("status", { message: "Ich bereite den Kontext vor..." });
+    const pastedWebsiteContent = await buildPastedUrlContextText(parsed.data.content);
+
+    const systemPromptInput: SurveyChatSystemPromptInput = {
+      globalUserRules: globalAssistantRules,
+      chatUserRules: assistantRulesFromChat,
+      pageContext: {
+        page: parsed.data.pageContext.page,
+        surveyId: activeSurveyId,
+        visibility: parsed.data.pageContext.visibility,
+        slug: parsed.data.pageContext.slug,
+        notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
+      },
+      surveys: rankedSurveys
+        .filter((s: SurveyRankRow & { score: number }) => knownSurveyIds.has(s.id))
+        .map((s: SurveyRankRow) => ({
+          id: s.id,
+          title: s.title,
+          visibility: s.visibility,
+          folderId: s.folder_id ?? null,
+        })),
+      folders: folderSnapshots,
+      candidateSurveyContexts: (candidateSurveyContexts ?? []).map(
+        (s: {
+          id: string;
+          title: string;
+          description: string | null;
+          visibility: "private" | "public";
+          folder_id: string | null;
+          notification_emails: string[] | null;
+          definition: unknown;
+        }) => {
+          const base = {
+            id: s.id,
+            title: s.title,
+            visibility: s.visibility,
+            folderId: s.folder_id ?? null,
+            notificationEmails: s.notification_emails ?? [],
+            stepOutline: buildStepOutline(s.definition),
+            duplicateIdReport: buildDuplicateIdReport(s.definition),
+          };
+          if (activeSurveyId && s.id === activeSurveyId) {
+            return { ...base, definition: s.definition };
+          }
+          return base;
+        },
+      ),
+      attachmentSummaries: attachmentSummaries.map(
+        (a) => `${a.fileName} (${a.mimeType}, ${a.sizeBytes} bytes)`,
+      ),
+      conversationSummary,
+      pastedWebsiteContent,
+    };
+
+    const systemBlocks = buildCachedSurveyChatSystem(systemPromptInput);
+
+    const useMultiPhase =
+      isMultiPhaseSurveyCreationEnabled() &&
+      modelSelection.tier === "action" &&
+      isLargeSurveyCreationIntent(parsed.data.content);
 
     emit("meta", {
       pageContext: parsed.data.pageContext,
@@ -921,6 +920,16 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       candidateSurveyCount: candidateIds.length,
     });
 
+    // Non-blocking for the main reply path; title can finish in parallel-ish after first status.
+    void maybeAutoTitleAiChat({
+      supabase: auth.supabase,
+      userId: auth.userId,
+      chatId,
+      title: chat.title,
+      messages: fullHistoryPlain,
+      anthropic,
+    }).catch((err) => console.warn("auto chat title failed", err));
+
     let response: Anthropic.Messages.Message | null = null;
     let selectedModel: string | null = null;
     let rawAssistantText: string | null = null;
@@ -932,6 +941,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         userMessage: parsed.data.content,
         system: systemBlocks,
         historyMessages: anthropicHistory,
+        folders: folderSnapshots,
         onStatus: (message) => emit("status", { message }),
       });
       if (multi.ok) {
@@ -940,7 +950,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         multiPhaseMeta = { phaseCount: multi.phaseCount, stepCount: multi.stepCount };
       } else {
         emit("status", {
-          message: "Mehrphasige Erstellung fehlgeschlagen — ich versuche es in einem Schritt…",
+          message: `Mehrphasige Erstellung fehlgeschlagen (${multi.message}) — ich versuche es in einem Schritt…`,
         });
         console.warn("Multi-phase survey creation failed; falling back to single-shot", multi.message);
       }
@@ -955,6 +965,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         maxTokens: modelSelection.maxTokens,
         system: systemBlocks,
         messages: anthropicHistory,
+        stream: true,
         timeoutMs: 240_000,
       });
 
@@ -1013,7 +1024,11 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     emit("status", { message: "Ich speichere alles im Chat..." });
 
     if (assistantInsert.error || !assistantInsert.data) {
-      emit("error", { message: "Assistant message could not be persisted." });
+      emit("error", {
+        message:
+          assistantInsert.error?.message ||
+          "Assistant message could not be persisted.",
+      });
       return;
     }
 
@@ -1035,6 +1050,9 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           .select("id")
           .single();
         actionId = insertedAction.data?.id ?? null;
+        if (!actionId) {
+          console.warn("ai_chat_actions insert failed after valid proposal", insertedAction.error);
+        }
       } else if (typeof (parsedJson as { kind?: unknown }).kind === "string") {
         emit("status", { message: "Ich hinterlege den Vorschlag zur Freigabe..." });
         const parsedObj = parsedJson as Record<string, unknown> & { kind: string };
@@ -1054,6 +1072,10 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           .select("id")
           .single();
         actionId = insertedAction.data?.id ?? null;
+      } else {
+        console.warn("Assistant JSON parsed but surveyAiProposalSchema rejected it", {
+          issues: proposal.error.issues.slice(0, 5),
+        });
       }
     }
 

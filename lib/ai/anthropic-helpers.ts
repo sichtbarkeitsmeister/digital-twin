@@ -167,9 +167,11 @@ export function isAnthropicModelNotFoundError(error: unknown): boolean {
 
 /**
  * Anthropic requires streaming for long-running requests (high max_tokens can
- * exceed the non-streaming time limit). Auto-enable above this threshold.
+ * exceed the non-streaming time limit). Multiphase outline/expand uses 8192 —
+ * the previous `>` threshold left those on non-streaming and they hung/failed
+ * on large Fragebogen pastes. Default to streaming always; opt out explicitly.
  */
-const STREAM_REQUIRED_MAX_TOKENS = 8_192;
+const STREAM_REQUIRED_MAX_TOKENS = 4_096;
 
 function isAbortError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -185,12 +187,12 @@ export async function callAnthropicFirstAvailable(input: {
   maxTokens: number;
   system: SurveyChatSystem;
   messages: Anthropic.MessageParam[];
-  /** Force streaming; defaults to true when maxTokens > 8192. */
+  /** Force streaming on/off; defaults to true when maxTokens >= 4096. */
   stream?: boolean;
   /** Abort the request after this many ms (prevents hung UI when platform kills the route). */
   timeoutMs?: number;
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
-  const useStream = input.stream ?? input.maxTokens > STREAM_REQUIRED_MAX_TOKENS;
+  const useStream = input.stream ?? input.maxTokens >= STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
 
   for (const model of input.models) {

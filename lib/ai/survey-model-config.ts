@@ -107,13 +107,17 @@ export function isLargeSurveyCreationIntent(userMessage: string): boolean {
 
   const hasSurveyNoun = SURVEY_NOUN_RE.test(text);
   const hasCreateVerb = CREATE_SURVEY_RE.test(text);
-  if (!hasSurveyNoun) return false;
+  const looksLikeNumberedQuestionnaire = /#{1,3}\s+\d+\./.test(text);
+  // German Fragebogen pastes often omit the word "fragebogen" and only say "abspeichern".
+  const largePaste =
+    text.length >= LARGE_PASTE_CHAR_THRESHOLD &&
+    (hasCreateVerb || looksLikeNumberedQuestionnaire || /\b(?:frage|fragen)\b/i.test(text));
 
-  // Long pasted Fragebogen + save/create intent (or just a very large questionnaire dump).
-  if (text.length >= LARGE_PASTE_CHAR_THRESHOLD && (hasCreateVerb || /#{1,3}\s+\d+\./.test(text))) {
+  if (largePaste && (hasSurveyNoun || looksLikeNumberedQuestionnaire || hasCreateVerb)) {
     return true;
   }
 
+  if (!hasSurveyNoun) return false;
   if (!hasCreateVerb) return false;
 
   const numMatch =
