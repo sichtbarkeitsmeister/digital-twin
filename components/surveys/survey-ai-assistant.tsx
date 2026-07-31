@@ -33,14 +33,14 @@ export function SurveyAiAssistant<TContext extends PageContext>({
     <div className="fixed bottom-4 right-4 z-[130] flex max-w-[calc(100vw-1rem)] flex-col items-end gap-2">
       {hasOpenedOnce ? (
         <Card
-          className={`h-[86vh] w-[min(1220px,calc(100vw-1rem))] max-h-[86vh] flex-col overflow-hidden shadow-xl ${
-            open ? "flex" : "hidden"
+          className={`flex h-[min(86vh,calc(100dvh-5.5rem))] w-[min(1220px,calc(100vw-1rem))] max-h-[calc(100dvh-5.5rem)] flex-col overflow-hidden shadow-xl ${
+            open ? "" : "hidden"
           }`}
           onWheelCapture={(e) => {
             e.stopPropagation();
           }}
         >
-          <CardHeader className="pb-2">
+          <CardHeader className="shrink-0 space-y-0 p-4 pb-2">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Sparkles className="h-4 w-4" />
@@ -57,8 +57,10 @@ export function SurveyAiAssistant<TContext extends PageContext>({
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 pt-0">
-            <SurveyAiChatShell pageContext={context} />
+          <CardContent className="relative min-h-0 flex-1 overflow-hidden p-0">
+            <div className="absolute inset-x-3 bottom-3 top-0 min-h-0">
+              <SurveyAiChatShell pageContext={context} />
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -81,4 +83,3 @@ export function SurveyAiAssistant<TContext extends PageContext>({
     </div>
   );
 }
-
