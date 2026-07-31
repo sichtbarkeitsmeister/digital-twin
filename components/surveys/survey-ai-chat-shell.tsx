@@ -38,6 +38,7 @@ import {
   SURVEY_AI_ATTACHMENT_ACCEPT_ATTR,
   SURVEY_AI_MAX_ATTACHMENT_BYTES,
   SURVEY_AI_MAX_ATTACHMENTS,
+  SURVEY_AI_MAX_MESSAGE_CHARS,
 } from "@/lib/ai/survey-ai-attachments-shared";
 
 type PageContext = {
@@ -545,6 +546,12 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   async function sendPromptInternal(forcedPrompt?: string) {
     const promptText = (forcedPrompt ?? prompt).trim();
     if (!promptText) return;
+    if (promptText.length > SURVEY_AI_MAX_MESSAGE_CHARS) {
+      setStatus(
+        `Nachricht zu lang (${promptText.length.toLocaleString("de-DE")} / ${SURVEY_AI_MAX_MESSAGE_CHARS.toLocaleString("de-DE")} Zeichen). Bitte kürzen oder als Datei anhängen.`,
+      );
+      return;
+    }
     const outgoingAttachments = [...attachments];
     const previewUrlsToCleanup = outgoingAttachments
       .map((a) => a.previewObjectUrl)
@@ -596,6 +603,14 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       setAttachments([]);
     }
 
+    const restoreComposerAfterFailure = () => {
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticUserId));
+      if (!forcedPrompt) {
+        setPrompt(promptText);
+        setAttachments(outgoingAttachments);
+      }
+    };
+
     try {
       const res = await fetch(`/api/ai/chats/${targetChatId}/messages`, {
         method: "POST",
@@ -610,6 +625,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         const data = (await res.json().catch(() => null)) as {
           message?: string;
         } | null;
+        restoreComposerAfterFailure();
         setStatus(data?.message ?? "Nachricht konnte nicht gesendet werden.");
         return;
       }
@@ -617,6 +633,8 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let sawDone = false;
+      let sawError = false;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -640,20 +658,28 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
             if (nextStatus) setThinkingStatus(nextStatus);
           }
           if (eventName === "error") {
+            sawError = true;
             setStatus(String(payload.message ?? "Streaming error."));
             setThinkingStatus(null);
           }
           if (eventName === "done") {
+            sawDone = true;
             setThinkingStatus(null);
           }
         }
       }
       await loadChats();
       await loadChat(targetChatId);
+      if (!sawDone && !sawError) {
+        setStatus(
+          "Die Antwort wurde unterbrochen (Timeout). Bitte die Nachricht erneut senden.",
+        );
+      }
       for (const u of previewUrlsToCleanup) {
         URL.revokeObjectURL(u);
       }
     } catch {
+      restoreComposerAfterFailure();
       setStatus("Nachricht konnte nicht gesendet werden.");
       setThinkingStatus(null);
     } finally {
@@ -875,7 +901,12 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
             </p>
             <p className="truncate text-xs text-secondary">{contextSummary}</p>
             {status ? (
-              <p className="mt-1 text-xs text-secondary">{status}</p>
+              <p
+                className="mt-1 whitespace-normal break-words rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"
+                role="alert"
+              >
+                {status}
+              </p>
             ) : null}
           </div>
           <div className="flex items-center gap-2 text-xs">

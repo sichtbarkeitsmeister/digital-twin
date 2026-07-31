@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/chat-context";
 import {
   anthropicSurveyBetaHeaders,
+  callAnthropicFirstAvailable,
   extractAnthropicText,
   isAnthropicModelNotFoundError,
   isMultiPhaseSurveyCreationEnabled,
@@ -28,6 +29,7 @@ import {
   normalizeMimeType,
   sanitizeStorageFileSegment,
 } from "@/lib/ai/chat-attachments";
+import { SURVEY_AI_MAX_MESSAGE_CHARS } from "@/lib/ai/survey-ai-attachments-shared";
 import { requireAuthUser, getChatOrNull } from "@/lib/ai/chat-db";
 import {
   hydrateHistoryForAnthropic,
@@ -46,6 +48,8 @@ import {
 import { runMultiPhaseSurveyCreation } from "@/lib/ai/survey-multiphase-create";
 import { surveyAiProposalSchema } from "@/lib/ai/survey-assistant-types";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
+
+export const maxDuration = 300;
 
 const MAX_CANDIDATE_SURVEY_CONTEXTS = 2;
 const MAX_KNOWN_SURVEYS = 50;
@@ -74,7 +78,14 @@ const attachmentInboundSchema = z
 
 const requestSchema = z
   .object({
-    content: z.string().trim().min(1).max(12000),
+    content: z
+      .string()
+      .trim()
+      .min(1)
+      .max(
+        SURVEY_AI_MAX_MESSAGE_CHARS,
+        `Nachricht zu lang (max. ${SURVEY_AI_MAX_MESSAGE_CHARS.toLocaleString("de-DE")} Zeichen). Bitte kürzen oder als Datei anhängen.`,
+      ),
     pageContext: z.object({
       page: z.enum(["survey_list", "survey_builder_new", "survey_builder_edit"]),
       surveyId: z.string().uuid().nullable().optional(),
@@ -564,9 +575,10 @@ async function completeAssistantTextWithContinuation(input: {
 
   while (stopReason === "max_tokens" && rounds < 3) {
     rounds += 1;
-    const continuation = await input.anthropic.messages.create({
-      model: input.model,
-      max_tokens: input.maxTokens,
+    const continued = await callAnthropicFirstAvailable({
+      anthropic: input.anthropic,
+      models: [input.model],
+      maxTokens: input.maxTokens,
       system: input.system,
       messages: [
         ...input.baseMessages,
@@ -577,12 +589,14 @@ async function completeAssistantTextWithContinuation(input: {
             "Fahre exakt dort fort, wo du aufgehört hast. Wiederhole nichts und beende die Antwort vollständig.",
         },
       ],
+      timeoutMs: 240_000,
     });
+    if (!continued) break;
 
-    const nextText = extractText(continuation);
+    const nextText = extractText(continued.response);
     // Never inject separator characters between continuations: this can corrupt large JSON payloads.
     if (nextText) fullText += nextText;
-    stopReason = continuation.stop_reason;
+    stopReason = continued.response.stop_reason;
   }
 
   return fullText;
@@ -935,36 +949,29 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     if (!rawAssistantText) {
       emit("status", { message: "Ich formuliere gerade die beste Antwort..." });
 
-      let lastError: unknown = null;
-      for (const model of modelSelection.modelsToTry) {
-        try {
-          response = await anthropic.messages.create({
-            model,
-            max_tokens: modelSelection.maxTokens,
-            system: systemBlocks,
-            messages: anthropicHistory,
-          });
-          selectedModel = model;
-          break;
-        } catch (error) {
-          lastError = error;
-          if (isModelNotFoundError(error)) continue;
-          throw error;
-        }
-      }
+      const firstCall = await callAnthropicFirstAvailable({
+        anthropic,
+        models: modelSelection.modelsToTry,
+        maxTokens: modelSelection.maxTokens,
+        system: systemBlocks,
+        messages: anthropicHistory,
+        timeoutMs: 240_000,
+      });
 
-      if (!response || !selectedModel) {
+      if (!firstCall) {
         emit("error", {
           message:
             "AI model unavailable. Set ANTHROPIC_SURVEY_CHAT_MODEL / ANTHROPIC_SURVEY_ACTION_MODEL to valid models.",
         });
         console.error("Global chat model selection failed", {
-          lastError,
           tier: modelSelection.tier,
           modelsToTry: modelSelection.modelsToTry,
         });
         return;
       }
+
+      response = firstCall.response;
+      selectedModel = firstCall.model;
 
       rawAssistantText = await completeAssistantTextWithContinuation({
         anthropic,
