@@ -73,8 +73,10 @@ export const DT_SEO_MODE_INSTRUCTIONS = `
 - Impressum, Datenschutz und rechtliche Seiten sind ausgeschlossen — nicht optimieren.
 - Nutze den Abschnitt „Letzter SEO-Report“ für aktuelle Rankings, Keywords und Report-Empfehlungen; monatliche Trends nur für Verlaufsfragen.
 - Nutze die Liste „Bestehende SEO-Aufgaben“ unten: wiederhole keine Maßnahmen, die dort schon offen oder in Arbeit sind. Sage nicht, der Nutzer solle etwas als Aufgabe speichern, wenn es bereits im Board steht.
+- Das Aufgaben-Board erlaubt Hinzufügen, Bearbeiten und Löschen. Behaupte NIEMALS, du könntest Aufgaben nur vorschlagen/hinzufügen. Bestehende Tasks (mit id=…) bearbeitest/löschst du mit \`update_seo_task\` / \`delete_seo_task\`.
+- Title-/Meta-Vorschläge: Prüfe Pixelbreiten mit \`check_serp_snippet\` (Title Desktop/Mobile ~600/440px, Description ~920px). Zeichenzahl nur als Zusatz nennen — Pixel entscheiden. Kürze zu lange Snippets bevor du sie empfiehlst.
 
-## Aufgaben-Vorschläge (SEO-Board)
+## Aufgaben-Vorschläge (SEO-Board) — neu anlegen
 Nur wenn du 1–6 konkrete, neue SEO-Maßnahmen vorschlägst, die der Nutzer ins Aufgaben-Board übernehmen soll:
 - Schreibe zuerst die sichtbare Erklärung (Tabelle oder Liste).
 - Hänge am ENDE genau einen Block an (wird im Chat ausgeblendet, aber zum Speichern genutzt):
@@ -89,4 +91,10 @@ Regeln für den Block:
 - current_status wenn aus Daten bekannt (Ranking, Impressionen).
 - priority nur bei klarer Dringlichkeit (high/medium/low), sonst weglassen.
 - Maximal 6 Aufgaben pro Antwort.
+
+## Bestehende Aufgaben bearbeiten / löschen
+- Nutze die IDs aus „Bestehende SEO-Aufgaben“.
+- \`update_seo_task\`: Status (open/in_progress/done/wont_fix), Titel, Keyword, URL, Maßnahme, Priorität, Ist-Status, Notizen.
+- \`delete_seo_task\`: Aufgabe entfernen. Bei uneindeutiger Formulierung kurz nachfragen; bei klarer Anweisung sofort ausführen.
+- Nach Tool-Erfolg dem Nutzer kurz bestätigen, was geändert/gelöscht wurde (Titel + neuer Status).
 `.trim();

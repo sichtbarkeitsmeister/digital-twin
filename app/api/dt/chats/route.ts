@@ -54,7 +54,7 @@ export async function GET(req: Request) {
     }
   }
 
-  if (parsed.data.mode === "seo" && !adminOversight) {
+  if (parsed.data.mode === "seo") {
     const gate = await requireDtSeoAccess(
       auth.supabase,
       auth.userId!,
@@ -70,7 +70,8 @@ export async function GET(req: Request) {
     scope: parsed.data.scope,
     userId: auth.userId!,
     includeArchived: parsed.data.archived,
-    chatMode: adminOversight ? undefined : parsed.data.mode,
+    // Keep SEO mode filter even under platform-admin oversight.
+    chatMode: parsed.data.mode,
     adminOversight,
     ownerUserId: parsed.data.owner,
   });

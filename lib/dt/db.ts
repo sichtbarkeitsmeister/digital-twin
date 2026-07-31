@@ -102,13 +102,17 @@ export async function listDtChats(params: {
     .eq("organisation_id", params.organisationId)
     .order("updated_at", { ascending: false });
 
-  if (params.adminOversight && params.scope === "org") {
+  // SEO workspace: always isolate SEO chats (owner is typically null).
+  if (modeFilter === "seo") {
+    q = q.eq("mode", "seo");
+    if (params.adminOversight && params.scope === "org" && params.ownerUserId) {
+      q = q.eq("owner_user_id", params.ownerUserId);
+    }
+  } else if (params.adminOversight && params.scope === "org") {
     // Oversight: every chat in the org, optionally filtered to one person.
     if (params.ownerUserId) {
       q = q.eq("owner_user_id", params.ownerUserId);
     }
-  } else if (params.scope === "mine" && modeFilter === "seo") {
-    q = q.eq("mode", "seo");
   } else if (params.scope === "mine") {
     // Personal chats only: created by this user in-app (exclude legacy migration rows).
     q = q
@@ -119,8 +123,6 @@ export async function listDtChats(params: {
     q = q.or(dtChatTeamOrFilter());
   } else if (params.scope === "all") {
     q = q.or(dtChatVisibleOrFilter(params.userId));
-  } else if (modeFilter === "seo") {
-    q = q.eq("mode", "seo").eq("owner_user_id", params.userId);
   } else {
     q = q.or(dtChatVisibleOrFilter(params.userId));
   }
