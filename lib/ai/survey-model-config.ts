@@ -39,7 +39,7 @@ export function resolveSurveyUtilityModels(): string[] {
 }
 
 const ACTION_VERB_RE =
-  /\b(erstell(?:e|en)|leg(?:e|en)\s+(?:eine|einen|an)|create|generier(?:e|en)|generate|füg(?:e|en)\s+hinzu|add|einfüg|bearbeit(?:e|en)|edit|änder(?:e|en)|change|update|patch|korrigier(?:e|en)|fix|reparier(?:e|en)|lösch(?:e|en)|delete|entfern(?:e|en)|remove|veröffentlich(?:e|en)|publish|unpublish|depublish|ordner|folder|umbenenn(?:e|en)|rename|zuweis(?:e|en)|assign|überarbeit(?:e|en)|rewrite|ersetz(?:e|en)|replace|duplikat|duplicate\s*id|infotext|schritt\s+\d+|step\s+\d+|frage(?:n)?\s+(?:hinzu|ändern|entfernen))\b/i;
+  /\b(erstell(?:e|en)|leg(?:e|en)\s+(?:eine|einen|an)|create|generier(?:e|en)|generate|füg(?:e|en)\s+hinzu|add|einfüg|bearbeit(?:e|en)|edit|änder(?:e|en)|change|update|patch|korrigier(?:e|en)|fix|reparier(?:e|en)|lösch(?:e|en)|delete|entfern(?:e|en)|remove|veröffentlich(?:e|en)|publish|unpublish|depublish|ordner|folder|speicher(?:e|n)|abspeicher(?:e|n)|umbenenn(?:e|en)|rename|zuweis(?:e|en)|assign|überarbeit(?:e|en)|rewrite|ersetz(?:e|en)|replace|duplikat|duplicate\s*id|infotext|schritt\s+\d+|step\s+\d+|frage(?:n)?\s+(?:hinzu|ändern|entfernen))\b/i;
 
 const CHAT_SIGNAL_RE =
   /\b(was\s+(?:ist|sind|bedeutet)|wie\s+(?:funktioniert|kann|soll|würde)|warum|erklär(?:e| mir|ung)|explain|hilf\s+mir\s+(?:bei|beim|zu\s+verstehen)|brainstorm|ideen\s+für|best\s+practice|unterschied\s+zwischen)\b/i;
@@ -95,14 +95,26 @@ export const MULTIPHASE_MIN_STEPS = 12;
 export const MULTIPHASE_STEP_CHUNK_SIZE = 6;
 
 const CREATE_SURVEY_RE =
-  /\b(erstell(?:e|en)|leg(?:e|en)\s+(?:eine|einen|an)|create|generier(?:e|en)|generate|neue\s+umfrage)\b/i;
+  /\b(erstell(?:e|en)|leg(?:e|en)\s+(?:eine|einen|an)|create|generier(?:e|en)|generate|neue\s+umfrage|speicher(?:e|n)|abspeicher(?:e|n)|anleg(?:e|en)|übernehm(?:e|en))\b/i;
 const SURVEY_NOUN_RE = /\b(umfrage|survey|fragebogen)\b/i;
+/** Pasted questionnaires are often long even without an explicit "create" verb. */
+const LARGE_PASTE_CHAR_THRESHOLD = 6_000;
 
 /** Large new-survey requests use phased generation (outline → batched expand). */
 export function isLargeSurveyCreationIntent(userMessage: string): boolean {
   const text = userMessage.trim();
   if (!text) return false;
-  if (!CREATE_SURVEY_RE.test(text) || !SURVEY_NOUN_RE.test(text)) return false;
+
+  const hasSurveyNoun = SURVEY_NOUN_RE.test(text);
+  const hasCreateVerb = CREATE_SURVEY_RE.test(text);
+  if (!hasSurveyNoun) return false;
+
+  // Long pasted Fragebogen + save/create intent (or just a very large questionnaire dump).
+  if (text.length >= LARGE_PASTE_CHAR_THRESHOLD && (hasCreateVerb || /#{1,3}\s+\d+\./.test(text))) {
+    return true;
+  }
+
+  if (!hasCreateVerb) return false;
 
   const numMatch =
     text.match(/\b(\d{1,3})\s*(?:\+?\s*)?(?:fragen|questions|schritte|steps|seiten|pages)\b/i) ||

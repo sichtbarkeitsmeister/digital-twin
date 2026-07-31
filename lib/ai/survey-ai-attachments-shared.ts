@@ -2,6 +2,8 @@
 
 export const SURVEY_AI_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const SURVEY_AI_MAX_ATTACHMENTS = 6;
+/** Max characters for a chat message body (questionnaire pastes need headroom). */
+export const SURVEY_AI_MAX_MESSAGE_CHARS = 50_000;
 export const SURVEY_AI_ATTACHMENT_ACCEPT_ATTR =
   "image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,text/markdown,.md,.txt,.json,.csv,application/json";
 
