@@ -76,7 +76,8 @@ npm install
 #### Empfohlene/optionale Variablen
 
 - `SMTP_SECURE` (`true`/`false`, default nach Port)
-- `SMTP_FROM` (Absenderadresse)
+- `SMTP_FROM` (Absenderadresse; Anzeigename standardmäßig „Sichtbarkeitsmeister“)
+- `SMTP_FROM_NAME` (optionaler Absendername, default: `Sichtbarkeitsmeister`)
 - `APP_BASE_URL` (z. B. `https://<deine-domain>`)
 - `NEXT_PUBLIC_APP_BASE_URL` (Fallback fuer Base URL)
 - `SUPABASE_PROJECT_ID` (fuer Type-Generierung)
