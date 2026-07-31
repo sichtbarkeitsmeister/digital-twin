@@ -217,6 +217,42 @@ export async function kickFromOrganisationAction(
   return { ok: true, message: "Member removed." };
 }
 
+const revokeInviteSchema = z.object({
+  invite_id: z.string().uuid(),
+  organisation_id: z.string().uuid(),
+});
+
+export async function revokeOrganisationInviteAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = revokeInviteSchema.safeParse({
+    invite_id: formData.get("invite_id"),
+    organisation_id: formData.get("organisation_id"),
+  });
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe",
+    };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("revoke_organisation_invite", {
+    invite_id: parsed.data.invite_id,
+  });
+
+  if (error) {
+    return { ok: false, message: "Einladung konnte nicht gelöscht werden." };
+  }
+
+  revalidatePath("/dashboard/organisations");
+  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/inbox");
+  return { ok: true, message: "Einladung gelöscht. Du kannst die Person erneut einladen." };
+}
+
 const transferSchema = z.object({
   organisation_id: z.string().uuid(),
   new_owner_email: z
