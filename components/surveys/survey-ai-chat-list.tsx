@@ -36,7 +36,7 @@ export function SurveyAiChatList(props: {
   chatSettingsOpenForId: string | null;
 }) {
   return (
-    <div className="grid h-full min-w-0 grid-rows-[auto_auto_auto_1fr] border-r border-border/70 bg-muted/35 backdrop-blur">
+    <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] border-r border-border/70 bg-muted/35 backdrop-blur">
       <div className="flex items-center justify-between gap-2 p-3">
         <p className="text-sm font-semibold">Chats</p>
         <Button
@@ -71,7 +71,7 @@ export function SurveyAiChatList(props: {
           Neuer Chat
         </Button>
       </div>
-      <div className="scrollbar-subtle min-w-0 overflow-y-auto px-2 pb-2">
+      <div className="scrollbar-subtle min-h-0 min-w-0 overflow-y-auto px-2 pb-2">
         <div className="grid min-w-0 gap-1">
           {props.chats.map((chat) => {
             const selected = props.selectedChatId === chat.id;
