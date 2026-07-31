@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 
-import { surveySchema } from "@/lib/surveys/schema";
+import { surveySchema, type SurveyParsed } from "@/lib/surveys/schema";
 import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
 import {
   resolveFolderPlacementFromMessage,
@@ -133,7 +133,7 @@ export function convertMarkdownQuestionnaireToSurvey(userMessage: string): {
   ok: true;
   title: string;
   description: string;
-  survey: Survey;
+  survey: SurveyParsed;
 } | { ok: false; message: string } {
   const lines = userMessage.replace(/\r\n/g, "\n").split("\n");
 
