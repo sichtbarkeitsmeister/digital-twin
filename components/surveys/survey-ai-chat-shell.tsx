@@ -773,7 +773,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   return (
     <div
       ref={shellRef}
-      className={`grid h-full min-h-0 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-xl overscroll-contain ${
+      className={`grid h-full min-h-0 flex-1 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-xl overscroll-contain ${
         sidebarCollapsed
           ? "grid-cols-[54px_minmax(0,1fr)]"
           : "grid-cols-[280px_minmax(0,1fr)]"
@@ -838,7 +838,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         />
       )}
 
-      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-transparent">
+      <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-transparent">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-card/85 px-4 py-3 backdrop-blur">
           <div className="min-w-0 shrink">
             <p
@@ -916,9 +916,9 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
           </div>
         </div>
 
-        <div className="relative min-h-0 overflow-hidden">
+        <div className="relative flex min-h-0 flex-col overflow-hidden">
           <div
-            className={`relative z-0 flex h-full min-h-0 flex-col transition-colors ${dropHighlight && selectedChatId ? "bg-primary/[0.04]" : ""}`}
+            className={`relative z-0 flex min-h-0 flex-1 flex-col transition-colors ${dropHighlight && selectedChatId ? "bg-primary/[0.04]" : ""}`}
             onDragEnter={(e) => {
               e.preventDefault();
               e.stopPropagation();
