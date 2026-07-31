@@ -23,6 +23,7 @@ import {
 } from "@/app/dashboard/_components/organisations/org-overview-panel";
 import { TeamActions } from "@/app/dashboard/_components/organisations/team-actions";
 import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button";
+import { RevokeInviteButton } from "@/app/dashboard/_components/revoke-invite-button";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 
 export function OrganisationDetailFallback() {
@@ -322,7 +323,15 @@ export async function OrganisationDetailView({
                     Ausstehende Einladungen
                   </p>
                   <ul className="divide-y divide-sbkm-navy/8 dark:divide-white/8">
-                    {invites.map((invite) => (
+                    {invites.map((invite) => {
+                      const canRevokeInvite = (() => {
+                        if (platformAdmin) return true;
+                        if (myOrgRole === "owner") return true;
+                        if (myOrgRole === "admin") return invite.org_role === "employee";
+                        return false;
+                      })();
+
+                      return (
                       <li
                         key={invite.id}
                         className="flex flex-wrap items-center justify-between gap-2 px-2 py-2.5"
@@ -339,9 +348,18 @@ export async function OrganisationDetailView({
                             </p>
                           </div>
                         </div>
-                        <Badge variant="secondary">Ausstehend</Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary">Ausstehend</Badge>
+                          {canRevokeInvite ? (
+                            <RevokeInviteButton
+                              inviteId={invite.id}
+                              organisationId={organisationId}
+                            />
+                          ) : null}
+                        </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </div>
               ) : null}

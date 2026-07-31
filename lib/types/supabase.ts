@@ -1063,6 +1063,10 @@ export type Database = {
         Args: { org_id: string; target_user_id: string }
         Returns: undefined
       }
+      revoke_organisation_invite: {
+        Args: { invite_id: string }
+        Returns: undefined
+      }
       list_public_field_questions: {
         Args: { p_field_id: string; p_slug: string }
         Returns: {
