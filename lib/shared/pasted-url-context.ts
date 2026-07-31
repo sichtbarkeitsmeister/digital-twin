@@ -79,7 +79,7 @@ async function fetchPublicPage(url: string): Promise<{ title: string | null; tex
     method: "GET",
     redirect: "follow",
     headers: {
-      Accept: "text/html,text/plain;q=0.9,*/*;q=0.8",
+      Accept: "text/html,application/xhtml+xml,application/xml,text/xml,text/plain;q=0.9,*/*;q=0.8",
       "User-Agent": "DigitalTwinBot/1.0 (+https://digital-twin-sbkm.de)",
     },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -88,6 +88,38 @@ async function fetchPublicPage(url: string): Promise<{ title: string | null; tex
   if (!res.ok) return null;
 
   const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+  const body = decodeResponseTextSafely(await res.arrayBuffer());
+
+  const looksLikeXml =
+    contentType.includes("xml") ||
+    url.toLowerCase().includes("sitemap") ||
+    /^\s*<\?xml/i.test(body) ||
+    /<(urlset|sitemapindex)\b/i.test(body);
+
+  if (looksLikeXml) {
+    const locs = [...body.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((m) => m[1]!.trim());
+    const unique = [...new Set(locs)];
+    if (unique.length === 0) {
+      return {
+        title: "Sitemap/XML",
+        text: body.slice(0, MAX_TEXT_CHARS),
+      };
+    }
+    const preview = unique.slice(0, 60);
+    const text = [
+      `Sitemap/XML mit ${unique.length} <loc>-Einträgen.`,
+      "URLs (Auszug):",
+      ...preview.map((u, i) => `${i + 1}. ${u}`),
+      unique.length > preview.length ? `… und ${unique.length - preview.length} weitere.` : null,
+      "",
+      "Für den vollständigen Sitemap-Abgleich im SEO-Modus zusätzlich `read_sitemap` nutzen.",
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .slice(0, MAX_TEXT_CHARS);
+    return { title: "Sitemap", text };
+  }
+
   if (
     !contentType.includes("text/html") &&
     !contentType.includes("text/plain") &&
@@ -96,12 +128,11 @@ async function fetchPublicPage(url: string): Promise<{ title: string | null; tex
     return null;
   }
 
-  const html = decodeResponseTextSafely(await res.arrayBuffer());
-  const text = htmlToPlainText(html);
+  const text = htmlToPlainText(body);
   if (!text) return null;
 
   return {
-    title: extractHtmlTitle(html),
+    title: extractHtmlTitle(body),
     text,
   };
 }
@@ -117,7 +148,7 @@ export async function buildPastedUrlContextText(sourceText: string): Promise<str
       const page = await fetchPublicPage(url);
       if (!page) {
         sections.push(
-          `URL: ${url}\nStatus: Seite konnte nicht geladen werden (nicht öffentlich, blockiert oder kein HTML/Text).`,
+          `URL: ${url}\nStatus: Seite konnte nicht geladen werden (nicht öffentlich, blockiert oder ungeeigneter Inhaltstyp).`,
         );
         continue;
       }

@@ -52,7 +52,12 @@ export function getSmtpDiagnostics() {
   const host = process.env.SMTP_HOST?.trim() || null;
   const port = process.env.SMTP_PORT?.trim() || "587";
   const user = process.env.SMTP_USER?.trim() || null;
-  const from = process.env.SMTP_FROM?.trim() || user;
+  const fromRaw = process.env.SMTP_FROM?.trim() || user;
+  const fromName = process.env.SMTP_FROM_NAME?.trim() || "Sichtbarkeitsmeister";
+  const from =
+    fromRaw && !fromRaw.includes("<")
+      ? `"${fromName}" <${fromRaw}>`
+      : fromRaw;
   const hasPass = Boolean(
     process.env.SMTP_PASS?.trim() || process.env.SMTP_PASSWORD?.trim(),
   );

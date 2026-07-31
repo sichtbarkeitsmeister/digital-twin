@@ -8,24 +8,28 @@ export function renderOrgOwnerWelcomeEmail(opts: {
 }) {
   const appBase = getAppBaseUrl();
   const intro = opts.isNewAccount
-    ? `Hallo,\n\nwir haben ein Konto für dich angelegt und dich als Inhaber von ${opts.organisationName} eingetragen. ` +
-      "Mit dem Button unten meldest du dich in einem Schritt an und landest direkt im DigitalTwin-Portal."
-    : `Hallo,\n\ndu wurdest als Inhaber von ${opts.organisationName} eingetragen. ` +
-      "Melde dich mit einem Klick an, um das DigitalTwin-Portal zu öffnen.";
+    ? `Hallo,\n\ndu wurdest als Inhaber von ${opts.organisationName} eingeladen. ` +
+      "Wir haben dafür ein Konto für dich angelegt. " +
+      "Mit dem Button unten nimmst du die Einladung an und landest direkt im DigitalTwin-Portal."
+    : `Hallo,\n\ndu wurdest als Inhaber von ${opts.organisationName} eingeladen. ` +
+      "Mit dem Button unten nimmst du die Einladung an und öffnest das DigitalTwin-Portal.";
 
   return renderBrandedEmail({
-    title: `Inhaber von ${opts.organisationName}`,
-    preheader: "Ein-Klick-Anmeldung zum DigitalTwin-Portal",
-    headline: `Du bist jetzt Inhaber von ${opts.organisationName}`,
+    title: `Einladung: Inhaber von ${opts.organisationName}`,
+    eyebrow: "Einladung",
+    preheader: `Einladung als Inhaber von ${opts.organisationName}`,
+    headline: `Einladung: Inhaber von ${opts.organisationName}`,
     intro,
     details: [
       { label: "Organisation", value: opts.organisationName },
       { label: "Rolle", value: "Inhaber" },
       { label: "Portal", value: appBase },
+      { label: "Art", value: "Einladung / Magic Link" },
     ],
-    actions: [{ label: "Jetzt anmelden", href: opts.loginUrl }],
+    actions: [{ label: "Einladung annehmen", href: opts.loginUrl }],
     footerText:
-      "Der Anmeldelink ist zeitlich begrenzt. Falls er abgelaufen ist, fordere auf der Login-Seite einen neuen Link an. " +
-      "Du erhältst diese E-Mail, weil du als Inhaber einer Organisation hinterlegt wurdest.",
+      "Das ist eine Einladungs-E-Mail. Der Anmeldelink ist zeitlich begrenzt. " +
+      "Falls er abgelaufen ist, fordere auf der Login-Seite einen neuen Link an. " +
+      "Du erhältst diese E-Mail, weil du als Inhaber einer Organisation eingetragen wurdest.",
   });
 }

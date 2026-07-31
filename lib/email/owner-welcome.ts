@@ -60,7 +60,7 @@ export async function sendOrgOwnerWelcomeEmail(input: {
   organisationId?: string | null;
 }): Promise<OwnerWelcomeEmailResult> {
   const to = input.email.trim().toLowerCase();
-  const subject = `Willkommen als Inhaber von ${input.organisationName}`;
+  const subject = `Einladung: Du bist Inhaber von ${input.organisationName}`;
   const context = {
     kind: "owner_welcome",
     metadata: {
@@ -105,9 +105,9 @@ export async function sendOrgOwnerWelcomeEmail(input: {
     isNewAccount: input.isNewAccount,
   });
   const text = [
-    `Du bist jetzt Inhaber von ${input.organisationName}.`,
+    `EINLADUNG: Du wurdest als Inhaber von ${input.organisationName} eingeladen.`,
     "",
-    "Melde dich mit diesem Link an:",
+    "Einladung annehmen:",
     input.link,
     "",
     "Der Link ist zeitlich begrenzt.",
@@ -137,13 +137,13 @@ export function formatOwnerWelcomeEmailStatus(
   sendWelcome: boolean,
 ): string | null {
   if (!sendWelcome) return null;
-  if (!result) return "Willkommens-E-Mail konnte nicht gesendet werden (Anmeldelink fehlgeschlagen).";
-  if (result.ok && !result.skipped) return "Willkommens-E-Mail wurde gesendet.";
+  if (!result) return "Einladungs-E-Mail konnte nicht gesendet werden (Anmeldelink fehlgeschlagen).";
+  if (result.ok && !result.skipped) return "Einladungs-E-Mail wurde gesendet.";
   if (result.ok && result.skipped) {
-    return `Willkommens-E-Mail übersprungen (${result.reason}).`;
+    return `Einladungs-E-Mail übersprungen (${result.reason}).`;
   }
   if (!result.ok) {
-    return `Willkommens-E-Mail fehlgeschlagen (${result.reason}).`;
+    return `Einladungs-E-Mail fehlgeschlagen (${result.reason}).`;
   }
   return null;
 }

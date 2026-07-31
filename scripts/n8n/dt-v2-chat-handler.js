@@ -229,6 +229,33 @@ const seoTools = [
       properties: {},
     },
   },
+  {
+    name: "read_sitemap",
+    description:
+      "Liest eine Sitemap (XML, inkl. Sitemap-Index) live und listet die enthaltenen URLs. Optional Vergleich mit dem DigitalTwin-Crawl-Index. Nutze dies, wenn der Nutzer eine Sitemap schickt oder fragt, welche URLs in der Sitemap stehen. Behaupte nie, du könntest keine Sitemap lesen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sitemapUrl: {
+          type: "string",
+          description:
+            "Optionale Sitemap-URL. Wenn leer: Org-Sitemap bzw. Website/sitemap.xml.",
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_website_url",
+    description:
+      "Live-Check einer öffentlichen URL: HTTP-Status, Title, Meta-Robots/noindex, Canonical und ob die URL im DigitalTwin-Crawl-Index liegt. Nutze dies für Erreichbarkeit/noindex — nicht mit Google-Indexierung verwechseln.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Die zu prüfende absolute URL." },
+      },
+      required: ["url"],
+    },
+  },
 ];
 
 async function runSeoTool(name, input) {
@@ -273,6 +300,33 @@ async function runSeoTool(name, input) {
       });
       if (!r.ok || !r.data?.ok) return "SEO-Report-Abruf fehlgeschlagen.";
       return r.data.report || "Kein Report-Inhalt.";
+    }
+    if (name === "read_sitemap") {
+      const sitemapUrl = String(args.sitemapUrl || "").trim();
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: {
+          organisationId,
+          action: "sitemap",
+          ...(sitemapUrl ? { sitemapUrl } : {}),
+        },
+      });
+      if (!r.ok || !r.data?.ok) return "Sitemap-Abruf fehlgeschlagen.";
+      return r.data.text || "Keine Sitemap-Daten.";
+    }
+    if (name === "inspect_website_url") {
+      const u = String(args.url || "").trim();
+      if (!u) return "Keine URL angegeben.";
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: { organisationId, action: "inspect", url: u },
+      });
+      if (!r.ok || !r.data?.ok) return "Live-URL-Check fehlgeschlagen.";
+      return r.data.text || "Keine Prüfergebnisse.";
     }
     return `Unbekanntes Werkzeug: ${name}`;
   } catch (err) {

@@ -53,8 +53,26 @@ function getTransport() {
   return cachedTransport;
 }
 
+const DEFAULT_FROM_NAME = "Sichtbarkeitsmeister";
+
+/**
+ * Visible From header. Defaults to `Sichtbarkeitsmeister <address>`.
+ * - SMTP_FROM may be a bare address or already `Name <addr>`
+ * - SMTP_FROM_NAME overrides the display name when SMTP_FROM has no name
+ */
 export function getFromAddress() {
-  return process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "no-reply@example.com";
+  const raw = (process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "no-reply@example.com").trim();
+  if (!raw) return `${DEFAULT_FROM_NAME} <no-reply@example.com>`;
+
+  // Already a formatted "Name <email>" header — keep as-is.
+  if (/^[^<]+<[^>]+>$/.test(raw) || raw.includes("<")) {
+    return raw;
+  }
+
+  const name = (process.env.SMTP_FROM_NAME ?? DEFAULT_FROM_NAME).trim() || DEFAULT_FROM_NAME;
+  // Escape quotes in display name for RFC 5322 safety.
+  const safeName = name.replace(/["\\]/g, "");
+  return `"${safeName}" <${raw}>`;
 }
 
 export function getAppBaseUrl() {

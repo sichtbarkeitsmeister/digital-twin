@@ -672,8 +672,13 @@ export async function runDtMigration(opts: MigrationOptions): Promise<{
     if (!linkErr && process.env.SMTP_HOST) {
       await sendEmail({
         to: [email],
-        subject: "Dein DigitalTwin-Portal ist umgezogen",
-        text: `Anmeldung: ${loginUrl}`,
+        subject: `Einladung: DigitalTwin-Portal für ${entry.organisationName}`,
+        text: [
+          `EINLADUNG zum DigitalTwin-Portal für ${entry.organisationName}.`,
+          "",
+          "Einladung annehmen:",
+          loginUrl,
+        ].join("\n"),
         html,
       });
     }
