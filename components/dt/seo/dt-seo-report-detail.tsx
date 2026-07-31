@@ -301,29 +301,37 @@ export function DtSeoReportDetail(props: {
   const [activeTab, setActiveTab] = useState("report");
 
   const fetchReport = useCallback(async () => {
-    const res = await fetch(`/api/dt/seo/reports/${encodeURIComponent(props.reportId)}`);
-    const json = (await res.json()) as {
-      ok?: boolean;
-      message?: string;
-      report?: DtSeoReportRow;
-    };
-    if (!res.ok || !json.ok || !json.report) {
-      setLoadError(json.message ?? "Report nicht gefunden.");
+    try {
+      const res = await fetch(`/api/dt/seo/reports/${encodeURIComponent(props.reportId)}`);
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        report?: DtSeoReportRow;
+      };
+      if (!res.ok || !json.ok || !json.report) {
+        setLoadError(json.message ?? "Report nicht gefunden.");
+        setReport(null);
+        return false;
+      }
+      setLoadError(null);
+      setReport(json.report);
+      return true;
+    } catch {
+      setLoadError("Fehler: Report-Status konnte nicht geladen werden.");
       setReport(null);
       return false;
     }
-    setLoadError(null);
-    setReport(json.report);
-    return true;
   }, [props.reportId]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoading(true);
-      const ok = await fetchReport();
-      if (!cancelled) setLoading(false);
-      if (!ok) return;
+      try {
+        await fetchReport();
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -676,9 +684,17 @@ export function DtSeoReportDetail(props: {
           role="alert"
         >
           <p className="font-semibold">
-            {isCancelled ? "Report abgebrochen" : "Report fehlgeschlagen"}
+            {isCancelled ? "Report abgebrochen" : "Fehler: Report fehlgeschlagen"}
           </p>
-          {report.state_message ? <p className="mt-0.5">{report.state_message}</p> : null}
+          <p className="mt-0.5">
+            {report.state_message?.trim()
+              ? report.state_message.startsWith("Fehler:")
+                ? report.state_message
+                : `Fehler: ${report.state_message}`
+              : isCancelled
+                ? "Fehler: Der Report wurde abgebrochen."
+                : "Fehler: Die Report-Erstellung ist fehlgeschlagen. Bitte erneut versuchen."}
+          </p>
         </div>
       ) : null}
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { queueDtSeoReport, requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess, requireDtSeoReportAccess } from "@/lib/dt/seo/access";
+import { syncReportJobHealth } from "@/lib/dt/seo/sync-report-job-health";
 import { triggerDtSeoReportN8n } from "@/lib/dt/seo/trigger-report";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -33,6 +34,8 @@ export async function GET(req: Request) {
   if (!gate.ok) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }
+
+  await syncReportJobHealth({ organisationId: parsed.data.org });
 
   const { data, error } = await auth.supabase
     .from("dt_seo_reports")

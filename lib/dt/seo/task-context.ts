@@ -4,7 +4,7 @@ import type { DtSeoTaskRow } from "@/lib/dt/types";
 
 export type DtSeoTaskPromptRow = Pick<
   DtSeoTaskRow,
-  "title" | "keyword" | "status" | "current_status" | "action" | "updated_at"
+  "id" | "title" | "keyword" | "status" | "current_status" | "action" | "updated_at" | "url" | "priority"
 >;
 
 const STATUS_ORDER: Record<DtSeoTaskRow["status"], number> = {
@@ -37,8 +37,13 @@ function truncate(value: string | null | undefined, max: number): string | null 
 }
 
 function formatTaskLine(task: DtSeoTaskPromptRow): string {
-  const parts = [`[${taskStatusLabel(task.status)}] ${task.title.trim()}`];
+  const parts = [
+    `id=${task.id}`,
+    `[${taskStatusLabel(task.status)}] ${task.title.trim()}`,
+  ];
   if (task.keyword?.trim()) parts.push(`Keyword: ${task.keyword.trim()}`);
+  if (task.url?.trim()) parts.push(`URL: ${task.url.trim()}`);
+  if (task.priority?.trim()) parts.push(`Prio: ${task.priority.trim()}`);
   if (task.current_status?.trim()) parts.push(`Ist: ${task.current_status.trim()}`);
   const action = truncate(task.action, 140);
   if (action) parts.push(`Maßnahme: ${action}`);
@@ -52,7 +57,7 @@ export async function loadDtSeoTasksForPrompt(
 ): Promise<DtSeoTaskPromptRow[]> {
   const { data, error } = await supabase
     .from("dt_seo_tasks")
-    .select("title,keyword,status,current_status,action,updated_at")
+    .select("id,title,keyword,url,status,priority,current_status,action,updated_at")
     .eq("organisation_id", organisationId)
     .order("updated_at", { ascending: false })
     .limit(limit);
@@ -75,6 +80,7 @@ export function formatDtSeoTasksForPrompt(tasks: DtSeoTaskPromptRow[]): string {
     return [
       "Noch keine SEO-Aufgaben im Board.",
       "Du darfst neue, konkrete Maßnahmen vorschlagen — der Nutzer kann sie als Aufgabe speichern.",
+      "Bestehende Aufgaben kannst du später mit update_seo_task / delete_seo_task bearbeiten oder löschen (IDs erscheinen hier, sobald Tasks existieren).",
     ].join("\n");
   }
 
@@ -83,11 +89,13 @@ export function formatDtSeoTasksForPrompt(tasks: DtSeoTaskPromptRow[]): string {
   const wontFix = tasks.filter((t) => t.status === "wont_fix");
 
   const sections: string[] = [
-    "Diese Aufgaben existieren bereits im SEO-Aufgaben-Board. Prüfe sie, bevor du Maßnahmen empfiehlst oder sagst, der Nutzer solle etwas „als Aufgabe speichern“.",
+    "Diese Aufgaben existieren bereits im SEO-Aufgaben-Board. Jede Zeile hat eine stabile id=… — nutze sie für update_seo_task / delete_seo_task.",
     "",
     "Regeln:",
     "- Schlage keine neue Aufgabe vor, die inhaltlich dieselbe Maßnahme oder dasselbe Keyword abdeckt wie eine offene oder laufende Aufgabe.",
-    "- Verweise stattdessen auf die bestehende Aufgabe (Titel/Status) oder schlage nur einen nächsten Schritt/Follow-up vor.",
+    "- Verweise stattdessen auf die bestehende Aufgabe (id/Titel/Status) oder aktualisiere sie mit update_seo_task, wenn der Nutzer das will.",
+    "- Auf Wunsch des Nutzers darfst du bestehende Aufgaben direkt bearbeiten (Status, Titel, Maßnahme, …) oder mit delete_seo_task löschen — das Board erlaubt Edit/Delete, nicht nur Hinzufügen.",
+    "- Bei Löschen kurz bestätigen („Soll ich Aufgabe … wirklich löschen?“), außer der Nutzer hat es eindeutig beauftragt.",
     "- Erledigte Aufgaben nicht erneut als neue Aufgabe vorschlagen — höchstens kurz nachfragen, ob ein Follow-up sinnvoll ist.",
     "- Aufgaben mit Status „Won't fix“ nicht erneut empfehlen.",
   ];

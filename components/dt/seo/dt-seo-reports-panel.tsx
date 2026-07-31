@@ -47,9 +47,21 @@ export function DtSeoReportsPanel(props: {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`/api/dt/seo/reports?org=${encodeURIComponent(props.organisationId)}`);
-    const json = (await res.json()) as { ok?: boolean; reports?: DtSeoReportRow[] };
-    if (json.ok && json.reports) setReports(json.reports as DtSeoReportRow[]);
+    try {
+      const res = await fetch(`/api/dt/seo/reports?org=${encodeURIComponent(props.organisationId)}`);
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        reports?: DtSeoReportRow[];
+      };
+      if (!res.ok || !json.ok) {
+        setStatus(`Fehler: ${json.message ?? "Reports konnten nicht geladen werden."}`);
+        return;
+      }
+      if (json.reports) setReports(json.reports as DtSeoReportRow[]);
+    } catch {
+      setStatus("Fehler: Reports konnten nicht geladen werden.");
+    }
   }, [props.organisationId]);
 
   useEffect(() => {
@@ -78,10 +90,26 @@ export function DtSeoReportsPanel(props: {
         void fetch(`/api/dt/seo/reports/${activeId}`)
           .then((r) => r.json())
           .then((j: { report?: DtSeoReportRow }) => {
-            if (j.report?.state === "done" || j.report?.state === "error") {
+            const state = j.report?.state;
+            if (state === "done" || state === "error" || state === "cancelled") {
               setActiveId(null);
+              if (state === "error" || state === "cancelled") {
+                const msg = j.report?.state_message?.trim();
+                setStatus(
+                  msg
+                    ? msg.startsWith("Fehler:")
+                      ? msg
+                      : `Fehler: ${msg}`
+                    : state === "cancelled"
+                      ? "Fehler: Report abgebrochen."
+                      : "Fehler: Report-Erstellung fehlgeschlagen.",
+                );
+              }
               void refresh();
             }
+          })
+          .catch(() => {
+            setStatus("Fehler: Report-Status konnte nicht geladen werden.");
           });
       }
     }, POLL_MS);
@@ -154,7 +182,18 @@ export function DtSeoReportsPanel(props: {
           SEO-Report erstellen
         </DtPillButton>
       ) : null}
-      {status ? <p className="text-sm text-sbkm-ink-600 dark:text-white/60">{status}</p> : null}
+      {status ? (
+        <p
+          className={
+            status.startsWith("Fehler")
+              ? "text-sm text-red-600 dark:text-red-400"
+              : "text-sm text-sbkm-ink-600 dark:text-white/60"
+          }
+          role={status.startsWith("Fehler") ? "alert" : undefined}
+        >
+          {status}
+        </p>
+      ) : null}
 
       <AnimatePresence>
         {dialogOpen ? (
@@ -274,8 +313,16 @@ export function DtSeoReportsPanel(props: {
                     {r.recipient_type} · {r.recipient_email}
                     {runtime ? ` · ${runtime}` : null}
                   </p>
-                  {isErrorish && r.state_message ? (
-                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">{r.state_message}</p>
+                  {isErrorish ? (
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                      {r.state_message?.trim()
+                        ? r.state_message.startsWith("Fehler:")
+                          ? r.state_message
+                          : `Fehler: ${r.state_message}`
+                        : r.state === "cancelled"
+                          ? "Fehler: Report abgebrochen."
+                          : "Fehler: Report-Erstellung fehlgeschlagen."}
+                    </p>
                   ) : null}
                   {r.state === "done" ? (
                     <p className="mt-1 text-xs font-medium text-sbkm-mint">Details ansehen</p>

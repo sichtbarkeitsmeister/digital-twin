@@ -4,7 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Loader2, ListPlus, Plus } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
+import { DtSeoSerpPixelMeter } from "@/components/dt/seo/dt-seo-serp-pixel-meter";
 import type { DtSeoChatTaskProposal } from "@/lib/dt/seo/chat-task-proposals";
+
+function looksLikeSerpTitle(title: string): boolean {
+  const t = title.trim();
+  return t.length >= 20 || /[|–—]/.test(t);
+}
+
+function extractSerpDescription(action: string): string | null {
+  const match = action.match(
+    /(?:meta[- ]?description|description)\s*[:=]\s*[„"']?([^\n"']{20,})/i,
+  );
+  return match?.[1]?.trim() || null;
+}
 
 const PRIORITY_LABEL: Record<string, string> = {
   low: "Niedrig",
@@ -127,6 +140,14 @@ export function DtSeoChatTaskProposals(props: {
                   <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/50">
                     {proposal.action}
                   </p>
+                  {looksLikeSerpTitle(proposal.title) || extractSerpDescription(proposal.action) ? (
+                    <DtSeoSerpPixelMeter
+                      className="mt-2"
+                      compact
+                      title={looksLikeSerpTitle(proposal.title) ? proposal.title : null}
+                      description={extractSerpDescription(proposal.action)}
+                    />
+                  ) : null}
                   {proposal.priority ? (
                     <span className="mt-1.5 inline-flex rounded-pill bg-sbkm-navy/8 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sbkm-navy dark:bg-white/10 dark:text-white/80">
                       {PRIORITY_LABEL[proposal.priority] ?? proposal.priority}
