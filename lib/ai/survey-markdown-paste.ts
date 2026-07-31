@@ -1,0 +1,335 @@
+import { randomUUID } from "crypto";
+
+import { surveySchema } from "@/lib/surveys/schema";
+import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
+import {
+  resolveFolderPlacementFromMessage,
+  wrapProposalWithFolder,
+} from "@/lib/ai/survey-multiphase-create";
+
+type FolderSnapshot = { id: string; name: string };
+
+const QUESTION_LINE_RE = /^\*\*(.+?)\*\*\s*$/;
+const OPTION_LINE_RE = /^[○●◦•▪︎]\s+(.+)\s*$/;
+const SECTION_RE = /^##\s+(.+)\s*$/;
+const TITLE_RE = /^#\s+(.+)\s*$/;
+const BLANK_LINE_RE = /^_{6,}\s*$/;
+const HINT_LINE_RE = /^(?:→|->)\s*(.+)\s*$/;
+
+function stripEmojiPrefix(text: string): string {
+  return text
+    .replace(
+      /^(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{20E3}]+\s*)+/u,
+      "",
+    )
+    .trim();
+}
+
+function slugId(prefix: string, index: number): string {
+  return `${prefix}_${String(index).padStart(3, "0")}_${randomUUID().slice(0, 8)}`;
+}
+
+function detectFieldType(
+  questionTitle: string,
+  options: string[],
+): SurveyField["type"] {
+  const t = questionTitle.toLowerCase();
+  if (options.length >= 2 && /\branking\b|\bnummerieren\b|\bpriorit[aä]t\b/.test(t)) {
+    return "ranking";
+  }
+  if (options.length >= 1 && /\bmehrfachauswahl\b|\bmehrere\b/.test(t)) {
+    return "checkbox";
+  }
+  if (options.length >= 1) return "radio";
+  if (/\bbewertung\b|\bskala\b|\bsternen?\b|\brating\b/.test(t)) return "rating";
+  return "text";
+}
+
+function buildField(input: {
+  title: string;
+  description: string;
+  options: string[];
+  index: number;
+}): SurveyField {
+  const title = stripEmojiPrefix(input.title).replace(/\s+/g, " ").trim() || `Frage ${input.index}`;
+  const description = input.description.trim();
+  const type = detectFieldType(title, input.options);
+  const base = {
+    id: slugId("field", input.index),
+    title,
+    description,
+    required: true,
+  };
+
+  if (type === "ranking") {
+    return {
+      ...base,
+      type: "ranking",
+      options: input.options.map((label, i) => ({
+        id: slugId("opt", i + 1),
+        label,
+      })),
+      allowCustomEntries: false,
+    };
+  }
+  if (type === "checkbox") {
+    return {
+      ...base,
+      type: "checkbox",
+      options: input.options.map((label, i) => ({
+        id: slugId("opt", i + 1),
+        label,
+      })),
+      allowOtherOption: false,
+    };
+  }
+  if (type === "radio") {
+    return {
+      ...base,
+      type: "radio",
+      options: input.options.map((label, i) => ({
+        id: slugId("opt", i + 1),
+        label,
+      })),
+      allowOtherOption: false,
+    };
+  }
+  if (type === "rating") {
+    return {
+      ...base,
+      type: "rating",
+      scale: { min: 1, max: 5 },
+    };
+  }
+  return {
+    ...base,
+    type: "text",
+  };
+}
+
+/**
+ * True when the user pasted a ready-made Fragebogen (sections + many questions)
+ * rather than asking the model to invent one from scratch.
+ */
+export function isCompleteQuestionnairePaste(userMessage: string): boolean {
+  const text = userMessage.trim();
+  if (text.length < 2_500) return false;
+
+  const sectionCount = (text.match(/^##\s+/gm) ?? []).length;
+  const questionCount = (text.match(/^\*\*[^*].+\*\*\s*$/gm) ?? []).length;
+  const looksNumbered = /#{1,3}\s+\d+\./.test(text);
+  const saveIntent =
+    /\b(?:ab)?speicher(?:e|n|t)?\b/i.test(text) ||
+    /\b(?:ordner|folder)\b/i.test(text) ||
+    /\b(?:erstell|anleg|übernehm)\w*\b/i.test(text);
+
+  if (!saveIntent && !looksNumbered) return false;
+  if (sectionCount >= 3 && questionCount >= 8) return true;
+  if (questionCount >= 15 && text.length >= 6_000) return true;
+  return false;
+}
+
+export function convertMarkdownQuestionnaireToSurvey(userMessage: string): {
+  ok: true;
+  title: string;
+  description: string;
+  survey: Survey;
+} | { ok: false; message: string } {
+  const lines = userMessage.replace(/\r\n/g, "\n").split("\n");
+
+  let title = "";
+  const preSection: string[] = [];
+  const sections: Array<{ title: string; lines: string[] }> = [];
+  let current: { title: string; lines: string[] } | null = null;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const titleMatch = line.match(TITLE_RE);
+    if (titleMatch && !title) {
+      title = stripEmojiPrefix(titleMatch[1] ?? "").replace(/\s+/g, " ").trim();
+      continue;
+    }
+    const sectionMatch = line.match(SECTION_RE);
+    if (sectionMatch) {
+      current = {
+        title: stripEmojiPrefix(sectionMatch[1] ?? "").replace(/\s+/g, " ").trim(),
+        lines: [],
+      };
+      sections.push(current);
+      continue;
+    }
+    if (!current) {
+      preSection.push(line);
+      continue;
+    }
+    current.lines.push(line);
+  }
+
+  if (sections.length === 0) {
+    return { ok: false, message: "Kein Abschnitts-Markup (## …) im Fragebogen gefunden." };
+  }
+
+  const steps: SurveyStep[] = [];
+  let fieldIndex = 0;
+
+  for (let s = 0; s < sections.length; s += 1) {
+    const section = sections[s]!;
+    const fields: SurveyField[] = [];
+    let sectionDescriptionParts: string[] = [];
+    let active: {
+      title: string;
+      descriptionParts: string[];
+      options: string[];
+    } | null = null;
+
+    const flush = () => {
+      if (!active) return;
+      fieldIndex += 1;
+      fields.push(
+        buildField({
+          title: active.title,
+          description: active.descriptionParts.join("\n").trim(),
+          options: active.options,
+          index: fieldIndex,
+        }),
+      );
+      active = null;
+    };
+
+    for (const line of section.lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === "---" || BLANK_LINE_RE.test(trimmed)) continue;
+
+      const q = trimmed.match(QUESTION_LINE_RE);
+      if (q) {
+        flush();
+        active = {
+          title: q[1] ?? "",
+          descriptionParts: [],
+          options: [],
+        };
+        continue;
+      }
+
+      const opt = trimmed.match(OPTION_LINE_RE);
+      if (opt && active) {
+        active.options.push((opt[1] ?? "").trim());
+        continue;
+      }
+
+      const hint = trimmed.match(HINT_LINE_RE);
+      if (hint) {
+        const text = (hint[1] ?? "").trim();
+        if (active) active.descriptionParts.push(text);
+        else sectionDescriptionParts.push(text);
+        continue;
+      }
+
+      // Skip instructional bullets that are not answer options.
+      if (/^[-*]\s+/.test(trimmed) && !active) {
+        sectionDescriptionParts.push(trimmed.replace(/^[-*]\s+/, ""));
+        continue;
+      }
+
+      if (active) {
+        // Ranking instruction lines belonging to the question.
+        if (/bitte nach|nummerieren|priorit/i.test(trimmed)) {
+          active.descriptionParts.push(trimmed);
+        }
+        continue;
+      }
+
+      if (!trimmed.startsWith("#")) {
+        sectionDescriptionParts.push(trimmed);
+      }
+    }
+    flush();
+
+    if (fields.length === 0) continue;
+    steps.push({
+      id: slugId("step", s + 1),
+      title: section.title || `Abschnitt ${s + 1}`,
+      description: sectionDescriptionParts.join("\n").trim(),
+      fields,
+    });
+  }
+
+  if (steps.length === 0) {
+    return { ok: false, message: "Im Fragebogen wurden keine Fragen erkannt." };
+  }
+
+  const description = preSection
+    .map((l) => l.trim())
+    .filter((l) => l && l !== "---" && !l.startsWith("#"))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 4000);
+
+  const surveyTitle =
+    title ||
+    steps[0]?.title ||
+    "Fragebogen";
+
+  const survey: Survey = {
+    version: 1,
+    id: randomUUID(),
+    title: surveyTitle,
+    description: description.slice(0, 500),
+    infoTextEnabled: description.length > 0,
+    infoText: description,
+    answerPlaceholder: "Deine Antwort…",
+    steps,
+  };
+
+  const validated = surveySchema.safeParse(survey);
+  if (!validated.success) {
+    return {
+      ok: false,
+      message:
+        validated.error.issues[0]?.message ??
+        "Konvertierter Fragebogen entspricht nicht dem Schema.",
+    };
+  }
+
+  return {
+    ok: true,
+    title: surveyTitle.slice(0, 120),
+    description: description.slice(0, 500),
+    survey: validated.data,
+  };
+}
+
+export function buildQuestionnairePasteProposal(input: {
+  userMessage: string;
+  folders: FolderSnapshot[];
+}):
+  | { ok: true; proposal: Record<string, unknown>; stepCount: number; fieldCount: number }
+  | { ok: false; message: string } {
+  if (!isCompleteQuestionnairePaste(input.userMessage)) {
+    return { ok: false, message: "Kein vollständiger Fragebogen-Paste erkannt." };
+  }
+
+  const converted = convertMarkdownQuestionnaireToSurvey(input.userMessage);
+  if (!converted.ok) return converted;
+
+  const fieldCount = converted.survey.steps.reduce((n, s) => n + s.fields.length, 0);
+  const createSurvey = {
+    kind: "create_survey" as const,
+    summary: `Fragebogen „${converted.title}“ aus Paste übernommen (${converted.survey.steps.length} Abschnitte, ${fieldCount} Fragen).`,
+    title: converted.title,
+    description: converted.description,
+    notificationEmails: [] as string[],
+    survey: converted.survey,
+  };
+
+  const placement = resolveFolderPlacementFromMessage(input.userMessage, input.folders);
+  const proposal = wrapProposalWithFolder({ createSurvey, placement });
+
+  return {
+    ok: true,
+    proposal,
+    stepCount: converted.survey.steps.length,
+    fieldCount,
+  };
+}
