@@ -12,7 +12,7 @@ import {
   formatOwnerWelcomeEmailStatus,
   sendOrgOwnerWelcomeEmail,
 } from "@/lib/email/owner-welcome";
-import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { revokeOrganisationInvite } from "@/lib/dashboard/revoke-org-invite";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -239,79 +239,13 @@ export async function revokeOrganisationInviteAction(
     };
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { ok: false, message: "Nicht angemeldet." };
-  }
-
-  const { data: invite, error: inviteLoadError } = await supabase
-    .from("organisation_invites")
-    .select("id, organisation_id, org_role, status")
-    .eq("id", parsed.data.invite_id)
-    .maybeSingle();
-
-  if (inviteLoadError || !invite) {
-    return { ok: false, message: "Einladung nicht gefunden." };
-  }
-  if (invite.organisation_id !== parsed.data.organisation_id) {
-    return { ok: false, message: "Einladung gehört nicht zu dieser Organisation." };
-  }
-  if (invite.status !== "pending") {
-    return { ok: false, message: "Einladung ist nicht mehr offen." };
-  }
-
-  const platformAdmin = await isPlatformAdmin(supabase, user.id);
-  const { data: roleData } = await supabase.rpc("my_org_role", {
-    org_id: invite.organisation_id,
-  });
-  const myRole = typeof roleData === "string" ? roleData : null;
-  const allowed =
-    platformAdmin ||
-    myRole === "owner" ||
-    (myRole === "admin" && invite.org_role === "employee");
-  if (!allowed) {
-    return { ok: false, message: "Keine Berechtigung zum Löschen dieser Einladung." };
-  }
-
-  // Preferred path: DB RPC (migration 20260731_revoke_organisation_invite.sql).
-  const { error: rpcError } = await supabase.rpc("revoke_organisation_invite", {
-    invite_id: parsed.data.invite_id,
+  const result = await revokeOrganisationInvite({
+    inviteId: parsed.data.invite_id,
+    organisationId: parsed.data.organisation_id,
   });
 
-  if (rpcError) {
-    // Fallback if migration is not applied yet on Supabase (common cause of delete failures).
-    console.warn("[revoke invite] RPC failed, service-role fallback:", rpcError.message);
-    try {
-      const service = createServiceClient();
-      const { data: updated, error: updateError } = await service
-        .from("organisation_invites")
-        .update({
-          status: "revoked",
-          revoked_at: new Date().toISOString(),
-        })
-        .eq("id", parsed.data.invite_id)
-        .eq("status", "pending")
-        .select("id")
-        .maybeSingle();
-
-      if (updateError || !updated) {
-        return {
-          ok: false,
-          message:
-            "Einladung konnte nicht gelöscht werden. Bitte SQL-Migration " +
-            "`revoke_organisation_invite` in Supabase ausführen.",
-        };
-      }
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : rpcError.message;
-      return {
-        ok: false,
-        message: `Einladung konnte nicht gelöscht werden (${reason}).`,
-      };
-    }
+  if (!result.ok) {
+    return { ok: false, message: result.message };
   }
 
   revalidatePath("/dashboard/organisations");

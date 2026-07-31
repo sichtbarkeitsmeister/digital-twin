@@ -1,11 +1,9 @@
 "use client";
 
-import { useActionState } from "react";
-import type { ActionState } from "@/app/dashboard/actions";
-import { revokeOrganisationInviteAction } from "@/app/dashboard/actions";
-import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
-const initialState: ActionState = { ok: true, message: "" };
+import { Button } from "@/components/ui/button";
 
 export function RevokeInviteButton({
   inviteId,
@@ -14,35 +12,62 @@ export function RevokeInviteButton({
   inviteId: string;
   organisationId: string;
 }) {
-  const [state, formAction, pending] = useActionState(
-    revokeOrganisationInviteAction,
-    initialState,
-  );
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    if (
+      !window.confirm(
+        "Einladung wirklich löschen? Danach kannst du die Person erneut einladen.",
+      )
+    ) {
+      return;
+    }
+
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/dashboard/org-invites/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inviteId, organisationId }),
+      });
+      const json = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        message?: string;
+      } | null;
+
+      if (!res.ok || !json?.ok) {
+        setError(json?.message ?? `Löschen fehlgeschlagen (HTTP ${res.status}).`);
+        return;
+      }
+
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Netzwerkfehler beim Löschen.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
-    <form
-      action={formAction}
-      className="flex items-center gap-2"
-      onSubmit={(e) => {
-        if (!window.confirm("Einladung wirklich löschen? Danach kannst du die Person erneut einladen.")) {
-          e.preventDefault();
-        }
-      }}
-    >
-      <input type="hidden" name="invite_id" value={inviteId} />
-      <input type="hidden" name="organisation_id" value={organisationId} />
+    <div className="flex max-w-xs flex-col items-end gap-1">
       <Button
-        type="submit"
+        type="button"
         size="sm"
         variant="destructive"
         disabled={pending}
+        onClick={() => void handleDelete()}
         className="transition-transform duration-150 active:scale-[0.98]"
       >
         {pending ? "Löschen…" : "Löschen"}
       </Button>
-      {state.message && !state.ok ? (
-        <span className="text-xs text-red-400">{state.message}</span>
+      {error ? (
+        <span className="text-right text-xs text-red-400" role="alert">
+          {error}
+        </span>
       ) : null}
-    </form>
+    </div>
   );
 }
