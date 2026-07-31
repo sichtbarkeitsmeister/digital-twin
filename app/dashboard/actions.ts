@@ -3,6 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
+  ensureMemberInviteLoginLink,
+  formatMemberInviteEmailStatus,
+  sendOrgMemberInviteEmail,
+} from "@/lib/email/member-invite";
+import {
   ensureOwnerLoginLink,
   formatOwnerWelcomeEmailStatus,
   sendOrgOwnerWelcomeEmail,
@@ -106,6 +111,18 @@ const inviteSchema = z.object({
   role: z.enum(["admin", "employee"]),
 });
 
+function isDuplicateInviteError(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  const code = error.code ?? "";
+  return (
+    code === "23505" ||
+    msg.includes("duplicate") ||
+    msg.includes("unique") ||
+    msg.includes("organisation_invites_pending_unique")
+  );
+}
+
 export async function inviteToOrganisationAction(
   _prev: ActionState,
   formData: FormData,
@@ -117,22 +134,55 @@ export async function inviteToOrganisationAction(
   });
 
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe",
+    };
   }
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const { error } = await supabase.rpc("invite_to_organisation", {
     org_id: parsed.data.organisation_id,
     invited_email: parsed.data.invited_email,
     role: parsed.data.role,
   });
 
-  if (error) {
-    return { ok: false, message: "Could not invite user." };
+  const resent = isDuplicateInviteError(error);
+  if (error && !resent) {
+    return { ok: false, message: "Einladung konnte nicht erstellt werden." };
   }
 
+  const { data: org } = await supabase
+    .from("organisations")
+    .select("name")
+    .eq("id", parsed.data.organisation_id)
+    .maybeSingle();
+  const organisationName = org?.name?.trim() || "euer DigitalTwin";
+
+  const login = await ensureMemberInviteLoginLink(parsed.data.invited_email);
+  const emailResult = login
+    ? await sendOrgMemberInviteEmail({
+        email: parsed.data.invited_email,
+        organisationName,
+        organisationId: parsed.data.organisation_id,
+        role: parsed.data.role,
+        link: login.link,
+        isNewAccount: login.isNewAccount,
+        triggeredByUserId: user?.id ?? null,
+      })
+    : null;
+
   revalidatePath("/dashboard/organisations");
-  return { ok: true, message: "Invite sent." };
+  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/inbox");
+
+  const mailStatus = formatMemberInviteEmailStatus(emailResult);
+  const prefix = resent ? "Offene Einladung erneut versendet. " : "";
+  return { ok: true, message: `${prefix}${mailStatus}` };
 }
 
 const kickSchema = z.object({
