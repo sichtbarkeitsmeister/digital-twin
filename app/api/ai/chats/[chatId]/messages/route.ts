@@ -46,6 +46,7 @@ import {
   selectSurveyModelsForMessage,
 } from "@/lib/ai/survey-model-config";
 import { runMultiPhaseSurveyCreation } from "@/lib/ai/survey-multiphase-create";
+import { buildQuestionnairePasteProposal } from "@/lib/ai/survey-markdown-paste";
 import { surveyAiProposalSchema } from "@/lib/ai/survey-assistant-types";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
 
@@ -776,6 +777,87 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       id: f.id,
       name: f.name,
     }));
+
+    // Fast path for finished Fragebogen pastes: convert locally and return without
+    // Anthropic / multiphase (those time out on 40+ question questionnaires).
+    const earlyPaste = buildQuestionnairePasteProposal({
+      userMessage: parsed.data.content,
+      folders: folderSnapshots,
+    });
+    if (earlyPaste.ok) {
+      emit("status", {
+        message: `Fragebogen erkannt — ich übernehme ${earlyPaste.fieldCount} Fragen in ${earlyPaste.stepCount} Abschnitten…`,
+      });
+      const assistantText = JSON.stringify(earlyPaste.proposal);
+      const proposal = surveyAiProposalSchema.safeParse(earlyPaste.proposal);
+      const assistantInsert = await auth.supabase
+        .from("ai_chat_messages")
+        .insert({
+          chat_id: chatId,
+          role: "assistant",
+          content: assistantText,
+          metadata: {
+            selectedModel: "survey-markdown-paste",
+            modelTier: "action",
+            pasteConvert: {
+              stepCount: earlyPaste.stepCount,
+              fieldCount: earlyPaste.fieldCount,
+            },
+            pageContext: parsed.data.pageContext,
+          },
+        })
+        .select("id,chat_id,role,content,metadata,created_at")
+        .single();
+
+      if (assistantInsert.error || !assistantInsert.data) {
+        emit("error", {
+          message:
+            assistantInsert.error?.message ||
+            "Assistant message could not be persisted.",
+        });
+        return;
+      }
+
+      let actionId: string | null = null;
+      if (proposal.success) {
+        emit("status", { message: "Ich hinterlege den Vorschlag zur Freigabe..." });
+        const insertedAction = await auth.supabase
+          .from("ai_chat_actions")
+          .insert({
+            chat_id: chatId,
+            message_id: assistantInsert.data.id,
+            proposal_kind: proposal.data.kind,
+            proposal_json: proposal.data,
+            execution_status: "proposed",
+          })
+          .select("id")
+          .single();
+        if (!insertedAction.error && insertedAction.data) {
+          actionId = insertedAction.data.id;
+        }
+      }
+
+      await auth.supabase
+        .from("ai_chats")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", chatId);
+
+      void maybeAutoTitleAiChat({
+        supabase: auth.supabase,
+        userId: auth.userId,
+        chatId,
+        title: chat.title,
+        messages: fullHistoryPlain,
+        anthropic,
+      }).catch((err) => console.warn("auto chat title failed", err));
+
+      emit("done", {
+        messageId: assistantInsert.data.id,
+        actionId,
+        model: "survey-markdown-paste",
+      });
+      return;
+    }
 
     const activeSurveyId = parsed.data.pageContext.surveyId ?? null;
     const terms = toPromptTerms(parsed.data.content);

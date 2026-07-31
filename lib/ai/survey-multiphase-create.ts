@@ -169,7 +169,7 @@ export function resolveFolderPlacementFromMessage(
   return null;
 }
 
-function wrapProposalWithFolder(input: {
+export function wrapProposalWithFolder(input: {
   createSurvey: {
     kind: "create_survey";
     summary: string;
