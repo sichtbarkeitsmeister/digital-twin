@@ -58,6 +58,12 @@ export type MultiPhaseSurveyCreateResult =
     }
   | { ok: false; message: string };
 
+type FolderSnapshot = { id: string; name: string };
+
+type FolderPlacement =
+  | { type: "existing"; folder: FolderSnapshot }
+  | { type: "create"; name: string };
+
 function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -95,7 +101,184 @@ The user requested a large new survey. Return ONLY one JSON object (no markdown,
 Rules:
 - Include EVERY step and field the user asked for as blueprints.
 - Field objects must NOT include options, scale, or placeholder yet — only id, type, title, description, required.
-- All step.id and field.id must be globally unique within the survey.`;
+- All step.id and field.id must be globally unique within the survey.
+- Do NOT include folderId. Folder placement is handled separately by the server.`;
+
+const MULTIPHASE_CALL_TIMEOUT_MS = 180_000;
+const OUTLINE_MAX_TOKENS = 16_384;
+const EXPAND_MAX_TOKENS = 12_288;
+
+/** Fold German umlauts so "gruenerstraße" matches "Grünerstraße". */
+function foldGerman(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss");
+}
+
+/**
+ * Detect "speichern/abspeichern in Ordner X" and resolve against Known folders.
+ * Returns null when the user did not ask for folder placement.
+ */
+export function resolveFolderPlacementFromMessage(
+  userMessage: string,
+  folders: FolderSnapshot[],
+): FolderPlacement | null {
+  const text = userMessage.trim();
+  if (!text) return null;
+
+  const wantsFolder =
+    /\b(?:ordner|folder)\b/i.test(text) ||
+    /\b(?:ab)?speicher(?:e|n|t)?\b/i.test(text);
+  if (!wantsFolder) return null;
+
+  const foldedText = foldGerman(text);
+  let matched: FolderSnapshot | null = null;
+  for (const f of folders) {
+    const name = f.name.trim();
+    if (name.length < 2) continue;
+    const foldedName = foldGerman(name);
+    if (foldedText.includes(foldedName)) {
+      if (!matched || name.length > matched.name.length) matched = f;
+    }
+  }
+  if (matched) return { type: "existing", folder: matched };
+
+  // "in ordner orthopädie gruenerstraße abspeichern" → "orthopädie gruenerstraße"
+  const named =
+    text.match(
+      /\b(?:in\s+)?(?:den\s+|dem\s+)?ordner\s+([^\n,.]+?)(?:\s+ab)?speicher(?:e|n|t)?\b/i,
+    ) ||
+    text.match(/\b(?:in\s+)?(?:den\s+|dem\s+)?ordner\s+([^\n,.]+)/i) ||
+    text.match(/\bfolder\s+([^\n,.]+?)(?:\s+save|\s+store)?\b/i);
+
+  let rawName = (named?.[1] ?? "").trim().replace(/\s+/g, " ");
+  rawName = rawName
+    .replace(/^[„“"']+|[„“"']+$/g, "")
+    .replace(/\s+(bitte|danke|und|ablegen|anlegen|erstellen).*$/i, "")
+    .trim();
+
+  if (rawName.length >= 2 && rawName.length <= 80) {
+    return { type: "create", name: rawName };
+  }
+
+  // Save/abspeichern without a resolvable folder name — skip folder steps.
+  if (!/\b(?:ordner|folder)\b/i.test(text)) return null;
+  return null;
+}
+
+function wrapProposalWithFolder(input: {
+  createSurvey: {
+    kind: "create_survey";
+    summary: string;
+    title: string;
+    description: string;
+    notificationEmails: string[];
+    survey: z.infer<typeof surveySchema>;
+  };
+  placement: FolderPlacement | null;
+}): Record<string, unknown> {
+  const survey = input.createSurvey;
+  if (!input.placement) return survey;
+
+  const surveyRef = "survey_main";
+  if (input.placement.type === "existing") {
+    return {
+      kind: "batch",
+      summary: `${survey.summary} Im Ordner „${input.placement.folder.name}“.`,
+      steps: [
+        {
+          kind: "create_survey",
+          ref: surveyRef,
+          summary: survey.summary,
+          title: survey.title,
+          description: survey.description,
+          notificationEmails: survey.notificationEmails,
+          survey: survey.survey,
+        },
+        {
+          kind: "assign_folder",
+          summary: `Umfrage dem Ordner „${input.placement.folder.name}“ zuordnen.`,
+          surveyRef,
+          folderRef: input.placement.folder.id,
+        },
+      ],
+    };
+  }
+
+  const folderRef = "folder_target";
+  return {
+    kind: "batch",
+    summary: `${survey.summary} Neuer Ordner „${input.placement.name}“.`,
+    steps: [
+      {
+        kind: "create_folder",
+        ref: folderRef,
+        summary: `Ordner „${input.placement.name}“ anlegen.`,
+        name: input.placement.name,
+      },
+      {
+        kind: "create_survey",
+        ref: surveyRef,
+        summary: survey.summary,
+        title: survey.title,
+        description: survey.description,
+        notificationEmails: survey.notificationEmails,
+        survey: survey.survey,
+      },
+      {
+        kind: "assign_folder",
+        summary: `Umfrage dem Ordner „${input.placement.name}“ zuordnen.`,
+        surveyRef,
+        folderRef,
+      },
+    ],
+  };
+}
+
+async function completeTextWithContinuation(input: {
+  anthropic: Anthropic;
+  models: string[];
+  maxTokens: number;
+  system: SurveyChatSystem;
+  baseMessages: Anthropic.MessageParam[];
+  initialResponse: Anthropic.Messages.Message;
+  model: string;
+  timeoutMs: number;
+}): Promise<string> {
+  let fullText = extractAnthropicText(input.initialResponse);
+  let stopReason = input.initialResponse.stop_reason;
+  let rounds = 0;
+
+  while (stopReason === "max_tokens" && rounds < 3) {
+    rounds += 1;
+    const continued = await callAnthropicFirstAvailable({
+      anthropic: input.anthropic,
+      models: [input.model],
+      maxTokens: input.maxTokens,
+      system: input.system,
+      messages: [
+        ...input.baseMessages,
+        { role: "assistant", content: fullText },
+        {
+          role: "user",
+          content:
+            "Fahre exakt dort fort, wo du aufgehört hast. Wiederhole nichts und beende die JSON-Antwort vollständig.",
+        },
+      ],
+      stream: true,
+      timeoutMs: input.timeoutMs,
+    });
+    if (!continued) break;
+    const nextText = extractAnthropicText(continued.response);
+    if (nextText) fullText += nextText;
+    stopReason = continued.response.stop_reason;
+  }
+
+  return fullText;
+}
 
 function buildExpandInstruction(input: {
   userMessage: string;
@@ -126,10 +309,15 @@ export async function runMultiPhaseSurveyCreation(input: {
   userMessage: string;
   system: SurveyChatSystem;
   historyMessages: Anthropic.MessageParam[];
+  folders?: FolderSnapshot[];
   onStatus?: (message: string) => void;
 }): Promise<MultiPhaseSurveyCreateResult> {
   const models = resolveSurveyActionModels();
   const emit = input.onStatus ?? (() => {});
+  const folderPlacement = resolveFolderPlacementFromMessage(
+    input.userMessage,
+    input.folders ?? [],
+  );
 
   emit("Große Umfrage — ich skizziere zuerst die Struktur…");
 
@@ -144,15 +332,28 @@ export async function runMultiPhaseSurveyCreation(input: {
   const outlineCall = await callAnthropicFirstAvailable({
     anthropic: input.anthropic,
     models,
-    maxTokens: 8192,
+    maxTokens: OUTLINE_MAX_TOKENS,
     system: input.system,
     messages: outlineMessages,
+    stream: true,
+    timeoutMs: MULTIPHASE_CALL_TIMEOUT_MS,
   });
   if (!outlineCall) {
     return { ok: false, message: "Outline-Modell nicht verfügbar." };
   }
 
-  const outlineParsed = tryParseJsonObject(extractAnthropicText(outlineCall.response));
+  const outlineText = await completeTextWithContinuation({
+    anthropic: input.anthropic,
+    models,
+    maxTokens: OUTLINE_MAX_TOKENS,
+    system: input.system,
+    baseMessages: outlineMessages,
+    initialResponse: outlineCall.response,
+    model: outlineCall.model,
+    timeoutMs: MULTIPHASE_CALL_TIMEOUT_MS,
+  });
+
+  const outlineParsed = tryParseJsonObject(outlineText);
   const outlineResult = outlineSchema.safeParse(outlineParsed);
   if (!outlineResult.success) {
     return {
@@ -194,15 +395,28 @@ export async function runMultiPhaseSurveyCreation(input: {
       const expandCall = await callAnthropicFirstAvailable({
         anthropic: input.anthropic,
         models,
-        maxTokens: 8192,
+        maxTokens: EXPAND_MAX_TOKENS,
         system: input.system,
         messages: expandMessages,
+        stream: true,
+        timeoutMs: MULTIPHASE_CALL_TIMEOUT_MS,
       });
       if (!expandCall) {
         return { ok: false, message: "Expand-Modell nicht verfügbar." };
       }
 
-      const expandParsed = tryParseJsonObject(extractAnthropicText(expandCall.response));
+      const expandText = await completeTextWithContinuation({
+        anthropic: input.anthropic,
+        models,
+        maxTokens: EXPAND_MAX_TOKENS,
+        system: input.system,
+        baseMessages: expandMessages,
+        initialResponse: expandCall.response,
+        model: expandCall.model,
+        timeoutMs: MULTIPHASE_CALL_TIMEOUT_MS,
+      });
+
+      const expandParsed = tryParseJsonObject(expandText);
       const expandResult = expandChunkSchema.safeParse(expandParsed);
       if (expandResult.success) {
         expandedSteps = expandResult.data.steps;
@@ -245,7 +459,7 @@ export async function runMultiPhaseSurveyCreation(input: {
     };
   }
 
-  const proposal = {
+  const createSurvey = {
     kind: "create_survey" as const,
     summary: `Neue Umfrage „${outline.title}" (${validatedSurvey.data.steps.length} Schritte, mehrphasig erstellt).`,
     title: outline.title,
@@ -253,6 +467,11 @@ export async function runMultiPhaseSurveyCreation(input: {
     notificationEmails: outline.notificationEmails,
     survey: validatedSurvey.data,
   };
+
+  const proposal = wrapProposalWithFolder({
+    createSurvey,
+    placement: folderPlacement,
+  });
 
   return {
     ok: true,
