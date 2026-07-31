@@ -780,9 +780,17 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
     // Fast path for finished Fragebogen pastes: convert locally and return without
     // Anthropic / multiphase (those time out on 40+ question questionnaires).
+    // Also handles short retries ("versuche es erneut") by reusing the last paste.
+    const priorUserMessages = fullHistoryPlain
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      // Exclude the just-inserted current message from "prior" lookup source list;
+      // resolveQuestionnairePasteSource still prefers current when it is a full paste.
+      .slice(0, -1);
     const earlyPaste = buildQuestionnairePasteProposal({
       userMessage: parsed.data.content,
       folders: folderSnapshots,
+      priorUserMessages,
     });
     if (earlyPaste.ok) {
       emit("status", {

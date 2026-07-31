@@ -129,6 +129,41 @@ export function isCompleteQuestionnairePaste(userMessage: string): boolean {
   return false;
 }
 
+/** Short follow-ups after a paste/timeout — reuse the last Fragebogen in history. */
+export function isPasteRetryOrConfirmIntent(userMessage: string): boolean {
+  const text = userMessage.trim();
+  if (!text || text.length > 400) return false;
+  return (
+    /\b(?:versuch(?:e|en)?\s+(?:es\s+)?erneut|nochmal|noch\s*mal|erneut|retry|nochmals)\b/i.test(
+      text,
+    ) ||
+    /\b(?:genau\s+so|1\s*:\s*1|eins\s*zu\s*eins|wie\s+im\s+template|wie\s+vorliegend|so\s+lassen|so\s+übernehmen|bitte\s+übernehmen|übernimm(?:\s+es)?|abspeichern|speichern)\b/i.test(
+      text,
+    ) ||
+    /^(?:ja|ok|okay|mach\s+das|los|bitte)\.?$/i.test(text)
+  );
+}
+
+/**
+ * Prefer the current message if it is a full paste; otherwise, on retry/confirm,
+ * reuse the latest questionnaire paste from prior user messages.
+ */
+export function resolveQuestionnairePasteSource(input: {
+  userMessage: string;
+  priorUserMessages?: string[];
+}): string | null {
+  if (isCompleteQuestionnairePaste(input.userMessage)) {
+    return input.userMessage;
+  }
+  if (!isPasteRetryOrConfirmIntent(input.userMessage)) return null;
+  const priors = input.priorUserMessages ?? [];
+  for (let i = priors.length - 1; i >= 0; i -= 1) {
+    const prior = priors[i];
+    if (prior && isCompleteQuestionnairePaste(prior)) return prior;
+  }
+  return null;
+}
+
 export function convertMarkdownQuestionnaireToSurvey(userMessage: string): {
   ok: true;
   title: string;
@@ -303,14 +338,19 @@ export function convertMarkdownQuestionnaireToSurvey(userMessage: string): {
 export function buildQuestionnairePasteProposal(input: {
   userMessage: string;
   folders: FolderSnapshot[];
+  priorUserMessages?: string[];
 }):
   | { ok: true; proposal: Record<string, unknown>; stepCount: number; fieldCount: number }
   | { ok: false; message: string } {
-  if (!isCompleteQuestionnairePaste(input.userMessage)) {
+  const source = resolveQuestionnairePasteSource({
+    userMessage: input.userMessage,
+    priorUserMessages: input.priorUserMessages,
+  });
+  if (!source) {
     return { ok: false, message: "Kein vollständiger Fragebogen-Paste erkannt." };
   }
 
-  const converted = convertMarkdownQuestionnaireToSurvey(input.userMessage);
+  const converted = convertMarkdownQuestionnaireToSurvey(source);
   if (!converted.ok) return converted;
 
   const fieldCount = converted.survey.steps.reduce((n, s) => n + s.fields.length, 0);
@@ -323,7 +363,10 @@ export function buildQuestionnairePasteProposal(input: {
     survey: converted.survey,
   };
 
-  const placement = resolveFolderPlacementFromMessage(input.userMessage, input.folders);
+  // Folder intent may be in the original paste and/or the short retry message.
+  const placement =
+    resolveFolderPlacementFromMessage(input.userMessage, input.folders) ??
+    resolveFolderPlacementFromMessage(source, input.folders);
   const proposal = wrapProposalWithFolder({ createSurvey, placement });
 
   return {
