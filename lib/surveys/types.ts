@@ -1,6 +1,12 @@
 export type SurveyVersion = 1;
 
-export type SurveyFieldType = "text" | "radio" | "checkbox" | "rating" | "ranking";
+export type SurveyFieldType =
+  | "text"
+  | "text_list"
+  | "radio"
+  | "checkbox"
+  | "rating"
+  | "ranking";
 
 export type SurveyOption = {
   id: string;
@@ -22,6 +28,14 @@ export type SurveyFieldBase = {
 
 export type SurveyTextField = SurveyFieldBase & {
   type: "text";
+};
+
+/** Multiple editable text slots; option labels are prompts shown above each input. */
+export type SurveyTextListField = SurveyFieldBase & {
+  type: "text_list";
+  options: SurveyOption[];
+  /** Wenn true, können Teilnehmende zusätzliche leere Eingaben ergänzen. Standard: true. */
+  allowExtraEntries?: boolean;
 };
 
 export type SurveyRadioField = SurveyFieldBase & {
@@ -52,6 +66,7 @@ export type SurveyRankingField = SurveyFieldBase & {
 
 export type SurveyField =
   | SurveyTextField
+  | SurveyTextListField
   | SurveyRadioField
   | SurveyCheckboxField
   | SurveyRatingField

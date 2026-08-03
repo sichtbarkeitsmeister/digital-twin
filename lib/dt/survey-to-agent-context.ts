@@ -8,6 +8,7 @@ import {
   formatRankingAnswerForDisplay,
   hasStoredRankingAnswer,
 } from "@/lib/surveys/ranking-answer";
+import { formatTextListAnswerForDisplay } from "@/lib/surveys/text-list-answer";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -59,6 +60,10 @@ export function isPlaceholderOrEmptyAnswer(text: string): boolean {
 }
 
 export function normalizeSurveyAnswer(v: unknown, field?: SurveyField): string {
+  if (field?.type === "text_list") {
+    const formatted = formatTextListAnswerForDisplay(v, field.options);
+    return formatted.trim();
+  }
   if (field?.type === "ranking") {
     if (!hasStoredRankingAnswer(v)) return "";
     const labels = field.options.map((o) => o.label);

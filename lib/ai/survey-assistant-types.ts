@@ -275,6 +275,7 @@ const UPDATE_FIELD_LIFT_KEYS = [
   "scale",
   "allowOtherOption",
   "allowCustomEntries",
+  "allowExtraEntries",
 ] as const;
 
 const UPDATE_STEP_LIFT_KEYS = ["title", "description"] as const;
