@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { loadDtAuthorProfiles } from "@/lib/dt/author-labels";
 import { DT_CHAT_ATTACHMENTS_BUCKET, isSkippedStoragePath } from "@/lib/dt/attachments";
+import { isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { getDtChatOrNull, loadDtMessages, requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { buildChatParticipants } from "@/lib/dt/oversight";
@@ -134,7 +135,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ chatId: s
   if (parsed.data.agentId !== undefined) {
     const { data: agent } = await auth.supabase
       .from("dt_agents")
-      .select("id")
+      .select("id,slug,kind")
       .eq("id", parsed.data.agentId)
       .eq("organisation_id", chat.organisation_id)
       .eq("is_enabled", true)
@@ -142,7 +143,25 @@ export async function PATCH(req: Request, context: { params: Promise<{ chatId: s
 
     if (!agent) {
       return NextResponse.json(
-        { ok: false, message: "Agent nicht verfügbar." },
+        {
+          ok: false,
+          message:
+            "Agent nicht verfügbar: Er gehört nicht zur Organisation dieses Chats oder ist deaktiviert.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const agentIsSeoAdvisor = isSeoAdvisorAgent(agent);
+    if (chat.mode === "seo" && !agentIsSeoAdvisor) {
+      return NextResponse.json(
+        { ok: false, message: "In SEO-Chats ist nur der SEO-Berater möglich." },
+        { status: 400 },
+      );
+    }
+    if (chat.mode !== "seo" && agentIsSeoAdvisor) {
+      return NextResponse.json(
+        { ok: false, message: "Der SEO-Berater ist nur im SEO-Bereich verfügbar." },
         { status: 400 },
       );
     }

@@ -327,7 +327,16 @@ export function DtChatShell(props: {
   }, [props.adminOversight, selectedOrgId]);
 
   const loadChat = useCallback(
-    async (chatId: string) => {
+    async (
+      chatId: string,
+      options?: { expectedOrgId?: string; notifyOnMismatch?: boolean },
+    ) => {
+      const rejectStale = (message: string) => {
+        writeDtLastChatId(null, props.seoMode);
+        if (options?.notifyOnMismatch) setStatus(message);
+        return false;
+      };
+
       const res = await fetch(`/api/dt/chats/${chatId}`);
       const json = (await res.json()) as {
         ok?: boolean;
@@ -344,16 +353,17 @@ export function DtChatShell(props: {
         setStatus(json.message ?? "Chat konnte nicht geladen werden.");
         return false;
       }
+      // A stale pointer from another organisation would mix agents and chats.
+      const expectedOrgId = options?.expectedOrgId;
+      if (expectedOrgId && json.chat && json.chat.organisation_id !== expectedOrgId) {
+        return rejectStale("Dieser Chat gehört zu einer anderen Organisation.");
+      }
       // SEO workspace must not reopen persona chats from shared last-chat storage.
       if (props.seoMode && json.chat && json.chat.mode !== "seo") {
-        writeDtLastChatId(null, true);
-        setStatus("Dieser Chat gehört nicht zum SEO-Bereich.");
-        return false;
+        return rejectStale("Dieser Chat gehört nicht zum SEO-Bereich.");
       }
       if (!props.seoMode && json.chat?.mode === "seo") {
-        writeDtLastChatId(null, false);
-        setStatus("SEO-Chats sind nur im SEO-Bereich verfügbar.");
-        return false;
+        return rejectStale("SEO-Chats sind nur im SEO-Bereich verfügbar.");
       }
       setMessages(json.messages ?? []);
       setAuthorLabels(json.authorLabels ?? {});
@@ -487,7 +497,10 @@ export function DtChatShell(props: {
           const storedChat = readDtLastChatId(props.seoMode);
           const preferred = urlChat || storedChat;
           if (preferred) {
-            const loaded = await loadChat(preferred);
+            const loaded = await loadChat(preferred, {
+              expectedOrgId: resolvedOrgId || undefined,
+              notifyOnMismatch: Boolean(urlChat),
+            });
             if (cancelled) return;
             if (loaded) {
               setSelectedChatId(preferred);
@@ -745,7 +758,10 @@ export function DtChatShell(props: {
     setStatus(null);
     setMobileSidebarOpen(false);
     syncChatUrl({ chat: chatId });
-    await loadChat(chatId);
+    await loadChat(chatId, {
+      expectedOrgId: selectedOrgId || undefined,
+      notifyOnMismatch: true,
+    });
   };
 
   const handleDeleteChat = async (chatId: string) => {
@@ -962,9 +978,15 @@ export function DtChatShell(props: {
   const handleSelectAgent = useCallback(
     async (agentId: string) => {
       if (agentId === selectedAgentId || isBusy) return;
+      // Never switch to an agent that is not offered for the current organisation.
+      if (!agents.some((agent) => agent.id === agentId)) {
+        setStatus("Dieser Agent gehört nicht zur gewählten Organisation.");
+        return;
+      }
 
       if (!selectedChatId || ghostMode) {
         setSelectedAgentId(agentId);
+        setStatus(null);
         return;
       }
 
@@ -984,13 +1006,14 @@ export function DtChatShell(props: {
         return;
       }
 
+      setStatus(null);
       setChats((prev) =>
         prev.map((c) =>
           c.id === selectedChatId ? { ...c, agent_id: agentId } : c,
         ),
       );
     },
-    [selectedAgentId, selectedChatId, ghostMode, isBusy],
+    [agents, selectedAgentId, selectedChatId, ghostMode, isBusy],
   );
 
   const chatGptLayout = Boolean(props.embedded);
@@ -1038,8 +1061,8 @@ export function DtChatShell(props: {
         syncChatUrl({ scope, chat: null });
         startNewChat();
       }}
-      hideScopeTabs={props.seoMode && !props.adminOversight}
-      showOrgTab={props.adminOversight}
+      hideScopeTabs={props.seoMode}
+      showOrgTab={props.adminOversight && !props.seoMode}
       adminOversight={oversightActive}
       orgMembers={orgMembers}
       ownerFilterUserId={ownerFilterUserId}
