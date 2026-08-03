@@ -54,8 +54,16 @@ export async function canDirectlyEditDtAgents(
   return isPlatformAdmin(supabase, userId);
 }
 
-/** Same access as agent management — owners/admins/platform admins per org. */
-export const canViewDtAgentContext = canManageDtAgents;
+/**
+ * The context inspector reveals the assembled system prompt, so it stays
+ * internal: platform admins only, never customers.
+ */
+export async function canViewDtAgentContext(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<boolean> {
+  return isPlatformAdmin(supabase, userId);
+}
 
 export async function userCanManageAnyDtAgents(userId: string): Promise<boolean> {
   const supabase = await import("@/lib/supabase/server").then((m) => m.createClient());

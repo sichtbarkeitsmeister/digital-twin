@@ -165,7 +165,14 @@ export async function inviteToOrganisationAction(
 
   const resent = isDuplicateInviteError(error);
   if (error && !resent) {
-    return { ok: false, message: `Einladung konnte nicht erstellt werden (${error.message}).` };
+    console.warn("[invite] invite_to_organisation failed:", error.message);
+    return {
+      ok: false,
+      message:
+        error.message === "forbidden"
+          ? "Du darfst für diese Organisation niemanden einladen."
+          : "Einladung konnte nicht erstellt werden. Bitte später erneut versuchen.",
+    };
   }
 
   let inviteId =
@@ -200,11 +207,12 @@ export async function inviteToOrganisationAction(
     revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
     revalidatePath("/dashboard/inbox");
     if (acceptError) {
+      console.warn("[invite] self-accept failed:", acceptError.message);
       return {
         ok: false,
         message:
-          `Einladung erstellt, automatische Annahme fehlgeschlagen (${acceptError.message}). ` +
-          "Bitte unter Posteingang manuell annehmen.",
+          "Einladung erstellt, konnte aber nicht automatisch angenommen werden. " +
+          "Bitte im Posteingang manuell annehmen.",
       };
     }
     return {
@@ -241,9 +249,11 @@ export async function inviteToOrganisationAction(
   revalidatePath("/dashboard/inbox");
   revalidatePath("/dashboard/admin/mails");
 
+  const platformAdmin = user ? await isPlatformAdmin(supabase, user.id) : false;
   const mailStatus = formatMemberInviteEmailStatus(
     emailResult,
     login.ok ? null : login.reason,
+    platformAdmin,
   );
   const prefix = resent ? "Offene Einladung erneut versendet. " : "";
   const emailSent = memberInviteEmailSucceeded(emailResult);
@@ -275,7 +285,7 @@ export async function kickFromOrganisationAction(
   });
 
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
   }
 
   const supabase = await createClient();
@@ -285,11 +295,11 @@ export async function kickFromOrganisationAction(
   });
 
   if (error) {
-    return { ok: false, message: "Could not remove member." };
+    return { ok: false, message: "Mitglied konnte nicht entfernt werden." };
   }
 
   revalidatePath("/dashboard/organisations");
-  return { ok: true, message: "Member removed." };
+  return { ok: true, message: "Mitglied entfernt." };
 }
 
 const revokeInviteSchema = z.object({
@@ -372,18 +382,23 @@ export async function revokeOrganisationInviteAction(
         .maybeSingle();
 
       if (updateError || !updated) {
+        console.warn(
+          "[revoke invite] service-role fallback failed:",
+          updateError?.message ?? "no row updated",
+        );
         return {
           ok: false,
-          message:
-            "Einladung konnte nicht gelöscht werden. Bitte SQL-Migration " +
-            "`revoke_organisation_invite` in Supabase ausführen.",
+          message: "Einladung konnte nicht gelöscht werden. Bitte später erneut versuchen.",
         };
       }
     } catch (err) {
-      const reason = err instanceof Error ? err.message : rpcError.message;
+      console.warn(
+        "[revoke invite] service-role fallback threw:",
+        err instanceof Error ? err.message : rpcError.message,
+      );
       return {
         ok: false,
-        message: `Einladung konnte nicht gelöscht werden (${reason}).`,
+        message: "Einladung konnte nicht gelöscht werden. Bitte später erneut versuchen.",
       };
     }
   }

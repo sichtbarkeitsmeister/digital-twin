@@ -96,7 +96,7 @@ export async function OrganisationDetailView({
   const canManage =
     platformAdmin || myOrgRole === "owner" || myOrgRole === "admin";
   const canTransferOwnership = myOrgRole === "owner" || platformAdmin;
-  const canViewUsage = await canViewDtUsage(supabase, userId, organisationId);
+  const canViewUsage = await canViewDtUsage(supabase, userId);
   const canViewSeoReports =
     platformAdmin || (await isOrgOwner(supabase, userId, organisationId));
   const canManageSeo = platformAdmin;
@@ -129,12 +129,14 @@ export async function OrganisationDetailView({
         <div className={cn(orgDetailCardClass, "p-5")}>
           <h2 className="text-sm font-semibold tracking-tight text-primary">Fehler</h2>
           <p className="mt-1 text-sm text-secondary">
-            Organisationsdaten konnten nicht geladen werden.
+            Organisationsdaten konnten nicht geladen werden. Bitte lade die Seite neu.
           </p>
-          <div className="mt-3 grid gap-1 text-sm text-secondary">
-            {membersError ? <p>Mitglieder: {membersError.message}</p> : null}
-            {invitesError ? <p>Einladungen: {invitesError.message}</p> : null}
-          </div>
+          {platformAdmin ? (
+            <div className="mt-3 grid gap-1 text-sm text-secondary">
+              {membersError ? <p>Mitglieder: {membersError.message}</p> : null}
+              {invitesError ? <p>Einladungen: {invitesError.message}</p> : null}
+            </div>
+          ) : null}
         </div>
       </OrganisationPageShell>
     );

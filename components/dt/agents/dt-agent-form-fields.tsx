@@ -23,6 +23,8 @@ export function DtAgentFormFields(props: {
   disabled?: boolean;
   /** Hide the per-org prompt field (prompt is managed globally). */
   hidePrompt?: boolean;
+  /** Replacement copy shown instead of the prompt when it is hidden. */
+  promptNote?: string;
   /** Hide the enabled checkbox (agent must stay active). */
   hideEnabled?: boolean;
   /** Show global-sync toggle + conditional prompt UI for default agents. */
@@ -37,6 +39,7 @@ export function DtAgentFormFields(props: {
     onChange,
     disabled,
     hidePrompt,
+    promptNote,
     hideEnabled,
     supportsGlobalSync,
     supportsAppend,
@@ -131,8 +134,8 @@ export function DtAgentFormFields(props: {
         </div>
       ) : hidePrompt ? (
         <p className="rounded-2xl border border-sbkm-navy/10 bg-sbkm-mint/10 px-3 py-2 text-xs text-sbkm-ink-600 dark:border-white/10 dark:bg-white/5 dark:text-white/55">
-          Der System-Prompt dieses Agenten wird global verwaltet (siehe „Globale
-          Standard-Prompts“) und gilt für alle Organisationen.
+          {promptNote ??
+            "Der System-Prompt dieses Agenten wird global verwaltet (siehe „Globale Standard-Prompts“) und gilt für alle Organisationen."}
         </p>
       ) : (
         <label className="grid gap-1 text-sm">

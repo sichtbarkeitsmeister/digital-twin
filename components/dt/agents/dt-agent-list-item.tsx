@@ -55,13 +55,15 @@ function agentKindLabel(kind: string, slug: string): string {
     case "persona":
       return "Persona";
     default:
-      return kind;
+      return "Assistent";
   }
 }
 
 function AgentMetaBadges(props: {
   agent: DtAgentListItemRow;
   pendingReview?: boolean;
+  /** Prompt wiring badges are internal — only platform admins see them. */
+  showPromptBadges?: boolean;
 }) {
   return (
     <>
@@ -70,19 +72,19 @@ function AgentMetaBadges(props: {
           Standard
         </Badge>
       ) : null}
-      {props.agent.uses_global_prompt ? (
+      {props.showPromptBadges && props.agent.uses_global_prompt ? (
         <Badge
           variant="outline"
           className="shrink-0 border-sbkm-mint/30 text-[10px] text-sbkm-navy/70 dark:text-white/60"
         >
           Global
         </Badge>
-      ) : props.agent.is_default ? (
+      ) : props.showPromptBadges && props.agent.is_default ? (
         <Badge variant="outline" className="shrink-0 text-[10px]">
           Eigener Prompt
         </Badge>
       ) : null}
-      {props.agent.prompt_append?.trim() ? (
+      {props.showPromptBadges && props.agent.prompt_append?.trim() ? (
         <Badge variant="outline" className="shrink-0 text-[10px]">
           Zusatz
         </Badge>
@@ -260,7 +262,11 @@ export function DtAgentListItem(props: {
             <p className="truncate text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white sm:text-base">
               {agent.name}
             </p>
-            <AgentMetaBadges agent={agent} pendingReview={props.pendingReview} />
+            <AgentMetaBadges
+              agent={agent}
+              pendingReview={props.pendingReview}
+              showPromptBadges={props.canDirectlyEdit}
+            />
           </div>
           <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55 sm:text-sm">
             {agent.role ?? agentKindLabel(agent.kind, agent.slug)}

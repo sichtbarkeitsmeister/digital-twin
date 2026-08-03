@@ -85,16 +85,6 @@ export function InviteMemberForm({
           role="status"
         >
           {state.message}
-          {!state.emailSent && !state.selfJoined ? (
-            <>
-              {" "}
-              Log:{" "}
-              <a className="underline underline-offset-2" href="/dashboard/admin/mails">
-                Verwaltung → E-Mails
-              </a>
-              .
-            </>
-          ) : null}
         </p>
       ) : null}
 

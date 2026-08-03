@@ -27,10 +27,10 @@ type InviteRow = {
 };
 
 function formatOrgRole(role: string) {
-  if (role === "owner") return "Owner";
+  if (role === "owner") return "Inhaber";
   if (role === "admin") return "Admin";
-  if (role === "employee") return "Employee";
-  return role;
+  if (role === "employee") return "Mitarbeiter";
+  return "Mitglied";
 }
 
 export default async function InboxPage() {
@@ -61,12 +61,12 @@ export default async function InboxPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Error</CardTitle>
-          <CardDescription>Could not load inbox.</CardDescription>
+          <CardTitle>Posteingang nicht verfügbar</CardTitle>
+          <CardDescription>
+            Deine Einladungen konnten gerade nicht geladen werden. Bitte lade die
+            Seite neu.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="text-sm text-secondary">
-          {inboxError.message}
-        </CardContent>
       </Card>
     );
   }
@@ -78,10 +78,10 @@ export default async function InboxPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div className="grid gap-1">
           <h1 className="text-2xl font-bold tracking-tight text-primary">
-            Inbox
+            Posteingang
           </h1>
           <p className="text-secondary">
-            Signed in as <span className="text-primary">{email}</span>
+            Angemeldet als <span className="text-primary">{email}</span>
           </p>
         </div>
       </div>
@@ -89,7 +89,7 @@ export default async function InboxPage() {
       <section className="grid gap-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold tracking-tight text-primary">
-            Invites
+            Einladungen
           </h2>
           <Badge variant="secondary">{inboxInvites.length}</Badge>
         </div>
@@ -97,9 +97,9 @@ export default async function InboxPage() {
         {inboxInvites.length === 0 ? (
           <Card>
             <CardHeader>
-              <CardTitle>No invites</CardTitle>
+              <CardTitle>Keine offenen Einladungen</CardTitle>
               <CardDescription>
-                Invitations you can accept will appear here.
+                Einladungen, die du annehmen kannst, erscheinen hier.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -122,19 +122,18 @@ export default async function InboxPage() {
                       </Badge>
                     </div>
                     <CardDescription>
-                      {org?.slug ? `${org.slug} · ` : ""}
-                      Invited as {formatOrgRole(invite.org_role)}
+                      Eingeladen als {formatOrgRole(invite.org_role)}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-wrap items-center justify-between gap-3">
                     <p className="text-sm text-secondary">
-                      Invite for{" "}
+                      Einladung für{" "}
                       <span className="text-primary">{invite.email}</span>
                     </p>
                     <form action={acceptOrganisationInviteAction}>
                       <input type="hidden" name="invite_id" value={invite.id} />
                       <Button type="submit" size="sm">
-                        Accept
+                        Annehmen
                       </Button>
                     </form>
                   </CardContent>
