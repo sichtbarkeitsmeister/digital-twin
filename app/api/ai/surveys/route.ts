@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { buildSurveyAssistantSystemPrompt } from "@/lib/ai/survey-assistant-prompt";
 import {
-  surveyAiProposalSchema,
+  parseSurveyAiProposal,
   surveyAiRouteResponseSchema,
 } from "@/lib/ai/survey-assistant-types";
 import { createClient } from "@/lib/supabase/server";
@@ -153,7 +153,7 @@ export async function POST(req: Request) {
     const text = extractText(response);
     const jsonText = stripCodeFences(text);
     const parsedJson: unknown = JSON.parse(jsonText);
-    const proposalParsed = surveyAiProposalSchema.safeParse(parsedJson);
+    const proposalParsed = parseSurveyAiProposal(parsedJson);
     if (!proposalParsed.success) {
       return NextResponse.json(
         {
