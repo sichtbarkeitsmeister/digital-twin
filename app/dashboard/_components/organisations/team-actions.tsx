@@ -44,7 +44,7 @@ export function TeamActions(props: {
       <CenteredModal
         open={invite}
         title="Mitglied einladen"
-        description="Bestehende Konten werden sofort hinzugefügt."
+        description="Es wird eine Einladungs-E-Mail mit Magic Link gesendet. Das Fenster bleibt offen, falls der Versand fehlschlägt."
         onClose={() => setInvite(false)}
       >
         <InviteMemberForm

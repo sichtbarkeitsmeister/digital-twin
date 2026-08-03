@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   ensureMemberInviteLoginLink,
   formatMemberInviteEmailStatus,
+  memberInviteEmailSucceeded,
   sendOrgMemberInviteEmail,
 } from "@/lib/email/member-invite";
 import {
@@ -19,6 +20,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 export type ActionState = {
   ok: boolean;
   message: string;
+  /** Set by member invite: true only when SMTP mail was actually sent. */
+  emailSent?: boolean;
 };
 
 const checkboxOnSchema = z.preprocess(
@@ -165,7 +168,7 @@ export async function inviteToOrganisationAction(
   const organisationName = org?.name?.trim() || "euer DigitalTwin";
 
   const login = await ensureMemberInviteLoginLink(parsed.data.invited_email);
-  const emailResult = login
+  const emailResult = login.ok
     ? await sendOrgMemberInviteEmail({
         email: parsed.data.invited_email,
         organisationName,
@@ -180,10 +183,22 @@ export async function inviteToOrganisationAction(
   revalidatePath("/dashboard/organisations");
   revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
   revalidatePath("/dashboard/inbox");
+  revalidatePath("/dashboard/admin/mails");
 
-  const mailStatus = formatMemberInviteEmailStatus(emailResult);
+  const mailStatus = formatMemberInviteEmailStatus(
+    emailResult,
+    login.ok ? null : login.reason,
+  );
   const prefix = resent ? "Offene Einladung erneut versendet. " : "";
-  return { ok: true, message: `${prefix}${mailStatus}` };
+  const emailSent = memberInviteEmailSucceeded(emailResult);
+
+  // Invite row is saved even when mail fails — but ok mirrors mail success so the
+  // modal stays open and the user sees why no email arrived.
+  return {
+    ok: emailSent,
+    emailSent,
+    message: `${prefix}${mailStatus}`,
+  };
 }
 
 const kickSchema = z.object({

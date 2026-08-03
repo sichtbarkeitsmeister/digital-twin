@@ -8,41 +8,87 @@ export type MemberInviteEmailResult =
   | { ok: true; skipped: true; reason: string }
   | { ok: false; reason: string };
 
+export type MemberInviteLoginLinkResult =
+  | { ok: true; link: string; isNewAccount: boolean }
+  | { ok: false; reason: string };
+
 function inboxRedirectUrl() {
   return `${getAppBaseUrl()}/dashboard/inbox`;
 }
 
+async function generateAuthLink(
+  service: ReturnType<typeof createServiceClient>,
+  email: string,
+  type: "invite" | "magiclink",
+) {
+  return service.auth.admin.generateLink({
+    type,
+    email,
+    options: { redirectTo: inboxRedirectUrl() },
+  });
+}
+
+/**
+ * Create a one-click login/invite link for the invitee.
+ * Falls back invite → magiclink if the auth user already exists.
+ */
 export async function ensureMemberInviteLoginLink(
   email: string,
-): Promise<{ link: string; isNewAccount: boolean } | null> {
+): Promise<MemberInviteLoginLinkResult> {
   const normalized = email.trim().toLowerCase();
-  if (!normalized) return null;
+  if (!normalized) return { ok: false, reason: "Keine E-Mail-Adresse" };
 
-  const service = createServiceClient();
+  let service: ReturnType<typeof createServiceClient>;
+  try {
+    service = createServiceClient();
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : "Service-Role fehlt",
+    };
+  }
+
   const { data: profile } = await service
     .from("profiles")
     .select("id, email")
     .eq("email", normalized)
     .maybeSingle();
 
-  const isNewAccount = !profile?.id;
-  const linkType = isNewAccount ? "invite" : "magiclink";
+  let isNewAccount = !profile?.id;
+  let linkType: "invite" | "magiclink" = isNewAccount ? "invite" : "magiclink";
 
-  const { data: linkData, error: linkErr } = await service.auth.admin.generateLink({
-    type: linkType,
-    email: normalized,
-    options: { redirectTo: inboxRedirectUrl() },
-  });
+  let { data: linkData, error: linkErr } = await generateAuthLink(
+    service,
+    normalized,
+    linkType,
+  );
+
+  // Auth user may already exist even without a profiles row (or vice versa).
+  if (linkErr && linkType === "invite") {
+    console.warn(
+      "[email] member invite link (invite) failed, trying magiclink:",
+      linkErr.message,
+    );
+    isNewAccount = false;
+    linkType = "magiclink";
+    ({ data: linkData, error: linkErr } = await generateAuthLink(
+      service,
+      normalized,
+      "magiclink",
+    ));
+  }
 
   if (linkErr) {
     console.warn("[email] member invite login link:", linkErr.message);
-    return null;
+    return { ok: false, reason: `Anmeldelink fehlgeschlagen: ${linkErr.message}` };
   }
 
   const link = linkData?.properties?.action_link?.trim();
-  if (!link) return null;
+  if (!link) {
+    return { ok: false, reason: "Anmeldelink leer (Supabase generateLink)." };
+  }
 
-  return { link, isNewAccount };
+  return { ok: true, link, isNewAccount };
 }
 
 export async function sendOrgMemberInviteEmail(input: {
@@ -131,16 +177,26 @@ export async function sendOrgMemberInviteEmail(input: {
 
 export function formatMemberInviteEmailStatus(
   result: MemberInviteEmailResult | null,
+  linkError?: string | null,
 ): string {
+  if (linkError) {
+    return `Einladung gespeichert, aber E-Mail nicht gesendet (${linkError}).`;
+  }
   if (!result) {
-    return "Einladung gespeichert, aber Anmeldelink konnte nicht erzeugt werden — E-Mail nicht gesendet.";
+    return "Einladung gespeichert, aber E-Mail nicht gesendet (unbekannter Fehler).";
   }
   if (result.ok && !result.skipped) return "Einladungs-E-Mail wurde gesendet.";
   if (result.ok && result.skipped) {
-    return `Einladung gespeichert, E-Mail übersprungen (${result.reason}).`;
+    return `Einladung gespeichert, E-Mail übersprungen (${result.reason}). Prüfe SMTP unter Verwaltung → E-Mails.`;
   }
   if (!result.ok) {
     return `Einladung gespeichert, E-Mail fehlgeschlagen (${result.reason}).`;
   }
   return "Einladung gespeichert.";
+}
+
+export function memberInviteEmailSucceeded(
+  result: MemberInviteEmailResult | null,
+): boolean {
+  return Boolean(result?.ok && !result.skipped);
 }

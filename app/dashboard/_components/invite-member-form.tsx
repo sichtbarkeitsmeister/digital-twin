@@ -8,14 +8,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 
-const initialState: ActionState = { ok: true, message: "" };
+const initialState: ActionState = { ok: true, message: "", emailSent: false };
 
 export function InviteMemberForm({
   organisationId,
   onSuccess,
+  initialEmail,
+  submitLabel,
 }: {
   organisationId: string;
-  onSuccess?: () => void;
+  onSuccess?: (message: string) => void;
+  /** Prefill for resend flows. */
+  initialEmail?: string;
+  submitLabel?: string;
 }) {
   const [state, formAction, pending] = useActionState(
     inviteToOrganisationAction,
@@ -26,7 +31,8 @@ export function InviteMemberForm({
   useEffect(() => {
     if (state.message !== lastMessage.current) {
       lastMessage.current = state.message;
-      if (state.ok && state.message) onSuccess?.();
+      // Only close when the invitation email was actually sent.
+      if (state.emailSent && state.message) onSuccess?.(state.message);
     }
   }, [state, onSuccess]);
 
@@ -42,6 +48,7 @@ export function InviteMemberForm({
           type="email"
           placeholder="kollege@firma.de"
           autoComplete="email"
+          defaultValue={initialEmail ?? ""}
           required
         />
       </div>
@@ -55,15 +62,29 @@ export function InviteMemberForm({
       </div>
 
       {state.message ? (
-        <p className={state.ok ? "text-sm text-secondary" : "text-sm text-red-400"}>
+        <p
+          className={
+            state.emailSent ? "text-sm text-secondary" : "text-sm text-red-400"
+          }
+          role="status"
+        >
           {state.message}
+          {!state.emailSent ? (
+            <>
+              {" "}
+              Details unter{" "}
+              <a className="underline underline-offset-2" href="/dashboard/admin/mails">
+                Verwaltung → E-Mails
+              </a>
+              .
+            </>
+          ) : null}
         </p>
       ) : null}
 
       <Button type="submit" disabled={pending} className="active:scale-[0.98]">
-        {pending ? "Wird gesendet …" : "Einladen"}
+        {pending ? "Wird gesendet …" : submitLabel ?? "Einladen & E-Mail senden"}
       </Button>
     </form>
   );
 }
-
