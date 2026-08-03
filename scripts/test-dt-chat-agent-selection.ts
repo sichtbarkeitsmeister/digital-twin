@@ -5,11 +5,13 @@ import {
   resolveDefaultAgentId,
   shouldStartNewChatOnAgentSwitch,
 } from "../lib/dt/chat/agent-selection";
+import { filterAgentsHiddenFromOrgMembers } from "../lib/dt/agents/seo-advisor";
 
 const advisor = { id: "advisor", slug: "seo_advisor", kind: "seo_advisor" };
 const geo = { id: "geo", slug: "geo_advisor", kind: "geo_advisor" };
 const peter = { id: "peter", slug: "peter_lustig", kind: "persona" };
 const benno = { id: "benno", slug: "benno", kind: "wunschkunde" };
+const starterTwin = { id: "twin", slug: "default", kind: "persona" };
 
 function testSeoWorkspaceKeepsTwins() {
   const agents = [advisor, peter, benno];
@@ -119,7 +121,39 @@ function testAgentSwitchStartsNewChat() {
   console.log("agent switch starts new chat: ok");
 }
 
+function testCustomerAgentVisibility() {
+  // Advisor and the auto-created starter twin stay out of the customer view.
+  assert.deepEqual(
+    filterAgentsHiddenFromOrgMembers([advisor, starterTwin, peter]).map((a) => a.id),
+    ["peter"],
+  );
+
+  // Without another usable avatar the starter twin remains as fallback.
+  assert.deepEqual(
+    filterAgentsHiddenFromOrgMembers([advisor, starterTwin]).map((a) => a.id),
+    ["twin"],
+  );
+  assert.deepEqual(
+    filterAgentsHiddenFromOrgMembers([
+      starterTwin,
+      { ...peter, is_enabled: false },
+    ]).map((a) => a.id),
+    ["twin", "peter"],
+  );
+
+  // The org overview uses camelCase rows.
+  assert.deepEqual(
+    filterAgentsHiddenFromOrgMembers([
+      { ...starterTwin, isEnabled: true },
+      { ...benno, isEnabled: true },
+    ]).map((a) => a.id),
+    ["benno"],
+  );
+  console.log("customer agent visibility: ok");
+}
+
 testSeoWorkspaceKeepsTwins();
+testCustomerAgentVisibility();
 testAdvisorStaysOutOfNormalChat();
 testChatModeForCreate();
 testAgentSwitchStartsNewChat();
