@@ -48,6 +48,7 @@ import {
 import { runMultiPhaseSurveyCreation } from "@/lib/ai/survey-multiphase-create";
 import { buildQuestionnairePasteProposal } from "@/lib/ai/survey-markdown-paste";
 import {
+  describeSurveyProposalValidationError,
   normalizeSurveyAiProposalInput,
   parseSurveyAiProposal,
 } from "@/lib/ai/survey-assistant-types";
@@ -264,6 +265,59 @@ function hasActionJsonIntent(text: string) {
   return extractProposalHintFromText(text)?.kind != null;
 }
 
+function proposalLooksLikeAction(value: unknown): value is Record<string, unknown> & { kind: string } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as { kind?: unknown }).kind === "string"
+  );
+}
+
+async function repairSurveyProposalJson(input: {
+  anthropic: Anthropic;
+  utilityModels: string[];
+  brokenText: string;
+  schemaHint?: string;
+}) {
+  const repairSource =
+    input.brokenText.length > 120_000
+      ? `${input.brokenText.slice(0, 120_000)}\n…`
+      : input.brokenText;
+  const schemaBlock = input.schemaHint
+    ? `\n\nSchema-Fehler:\n${input.schemaHint}\n\nKorrigiere insbesondere fehlende Objekte (z.B. add_field braucht field{id,type,title,description,required}, add_step braucht step{id,title,description,fields}, update_field braucht patch{}).`
+    : "";
+  const repairCall = await callAnthropicFirstAvailable({
+    anthropic: input.anthropic,
+    models: input.utilityModels,
+    maxTokens: 8192,
+    system:
+      "You repair malformed or schema-invalid survey action JSON. Return exactly one valid JSON object only. No markdown, no prose, no code fences.",
+    messages: [
+      {
+        role: "user",
+        content:
+          `Repariere das folgende fehlerhafte JSON für eine Survey-Aktion.` +
+          `\n\nWICHTIG:` +
+          `\n- Gib NUR ein valides JSON-Objekt zurück.` +
+          `\n- Keine Erklärungen, kein Markdown, keine Code-Fences.` +
+          `\n- Behalte die fachliche Bedeutung bei.` +
+          `\n- add_field MUSS ein vollständiges field-Objekt enthalten.` +
+          `\n- update_field MUSS patch:{...} verwenden.` +
+          schemaBlock +
+          `\n\nFehlerhafte Antwort:\n${repairSource}`,
+      },
+    ],
+    stream: true,
+    timeoutMs: 120_000,
+  });
+  if (!repairCall) return null;
+  const repairedText = extractText(repairCall.response).trim();
+  const repairedParsed = tryParseJsonObject(repairedText);
+  if (!repairedParsed) return repairedText ? { text: repairedText, parsed: null as unknown } : null;
+  return { text: repairedText, parsed: repairedParsed };
+}
+
 async function ensureValidAssistantOutput(input: {
   anthropic: Anthropic;
   utilityModels: string[];
@@ -271,47 +325,83 @@ async function ensureValidAssistantOutput(input: {
   baseMessages: Anthropic.MessageParam[];
   assistantText: string;
 }) {
+  const acceptIfValid = (text: string, parsed: unknown) => {
+    if (!proposalLooksLikeAction(parsed)) {
+      return { assistantText: text, parsedJson: parsed };
+    }
+    const validated = parseSurveyAiProposal(parsed);
+    if (validated.success) {
+      return {
+        assistantText: JSON.stringify(validated.data),
+        parsedJson: validated.data,
+      };
+    }
+    return null;
+  };
+
   const initialParsed = tryParseJsonObject(input.assistantText);
   if (initialParsed) {
+    const accepted = acceptIfValid(input.assistantText, initialParsed);
+    if (accepted) return accepted;
+    if (proposalLooksLikeAction(initialParsed)) {
+      let candidate = stripCodeFences(input.assistantText);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const hint = describeSurveyProposalValidationError(
+          tryParseJsonObject(candidate) ?? initialParsed,
+        );
+        const repaired = await repairSurveyProposalJson({
+          anthropic: input.anthropic,
+          utilityModels: input.utilityModels,
+          brokenText: candidate,
+          schemaHint: hint,
+        });
+        if (!repaired) break;
+        if (repaired.parsed) {
+          const acceptedRepair = acceptIfValid(repaired.text, repaired.parsed);
+          if (acceptedRepair) return acceptedRepair;
+        }
+        candidate = repaired.text;
+      }
+      // Keep parseable-but-invalid JSON so UI can still show a proposal card;
+      // apply will reject with a clear German message.
+      return { assistantText: input.assistantText, parsedJson: initialParsed };
+    }
     return { assistantText: input.assistantText, parsedJson: initialParsed };
   }
+
   if (!hasActionJsonIntent(input.assistantText)) {
     return { assistantText: input.assistantText, parsedJson: null };
   }
 
   let candidate = stripCodeFences(input.assistantText);
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    // Truncate repair input — full 16k+ Fragebogen JSON can blow utility context.
-    const repairSource =
-      candidate.length > 120_000 ? `${candidate.slice(0, 120_000)}\n…` : candidate;
-    const repairCall = await callAnthropicFirstAvailable({
+    const repaired = await repairSurveyProposalJson({
       anthropic: input.anthropic,
-      models: input.utilityModels,
-      maxTokens: 8192,
-      system:
-        "You repair malformed JSON. Return exactly one valid JSON object only. No markdown, no prose, no code fences.",
-      messages: [
-        {
-          role: "user",
-          content:
-            `Repariere das folgende fehlerhafte JSON für eine Survey-Aktion.` +
-            `\n\nWICHTIG:` +
-            `\n- Gib NUR ein valides JSON-Objekt zurück.` +
-            `\n- Keine Erklärungen, kein Markdown, keine Code-Fences.` +
-            `\n- Behalte die fachliche Bedeutung bei.` +
-            `\n\nFehlerhafte Antwort:\n${repairSource}`,
-        },
-      ],
-      stream: true,
-      timeoutMs: 120_000,
+      utilityModels: input.utilityModels,
+      brokenText: candidate,
     });
-    if (!repairCall) break;
-    const repairedText = extractText(repairCall.response).trim();
-    const repairedParsed = tryParseJsonObject(repairedText);
-    if (repairedParsed) {
-      return { assistantText: repairedText, parsedJson: repairedParsed };
+    if (!repaired) break;
+    if (repaired.parsed) {
+      const accepted = acceptIfValid(repaired.text, repaired.parsed);
+      if (accepted) return accepted;
+      // Parsed but schema-invalid: continue repair loop with schema hint next.
+      candidate = repaired.text;
+      const schemaRepaired = await repairSurveyProposalJson({
+        anthropic: input.anthropic,
+        utilityModels: input.utilityModels,
+        brokenText: candidate,
+        schemaHint: describeSurveyProposalValidationError(repaired.parsed),
+      });
+      if (schemaRepaired?.parsed) {
+        const acceptedSchema = acceptIfValid(schemaRepaired.text, schemaRepaired.parsed);
+        if (acceptedSchema) return acceptedSchema;
+        candidate = schemaRepaired.text;
+      } else if (schemaRepaired?.text) {
+        candidate = schemaRepaired.text;
+      }
+      continue;
     }
-    if (repairedText) candidate = repairedText;
+    if (repaired.text) candidate = repaired.text;
   }
 
   const actionModels = resolveSurveyActionModels();
@@ -327,8 +417,9 @@ async function ensureValidAssistantOutput(input: {
         {
           role: "user",
           content:
-            "Deine letzte Antwort war nicht als valides JSON parsebar. Erzeuge jetzt die gleiche Aktion erneut, " +
-            "aber gib ausschließlich EIN valides JSON-Objekt zurück. Kein Text davor/danach, keine Markdown-Code-Fences.",
+            "Deine letzte Antwort war kein gültiger Survey-Aktions-JSON. Erzeuge jetzt die gleiche Aktion erneut, " +
+            "aber gib ausschließlich EIN valides JSON-Objekt zurück. Kein Text davor/danach, keine Markdown-Code-Fences. " +
+            "Bei add_field MUSS field{id,type,title,description,required} vollständig sein; bei update_field MUSS patch{} gesetzt sein.",
         },
       ],
       stream: true,
@@ -338,6 +429,8 @@ async function ensureValidAssistantOutput(input: {
     const regeneratedText = extractText(regenerate.response).trim();
     const regeneratedParsed = tryParseJsonObject(regeneratedText);
     if (regeneratedParsed) {
+      const accepted = acceptIfValid(regeneratedText, regeneratedParsed);
+      if (accepted) return accepted;
       return { assistantText: regeneratedText, parsedJson: regeneratedParsed };
     }
   }
@@ -1141,6 +1234,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       } else if (typeof (parsedJson as { kind?: unknown }).kind === "string") {
         emit("status", { message: "Ich hinterlege den Vorschlag zur Freigabe..." });
         const parsedObj = parsedJson as Record<string, unknown> & { kind: string };
+        const validationMessage = describeSurveyProposalValidationError(parsedObj);
         const insertedAction = await auth.supabase
           .from("ai_chat_actions")
           .insert({
@@ -1152,7 +1246,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
             execution_status: "proposed",
             execution_result: {
               ok: false,
-              message: "Vorschlag nicht vollständig validiert. Wird beim Annehmen geprüft.",
+              message: validationMessage,
             },
           })
           .select("id")

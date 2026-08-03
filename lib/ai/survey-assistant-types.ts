@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { surveySchema } from "@/lib/surveys/schema";
+import {
+  surveyFieldSchema,
+  surveySchema,
+  surveyStepSchema,
+} from "@/lib/surveys/schema";
 
 const builderProposalSchema = z.object({
   kind: z.literal("edit_survey_definition"),
@@ -19,7 +23,8 @@ const patchOperationSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("add_field"),
     stepId: z.string().min(1),
-    field: z.unknown(),
+    // Must be a full field object — z.unknown() in Zod 4 accepts missing keys.
+    field: surveyFieldSchema,
     index: z.number().int().min(0).optional(),
   }),
   z.object({
@@ -39,7 +44,7 @@ const patchOperationSchema = z.discriminatedUnion("op", [
   }),
   z.object({
     op: z.literal("add_step"),
-    step: z.unknown(),
+    step: surveyStepSchema,
     index: z.number().int().min(0).optional(),
   }),
   z.object({
@@ -380,6 +385,39 @@ export function normalizeSurveyAiProposalInput(raw: unknown): unknown {
 /** Normalize then validate a survey AI proposal payload. */
 export function parseSurveyAiProposal(raw: unknown) {
   return surveyAiProposalSchema.safeParse(normalizeSurveyAiProposalInput(raw));
+}
+
+/** Short German explanation for common invalid proposal shapes. */
+export function describeSurveyProposalValidationError(raw: unknown): string {
+  const normalized = normalizeSurveyAiProposalInput(raw);
+  const parsed = surveyAiProposalSchema.safeParse(normalized);
+  if (parsed.success) return "Ungültiger Proposal-Payload.";
+
+  const root = asPlainObject(normalized);
+  const operations = Array.isArray(root?.operations) ? root!.operations : null;
+  if (root?.kind === "patch_survey_definition" && operations) {
+    for (let i = 0; i < operations.length; i++) {
+      const op = asPlainObject(operations[i]);
+      if (!op || typeof op.op !== "string") continue;
+      if (op.op === "add_field" && (op.field === undefined || op.field === null)) {
+        return `Ungültiger Proposal-Payload: Operation ${i + 1} (add_field) enthält kein field-Objekt.`;
+      }
+      if (op.op === "add_step" && (op.step === undefined || op.step === null)) {
+        return `Ungültiger Proposal-Payload: Operation ${i + 1} (add_step) enthält kein step-Objekt.`;
+      }
+      if (op.op === "update_field" && (op.patch === undefined || op.patch === null) && op.required === undefined) {
+        return `Ungültiger Proposal-Payload: Operation ${i + 1} (update_field) enthält kein patch-Objekt.`;
+      }
+    }
+  }
+
+  const issue = parsed.error.issues[0];
+  if (!issue) return "Ungültiger Proposal-Payload.";
+  const path = issue.path.length > 0 ? ` (${issue.path.join(".")})` : "";
+  if (issue.message === "Invalid input" || issue.message.startsWith("Invalid input:")) {
+    return `Ungültiger Proposal-Payload${path}.`;
+  }
+  return `Ungültiger Proposal-Payload${path}: ${issue.message}`;
 }
 
 /** How many Umfragen are archived by delete_survey in this proposal (standalone or batch). */

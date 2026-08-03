@@ -5,11 +5,13 @@
 import assert from "node:assert/strict";
 
 import {
+  describeSurveyProposalValidationError,
   normalizeSurveyAiProposalInput,
   normalizeSurveyPatchOperation,
   parseSurveyAiProposal,
   surveyAiProposalSchema,
 } from "../lib/ai/survey-assistant-types";
+import { applySurveyPatchOperations } from "../lib/ai/survey-patch";
 
 const surveyId = "31ddfdea-401b-4744-95d4-05b789adede0";
 
@@ -137,5 +139,77 @@ const manyParsed = parseSurveyAiProposal({
   operations: manyOps,
 });
 assert.equal(manyParsed.success, true);
+
+// add_field without field object must be rejected (Zod 4 z.unknown() used to allow this).
+const missingFieldProposal = {
+  kind: "patch_survey_definition",
+  summary: "Abschlusssatz als neues Feld hinzufügen",
+  surveyId,
+  operations: [{ op: "add_field", stepId: "step_13_abschlussfragen" }],
+};
+const missingFieldParsed = parseSurveyAiProposal(missingFieldProposal);
+assert.equal(missingFieldParsed.success, false);
+assert.match(
+  describeSurveyProposalValidationError(missingFieldProposal),
+  /add_field.*field/i,
+);
+
+const validAddField = parseSurveyAiProposal({
+  kind: "patch_survey_definition",
+  summary: "Abschlusssatz hinzufügen",
+  surveyId,
+  operations: [
+    {
+      op: "add_field",
+      stepId: "step_13_abschlussfragen",
+      field: {
+        id: "field_13_2",
+        type: "text",
+        title: "Vielen Dank!",
+        description: "Abschluss",
+        required: false,
+        placeholder: "",
+      },
+    },
+  ],
+});
+assert.equal(validAddField.success, true);
+
+const patchGuard = applySurveyPatchOperations({
+  baseSurvey: {
+    version: 1,
+    id: "survey_1",
+    title: "T",
+    description: "",
+    steps: [
+      {
+        id: "step_13_abschlussfragen",
+        title: "Abschluss",
+        description: "",
+        fields: [
+          {
+            id: "field_13_1",
+            type: "text",
+            title: "Noch etwas?",
+            description: "",
+            required: true,
+            placeholder: "",
+          },
+        ],
+      },
+    ],
+  },
+  operations: [
+    {
+      op: "add_field",
+      stepId: "step_13_abschlussfragen",
+      field: undefined as unknown as object,
+    },
+  ],
+});
+assert.equal(patchGuard.ok, false);
+if (!patchGuard.ok) {
+  assert.match(patchGuard.message, /field/i);
+}
 
 console.log("ok: survey proposal normalize");

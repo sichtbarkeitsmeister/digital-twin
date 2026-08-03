@@ -99,6 +99,12 @@ export function applySurveyPatchOperations(input: {
     if (op.op === "add_field") {
       const stepIdx = findStepIndex(op.stepId);
       if (stepIdx < 0) return { ok: false as const, message: `Schritt nicht gefunden: ${op.stepId}` };
+      if (op.field === undefined || op.field === null || typeof op.field !== "object") {
+        return {
+          ok: false as const,
+          message: "add_field ohne field-Objekt — Felddefinition fehlt.",
+        };
+      }
       const idx =
         typeof op.index === "number"
           ? Math.max(0, Math.min(op.index, draft.steps[stepIdx].fields.length))
@@ -134,6 +140,12 @@ export function applySurveyPatchOperations(input: {
     }
 
     if (op.op === "add_step") {
+      if (op.step === undefined || op.step === null || typeof op.step !== "object") {
+        return {
+          ok: false as const,
+          message: "add_step ohne step-Objekt — Schritt-Definition fehlt.",
+        };
+      }
       const idx =
         typeof op.index === "number"
           ? Math.max(0, Math.min(op.index, draft.steps.length))
@@ -155,9 +167,16 @@ export function applySurveyPatchOperations(input: {
 
   const parsedPatched = surveySchema.safeParse(draft);
   if (!parsedPatched.success) {
+    const issue = parsedPatched.error.issues[0];
+    const raw = issue?.message ?? "Patch ergibt keine gültige Umfrage.";
+    const message =
+      raw.includes("expected object, received undefined") ||
+      raw.includes("expected object, received null")
+        ? "Patch unvollständig: ein Feld- oder Schritt-Objekt fehlt."
+        : raw;
     return {
       ok: false as const,
-      message: parsedPatched.error.issues[0]?.message ?? "Patch ergibt keine gültige Umfrage.",
+      message,
     };
   }
 
