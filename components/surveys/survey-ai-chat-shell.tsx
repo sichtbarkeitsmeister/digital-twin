@@ -114,7 +114,18 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
     Map<string, AiChatStoredAttachment[]>
   >(new Map());
   const [dropHighlight, setDropHighlight] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  type ChatStatusTone = "error" | "success" | "neutral";
+  const [status, setStatusState] = useState<{
+    message: string;
+    tone: ChatStatusTone;
+  } | null>(null);
+  const setStatus = (message: string | null, tone: ChatStatusTone = "error") => {
+    if (!message) {
+      setStatusState(null);
+      return;
+    }
+    setStatusState({ message, tone });
+  };
   const [thinkingStatus, setThinkingStatus] = useState<string | null>(null);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -771,7 +782,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       message: string;
       navigateTo?: string | null;
     };
-    setStatus(data.message);
+    setStatus(data.message, data.ok ? "success" : "error");
     if (!data.ok) {
       await maybeTriggerAutoFixForFailedAction(actionId, data.message);
     }
@@ -793,7 +804,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       },
     );
     const data = (await res.json()) as { ok: boolean; message: string };
-    setStatus(data.message);
+    setStatus(data.message, data.ok ? "success" : "error");
     if (data.ok) router.refresh();
     await loadChat(selectedChatId);
     await loadChats();
@@ -810,7 +821,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       },
     );
     const data = (await res.json()) as { ok: boolean; message: string };
-    setStatus(data.message);
+    setStatus(data.message, data.ok ? "success" : "error");
     await loadChat(selectedChatId);
     await loadChats();
     setPendingActionId(null);
@@ -922,10 +933,16 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
             <p className="truncate text-xs text-secondary">{contextSummary}</p>
             {status ? (
               <p
-                className="mt-1 whitespace-normal break-words rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"
-                role="alert"
+                className={
+                  status.tone === "success"
+                    ? "mt-1 whitespace-normal break-words rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-800 dark:text-emerald-200"
+                    : status.tone === "neutral"
+                      ? "mt-1 whitespace-normal break-words rounded-md border border-border/70 bg-muted/50 px-2 py-1 text-xs font-medium text-foreground"
+                      : "mt-1 whitespace-normal break-words rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"
+                }
+                role={status.tone === "error" ? "alert" : "status"}
               >
-                {status}
+                {status.message}
               </p>
             ) : null}
           </div>
