@@ -1,3 +1,5 @@
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
 import { logEmailSend } from "@/lib/email/send-log";
 import { renderOrgMemberInviteEmail } from "@/lib/email/templates/org-member-invite";
@@ -173,6 +175,95 @@ export async function sendOrgMemberInviteEmail(input: {
     console.warn("[email] member invite:", reason);
     return { ok: false, reason };
   }
+}
+
+export type SupabaseAuthInviteResult =
+  | { ok: true; via: "invite" | "magiclink" }
+  | { ok: false; reason: string };
+
+function isAlreadyRegistered(message: string) {
+  const m = message.toLowerCase();
+  return m.includes("already been registered") || m.includes("already registered");
+}
+
+/**
+ * Fallback delivery through Supabase's own auth mailer.
+ * Used when the project SMTP relay refuses our branded mail — the invitee still
+ * gets a working login link, just in Supabase's default layout.
+ */
+export async function sendSupabaseAuthInviteEmail(input: {
+  email: string;
+  organisationId: string;
+  organisationName: string;
+  role: string;
+  isNewAccount: boolean;
+  triggeredByUserId?: string | null;
+}): Promise<SupabaseAuthInviteResult> {
+  const to = input.email.trim().toLowerCase();
+  if (!to) return { ok: false, reason: "Keine E-Mail-Adresse" };
+
+  const logContext = {
+    kind: "member_invite_supabase",
+    to: [to],
+    subject: `Einladung zu ${input.organisationName} (Supabase-Versand)`,
+    metadata: {
+      organisationName: input.organisationName,
+      role: input.role,
+      isNewAccount: input.isNewAccount,
+    },
+    triggeredByUserId: input.triggeredByUserId ?? null,
+    organisationId: input.organisationId,
+  };
+
+  const fail = async (reason: string): Promise<SupabaseAuthInviteResult> => {
+    await logEmailSend({ ...logContext, status: "failed", errorMessage: reason });
+    return { ok: false, reason };
+  };
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !anonKey) return fail("Supabase-Konfiguration fehlt");
+
+  let service: ReturnType<typeof createServiceClient>;
+  try {
+    service = createServiceClient();
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Service-Role fehlt");
+  }
+
+  if (input.isNewAccount) {
+    const { error } = await service.auth.admin.inviteUserByEmail(to, {
+      redirectTo: inboxRedirectUrl(),
+    });
+    if (!error) {
+      await logEmailSend({
+        ...logContext,
+        status: "sent",
+        metadata: { ...logContext.metadata, via: "invite" },
+      });
+      return { ok: true, via: "invite" };
+    }
+    if (!isAlreadyRegistered(error.message)) {
+      return fail(`Supabase-Einladung fehlgeschlagen: ${error.message}`);
+    }
+  }
+
+  // Existing account: Supabase only mails a magic link through the public API.
+  const anon = createSupabaseClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { error } = await anon.auth.signInWithOtp({
+    email: to,
+    options: { shouldCreateUser: false, emailRedirectTo: inboxRedirectUrl() },
+  });
+  if (error) return fail(`Supabase-Magic-Link fehlgeschlagen: ${error.message}`);
+
+  await logEmailSend({
+    ...logContext,
+    status: "sent",
+    metadata: { ...logContext.metadata, via: "magiclink" },
+  });
+  return { ok: true, via: "magiclink" };
 }
 
 /**
