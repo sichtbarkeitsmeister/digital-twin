@@ -4,6 +4,7 @@ import * as React from "react";
 import { HelpCircle, Plus, X } from "lucide-react";
 
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
+import { SurveyTextListInput } from "@/components/surveys/survey-text-list-input";
 import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
 import {
   addCheckboxOtherEntry,
@@ -19,6 +20,7 @@ import {
   setCheckboxOtherEntryText,
 } from "@/lib/surveys/other-option";
 import { isRankingAnswerValid } from "@/lib/surveys/ranking-answer";
+import { isTextListAnswerValid } from "@/lib/surveys/text-list-answer";
 import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -348,6 +350,13 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
 
   function isFilled(field: SurveyField, value: unknown) {
     if (field.type === "text") return typeof value === "string" && value.trim().length > 0;
+    if (field.type === "text_list") {
+      return isTextListAnswerValid(
+        value,
+        field.options.map((o) => o.id),
+        field.required,
+      );
+    }
     if (field.type === "radio") {
       if (typeof value !== "string") return false;
       const raw = value.trim();
@@ -921,6 +930,21 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                           );
                         })}
                       </div>
+                    ) : null}
+
+                    {field.type === "text_list" ? (
+                      <SurveyTextListInput
+                        fieldId={field.id}
+                        options={field.options}
+                        value={answers[field.id]}
+                        onChange={(next) => setAnswer(field.id, next)}
+                        disabled={!session}
+                        allowExtraEntries={field.allowExtraEntries !== false}
+                        required={field.required}
+                        placeholder={
+                          survey.answerPlaceholder?.trim() || "Deine Antwort…"
+                        }
+                      />
                     ) : null}
 
                     {field.type === "ranking" ? (

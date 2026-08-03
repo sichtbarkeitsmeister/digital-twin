@@ -42,9 +42,14 @@ import {
   setCheckboxOtherEntryText,
 } from "@/lib/surveys/other-option";
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
+import { SurveyTextListInput } from "@/components/surveys/survey-text-list-input";
 import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
 import { RichTextEditor } from "@/components/surveys/rich-text-editor";
 import { formatRankingAnswerForDisplay } from "@/lib/surveys/ranking-answer";
+import {
+  formatTextListAnswerForDisplay,
+  isTextListAnswerValid,
+} from "@/lib/surveys/text-list-answer";
 import { surveySchema } from "@/lib/surveys/schema";
 import {
   normalizeSurveyPurpose,
@@ -130,6 +135,19 @@ function createDefaultField(type: SurveyFieldType): SurveyField {
     return { ...base, type: "rating", scale: { min: 1, max: 5 } };
   }
   const options: SurveyOption[] = [{ id: createId(), label: "Option 1" }];
+  if (type === "text_list") {
+    return {
+      ...base,
+      type: "text_list",
+      required: true,
+      options: [
+        { id: createId(), label: "Mir ist aufgefallen, dass…" },
+        { id: createId(), label: "Das Kind hat Probleme mit…" },
+        { id: createId(), label: "Der Kinderarzt hat empfohlen…" },
+      ],
+      allowExtraEntries: true,
+    };
+  }
   if (type === "radio")
     return { ...base, type: "radio", options, allowOtherOption: false };
   if (type === "checkbox")
@@ -142,16 +160,27 @@ function createDefaultField(type: SurveyFieldType): SurveyField {
   };
 }
 
+function fieldHasOptions(
+  field: SurveyField,
+): field is Extract<
+  SurveyField,
+  { type: "text_list" | "radio" | "checkbox" | "ranking" }
+> {
+  return (
+    field.type === "text_list" ||
+    field.type === "radio" ||
+    field.type === "checkbox" ||
+    field.type === "ranking"
+  );
+}
+
 function getOptionsFromField(
   field: SurveyField,
   minCount: number,
 ): SurveyOption[] {
-  const source =
-    field.type === "radio" ||
-    field.type === "checkbox" ||
-    field.type === "ranking"
-      ? field.options.map((opt) => ({ ...opt }))
-      : [{ id: createId(), label: "Option 1" }];
+  const source = fieldHasOptions(field)
+    ? field.options.map((opt) => ({ ...opt }))
+    : [{ id: createId(), label: "Option 1" }];
   const next = [...source];
   while (next.length < minCount) {
     next.push({ id: createId(), label: `Option ${next.length + 1}` });
@@ -184,6 +213,16 @@ function convertFieldType(
       ...base,
       type: "rating",
       scale: field.type === "rating" ? field.scale : { min: 1, max: 5 },
+    };
+  }
+
+  if (nextType === "text_list") {
+    return {
+      ...base,
+      type: "text_list",
+      options: getOptionsFromField(field, 1),
+      allowExtraEntries:
+        field.type === "text_list" ? field.allowExtraEntries !== false : true,
     };
   }
 
@@ -601,11 +640,7 @@ export function SurveyBuilder({
           ...st,
           fields: st.fields.map((f) => {
             if (f.id !== fieldId) return f;
-            if (
-              f.type !== "radio" &&
-              f.type !== "checkbox" &&
-              f.type !== "ranking"
-            ) {
+            if (!fieldHasOptions(f)) {
               return f;
             }
             return {
@@ -629,20 +664,17 @@ export function SurveyBuilder({
           ...st,
           fields: st.fields.map((f) => {
             if (f.id !== fieldId) return f;
-            if (
-              f.type !== "radio" &&
-              f.type !== "checkbox" &&
-              f.type !== "ranking"
-            ) {
+            if (!fieldHasOptions(f)) {
               return f;
             }
             const nextNum = f.options.length + 1;
+            const label =
+              f.type === "text_list"
+                ? `Prompt ${nextNum}`
+                : `Option ${nextNum}`;
             return {
               ...f,
-              options: [
-                ...f.options,
-                { id: createId(), label: `Option ${nextNum}` },
-              ],
+              options: [...f.options, { id: createId(), label }],
             };
           }),
         };
@@ -659,11 +691,7 @@ export function SurveyBuilder({
           ...st,
           fields: st.fields.map((f) => {
             if (f.id !== fieldId) return f;
-            if (
-              f.type !== "radio" &&
-              f.type !== "checkbox" &&
-              f.type !== "ranking"
-            ) {
+            if (!fieldHasOptions(f)) {
               return f;
             }
             const minOptions = f.type === "ranking" ? 2 : 1;
@@ -1252,6 +1280,17 @@ export function SurveyBuilder({
                                   changeFieldType(
                                     currentStep.id,
                                     field.id,
+                                    "text_list",
+                                  )
+                                }
+                              >
+                                Textliste
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  changeFieldType(
+                                    currentStep.id,
+                                    field.id,
                                     "radio",
                                   )
                                 }
@@ -1392,12 +1431,17 @@ export function SurveyBuilder({
                         </div>
                       ) : null}
 
-                      {field.type === "radio" ||
+                      {field.type === "text_list" ||
+                      field.type === "radio" ||
                       field.type === "checkbox" ||
                       field.type === "ranking" ? (
                         <div className="grid gap-2">
                           <div className="flex items-center justify-between gap-2">
-                            <Label>Optionen</Label>
+                            <Label>
+                              {field.type === "text_list"
+                                ? "Prompts / Eingabefelder"
+                                : "Optionen"}
+                            </Label>
                             <Button
                               type="button"
                               size="sm"
@@ -1407,15 +1451,26 @@ export function SurveyBuilder({
                               }
                             >
                               <Plus className="mr-2 h-4 w-4" />
-                              Option
+                              {field.type === "text_list" ? "Prompt" : "Option"}
                             </Button>
                           </div>
+                          {field.type === "text_list" ? (
+                            <p className="text-xs text-secondary">
+                              Jeder Prompt wird als Label über einem editierbaren
+                              Textfeld angezeigt. Bei Pflichtfeld muss jedes Feld
+                              ausgefüllt werden.
+                            </p>
+                          ) : null}
                           {field.options.map((opt) => (
                             <div
                               key={opt.id}
                               className="flex items-center gap-2"
                             >
-                              {field.type !== "ranking" ? (
+                              {field.type === "text_list" ? (
+                                <span className="inline-flex h-5 w-5 items-center justify-center text-xs text-secondary">
+                                  T
+                                </span>
+                              ) : field.type !== "ranking" ? (
                                 <span
                                   className={cn(
                                     "inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px]",
@@ -1460,7 +1515,11 @@ export function SurveyBuilder({
                                     },
                                   )
                                 }
-                                placeholder="Option"
+                                placeholder={
+                                  field.type === "text_list"
+                                    ? "Prompt (z.B. Mir ist aufgefallen, dass…)"
+                                    : "Option"
+                                }
                               />
                               <Button
                                 type="button"
@@ -1473,13 +1532,29 @@ export function SurveyBuilder({
                                   field.options.length <=
                                   (field.type === "ranking" ? 2 : 1)
                                 }
-                                aria-label="Option entfernen"
+                                aria-label={
+                                  field.type === "text_list"
+                                    ? "Prompt entfernen"
+                                    : "Option entfernen"
+                                }
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           ))}
-                          {field.type !== "ranking" ? (
+                          {field.type === "text_list" ? (
+                            <label className="flex cursor-pointer items-center gap-2 text-sm">
+                              <Checkbox
+                                checked={field.allowExtraEntries !== false}
+                                onCheckedChange={(next) =>
+                                  updateField(currentStep.id, field.id, {
+                                    allowExtraEntries: next === true,
+                                  })
+                                }
+                              />
+                              <span>Zusätzliche freie Eingaben erlauben</span>
+                            </label>
+                          ) : field.type !== "ranking" ? (
                             <label className="flex cursor-pointer items-center gap-2 text-sm">
                               <Checkbox
                                 checked={
@@ -1527,6 +1602,14 @@ export function SurveyBuilder({
                         onClick={() => addField(currentStep.id, "text")}
                       >
                         Text
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addField(currentStep.id, "text_list")}
+                      >
+                        Textliste
                       </Button>
                       <Button
                         type="button"
@@ -1855,6 +1938,25 @@ export function SurveyBuilder({
                   </div>
                 ) : null}
 
+                {activeResponseField.type === "text_list" ? (
+                  <SurveyTextListInput
+                    fieldId={activeResponseField.id}
+                    options={activeResponseField.options}
+                    value={previewAnswers[activeResponseField.id]}
+                    onChange={(next) =>
+                      setPreviewAnswers((prev) => ({
+                        ...prev,
+                        [activeResponseField.id]: next,
+                      }))
+                    }
+                    allowExtraEntries={activeResponseField.allowExtraEntries !== false}
+                    required={activeResponseField.required}
+                    placeholder={
+                      survey.answerPlaceholder?.trim() || "Deine Antwort…"
+                    }
+                  />
+                ) : null}
+
                 {activeResponseField.type === "ranking" ? (
                   <SurveyRankingInput
                     fieldId={activeResponseField.id}
@@ -1959,6 +2061,12 @@ function summarizeFieldAnswer(field: SurveyField, value: unknown) {
   if (field.type === "text") {
     return typeof value === "string" && value.trim() ? value.trim() : "Keine Antwort";
   }
+  if (field.type === "text_list") {
+    const formatted = formatTextListAnswerForDisplay(value, field.options);
+    if (!formatted.trim()) return "Keine Eingaben";
+    const lines = formatted.split("\n").filter(Boolean);
+    return `Textliste: ${lines.slice(0, 2).join(" · ")}${lines.length > 2 ? ` +${lines.length - 2}` : ""}`;
+  }
   if (field.type === "radio") {
     if (typeof value !== "string" || !value.trim()) return "Nichts gewählt";
     return `Gewählt: ${value}`;
@@ -1983,6 +2091,13 @@ function summarizeFieldAnswer(field: SurveyField, value: unknown) {
 
 function hasFieldAnswer(field: SurveyField, value: unknown) {
   if (field.type === "text") return typeof value === "string" && value.trim().length > 0;
+  if (field.type === "text_list") {
+    return isTextListAnswerValid(
+      value,
+      field.options.map((o) => o.id),
+      false,
+    );
+  }
   if (field.type === "radio") return typeof value === "string" && value.trim().length > 0;
   if (field.type === "checkbox") {
     return (
@@ -2340,6 +2455,20 @@ function SurveyPreview({
                       />
                     ) : null}
 
+                    {field.type === "text_list" ? (
+                      <SurveyTextListInput
+                        fieldId={field.id}
+                        options={field.options}
+                        value={answers[field.id]}
+                        onChange={(next) => setAnswer(field.id, next)}
+                        allowExtraEntries={field.allowExtraEntries !== false}
+                        required={field.required}
+                        placeholder={
+                          survey.answerPlaceholder?.trim() || "Deine Antwort…"
+                        }
+                      />
+                    ) : null}
+
                     {field.type === "radio" ? (
                       <div className="grid gap-2">
                         {field.options.map((opt) => {
@@ -2588,6 +2717,20 @@ function SurveyPreview({
                           );
                         })}
                       </div>
+                    ) : null}
+
+                    {field.type === "text_list" ? (
+                      <SurveyTextListInput
+                        fieldId={field.id}
+                        options={field.options}
+                        value={answers[field.id]}
+                        onChange={(next) => setAnswer(field.id, next)}
+                        allowExtraEntries={field.allowExtraEntries !== false}
+                        required={field.required}
+                        placeholder={
+                          survey.answerPlaceholder?.trim() || "Deine Antwort…"
+                        }
+                      />
                     ) : null}
 
                     {field.type === "ranking" ? (

@@ -9,6 +9,7 @@
     "test:survey-facts": "tsx scripts/test-survey-facts.ts",
     "test:survey-agent-output": "tsx scripts/test-survey-agent-output.ts",
     "test:survey-proposal-normalize": "tsx scripts/test-survey-proposal-normalize.ts",
+    "test:survey-text-list": "tsx scripts/test-survey-text-list.ts",
     "test:survey-clarifications": "tsx scripts/test-survey-clarifications.ts",
     "test:anbieter-to-seo": "tsx scripts/test-anbieter-to-seo.ts",
     "types:generate": "tsx scripts/generate-types.ts",
