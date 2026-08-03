@@ -52,7 +52,6 @@ import {
 } from "@/lib/dt/seo/chat-task-proposals";
 import {
   filterAgentsHiddenFromOrgMembers,
-  filterSeoWorkspaceAgents,
   isSeoAdvisorAgent,
 } from "@/lib/dt/agents/seo-advisor";
 
@@ -71,18 +70,14 @@ function resolveDefaultAgentId(
 ): string {
   if (agents.length === 0) return "";
 
-  // SEO workspace: always prefer the SEO advisor (no persona mix).
-  if (options.seoMode) {
-    if (options.currentId && agents.some((agent) => agent.id === options.currentId)) {
-      const current = agents.find((agent) => agent.id === options.currentId);
-      if (current && isSeoAdvisorAgent(current)) return options.currentId;
-    }
-    return pickSeoAdvisorAgentId(agents) ?? agents[0]!.id;
-  }
-
-  // Outside SEO: keep an explicit, still-valid selection (e.g. Peter after "Neuer Chat").
+  // Keep an explicit, still-valid selection (e.g. a digital twin after "Neuer Chat").
   if (options.currentId && agents.some((agent) => agent.id === options.currentId)) {
     return options.currentId;
+  }
+
+  // SEO workspace starts on the SEO advisor when nothing is selected yet.
+  if (options.seoMode) {
+    return pickSeoAdvisorAgentId(agents) ?? agents[0]!.id;
   }
 
   // Never fall back onto the SEO advisor outside the SEO workspace.
@@ -224,8 +219,13 @@ export function DtChatShell(props: {
     ? extractAgentDisg(selectedAgent.avatar_data)
     : null;
   const displayAgentEmoji = selectedAgent ? emojiForAgent(selectedAgent) : null;
+  const selectedAgentIsSeoAdvisor = selectedAgent ? isSeoAdvisorAgent(selectedAgent) : false;
+  // Only SEO advisor conversations belong to the SEO list. A digital twin picked
+  // inside the SEO workspace starts a regular DigitalTwin chat.
   const chatModeForCreate: DtChatMode = props.seoMode
-    ? "seo"
+    ? selectedAgentIsSeoAdvisor
+      ? "seo"
+      : "default"
     : chatScope === "team"
       ? "team"
       : "default";
@@ -276,9 +276,10 @@ export function DtChatShell(props: {
     if (!selectedOrgId) return;
     const res = await fetch(`/api/dt/agents?org=${encodeURIComponent(selectedOrgId)}`);
     const json = (await res.json()) as { ok?: boolean; agents?: DtAgentOption[] };
-    // SEO workspace: only SEO/GEO advisors. Elsewhere: hide SEO advisors from org members.
+    // SEO workspace keeps every agent (advisor + digital twins).
+    // Elsewhere the SEO advisor stays hidden.
     const visible = props.seoMode
-      ? filterSeoWorkspaceAgents(json.agents ?? [])
+      ? (json.agents ?? [])
       : filterAgentsHiddenFromOrgMembers(json.agents ?? []);
     if (json.ok && visible.length) {
       setAgents(visible);
@@ -450,7 +451,7 @@ export function DtChatShell(props: {
           };
           if (agentsJson.ok && agentsJson.agents?.length) {
             const visible = props.seoMode
-              ? filterSeoWorkspaceAgents(agentsJson.agents)
+              ? agentsJson.agents
               : filterAgentsHiddenFromOrgMembers(agentsJson.agents);
             if (visible.length) {
               setAgents(visible);
@@ -718,11 +719,11 @@ export function DtChatShell(props: {
     clearComposerAttachments();
     setStatus(null);
     setMobileSidebarOpen(false);
-    // SEO workspace: always SEO advisor. Elsewhere: keep current avatar.
+    // Keep the currently selected avatar (e.g. Peter). Only fall back when invalid.
     setSelectedAgentId((prev) =>
       resolveDefaultAgentId(agents, {
         seoMode: props.seoMode,
-        currentId: props.seoMode ? undefined : prev,
+        currentId: prev,
       }),
     );
   };
@@ -979,7 +980,8 @@ export function DtChatShell(props: {
     async (agentId: string) => {
       if (agentId === selectedAgentId || isBusy) return;
       // Never switch to an agent that is not offered for the current organisation.
-      if (!agents.some((agent) => agent.id === agentId)) {
+      const targetAgent = agents.find((agent) => agent.id === agentId);
+      if (!targetAgent) {
         setStatus("Dieser Agent gehört nicht zur gewählten Organisation.");
         return;
       }
@@ -987,6 +989,17 @@ export function DtChatShell(props: {
       if (!selectedChatId || ghostMode) {
         setSelectedAgentId(agentId);
         setStatus(null);
+        return;
+      }
+
+      // SEO workspace: advisor and twin conversations live in different lists,
+      // so switching between them opens a fresh chat instead of moving this one.
+      if (
+        props.seoMode &&
+        isSeoAdvisorAgent(targetAgent) !== (activeChat?.mode === "seo")
+      ) {
+        startNewChat();
+        setSelectedAgentId(agentId);
         return;
       }
 
@@ -1013,7 +1026,16 @@ export function DtChatShell(props: {
         ),
       );
     },
-    [agents, selectedAgentId, selectedChatId, ghostMode, isBusy],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- startNewChat is stable enough here
+    [
+      agents,
+      activeChat?.mode,
+      props.seoMode,
+      selectedAgentId,
+      selectedChatId,
+      ghostMode,
+      isBusy,
+    ],
   );
 
   const chatGptLayout = Boolean(props.embedded);
