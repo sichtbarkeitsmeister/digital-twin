@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthUser, getChatOrNull } from "@/lib/ai/chat-db";
-import { surveyAiProposalSchema } from "@/lib/ai/survey-assistant-types";
+import { parseSurveyAiProposal } from "@/lib/ai/survey-assistant-types";
 import { applySurveyProposal } from "@/lib/ai/chat-executor";
 
 export async function POST(
@@ -25,7 +25,7 @@ export async function POST(
     .maybeSingle();
   if (!action) return NextResponse.json({ ok: false, message: "Aktion nicht gefunden." }, { status: 404 });
 
-  const proposalParsed = surveyAiProposalSchema.safeParse(action.proposal_json);
+  const proposalParsed = parseSurveyAiProposal(action.proposal_json);
   if (!proposalParsed.success) {
     await auth.supabase
       .from("ai_chat_actions")

@@ -47,7 +47,10 @@ import {
 } from "@/lib/ai/survey-model-config";
 import { runMultiPhaseSurveyCreation } from "@/lib/ai/survey-multiphase-create";
 import { buildQuestionnairePasteProposal } from "@/lib/ai/survey-markdown-paste";
-import { surveyAiProposalSchema } from "@/lib/ai/survey-assistant-types";
+import {
+  normalizeSurveyAiProposalInput,
+  parseSurveyAiProposal,
+} from "@/lib/ai/survey-assistant-types";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
 
 export const maxDuration = 300;
@@ -789,7 +792,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         message: `Fragebogen erkannt — ich übernehme ${earlyPaste.fieldCount} Fragen in ${earlyPaste.stepCount} Abschnitten…`,
       });
       const assistantText = JSON.stringify(earlyPaste.proposal);
-      const proposal = surveyAiProposalSchema.safeParse(earlyPaste.proposal);
+      const proposal = parseSurveyAiProposal(earlyPaste.proposal);
       const assistantInsert = await auth.supabase
         .from("ai_chat_messages")
         .insert({
@@ -1117,7 +1120,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     let actionId: string | null = null;
     const parsedJson = ensuredAssistant.parsedJson;
     if (parsedJson) {
-      const proposal = surveyAiProposalSchema.safeParse(parsedJson);
+      const proposal = parseSurveyAiProposal(parsedJson);
       if (proposal.success) {
         emit("status", { message: "Ich hinterlege den Vorschlag zur Freigabe..." });
         const insertedAction = await auth.supabase
@@ -1144,7 +1147,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
             chat_id: chatId,
             message_id: assistantInsert.data.id,
             proposal_kind: parsedObj.kind,
-            proposal_json: parsedObj,
+            // Store normalized ops when possible so Apply can still succeed later.
+            proposal_json: normalizeSurveyAiProposalInput(parsedObj),
             execution_status: "proposed",
             execution_result: {
               ok: false,
