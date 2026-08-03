@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Eye, Mail, User } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -14,6 +13,7 @@ import {
   DtPillButton,
   DtTabs,
 } from "@/components/dt";
+import { germanAuthErrorMessage } from "@/lib/shared/auth-error-messages";
 import { createClient } from "@/lib/supabase/client";
 
 export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
@@ -47,7 +47,7 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
       if (authError) throw authError;
       setSuccess(true);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ein Fehler ist aufgetreten.");
+      setError(germanAuthErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
