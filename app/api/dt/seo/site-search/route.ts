@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { verifyDtInternalWebhookSecret } from "@/lib/dt/internal-webhook";
 import {
+  auditSiteIndexabilityForTool,
   inspectWebsiteUrlForTool,
   readSitemapForTool,
 } from "@/lib/dt/seo/live-site-tools";
@@ -15,11 +16,12 @@ export const maxDuration = 30;
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  action: z.enum(["search", "read", "sitemap", "inspect"]).default("search"),
+  action: z.enum(["search", "read", "sitemap", "inspect", "audit"]).default("search"),
   query: z.string().trim().min(1).max(400).optional(),
   url: z.string().trim().min(1).max(2048).optional(),
+  urls: z.array(z.string().trim().min(1).max(2048)).max(30).optional(),
   sitemapUrl: z.string().trim().min(1).max(2048).optional(),
-  limit: z.number().int().min(1).max(10).optional(),
+  limit: z.number().int().min(1).max(30).optional(),
 });
 
 /**
@@ -67,6 +69,15 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, message: "url erforderlich." }, { status: 400 });
       }
       const text = await inspectWebsiteUrlForTool(organisationId, url);
+      return NextResponse.json({ ok: true, text });
+    }
+
+    if (action === "audit") {
+      const text = await auditSiteIndexabilityForTool(organisationId, {
+        sitemapUrl: sitemapUrl ?? null,
+        urls: parsed.data.urls ?? null,
+        limit: limit ?? null,
+      });
       return NextResponse.json({ ok: true, text });
     }
 
