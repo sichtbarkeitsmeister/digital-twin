@@ -98,6 +98,22 @@ function testEmptyAudit() {
   console.log("empty audit: ok");
 }
 
+function testBudgetGoneBeforeFirstCheck() {
+  // URLs existed, but the sitemap fetch ate the budget. Must not claim there
+  // was nothing to check.
+  const text = formatIndexabilityAudit([], {
+    source: "sitemap",
+    sourceLabel: "Sitemap https://example.de/sitemap.xml",
+    totalCandidates: 120,
+    checked: 0,
+    stoppedEarly: true,
+  });
+  assert.match(text, /Geprüft: 0 von 120/);
+  assert.match(text, /Zeitbudget/);
+  assert.doesNotMatch(text, /Keine URLs zum Prüfen/);
+  console.log("budget gone before first check: ok");
+}
+
 function testCleanAudit() {
   const text = formatIndexabilityAudit([row({}), row({ url: "https://example.de/zwei" })], {
     source: "sitemap",
@@ -141,5 +157,6 @@ testCanonicalEvaluation();
 testRedirectDetection();
 testAuditFormatting();
 testEmptyAudit();
+testBudgetGoneBeforeFirstCheck();
 testCleanAudit();
 console.log("All indexability audit tests passed.");

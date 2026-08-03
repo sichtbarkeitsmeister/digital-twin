@@ -103,7 +103,16 @@ export function formatIndexabilityAudit(
   meta: DtIndexabilityAuditMeta,
 ): string {
   if (rows.length === 0) {
-    return "Keine URLs zum Prüfen gefunden. Bitte Sitemap-URL angeben oder in den SEO-Einstellungen „Jetzt crawlen“ ausführen.";
+    if (meta.totalCandidates === 0) {
+      return "Keine URLs zum Prüfen gefunden. Bitte Sitemap-URL angeben oder in den SEO-Einstellungen „Jetzt crawlen“ ausführen.";
+    }
+    // Candidates existed but the budget was gone before the first check —
+    // say so instead of pretending there was nothing to check.
+    return [
+      `Indexierbarkeits-Check (${meta.sourceLabel})`,
+      `Geprüft: 0 von ${meta.totalCandidates} URLs — das Zeitbudget war bereits aufgebraucht (z. B. langsame Sitemap).`,
+      "Bitte erneut versuchen und dabei konkrete URLs übergeben oder das Limit senken.",
+    ].join("\n");
   }
 
   const blocked: string[] = [];

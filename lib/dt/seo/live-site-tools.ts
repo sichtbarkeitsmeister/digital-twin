@@ -285,7 +285,15 @@ async function checkUrlIndexability(
   };
 
   const safe = checkSafePublicUrl(url);
-  if (!safe.ok) return { ...base, error: safe.reason };
+  if (!safe.ok) {
+    // Short phrase — the formatter wraps it in "nicht erreichbar (…)".
+    return {
+      ...base,
+      error: safe.reason.startsWith("Interne")
+        ? "interne/lokale Adresse"
+        : "ungültige URL",
+    };
+  }
 
   try {
     const res = await fetch(url, {
@@ -333,6 +341,11 @@ export async function auditSiteIndexabilityForTool(
   organisationId: string,
   input: { sitemapUrl?: string | null; urls?: string[] | null; limit?: number | null },
 ): Promise<string> {
+  // Start the clock here: resolving the sitemap is itself a network call and
+  // must count against the budget, otherwise a slow sitemap plus the checks
+  // together can exceed the route limit.
+  const deadline = Date.now() + AUDIT_TOTAL_BUDGET_MS;
+
   const limit = Math.min(
     Math.max(input.limit ?? AUDIT_DEFAULT_LIMIT, 1),
     AUDIT_MAX_LIMIT,
@@ -344,7 +357,7 @@ export async function auditSiteIndexabilityForTool(
     sourceLabel: "übergebene URLs",
   };
 
-  const explicit = (input.urls ?? []).map((u) => u.trim()).filter(Boolean);
+  const explicit = [...new Set((input.urls ?? []).map((u) => u.trim()).filter(Boolean))];
   if (explicit.length > 0) {
     candidates = explicit;
   } else {
@@ -417,7 +430,6 @@ export async function auditSiteIndexabilityForTool(
     if (normalised) crawledUrls.add(normalised);
   }
 
-  const deadline = Date.now() + AUDIT_TOTAL_BUDGET_MS;
   const rows: DtIndexabilityRow[] = [];
   let stoppedEarly = false;
 
