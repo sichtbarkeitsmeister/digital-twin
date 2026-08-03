@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 import { DashboardShell } from "@/app/dashboard/_components/dashboard-shell";
-import { userCanManageAnyIntegrations } from "@/lib/dashboard/org-context";
+import { userCanManageAnyIntegrations, userHasAnyLeads } from "@/lib/dashboard/org-context";
 import { userCanManageAnyDtAgents } from "@/lib/dt/org-access";
 import { userCanViewAnyDtUsage } from "@/lib/dt/usage/access";
 import { countPendingDtAgentEditRequests } from "@/lib/dt/agent-edit-requests";
@@ -50,6 +50,7 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     : await userCanManageAnyIntegrations(user.id);
   const canManageDtAgents = await userCanManageAnyDtAgents(user.id);
   const canViewDtUsage = await userCanViewAnyDtUsage(user.id);
+  const showLeads = await userHasAnyLeads(user.id);
   const pendingSurveyQuestionsCount = isPlatformAdmin
     ? (
         await supabase
@@ -69,6 +70,7 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
       canManageIntegrations={canManageIntegrations}
       canManageDtAgents={canManageDtAgents}
       canViewDtUsage={canViewDtUsage}
+      showLeads={showLeads}
       pendingSurveyQuestionsCount={pendingSurveyQuestionsCount}
       pendingAgentEditRequestsCount={pendingAgentEditRequestsCount}
     >

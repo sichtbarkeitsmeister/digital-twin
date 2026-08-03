@@ -599,13 +599,15 @@ export function DtAgentsManager(props: {
                 Neuer Agent
               </DtPillButton>
             ) : null}
-            <Link
-              href={contextHref}
-              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/60 px-4 text-sm font-semibold text-sbkm-navy transition hover:bg-sbkm-mint/15 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
-            >
-              <FileSearch className="size-4" aria-hidden />
-              Kontext ansehen
-            </Link>
+            {showAdminChrome ? (
+              <Link
+                href={contextHref}
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/60 px-4 text-sm font-semibold text-sbkm-navy transition hover:bg-sbkm-mint/15 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
+              >
+                <FileSearch className="size-4" aria-hidden />
+                Kontext ansehen
+              </Link>
+            ) : null}
           </div>
         </div>
       </header>

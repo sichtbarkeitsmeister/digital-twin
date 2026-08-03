@@ -540,11 +540,11 @@ export function OrgOverviewPanel(props: {
                   <p className="text-xs text-secondary">Chats gesamt</p>
                 </div>
               </div>
-              <p className="max-w-[12rem] text-right text-xs text-secondary">
-                {!props.canViewUsage
-                  ? "Token-Nutzung nur für Inhaber und Admins."
-                  : "Noch keine Token-Nutzung in den letzten 30 Tagen."}
-              </p>
+              {props.canViewUsage ? (
+                <p className="max-w-[12rem] text-right text-xs text-secondary">
+                  Noch keine Token-Nutzung in den letzten 30 Tagen.
+                </p>
+              ) : null}
             </div>
           </OverviewCard>
         )}

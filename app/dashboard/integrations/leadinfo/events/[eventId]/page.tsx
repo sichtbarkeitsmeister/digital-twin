@@ -2,11 +2,11 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import {
-  canManageOrganisation,
   getAuthenticatedUserId,
   loadUserOrganisations,
   resolveSelectedOrganisationId,
 } from "@/lib/dashboard/org-context";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { LEADINFO_PROVIDER } from "@/lib/integrations/leadinfo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,11 +44,7 @@ export default async function LeadinfoEventDetailPage({
     redirect("/dashboard/integrations");
   }
 
-  const canManage = await canManageOrganisation(
-    supabase,
-    userId,
-    selectedOrganisationId,
-  );
+  const canManage = await isPlatformAdmin(supabase, userId);
 
   if (!canManage) {
     redirect("/dashboard");

@@ -43,11 +43,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const allowed = await canViewDtAgentContext(
-    supabase,
-    user.id,
-    parsed.data.org,
-  );
+  const allowed = await canViewDtAgentContext(supabase, user.id);
   if (!allowed) {
     return NextResponse.json(
       { ok: false, message: "Keine Berechtigung." },

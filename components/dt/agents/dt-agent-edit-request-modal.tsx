@@ -144,6 +144,8 @@ export function DtAgentEditRequestModal(props: {
                 values={values}
                 onChange={(patch) => setValues((prev) => (prev ? { ...prev, ...patch } : prev))}
                 disabled={busy}
+                hidePrompt
+                promptNote="Beschreiben Sie unten einfach, was der Agent künftig anders machen soll — die technische Umsetzung übernehmen wir."
               />
               <label className="mt-4 grid gap-1 text-sm">
                 <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">

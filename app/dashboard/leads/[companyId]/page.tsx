@@ -7,6 +7,7 @@ import {
   loadUserOrganisations,
   resolveSelectedOrganisationId,
 } from "@/lib/dashboard/org-context";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +25,12 @@ const STATUS_LABEL: Record<string, string> = {
   blocked: "Blockiert",
 };
 
+const CHANNEL_LABEL: Record<string, string> = {
+  email: "Bevorzugt E-Mail",
+  linkedin: "Bevorzugt LinkedIn",
+  any: "Kanal egal",
+};
+
 function formatTimestamp(value: string | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleString();
@@ -35,6 +42,22 @@ function prettyJson(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+/** Readable page list for customers instead of the raw visit payload. */
+function visitedPagePaths(pages: unknown): string[] {
+  if (!Array.isArray(pages)) return [];
+  return pages
+    .map((page) => {
+      if (typeof page === "string") return page;
+      if (page && typeof page === "object") {
+        const record = page as Record<string, unknown>;
+        const candidate = record.url ?? record.path ?? record.page ?? record.title;
+        if (typeof candidate === "string") return candidate;
+      }
+      return null;
+    })
+    .filter((value): value is string => Boolean(value?.trim()));
 }
 
 export default async function CompanyDetailPage({
@@ -67,6 +90,7 @@ export default async function CompanyDetailPage({
     redirect("/dashboard");
   }
 
+  const showTechnicalDetails = await isPlatformAdmin(supabase, userId);
   const orgQuery = `org=${selectedOrganisationId}`;
 
   const { data: company, error } = await supabase
@@ -83,7 +107,9 @@ export default async function CompanyDetailPage({
           <CardTitle>Fehler</CardTitle>
           <CardDescription>Firma konnte nicht geladen werden.</CardDescription>
         </CardHeader>
-        <CardContent className="text-sm text-red-400">{error.message}</CardContent>
+        {showTechnicalDetails ? (
+          <CardContent className="text-sm text-red-400">{error.message}</CardContent>
+        ) : null}
       </Card>
     );
   }
@@ -137,7 +163,9 @@ export default async function CompanyDetailPage({
           <Badge variant="secondary">
             {STATUS_LABEL[company.agent_status] ?? company.agent_status}
           </Badge>
-          <Badge variant="outline">{company.channel_preference}</Badge>
+          {CHANNEL_LABEL[company.channel_preference] ? (
+            <Badge variant="outline">{CHANNEL_LABEL[company.channel_preference]}</Badge>
+          ) : null}
         </div>
       </div>
 
@@ -175,9 +203,7 @@ export default async function CompanyDetailPage({
         </CardHeader>
         <CardContent className="grid gap-2">
           {(contacts ?? []).length === 0 ? (
-            <p className="text-sm text-secondary">
-              Noch keine Kontakte. Apollo-Anreicherung kommt in Phase 2.
-            </p>
+            <p className="text-sm text-secondary">Noch keine Kontakte hinterlegt.</p>
           ) : (
             (contacts ?? []).map((c) => (
               <div key={c.id} className="rounded-lg border px-3 py-2 text-sm">
@@ -241,7 +267,7 @@ export default async function CompanyDetailPage({
                       {v.referrer ? ` · ${v.referrer}` : ""}
                     </p>
                   </div>
-                  {v.raw_event_id ? (
+                  {showTechnicalDetails && v.raw_event_id ? (
                     <Button asChild variant="ghost" size="sm">
                       <Link
                         href={`/dashboard/integrations/leadinfo/events/${v.raw_event_id}?${orgQuery}`}
@@ -252,9 +278,19 @@ export default async function CompanyDetailPage({
                   ) : null}
                 </div>
                 {Array.isArray(v.pages) && v.pages.length > 0 ? (
-                  <pre className="mt-2 overflow-x-auto rounded-md bg-muted/30 p-2 text-xs">
-                    {prettyJson(v.pages)}
-                  </pre>
+                  showTechnicalDetails ? (
+                    <pre className="mt-2 overflow-x-auto rounded-md bg-muted/30 p-2 text-xs">
+                      {prettyJson(v.pages)}
+                    </pre>
+                  ) : (
+                    <ul className="mt-2 grid gap-1 text-xs text-secondary">
+                      {visitedPagePaths(v.pages).map((path, i) => (
+                        <li key={`${v.id}-${i}`} className="truncate">
+                          {path}
+                        </li>
+                      ))}
+                    </ul>
+                  )
                 ) : null}
               </div>
             ))
@@ -262,16 +298,18 @@ export default async function CompanyDetailPage({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Metadaten</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="overflow-x-auto rounded-lg border bg-muted/20 p-4 text-xs">
-            {prettyJson(company.metadata)}
-          </pre>
-        </CardContent>
-      </Card>
+      {showTechnicalDetails ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Metadaten</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-x-auto rounded-lg border bg-muted/20 p-4 text-xs">
+              {prettyJson(company.metadata)}
+            </pre>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

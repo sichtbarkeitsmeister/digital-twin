@@ -5,11 +5,11 @@ import { redirect } from "next/navigation";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { PersistedOrganisationUrlSync } from "@/components/shared/persisted-organisation-url-sync";
 import {
-  canManageOrganisation,
   getAuthenticatedUserId,
   loadUserOrganisations,
   resolveSelectedOrganisationId,
 } from "@/lib/dashboard/org-context";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import {
   LEADINFO_PROVIDER,
   previewBody,
@@ -49,11 +49,7 @@ export default async function LeadinfoEventsPage({
     redirect("/dashboard/integrations");
   }
 
-  const canManage = await canManageOrganisation(
-    supabase,
-    userId,
-    selectedOrganisationId,
-  );
+  const canManage = await isPlatformAdmin(supabase, userId);
 
   if (!canManage) {
     redirect("/dashboard");

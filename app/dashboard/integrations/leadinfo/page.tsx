@@ -6,11 +6,11 @@ import { LeadinfoIntegrationPanel } from "@/app/dashboard/integrations/_componen
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { PersistedOrganisationUrlSync } from "@/components/shared/persisted-organisation-url-sync";
 import {
-  canManageOrganisation,
   getAuthenticatedUserId,
   loadUserOrganisations,
   resolveSelectedOrganisationId,
 } from "@/lib/dashboard/org-context";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import {
   buildLeadinfoWebhookUrl,
   LEADINFO_PROVIDER,
@@ -38,11 +38,7 @@ export default async function LeadinfoIntegrationPage({
     redirect("/dashboard/integrations");
   }
 
-  const canManage = await canManageOrganisation(
-    supabase,
-    userId,
-    selectedOrganisationId,
-  );
+  const canManage = await isPlatformAdmin(supabase, userId);
 
   if (!canManage) {
     redirect("/dashboard");
