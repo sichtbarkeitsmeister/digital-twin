@@ -7,6 +7,7 @@ import {
   searchDtSitePages,
 } from "@/lib/dt/seo/search-site-pages";
 import {
+  auditSiteIndexabilityForTool,
   inspectWebsiteUrlForTool,
   readSitemapForTool,
 } from "@/lib/dt/seo/live-site-tools";
@@ -99,6 +100,29 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
         url: { type: "string", description: "Die zu prüfende absolute URL." },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "audit_site_indexability",
+    description:
+      "Prüft mehrere URLs auf einmal auf technische Blocker: HTTP-Fehler, noindex, fremdes Canonical, Weiterleitungen — plus Abgleich mit dem Crawl-Index. Nutze dies bei Fragen wie „warum ist Seite X nicht bei Google“ oder für einen Indexierbarkeits-Überblick. Ohne Argumente: URLs aus Sitemap bzw. Crawl-Index. Achtung: kein Google-Indexierungsstatus.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sitemapUrl: {
+          type: "string",
+          description: "Optionale Sitemap-URL als Quelle der zu prüfenden URLs.",
+        },
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optionale konkrete URL-Liste (hat Vorrang vor der Sitemap).",
+        },
+        limit: {
+          type: "number",
+          description: "Wie viele URLs geprüft werden (Standard 15, max. 30).",
+        },
+      },
     },
   },
   {
@@ -199,6 +223,13 @@ async function runDtRetrievalTool(
       const url = String(args.url ?? "").trim();
       if (!url) return "Keine URL angegeben.";
       return inspectWebsiteUrlForTool(organisationId, url);
+    }
+    if (name === "audit_site_indexability") {
+      return auditSiteIndexabilityForTool(organisationId, {
+        sitemapUrl: typeof args.sitemapUrl === "string" ? args.sitemapUrl : null,
+        urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : null,
+        limit: typeof args.limit === "number" ? args.limit : null,
+      });
     }
     if (name === "update_seo_task") {
       const taskId = String(args.taskId ?? "").trim();

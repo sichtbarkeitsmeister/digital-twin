@@ -50,45 +50,15 @@ import {
   type DtSeoChatTaskProposal,
   type DtSeoTaskProposalMatchRow,
 } from "@/lib/dt/seo/chat-task-proposals";
+import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
 import {
-  filterAgentsHiddenFromOrgMembers,
-  filterSeoWorkspaceAgents,
-  isSeoAdvisorAgent,
-} from "@/lib/dt/agents/seo-advisor";
+  isSeoModeChat,
+  resolveChatModeForCreate,
+  resolveDefaultAgentId,
+  shouldStartNewChatOnAgentSwitch,
+} from "@/lib/dt/chat/agent-selection";
 
 export type DtOrgOptionWithRole = DtOrgOption & { canManageAgents?: boolean };
-
-function pickSeoAdvisorAgentId(agents: DtAgentOption[]): string | null {
-  const advisor = agents.find(
-    (agent) => agent.slug === "seo_advisor" || agent.kind === "seo_advisor",
-  );
-  return advisor?.id ?? null;
-}
-
-function resolveDefaultAgentId(
-  agents: DtAgentOption[],
-  options: { seoMode?: boolean; currentId?: string },
-): string {
-  if (agents.length === 0) return "";
-
-  // SEO workspace: always prefer the SEO advisor (no persona mix).
-  if (options.seoMode) {
-    if (options.currentId && agents.some((agent) => agent.id === options.currentId)) {
-      const current = agents.find((agent) => agent.id === options.currentId);
-      if (current && isSeoAdvisorAgent(current)) return options.currentId;
-    }
-    return pickSeoAdvisorAgentId(agents) ?? agents[0]!.id;
-  }
-
-  // Outside SEO: keep an explicit, still-valid selection (e.g. Peter after "Neuer Chat").
-  if (options.currentId && agents.some((agent) => agent.id === options.currentId)) {
-    return options.currentId;
-  }
-
-  // Never fall back onto the SEO advisor outside the SEO workspace.
-  const nonSeo = agents.find((agent) => !isSeoAdvisorAgent(agent));
-  return nonSeo?.id ?? agents[0]!.id;
-}
 
 export function DtChatShell(props: {
   organisations: DtOrgOptionWithRole[];
@@ -105,6 +75,8 @@ export function DtChatShell(props: {
   seoMode?: boolean;
   /** Platform-admin: browse and reply in any org member's chats. */
   adminOversight?: boolean;
+  /** Platform-admin: show the internal prompt-context link. */
+  isPlatformAdmin?: boolean;
   /** Embedded layout without marketing header (dashboard SEO chat). */
   chromeless?: boolean;
   /** Use full available height (dashboard SEO chat focus). */
@@ -224,11 +196,11 @@ export function DtChatShell(props: {
     ? extractAgentDisg(selectedAgent.avatar_data)
     : null;
   const displayAgentEmoji = selectedAgent ? emojiForAgent(selectedAgent) : null;
-  const chatModeForCreate: DtChatMode = props.seoMode
-    ? "seo"
-    : chatScope === "team"
-      ? "team"
-      : "default";
+  const chatModeForCreate: DtChatMode = resolveChatModeForCreate({
+    seoMode: props.seoMode,
+    teamScope: chatScope === "team",
+    agent: selectedAgent,
+  });
   const selectedOrg = props.organisations.find((o) => o.id === selectedOrgId);
   const canManageAgents = Boolean(selectedOrg?.canManageAgents);
   const contextMode = isSeoChat
@@ -237,7 +209,7 @@ export function DtChatShell(props: {
       ? "team"
       : "default";
   const contextHref =
-    canManageAgents && selectedOrgId && selectedAgentId
+    props.isPlatformAdmin && selectedOrgId && selectedAgentId
       ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}`
       : null;
 
@@ -276,9 +248,10 @@ export function DtChatShell(props: {
     if (!selectedOrgId) return;
     const res = await fetch(`/api/dt/agents?org=${encodeURIComponent(selectedOrgId)}`);
     const json = (await res.json()) as { ok?: boolean; agents?: DtAgentOption[] };
-    // SEO workspace: only SEO/GEO advisors. Elsewhere: hide SEO advisors from org members.
+    // SEO workspace keeps every agent (advisor + digital twins).
+    // Elsewhere the SEO advisor stays hidden.
     const visible = props.seoMode
-      ? filterSeoWorkspaceAgents(json.agents ?? [])
+      ? (json.agents ?? [])
       : filterAgentsHiddenFromOrgMembers(json.agents ?? []);
     if (json.ok && visible.length) {
       setAgents(visible);
@@ -327,7 +300,16 @@ export function DtChatShell(props: {
   }, [props.adminOversight, selectedOrgId]);
 
   const loadChat = useCallback(
-    async (chatId: string) => {
+    async (
+      chatId: string,
+      options?: { expectedOrgId?: string; notifyOnMismatch?: boolean },
+    ) => {
+      const rejectStale = (message: string) => {
+        writeDtLastChatId(null, props.seoMode);
+        if (options?.notifyOnMismatch) setStatus(message);
+        return false;
+      };
+
       const res = await fetch(`/api/dt/chats/${chatId}`);
       const json = (await res.json()) as {
         ok?: boolean;
@@ -344,16 +326,17 @@ export function DtChatShell(props: {
         setStatus(json.message ?? "Chat konnte nicht geladen werden.");
         return false;
       }
+      // A stale pointer from another organisation would mix agents and chats.
+      const expectedOrgId = options?.expectedOrgId;
+      if (expectedOrgId && json.chat && json.chat.organisation_id !== expectedOrgId) {
+        return rejectStale("Dieser Chat gehört zu einer anderen Organisation.");
+      }
       // SEO workspace must not reopen persona chats from shared last-chat storage.
       if (props.seoMode && json.chat && json.chat.mode !== "seo") {
-        writeDtLastChatId(null, true);
-        setStatus("Dieser Chat gehört nicht zum SEO-Bereich.");
-        return false;
+        return rejectStale("Dieser Chat gehört nicht zum SEO-Bereich.");
       }
       if (!props.seoMode && json.chat?.mode === "seo") {
-        writeDtLastChatId(null, false);
-        setStatus("SEO-Chats sind nur im SEO-Bereich verfügbar.");
-        return false;
+        return rejectStale("SEO-Chats sind nur im SEO-Bereich verfügbar.");
       }
       setMessages(json.messages ?? []);
       setAuthorLabels(json.authorLabels ?? {});
@@ -440,7 +423,7 @@ export function DtChatShell(props: {
           };
           if (agentsJson.ok && agentsJson.agents?.length) {
             const visible = props.seoMode
-              ? filterSeoWorkspaceAgents(agentsJson.agents)
+              ? agentsJson.agents
               : filterAgentsHiddenFromOrgMembers(agentsJson.agents);
             if (visible.length) {
               setAgents(visible);
@@ -487,7 +470,10 @@ export function DtChatShell(props: {
           const storedChat = readDtLastChatId(props.seoMode);
           const preferred = urlChat || storedChat;
           if (preferred) {
-            const loaded = await loadChat(preferred);
+            const loaded = await loadChat(preferred, {
+              expectedOrgId: resolvedOrgId || undefined,
+              notifyOnMismatch: Boolean(urlChat),
+            });
             if (cancelled) return;
             if (loaded) {
               setSelectedChatId(preferred);
@@ -705,11 +691,11 @@ export function DtChatShell(props: {
     clearComposerAttachments();
     setStatus(null);
     setMobileSidebarOpen(false);
-    // SEO workspace: always SEO advisor. Elsewhere: keep current avatar.
+    // Keep the currently selected avatar (e.g. Peter). Only fall back when invalid.
     setSelectedAgentId((prev) =>
       resolveDefaultAgentId(agents, {
         seoMode: props.seoMode,
-        currentId: props.seoMode ? undefined : prev,
+        currentId: prev,
       }),
     );
   };
@@ -745,7 +731,10 @@ export function DtChatShell(props: {
     setStatus(null);
     setMobileSidebarOpen(false);
     syncChatUrl({ chat: chatId });
-    await loadChat(chatId);
+    await loadChat(chatId, {
+      expectedOrgId: selectedOrgId || undefined,
+      notifyOnMismatch: true,
+    });
   };
 
   const handleDeleteChat = async (chatId: string) => {
@@ -806,7 +795,9 @@ export function DtChatShell(props: {
     }
     setSelectedChatId(json.chat.id);
     setChats((prev) => [json.chat!, ...prev]);
-    writeDtLastChatId(json.chat.id, props.seoMode);
+    // Store under the area the chat actually belongs to: a twin chat started in the
+    // SEO workspace is a regular DigitalTwin chat and reopens there.
+    writeDtLastChatId(json.chat.id, isSeoModeChat(json.chat.mode ?? chatModeForCreate));
     return json.chat.id;
   };
 
@@ -945,6 +936,8 @@ export function DtChatShell(props: {
       }
 
       void refreshChats();
+      // The advisor can add, edit or delete board tasks through its tools.
+      void refreshSeoTasks();
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         setStatus("Antwort gestoppt.");
@@ -962,8 +955,28 @@ export function DtChatShell(props: {
   const handleSelectAgent = useCallback(
     async (agentId: string) => {
       if (agentId === selectedAgentId || isBusy) return;
+      // Never switch to an agent that is not offered for the current organisation.
+      const targetAgent = agents.find((agent) => agent.id === agentId);
+      if (!targetAgent) {
+        setStatus("Dieser Agent gehört nicht zur gewählten Organisation.");
+        return;
+      }
 
       if (!selectedChatId || ghostMode) {
+        setSelectedAgentId(agentId);
+        setStatus(null);
+        return;
+      }
+
+      if (
+        shouldStartNewChatOnAgentSwitch({
+          seoMode: props.seoMode,
+          hasActiveChat: true,
+          activeChatMode: activeChat?.mode ?? null,
+          targetAgent,
+        })
+      ) {
+        startNewChat();
         setSelectedAgentId(agentId);
         return;
       }
@@ -984,13 +997,23 @@ export function DtChatShell(props: {
         return;
       }
 
+      setStatus(null);
       setChats((prev) =>
         prev.map((c) =>
           c.id === selectedChatId ? { ...c, agent_id: agentId } : c,
         ),
       );
     },
-    [selectedAgentId, selectedChatId, ghostMode, isBusy],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- startNewChat is stable enough here
+    [
+      agents,
+      activeChat?.mode,
+      props.seoMode,
+      selectedAgentId,
+      selectedChatId,
+      ghostMode,
+      isBusy,
+    ],
   );
 
   const chatGptLayout = Boolean(props.embedded);
@@ -1038,8 +1061,8 @@ export function DtChatShell(props: {
         syncChatUrl({ scope, chat: null });
         startNewChat();
       }}
-      hideScopeTabs={props.seoMode && !props.adminOversight}
-      showOrgTab={props.adminOversight}
+      hideScopeTabs={props.seoMode}
+      showOrgTab={props.adminOversight && !props.seoMode}
       adminOversight={oversightActive}
       orgMembers={orgMembers}
       ownerFilterUserId={ownerFilterUserId}

@@ -266,22 +266,31 @@ export async function sendSupabaseAuthInviteEmail(input: {
   return { ok: true, via: "magiclink" };
 }
 
+/**
+ * @param showTechnicalReason SMTP/relay errors are only meaningful for platform
+ * admins — customers just see that the mail did not go out.
+ */
 export function formatMemberInviteEmailStatus(
   result: MemberInviteEmailResult | null,
   linkError?: string | null,
+  showTechnicalReason = true,
 ): string {
+  const detail = (reason: string) => (showTechnicalReason ? ` (${reason})` : "");
+
   if (linkError) {
-    return `Einladung gespeichert, aber E-Mail nicht gesendet (${linkError}).`;
+    return `Einladung gespeichert, aber E-Mail nicht gesendet${detail(linkError)}.`;
   }
   if (!result) {
-    return "Einladung gespeichert, aber E-Mail nicht gesendet (unbekannter Fehler).";
+    return "Einladung gespeichert, aber E-Mail nicht gesendet.";
   }
   if (result.ok && !result.skipped) return "Einladungs-E-Mail wurde gesendet.";
   if (result.ok && result.skipped) {
-    return `Einladung gespeichert, E-Mail übersprungen (${result.reason}). Prüfe SMTP unter Verwaltung → E-Mails.`;
+    return showTechnicalReason
+      ? `Einladung gespeichert, E-Mail übersprungen (${result.reason}). Prüfe SMTP unter Verwaltung → E-Mails.`
+      : "Einladung gespeichert, E-Mail wurde nicht versendet.";
   }
   if (!result.ok) {
-    return `Einladung gespeichert, E-Mail fehlgeschlagen (${result.reason}).`;
+    return `Einladung gespeichert, E-Mail fehlgeschlagen${detail(result.reason)}.`;
   }
   return "Einladung gespeichert.";
 }

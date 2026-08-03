@@ -74,6 +74,7 @@ export function DashboardSidebar({
   canManageIntegrations,
   canManageDtAgents,
   canViewDtUsage,
+  showLeads,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
 }: {
@@ -81,12 +82,13 @@ export function DashboardSidebar({
   canManageIntegrations: boolean;
   canManageDtAgents: boolean;
   canViewDtUsage: boolean;
+  showLeads: boolean;
   pendingSurveyQuestionsCount: number;
   pendingAgentEditRequestsCount: number;
 }) {
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
-    { label: "Leads", href: "/dashboard/leads", icon: Sparkles },
+    ...(showLeads ? [{ label: "Leads", href: "/dashboard/leads", icon: Sparkles }] : []),
     { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },
     ...(canManageIntegrations
       ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
@@ -104,6 +106,10 @@ export function DashboardSidebar({
               pathname.startsWith("/dashboard/verwaltung/agents") ||
               pathname.startsWith("/dashboard/digital-twin/agents"),
           },
+        ]
+      : []),
+    ...(isPlatformAdmin
+      ? [
           {
             label: "Agent-Kontext",
             href: "/dashboard/verwaltung/agent-kontext",
@@ -111,10 +117,6 @@ export function DashboardSidebar({
             match: (pathname: string) =>
               pathname.startsWith("/dashboard/verwaltung/agent-kontext"),
           },
-        ]
-      : []),
-    ...(isPlatformAdmin
-      ? [
           {
             label: "SEO Modus",
             href: "/dashboard/verwaltung/seo",
@@ -153,7 +155,7 @@ export function DashboardSidebar({
         pathname.startsWith("/dashboard/admin/organisations") ||
         pathname.startsWith("/dashboard/admin/digital-twin"),
     },
-    { label: "Jobs runner", href: "/dashboard/admin/jobs", icon: Workflow },
+    { label: "Jobs", href: "/dashboard/admin/jobs", icon: Workflow },
     {
       label: "E-Mails",
       href: "/dashboard/admin/mails",

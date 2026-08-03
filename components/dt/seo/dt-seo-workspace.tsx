@@ -177,6 +177,7 @@ export function DtSeoWorkspace(props: {
             fillHeight
             lockOrganisation
             adminOversight={canManage}
+            isPlatformAdmin={props.isPlatformAdmin}
             onSaveTaskProposal={async ({ organisationId, chatId, messageId, proposal }) => {
               const res = await fetch("/api/dt/seo/tasks", {
                 method: "POST",

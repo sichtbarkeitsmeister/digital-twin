@@ -10,17 +10,34 @@ export function isSeoAdvisorAgent(agent: {
   );
 }
 
-export function filterAgentsHiddenFromOrgMembers<
-  T extends { slug?: string | null; kind?: string | null },
->(agents: T[]): T[] {
-  return agents.filter((agent) => !isSeoAdvisorAgent(agent));
+type AgentVisibilityInput = {
+  slug?: string | null;
+  kind?: string | null;
+  is_enabled?: boolean | null;
+  isEnabled?: boolean | null;
+};
+
+/**
+ * The "DigitalTwin von …" persona every organisation gets on creation. Real
+ * avatars replace it, so customers should not see it as a separate agent.
+ */
+export function isDefaultTwinAgent(agent: { slug?: string | null }): boolean {
+  return agent.slug === "default";
 }
 
-/** SEO workspace: only SEO/GEO advisor agents (no persona mix). */
-export function filterSeoWorkspaceAgents<
-  T extends { slug?: string | null; kind?: string | null },
->(agents: T[]): T[] {
-  return agents.filter((agent) => isSeoAdvisorAgent(agent));
+function isAgentEnabled(agent: AgentVisibilityInput): boolean {
+  return agent.is_enabled ?? agent.isEnabled ?? true;
+}
+
+export function filterAgentsHiddenFromOrgMembers<T extends AgentVisibilityInput>(
+  agents: T[],
+): T[] {
+  const withoutAdvisor = agents.filter((agent) => !isSeoAdvisorAgent(agent));
+  const withoutDefaultTwin = withoutAdvisor.filter((agent) => !isDefaultTwinAgent(agent));
+
+  // Keep the default twin as a fallback while an organisation has no other
+  // usable avatar — otherwise the chat would be left without any agent.
+  return withoutDefaultTwin.some(isAgentEnabled) ? withoutDefaultTwin : withoutAdvisor;
 }
 
 export function isSeoUsageEvent(
