@@ -152,14 +152,9 @@ export async function PATCH(req: Request, context: { params: Promise<{ chatId: s
       );
     }
 
-    const agentIsSeoAdvisor = isSeoAdvisorAgent(agent);
-    if (chat.mode === "seo" && !agentIsSeoAdvisor) {
-      return NextResponse.json(
-        { ok: false, message: "In SEO-Chats ist nur der SEO-Berater möglich." },
-        { status: 400 },
-      );
-    }
-    if (chat.mode !== "seo" && agentIsSeoAdvisor) {
+    // SEO chats may use any agent of their organisation (advisor or digital twin),
+    // but the SEO advisor stays inside the SEO workspace.
+    if (chat.mode !== "seo" && isSeoAdvisorAgent(agent)) {
       return NextResponse.json(
         { ok: false, message: "Der SEO-Berater ist nur im SEO-Bereich verfügbar." },
         { status: 400 },

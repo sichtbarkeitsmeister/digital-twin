@@ -16,13 +16,6 @@ export function filterAgentsHiddenFromOrgMembers<
   return agents.filter((agent) => !isSeoAdvisorAgent(agent));
 }
 
-/** SEO workspace: only SEO/GEO advisor agents (no persona mix). */
-export function filterSeoWorkspaceAgents<
-  T extends { slug?: string | null; kind?: string | null },
->(agents: T[]): T[] {
-  return agents.filter((agent) => isSeoAdvisorAgent(agent));
-}
-
 export function isSeoUsageEvent(
   row: { mode?: string | null; agent_id?: string | null },
   agentsById: Map<string, { slug?: string | null; kind?: string | null }>,
