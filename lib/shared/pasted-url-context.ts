@@ -1,3 +1,4 @@
+import { isBlockedFetchHost } from "@/lib/shared/safe-fetch-url";
 import { decodeResponseTextSafely, sanitizeForLlmText } from "@/lib/shared/sanitize-llm-text";
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
@@ -10,20 +11,6 @@ function cleanTrailingPunctuation(url: string): string {
   return url.replace(/[.,;:!?)]+$/g, "");
 }
 
-function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (!h) return true;
-  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal")) return true;
-  if (h === "127.0.0.1" || h === "::1" || h === "0.0.0.0") return true;
-  if (/^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true;
-  const m172 = h.match(/^172\.(\d+)\./);
-  if (m172) {
-    const octet = Number(m172[1]);
-    if (octet >= 16 && octet <= 31) return true;
-  }
-  return false;
-}
-
 export function extractUrlsFromText(text: string, max = MAX_URLS): string[] {
   const matches = text.match(URL_RE) ?? [];
   const seen = new Set<string>();
@@ -34,7 +21,7 @@ export function extractUrlsFromText(text: string, max = MAX_URLS): string[] {
     try {
       const url = new URL(cleaned);
       if (url.protocol !== "http:" && url.protocol !== "https:") continue;
-      if (isBlockedHost(url.hostname)) continue;
+      if (isBlockedFetchHost(url.hostname)) continue;
       const normalized = url.toString();
       if (seen.has(normalized)) continue;
       seen.add(normalized);

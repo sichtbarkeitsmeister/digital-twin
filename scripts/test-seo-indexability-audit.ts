@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   evaluateCanonical,
   formatIndexabilityAudit,
+  isNotableRedirect,
   type DtIndexabilityRow,
 } from "../lib/dt/seo/indexability-audit";
 
@@ -110,7 +111,34 @@ function testCleanAudit() {
   console.log("clean audit: ok");
 }
 
+function testRedirectDetection() {
+  // fetch() drops the fragment, so res.url differs from the requested string
+  // without any redirect having happened. Verified against a real server.
+  assert.equal(
+    isNotableRedirect("https://example.de/a#frag", "https://example.de/a"),
+    false,
+  );
+  assert.equal(
+    isNotableRedirect("https://example.de/a?x=1#frag", "https://example.de/a?x=1"),
+    false,
+  );
+  // Normal canonicalisation is not worth reporting.
+  assert.equal(isNotableRedirect("https://example.de/b", "https://example.de/b/"), false);
+  assert.equal(isNotableRedirect("http://example.de/b", "https://example.de/b"), false);
+  assert.equal(isNotableRedirect("https://www.example.de/b", "https://example.de/b"), false);
+  assert.equal(
+    isNotableRedirect("https://example.de/a?utm_source=news", "https://example.de/a"),
+    false,
+  );
+  // A different page is a real redirect.
+  assert.equal(isNotableRedirect("https://example.de/alt", "https://example.de/neu"), true);
+  assert.equal(isNotableRedirect("https://example.de/a", "https://andere.de/a"), true);
+  assert.equal(isNotableRedirect("https://example.de/a", null), false);
+  console.log("redirect detection: ok");
+}
+
 testCanonicalEvaluation();
+testRedirectDetection();
 testAuditFormatting();
 testEmptyAudit();
 testCleanAudit();

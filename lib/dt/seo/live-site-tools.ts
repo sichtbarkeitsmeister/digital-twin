@@ -9,10 +9,12 @@ import {
 import {
   evaluateCanonical,
   formatIndexabilityAudit,
+  isNotableRedirect,
   type DtIndexabilityAuditMeta,
   type DtIndexabilityRow,
 } from "@/lib/dt/seo/indexability-audit";
 import { getDtSitePageContent } from "@/lib/dt/seo/search-site-pages";
+import { checkSafePublicUrl } from "@/lib/shared/safe-fetch-url";
 
 const INSPECT_TIMEOUT_MS = 15_000;
 const SITEMAP_PREVIEW_LIMIT = 80;
@@ -67,6 +69,9 @@ export async function readSitemapForTool(
       "(z. B. https://example.de/sitemap.xml) oder in den SEO-Einstellungen hinterlegen."
     );
   }
+
+  const safeSitemap = checkSafePublicUrl(sitemapUrl);
+  if (!safeSitemap.ok) return safeSitemap.reason;
 
   let urls: string[];
   try {
@@ -183,17 +188,8 @@ export async function inspectWebsiteUrlForTool(
   urlInput: string,
 ): Promise<string> {
   const requestedUrl = urlInput.trim();
-  if (!requestedUrl) return "Keine URL angegeben.";
-
-  let parsed: URL;
-  try {
-    parsed = new URL(requestedUrl);
-  } catch {
-    return `Ungültige URL: ${requestedUrl}`;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return "Nur http/https-URLs sind erlaubt.";
-  }
+  const safe = checkSafePublicUrl(requestedUrl);
+  if (!safe.ok) return safe.reason;
 
   const crawled = await getDtSitePageContent(organisationId, requestedUrl);
 
@@ -274,6 +270,7 @@ export async function inspectWebsiteUrlForTool(
 async function checkUrlIndexability(
   url: string,
   crawledUrls: Set<string>,
+  timeoutMs: number,
 ): Promise<DtIndexabilityRow> {
   const base: DtIndexabilityRow = {
     url,
@@ -287,6 +284,9 @@ async function checkUrlIndexability(
     error: null,
   };
 
+  const safe = checkSafePublicUrl(url);
+  if (!safe.ok) return { ...base, error: safe.reason };
+
   try {
     const res = await fetch(url, {
       method: "GET",
@@ -295,7 +295,7 @@ async function checkUrlIndexability(
         "User-Agent": USER_AGENT,
         Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
       },
-      signal: AbortSignal.timeout(AUDIT_URL_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     const contentType = res.headers.get("content-type");
@@ -317,7 +317,7 @@ async function checkUrlIndexability(
       noindex: /\bnoindex\b/.test(robotsBlob),
       canonical: signals.canonical,
       canonicalPointsElsewhere: evaluateCanonical(url, finalUrl, signals.canonical),
-      redirected: finalUrl !== url,
+      redirected: isNotableRedirect(url, finalUrl),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "unbekannt";
@@ -392,13 +392,22 @@ export async function auditSiteIndexabilityForTool(
 
   const selected = candidates.slice(0, limit);
 
+  // Match both the raw and the normalised form: the crawl index may store a
+  // different variant of the same URL than the sitemap lists.
+  const lookupUrls = new Set<string>();
+  for (const url of selected) {
+    lookupUrls.add(url);
+    const normalised = normaliseUrl(url);
+    if (normalised) lookupUrls.add(normalised);
+  }
+
   const supabase = createServiceClient();
   const { data: crawled } = await supabase
     .from("dt_site_pages")
     .select("url")
     .eq("organisation_id", organisationId)
     .eq("is_excluded", false)
-    .in("url", selected);
+    .in("url", [...lookupUrls]);
 
   const crawledUrls = new Set<string>();
   for (const row of crawled ?? []) {
@@ -413,13 +422,18 @@ export async function auditSiteIndexabilityForTool(
   let stoppedEarly = false;
 
   for (let i = 0; i < selected.length; i += AUDIT_CONCURRENCY) {
-    if (Date.now() >= deadline) {
+    // Cap each request by the time that is actually left, otherwise a slow
+    // batch can overrun the budget and take the whole chat route with it.
+    const remaining = deadline - Date.now();
+    if (remaining <= 1_000) {
       stoppedEarly = true;
       break;
     }
     const batch = selected.slice(i, i + AUDIT_CONCURRENCY);
     const results = await Promise.all(
-      batch.map((url) => checkUrlIndexability(url, crawledUrls)),
+      batch.map((url) =>
+        checkUrlIndexability(url, crawledUrls, Math.min(AUDIT_URL_TIMEOUT_MS, remaining)),
+      ),
     );
     rows.push(...results);
   }

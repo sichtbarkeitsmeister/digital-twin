@@ -26,15 +26,40 @@ export type DtIndexabilityAuditMeta = {
   stoppedEarly: boolean;
 };
 
+const TRACKING_PARAM = /^(utm_|fbclid|gclid|msclkid|mc_)/i;
+
+/**
+ * Comparison key for "is this the same page?".
+ *
+ * Deliberately ignores what a site canonicalises anyway — scheme, `www.`,
+ * default ports, trailing slash, fragment and tracking parameters — so that
+ * normal setups do not get reported as problems.
+ */
+export function pageComparisonKey(value: string, base?: string | null): string | null {
+  try {
+    const url = new URL(value, base ?? undefined);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    for (const key of [...url.searchParams.keys()]) {
+      if (TRACKING_PARAM.test(key)) url.searchParams.delete(key);
+    }
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const port =
+      (url.protocol === "http:" && url.port === "80") ||
+      (url.protocol === "https:" && url.port === "443")
+        ? ""
+        : url.port;
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    const query = url.searchParams.toString();
+    return `${host}${port ? `:${port}` : ""}${path}${query ? `?${query}` : ""}`;
+  } catch {
+    return null;
+  }
+}
+
 function sameUrl(a: string, b: string): boolean {
-  const strip = (value: string) =>
-    value
-      .trim()
-      .replace(/#.*$/, "")
-      .replace(/\/+$/, "")
-      .replace(/^https?:\/\/(www\.)?/i, "")
-      .toLowerCase();
-  return strip(a) === strip(b);
+  const keyA = pageComparisonKey(a);
+  const keyB = pageComparisonKey(b);
+  return keyA !== null && keyA === keyB;
 }
 
 export function evaluateCanonical(
@@ -43,13 +68,24 @@ export function evaluateCanonical(
   canonical: string | null,
 ): boolean {
   if (!canonical?.trim()) return false;
-  let resolved = canonical.trim();
-  try {
-    resolved = new URL(canonical, finalUrl || requestedUrl).toString();
-  } catch {
-    return false;
-  }
-  return !sameUrl(resolved, finalUrl || requestedUrl) && !sameUrl(resolved, requestedUrl);
+  const resolved = pageComparisonKey(canonical, finalUrl || requestedUrl);
+  if (!resolved) return false;
+  const finalKey = pageComparisonKey(finalUrl || requestedUrl);
+  const requestedKey = pageComparisonKey(requestedUrl);
+  return resolved !== finalKey && resolved !== requestedKey;
+}
+
+/**
+ * True only when the final URL is a different page. `fetch` normalises the URL
+ * (it drops the fragment), so a plain string comparison would report a
+ * redirect for every URL that carries an anchor.
+ */
+export function isNotableRedirect(
+  requestedUrl: string,
+  finalUrl: string | null,
+): boolean {
+  if (!finalUrl) return false;
+  return !sameUrl(requestedUrl, finalUrl);
 }
 
 function rowProblems(row: DtIndexabilityRow): string[] {
