@@ -70,9 +70,9 @@ export function getFromAddress() {
   }
 
   const name = (process.env.SMTP_FROM_NAME ?? DEFAULT_FROM_NAME).trim() || DEFAULT_FROM_NAME;
-  // Escape quotes in display name for RFC 5322 safety.
-  const safeName = name.replace(/["\\]/g, "");
-  return `"${safeName}" <${raw}>`;
+  // Unquoted display name — some SMTP relays reject/"soft-fail" quoted From headers.
+  const safeName = name.replace(/[<>\r\n"]/g, "").trim() || DEFAULT_FROM_NAME;
+  return `${safeName} <${raw}>`;
 }
 
 export function getAppBaseUrl() {

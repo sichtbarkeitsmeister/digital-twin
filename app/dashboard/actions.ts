@@ -22,6 +22,10 @@ export type ActionState = {
   message: string;
   /** Set by member invite: true only when SMTP mail was actually sent. */
   emailSent?: boolean;
+  /** Magic/invite link — shown when mail fails or for self-serve copy. */
+  inviteLink?: string | null;
+  /** True when the invited email is the current user and membership was added. */
+  selfJoined?: boolean;
 };
 
 const checkboxOnSchema = z.preprocess(
@@ -149,15 +153,67 @@ export async function inviteToOrganisationAction(
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { error } = await supabase.rpc("invite_to_organisation", {
+  const invitedEmail = parsed.data.invited_email;
+  const selfInvite =
+    Boolean(user?.email) && user!.email!.trim().toLowerCase() === invitedEmail;
+
+  const { data: inviteIdRaw, error } = await supabase.rpc("invite_to_organisation", {
     org_id: parsed.data.organisation_id,
-    invited_email: parsed.data.invited_email,
+    invited_email: invitedEmail,
     role: parsed.data.role,
   });
 
   const resent = isDuplicateInviteError(error);
   if (error && !resent) {
-    return { ok: false, message: "Einladung konnte nicht erstellt werden." };
+    return { ok: false, message: `Einladung konnte nicht erstellt werden (${error.message}).` };
+  }
+
+  let inviteId =
+    typeof inviteIdRaw === "string" && inviteIdRaw.trim() ? inviteIdRaw.trim() : null;
+
+  if (!inviteId) {
+    const { data: pending } = await supabase
+      .from("organisation_invites")
+      .select("id")
+      .eq("organisation_id", parsed.data.organisation_id)
+      .eq("email", invitedEmail)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    inviteId = pending?.id ?? null;
+  }
+
+  // Self-invite: accept immediately — no email needed to join as yourself.
+  if (selfInvite) {
+    if (!inviteId) {
+      return {
+        ok: false,
+        message:
+          "Selbst-Einladung: Einladungs-ID fehlt. Bitte offene Einladung löschen und erneut versuchen.",
+      };
+    }
+    const { error: acceptError } = await supabase.rpc("accept_organisation_invite", {
+      invite_id: inviteId,
+    });
+    revalidatePath("/dashboard/organisations");
+    revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+    revalidatePath("/dashboard/inbox");
+    if (acceptError) {
+      return {
+        ok: false,
+        message:
+          `Einladung erstellt, automatische Annahme fehlgeschlagen (${acceptError.message}). ` +
+          "Bitte unter Posteingang manuell annehmen.",
+      };
+    }
+    return {
+      ok: true,
+      emailSent: false,
+      selfJoined: true,
+      message:
+        "Du hast dich selbst eingeladen — Mitgliedschaft ist aktiv. Keine E-Mail nötig.",
+    };
   }
 
   const { data: org } = await supabase
@@ -167,10 +223,10 @@ export async function inviteToOrganisationAction(
     .maybeSingle();
   const organisationName = org?.name?.trim() || "euer DigitalTwin";
 
-  const login = await ensureMemberInviteLoginLink(parsed.data.invited_email);
+  const login = await ensureMemberInviteLoginLink(invitedEmail);
   const emailResult = login.ok
     ? await sendOrgMemberInviteEmail({
-        email: parsed.data.invited_email,
+        email: invitedEmail,
         organisationName,
         organisationId: parsed.data.organisation_id,
         role: parsed.data.role,
@@ -191,13 +247,16 @@ export async function inviteToOrganisationAction(
   );
   const prefix = resent ? "Offene Einladung erneut versendet. " : "";
   const emailSent = memberInviteEmailSucceeded(emailResult);
+  const inviteLink = login.ok ? login.link : null;
 
-  // Invite row is saved even when mail fails — but ok mirrors mail success so the
-  // modal stays open and the user sees why no email arrived.
+  // Invite row is saved even when mail fails — keep modal open with copyable link.
   return {
     ok: emailSent,
     emailSent,
-    message: `${prefix}${mailStatus}`,
+    inviteLink,
+    message: emailSent
+      ? `${prefix}${mailStatus}`
+      : `${prefix}${mailStatus} Du kannst den Anmeldelink unten kopieren.`,
   };
 }
 
