@@ -7,6 +7,7 @@ import {
   formatMemberInviteEmailStatus,
   memberInviteEmailSucceeded,
   sendOrgMemberInviteEmail,
+  sendSupabaseAuthInviteEmail,
 } from "@/lib/email/member-invite";
 import {
   ensureOwnerLoginLink,
@@ -246,17 +247,50 @@ export async function inviteToOrganisationAction(
     login.ok ? null : login.reason,
   );
   const prefix = resent ? "Offene Einladung erneut versendet. " : "";
-  const emailSent = memberInviteEmailSucceeded(emailResult);
+  const brandedSent = memberInviteEmailSucceeded(emailResult);
   const inviteLink = login.ok ? login.link : null;
+
+  if (brandedSent) {
+    return {
+      ok: true,
+      emailSent: true,
+      inviteLink,
+      message: `${prefix}${mailStatus}`,
+    };
+  }
+
+  // Own SMTP refused the branded mail — let Supabase's mailer deliver a plain
+  // login link so the invitee is not blocked by our relay.
+  const fallback = await sendSupabaseAuthInviteEmail({
+    email: invitedEmail,
+    organisationId: parsed.data.organisation_id,
+    organisationName,
+    role: parsed.data.role,
+    isNewAccount: login.ok ? login.isNewAccount : true,
+    triggeredByUserId: user?.id ?? null,
+  });
+
+  revalidatePath("/dashboard/admin/mails");
+
+  if (fallback.ok) {
+    return {
+      ok: true,
+      emailSent: true,
+      inviteLink,
+      message:
+        `${prefix}${mailStatus} Ersatzweise wurde ein Anmeldelink über Supabase ` +
+        `an ${invitedEmail} gesendet (Absender: noreply@mail.app.supabase.io).`,
+    };
+  }
 
   // Invite row is saved even when mail fails — keep modal open with copyable link.
   return {
-    ok: emailSent,
-    emailSent,
+    ok: false,
+    emailSent: false,
     inviteLink,
-    message: emailSent
-      ? `${prefix}${mailStatus}`
-      : `${prefix}${mailStatus} Du kannst den Anmeldelink unten kopieren.`,
+    message:
+      `${prefix}${mailStatus} Auch der Supabase-Versand schlug fehl ` +
+      `(${fallback.reason}). Du kannst den Anmeldelink unten kopieren.`,
   };
 }
 
