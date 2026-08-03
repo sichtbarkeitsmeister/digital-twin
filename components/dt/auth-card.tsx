@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { Eye, Mail, User } from "lucide-react";
+import { Mail } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
@@ -14,6 +13,7 @@ import {
   DtPillButton,
   DtTabs,
 } from "@/components/dt";
+import { translateAuthError } from "@/lib/auth/error-messages";
 import { createClient } from "@/lib/supabase/client";
 
 export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
@@ -28,7 +28,6 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -47,7 +46,7 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
       if (authError) throw authError;
       setSuccess(true);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ein Fehler ist aufgetreten.");
+      setError(translateAuthError(err instanceof Error ? err.message : null));
     } finally {
       setIsLoading(false);
     }
@@ -71,27 +70,15 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
               Zugang anfordern
             </DtHeading>
             <p className="mt-1 text-sm leading-normal text-sbkm-ink-600 dark:text-white/70">
-              In zwei Minuten startklar. Du bekommst die Zugangsdaten per E-Mail.
+              In zwei Minuten startklar. Du bekommst deinen Zugang per E-Mail —
+              ganz ohne Passwort.
             </p>
           </div>
 
           {success ? (
-            <SuccessMessage onReset={() => { setSuccess(false); setEmail(""); }} />
+            <SuccessMessage email={email} onReset={() => { setSuccess(false); setEmail(""); }} />
           ) : (
             <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <DtField label="Vorname" htmlFor="first-name">
-                  <DtInputWrap icon={<User className="h-[18px] w-[18px]" strokeWidth={1.6} />}>
-                    <DtInput id="first-name" placeholder="André" autoComplete="given-name" />
-                  </DtInputWrap>
-                </DtField>
-                <DtField label="Nachname" htmlFor="last-name">
-                  <DtInputWrap>
-                    <DtInput id="last-name" placeholder="Petermann" autoComplete="family-name" />
-                  </DtInputWrap>
-                </DtField>
-              </div>
-
               <DtField label="Geschäftliche E-Mail" htmlFor="signup-email">
                 <DtInputWrap icon={<Mail className="h-[18px] w-[18px]" strokeWidth={1.6} />}>
                   <DtInput
@@ -106,27 +93,7 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
                 </DtInputWrap>
               </DtField>
 
-              <DtField label="Passwort" htmlFor="signup-password">
-                <DtInputWrap
-                  trailing={
-                    <button
-                      type="button"
-                      className="grid place-items-center px-3.5 text-sbkm-ink-500 hover:text-sbkm-navy dark:hover:text-white"
-                      aria-label="Passwort anzeigen"
-                      onClick={() => setShowPassword((v) => !v)}
-                    >
-                      <Eye className="h-[18px] w-[18px]" strokeWidth={1.6} />
-                    </button>
-                  }
-                >
-                  <DtInput
-                    id="signup-password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Mindestens 10 Zeichen"
-                    autoComplete="new-password"
-                  />
-                </DtInputWrap>
-              </DtField>
+              <MagicLinkHint />
 
               {error ? <p className="text-sm text-red-500">{error}</p> : null}
 
@@ -154,12 +121,12 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
               Willkommen zurück.
             </DtHeading>
             <p className="mt-1 text-sm leading-normal text-sbkm-ink-600 dark:text-white/70">
-              Melde dich an und führe deine Pipeline weiter.
+              Gib deine E-Mail-Adresse ein — wir schicken dir einen Anmeldelink.
             </p>
           </div>
 
           {success ? (
-            <SuccessMessage onReset={() => { setSuccess(false); setEmail(""); }} />
+            <SuccessMessage email={email} onReset={() => { setSuccess(false); setEmail(""); }} />
           ) : (
             <>
               <DtField label="E-Mail" htmlFor="signin-email">
@@ -176,10 +143,12 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
                 </DtInputWrap>
               </DtField>
 
+              <MagicLinkHint />
+
               {error ? <p className="text-sm text-red-500">{error}</p> : null}
 
               <DtPillButton type="submit" size="full" disabled={isLoading}>
-                {isLoading ? "Wird gesendet …" : "Magic Link senden"}
+                {isLoading ? "Wird gesendet …" : "Anmeldelink senden"}
               </DtPillButton>
 
               <DtPillButton
@@ -188,7 +157,7 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
                 size="full"
                 onClick={() => router.push("/dashboard")}
               >
-                Zum Dashboard
+                Ich bin bereits angemeldet
               </DtPillButton>
 
               <p className="text-center text-[13.5px] text-sbkm-ink-600 dark:text-white/70">
@@ -209,15 +178,26 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
   );
 }
 
-function SuccessMessage({ onReset }: { onReset: () => void }) {
+function MagicLinkHint() {
+  return (
+    <p className="rounded-dt bg-sbkm-mint/10 px-3 py-2 text-[13px] leading-normal text-sbkm-ink-600 dark:bg-white/5 dark:text-white/70">
+      Du brauchst kein Passwort: Wir schicken dir eine E-Mail mit einem Link, der
+      dich direkt anmeldet. Der Link gilt nur kurze Zeit und lässt sich einmal
+      verwenden.
+    </p>
+  );
+}
+
+function SuccessMessage({ email, onReset }: { email: string; onReset: () => void }) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm leading-normal text-sbkm-ink-600 dark:text-white/70">
-        Prüfe dein Postfach — wir haben dir einen Magic Link geschickt. Klicke auf den
-        Link in der E-Mail, um den Vorgang abzuschließen.
+        E-Mail ist unterwegs{email ? ` an ${email}` : ""}. Klicke auf den Anmeldelink
+        darin, dann bist du eingeloggt. Kommt nichts an, sieh bitte im Spam-Ordner
+        nach.
       </p>
       <DtPillButton type="button" variant="outline" size="full" onClick={onReset}>
-        Erneut senden
+        Andere Adresse verwenden
       </DtPillButton>
     </div>
   );
