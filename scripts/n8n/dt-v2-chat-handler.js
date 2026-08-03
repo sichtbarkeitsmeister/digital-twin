@@ -257,6 +257,29 @@ const seoTools = [
     },
   },
   {
+    name: "audit_site_indexability",
+    description:
+      "Prüft mehrere URLs auf einmal auf technische Blocker: HTTP-Fehler, noindex, fremdes Canonical, Weiterleitungen — plus Abgleich mit dem Crawl-Index. Nutze dies bei Fragen wie „warum ist Seite X nicht bei Google“ oder für einen Indexierbarkeits-Überblick. Ohne Argumente: URLs aus Sitemap bzw. Crawl-Index. Achtung: kein Google-Indexierungsstatus.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sitemapUrl: {
+          type: "string",
+          description: "Optionale Sitemap-URL als Quelle der zu prüfenden URLs.",
+        },
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optionale konkrete URL-Liste (hat Vorrang vor der Sitemap).",
+        },
+        limit: {
+          type: "number",
+          description: "Wie viele URLs geprüft werden (Standard 15, max. 30).",
+        },
+      },
+    },
+  },
+  {
     name: "update_seo_task",
     description:
       "Bearbeitet eine bestehende SEO-Aufgabe im Board (Titel, Status, Keyword, URL, Maßnahme, Priorität, …). Nutze die taskId aus „Bestehende SEO-Aufgaben“. Das Board erlaubt Edit — nicht nur Hinzufügen.",
@@ -384,6 +407,22 @@ async function runSeoTool(name, input) {
         body: { organisationId, action: "inspect", url: u },
       });
       if (!r.ok || !r.data?.ok) return "Live-URL-Check fehlgeschlagen.";
+      return r.data.text || "Keine Prüfergebnisse.";
+    }
+    if (name === "audit_site_indexability") {
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: {
+          organisationId,
+          action: "audit",
+          ...(args.sitemapUrl ? { sitemapUrl: String(args.sitemapUrl) } : {}),
+          ...(Array.isArray(args.urls) ? { urls: args.urls.map((u) => String(u)) } : {}),
+          ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+        },
+      });
+      if (!r.ok || !r.data?.ok) return "Indexierbarkeits-Check fehlgeschlagen.";
       return r.data.text || "Keine Prüfergebnisse.";
     }
     if (name === "update_seo_task") {

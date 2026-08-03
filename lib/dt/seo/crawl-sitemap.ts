@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { gunzipSync } from "node:zlib";
 
 import { isDtExcludedPageUrl } from "@/lib/dt/seo/build-seo-context";
+import { checkSafePublicUrl } from "@/lib/shared/safe-fetch-url";
 
 export const USER_AGENT =
   "Mozilla/5.0 (compatible; DigitalTwin-SBKM-Crawler/1.0; +https://www.digital-twin-sbkm.de)";
@@ -81,6 +82,10 @@ function isCrawlableLink(resolved: URL, origin: string): boolean {
 }
 
 async function fetchSitemapBody(sitemapUrl: string): Promise<string> {
+  // A sitemap index can point anywhere, including internal addresses.
+  const safe = checkSafePublicUrl(sitemapUrl);
+  if (!safe.ok) throw new Error(safe.reason);
+
   const res = await fetch(sitemapUrl, {
     headers: { "User-Agent": USER_AGENT, Accept: "application/xml,text/xml,*/*" },
     signal: AbortSignal.timeout(25_000),
