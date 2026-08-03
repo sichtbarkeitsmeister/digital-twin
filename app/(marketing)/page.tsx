@@ -5,6 +5,7 @@ import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
 import { LandingHero, LandingPipeline, LandingTrust } from "@/components/dt/landing-sections";
 import type { DtChatListScope } from "@/lib/dt/db";
 import { loadDtUserOrganisations } from "@/lib/dt/load-user-organisations";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 
 function MarketingHome() {
   return (
@@ -32,6 +33,7 @@ async function HomeContent({
   }
 
   const { organisations, error: orgError } = await loadDtUserOrganisations(user.id);
+  const platformAdmin = await isPlatformAdmin(supabase, user.id);
 
   if (orgError) {
     console.error("[home] organisations:", orgError);
@@ -64,6 +66,7 @@ async function HomeContent({
         initialOrgId={initialOrgId}
         initialChatId={searchParams.chat ?? null}
         initialScope={initialScope}
+        isPlatformAdmin={platformAdmin}
       />
     </div>
   );

@@ -75,6 +75,8 @@ export function DtChatShell(props: {
   seoMode?: boolean;
   /** Platform-admin: browse and reply in any org member's chats. */
   adminOversight?: boolean;
+  /** Platform-admin: show the internal prompt-context link. */
+  isPlatformAdmin?: boolean;
   /** Embedded layout without marketing header (dashboard SEO chat). */
   chromeless?: boolean;
   /** Use full available height (dashboard SEO chat focus). */
@@ -207,7 +209,7 @@ export function DtChatShell(props: {
       ? "team"
       : "default";
   const contextHref =
-    canManageAgents && selectedOrgId && selectedAgentId
+    props.isPlatformAdmin && selectedOrgId && selectedAgentId
       ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}`
       : null;
 
