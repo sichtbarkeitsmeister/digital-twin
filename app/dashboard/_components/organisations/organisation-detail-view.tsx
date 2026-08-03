@@ -23,6 +23,7 @@ import {
 } from "@/app/dashboard/_components/organisations/org-overview-panel";
 import { TeamActions } from "@/app/dashboard/_components/organisations/team-actions";
 import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button";
+import { ResendInviteButton } from "@/app/dashboard/_components/resend-invite-button";
 import { RevokeInviteButton } from "@/app/dashboard/_components/revoke-invite-button";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 
@@ -351,10 +352,16 @@ export async function OrganisationDetailView({
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="secondary">Ausstehend</Badge>
                           {canRevokeInvite ? (
-                            <RevokeInviteButton
-                              inviteId={invite.id}
-                              organisationId={organisationId}
-                            />
+                            <>
+                              <ResendInviteButton
+                                organisationId={organisationId}
+                                email={invite.email}
+                              />
+                              <RevokeInviteButton
+                                inviteId={invite.id}
+                                organisationId={organisationId}
+                              />
+                            </>
                           ) : null}
                         </div>
                       </li>
