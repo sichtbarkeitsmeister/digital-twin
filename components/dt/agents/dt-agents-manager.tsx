@@ -40,7 +40,6 @@ type GlobalPrompts = {
 };
 
 type PageView = "agents" | "prompts";
-type AgentFilter = "all" | "standard" | "additional";
 
 function isProtectedAlwaysOn(agent: AgentRow): boolean {
   return agent.is_default && agent.slug === "seo_advisor";
@@ -80,7 +79,6 @@ function AgentsListSkeleton() {
       style={{ minHeight: SKELETON_ROW_COUNT * SKELETON_ROW_HEIGHT_PX }}
       aria-hidden
     >
-      <div className="h-11 animate-pulse rounded-pill bg-sbkm-navy/[0.06] dark:bg-white/10" />
       <AgentsSkeleton />
     </div>
   );
@@ -113,7 +111,6 @@ export function DtAgentsManager(props: {
   const [pageView, setPageView] = useState<PageView>(() =>
     searchParams.get("view") === "prompts" ? "prompts" : "agents",
   );
-  const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
 
   useEffect(() => {
     const fromUrl = searchParams.get("org");
@@ -184,40 +181,10 @@ export function DtAgentsManager(props: {
     [agents],
   );
 
-  const { standardAgents, additionalAgents, filteredAgents } = useMemo(() => {
-    const standard = agents.filter((a) => a.is_default);
-    const additional = agents.filter((a) => !a.is_default);
-    const filtered =
-      agentFilter === "standard"
-        ? standard
-        : agentFilter === "additional"
-          ? additional
-          : agents;
-    return {
-      standardAgents: standard,
-      additionalAgents: additional,
-      filteredAgents: filtered,
-    };
-  }, [agents, agentFilter]);
-
   const editingAgent = useMemo(
     () => agents.find((a) => a.id === editingId) ?? null,
     [agents, editingId],
   );
-
-  const filterTabs = useMemo(() => {
-    const count = (n: number) => (initialLoading ? "–" : String(n));
-    return [
-      { id: "all", label: `Alle (${count(agents.length)})` },
-      { id: "standard", label: `Standard (${count(standardAgents.length)})` },
-      { id: "additional", label: `Weitere (${count(additionalAgents.length)})` },
-    ];
-  }, [
-    agents.length,
-    standardAgents.length,
-    additionalAgents.length,
-    initialLoading,
-  ]);
 
   const pageTabs = useMemo(
     () => [
@@ -439,19 +406,10 @@ export function DtAgentsManager(props: {
   const agentsMainContent = (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
       <section className="grid min-w-0 gap-4">
-        <DtTabs
-          tabs={filterTabs}
-          active={agentFilter}
-          onChange={(id) => setAgentFilter(id as AgentFilter)}
-          layoutId="agents-filter-tab"
-          className="mb-0 [&_button]:tabular-nums"
-          disabled={initialLoading}
-        />
-
         <div className="relative">
           {initialLoading ? (
             <AgentsListSkeleton />
-          ) : filteredAgents.length === 0 ? (
+          ) : agents.length === 0 ? (
             <DtGlassCard
               variant="subtle"
               className="flex min-h-[288px] flex-col items-center justify-center gap-3 py-12 text-center"
@@ -460,18 +418,14 @@ export function DtAgentsManager(props: {
                 <Users className="size-6" aria-hidden />
               </div>
               <p className="font-semibold tracking-tight text-sbkm-navy dark:text-white">
-                {agentFilter === "additional"
-                  ? "Keine weiteren Agenten"
-                  : agentFilter === "standard"
-                    ? "Keine Standard-Agenten"
-                    : "Noch keine Agenten"}
+                Noch keine Agenten
               </p>
               <p className="max-w-sm text-sm text-sbkm-ink-600 dark:text-white/55">
-                {agentFilter === "additional" && canDirectlyEdit
+                {canDirectlyEdit
                   ? "Erstelle einen neuen Agenten über „Neuer Agent“."
-                  : "Standard-Agenten werden bei der Organisation automatisch angelegt."}
+                  : "Agenten werden bei der Organisation automatisch angelegt."}
               </p>
-              {agentFilter === "additional" && canDirectlyEdit ? (
+              {canDirectlyEdit ? (
                 <DtPillButton
                   type="button"
                   size="sm"
@@ -494,13 +448,13 @@ export function DtAgentsManager(props: {
             >
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10" />
               <LayoutGroup id="agents-list">
-                {filteredAgents.map((agent, i) => (
+                {agents.map((agent, i) => (
                 <DtAgentListItem
                   key={agent.id}
                   agent={agent}
                   index={i}
                   compact
-                  isLast={i === filteredAgents.length - 1}
+                  isLast={i === agents.length - 1}
                   busy={busy || refreshing}
                   canDirectlyEdit={canDirectlyEdit}
                   pendingReview={Boolean(pendingByAgentId.get(agent.id))}
@@ -677,7 +631,6 @@ export function DtAgentsManager(props: {
         organisationName={orgName}
         onClose={() => setCreateWizardOpen(false)}
         onCreated={() => {
-          setAgentFilter("additional");
           toast.success("Agent wurde angelegt.");
           void refresh(true);
         }}
