@@ -5,6 +5,7 @@ import {
   ensureSurveyAiUserPreferences,
   SURVEY_AI_MAX_ASSISTANT_RULES_CHARS,
 } from "@/lib/settings/survey-ai-server";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { createClient } from "@/lib/supabase/server";
 
 const patchSchema = z.object({
@@ -66,8 +67,15 @@ export async function PATCH(req: Request) {
   if (parsed.data.autoNavigate !== undefined) patch.auto_navigate = parsed.data.autoNavigate;
   if (parsed.data.showArchivedChats !== undefined)
     patch.show_archived_chats = parsed.data.showArchivedChats;
-  if (parsed.data.globalAssistantRules !== undefined)
+  if (parsed.data.globalAssistantRules !== undefined) {
+    if (!(await isPlatformAdmin(supabase, user.id))) {
+      return NextResponse.json(
+        { ok: false, message: "Survey-KI-Einstellungen sind nur intern verfügbar." },
+        { status: 403 },
+      );
+    }
     patch.global_assistant_rules = parsed.data.globalAssistantRules;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ ok: false, message: "Keine Änderungen übergeben." }, { status: 400 });

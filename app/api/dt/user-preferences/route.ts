@@ -5,6 +5,7 @@ import {
   DT_MAX_ASSISTANT_RULES_CHARS,
   ensureDtUserPreferences,
 } from "@/lib/settings/dt-user-preferences-server";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { createClient } from "@/lib/supabase/server";
 
 const patchSchema = z.object({
@@ -67,6 +68,12 @@ export async function PATCH(req: Request) {
     patch.show_archived_chats = parsed.data.showArchivedChats;
   }
   if (parsed.data.globalAssistantRules !== undefined) {
+    if (!(await isPlatformAdmin(supabase, user.id))) {
+      return NextResponse.json(
+        { ok: false, message: "Globale Assistenten-Regeln sind nur intern verfügbar." },
+        { status: 403 },
+      );
+    }
     patch.global_assistant_rules = parsed.data.globalAssistantRules;
   }
   if (parsed.data.defaultAgentId !== undefined) {

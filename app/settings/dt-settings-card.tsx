@@ -16,7 +16,11 @@ type PrefsResponse = {
   message?: string;
 };
 
-export function DtSettingsCard() {
+export function DtSettingsCard(props: {
+  /** Platform-admin-only controls such as global assistant rules. */
+  showInternalSettings?: boolean;
+}) {
+  const showInternal = Boolean(props.showInternalSettings);
   const [showArchived, setShowArchived] = useState(false);
   const [globalRules, setGlobalRules] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -104,31 +108,33 @@ export function DtSettingsCard() {
           </span>
         </label>
 
-        <div className="grid gap-2">
-          <label className="text-sm font-medium" htmlFor="dt-global-rules">
-            Globale Assistenten-Regeln
-          </label>
-          <p className="text-xs text-secondary">
-            Gelten für alle DigitalTwin-Chats deiner Organisationen. Die KI befolgt sie, soweit mit
-            den Systemanweisungen vereinbar.
-          </p>
-          <Textarea
-            id="dt-global-rules"
-            disabled={!prefsReady}
-            value={globalRules}
-            maxLength={DT_MAX_ASSISTANT_RULES_CHARS}
-            onChange={(e) => {
-              const v = e.target.value;
-              setGlobalRules(v);
-              scheduleRulesSave(v);
-            }}
-            placeholder="z. B. Immer auf Deutsch; kurze Antworten; Du-Form; …"
-            className="min-h-[100px] resize-y text-sm"
-          />
-          <p className="text-right text-xs text-secondary">
-            {globalRules.length}/{DT_MAX_ASSISTANT_RULES_CHARS}
-          </p>
-        </div>
+        {showInternal ? (
+          <div className="grid gap-2">
+            <label className="text-sm font-medium" htmlFor="dt-global-rules">
+              Globale Assistenten-Regeln
+            </label>
+            <p className="text-xs text-secondary">
+              Gelten für alle DigitalTwin-Chats deiner Organisationen. Die KI befolgt sie, soweit mit
+              den Systemanweisungen vereinbar.
+            </p>
+            <Textarea
+              id="dt-global-rules"
+              disabled={!prefsReady}
+              value={globalRules}
+              maxLength={DT_MAX_ASSISTANT_RULES_CHARS}
+              onChange={(e) => {
+                const v = e.target.value;
+                setGlobalRules(v);
+                scheduleRulesSave(v);
+              }}
+              placeholder="z. B. Immer auf Deutsch; kurze Antworten; Du-Form; …"
+              className="min-h-[100px] resize-y text-sm"
+            />
+            <p className="text-right text-xs text-secondary">
+              {globalRules.length}/{DT_MAX_ASSISTANT_RULES_CHARS}
+            </p>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
