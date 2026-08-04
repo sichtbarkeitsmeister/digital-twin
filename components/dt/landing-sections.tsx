@@ -84,8 +84,8 @@ const accessSteps = [
   },
   {
     num: "3",
-    title: "Sie sehen den aktuellen Stand",
-    body: "Geprüfte Texte, Freigaben und Ergebnisse — inklusive der Stellen, an denen wir kurz Ihr Okay brauchen.",
+    title: "Sie sehen Ihren SEO-Stand",
+    body: "Letzte SEO-Optimierungen, anstehende Optimierungen, nächste Schritte und der aktuelle SEO-Stand — übersichtlich an einem Ort.",
   },
 ];
 
