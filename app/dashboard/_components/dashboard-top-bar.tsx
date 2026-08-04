@@ -1,13 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Plus } from "lucide-react";
 
 import { DashboardLogoLink } from "@/app/dashboard/_components/dashboard-logo-link";
 import { DashboardTopBarOrgSelector } from "@/components/dt/dashboard/dashboard-top-bar-org-selector";
-import { DtIconButton } from "@/components/dt/dt-icon-button";
-import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtThemeToggle } from "@/components/dt/dt-theme-toggle";
 import { ZumChatButton } from "@/components/zum-chat-button";
 import { UserMenu } from "@/components/user-menu";
@@ -17,18 +13,8 @@ function TopBarActions() {
   return (
     <div className="flex items-center justify-end gap-2 sm:gap-3">
       <ZumChatButton compact className="shrink-0" />
-      <DtIconButton aria-label="Benachrichtigungen" className="relative">
-        <Bell className="h-[18px] w-[18px]" strokeWidth={1.7} />
-        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-sbkm-mint" />
-      </DtIconButton>
       <DtThemeToggle />
       <UserMenu />
-      <DtPillButton asChild size="sm" className="hidden sm:inline-flex">
-        <Link href="/dashboard/surveys/new">
-          <Plus className="h-4 w-4" strokeWidth={2.2} />
-          Neuer Entwurf
-        </Link>
-      </DtPillButton>
     </div>
   );
 }
