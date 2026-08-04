@@ -148,7 +148,13 @@ export function isCompleteQuestionnairePaste(userMessage: string): boolean {
   return false;
 }
 
-/** Short follow-ups after a paste/timeout — reuse the last Fragebogen in history. */
+/**
+ * Short follow-ups after a paste/timeout — reuse the last Fragebogen in history.
+ *
+ * Bare confirmations ("ja", "ok", "bitte") are deliberately not accepted: they
+ * are how every other proposal in this chat gets approved, and re-importing a
+ * whole questionnaire instead would bury the answer the user actually wanted.
+ */
 export function isPasteRetryOrConfirmIntent(userMessage: string): boolean {
   const text = userMessage.trim();
   if (!text || text.length > 400) return false;
@@ -156,12 +162,14 @@ export function isPasteRetryOrConfirmIntent(userMessage: string): boolean {
     /\b(?:versuch(?:e|en)?\s+(?:es\s+)?erneut|nochmal|noch\s*mal|erneut|retry|nochmals)\b/i.test(
       text,
     ) ||
-    /\b(?:genau\s+so|1\s*:\s*1|eins\s*zu\s*eins|wie\s+im\s+template|wie\s+vorliegend|so\s+lassen|so\s+übernehmen|bitte\s+übernehmen|übernimm(?:\s+es)?|abspeichern|speichern)\b/i.test(
+    /\b(?:genau\s+so|1\s*:\s*1|eins\s*zu\s*eins|wie\s+im\s+template|wie\s+vorliegend|so\s+lassen|so\s+übernehmen|bitte\s+übernehmen|übernimm(?:\s+es)?)\b/i.test(
       text,
-    ) ||
-    /^(?:ja|ok|okay|mach\s+das|los|bitte)\.?$/i.test(text)
+    )
   );
 }
+
+/** How far back a retry may reach for the questionnaire it repeats. */
+const PASTE_RETRY_LOOKBACK = 3;
 
 /**
  * Prefer the current message if it is a full paste; otherwise, on retry/confirm,
@@ -176,7 +184,8 @@ export function resolveQuestionnairePasteSource(input: {
   }
   if (!isPasteRetryOrConfirmIntent(input.userMessage)) return null;
   const priors = input.priorUserMessages ?? [];
-  for (let i = priors.length - 1; i >= 0; i -= 1) {
+  const start = Math.max(0, priors.length - PASTE_RETRY_LOOKBACK);
+  for (let i = priors.length - 1; i >= start; i -= 1) {
     const prior = priors[i];
     if (prior && isCompleteQuestionnairePaste(prior)) return prior;
   }
@@ -229,7 +238,7 @@ export function convertMarkdownQuestionnaireToSurvey(userMessage: string): {
   for (let s = 0; s < sections.length; s += 1) {
     const section = sections[s]!;
     const fields: SurveyField[] = [];
-    let sectionDescriptionParts: string[] = [];
+    const sectionDescriptionParts: string[] = [];
     let active: {
       title: string;
       descriptionParts: string[];
