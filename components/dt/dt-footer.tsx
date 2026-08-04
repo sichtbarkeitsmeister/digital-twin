@@ -21,7 +21,7 @@ export function DtFooter({ className, links = defaultLinks }: DtFooterProps) {
     >
       <div className="mx-auto flex w-full max-w-dt flex-col items-center justify-between gap-3 text-[13px] text-sbkm-ink-600 dark:text-white/60 sm:flex-row">
         <span>
-          © DigitalTwin. Powered by <strong className="text-sbkm-navy dark:text-white">sbkm.</strong>
+          © DigitalTwin. Betrieben von Sichtbarkeitsmeister GmbH.
         </span>
         <div className="hidden items-center gap-6 sm:flex">
           {links.map((link) => (

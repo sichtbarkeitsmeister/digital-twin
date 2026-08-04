@@ -2,7 +2,15 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
-import { LandingHero, LandingPipeline, LandingTrust } from "@/components/dt/landing-sections";
+import {
+  LandingAccess,
+  LandingFaq,
+  LandingHero,
+  LandingHowWeWork,
+  LandingPracticeDemo,
+  LandingProblem,
+  LandingReport,
+} from "@/components/dt/landing-sections";
 import type { DtChatListScope } from "@/lib/dt/db";
 import { loadDtUserOrganisations } from "@/lib/dt/load-user-organisations";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
@@ -12,8 +20,13 @@ function MarketingHome() {
     <>
       <LandingHero />
       <hr className="border-0 border-t border-sbkm-navy/15 dark:border-white/10" />
-      <LandingPipeline />
-      <LandingTrust />
+      <LandingProblem />
+      <LandingHowWeWork />
+      <LandingPracticeDemo />
+      <hr className="border-0 border-t border-sbkm-navy/15 dark:border-white/10" />
+      <LandingFaq />
+      <LandingReport />
+      <LandingAccess />
     </>
   );
 }

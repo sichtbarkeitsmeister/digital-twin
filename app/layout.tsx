@@ -10,9 +10,9 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "DigitalTwin — Schreiben. Prüfen. Veröffentlichen.",
+  title: "DigitalTwin — Bevor ein Text online geht, wissen wir, ob er ankommt",
   description:
-    "Minimal, schnell und fokussiert — dein digitaler Zwilling übernimmt Recherche, Markenstimme-Check und Veröffentlichung.",
+    "Der DigitalTwin verbindet SEO-Wissen mit der Analyse Ihrer Wunschkunden. Texte werden vor Veröffentlichung geprüft — entwickelt und betreut von Sichtbarkeitsmeister.",
 };
 
 const poppins = Poppins({
