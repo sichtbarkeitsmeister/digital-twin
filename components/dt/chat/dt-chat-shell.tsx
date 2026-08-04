@@ -1258,8 +1258,10 @@ export function DtChatShell(props: {
                   agentEmoji={displayAgentEmoji}
                   teamMode={showChatAuthors}
                   authorLabels={authorLabels}
-                  suggestedFollowUps={quickActions}
-                  onSuggestedFollowUp={(text) => setPrompt(text)}
+                  suggestedFollowUps={messages.length === 0 ? quickActions : undefined}
+                  onSuggestedFollowUp={
+                    messages.length === 0 ? (text) => setPrompt(text) : undefined
+                  }
                   seoTasks={props.seoMode || isSeoChat ? seoTasks : undefined}
                   emptyHint={
                     ghostMode
@@ -1346,7 +1348,8 @@ export function DtChatShell(props: {
               onSend={handleSend}
               onStop={() => abortRef.current?.abort()}
               isBusy={isBusy}
-              quickActions={messages.length === 0 ? quickActions : []}
+              quickActions={quickActions}
+              quickActionsDefaultCollapsed={messages.length > 0}
               disabled={!selectedAgentId || (isInitialLoading && !ghostMode)}
               ghostMode={ghostMode}
               onGhostModeChange={handleGhostToggle}
