@@ -1,7 +1,14 @@
 "use client";
 
-import { useRef } from "react";
-import { ArrowUp, Ghost, Paperclip, PenLine, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowUp,
+  ChevronDown,
+  Ghost,
+  Paperclip,
+  PenLine,
+  Square,
+} from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { DtAttachmentChips } from "@/components/dt/chat/dt-attachment-chips";
@@ -23,6 +30,8 @@ export function DtChatComposer(props: {
   onStop?: () => void;
   isBusy: boolean;
   quickActions: string[];
+  /** When true, Schnelltests start collapsed (e.g. after conversation has begun). */
+  quickActionsDefaultCollapsed?: boolean;
   disabled?: boolean;
   ghostMode: boolean;
   onGhostModeChange: (next: boolean) => void;
@@ -37,10 +46,17 @@ export function DtChatComposer(props: {
   agentName?: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(
+    () => !props.quickActionsDefaultCollapsed,
+  );
   const canSend =
     (props.value.trim().length > 0 || props.attachments.length > 0) &&
     !props.isBusy &&
     !props.disabled;
+
+  useEffect(() => {
+    setQuickActionsOpen(!props.quickActionsDefaultCollapsed);
+  }, [props.quickActionsDefaultCollapsed]);
 
   return (
     <div
@@ -89,24 +105,58 @@ export function DtChatComposer(props: {
 
       <div className="mx-auto w-full max-w-3xl">
         {props.quickActions.length > 0 ? (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="mb-3 flex flex-wrap gap-2"
-          >
-            {props.quickActions.map((label) => (
+          <div className="mb-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sbkm-ink-500 dark:text-white/45">
+                Schnelltests
+              </p>
               <button
-                key={label}
                 type="button"
-                disabled={props.isBusy || props.disabled}
-                onClick={() => props.onChange(label)}
-                className="rounded-pill border border-sbkm-navy/12 bg-white/75 px-3 py-1.5 text-xs font-semibold text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
+                aria-expanded={quickActionsOpen}
+                aria-controls="dt-composer-quick-actions"
+                aria-label={
+                  quickActionsOpen ? "Schnelltests einklappen" : "Schnelltests ausklappen"
+                }
+                onClick={() => setQuickActionsOpen((open) => !open)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sbkm-navy/10 text-sbkm-navy transition duration-150 hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] dark:border-white/12 dark:text-white dark:hover:bg-white/10"
               >
-                {label}
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 transition-transform duration-200",
+                    quickActionsOpen ? "" : "-rotate-180",
+                  )}
+                  aria-hidden
+                />
               </button>
-            ))}
-          </motion.div>
+            </div>
+            <AnimatePresence initial={false}>
+              {quickActionsOpen ? (
+                <motion.div
+                  id="dt-composer-quick-actions"
+                  key="quick-actions"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {props.quickActions.map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        disabled={props.isBusy || props.disabled}
+                        onClick={() => props.onChange(label)}
+                        className="rounded-pill border border-sbkm-navy/12 bg-white/75 px-3 py-1.5 text-xs font-semibold text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
         ) : null}
 
         <DtAttachmentChips

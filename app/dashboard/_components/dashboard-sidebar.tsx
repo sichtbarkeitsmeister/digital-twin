@@ -17,6 +17,7 @@ import {
   Mail,
 } from "lucide-react";
 
+import { ZumChatButton } from "@/components/zum-chat-button";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -172,6 +173,8 @@ export function DashboardSidebar({
 
   return (
     <div className="grid gap-4">
+      <ZumChatButton size="full" className="w-full justify-center shadow-dt" />
+
       <nav className="grid gap-1">
         {mainItems.map((item) => (
           <NavLink key={item.href} item={item} />
