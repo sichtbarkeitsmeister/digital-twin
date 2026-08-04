@@ -222,7 +222,6 @@ export function OrgOverviewPanel(props: {
       setEnablingSeo(false);
     }
   }
-  const openSeoTasks = overview.seoTasks.open + overview.seoTasks.inProgress;
   const visibleAgents = canViewSeoAdvisor
     ? overview.agents
     : filterAgentsHiddenFromOrgMembers(overview.agents);
@@ -251,7 +250,6 @@ export function OrgOverviewPanel(props: {
       <motion.div variants={item} className="flex flex-wrap items-center gap-2">
         <StatPill label="Mitglieder" value={props.memberCount} />
         <StatPill label="Agenten" value={enabledAgents.length} />
-        <StatPill label="SEO-Aufgaben" value={openSeoTasks} />
         <StatPill label={fourthStat.label} value={fourthStat.value} />
       </motion.div>
 
@@ -408,39 +406,17 @@ export function OrgOverviewPanel(props: {
                     />
                   ) : null}
 
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    {overview.seoTasks.total > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {overview.seoTasks.open > 0 ? (
-                          <span className="rounded-pill bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
-                            {overview.seoTasks.open} offen
-                          </span>
-                        ) : null}
-                        {overview.seoTasks.inProgress > 0 ? (
-                          <span className="rounded-pill bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-900 dark:bg-blue-500/15 dark:text-blue-200">
-                            {overview.seoTasks.inProgress} in Arbeit
-                          </span>
-                        ) : null}
-                        {overview.seoTasks.done > 0 ? (
-                          <span className="rounded-pill bg-muted px-2.5 py-1 text-xs font-medium text-secondary">
-                            {overview.seoTasks.done} erledigt
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {overview.lastCrawl ? (
-                      <p className="text-xs text-secondary">
-                        Crawl: {crawlStatusLabel(overview.lastCrawl.status)}
-                        {overview.lastCrawl.pagesCrawled > 0
-                          ? ` · ${overview.lastCrawl.pagesCrawled} Seiten`
-                          : ""}
-                        {overview.lastCrawl.finishedAt
-                          ? ` · ${formatOrgDate(overview.lastCrawl.finishedAt)}`
-                          : ""}
-                      </p>
-                    ) : null}
-                  </div>
+                  {overview.lastCrawl ? (
+                    <p className="text-xs text-secondary">
+                      Crawl: {crawlStatusLabel(overview.lastCrawl.status)}
+                      {overview.lastCrawl.pagesCrawled > 0
+                        ? ` · ${overview.lastCrawl.pagesCrawled} Seiten`
+                        : ""}
+                      {overview.lastCrawl.finishedAt
+                        ? ` · ${formatOrgDate(overview.lastCrawl.finishedAt)}`
+                        : ""}
+                    </p>
+                  ) : null}
                 </div>
 
                 {hasSeoMonthly ? (
