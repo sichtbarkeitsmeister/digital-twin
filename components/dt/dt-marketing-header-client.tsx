@@ -12,9 +12,10 @@ import { DtThemeToggle } from "@/components/dt/dt-theme-toggle";
 import { createClient } from "@/lib/supabase/client";
 
 const navItems = [
-  { href: "#pipeline", label: "Wie es funktioniert" },
-  { href: "#trust", label: "Ergebnisse" },
-  { href: "/dashboard", label: "Demo ansehen" },
+  { href: "#arbeit", label: "Wie wir arbeiten" },
+  { href: "#faq", label: "Häufige Fragen" },
+  { href: "#bericht", label: "Ihr Bericht" },
+  { href: "#zugang", label: "Ihr Zugang" },
 ];
 
 export function DtMarketingHeaderClient({
@@ -82,10 +83,17 @@ export function DtMarketingHeaderClient({
           hidden && !menuOpen && "-translate-y-[110%] opacity-0",
         )}
       >
-        <DtLogo size="header" />
+        <div className="flex min-w-0 items-center gap-3">
+          <DtLogo size="header" />
+          {showMarketingNav ? (
+            <span className="hidden max-w-[11rem] text-[11px] leading-tight text-sbkm-ink-600 dark:text-white/55 xl:inline">
+              ein Werkzeug von Sichtbarkeitsmeister
+            </span>
+          ) : null}
+        </div>
 
         {showMarketingNav ? (
-          <nav className="hidden items-center gap-7 lg:flex">
+          <nav className="hidden items-center gap-6 xl:gap-7 lg:flex">
             {navItems.map((item) => (
               <DtNavLink key={item.href} href={item.href}>
                 {item.label}
@@ -96,9 +104,16 @@ export function DtMarketingHeaderClient({
 
         <div className="flex items-center gap-3">
           <DtThemeToggle />
-          <div className={cn(showMarketingNav ? "hidden sm:block" : "block")}>
-            {authSlot}
-          </div>
+          {showMarketingNav ? (
+            <>
+              <DtPillButton asChild size="sm" className="hidden sm:inline-flex">
+                <Link href="#zugang">Zugang erhalten</Link>
+              </DtPillButton>
+              <div className="hidden lg:block">{authSlot}</div>
+            </>
+          ) : (
+            <div>{authSlot}</div>
+          )}
           {showMarketingNav ? (
             <button
               type="button"
@@ -152,8 +167,8 @@ export function DtMarketingHeaderClient({
 
         <div className="mt-auto flex flex-col gap-2.5 pt-6">
           <DtPillButton asChild size="full">
-            <Link href="/auth/sign-up" onClick={() => setMenuOpen(false)}>
-              Zugang anfordern
+            <Link href="#zugang" onClick={() => setMenuOpen(false)}>
+              Zugang erhalten
             </Link>
           </DtPillButton>
           <DtPillButton asChild variant="outline" size="full">
