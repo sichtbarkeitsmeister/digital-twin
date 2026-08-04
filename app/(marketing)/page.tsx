@@ -14,6 +14,7 @@ import {
 import type { DtChatListScope } from "@/lib/dt/db";
 import { loadDtUserOrganisations } from "@/lib/dt/load-user-organisations";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { hasEnvVars } from "@/lib/utils";
 
 function MarketingHome() {
   return (
@@ -36,6 +37,10 @@ async function HomeContent({
 }: {
   searchParams: { org?: string; scope?: string; chat?: string };
 }) {
+  if (!hasEnvVars) {
+    return <MarketingHome />;
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
