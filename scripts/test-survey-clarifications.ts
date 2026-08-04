@@ -349,6 +349,26 @@ const needsPreview = buildImportPreviewFromBundle({
 assert.equal(needsPreview.scope, "focused");
 assert.equal(needsPreview.facts.length, 1);
 assert.match(needsPreview.facts[0]?.value ?? "", /Kosten/);
+assert.match(needsPreview.facts[0]?.fieldTitle ?? "", /Bedürfnisse|Fragen/i);
+
+/** Regression: „Bedürfnisse“ must not fall back to the Dauer-Feld via shared Mandatsreise/Phase. */
+const withoutNeedsBundle: SurveyFactsBundle = {
+  surveyTitle: "MSH Arbeitgeber",
+  skippedFieldCount: 0,
+  facts: noisyEmployerBundle.facts.filter((f) => f.fieldId !== "fd"),
+};
+
+const needsMustNotStealDuration = buildImportPreviewFromBundle({
+  clarificationId: "clar-needs-no-steal",
+  sourceResponseId: "22222222-2222-2222-2222-222222222222",
+  sourceSurveyTitle: "MSH Arbeitgeber",
+  bundle: withoutNeedsBundle,
+  fieldTitle: "Was sind die 3 wichtigsten Fragen/Bedürfnisse in jeder Phase der Mandatsreise?",
+  remarkText: "siehe Arbeitgeber-Fragebogen",
+});
+
+assert.equal(needsMustNotStealDuration.scope, "empty");
+assert.equal(needsMustNotStealDuration.facts.length, 0);
 
 const durationPreview = buildImportPreviewFromBundle({
   clarificationId: "clar-duration",

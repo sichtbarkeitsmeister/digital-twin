@@ -702,6 +702,29 @@ function tokenOverlapScore(haystack: string, tokens: string[]): number {
   return score;
 }
 
+/** Shared Mandatsreise-context — alone must not pick a sibling field. */
+const SHARED_JOURNEY_TOKENS = new Set(["mandatsreise", "phase", "phasen", "ablauf"]);
+
+/**
+ * Tokens that identify *which* Mandatsreise question (Bedürfnisse vs Dauer vs Schritte).
+ * All of these must appear in the winning sibling field title.
+ */
+function requiredTopicTokens(tokens: string[]): string[] {
+  const specific = tokens.filter((t) => !SHARED_JOURNEY_TOKENS.has(t) && t.length >= 6);
+  if (specific.length > 0) return specific;
+  return tokens.filter((t) => t.length >= 8);
+}
+
+function fieldCoversRequiredTokens(fieldTitle: string, required: string[]): boolean {
+  if (required.length === 0) return true;
+  const hay = fieldTitle.toLowerCase();
+  return required.every((t) => hay.includes(t));
+}
+
+function titleForFieldId(bundle: SurveyFactsBundle, fieldId: string): string {
+  return bundle.facts.find((f) => f.fieldId === fieldId)?.fieldTitle ?? "";
+}
+
 export type ClarificationFactScope = "focused" | "full_survey" | "empty";
 
 /** Absolute safety: never hand the model more than one sibling field. */
@@ -727,6 +750,22 @@ function isNearTitleMatch(a: string, b: string): boolean {
   return shorter.length / longer.length >= 0.7;
 }
 
+function acceptFocusedField(
+  bundle: SurveyFactsBundle,
+  fieldId: string,
+  tokens: string[],
+): { facts: SurveyFact[]; scope: ClarificationFactScope } {
+  const title = titleForFieldId(bundle, fieldId);
+  const required = requiredTopicTokens(tokens);
+  if (!fieldCoversRequiredTokens(title, required)) {
+    return { facts: [], scope: "empty" };
+  }
+  return {
+    facts: factsForSingleField(bundle, fieldId),
+    scope: "focused",
+  };
+}
+
 /**
  * Pick only facts that clearly belong to the same question as the clarification.
  * Never dump the whole sibling survey — better empty (admin pastes) than over-import.
@@ -738,14 +777,13 @@ function filterFactsForFieldFocus(
 ): { facts: SurveyFact[]; scope: ClarificationFactScope } {
   if (bundle.facts.length === 0) return { facts: [], scope: "empty" };
 
+  const tokens = distinctiveFieldTokens(fieldTitle);
+
   const titleNorm = fieldTitle.trim().toLowerCase();
   if (titleNorm) {
     const exact = bundle.facts.filter((f) => f.fieldTitle.toLowerCase() === titleNorm);
     if (exact.length > 0) {
-      return {
-        facts: factsForSingleField(bundle, exact[0]!.fieldId),
-        scope: "focused",
-      };
+      return acceptFocusedField(bundle, exact[0]!.fieldId, tokens);
     }
   }
 
@@ -755,10 +793,7 @@ function filterFactsForFieldFocus(
       (f) => normalizeFieldTitleForMatch(f.fieldTitle) === normalizedTarget,
     );
     if (byNormalized.length > 0) {
-      return {
-        facts: factsForSingleField(bundle, byNormalized[0]!.fieldId),
-        scope: "focused",
-      };
+      return acceptFocusedField(bundle, byNormalized[0]!.fieldId, tokens);
     }
   }
 
@@ -767,21 +802,15 @@ function filterFactsForFieldFocus(
       isNearTitleMatch(normalizedTarget, normalizeFieldTitleForMatch(f.fieldTitle)),
     );
     if (near.length > 0) {
-      // If several near-matches, prefer the highest token overlap with the target.
-      const tokens = distinctiveFieldTokens(fieldTitle);
       const ranked = [...near].sort(
         (a, b) =>
           tokenOverlapScore(b.fieldTitle.toLowerCase(), tokens) -
           tokenOverlapScore(a.fieldTitle.toLowerCase(), tokens),
       );
-      return {
-        facts: factsForSingleField(bundle, ranked[0]!.fieldId),
-        scope: "focused",
-      };
+      return acceptFocusedField(bundle, ranked[0]!.fieldId, tokens);
     }
   }
 
-  const tokens = distinctiveFieldTokens(fieldTitle);
   if (tokens.length === 0) {
     return { facts: [], scope: "empty" };
   }
@@ -810,10 +839,7 @@ function filterFactsForFieldFocus(
     return { facts: [], scope: "empty" };
   }
 
-  return {
-    facts: factsForSingleField(bundle, best.fieldId),
-    scope: "focused",
-  };
+  return acceptFocusedField(bundle, best.fieldId, tokens);
 }
 
 export type SurveyClarificationPreviewFact = {
