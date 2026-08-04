@@ -105,32 +105,29 @@ export function DtChatComposer(props: {
 
       <div className="mx-auto w-full max-w-3xl">
         {props.quickActions.length > 0 ? (
-          <div className="mb-3">
+          <div className="mb-2">
             <button
               type="button"
               aria-expanded={quickActionsOpen}
               aria-controls="dt-composer-quick-actions"
               onClick={() => setQuickActionsOpen((open) => !open)}
               className={cn(
-                "flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition duration-150 active:scale-[0.995]",
+                "inline-flex h-8 max-w-full items-center gap-1.5 rounded-pill border px-2.5 text-left transition duration-150 active:scale-[0.98]",
                 quickActionsOpen
                   ? "border-sbkm-mint/45 bg-sbkm-mint/10 dark:border-sbkm-mint/30 dark:bg-sbkm-mint/10"
                   : "border-sbkm-navy/12 bg-white/80 hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 dark:border-white/12 dark:bg-white/5 dark:hover:bg-white/10",
               )}
             >
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-sbkm-navy dark:text-white">
-                  Schnelltests
-                </span>
-                <span className="block text-xs text-sbkm-ink-500 dark:text-white/50">
-                  {quickActionsOpen
-                    ? "Fragen ausblenden"
-                    : `${props.quickActions.length} Vorschläge anzeigen`}
+              <span className="truncate text-xs font-semibold text-sbkm-navy dark:text-white">
+                Schnelltests
+                <span className="font-medium text-sbkm-ink-500 dark:text-white/50">
+                  {" "}
+                  · {props.quickActions.length}
                 </span>
               </span>
               <ChevronDown
                 className={cn(
-                  "h-4 w-4 shrink-0 text-sbkm-navy transition-transform duration-200 dark:text-white",
+                  "h-3.5 w-3.5 shrink-0 text-sbkm-ink-500 transition-transform duration-200 dark:text-white/60",
                   quickActionsOpen && "rotate-180",
                 )}
                 aria-hidden
@@ -144,17 +141,17 @@ export function DtChatComposer(props: {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.2 }}
+                  transition={{ duration: 0.18 }}
                   className="overflow-hidden"
                 >
-                  <div className="flex flex-wrap gap-2 pt-2.5">
+                  <div className="flex flex-wrap gap-1.5 pt-1.5">
                     {props.quickActions.map((label) => (
                       <button
                         key={label}
                         type="button"
                         disabled={props.isBusy || props.disabled}
                         onClick={() => props.onChange(label)}
-                        className="rounded-pill border border-sbkm-navy/12 bg-white/75 px-3 py-1.5 text-xs font-semibold text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
+                        className="rounded-pill border border-sbkm-navy/12 bg-white/75 px-2.5 py-1 text-[11px] font-semibold leading-snug text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
                       >
                         {label}
                       </button>
