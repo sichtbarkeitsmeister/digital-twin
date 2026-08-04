@@ -1346,7 +1346,7 @@ export function DtChatShell(props: {
               onSend={handleSend}
               onStop={() => abortRef.current?.abort()}
               isBusy={isBusy}
-              quickActions={quickActions}
+              quickActions={messages.length === 0 ? quickActions : []}
               disabled={!selectedAgentId || (isInitialLoading && !ghostMode)}
               ghostMode={ghostMode}
               onGhostModeChange={handleGhostToggle}
