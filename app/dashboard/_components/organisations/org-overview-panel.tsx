@@ -410,7 +410,8 @@ export function OrgOverviewPanel(props: {
 
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                     {overview.seoTasks.total > 0 ? (
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-secondary">Aufgaben</span>
                         {overview.seoTasks.open > 0 ? (
                           <span className="rounded-pill bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
                             {overview.seoTasks.open} offen
