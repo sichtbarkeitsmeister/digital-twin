@@ -106,29 +106,36 @@ export function DtChatComposer(props: {
       <div className="mx-auto w-full max-w-3xl">
         {props.quickActions.length > 0 ? (
           <div className="mb-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sbkm-ink-500 dark:text-white/45">
-                Schnelltests
-              </p>
-              <button
-                type="button"
-                aria-expanded={quickActionsOpen}
-                aria-controls="dt-composer-quick-actions"
-                aria-label={
-                  quickActionsOpen ? "Schnelltests einklappen" : "Schnelltests ausklappen"
-                }
-                onClick={() => setQuickActionsOpen((open) => !open)}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sbkm-navy/10 text-sbkm-navy transition duration-150 hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] dark:border-white/12 dark:text-white dark:hover:bg-white/10"
-              >
-                <ChevronDown
-                  className={cn(
-                    "h-4 w-4 transition-transform duration-200",
-                    quickActionsOpen ? "" : "-rotate-180",
-                  )}
-                  aria-hidden
-                />
-              </button>
-            </div>
+            <button
+              type="button"
+              aria-expanded={quickActionsOpen}
+              aria-controls="dt-composer-quick-actions"
+              onClick={() => setQuickActionsOpen((open) => !open)}
+              className={cn(
+                "flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition duration-150 active:scale-[0.995]",
+                quickActionsOpen
+                  ? "border-sbkm-mint/45 bg-sbkm-mint/10 dark:border-sbkm-mint/30 dark:bg-sbkm-mint/10"
+                  : "border-sbkm-navy/12 bg-white/80 hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 dark:border-white/12 dark:bg-white/5 dark:hover:bg-white/10",
+              )}
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-sbkm-navy dark:text-white">
+                  Schnelltests
+                </span>
+                <span className="block text-xs text-sbkm-ink-500 dark:text-white/50">
+                  {quickActionsOpen
+                    ? "Fragen ausblenden"
+                    : `${props.quickActions.length} Vorschläge anzeigen`}
+                </span>
+              </span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 shrink-0 text-sbkm-navy transition-transform duration-200 dark:text-white",
+                  quickActionsOpen && "rotate-180",
+                )}
+                aria-hidden
+              />
+            </button>
             <AnimatePresence initial={false}>
               {quickActionsOpen ? (
                 <motion.div
@@ -140,7 +147,7 @@ export function DtChatComposer(props: {
                   transition={{ duration: 0.2 }}
                   className="overflow-hidden"
                 >
-                  <div className="flex flex-wrap gap-2 pt-2">
+                  <div className="flex flex-wrap gap-2 pt-2.5">
                     {props.quickActions.map((label) => (
                       <button
                         key={label}
