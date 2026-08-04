@@ -20,9 +20,22 @@ nextEnv.loadEnvConfig(root, false);
 const base = process.env.N8N_BASE_URL?.replace(/\/+$/, "");
 const apiKey = process.env.N8N_API_KEY;
 const workflowName = "DT v2 - Chat (Anthropic, JWT)";
+const allowLocalhost = process.argv.includes("--allow-localhost");
 
 if (!base || !apiKey) {
   console.error("Missing N8N_BASE_URL or N8N_API_KEY");
+  process.exit(1);
+}
+
+// APP_BASE_URL is baked into the Code node. A localhost value deploys a
+// workflow that cannot reach the app at all, and every chat tool fails.
+const appBaseForCheck = process.env.APP_BASE_URL ?? "";
+if (/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(appBaseForCheck) && !allowLocalhost) {
+  console.error(
+    `APP_BASE_URL points at "${appBaseForCheck}". n8n cannot reach that.\n` +
+      "Set APP_BASE_URL to the public app URL before deploying,\n" +
+      "or pass --allow-localhost when you deliberately target a tunnel.",
+  );
   process.exit(1);
 }
 

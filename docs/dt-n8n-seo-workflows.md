@@ -42,10 +42,18 @@ All internal routes: header `X-DT-Webhook-Secret: $DT_INTERNAL_WEBHOOK_SECRET`.
 
 ```bash
 # From repo root (.env.local: N8N_*, APP_BASE_URL, DT_INTERNAL_WEBHOOK_SECRET)
-node scripts/clone-dt-v2-seo-report-from-legacy.mjs
-node scripts/deploy-dt-v2-monthly-analytics-collect.mjs
-node scripts/deploy-dt-v2-monthly-analytics-scheduled.mjs
+npm run dt:n8n:chat               # DT v2 - Chat: Handler-Code + Werkzeuge
+npm run dt:n8n:seo-report
+npm run dt:n8n:monthly-collect
+npm run dt:n8n:monthly-scheduler
 ```
+
+**Wichtig:** Die SEO-Werkzeuge des Beraters (`read_sitemap`, `inspect_website_url`,
+`audit_site_indexability`, `update_seo_task`, `delete_seo_task`, `check_serp_snippet`)
+stecken in `scripts/n8n/dt-v2-chat-handler.js`. Läuft der Chat über n8n
+(`N8N_DT_CHAT_WEBHOOK` gesetzt), kennt er neue Werkzeuge erst nach
+`npm run dt:n8n:chat`. Der direkte Weg über die App ist sofort nach dem Deploy aktuell.
+Welcher Pfad gelaufen ist, steht als Badge unter Verwaltung → Nutzung.
 
 Set in Vercel / `.env.local`:
 
