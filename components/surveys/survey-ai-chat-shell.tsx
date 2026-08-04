@@ -681,13 +681,16 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
           }
           if (eventName === "done") {
             sawDone = true;
+            setStatus(null);
             setThinkingStatus(null);
           }
         }
       }
       await loadChats();
       await loadChat(targetChatId);
-      if (!sawDone && !sawError) {
+      if (sawDone) {
+        setStatus(null);
+      } else if (!sawError) {
         setStatus(
           "Die Antwort wurde unterbrochen (Timeout). Bitte die Nachricht erneut senden.",
         );
