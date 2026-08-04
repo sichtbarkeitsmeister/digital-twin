@@ -15,7 +15,7 @@ import { surveySchema } from "@/lib/surveys/schema";
 
 const blueprintFieldSchema = z.object({
   id: z.string().min(1),
-  type: z.enum(["text", "radio", "checkbox", "rating", "ranking"]),
+  type: z.enum(["text", "text_list", "radio", "checkbox", "rating", "ranking"]),
   title: z.string(),
   description: z.string().optional().default(""),
   required: z.boolean().optional().default(true),
@@ -92,7 +92,7 @@ The user requested a large new survey. Return ONLY one JSON object (no markdown,
         "title": "...",
         "description": "",
         "fields": [
-          { "id": "<unique field id>", "type": "text|radio|checkbox|rating|ranking", "title": "...", "description": "", "required": true }
+          { "id": "<unique field id>", "type": "text|text_list|radio|checkbox|rating|ranking", "title": "...", "description": "", "required": true }
         ]
       }
     ]

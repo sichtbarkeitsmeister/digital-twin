@@ -33,6 +33,8 @@ export function DtChatComposer(props: {
   onRemoveAttachment: (index: number) => void;
   dropHighlight?: boolean;
   onDragHighlight?: (v: boolean) => void;
+  /** Active avatar name for the default placeholder. */
+  agentName?: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canSend =
@@ -129,7 +131,7 @@ export function DtChatComposer(props: {
                 ? "Ghost-Chat — wird nicht gespeichert …"
                 : props.textMode
                   ? "Text-Modus — SEO-Text, der menschlich klingt …"
-                  : "Nachricht an deinen DigitalTwin …"
+                  : `Nachricht an ${props.agentName?.trim() || "deinen DigitalTwin"} …`
             }
             rows={2}
             disabled={props.isBusy || props.disabled}

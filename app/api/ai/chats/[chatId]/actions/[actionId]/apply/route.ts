@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthUser, getChatOrNull } from "@/lib/ai/chat-db";
-import { surveyAiProposalSchema } from "@/lib/ai/survey-assistant-types";
+import {
+  describeSurveyProposalValidationError,
+  parseSurveyAiProposal,
+} from "@/lib/ai/survey-assistant-types";
 import { applySurveyProposal } from "@/lib/ai/chat-executor";
 
 export async function POST(
@@ -25,16 +28,17 @@ export async function POST(
     .maybeSingle();
   if (!action) return NextResponse.json({ ok: false, message: "Aktion nicht gefunden." }, { status: 404 });
 
-  const proposalParsed = surveyAiProposalSchema.safeParse(action.proposal_json);
+  const proposalParsed = parseSurveyAiProposal(action.proposal_json);
   if (!proposalParsed.success) {
+    const message = describeSurveyProposalValidationError(action.proposal_json);
     await auth.supabase
       .from("ai_chat_actions")
       .update({
         execution_status: "failed",
-        execution_result: { ok: false, message: "Ungültiger Proposal-Payload." },
+        execution_result: { ok: false, message },
       })
       .eq("id", actionId);
-    return NextResponse.json({ ok: false, message: "Ungültiger Proposal-Payload." }, { status: 422 });
+    return NextResponse.json({ ok: false, message }, { status: 422 });
   }
 
   const result = await applySurveyProposal(proposalParsed.data);

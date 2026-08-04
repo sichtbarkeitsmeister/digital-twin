@@ -3,10 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import {
-  canManageOrganisation,
-  getAuthenticatedUserId,
-} from "@/lib/dashboard/org-context";
+import { getAuthenticatedUserId } from "@/lib/dashboard/org-context";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import {
   buildLeadinfoWebhookUrl,
   generateWebhookToken,
@@ -28,11 +26,11 @@ const statusSchema = z.object({
   status: z.enum(["enabled", "disabled"]),
 });
 
-async function requireOrgAdmin(organisationId: string) {
+async function requirePlatformAdmin() {
   const { supabase, userId } = await getAuthenticatedUserId();
-  const allowed = await canManageOrganisation(supabase, userId, organisationId);
+  const allowed = await isPlatformAdmin(supabase, userId);
   if (!allowed) {
-    return { ok: false as const, message: "You do not have permission to manage integrations." };
+    return { ok: false as const, message: "Keine Berechtigung für Integrationen." };
   }
   return { ok: true as const, supabase, userId };
 }
@@ -49,7 +47,7 @@ export async function generateLeadinfoIntegrationAction(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
-  const access = await requireOrgAdmin(parsed.data.organisation_id);
+  const access = await requirePlatformAdmin();
   if (!access.ok) {
     return { ok: false, message: access.message };
   }
@@ -96,7 +94,7 @@ export async function rotateLeadinfoTokenAction(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
-  const access = await requireOrgAdmin(parsed.data.organisation_id);
+  const access = await requirePlatformAdmin();
   if (!access.ok) {
     return { ok: false, message: access.message };
   }
@@ -137,7 +135,7 @@ export async function setLeadinfoStatusAction(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
-  const access = await requireOrgAdmin(parsed.data.organisation_id);
+  const access = await requirePlatformAdmin();
   if (!access.ok) {
     return { ok: false, message: access.message };
   }

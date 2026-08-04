@@ -256,6 +256,87 @@ const seoTools = [
       required: ["url"],
     },
   },
+  {
+    name: "audit_site_indexability",
+    description:
+      "Prüft mehrere URLs auf einmal auf technische Blocker: HTTP-Fehler, noindex, fremdes Canonical, Weiterleitungen — plus Abgleich mit dem Crawl-Index. Nutze dies bei Fragen wie „warum ist Seite X nicht bei Google“ oder für einen Indexierbarkeits-Überblick. Ohne Argumente: URLs aus Sitemap bzw. Crawl-Index. Achtung: kein Google-Indexierungsstatus.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sitemapUrl: {
+          type: "string",
+          description: "Optionale Sitemap-URL als Quelle der zu prüfenden URLs.",
+        },
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optionale konkrete URL-Liste (hat Vorrang vor der Sitemap).",
+        },
+        limit: {
+          type: "number",
+          description: "Wie viele URLs geprüft werden (Standard 15, max. 30).",
+        },
+      },
+    },
+  },
+  {
+    name: "update_seo_task",
+    description:
+      "Bearbeitet eine bestehende SEO-Aufgabe im Board (Titel, Status, Keyword, URL, Maßnahme, Priorität, …). Nutze die taskId aus „Bestehende SEO-Aufgaben“. Das Board erlaubt Edit — nicht nur Hinzufügen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "UUID der bestehenden Aufgabe." },
+        title: { type: "string", description: "Neuer Titel." },
+        url: { type: "string", description: "Ziel-URL (leer = entfernen)." },
+        keyword: { type: "string", description: "Keyword (leer = entfernen)." },
+        action: { type: "string", description: "Maßnahme / nächste Schritte." },
+        status: {
+          type: "string",
+          enum: ["open", "in_progress", "done", "wont_fix"],
+          description: "Neuer Status.",
+        },
+        priority: {
+          type: "string",
+          enum: ["low", "medium", "high", "urgent"],
+          description: "Priorität.",
+        },
+        currentStatus: {
+          type: "string",
+          description: "Ist-Status (Ranking, Impressionen, …).",
+        },
+        notes: { type: "string", description: "Interne Notizen." },
+      },
+      required: ["taskId"],
+    },
+  },
+  {
+    name: "delete_seo_task",
+    description:
+      "Löscht eine bestehende SEO-Aufgabe aus dem Board. Nutze die taskId aus „Bestehende SEO-Aufgaben“. Bei uneindeutiger Nutzeranfrage vorher nachfragen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "UUID der zu löschenden Aufgabe." },
+      },
+      required: ["taskId"],
+    },
+  },
+  {
+    name: "check_serp_snippet",
+    description:
+      "Misst Title und/oder Meta-Description in Pixeln (Google-SERP-Schätzung mit Arial). Limits: Title Desktop ~600px, Mobile ~440px, Description ~920px. Zeichenzahl nur Zusatz. Nutze dies bei Title-/Meta-Vorschlägen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Vorgeschlagener Title-Tag." },
+        description: {
+          type: "string",
+          description: "Vorgeschlagene Meta-Description.",
+        },
+      },
+    },
+  },
 ];
 
 async function runSeoTool(name, input) {
@@ -328,6 +409,83 @@ async function runSeoTool(name, input) {
       if (!r.ok || !r.data?.ok) return "Live-URL-Check fehlgeschlagen.";
       return r.data.text || "Keine Prüfergebnisse.";
     }
+    if (name === "audit_site_indexability") {
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: {
+          organisationId,
+          action: "audit",
+          ...(args.sitemapUrl ? { sitemapUrl: String(args.sitemapUrl) } : {}),
+          ...(Array.isArray(args.urls) ? { urls: args.urls.map((u) => String(u)) } : {}),
+          ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+        },
+      });
+      if (!r.ok || !r.data?.ok) return "Indexierbarkeits-Check fehlgeschlagen.";
+      return r.data.text || "Keine Prüfergebnisse.";
+    }
+    if (name === "update_seo_task") {
+      const taskId = String(args.taskId || "").trim();
+      if (!taskId) return "Keine taskId angegeben.";
+      const body = {
+        organisationId,
+        action: "update",
+        taskId,
+      };
+      if (args.title !== undefined) body.title = String(args.title);
+      if (args.url !== undefined) body.url = args.url === null ? null : String(args.url);
+      if (args.keyword !== undefined) {
+        body.keyword = args.keyword === null ? null : String(args.keyword);
+      }
+      if (args.action !== undefined) {
+        body.actionText = args.action === null ? null : String(args.action);
+      }
+      if (args.status !== undefined) body.status = String(args.status);
+      if (args.priority !== undefined) {
+        body.priority = args.priority === null ? null : String(args.priority);
+      }
+      if (args.currentStatus !== undefined) {
+        body.currentStatus =
+          args.currentStatus === null ? null : String(args.currentStatus);
+      }
+      if (args.notes !== undefined) {
+        body.notes = args.notes === null ? null : String(args.notes);
+      }
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/task-tools`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body,
+      });
+      if (!r.ok || !r.data?.ok) return r.data?.message || "Task-Update fehlgeschlagen.";
+      return r.data.text || "Aufgabe aktualisiert.";
+    }
+    if (name === "delete_seo_task") {
+      const taskId = String(args.taskId || "").trim();
+      if (!taskId) return "Keine taskId angegeben.";
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/task-tools`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: { organisationId, action: "delete", taskId },
+      });
+      if (!r.ok || !r.data?.ok) return r.data?.message || "Task-Löschen fehlgeschlagen.";
+      return r.data.text || "Aufgabe gelöscht.";
+    }
+    if (name === "check_serp_snippet") {
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/serp-pixel`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: {
+          title: typeof args.title === "string" ? args.title : undefined,
+          description: typeof args.description === "string" ? args.description : undefined,
+        },
+      });
+      if (!r.ok || !r.data?.ok) return "SERP-Pixel-Check fehlgeschlagen.";
+      return r.data.text || "Keine Pixel-Ergebnisse.";
+    }
     return `Unbekanntes Werkzeug: ${name}`;
   } catch (err) {
     return `Fehler beim Abrufen: ${err?.message || "unbekannt"}`;
@@ -347,7 +505,7 @@ function addUsage(u) {
   totalOutputTokens += u.output_tokens || 0;
 }
 
-for (let round = 0; round < 4; round++) {
+for (let round = 0; round < 6; round++) {
   const callBody = {
     model: promptJson.model,
     max_tokens: maxTokens,

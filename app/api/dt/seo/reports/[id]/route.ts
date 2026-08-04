@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoReportAccess } from "@/lib/dt/seo/access";
+import { syncReportJobHealth } from "@/lib/dt/seo/sync-report-job-health";
 
 export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAuthUser();
@@ -24,6 +25,11 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
   if (!gate.ok) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }
+
+  await syncReportJobHealth({
+    organisationId: report.organisation_id,
+    reportId: id,
+  });
 
   const { data, error } = await auth.supabase
     .from("dt_seo_reports")

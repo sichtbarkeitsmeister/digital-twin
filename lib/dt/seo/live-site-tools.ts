@@ -6,10 +6,25 @@ import {
   fetchUrlsFromSitemap,
   normaliseUrl,
 } from "@/lib/dt/seo/crawl-sitemap";
+import {
+  evaluateCanonical,
+  formatIndexabilityAudit,
+  isNotableRedirect,
+  type DtIndexabilityAuditMeta,
+  type DtIndexabilityRow,
+} from "@/lib/dt/seo/indexability-audit";
 import { getDtSitePageContent } from "@/lib/dt/seo/search-site-pages";
+import { checkSafePublicUrl } from "@/lib/shared/safe-fetch-url";
 
 const INSPECT_TIMEOUT_MS = 15_000;
 const SITEMAP_PREVIEW_LIMIT = 80;
+
+/** Bulk audit runs inside a chat tool call, so it must stay well below route limits. */
+const AUDIT_URL_TIMEOUT_MS = 8_000;
+const AUDIT_TOTAL_BUDGET_MS = 20_000;
+const AUDIT_CONCURRENCY = 6;
+const AUDIT_DEFAULT_LIMIT = 15;
+const AUDIT_MAX_LIMIT = 30;
 
 export async function loadOrgSitemapDefaults(organisationId: string): Promise<{
   websiteUrl: string | null;
@@ -54,6 +69,9 @@ export async function readSitemapForTool(
       "(z. B. https://example.de/sitemap.xml) oder in den SEO-Einstellungen hinterlegen."
     );
   }
+
+  const safeSitemap = checkSafePublicUrl(sitemapUrl);
+  if (!safeSitemap.ok) return safeSitemap.reason;
 
   let urls: string[];
   try {
@@ -122,6 +140,31 @@ export async function readSitemapForTool(
   return lines.join("\n");
 }
 
+type HtmlSignals = {
+  title: string | null;
+  metaRobots: string | null;
+  canonical: string | null;
+};
+
+function parseHtmlSignals(html: string, contentType: string | null): HtmlSignals {
+  const ct = (contentType ?? "").toLowerCase();
+  if (!(ct.includes("html") || html.includes("<html") || html.includes("<title"))) {
+    return { title: "(kein HTML — z. B. XML/Text)", metaRobots: null, canonical: null };
+  }
+  const $ = cheerio.load(html);
+  return {
+    title: $("title").first().text().replace(/\s+/g, " ").trim() || null,
+    metaRobots:
+      $('meta[name="robots"]').attr("content")?.replace(/\s+/g, " ").trim() ||
+      $('meta[name="googlebot"]').attr("content")?.replace(/\s+/g, " ").trim() ||
+      null,
+    canonical:
+      $('link[rel="canonical"]').attr("href")?.trim() ||
+      $('meta[property="og:url"]').attr("content")?.trim() ||
+      null,
+  };
+}
+
 export type LiveUrlInspection = {
   requestedUrl: string;
   finalUrl: string;
@@ -145,17 +188,8 @@ export async function inspectWebsiteUrlForTool(
   urlInput: string,
 ): Promise<string> {
   const requestedUrl = urlInput.trim();
-  if (!requestedUrl) return "Keine URL angegeben.";
-
-  let parsed: URL;
-  try {
-    parsed = new URL(requestedUrl);
-  } catch {
-    return `Ungültige URL: ${requestedUrl}`;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return "Nur http/https-URLs sind erlaubt.";
-  }
+  const safe = checkSafePublicUrl(requestedUrl);
+  if (!safe.ok) return safe.reason;
 
   const crawled = await getDtSitePageContent(organisationId, requestedUrl);
 
@@ -189,21 +223,10 @@ export async function inspectWebsiteUrlForTool(
 
   const ct = (contentType ?? "").toLowerCase();
   if (res.ok && (ct.includes("html") || ct.includes("xml") || ct.includes("text/"))) {
-    const html = await res.text();
-    if (ct.includes("html") || html.includes("<html") || html.includes("<title")) {
-      const $ = cheerio.load(html);
-      title = $("title").first().text().replace(/\s+/g, " ").trim() || null;
-      metaRobots =
-        $('meta[name="robots"]').attr("content")?.replace(/\s+/g, " ").trim() ||
-        $('meta[name="googlebot"]').attr("content")?.replace(/\s+/g, " ").trim() ||
-        null;
-      canonical =
-        $('link[rel="canonical"]').attr("href")?.trim() ||
-        $('meta[property="og:url"]').attr("content")?.trim() ||
-        null;
-    } else {
-      title = "(kein HTML — z. B. XML/Text)";
-    }
+    const signals = parseHtmlSignals(await res.text(), contentType);
+    title = signals.title;
+    metaRobots = signals.metaRobots;
+    canonical = signals.canonical;
   }
 
   const robotsBlob = `${metaRobots ?? ""} ${xRobotsTag ?? ""}`.toLowerCase();
@@ -242,4 +265,195 @@ export async function inspectWebsiteUrlForTool(
     "",
     "Hinweis: Das ist ein Live-HTTP-Check unsererseits — kein Google-Indexierungsstatus. GSC-Coverage wird aktuell nicht synchronisiert.",
   ].join("\n");
+}
+
+async function checkUrlIndexability(
+  url: string,
+  crawledUrls: Set<string>,
+  timeoutMs: number,
+): Promise<DtIndexabilityRow> {
+  const base: DtIndexabilityRow = {
+    url,
+    status: null,
+    finalUrl: null,
+    noindex: false,
+    canonical: null,
+    canonicalPointsElsewhere: false,
+    redirected: false,
+    inCrawlIndex: crawledUrls.has(normaliseUrl(url) ?? url) || crawledUrls.has(url),
+    error: null,
+  };
+
+  const safe = checkSafePublicUrl(url);
+  if (!safe.ok) {
+    // Short phrase — the formatter wraps it in "nicht erreichbar (…)".
+    return {
+      ...base,
+      error: safe.reason.startsWith("Interne")
+        ? "interne/lokale Adresse"
+        : "ungültige URL",
+    };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const contentType = res.headers.get("content-type");
+    const xRobotsTag = res.headers.get("x-robots-tag");
+    const finalUrl = res.url || url;
+
+    let signals = { title: null as string | null, metaRobots: null as string | null, canonical: null as string | null };
+    const ct = (contentType ?? "").toLowerCase();
+    if (res.ok && (ct.includes("html") || ct.includes("text/"))) {
+      signals = parseHtmlSignals(await res.text(), contentType);
+    }
+
+    const robotsBlob = `${signals.metaRobots ?? ""} ${xRobotsTag ?? ""}`.toLowerCase();
+
+    return {
+      ...base,
+      status: res.status,
+      finalUrl,
+      noindex: /\bnoindex\b/.test(robotsBlob),
+      canonical: signals.canonical,
+      canonicalPointsElsewhere: evaluateCanonical(url, finalUrl, signals.canonical),
+      redirected: isNotableRedirect(url, finalUrl),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unbekannt";
+    return { ...base, error: message.includes("timeout") ? "Zeitüberschreitung" : message };
+  }
+}
+
+/**
+ * Checks many URLs at once for technical blockers (HTTP errors, noindex,
+ * foreign canonical, redirects) and compares them with the crawl index.
+ */
+export async function auditSiteIndexabilityForTool(
+  organisationId: string,
+  input: { sitemapUrl?: string | null; urls?: string[] | null; limit?: number | null },
+): Promise<string> {
+  // Start the clock here: resolving the sitemap is itself a network call and
+  // must count against the budget, otherwise a slow sitemap plus the checks
+  // together can exceed the route limit.
+  const deadline = Date.now() + AUDIT_TOTAL_BUDGET_MS;
+
+  const limit = Math.min(
+    Math.max(input.limit ?? AUDIT_DEFAULT_LIMIT, 1),
+    AUDIT_MAX_LIMIT,
+  );
+
+  let candidates: string[] = [];
+  let meta: Pick<DtIndexabilityAuditMeta, "source" | "sourceLabel"> = {
+    source: "explicit",
+    sourceLabel: "übergebene URLs",
+  };
+
+  const explicit = [...new Set((input.urls ?? []).map((u) => u.trim()).filter(Boolean))];
+  if (explicit.length > 0) {
+    candidates = explicit;
+  } else {
+    const defaults = await loadOrgSitemapDefaults(organisationId);
+    let sitemapUrl = input.sitemapUrl?.trim() || defaults.sitemapUrl?.trim() || "";
+    if (!sitemapUrl && defaults.websiteUrl) {
+      try {
+        sitemapUrl = `${new URL(defaults.websiteUrl).origin}/sitemap.xml`;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (sitemapUrl) {
+      try {
+        candidates = await fetchUrlsFromSitemap(sitemapUrl);
+        meta = { source: "sitemap", sourceLabel: `Sitemap ${sitemapUrl}` };
+      } catch {
+        candidates = [];
+      }
+    }
+
+    if (candidates.length === 0) {
+      const supabase = createServiceClient();
+      const { data } = await supabase
+        .from("dt_site_pages")
+        .select("url")
+        .eq("organisation_id", organisationId)
+        .eq("is_excluded", false)
+        .order("url", { ascending: true })
+        .limit(AUDIT_MAX_LIMIT);
+      candidates = (data ?? []).map((row) => row.url as string);
+      meta = { source: "crawl_index", sourceLabel: "Crawl-Index" };
+    }
+  }
+
+  if (candidates.length === 0) {
+    return formatIndexabilityAudit([], {
+      ...meta,
+      totalCandidates: 0,
+      checked: 0,
+      stoppedEarly: false,
+    });
+  }
+
+  const selected = candidates.slice(0, limit);
+
+  // Match both the raw and the normalised form: the crawl index may store a
+  // different variant of the same URL than the sitemap lists.
+  const lookupUrls = new Set<string>();
+  for (const url of selected) {
+    lookupUrls.add(url);
+    const normalised = normaliseUrl(url);
+    if (normalised) lookupUrls.add(normalised);
+  }
+
+  const supabase = createServiceClient();
+  const { data: crawled } = await supabase
+    .from("dt_site_pages")
+    .select("url")
+    .eq("organisation_id", organisationId)
+    .eq("is_excluded", false)
+    .in("url", [...lookupUrls]);
+
+  const crawledUrls = new Set<string>();
+  for (const row of crawled ?? []) {
+    const url = row.url as string;
+    crawledUrls.add(url);
+    const normalised = normaliseUrl(url);
+    if (normalised) crawledUrls.add(normalised);
+  }
+
+  const rows: DtIndexabilityRow[] = [];
+  let stoppedEarly = false;
+
+  for (let i = 0; i < selected.length; i += AUDIT_CONCURRENCY) {
+    // Cap each request by the time that is actually left, otherwise a slow
+    // batch can overrun the budget and take the whole chat route with it.
+    const remaining = deadline - Date.now();
+    if (remaining <= 1_000) {
+      stoppedEarly = true;
+      break;
+    }
+    const batch = selected.slice(i, i + AUDIT_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((url) =>
+        checkUrlIndexability(url, crawledUrls, Math.min(AUDIT_URL_TIMEOUT_MS, remaining)),
+      ),
+    );
+    rows.push(...results);
+  }
+
+  return formatIndexabilityAudit(rows, {
+    ...meta,
+    totalCandidates: candidates.length,
+    checked: rows.length,
+    stoppedEarly,
+  });
 }

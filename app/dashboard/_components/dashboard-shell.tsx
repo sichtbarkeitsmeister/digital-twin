@@ -14,6 +14,7 @@ export function DashboardShell({
   canManageIntegrations,
   canManageDtAgents,
   canViewDtUsage,
+  showLeads,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
 }: {
@@ -22,6 +23,7 @@ export function DashboardShell({
   canManageIntegrations: boolean;
   canManageDtAgents?: boolean;
   canViewDtUsage?: boolean;
+  showLeads?: boolean;
   pendingSurveyQuestionsCount?: number;
   pendingAgentEditRequestsCount?: number;
 }) {
@@ -39,6 +41,7 @@ export function DashboardShell({
                 canManageIntegrations={canManageIntegrations}
                 canManageDtAgents={canManageDtAgents ?? false}
                 canViewDtUsage={canViewDtUsage ?? false}
+                showLeads={showLeads ?? false}
                 pendingSurveyQuestionsCount={pendingSurveyQuestionsCount ?? 0}
                 pendingAgentEditRequestsCount={pendingAgentEditRequestsCount ?? 0}
               />

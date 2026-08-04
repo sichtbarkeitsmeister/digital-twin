@@ -102,6 +102,10 @@ export async function canManageOrganisation(
   return membership?.org_role === "owner" || membership?.org_role === "admin";
 }
 
+/**
+ * Webhook URLs, tokens and raw event payloads are setup plumbing we run for the
+ * customer, so the integrations area stays platform-admin only.
+ */
 export async function userCanManageAnyIntegrations(userId: string) {
   const supabase = await createClient();
 
@@ -111,15 +115,24 @@ export async function userCanManageAnyIntegrations(userId: string) {
     .eq("id", userId)
     .maybeSingle();
 
-  if (profile?.role === "admin") {
-    return true;
-  }
+  return profile?.role === "admin";
+}
+
+/** Hide the Leads nav entry while an organisation has no lead data at all. */
+export async function userHasAnyLeads(userId: string) {
+  const supabase = await createClient();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (profile?.role === "admin") return true;
 
   const { count } = await supabase
-    .from("organisation_members")
-    .select("organisation_id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .in("org_role", ["owner", "admin"]);
+    .from("companies")
+    .select("id", { count: "exact", head: true });
 
   return (count ?? 0) > 0;
 }

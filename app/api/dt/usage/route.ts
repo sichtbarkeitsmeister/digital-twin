@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: "Ungültige Organisation." }, { status: 400 });
   }
 
-  const gate = await canViewDtUsage(auth.supabase, auth.userId, parsed.data.org);
+  const gate = await canViewDtUsage(auth.supabase, auth.userId);
   if (!gate) {
     return NextResponse.json({ ok: false, message: "Keine Berechtigung." }, { status: 403 });
   }

@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { surveySchema } from "@/lib/surveys/schema";
+import {
+  surveyFieldSchema,
+  surveySchema,
+  surveyStepSchema,
+} from "@/lib/surveys/schema";
 
 const builderProposalSchema = z.object({
   kind: z.literal("edit_survey_definition"),
@@ -19,7 +23,8 @@ const patchOperationSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("add_field"),
     stepId: z.string().min(1),
-    field: z.unknown(),
+    // Must be a full field object — z.unknown() in Zod 4 accepts missing keys.
+    field: surveyFieldSchema,
     index: z.number().int().min(0).optional(),
   }),
   z.object({
@@ -39,7 +44,7 @@ const patchOperationSchema = z.discriminatedUnion("op", [
   }),
   z.object({
     op: z.literal("add_step"),
-    step: z.unknown(),
+    step: surveyStepSchema,
     index: z.number().int().min(0).optional(),
   }),
   z.object({
@@ -259,6 +264,162 @@ export type SurveyAiProposal = z.infer<typeof surveyAiProposalSchema>;
 export type SurveyAiBatchStep = z.infer<typeof surveyAiBatchStepSchema>;
 
 export type SurveyAiRouteResponse = z.infer<typeof surveyAiRouteResponseSchema>;
+
+const UPDATE_FIELD_LIFT_KEYS = [
+  "title",
+  "description",
+  "required",
+  "placeholder",
+  "type",
+  "options",
+  "scale",
+  "allowOtherOption",
+  "allowCustomEntries",
+  "allowExtraEntries",
+] as const;
+
+const UPDATE_STEP_LIFT_KEYS = ["title", "description"] as const;
+
+const UPDATE_SURVEY_ROOT_LIFT_KEYS = [
+  "title",
+  "description",
+  "infoText",
+  "infoTextEnabled",
+  "answerPlaceholder",
+] as const;
+
+function asPlainObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function mergeLiftedPatch(
+  existingPatch: unknown,
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const patch = asPlainObject(existingPatch) ? { ...asPlainObject(existingPatch)! } : {};
+  for (const key of keys) {
+    if (source[key] !== undefined && patch[key] === undefined) {
+      patch[key] = source[key];
+    }
+  }
+  return patch;
+}
+
+/**
+ * Models often emit flat patch ops like
+ * `{ op:"update_field", stepId, fieldId, required:true }`
+ * instead of `{ ..., patch:{ required:true } }`. Lift those keys so Zod accepts them.
+ */
+export function normalizeSurveyPatchOperation(raw: unknown): unknown {
+  const op = asPlainObject(raw);
+  if (!op || typeof op.op !== "string") return raw;
+
+  if (op.op === "update_field") {
+    const fieldId =
+      typeof op.fieldId === "string"
+        ? op.fieldId
+        : typeof op.field === "string"
+          ? op.field
+          : op.fieldId;
+    return {
+      op: "update_field",
+      stepId: op.stepId,
+      fieldId,
+      patch: mergeLiftedPatch(op.patch, op, UPDATE_FIELD_LIFT_KEYS),
+    };
+  }
+
+  if (op.op === "update_step") {
+    return {
+      op: "update_step",
+      stepId: op.stepId,
+      patch: mergeLiftedPatch(op.patch, op, UPDATE_STEP_LIFT_KEYS),
+    };
+  }
+
+  if (op.op === "update_survey_root") {
+    return {
+      op: "update_survey_root",
+      patch: mergeLiftedPatch(op.patch, op, UPDATE_SURVEY_ROOT_LIFT_KEYS),
+    };
+  }
+
+  return raw;
+}
+
+function normalizePatchOperationsArray(operations: unknown): unknown {
+  if (!Array.isArray(operations)) return operations;
+  return operations.map(normalizeSurveyPatchOperation);
+}
+
+/** Normalize common model mistakes before schema validation. */
+export function normalizeSurveyAiProposalInput(raw: unknown): unknown {
+  const proposal = asPlainObject(raw);
+  if (!proposal || typeof proposal.kind !== "string") return raw;
+
+  if (proposal.kind === "patch_survey_definition") {
+    return {
+      ...proposal,
+      operations: normalizePatchOperationsArray(proposal.operations),
+    };
+  }
+
+  if (proposal.kind === "batch" && Array.isArray(proposal.steps)) {
+    return {
+      ...proposal,
+      steps: proposal.steps.map((step) => {
+        const s = asPlainObject(step);
+        if (!s || s.kind !== "patch_survey_definition") return step;
+        return {
+          ...s,
+          operations: normalizePatchOperationsArray(s.operations),
+        };
+      }),
+    };
+  }
+
+  return raw;
+}
+
+/** Normalize then validate a survey AI proposal payload. */
+export function parseSurveyAiProposal(raw: unknown) {
+  return surveyAiProposalSchema.safeParse(normalizeSurveyAiProposalInput(raw));
+}
+
+/** Short German explanation for common invalid proposal shapes. */
+export function describeSurveyProposalValidationError(raw: unknown): string {
+  const normalized = normalizeSurveyAiProposalInput(raw);
+  const parsed = surveyAiProposalSchema.safeParse(normalized);
+  if (parsed.success) return "Ungültiger Proposal-Payload.";
+
+  const root = asPlainObject(normalized);
+  const operations = Array.isArray(root?.operations) ? root!.operations : null;
+  if (root?.kind === "patch_survey_definition" && operations) {
+    for (let i = 0; i < operations.length; i++) {
+      const op = asPlainObject(operations[i]);
+      if (!op || typeof op.op !== "string") continue;
+      if (op.op === "add_field" && (op.field === undefined || op.field === null)) {
+        return `Ungültiger Proposal-Payload: Operation ${i + 1} (add_field) enthält kein field-Objekt.`;
+      }
+      if (op.op === "add_step" && (op.step === undefined || op.step === null)) {
+        return `Ungültiger Proposal-Payload: Operation ${i + 1} (add_step) enthält kein step-Objekt.`;
+      }
+      if (op.op === "update_field" && (op.patch === undefined || op.patch === null) && op.required === undefined) {
+        return `Ungültiger Proposal-Payload: Operation ${i + 1} (update_field) enthält kein patch-Objekt.`;
+      }
+    }
+  }
+
+  const issue = parsed.error.issues[0];
+  if (!issue) return "Ungültiger Proposal-Payload.";
+  const path = issue.path.length > 0 ? ` (${issue.path.join(".")})` : "";
+  if (issue.message === "Invalid input" || issue.message.startsWith("Invalid input:")) {
+    return `Ungültiger Proposal-Payload${path}.`;
+  }
+  return `Ungültiger Proposal-Payload${path}: ${issue.message}`;
+}
 
 /** How many Umfragen are archived by delete_survey in this proposal (standalone or batch). */
 export function countSurveyDeletesInProposal(proposal: unknown): number {

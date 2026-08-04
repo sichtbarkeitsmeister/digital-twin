@@ -23,6 +23,8 @@ import {
 } from "@/app/dashboard/_components/organisations/org-overview-panel";
 import { TeamActions } from "@/app/dashboard/_components/organisations/team-actions";
 import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button";
+import { ResendInviteButton } from "@/app/dashboard/_components/resend-invite-button";
+import { RevokeInviteButton } from "@/app/dashboard/_components/revoke-invite-button";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 
 export function OrganisationDetailFallback() {
@@ -94,7 +96,7 @@ export async function OrganisationDetailView({
   const canManage =
     platformAdmin || myOrgRole === "owner" || myOrgRole === "admin";
   const canTransferOwnership = myOrgRole === "owner" || platformAdmin;
-  const canViewUsage = await canViewDtUsage(supabase, userId, organisationId);
+  const canViewUsage = await canViewDtUsage(supabase, userId);
   const canViewSeoReports =
     platformAdmin || (await isOrgOwner(supabase, userId, organisationId));
   const canManageSeo = platformAdmin;
@@ -127,12 +129,14 @@ export async function OrganisationDetailView({
         <div className={cn(orgDetailCardClass, "p-5")}>
           <h2 className="text-sm font-semibold tracking-tight text-primary">Fehler</h2>
           <p className="mt-1 text-sm text-secondary">
-            Organisationsdaten konnten nicht geladen werden.
+            Organisationsdaten konnten nicht geladen werden. Bitte lade die Seite neu.
           </p>
-          <div className="mt-3 grid gap-1 text-sm text-secondary">
-            {membersError ? <p>Mitglieder: {membersError.message}</p> : null}
-            {invitesError ? <p>Einladungen: {invitesError.message}</p> : null}
-          </div>
+          {platformAdmin ? (
+            <div className="mt-3 grid gap-1 text-sm text-secondary">
+              {membersError ? <p>Mitglieder: {membersError.message}</p> : null}
+              {invitesError ? <p>Einladungen: {invitesError.message}</p> : null}
+            </div>
+          ) : null}
         </div>
       </OrganisationPageShell>
     );
@@ -322,7 +326,15 @@ export async function OrganisationDetailView({
                     Ausstehende Einladungen
                   </p>
                   <ul className="divide-y divide-sbkm-navy/8 dark:divide-white/8">
-                    {invites.map((invite) => (
+                    {invites.map((invite) => {
+                      const canRevokeInvite = (() => {
+                        if (platformAdmin) return true;
+                        if (myOrgRole === "owner") return true;
+                        if (myOrgRole === "admin") return invite.org_role === "employee";
+                        return false;
+                      })();
+
+                      return (
                       <li
                         key={invite.id}
                         className="flex flex-wrap items-center justify-between gap-2 px-2 py-2.5"
@@ -339,9 +351,24 @@ export async function OrganisationDetailView({
                             </p>
                           </div>
                         </div>
-                        <Badge variant="secondary">Ausstehend</Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary">Ausstehend</Badge>
+                          {canRevokeInvite ? (
+                            <>
+                              <ResendInviteButton
+                                organisationId={organisationId}
+                                email={invite.email}
+                              />
+                              <RevokeInviteButton
+                                inviteId={invite.id}
+                                organisationId={organisationId}
+                              />
+                            </>
+                          ) : null}
+                        </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </div>
               ) : null}

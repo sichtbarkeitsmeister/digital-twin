@@ -7,6 +7,7 @@ import {
   searchDtSitePages,
 } from "@/lib/dt/seo/search-site-pages";
 import {
+  auditSiteIndexabilityForTool,
   inspectWebsiteUrlForTool,
   readSitemapForTool,
 } from "@/lib/dt/seo/live-site-tools";
@@ -14,11 +15,16 @@ import {
   formatSeoReportRawForTool,
   loadLatestDtSeoReportRawForOrg,
 } from "@/lib/dt/seo/report-detail-tool";
+import { formatSerpSnippetCheckForTool } from "@/lib/dt/seo/serp-pixel";
+import {
+  deleteSeoTaskForTool,
+  updateSeoTaskForTool,
+} from "@/lib/dt/seo/task-tools";
 import { mergeUsage, sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { sanitizeForLlmText } from "@/lib/shared/sanitize-llm-text";
 import type { DtChatMode } from "@/lib/dt/types";
 
-const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_ROUNDS = 6;
 
 export type DtAnthropicUsage = {
   inputTokens: number;
@@ -96,6 +102,87 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
       required: ["url"],
     },
   },
+  {
+    name: "audit_site_indexability",
+    description:
+      "Prüft mehrere URLs auf einmal auf technische Blocker: HTTP-Fehler, noindex, fremdes Canonical, Weiterleitungen — plus Abgleich mit dem Crawl-Index. Nutze dies bei Fragen wie „warum ist Seite X nicht bei Google“ oder für einen Indexierbarkeits-Überblick. Ohne Argumente: URLs aus Sitemap bzw. Crawl-Index. Achtung: kein Google-Indexierungsstatus.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sitemapUrl: {
+          type: "string",
+          description: "Optionale Sitemap-URL als Quelle der zu prüfenden URLs.",
+        },
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optionale konkrete URL-Liste (hat Vorrang vor der Sitemap).",
+        },
+        limit: {
+          type: "number",
+          description: "Wie viele URLs geprüft werden (Standard 15, max. 30).",
+        },
+      },
+    },
+  },
+  {
+    name: "update_seo_task",
+    description:
+      "Bearbeitet eine bestehende SEO-Aufgabe im Board (Titel, Status, Keyword, URL, Maßnahme, Priorität, …). Nutze die taskId aus „Bestehende SEO-Aufgaben“. Das Board erlaubt Edit — nicht nur Hinzufügen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "UUID der bestehenden Aufgabe." },
+        title: { type: "string", description: "Neuer Titel." },
+        url: { type: "string", description: "Ziel-URL (leer = entfernen)." },
+        keyword: { type: "string", description: "Keyword (leer = entfernen)." },
+        action: { type: "string", description: "Maßnahme / nächste Schritte." },
+        status: {
+          type: "string",
+          enum: ["open", "in_progress", "done", "wont_fix"],
+          description: "Neuer Status.",
+        },
+        priority: {
+          type: "string",
+          enum: ["low", "medium", "high", "urgent"],
+          description: "Priorität.",
+        },
+        currentStatus: {
+          type: "string",
+          description: "Ist-Status (Ranking, Impressionen, …).",
+        },
+        notes: { type: "string", description: "Interne Notizen." },
+      },
+      required: ["taskId"],
+    },
+  },
+  {
+    name: "delete_seo_task",
+    description:
+      "Löscht eine bestehende SEO-Aufgabe aus dem Board. Nutze die taskId aus „Bestehende SEO-Aufgaben“. Bei uneindeutiger Nutzeranfrage vorher nachfragen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "UUID der zu löschenden Aufgabe." },
+      },
+      required: ["taskId"],
+    },
+  },
+  {
+    name: "check_serp_snippet",
+    description:
+      "Misst Title und/oder Meta-Description in Pixeln (Google-SERP-Schätzung mit Arial). Limits: Title Desktop ~600px, Mobile ~440px, Description ~920px. Zeichenzahl nur Zusatz. Nutze dies bei Title-/Meta-Vorschlägen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Vorgeschlagener Title-Tag." },
+        description: {
+          type: "string",
+          description: "Vorgeschlagene Meta-Description.",
+        },
+      },
+    },
+  },
 ];
 
 async function runDtRetrievalTool(
@@ -136,6 +223,46 @@ async function runDtRetrievalTool(
       const url = String(args.url ?? "").trim();
       if (!url) return "Keine URL angegeben.";
       return inspectWebsiteUrlForTool(organisationId, url);
+    }
+    if (name === "audit_site_indexability") {
+      return auditSiteIndexabilityForTool(organisationId, {
+        sitemapUrl: typeof args.sitemapUrl === "string" ? args.sitemapUrl : null,
+        urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : null,
+        limit: typeof args.limit === "number" ? args.limit : null,
+      });
+    }
+    if (name === "update_seo_task") {
+      const taskId = String(args.taskId ?? "").trim();
+      const nullable = (v: unknown) =>
+        v === undefined ? undefined : v === null ? null : String(v);
+      return updateSeoTaskForTool(organisationId, taskId, {
+        title: args.title !== undefined ? String(args.title) : undefined,
+        url: nullable(args.url),
+        keyword: nullable(args.keyword),
+        action: nullable(args.action),
+        status:
+          args.status !== undefined
+            ? (String(args.status) as "open" | "in_progress" | "done" | "wont_fix")
+            : undefined,
+        priority:
+          args.priority === undefined
+            ? undefined
+            : args.priority === null
+              ? null
+              : String(args.priority),
+        currentStatus: nullable(args.currentStatus),
+        notes: nullable(args.notes),
+      });
+    }
+    if (name === "delete_seo_task") {
+      const taskId = String(args.taskId ?? "").trim();
+      return deleteSeoTaskForTool(organisationId, taskId);
+    }
+    if (name === "check_serp_snippet") {
+      return formatSerpSnippetCheckForTool({
+        title: typeof args.title === "string" ? args.title : null,
+        description: typeof args.description === "string" ? args.description : null,
+      });
     }
     return `Unbekanntes Werkzeug: ${name}`;
   } catch (err) {

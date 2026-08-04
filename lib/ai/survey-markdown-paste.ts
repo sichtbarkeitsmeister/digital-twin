@@ -37,6 +37,14 @@ function detectFieldType(
   if (options.length >= 2 && /\branking\b|\bnummerieren\b|\bpriorit[aä]t\b/.test(t)) {
     return "ranking";
   }
+  // Prompted blanks / phrase stems (often end with …) should be editable text slots.
+  if (
+    options.length >= 2 &&
+    (/\bformulierungen?\b|\bausfüllen\b|\bergänzen\b|\beintragen\b|\btextliste\b/.test(t) ||
+      options.filter((o) => /(?:\.\.\.|…)\s*$/.test(o.trim())).length >= 2)
+  ) {
+    return "text_list";
+  }
   if (options.length >= 1 && /\bmehrfachauswahl\b|\bmehrere\b/.test(t)) {
     return "checkbox";
   }
@@ -70,6 +78,17 @@ function buildField(input: {
         label,
       })),
       allowCustomEntries: false,
+    };
+  }
+  if (type === "text_list") {
+    return {
+      ...base,
+      type: "text_list",
+      options: input.options.map((label, i) => ({
+        id: slugId("opt", i + 1),
+        label,
+      })),
+      allowExtraEntries: true,
     };
   }
   if (type === "checkbox") {

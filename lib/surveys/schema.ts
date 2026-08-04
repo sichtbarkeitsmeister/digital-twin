@@ -27,6 +27,12 @@ export const surveyTextFieldSchema = fieldBaseSchema.extend({
   placeholder: z.string().optional().default(""),
 });
 
+export const surveyTextListFieldSchema = fieldBaseSchema.extend({
+  type: z.literal("text_list"),
+  options: z.array(surveyOptionSchema).min(1),
+  allowExtraEntries: z.boolean().optional().default(true),
+});
+
 export const surveyRadioFieldSchema = fieldBaseSchema.extend({
   type: z.literal("radio"),
   options: z.array(surveyOptionSchema).min(1),
@@ -52,6 +58,7 @@ export const surveyRankingFieldSchema = fieldBaseSchema.extend({
 
 export const surveyFieldSchema = z.discriminatedUnion("type", [
   surveyTextFieldSchema,
+  surveyTextListFieldSchema,
   surveyRadioFieldSchema,
   surveyCheckboxFieldSchema,
   surveyRatingFieldSchema,

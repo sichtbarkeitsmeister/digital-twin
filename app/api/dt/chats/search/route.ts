@@ -72,7 +72,7 @@ export async function GET(req: Request) {
 
   const chatMode = parsed.data.mode ?? "default";
 
-  if (chatMode === "seo" && auth.userId && !adminOversight) {
+  if (chatMode === "seo" && auth.userId) {
     const gate = await requireDtSeoAccess(auth.supabase, auth.userId, parsed.data.org);
     if (!gate.ok) {
       return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
@@ -89,12 +89,15 @@ export async function GET(req: Request) {
     .order("updated_at", { ascending: false })
     .limit(15);
 
-  if (adminOversight && listScope === "org") {
+  if (chatMode === "seo") {
+    chatsQuery = chatsQuery.eq("mode", "seo");
+    if (adminOversight && listScope === "org" && parsed.data.owner) {
+      chatsQuery = chatsQuery.eq("owner_user_id", parsed.data.owner);
+    }
+  } else if (adminOversight && listScope === "org") {
     if (parsed.data.owner) {
       chatsQuery = chatsQuery.eq("owner_user_id", parsed.data.owner);
     }
-  } else if (chatMode === "seo") {
-    chatsQuery = chatsQuery.eq("mode", "seo");
   } else if (listScope === "mine") {
     chatsQuery = chatsQuery
       .eq("mode", "default")
@@ -122,12 +125,15 @@ export async function GET(req: Request) {
     .order("created_at", { ascending: false })
     .limit(30);
 
-  if (adminOversight && listScope === "org") {
+  if (chatMode === "seo") {
+    msgQuery = msgQuery.eq("dt_chats.mode", "seo");
+    if (adminOversight && listScope === "org" && parsed.data.owner) {
+      msgQuery = msgQuery.eq("dt_chats.owner_user_id", parsed.data.owner);
+    }
+  } else if (adminOversight && listScope === "org") {
     if (parsed.data.owner) {
       msgQuery = msgQuery.eq("dt_chats.owner_user_id", parsed.data.owner);
     }
-  } else if (chatMode === "seo") {
-    msgQuery = msgQuery.eq("dt_chats.mode", "seo");
   } else if (listScope === "mine") {
     msgQuery = msgQuery
       .eq("dt_chats.mode", "default")

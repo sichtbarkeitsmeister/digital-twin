@@ -7,10 +7,18 @@ import { Loader2, MessageSquare, Trash2, X, FileText } from "lucide-react";
 
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
+import { DtSeoSerpPixelMeter } from "@/components/dt/seo/dt-seo-serp-pixel-meter";
 import { DtSeoTaskTimePanel } from "@/components/dt/seo/dt-seo-task-time-panel";
 import { cn } from "@/components/dt/cn";
 import type { DtSeoTaskAssignee } from "@/lib/dt/seo/task-assignees";
 import type { DtSeoTaskRow } from "@/lib/dt/types";
+
+function extractSerpDescription(action: string): string | null {
+  const match = action.match(
+    /(?:meta[- ]?description|description)\s*[:=]\s*[„"']?([^\n"']{20,})/i,
+  );
+  return match?.[1]?.trim() || null;
+}
 
 const inputClass =
   "h-10 w-full rounded-dt border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.04)] outline-none transition duration-150 placeholder:text-sbkm-ink-500 focus-visible:border-sbkm-mint/40 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 disabled:opacity-50 dark:border-white/15 dark:bg-white/10 dark:text-white dark:placeholder:text-white/40 dark:focus-visible:border-sbkm-mint/35";
@@ -266,6 +274,14 @@ export function DtSeoTaskDetailDrawer(props: {
                     placeholder="Was muss gemacht werden?"
                   />
                 </label>
+
+                {form.title.trim().length >= 12 || extractSerpDescription(form.action) ? (
+                  <DtSeoSerpPixelMeter
+                    title={form.title.trim().length >= 12 ? form.title : null}
+                    description={extractSerpDescription(form.action)}
+                    compact
+                  />
+                ) : null}
 
                 <div className="grid gap-5 sm:grid-cols-2">
                   <label className="grid gap-2">

@@ -3,16 +3,30 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
+  ensureMemberInviteLoginLink,
+  formatMemberInviteEmailStatus,
+  memberInviteEmailSucceeded,
+  sendOrgMemberInviteEmail,
+  sendSupabaseAuthInviteEmail,
+} from "@/lib/email/member-invite";
+import {
   ensureOwnerLoginLink,
   formatOwnerWelcomeEmailStatus,
   sendOrgOwnerWelcomeEmail,
 } from "@/lib/email/owner-welcome";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export type ActionState = {
   ok: boolean;
   message: string;
+  /** Set by member invite: true only when SMTP mail was actually sent. */
+  emailSent?: boolean;
+  /** Magic/invite link — shown when mail fails or for self-serve copy. */
+  inviteLink?: string | null;
+  /** True when the invited email is the current user and membership was added. */
+  selfJoined?: boolean;
 };
 
 const checkboxOnSchema = z.preprocess(
@@ -106,6 +120,18 @@ const inviteSchema = z.object({
   role: z.enum(["admin", "employee"]),
 });
 
+function isDuplicateInviteError(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  const code = error.code ?? "";
+  return (
+    code === "23505" ||
+    msg.includes("duplicate") ||
+    msg.includes("unique") ||
+    msg.includes("organisation_invites_pending_unique")
+  );
+}
+
 export async function inviteToOrganisationAction(
   _prev: ActionState,
   formData: FormData,
@@ -117,22 +143,169 @@ export async function inviteToOrganisationAction(
   });
 
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe",
+    };
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("invite_to_organisation", {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const invitedEmail = parsed.data.invited_email;
+  const selfInvite =
+    Boolean(user?.email) && user!.email!.trim().toLowerCase() === invitedEmail;
+
+  const { data: inviteIdRaw, error } = await supabase.rpc("invite_to_organisation", {
     org_id: parsed.data.organisation_id,
-    invited_email: parsed.data.invited_email,
+    invited_email: invitedEmail,
     role: parsed.data.role,
   });
 
-  if (error) {
-    return { ok: false, message: "Could not invite user." };
+  const resent = isDuplicateInviteError(error);
+  if (error && !resent) {
+    console.warn("[invite] invite_to_organisation failed:", error.message);
+    return {
+      ok: false,
+      message:
+        error.message === "forbidden"
+          ? "Du darfst für diese Organisation niemanden einladen."
+          : "Einladung konnte nicht erstellt werden. Bitte später erneut versuchen.",
+    };
   }
 
+  let inviteId =
+    typeof inviteIdRaw === "string" && inviteIdRaw.trim() ? inviteIdRaw.trim() : null;
+
+  if (!inviteId) {
+    const { data: pending } = await supabase
+      .from("organisation_invites")
+      .select("id")
+      .eq("organisation_id", parsed.data.organisation_id)
+      .eq("email", invitedEmail)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    inviteId = pending?.id ?? null;
+  }
+
+  // Self-invite: accept immediately — no email needed to join as yourself.
+  if (selfInvite) {
+    if (!inviteId) {
+      return {
+        ok: false,
+        message:
+          "Selbst-Einladung: Einladungs-ID fehlt. Bitte offene Einladung löschen und erneut versuchen.",
+      };
+    }
+    const { error: acceptError } = await supabase.rpc("accept_organisation_invite", {
+      invite_id: inviteId,
+    });
+    revalidatePath("/dashboard/organisations");
+    revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+    revalidatePath("/dashboard/inbox");
+    if (acceptError) {
+      console.warn("[invite] self-accept failed:", acceptError.message);
+      return {
+        ok: false,
+        message:
+          "Einladung erstellt, konnte aber nicht automatisch angenommen werden. " +
+          "Bitte im Posteingang manuell annehmen.",
+      };
+    }
+    return {
+      ok: true,
+      emailSent: false,
+      selfJoined: true,
+      message:
+        "Du hast dich selbst eingeladen — Mitgliedschaft ist aktiv. Keine E-Mail nötig.",
+    };
+  }
+
+  const { data: org } = await supabase
+    .from("organisations")
+    .select("name")
+    .eq("id", parsed.data.organisation_id)
+    .maybeSingle();
+  const organisationName = org?.name?.trim() || "euer DigitalTwin";
+
+  const login = await ensureMemberInviteLoginLink(invitedEmail);
+  const emailResult = login.ok
+    ? await sendOrgMemberInviteEmail({
+        email: invitedEmail,
+        organisationName,
+        organisationId: parsed.data.organisation_id,
+        role: parsed.data.role,
+        link: login.link,
+        isNewAccount: login.isNewAccount,
+        triggeredByUserId: user?.id ?? null,
+      })
+    : null;
+
   revalidatePath("/dashboard/organisations");
-  return { ok: true, message: "Invite sent." };
+  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/inbox");
+  revalidatePath("/dashboard/admin/mails");
+
+  const platformAdmin = user ? await isPlatformAdmin(supabase, user.id) : false;
+  const mailStatus = formatMemberInviteEmailStatus(
+    emailResult,
+    login.ok ? null : login.reason,
+    platformAdmin,
+  );
+  const prefix = resent ? "Offene Einladung erneut versendet. " : "";
+  const brandedSent = memberInviteEmailSucceeded(emailResult);
+  const inviteLink = login.ok ? login.link : null;
+
+  if (brandedSent) {
+    return {
+      ok: true,
+      emailSent: true,
+      inviteLink,
+      message: `${prefix}${mailStatus}`,
+    };
+  }
+
+  // Own SMTP refused the branded mail — let Supabase's mailer deliver a plain
+  // login link so the invitee is not blocked by our relay.
+  const fallback = await sendSupabaseAuthInviteEmail({
+    email: invitedEmail,
+    organisationId: parsed.data.organisation_id,
+    organisationName,
+    role: parsed.data.role,
+    isNewAccount: login.ok ? login.isNewAccount : true,
+    triggeredByUserId: user?.id ?? null,
+  });
+
+  revalidatePath("/dashboard/admin/mails");
+
+  if (fallback.ok) {
+    return {
+      ok: true,
+      emailSent: true,
+      inviteLink,
+      message: platformAdmin
+        ? `${prefix}${mailStatus} Ersatzweise wurde ein Anmeldelink über Supabase ` +
+          `an ${invitedEmail} gesendet (Absender: noreply@mail.app.supabase.io).`
+        : `${prefix}Einladung an ${invitedEmail} gesendet. ` +
+          "Die E-Mail kann im Spam-Ordner landen.",
+    };
+  }
+
+  // Invite row is saved even when mail fails — keep modal open with copyable link.
+  return {
+    ok: false,
+    emailSent: false,
+    inviteLink,
+    message: platformAdmin
+      ? `${prefix}${mailStatus} Auch der Ersatzversand schlug fehl ` +
+        `(${fallback.reason}). Du kannst den Anmeldelink unten kopieren.`
+      : `${prefix}${mailStatus} Du kannst den Anmeldelink unten kopieren und ` +
+        "direkt weitergeben.",
+  };
 }
 
 const kickSchema = z.object({
@@ -150,7 +323,7 @@ export async function kickFromOrganisationAction(
   });
 
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
   }
 
   const supabase = await createClient();
@@ -160,11 +333,118 @@ export async function kickFromOrganisationAction(
   });
 
   if (error) {
-    return { ok: false, message: "Could not remove member." };
+    return { ok: false, message: "Mitglied konnte nicht entfernt werden." };
   }
 
   revalidatePath("/dashboard/organisations");
-  return { ok: true, message: "Member removed." };
+  return { ok: true, message: "Mitglied entfernt." };
+}
+
+const revokeInviteSchema = z.object({
+  invite_id: z.string().uuid(),
+  organisation_id: z.string().uuid(),
+});
+
+export async function revokeOrganisationInviteAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = revokeInviteSchema.safeParse({
+    invite_id: formData.get("invite_id"),
+    organisation_id: formData.get("organisation_id"),
+  });
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, message: "Nicht angemeldet." };
+  }
+
+  const { data: invite, error: inviteLoadError } = await supabase
+    .from("organisation_invites")
+    .select("id, organisation_id, org_role, status")
+    .eq("id", parsed.data.invite_id)
+    .maybeSingle();
+
+  if (inviteLoadError || !invite) {
+    return { ok: false, message: "Einladung nicht gefunden." };
+  }
+  if (invite.organisation_id !== parsed.data.organisation_id) {
+    return { ok: false, message: "Einladung gehört nicht zu dieser Organisation." };
+  }
+  if (invite.status !== "pending") {
+    return { ok: false, message: "Einladung ist nicht mehr offen." };
+  }
+
+  const platformAdmin = await isPlatformAdmin(supabase, user.id);
+  const { data: roleData } = await supabase.rpc("my_org_role", {
+    org_id: invite.organisation_id,
+  });
+  const myRole = typeof roleData === "string" ? roleData : null;
+  const allowed =
+    platformAdmin ||
+    myRole === "owner" ||
+    (myRole === "admin" && invite.org_role === "employee");
+  if (!allowed) {
+    return { ok: false, message: "Keine Berechtigung zum Löschen dieser Einladung." };
+  }
+
+  // Preferred path: DB RPC (migration 20260731_revoke_organisation_invite.sql).
+  const { error: rpcError } = await supabase.rpc("revoke_organisation_invite", {
+    invite_id: parsed.data.invite_id,
+  });
+
+  if (rpcError) {
+    // Fallback if migration is not applied yet on Supabase (common cause of delete failures).
+    console.warn("[revoke invite] RPC failed, service-role fallback:", rpcError.message);
+    try {
+      const service = createServiceClient();
+      const { data: updated, error: updateError } = await service
+        .from("organisation_invites")
+        .update({
+          status: "revoked",
+          revoked_at: new Date().toISOString(),
+        })
+        .eq("id", parsed.data.invite_id)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
+
+      if (updateError || !updated) {
+        console.warn(
+          "[revoke invite] service-role fallback failed:",
+          updateError?.message ?? "no row updated",
+        );
+        return {
+          ok: false,
+          message: "Einladung konnte nicht gelöscht werden. Bitte später erneut versuchen.",
+        };
+      }
+    } catch (err) {
+      console.warn(
+        "[revoke invite] service-role fallback threw:",
+        err instanceof Error ? err.message : rpcError.message,
+      );
+      return {
+        ok: false,
+        message: "Einladung konnte nicht gelöscht werden. Bitte später erneut versuchen.",
+      };
+    }
+  }
+
+  revalidatePath("/dashboard/organisations");
+  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/inbox");
+  return { ok: true, message: "Einladung gelöscht. Du kannst die Person erneut einladen." };
 }
 
 const transferSchema = z.object({
