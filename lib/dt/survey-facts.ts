@@ -215,6 +215,107 @@ function normalizeForCoverage(text: string): string {
     .trim();
 }
 
+/** Cross-ref placeholders are resolved via Freigabe — not expected verbatim in the persona. */
+function isCrossRefPlaceholderValue(value: string): boolean {
+  const v = value.replace(/\s+/g, " ").trim();
+  if (v.length < 8) return false;
+  return (
+    /siehe\s+(den\s+)?(arbeitgeber|arbeitnehmer|anbieter|anderen?\s+fragebogen)/i.test(v) ||
+    /ist\s+die\s+gleiche\s+wie\s+beim?\s+arbeitgeber/i.test(v) ||
+    /gleiche?\s+\w*\s*wie\s+(beim?|der|die|dem)\s+arbeitgeber/i.test(v) ||
+    /bitte\s+.*(übernehmen|übernahme)/i.test(v) ||
+    /arbeitgeber[\s-]*(fragebogen|umfrage)/i.test(v)
+  );
+}
+
+const COVERAGE_STOPWORDS = new Set(
+  [
+    "aber",
+    "auch",
+    "beim",
+    "dann",
+    "dass",
+    "dein",
+    "deine",
+    "dem",
+    "den",
+    "der",
+    "des",
+    "die",
+    "diese",
+    "dieser",
+    "dieses",
+    "doch",
+    "durch",
+    "eine",
+    "einem",
+    "einen",
+    "einer",
+    "eines",
+    "etwa",
+    "etwas",
+    "fuer",
+    "ganz",
+    "gibt",
+    "haben",
+    "hast",
+    "hier",
+    "immer",
+    "kann",
+    "keine",
+    "kein",
+    "mehr",
+    "mein",
+    "meine",
+    "mich",
+    "mir",
+    "mit",
+    "nach",
+    "nicht",
+    "noch",
+    "oder",
+    "ohne",
+    "schon",
+    "sehr",
+    "sein",
+    "seine",
+    "sich",
+    "sie",
+    "sind",
+    "soll",
+    "sonst",
+    "ueber",
+    "und",
+    "uns",
+    "unter",
+    "vom",
+    "von",
+    "vor",
+    "was",
+    "wenn",
+    "wer",
+    "wie",
+    "wird",
+    "wo",
+    "wollen",
+    "wurde",
+    "werden",
+    "zwischen",
+  ].map((w) => normalizeForCoverage(w)),
+);
+
+function coverageTokens(normalizedNeedle: string): string[] {
+  return normalizedNeedle
+    .split(" ")
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 5)
+    .filter((t) => !COVERAGE_STOPWORDS.has(t));
+}
+
+function distinctiveCoverageTokens(normalizedNeedle: string): string[] {
+  return coverageTokens(normalizedNeedle).filter((t) => t.length >= 6);
+}
+
 function coverageNeedles(fact: SurveyFact): string[] {
   const value = fact.value.replace(/\s+/g, " ").trim();
   const needles: string[] = [];
@@ -223,10 +324,21 @@ function coverageNeedles(fact: SurveyFact): string[] {
     needles.push(value);
   }
 
+  // Leading distinctive span (paraphrases often keep the opening specifics)
+  if (value.length >= 48) {
+    needles.push(value.slice(0, 48).trim());
+  }
+
   // Distinctive chunks (rank lines, short phrases)
   for (const part of value.split(/[\n;,|/]+/)) {
     const p = part.replace(/^\d+\.\s*/, "").trim();
     if (p.length >= 6) needles.push(p);
+  }
+
+  // Quoted phrases from the answer
+  for (const m of value.matchAll(/[„""]([^„""]{6,80})["""]/g)) {
+    const q = m[1]?.trim();
+    if (q) needles.push(q);
   }
 
   // Short answers: pair with field title words
@@ -266,6 +378,16 @@ export function checkSurveyFactsCoverage(input: {
   const missing: SurveyFactCoverageHit[] = [];
 
   for (const fact of input.facts) {
+    // Cross-refs are imported via Freigabe — skip noisy false missing/weak.
+    if (isCrossRefPlaceholderValue(fact.value)) {
+      covered.push({
+        factId: fact.id,
+        status: "covered",
+        matchedBy: "cross_ref_placeholder",
+      });
+      continue;
+    }
+
     const idNorm = normalizeForCoverage(fact.id);
     if (idNorm && haystack.includes(idNorm)) {
       covered.push({ factId: fact.id, status: "covered", matchedBy: fact.id });
@@ -282,15 +404,38 @@ export function checkSurveyFactsCoverage(input: {
         best = { factId: fact.id, status: "covered", matchedBy: needle };
         break;
       }
-      // Weak: longest token ≥5 chars present
-      const tokens = n.split(" ").filter((t) => t.length >= 5);
+
+      const tokens = coverageTokens(n);
+      if (tokens.length === 0) continue;
+
       const hitTokens = tokens.filter((t) => haystack.includes(t));
-      if (tokens.length > 0 && hitTokens.length / tokens.length >= 0.6) {
+      const ratio = hitTokens.length / tokens.length;
+      const distinctive = distinctiveCoverageTokens(n);
+      const hitDistinctive = distinctive.filter((t) => haystack.includes(t));
+
+      // Strong paraphrase: most distinctive tokens present → treat as covered
+      // (reduces false „unsicher“ when the persona rephrases but keeps key terms).
+      if (
+        distinctive.length >= 2 &&
+        hitDistinctive.length / distinctive.length >= 0.7 &&
+        hitDistinctive.length >= 2
+      ) {
         best = {
+          factId: fact.id,
+          status: "covered",
+          matchedBy: hitDistinctive.join(" "),
+        };
+        break;
+      }
+
+      // Weak only when enough content tokens hit — not on stopword noise alone.
+      if (ratio >= 0.7 && hitTokens.length >= 2) {
+        const candidate: SurveyFactCoverageHit = {
           factId: fact.id,
           status: "weak",
           matchedBy: hitTokens.join(" "),
         };
+        if (!best || best.status !== "covered") best = candidate;
       }
     }
 
