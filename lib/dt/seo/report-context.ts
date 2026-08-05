@@ -1,3 +1,4 @@
+import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 import { buildLegacySeoClientConfig } from "@/lib/dt/seo/legacy-seo-config";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -25,11 +26,11 @@ export async function loadSeoReportContext(reportId: string): Promise<SeoReportC
 
   const { data: org } = await supabase
     .from("organisations")
-    .select("slug")
+    .select("name,slug")
     .eq("id", report.organisation_id)
     .maybeSingle();
 
-  const slug = String(org?.slug ?? "").trim();
+  const slug = resolveOrganisationSlug({ slug: org?.slug, name: org?.name });
   if (!slug) return null;
 
   const { data: orgCfg } = await supabase

@@ -33,11 +33,13 @@ export function AdminCreateOrgForm() {
         <Input
           id="org_slug"
           name="org_slug"
-          placeholder="acme-gmbh"
+          placeholder="wird aus dem Namen erzeugt"
           autoComplete="off"
         />
         <p className="text-xs text-secondary">
-          Nur Kleinbuchstaben, Zahlen und Bindestriche. Wird in URLs verwendet.
+          Leer lassen = automatisch aus dem Organisationsnamen (z.&nbsp;B. „MSH
+          Rechtsanwälte“ → <code className="text-xs">msh-rechtsanwaelte</code>).
+          Nur a-z, 0-9 und Bindestriche. Wird für SEO/n8n als Client-Key genutzt.
         </p>
       </div>
 
