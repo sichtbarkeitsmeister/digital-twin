@@ -3,6 +3,11 @@ import { z } from "zod";
 
 import { loadOrgConfig, requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { normalizeGoogleAccount } from "@/lib/dt/seo/google-accounts";
+import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
+
+const ORG_CONFIG_SELECT =
+  "organisation_id,display_name,twin_provisioned,seo_enabled,disabled,website_url,footer_url,ga4_property_id,ga4_account,gsc_site_url,gsc_account,sistrix_domain,sitemap_url,focus_keyword,report_recipient_email,report_timeframe,seo_checklist,seo_checklist_personalized,videos";
 
 const patchSchema = z.object({
   displayName: z.string().trim().min(1).max(200).optional(),
@@ -10,7 +15,9 @@ const patchSchema = z.object({
   footerUrl: z.string().url().nullable().optional(),
   seoEnabled: z.boolean().optional(),
   ga4PropertyId: z.string().max(120).nullable().optional(),
+  ga4Account: z.string().max(200).nullable().optional(),
   gscSiteUrl: z.string().max(500).nullable().optional(),
+  gscAccount: z.string().max(200).nullable().optional(),
   sistrixDomain: z.string().max(200).nullable().optional(),
   sitemapUrl: z.string().url().nullable().optional(),
   focusKeyword: z.string().max(200).nullable().optional(),
@@ -18,9 +25,30 @@ const patchSchema = z.object({
   reportTimeframe: z
     .enum(["last_7_days", "last_30_days", "last_90_days"])
     .optional(),
+  organisationSlug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9-]+$/, "Slug: nur a-z, 0-9 und Bindestriche")
+    .min(2)
+    .max(64)
+    .nullable()
+    .optional(),
   seoChecklist: z.array(z.union([z.string(), z.object({ label: z.string() })])).optional(),
   seoChecklistPersonalized: z.boolean().optional(),
 });
+
+async function loadOrganisationSlug(
+  supabase: Awaited<ReturnType<typeof requireAuthUser>>["supabase"],
+  orgId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("organisations")
+    .select("name,slug")
+    .eq("id", orgId)
+    .maybeSingle();
+  return resolveOrganisationSlug({ slug: data?.slug, name: data?.name });
+}
 
 export async function GET(
   _: Request,
@@ -42,7 +70,11 @@ export async function GET(
     return NextResponse.json({ ok: false, message: "Konfiguration nicht gefunden." }, { status: 404 });
   }
 
-  return NextResponse.json({ ok: true, config });
+  const organisationSlug = await loadOrganisationSlug(auth.supabase, orgId);
+  return NextResponse.json({
+    ok: true,
+    config: { ...config, organisation_slug: organisationSlug },
+  });
 }
 
 export async function PATCH(
@@ -75,7 +107,9 @@ export async function PATCH(
   if (d.footerUrl !== undefined) patch.footer_url = d.footerUrl;
   if (d.seoEnabled !== undefined) patch.seo_enabled = d.seoEnabled;
   if (d.ga4PropertyId !== undefined) patch.ga4_property_id = d.ga4PropertyId;
+  if (d.ga4Account !== undefined) patch.ga4_account = normalizeGoogleAccount(d.ga4Account);
   if (d.gscSiteUrl !== undefined) patch.gsc_site_url = d.gscSiteUrl;
+  if (d.gscAccount !== undefined) patch.gsc_account = normalizeGoogleAccount(d.gscAccount);
   if (d.sistrixDomain !== undefined) patch.sistrix_domain = d.sistrixDomain;
   if (d.sitemapUrl !== undefined) patch.sitemap_url = d.sitemapUrl;
   if (d.focusKeyword !== undefined) patch.focus_keyword = d.focusKeyword;
@@ -86,22 +120,59 @@ export async function PATCH(
     patch.seo_checklist_personalized = d.seoChecklistPersonalized;
   }
 
-  if (Object.keys(patch).length === 0) {
+  let organisationSlug: string | null | undefined;
+  if (d.organisationSlug !== undefined) {
+    if (d.organisationSlug === null) {
+      return NextResponse.json(
+        { ok: false, message: "Slug darf nicht leer sein (wird für SEO/n8n benötigt)." },
+        { status: 400 },
+      );
+    }
+    const { error: slugError } = await auth.supabase
+      .from("organisations")
+      .update({ slug: d.organisationSlug })
+      .eq("id", orgId);
+    if (slugError) {
+      const msg = slugError.message.toLowerCase().includes("unique")
+        ? "Dieser Slug ist bereits vergeben."
+        : (slugError.message || "Slug konnte nicht gespeichert werden.");
+      return NextResponse.json({ ok: false, message: msg }, { status: 400 });
+    }
+    organisationSlug = d.organisationSlug;
+  }
+
+  if (Object.keys(patch).length === 0 && organisationSlug === undefined) {
     return NextResponse.json({ ok: false, message: "Keine Änderungen." }, { status: 400 });
   }
 
-  const { data, error } = await auth.supabase
-    .from("dt_org_config")
-    .update(patch)
-    .eq("organisation_id", orgId)
-    .select(
-      "organisation_id,display_name,twin_provisioned,seo_enabled,disabled,website_url,footer_url,ga4_property_id,gsc_site_url,sistrix_domain,sitemap_url,focus_keyword,report_recipient_email,report_timeframe,seo_checklist,seo_checklist_personalized,videos",
-    )
-    .single();
-
-  if (error || !data) {
-    return NextResponse.json({ ok: false, message: error?.message ?? "Speichern fehlgeschlagen." }, { status: 500 });
+  let data;
+  if (Object.keys(patch).length > 0) {
+    const updated = await auth.supabase
+      .from("dt_org_config")
+      .update(patch)
+      .eq("organisation_id", orgId)
+      .select(ORG_CONFIG_SELECT)
+      .single();
+    if (updated.error || !updated.data) {
+      return NextResponse.json(
+        { ok: false, message: updated.error?.message ?? "Speichern fehlgeschlagen." },
+        { status: 500 },
+      );
+    }
+    data = updated.data;
+  } else {
+    data = await loadOrgConfig(orgId);
+    if (!data) {
+      return NextResponse.json({ ok: false, message: "Konfiguration nicht gefunden." }, { status: 404 });
+    }
   }
 
-  return NextResponse.json({ ok: true, config: data });
+  if (organisationSlug === undefined) {
+    organisationSlug = await loadOrganisationSlug(auth.supabase, orgId);
+  }
+
+  return NextResponse.json({
+    ok: true,
+    config: { ...data, organisation_slug: organisationSlug },
+  });
 }
