@@ -18,6 +18,7 @@
     "test:safe-fetch-url": "tsx scripts/test-safe-fetch-url.ts",
     "test:auth-error-messages": "tsx scripts/test-auth-error-messages.ts",
     "test:org-slug": "tsx scripts/test-org-slug.ts",
+    "test:seo-report-readiness": "tsx scripts/test-seo-report-readiness.ts",
     "test:survey-paste-retry": "tsx scripts/test-survey-paste-retry.ts",
     "types:generate": "tsx scripts/generate-types.ts",
     "env:check": "node -e \"console.log('URL=',process.env.NEXT_PUBLIC_SUPABASE_URL); console.log('KEY=',(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'').slice(0,8));\"",

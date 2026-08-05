@@ -4,7 +4,6 @@ import { z } from "zod";
 import { loadOrgConfig, requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { normalizeGoogleAccount } from "@/lib/dt/seo/google-accounts";
-import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 
 const ORG_CONFIG_SELECT =
   "organisation_id,display_name,twin_provisioned,seo_enabled,disabled,website_url,footer_url,ga4_property_id,ga4_account,gsc_site_url,gsc_account,sistrix_domain,sitemap_url,focus_keyword,report_recipient_email,report_timeframe,seo_checklist,seo_checklist_personalized,videos";
@@ -44,10 +43,11 @@ async function loadOrganisationSlug(
 ): Promise<string | null> {
   const { data } = await supabase
     .from("organisations")
-    .select("name,slug")
+    .select("slug")
     .eq("id", orgId)
     .maybeSingle();
-  return resolveOrganisationSlug({ slug: data?.slug, name: data?.name });
+  const slug = String(data?.slug ?? "").trim();
+  return slug || null;
 }
 
 export async function GET(

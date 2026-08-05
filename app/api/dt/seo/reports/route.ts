@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { queueDtSeoReport, requireAuthUser } from "@/lib/dt/db";
+import { loadOrgConfig, queueDtSeoReport, requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess, requireDtSeoReportAccess } from "@/lib/dt/seo/access";
+import { evaluateSeoReportReadiness } from "@/lib/dt/seo/report-readiness";
 import { syncReportJobHealth } from "@/lib/dt/seo/sync-report-job-health";
 import { triggerDtSeoReportN8n } from "@/lib/dt/seo/trigger-report";
 import { createClient } from "@/lib/supabase/server";
@@ -74,6 +75,29 @@ export async function POST(req: Request) {
   );
   if (!gate.ok) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
+  }
+
+  const config = await loadOrgConfig(parsed.data.organisationId);
+  const { data: orgRow } = await auth.supabase
+    .from("organisations")
+    .select("slug")
+    .eq("id", parsed.data.organisationId)
+    .maybeSingle();
+  const readiness = evaluateSeoReportReadiness({
+    organisationSlug: orgRow?.slug,
+    websiteUrl: config?.website_url,
+    ga4Account: config?.ga4_account,
+    gscAccount: config?.gsc_account,
+  });
+  if (!readiness.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: readiness.blockers.map((b) => b.message).join(" "),
+        readiness,
+      },
+      { status: 400 },
+    );
   }
 
   const { reportId, error } = await queueDtSeoReport({
