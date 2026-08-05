@@ -9,7 +9,9 @@ import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { GOOGLE_ACCOUNT_OPTIONS } from "@/lib/dt/seo/google-accounts";
 import { checklistToText, textToChecklist } from "@/lib/dt/seo/seo-checklist";
+import { cn } from "@/lib/utils";
 
 type Config = {
   organisation_id: string;
@@ -17,15 +19,37 @@ type Config = {
   seo_enabled: boolean;
   website_url: string | null;
   ga4_property_id: string | null;
+  ga4_account: string | null;
   gsc_site_url: string | null;
+  gsc_account: string | null;
   sistrix_domain: string | null;
   sitemap_url: string | null;
   focus_keyword: string | null;
   report_recipient_email: string | null;
   report_timeframe: string;
+  organisation_slug: string | null;
   seo_checklist: unknown;
   seo_checklist_personalized: boolean;
 };
+
+const selectClassName = cn(
+  "h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+  "outline-none transition focus-visible:border-sbkm-mint/45 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30",
+  "disabled:cursor-not-allowed disabled:opacity-60",
+);
+
+const REPORT_TIMEFRAME_OPTIONS = [
+  { value: "last_7_days", label: "Letzte 7 Tage" },
+  { value: "last_30_days", label: "Letzte 30 Tage" },
+  { value: "last_90_days", label: "Letzte 90 Tage" },
+] as const;
+
+function googleAccountSelectValue(stored: string | null | undefined): string {
+  const value = String(stored ?? "").trim();
+  if (!value) return "";
+  if ((GOOGLE_ACCOUNT_OPTIONS as readonly string[]).includes(value)) return value;
+  return value;
+}
 
 type CrawlStatus = {
   id: string;
@@ -223,7 +247,7 @@ export function DtSeoConfigForm(props: {
   }
 
   return (
-    <DtGlassCard className="grid gap-4 p-5">
+    <DtGlassCard key={props.organisationId} className="grid gap-4 p-5">
       <h2 className="text-lg font-bold text-sbkm-navy dark:text-white">SEO-Konfiguration</h2>
       {status ? <p className="text-sm text-sbkm-ink-600 dark:text-white/60">{status}</p> : null}
 
@@ -300,7 +324,55 @@ export function DtSeoConfigForm(props: {
             onBlur={(e) => void save({ gscSiteUrl: e.target.value.trim() || null })}
           />
         </div>
-        <div className="grid gap-1 sm:col-span-2">
+        <div className="grid gap-1">
+          <Label htmlFor="dt-ga4-account">GA4-Konto (SBKM)</Label>
+          <select
+            id="dt-ga4-account"
+            className={selectClassName}
+            disabled={!props.canEdit || busy}
+            value={googleAccountSelectValue(config.ga4_account)}
+            onChange={(e) => void save({ ga4Account: e.target.value.trim() || null })}
+          >
+            <option value="">Nicht gesetzt</option>
+            {GOOGLE_ACCOUNT_OPTIONS.map((email) => (
+              <option key={email} value={email}>
+                {email}
+              </option>
+            ))}
+            {config.ga4_account &&
+            !(GOOGLE_ACCOUNT_OPTIONS as readonly string[]).includes(config.ga4_account) ? (
+              <option value={config.ga4_account}>{config.ga4_account} (bisher)</option>
+            ) : null}
+          </select>
+          <p className="text-xs text-sbkm-ink-500 dark:text-white/45">
+            Unter welchem Google-Konto die GA4-Property bei uns liegt (n8n-Routing).
+          </p>
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="dt-gsc-account">GSC-Konto (SBKM)</Label>
+          <select
+            id="dt-gsc-account"
+            className={selectClassName}
+            disabled={!props.canEdit || busy}
+            value={googleAccountSelectValue(config.gsc_account)}
+            onChange={(e) => void save({ gscAccount: e.target.value.trim() || null })}
+          >
+            <option value="">Nicht gesetzt (n8n → ads2@)</option>
+            {GOOGLE_ACCOUNT_OPTIONS.map((email) => (
+              <option key={email} value={email}>
+                {email}
+              </option>
+            ))}
+            {config.gsc_account &&
+            !(GOOGLE_ACCOUNT_OPTIONS as readonly string[]).includes(config.gsc_account) ? (
+              <option value={config.gsc_account}>{config.gsc_account} (bisher)</option>
+            ) : null}
+          </select>
+          <p className="text-xs text-sbkm-ink-500 dark:text-white/45">
+            Unter welchem Google-Konto die Search Console bei uns freigeschaltet ist.
+          </p>
+        </div>
+        <div className="grid gap-1">
           <Label htmlFor="dt-sistrix">Sistrix Domain</Label>
           <Input
             id="dt-sistrix"
@@ -308,6 +380,47 @@ export function DtSeoConfigForm(props: {
             disabled={!props.canEdit}
             onBlur={(e) => void save({ sistrixDomain: e.target.value.trim() || null })}
           />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="dt-timeframe">Report-Zeitraum</Label>
+          <select
+            id="dt-timeframe"
+            className={selectClassName}
+            disabled={!props.canEdit || busy}
+            value={config.report_timeframe || "last_30_days"}
+            onChange={(e) => void save({ reportTimeframe: e.target.value })}
+          >
+            {REPORT_TIMEFRAME_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="grid gap-1 sm:col-span-2">
+          <Label htmlFor="dt-org-slug">Organisations-Slug</Label>
+          <Input
+            id="dt-org-slug"
+            defaultValue={config.organisation_slug ?? ""}
+            disabled={!props.canEdit}
+            placeholder="msh-rechtsanwaelte"
+            autoComplete="off"
+            onBlur={(e) => {
+              const v = e.target.value.trim().toLowerCase();
+              if (!v) {
+                e.target.value = config.organisation_slug ?? "";
+                setStatus("Slug darf nicht leer sein (wird für SEO/n8n benötigt).");
+                return;
+              }
+              if (v !== (config.organisation_slug ?? "")) {
+                void save({ organisationSlug: v });
+              }
+            }}
+          />
+          <p className="text-xs text-sbkm-ink-500 dark:text-white/45">
+            Technischer Client-Key für SEO/n8n (nur a-z, 0-9, Bindestriche). Ohne Slug scheitern
+            Report-Jobs.
+          </p>
         </div>
       </div>
 
