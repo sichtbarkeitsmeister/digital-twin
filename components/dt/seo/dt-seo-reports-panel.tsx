@@ -12,6 +12,10 @@ import { DtSeoOwnerDeliveryBadge } from "@/components/dt/seo/dt-seo-owner-delive
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/components/dt/cn";
+import {
+  evaluateSeoReportReadiness,
+  type SeoReportReadiness,
+} from "@/lib/dt/seo/report-readiness";
 import { reportStateLabel } from "@/lib/dt/seo/report-payload";
 import type { DtSeoReportRow } from "@/lib/dt/types";
 
@@ -44,6 +48,7 @@ export function DtSeoReportsPanel(props: {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sendToOwner, setSendToOwner] = useState(false);
   const [reportRecipientEmail, setReportRecipientEmail] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<SeoReportReadiness | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -72,11 +77,30 @@ export function DtSeoReportsPanel(props: {
     if (!dialogOpen) return;
     void fetch(`/api/dt/org-config/${encodeURIComponent(props.organisationId)}`)
       .then((r) => r.json())
-      .then((json: { ok?: boolean; config?: { report_recipient_email?: string | null } }) => {
-        const email = json.config?.report_recipient_email?.trim() || null;
-        setReportRecipientEmail(email);
-        if (!email) setSendToOwner(false);
-      });
+      .then(
+        (json: {
+          ok?: boolean;
+          config?: {
+            report_recipient_email?: string | null;
+            website_url?: string | null;
+            ga4_account?: string | null;
+            gsc_account?: string | null;
+            organisation_slug?: string | null;
+          };
+        }) => {
+          const email = json.config?.report_recipient_email?.trim() || null;
+          setReportRecipientEmail(email);
+          if (!email) setSendToOwner(false);
+          setReadiness(
+            evaluateSeoReportReadiness({
+              organisationSlug: json.config?.organisation_slug,
+              websiteUrl: json.config?.website_url,
+              ga4Account: json.config?.ga4_account,
+              gscAccount: json.config?.gsc_account,
+            }),
+          );
+        },
+      );
   }, [dialogOpen, props.organisationId]);
 
   useEffect(() => {
@@ -176,6 +200,7 @@ export function DtSeoReportsPanel(props: {
           disabled={busy}
           onClick={() => {
             setStatus(null);
+            setReadiness(null);
             setDialogOpen(true);
           }}
         >
@@ -238,6 +263,33 @@ export function DtSeoReportsPanel(props: {
                 Report-E-Mail aus den SEO-Einstellungen senden lassen.
               </p>
 
+              {readiness && readiness.issues.length > 0 ? (
+                <div
+                  className={cn(
+                    "mt-4 rounded-dt border p-3 text-sm",
+                    readiness.ok
+                      ? "border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                      : "border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-200",
+                  )}
+                  role={readiness.ok ? "status" : "alert"}
+                >
+                  <p className="font-semibold">
+                    {readiness.ok ? "Hinweise vor dem Start" : "Report kann noch nicht gestartet werden"}
+                  </p>
+                  <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                    {readiness.issues.map((issue) => (
+                      <li key={issue.code}>{issue.message}</li>
+                    ))}
+                  </ul>
+                  <Link
+                    href={`/dashboard/verwaltung/seo?org=${encodeURIComponent(props.organisationId)}&tab=settings`}
+                    className="mt-2 inline-flex text-xs font-semibold underline underline-offset-2"
+                  >
+                    Zu den SEO-Einstellungen
+                  </Link>
+                </div>
+              ) : null}
+
               <label
                 className={cn(
                   "mt-5 flex items-start gap-3 rounded-dt border border-sbkm-navy/10 bg-sbkm-navy/[0.03] p-3 dark:border-white/10 dark:bg-white/5",
@@ -272,7 +324,11 @@ export function DtSeoReportsPanel(props: {
                 >
                   Abbrechen
                 </button>
-                <DtPillButton type="button" disabled={busy} onClick={() => void triggerReport()}>
+                <DtPillButton
+                  type="button"
+                  disabled={busy || (readiness != null && !readiness.ok)}
+                  onClick={() => void triggerReport()}
+                >
                   {busy ? (
                     <span className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />

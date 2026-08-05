@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GOOGLE_ACCOUNT_OPTIONS } from "@/lib/dt/seo/google-accounts";
+import { evaluateSeoReportReadiness } from "@/lib/dt/seo/report-readiness";
 import { checklistToText, textToChecklist } from "@/lib/dt/seo/seo-checklist";
 import { cn } from "@/lib/utils";
 
@@ -246,10 +247,40 @@ export function DtSeoConfigForm(props: {
     return <p className="text-sm text-sbkm-ink-600">Lade Einstellungen…</p>;
   }
 
+  const readiness = evaluateSeoReportReadiness({
+    organisationSlug: config.organisation_slug,
+    websiteUrl: config.website_url,
+    ga4Account: config.ga4_account,
+    gscAccount: config.gsc_account,
+  });
+
   return (
     <DtGlassCard key={props.organisationId} className="grid gap-4 p-5">
       <h2 className="text-lg font-bold text-sbkm-navy dark:text-white">SEO-Konfiguration</h2>
       {status ? <p className="text-sm text-sbkm-ink-600 dark:text-white/60">{status}</p> : null}
+
+      {readiness.issues.length > 0 ? (
+        <div
+          className={cn(
+            "rounded-xl border p-3 text-sm",
+            readiness.ok
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+              : "border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-200",
+          )}
+          role={readiness.ok ? "status" : "alert"}
+        >
+          <p className="font-semibold">
+            {readiness.ok
+              ? "Empfohlen vor dem nächsten SEO-Report"
+              : "Noch unvollständig für SEO-Reports"}
+          </p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4">
+            {readiness.issues.map((issue) => (
+              <li key={issue.code}>{issue.message}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {props.isPlatformAdmin ? (
         <label className="flex items-center gap-2 text-sm">
