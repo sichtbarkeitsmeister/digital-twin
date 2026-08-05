@@ -21,4 +21,4 @@ Zeichenzahl ist nur Zusatzinfo — entscheidend sind die Pixel.
 
 ## Follow-up (nicht in diesem Batch)
 
-GSC Coverage / Indexierungsbericht syncen — separat, sobald n8n + Speicherung stehen.
+Google-Indexstatus: URL-Inspection-Stichproben (siehe `docs/seo-indexierung.md`) — kein Coverage-Sync möglich.
