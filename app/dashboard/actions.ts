@@ -15,6 +15,7 @@ import {
   sendOrgOwnerWelcomeEmail,
 } from "@/lib/email/owner-welcome";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -70,6 +71,15 @@ export async function adminCreateOrganisationAction(
 
   const { org_name, owner_email, org_slug, send_welcome } = parsed.data;
 
+  // Slug is required for SEO/n8n client routing — auto-fill from name when omitted.
+  const resolvedSlug = resolveOrganisationSlug({ slug: org_slug, name: org_name });
+  if (!resolvedSlug) {
+    return {
+      ok: false,
+      message: "Slug konnte nicht aus dem Organisationsnamen erzeugt werden. Bitte Slug manuell setzen.",
+    };
+  }
+
   let loginLink: Awaited<ReturnType<typeof ensureOwnerLoginLink>> = null;
   if (send_welcome) {
     loginLink = await ensureOwnerLoginLink(owner_email);
@@ -83,7 +93,7 @@ export async function adminCreateOrganisationAction(
   const { error } = await supabase.rpc("admin_create_organisation", {
     org_name,
     owner_email,
-    org_slug: org_slug ? org_slug : null,
+    org_slug: resolvedSlug,
   });
 
   if (error) {

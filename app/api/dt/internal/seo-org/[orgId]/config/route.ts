@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifyDtInternalWebhookSecret } from "@/lib/dt/internal-webhook";
+import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 import { buildLegacySeoClientConfig } from "@/lib/dt/seo/legacy-seo-config";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -15,7 +16,7 @@ export async function GET(req: Request, context: { params: Promise<{ orgId: stri
   const { data: cfg, error } = await supabase
     .from("dt_org_config")
     .select(
-      "organisation_id,display_name,website_url,ga4_property_id,gsc_site_url,sistrix_domain,report_timeframe,report_recipient_email,seo_enabled,disabled,ga4_account,gsc_account,organisations(slug)",
+      "organisation_id,display_name,website_url,ga4_property_id,gsc_site_url,sistrix_domain,report_timeframe,report_recipient_email,seo_enabled,disabled,ga4_account,gsc_account,organisations(name,slug)",
     )
     .eq("organisation_id", orgId)
     .maybeSingle();
@@ -28,7 +29,8 @@ export async function GET(req: Request, context: { params: Promise<{ orgId: stri
     return NextResponse.json({ ok: false, message: "SEO nicht aktiv." }, { status: 400 });
   }
 
-  const slug = (cfg.organisations as { slug?: string } | null)?.slug ?? "";
+  const org = cfg.organisations as { name?: string; slug?: string } | null;
+  const slug = resolveOrganisationSlug({ slug: org?.slug, name: org?.name }) ?? "";
 
   return NextResponse.json({
     ok: true,
