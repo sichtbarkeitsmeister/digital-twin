@@ -48,8 +48,13 @@ npm run dt:n8n:monthly-collect
 npm run dt:n8n:monthly-scheduler
 ```
 
+**GSC URL Inspection (Stichprobe):** Workflow `DT v2 - GSC URL Inspection`, Webhook
+`dt-gsc-url-inspection`. Deploy: `npm run dt:n8n:gsc-url-inspection`. Danach
+`N8N_DT_GSC_URL_INSPECTION_WEBHOOK` in Vercel setzen. Details: `docs/seo-indexierung.md`.
+
 **Wichtig:** Die SEO-Werkzeuge des Beraters (`read_sitemap`, `inspect_website_url`,
-`audit_site_indexability`, `update_seo_task`, `delete_seo_task`, `check_serp_snippet`)
+`audit_site_indexability`, `read_index_status`, `request_gsc_index_check`,
+`update_seo_task`, `delete_seo_task`, `check_serp_snippet`)
 stecken in `scripts/n8n/dt-v2-chat-handler.js`. Läuft der Chat über n8n
 (`N8N_DT_CHAT_WEBHOOK` gesetzt), kennt er neue Werkzeuge erst nach
 `npm run dt:n8n:chat`. Der direkte Weg über die App ist sofort nach dem Deploy aktuell.

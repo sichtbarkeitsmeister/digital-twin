@@ -280,6 +280,37 @@ const seoTools = [
     },
   },
   {
+    name: "read_index_status",
+    description:
+      "Liest gespeicherte Google-URL-Inspection-Stichproben (GSC). Kein Coverage-Bericht. Bei leerem Ergebnis ehrlich „keine Daten“ sagen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Optional: genau diese URL lesen." },
+        limit: { type: "number", description: "Max. Einträge (Standard 20)." },
+      },
+    },
+  },
+  {
+    name: "request_gsc_index_check",
+    description:
+      "Startet eine asynchrone Google-URL-Inspection-Stichprobe. Danach später read_index_status erneut aufrufen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optionale konkrete URL-Liste.",
+        },
+        limit: {
+          type: "number",
+          description: "Max. URLs in der Stichprobe.",
+        },
+      },
+    },
+  },
+  {
     name: "update_seo_task",
     description:
       "Bearbeitet eine bestehende SEO-Aufgabe im Board (Titel, Status, Keyword, URL, Maßnahme, Priorität, …). Nutze die taskId aus „Bestehende SEO-Aufgaben“. Das Board erlaubt Edit — nicht nur Hinzufügen.",
@@ -424,6 +455,36 @@ async function runSeoTool(name, input) {
       });
       if (!r.ok || !r.data?.ok) return "Indexierbarkeits-Check fehlgeschlagen.";
       return r.data.text || "Keine Prüfergebnisse.";
+    }
+    if (name === "read_index_status") {
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: {
+          organisationId,
+          action: "index_status",
+          ...(args.url ? { url: String(args.url) } : {}),
+          ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+        },
+      });
+      if (!r.ok || !r.data?.ok) return "Indexstatus-Abruf fehlgeschlagen.";
+      return r.data.text || "Keine Indexdaten.";
+    }
+    if (name === "request_gsc_index_check") {
+      const r = await httpJson({
+        method: "POST",
+        url: `${appBase}/api/dt/seo/site-search`,
+        headers: { "Content-Type": "application/json", "X-DT-Webhook-Secret": dtSecret },
+        body: {
+          organisationId,
+          action: "request_index_check",
+          ...(Array.isArray(args.urls) ? { urls: args.urls.map((u) => String(u)) } : {}),
+          ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+        },
+      });
+      if (!r.ok || !r.data?.ok) return "URL-Inspection-Start fehlgeschlagen.";
+      return r.data.text || "Inspection gestartet.";
     }
     if (name === "update_seo_task") {
       const taskId = String(args.taskId || "").trim();

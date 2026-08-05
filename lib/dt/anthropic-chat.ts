@@ -20,6 +20,10 @@ import {
   deleteSeoTaskForTool,
   updateSeoTaskForTool,
 } from "@/lib/dt/seo/task-tools";
+import {
+  readIndexStatusForTool,
+  triggerGscIndexCheckN8n,
+} from "@/lib/dt/seo/url-index-status";
 import { mergeUsage, sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { sanitizeForLlmText } from "@/lib/shared/sanitize-llm-text";
 import type { DtChatMode } from "@/lib/dt/types";
@@ -121,6 +125,43 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
         limit: {
           type: "number",
           description: "Wie viele URLs geprüft werden (Standard 15, max. 30).",
+        },
+      },
+    },
+  },
+  {
+    name: "read_index_status",
+    description:
+      "Liest gespeicherte Google-URL-Inspection-Stichproben (GSC) für diese Organisation. Kein Coverage-Bericht — nur zuvor geprüfte URLs. Bei leerem Ergebnis ehrlich „keine Daten“ sagen und ggf. request_gsc_index_check vorschlagen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Optional: genau diese URL lesen.",
+        },
+        limit: {
+          type: "number",
+          description: "Max. Einträge (Standard 20, max. 50).",
+        },
+      },
+    },
+  },
+  {
+    name: "request_gsc_index_check",
+    description:
+      "Startet eine asynchrone Google-URL-Inspection-Stichprobe über n8n/GSC. Danach später read_index_status erneut aufrufen. Ohne urls: Stichprobe aus Sitemap/Crawl.",
+    input_schema: {
+      type: "object",
+      properties: {
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optionale konkrete URL-Liste.",
+        },
+        limit: {
+          type: "number",
+          description: "Max. URLs in der Stichprobe (Standard 10, max. 20).",
         },
       },
     },
@@ -229,6 +270,19 @@ async function runDtRetrievalTool(
         sitemapUrl: typeof args.sitemapUrl === "string" ? args.sitemapUrl : null,
         urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : null,
         limit: typeof args.limit === "number" ? args.limit : null,
+      });
+    }
+    if (name === "read_index_status") {
+      return readIndexStatusForTool(organisationId, {
+        url: typeof args.url === "string" ? args.url : null,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      });
+    }
+    if (name === "request_gsc_index_check") {
+      return triggerGscIndexCheckN8n({
+        organisationId,
+        urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : undefined,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
       });
     }
     if (name === "update_seo_task") {

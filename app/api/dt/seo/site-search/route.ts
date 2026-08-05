@@ -11,12 +11,26 @@ import {
   getDtSitePageContent,
   searchDtSitePages,
 } from "@/lib/dt/seo/search-site-pages";
+import {
+  readIndexStatusForTool,
+  triggerGscIndexCheckN8n,
+} from "@/lib/dt/seo/url-index-status";
 
 export const maxDuration = 30;
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  action: z.enum(["search", "read", "sitemap", "inspect", "audit"]).default("search"),
+  action: z
+    .enum([
+      "search",
+      "read",
+      "sitemap",
+      "inspect",
+      "audit",
+      "index_status",
+      "request_index_check",
+    ])
+    .default("search"),
   query: z.string().trim().min(1).max(400).optional(),
   url: z.string().trim().min(1).max(2048).optional(),
   urls: z.array(z.string().trim().min(1).max(2048)).max(30).optional(),
@@ -77,6 +91,23 @@ export async function POST(req: Request) {
         sitemapUrl: sitemapUrl ?? null,
         urls: parsed.data.urls ?? null,
         limit: limit ?? null,
+      });
+      return NextResponse.json({ ok: true, text });
+    }
+
+    if (action === "index_status") {
+      const text = await readIndexStatusForTool(organisationId, {
+        url: url ?? null,
+        limit: limit ?? undefined,
+      });
+      return NextResponse.json({ ok: true, text });
+    }
+
+    if (action === "request_index_check") {
+      const text = await triggerGscIndexCheckN8n({
+        organisationId,
+        urls: parsed.data.urls,
+        limit: limit ?? undefined,
       });
       return NextResponse.json({ ok: true, text });
     }

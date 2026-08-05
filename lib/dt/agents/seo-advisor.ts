@@ -18,8 +18,8 @@ type AgentVisibilityInput = {
 };
 
 /**
- * The "DigitalTwin von …" persona every organisation gets on creation. Real
- * avatars replace it, so customers should not see it as a separate agent.
+ * Legacy starter persona (slug=default). New orgs no longer get one; existing
+ * unused starters are soft-disabled. Still hidden from customers when present.
  */
 export function isDefaultTwinAgent(agent: { slug?: string | null }): boolean {
   return agent.slug === "default";
