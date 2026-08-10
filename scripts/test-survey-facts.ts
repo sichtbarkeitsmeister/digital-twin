@@ -10,6 +10,7 @@ import {
   formatFactsForCoverageRepair,
   formatSurveyFactsForAgentContext,
   summarizeSurveyFactCoverage,
+  unresolvedSurveyFactCoverageIds,
 } from "../lib/dt/survey-facts";
 import { buildSurveyResponseContextForAgent } from "../lib/dt/survey-to-agent-context";
 
@@ -205,5 +206,21 @@ assert.doesNotMatch(repairBlock, /fact_002/);
 
 assert.ok(typeof summary.missing[0]?.valueText === "string" || summary.missing.length === 0);
 assert.equal(summary.weak.every((w) => typeof w.valueText === "string"), true);
+
+const incompleteSummary = summarizeSurveyFactCoverage({
+  facts: bundle.facts,
+  report: missing,
+});
+assert.ok(unresolvedSurveyFactCoverageIds(incompleteSummary).length >= 2);
+assert.deepEqual(
+  unresolvedSurveyFactCoverageIds(incompleteSummary, unresolvedSurveyFactCoverageIds(incompleteSummary)),
+  [],
+);
+assert.ok(
+  unresolvedSurveyFactCoverageIds(
+    incompleteSummary,
+    unresolvedSurveyFactCoverageIds(incompleteSummary).slice(1),
+  ).length >= 1,
+);
 
 console.log("survey-facts tests: ok");

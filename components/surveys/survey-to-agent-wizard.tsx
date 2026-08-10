@@ -34,6 +34,7 @@ import { resolveClarificationSourcePool } from "@/lib/dt/survey-clarifications";
 import { ClarificationImportPreview } from "@/components/surveys/clarification-import-preview";
 import { FactCoverageReview } from "@/components/surveys/fact-coverage-review";
 import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
+import { unresolvedSurveyFactCoverageIds } from "@/lib/dt/survey-facts";
 
 type WizardMode = "create" | "refine";
 type WizardStep = "organisation" | "modus" | "regeln" | "klaerungen" | "vorschau" | "fertig";
@@ -195,6 +196,14 @@ export function SurveyToAgentWizard(props: {
       return !d.sourceResponseId;
     });
   }
+
+  const unresolvedCoverageFactIds = useMemo(() => {
+    if (!factCoverage) return [];
+    return unresolvedSurveyFactCoverageIds(factCoverage, acceptedCoverageFactIds);
+  }, [factCoverage, acceptedCoverageFactIds]);
+
+  const coverageBlocksSave =
+    wizardMode === "create" && unresolvedCoverageFactIds.length > 0;
 
   useEffect(() => {
     if (wizardMode !== "refine" || !orgId) {
@@ -497,6 +506,15 @@ export function SurveyToAgentWizard(props: {
 
     if (wizardMode === "create") {
       if (!preview) return;
+      if (
+        factCoverage &&
+        unresolvedSurveyFactCoverageIds(factCoverage, acceptedCoverageFactIds).length > 0
+      ) {
+        setError(
+          "Bitte zuerst alle offenen Facts klären (Passt so / Anpassen) oder per KI nachziehen.",
+        );
+        return;
+      }
       setCreating(true);
       setError(null);
       const res = await fetch(
@@ -552,6 +570,8 @@ export function SurveyToAgentWizard(props: {
   }, [
     wizardMode,
     preview,
+    factCoverage,
+    acceptedCoverageFactIds,
     refinePreview,
     orgId,
     agentId,
@@ -1076,7 +1096,9 @@ export function SurveyToAgentWizard(props: {
                     {factCoverage.missingCount > 0
                       ? ` · ${factCoverage.missingCount} fehlend`
                       : " · vollständig"}
-                    . Diagnostik — blockiert Speichern nicht.
+                    {unresolvedCoverageFactIds.length > 0
+                      ? `. Speichern erst möglich, wenn ${unresolvedCoverageFactIds.length} offene Facts geklärt sind.`
+                      : ". Alle offenen Facts geklärt — Speichern freigegeben."}
                   </CardDescription>
                 </CardHeader>
                 {factCoverage.missingCount > 0 || factCoverage.weakCount > 0 ? (
@@ -1193,10 +1215,25 @@ export function SurveyToAgentWizard(props: {
               <RefreshCw className="size-4" aria-hidden />
               Regenerieren
             </Button>
-            <Button type="button" disabled={creating} onClick={() => void createAgent()}>
+            <Button
+              type="button"
+              disabled={creating || coverageBlocksSave}
+              onClick={() => void createAgent()}
+              title={
+                coverageBlocksSave
+                  ? `${unresolvedCoverageFactIds.length} Facts noch offen — bitte klären`
+                  : undefined
+              }
+            >
               {creating ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
               Agent anlegen
             </Button>
+            {coverageBlocksSave ? (
+              <p className="w-full text-sm text-amber-800 dark:text-amber-200">
+                Noch {unresolvedCoverageFactIds.length} offene Facts — „Passt so“, „Anpassen“
+                oder „Alle offenen per KI nachziehen“, dann Speichern.
+              </p>
+            ) : null}
           </motion.div>
         </motion.div>
       ) : null}
