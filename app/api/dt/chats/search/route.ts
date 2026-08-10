@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { dtChatTeamOrFilter, dtChatVisibleOrFilter, requireAuthUser } from "@/lib/dt/db";
+import {
+  dtChatSeoWorkspaceOrFilter,
+  dtChatTeamOrFilter,
+  dtChatVisibleOrFilter,
+  requireAuthUser,
+} from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 
 const querySchema = z.object({
   org: z.string().uuid(),
   scope: z.enum(["mine", "team", "all", "org"]).optional(),
-  mode: z.enum(["default", "seo", "team", "ghost"]).optional(),
+  mode: z.enum(["default", "seo", "team", "ghost", "seo_workspace"]).optional(),
   q: z.string().trim().min(1).max(120),
   includeArchived: z
     .string()
@@ -72,7 +77,7 @@ export async function GET(req: Request) {
 
   const chatMode = parsed.data.mode ?? "default";
 
-  if (chatMode === "seo" && auth.userId) {
+  if ((chatMode === "seo" || chatMode === "seo_workspace") && auth.userId) {
     const gate = await requireDtSeoAccess(auth.supabase, auth.userId, parsed.data.org);
     if (!gate.ok) {
       return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
@@ -89,7 +94,16 @@ export async function GET(req: Request) {
     .order("updated_at", { ascending: false })
     .limit(15);
 
-  if (chatMode === "seo") {
+  if (chatMode === "seo_workspace") {
+    if (adminOversight && listScope === "org") {
+      chatsQuery = chatsQuery.in("mode", ["seo", "default"]);
+      if (parsed.data.owner) {
+        chatsQuery = chatsQuery.eq("owner_user_id", parsed.data.owner);
+      }
+    } else {
+      chatsQuery = chatsQuery.or(dtChatSeoWorkspaceOrFilter(auth.userId!));
+    }
+  } else if (chatMode === "seo") {
     chatsQuery = chatsQuery.eq("mode", "seo");
     if (adminOversight && listScope === "org" && parsed.data.owner) {
       chatsQuery = chatsQuery.eq("owner_user_id", parsed.data.owner);
@@ -125,7 +139,16 @@ export async function GET(req: Request) {
     .order("created_at", { ascending: false })
     .limit(30);
 
-  if (chatMode === "seo") {
+  if (chatMode === "seo_workspace") {
+    if (adminOversight && listScope === "org") {
+      msgQuery = msgQuery.in("dt_chats.mode", ["seo", "default"]);
+      if (parsed.data.owner) {
+        msgQuery = msgQuery.eq("dt_chats.owner_user_id", parsed.data.owner);
+      }
+    } else {
+      msgQuery = msgQuery.or(dtChatSeoWorkspaceOrFilter(auth.userId!, "dt_chats"));
+    }
+  } else if (chatMode === "seo") {
     msgQuery = msgQuery.eq("dt_chats.mode", "seo");
     if (adminOversight && listScope === "org" && parsed.data.owner) {
       msgQuery = msgQuery.eq("dt_chats.owner_user_id", parsed.data.owner);

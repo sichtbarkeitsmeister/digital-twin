@@ -220,7 +220,8 @@ export function DtChatShell(props: {
     const q = new URLSearchParams({
       org: selectedOrgId,
       scope: props.seoMode && !props.adminOversight ? "mine" : chatScope,
-      ...(props.seoMode ? { mode: "seo" } : {}),
+      // SEO UI lists advisor chats + personal twin chats started there.
+      ...(props.seoMode ? { mode: "seo_workspace" } : {}),
       ...(isOrgScope ? { oversight: "1" } : {}),
       ...(isOrgScope && ownerFilterUserId ? { owner: ownerFilterUserId } : {}),
       ...(showArchived ? { archived: "1" } : {}),
@@ -332,10 +333,8 @@ export function DtChatShell(props: {
       if (expectedOrgId && json.chat && json.chat.organisation_id !== expectedOrgId) {
         return rejectStale("Dieser Chat gehört zu einer anderen Organisation.");
       }
-      // SEO workspace must not reopen persona chats from shared last-chat storage.
-      if (props.seoMode && json.chat && json.chat.mode !== "seo") {
-        return rejectStale("Dieser Chat gehört nicht zum SEO-Bereich.");
-      }
+      // Persona/twin chats (mode=default) are allowed in the SEO workspace because
+      // twins are selectable there. SEO advisor chats stay SEO-only.
       if (!props.seoMode && json.chat?.mode === "seo") {
         return rejectStale("SEO-Chats sind nur im SEO-Bereich verfügbar.");
       }
@@ -405,7 +404,7 @@ export function DtChatShell(props: {
           const chatQuery = new URLSearchParams({
             org: resolvedOrgId,
             scope: scopeForList,
-            ...(props.seoMode ? { mode: "seo" } : {}),
+            ...(props.seoMode ? { mode: "seo_workspace" } : {}),
             ...(bootstrapOversight ? { oversight: "1" } : {}),
           });
 
@@ -577,7 +576,7 @@ export function DtChatShell(props: {
           scope: props.seoMode && !props.adminOversight ? "mine" : chatScope,
           q,
         });
-        if (props.seoMode) params.set("mode", "seo");
+        if (props.seoMode) params.set("mode", "seo_workspace");
         if (isOrgScope) {
           params.set("oversight", "1");
           if (ownerFilterUserId) params.set("owner", ownerFilterUserId);
@@ -773,7 +772,7 @@ export function DtChatShell(props: {
         body: JSON.stringify({
           organisationId: selectedOrgId,
           agentId: selectedAgentId,
-          ...(props.seoMode ? { mode: "seo" as const } : {}),
+          // No mode filter: clear all chats of this agent (seo + default twin).
         }),
       });
       const json = (await res.json()) as {
