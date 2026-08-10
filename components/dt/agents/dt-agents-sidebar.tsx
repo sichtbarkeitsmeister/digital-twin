@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Settings2, Sparkles } from "lucide-react";
+import { Plus, Settings2, Sparkles, Trash2 } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -9,6 +9,8 @@ export function DtAgentsSidebar(props: {
   busy: boolean;
   onCreateAgent: () => void;
   onOpenGlobalPrompts: () => void;
+  /** Platform-admin: wipe all chats in the selected organisation. */
+  onDeleteAllChats?: () => void;
 }) {
   return (
     <aside className="grid gap-4 lg:sticky lg:top-6 lg:self-start">
@@ -37,6 +39,35 @@ export function DtAgentsSidebar(props: {
           Agent erstellen
         </DtPillButton>
       </DtGlassCard>
+
+      {props.onDeleteAllChats ? (
+        <DtGlassCard variant="subtle" padding="none" className="grid gap-3 p-4 sm:p-5">
+          <div className="flex items-center gap-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-red-500/10 text-red-700 dark:text-red-400">
+              <Trash2 className="size-4" aria-hidden />
+            </div>
+            <div>
+              <p className="font-semibold tracking-tight text-sbkm-navy dark:text-white">
+                Chats bereinigen
+              </p>
+              <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                Alle Chats der aktuellen Organisation löschen — nötig, um alte Agenten zu entfernen
+              </p>
+            </div>
+          </div>
+          <DtPillButton
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={props.busy}
+            className="w-full justify-center gap-1.5 border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-950/30"
+            onClick={props.onDeleteAllChats}
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+            Alle Chats löschen
+          </DtPillButton>
+        </DtGlassCard>
+      ) : null}
 
       <DtGlassCard variant="subtle" padding="none" className="grid gap-3 p-4 sm:p-5">
         <div className="flex items-center gap-2">

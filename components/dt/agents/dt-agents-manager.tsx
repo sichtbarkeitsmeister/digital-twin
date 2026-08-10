@@ -264,6 +264,65 @@ export function DtAgentsManager(props: {
     setPageView("agents");
   }
 
+  async function deleteAgentChats(
+    agent: AgentRow,
+    opts?: { quiet?: boolean },
+  ): Promise<{ ok: boolean; deletedCount: number }> {
+    const res = await fetch("/api/dt/chats/bulk-delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organisationId: orgId, agentId: agent.id }),
+    });
+    const json = (await res.json()) as {
+      ok?: boolean;
+      message?: string;
+      deletedCount?: number;
+    };
+    if (!json.ok) {
+      toast.error(json.message ?? "Chats des Agenten konnten nicht gelöscht werden.");
+      return { ok: false, deletedCount: 0 };
+    }
+    const deletedCount = json.deletedCount ?? 0;
+    if (!opts?.quiet && deletedCount > 0) {
+      toast.success(
+        `${deletedCount} Chat${deletedCount === 1 ? "" : "s"} von „${agent.name}" gelöscht.`,
+      );
+    }
+    return { ok: true, deletedCount };
+  }
+
+  async function deleteAllOrganisationChats() {
+    if (!orgId) return;
+    if (
+      !window.confirm(
+        "Alle Chats dieser Organisation wirklich löschen? Das kann nicht rückgängig gemacht werden.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    const res = await fetch("/api/dt/chats/bulk-delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organisationId: orgId }),
+    });
+    const json = (await res.json()) as {
+      ok?: boolean;
+      message?: string;
+      deletedCount?: number;
+    };
+    setBusy(false);
+    if (!json.ok) {
+      toast.error(json.message ?? "Chats konnten nicht gelöscht werden.");
+      return;
+    }
+    toast.success(
+      json.deletedCount && json.deletedCount > 0
+        ? `${json.deletedCount} Chat${json.deletedCount === 1 ? "" : "s"} gelöscht.`
+        : "Keine Chats zum Löschen gefunden.",
+    );
+  }
+
   async function deleteAgent(agent: AgentRow) {
     if (isProtectedAlwaysOn(agent)) {
       toast.error("Der SEO-Berater kann nicht entfernt werden.");
@@ -276,12 +335,17 @@ export function DtAgentsManager(props: {
     }
     if (
       !window.confirm(
-        `Agent „${agent.name}" wirklich entfernen? Nur möglich ohne zugehörige Chats.`,
+        `Agent „${agent.name}" wirklich entfernen? Zugehörige Chats werden mitgelöscht.`,
       )
     ) {
       return;
     }
     setBusy(true);
+    const chatsCleared = await deleteAgentChats(agent, { quiet: true });
+    if (!chatsCleared.ok) {
+      setBusy(false);
+      return;
+    }
     const res = await fetch(`/api/dt/agents/${agent.id}`, { method: "DELETE" });
     const json = (await res.json()) as { ok?: boolean; message?: string };
     setBusy(false);
@@ -289,6 +353,11 @@ export function DtAgentsManager(props: {
       toast.error(json.message ?? "Löschen fehlgeschlagen.");
       return;
     }
+    toast.success(
+      chatsCleared.deletedCount > 0
+        ? `Agent „${agent.name}" und ${chatsCleared.deletedCount} Chat${chatsCleared.deletedCount === 1 ? "" : "s"} entfernt.`
+        : `Agent „${agent.name}" entfernt.`,
+    );
     if (editingId === agent.id) setEditingId(null);
     await refresh(true);
   }
@@ -501,6 +570,9 @@ export function DtAgentsManager(props: {
                 busy={busy}
                 onCreateAgent={() => setCreateWizardOpen(true)}
                 onOpenGlobalPrompts={() => setPageView("prompts")}
+                onDeleteAllChats={
+                  canDirectlyEdit ? () => void deleteAllOrganisationChats() : undefined
+                }
               />
             )}
           </div>
@@ -516,6 +588,9 @@ export function DtAgentsManager(props: {
               busy={busy}
               onCreateAgent={() => setCreateWizardOpen(true)}
               onOpenGlobalPrompts={() => setPageView("prompts")}
+              onDeleteAllChats={
+                canDirectlyEdit ? () => void deleteAllOrganisationChats() : undefined
+              }
             />
           )}
         </div>

@@ -59,6 +59,9 @@ export function DtChatSidebar(props: {
   onSelectChat: (id: string) => void;
   onNewChat: () => void;
   onDeleteChat: (id: string) => void;
+  /** Wipe chats for the current org/context (header trash). */
+  onDeleteAllChats?: () => void;
+  deleteAllBusy?: boolean;
   onRenameChat: (chatId: string, title: string) => Promise<boolean>;
   onShareChat?: (chatId: string) => Promise<boolean>;
   currentUserId?: string | null;
@@ -318,23 +321,42 @@ export function DtChatSidebar(props: {
           <p className="text-[11px] font-semibold text-sbkm-ink-500 dark:text-white/50">
             {showSearchResults ? "Suchergebnisse" : "Chat-Verlauf"}
           </p>
-          {dense ? (
-            <button
-              type="button"
-              onClick={() => props.onToggleArchived(!props.showArchived)}
-              aria-label={props.showArchived ? "Archivierte ausblenden" : "Archivierte anzeigen"}
-              aria-pressed={props.showArchived}
-              title={props.showArchived ? "Archivierte ausblenden" : "Archivierte anzeigen"}
-              className={cn(
-                "inline-grid h-7 w-7 shrink-0 place-items-center rounded-pill transition",
-                props.showArchived
-                  ? "bg-sbkm-mint/20 text-sbkm-navy dark:text-white"
-                  : "text-sbkm-ink-500 hover:bg-sbkm-navy/10 dark:text-white/50 dark:hover:bg-white/10",
-              )}
-            >
-              <Archive className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-0.5">
+            {!props.ghostMode && !showSearchResults && props.onDeleteAllChats ? (
+              <button
+                type="button"
+                onClick={props.onDeleteAllChats}
+                disabled={props.deleteAllBusy || props.chats.length === 0}
+                aria-label="Alle Chats löschen"
+                title="Alle Chats löschen"
+                className={cn(
+                  "inline-grid h-7 w-7 place-items-center rounded-pill transition",
+                  props.chats.length === 0 || props.deleteAllBusy
+                    ? "cursor-not-allowed text-sbkm-ink-500/40 dark:text-white/25"
+                    : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30",
+                )}
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            ) : null}
+            {dense ? (
+              <button
+                type="button"
+                onClick={() => props.onToggleArchived(!props.showArchived)}
+                aria-label={props.showArchived ? "Archivierte ausblenden" : "Archivierte anzeigen"}
+                aria-pressed={props.showArchived}
+                title={props.showArchived ? "Archivierte ausblenden" : "Archivierte anzeigen"}
+                className={cn(
+                  "inline-grid h-7 w-7 shrink-0 place-items-center rounded-pill transition",
+                  props.showArchived
+                    ? "bg-sbkm-mint/20 text-sbkm-navy dark:text-white"
+                    : "text-sbkm-ink-500 hover:bg-sbkm-navy/10 dark:text-white/50 dark:hover:bg-white/10",
+                )}
+              >
+                <Archive className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {props.ghostMode ? (
