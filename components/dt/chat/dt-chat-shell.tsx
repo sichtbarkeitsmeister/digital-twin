@@ -135,6 +135,7 @@ export function DtChatShell(props: {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<DtChatSearchHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [deleteAllBusy, setDeleteAllBusy] = useState(false);
   const [seoTasks, setSeoTasks] = useState<DtSeoTaskProposalMatchRow[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const syncUrl = props.syncUrl !== false;
@@ -750,6 +751,52 @@ export function DtChatShell(props: {
     await refreshChats();
   };
 
+  const handleDeleteAllChats = async () => {
+    if (ghostMode || !selectedOrgId) return;
+    const scopeHint = props.seoMode
+      ? "alle SEO-Chats dieser Organisation"
+      : props.adminOversight || props.isPlatformAdmin
+        ? "alle Chats dieser Organisation"
+        : "alle deine Chats in dieser Organisation";
+    if (
+      !window.confirm(
+        `${scopeHint.charAt(0).toUpperCase()}${scopeHint.slice(1)} wirklich löschen? Das kann nicht rückgängig gemacht werden.`,
+      )
+    ) {
+      return;
+    }
+    setDeleteAllBusy(true);
+    setStatus(null);
+    try {
+      const res = await fetch("/api/dt/chats/bulk-delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          organisationId: selectedOrgId,
+          ...(props.seoMode ? { mode: "seo" as const } : {}),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        deletedCount?: number;
+      };
+      if (!json.ok) {
+        setStatus(json.message ?? "Chats konnten nicht gelöscht werden.");
+        return;
+      }
+      startNewChat();
+      await refreshChats();
+      setStatus(
+        json.deletedCount && json.deletedCount > 0
+          ? `${json.deletedCount} Chat${json.deletedCount === 1 ? "" : "s"} gelöscht.`
+          : "Keine Chats zum Löschen gefunden.",
+      );
+    } finally {
+      setDeleteAllBusy(false);
+    }
+  };
+
   const processFiles = async (files: File[]) => {
     if (files.length === 0) return;
     if (attachments.length >= DT_MAX_ATTACHMENTS) {
@@ -1044,6 +1091,8 @@ export function DtChatShell(props: {
       onSelectChat={handleSelectChat}
       onNewChat={startNewChat}
       onDeleteChat={handleDeleteChat}
+      onDeleteAllChats={() => void handleDeleteAllChats()}
+      deleteAllBusy={deleteAllBusy}
       onRenameChat={handleRenameChat}
       onShareChat={handleShareChat}
       currentUserId={props.currentUserId ?? null}
