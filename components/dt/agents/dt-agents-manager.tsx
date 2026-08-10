@@ -265,6 +265,10 @@ export function DtAgentsManager(props: {
   }
 
   async function deleteAgent(agent: AgentRow) {
+    if (isProtectedAlwaysOn(agent)) {
+      toast.error("Der SEO-Berater kann nicht entfernt werden.");
+      return;
+    }
     const enabledCountLocal = agents.filter((a) => a.is_enabled).length;
     if (agent.is_enabled && enabledCountLocal <= 1) {
       toast.error("Mindestens ein aktiver Agent muss bleiben.");

@@ -118,7 +118,7 @@ export async function PATCH(
 function deleteAgentMessage(code: string | undefined): string {
   switch (code) {
     case "default_agent_protected":
-      return "Standard-Agenten (DigitalTwin, SEO-Berater) können nicht entfernt werden.";
+      return "Der SEO-Berater kann nicht entfernt werden.";
     case "last_enabled_agent":
       return "Mindestens ein aktiver Agent muss in der Organisation bleiben.";
     case "agent_has_chats":
