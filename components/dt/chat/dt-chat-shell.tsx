@@ -753,14 +753,13 @@ export function DtChatShell(props: {
 
   const handleDeleteAllChats = async () => {
     if (ghostMode || !selectedOrgId) return;
-    const scopeHint = props.seoMode
-      ? "alle SEO-Chats dieser Organisation"
-      : props.adminOversight || props.isPlatformAdmin
-        ? "alle Chats dieser Organisation"
-        : "alle deine Chats in dieser Organisation";
+    if (!selectedAgentId || !selectedAgent) {
+      setStatus("Bitte zuerst einen Agenten auswählen.");
+      return;
+    }
     if (
       !window.confirm(
-        `${scopeHint.charAt(0).toUpperCase()}${scopeHint.slice(1)} wirklich löschen? Das kann nicht rückgängig gemacht werden.`,
+        `Alle Chats von „${selectedAgent.name}" wirklich löschen? Andere Agenten bleiben unberührt.`,
       )
     ) {
       return;
@@ -773,6 +772,7 @@ export function DtChatShell(props: {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           organisationId: selectedOrgId,
+          agentId: selectedAgentId,
           ...(props.seoMode ? { mode: "seo" as const } : {}),
         }),
       });
@@ -789,8 +789,8 @@ export function DtChatShell(props: {
       await refreshChats();
       setStatus(
         json.deletedCount && json.deletedCount > 0
-          ? `${json.deletedCount} Chat${json.deletedCount === 1 ? "" : "s"} gelöscht.`
-          : "Keine Chats zum Löschen gefunden.",
+          ? `${json.deletedCount} Chat${json.deletedCount === 1 ? "" : "s"} von „${selectedAgent.name}" gelöscht.`
+          : `Keine Chats von „${selectedAgent.name}" zum Löschen gefunden.`,
       );
     } finally {
       setDeleteAllBusy(false);
@@ -1093,6 +1093,12 @@ export function DtChatShell(props: {
       onDeleteChat={handleDeleteChat}
       onDeleteAllChats={() => void handleDeleteAllChats()}
       deleteAllBusy={deleteAllBusy}
+      deleteAllDisabled={!selectedAgentId}
+      deleteAllLabel={
+        selectedAgent
+          ? `Chats von „${selectedAgent.name}" löschen`
+          : "Chats dieses Agenten löschen"
+      }
       onRenameChat={handleRenameChat}
       onShareChat={handleShareChat}
       currentUserId={props.currentUserId ?? null}

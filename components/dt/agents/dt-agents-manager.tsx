@@ -291,36 +291,17 @@ export function DtAgentsManager(props: {
     return { ok: true, deletedCount };
   }
 
-  async function deleteAllOrganisationChats() {
-    if (!orgId) return;
+  async function clearAgentChats(agent: AgentRow) {
     if (
       !window.confirm(
-        "Alle Chats dieser Organisation wirklich löschen? Das kann nicht rückgängig gemacht werden.",
+        `Alle Chats von „${agent.name}" wirklich löschen? Andere Agenten bleiben unberührt.`,
       )
     ) {
       return;
     }
     setBusy(true);
-    const res = await fetch("/api/dt/chats/bulk-delete", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ organisationId: orgId }),
-    });
-    const json = (await res.json()) as {
-      ok?: boolean;
-      message?: string;
-      deletedCount?: number;
-    };
+    await deleteAgentChats(agent);
     setBusy(false);
-    if (!json.ok) {
-      toast.error(json.message ?? "Chats konnten nicht gelöscht werden.");
-      return;
-    }
-    toast.success(
-      json.deletedCount && json.deletedCount > 0
-        ? `${json.deletedCount} Chat${json.deletedCount === 1 ? "" : "s"} gelöscht.`
-        : "Keine Chats zum Löschen gefunden.",
-    );
   }
 
   async function deleteAgent(agent: AgentRow) {
@@ -538,6 +519,9 @@ export function DtAgentsManager(props: {
                   onSaveEdit={() => void saveEdit()}
                   onCancelEdit={() => setEditingId(null)}
                   onToggleEnabled={(next) => void toggleEnabled(agent, next)}
+                  onDeleteChats={
+                    canDirectlyEdit ? () => void clearAgentChats(agent) : undefined
+                  }
                   onDelete={() => void deleteAgent(agent)}
                   onRequestChange={() => setRequestAgent(agent)}
                   canDisable={canDisableAgent(agent)}
@@ -570,9 +554,6 @@ export function DtAgentsManager(props: {
                 busy={busy}
                 onCreateAgent={() => setCreateWizardOpen(true)}
                 onOpenGlobalPrompts={() => setPageView("prompts")}
-                onDeleteAllChats={
-                  canDirectlyEdit ? () => void deleteAllOrganisationChats() : undefined
-                }
               />
             )}
           </div>
@@ -588,9 +569,6 @@ export function DtAgentsManager(props: {
               busy={busy}
               onCreateAgent={() => setCreateWizardOpen(true)}
               onOpenGlobalPrompts={() => setPageView("prompts")}
-              onDeleteAllChats={
-                canDirectlyEdit ? () => void deleteAllOrganisationChats() : undefined
-              }
             />
           )}
         </div>
