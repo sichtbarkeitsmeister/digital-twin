@@ -485,7 +485,22 @@ function valueTextForReview(value: string, max = 2_000): string {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
-/** Compact coverage payload for API / wizard (non-blocking diagnostic). */
+/**
+ * Open fact IDs (missing + weak) that still need review before save.
+ * Accepted IDs (Passt so / in Prompt übernommen) are excluded.
+ */
+export function unresolvedSurveyFactCoverageIds(
+  summary: Pick<SurveyFactCoverageSummary, "missing" | "weak">,
+  acceptedFactIds: Iterable<string> = [],
+): string[] {
+  const accepted = new Set(acceptedFactIds);
+  const open = [...summary.missing, ...summary.weak]
+    .map((item) => item.factId)
+    .filter((id) => !accepted.has(id));
+  return [...new Set(open)];
+}
+
+/** Compact coverage payload for API / wizard. */
 export function summarizeSurveyFactCoverage(input: {
   facts: SurveyFact[];
   report: SurveyFactCoverageReport;
