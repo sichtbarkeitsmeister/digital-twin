@@ -160,7 +160,7 @@ function AgentActions(props: {
         <Pencil className="size-3.5" aria-hidden />
         {!props.compact ? "Bearbeiten" : null}
       </DtPillButton>
-      {!props.agent.is_default ? (
+      {!props.alwaysOn ? (
         <DtPillButton
           type="button"
           size="sm"
