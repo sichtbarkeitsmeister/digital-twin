@@ -64,6 +64,9 @@ export async function getDtChatOrNull(chatId: string): Promise<DtChatRow | null>
 
 export type DtChatListScope = "mine" | "team" | "all" | "org";
 
+/** List filter: chat modes plus SEO workspace (advisor + personal twin chats). */
+export type DtChatListMode = DtChatMode | "seo_workspace";
+
 const DT_CHAT_LIST_SELECT =
   "id,organisation_id,agent_id,mode,owner_user_id,title,archived_at,pinned,shared_to_team_at,created_at,updated_at";
 
@@ -83,12 +86,24 @@ export function dtChatVisibleOrFilter(userId: string, tablePrefix?: string): str
   ].join(",");
 }
 
+/**
+ * SEO workspace sidebar: SEO advisor chats + the user's own persona/twin chats.
+ * Twins are selectable in the SEO UI but created as mode=default.
+ */
+export function dtChatSeoWorkspaceOrFilter(userId: string, tablePrefix?: string): string {
+  const p = tablePrefix ? `${tablePrefix}.` : "";
+  return [
+    `${p}mode.eq.seo`,
+    `and(${p}mode.eq.default,${p}owner_user_id.eq.${userId},${p}legacy_session_id.is.null)`,
+  ].join(",");
+}
+
 export async function listDtChats(params: {
   organisationId: string;
   scope: DtChatListScope;
   userId: string;
   includeArchived?: boolean;
-  chatMode?: DtChatMode;
+  chatMode?: DtChatListMode;
   /** Platform-admin oversight: list any org member's chats. */
   adminOversight?: boolean;
   /** Filter chats by owner (personal chats of that user). */
@@ -102,8 +117,16 @@ export async function listDtChats(params: {
     .eq("organisation_id", params.organisationId)
     .order("updated_at", { ascending: false });
 
-  // SEO workspace: always isolate SEO chats (owner is typically null).
-  if (modeFilter === "seo") {
+  // SEO workspace: advisor chats + personal twin chats (selectable in that UI).
+  if (modeFilter === "seo_workspace") {
+    if (params.adminOversight && params.scope === "org") {
+      q = q.in("mode", ["seo", "default"]);
+      if (params.ownerUserId) q = q.eq("owner_user_id", params.ownerUserId);
+    } else {
+      q = q.or(dtChatSeoWorkspaceOrFilter(params.userId));
+    }
+  } else if (modeFilter === "seo") {
+    // SEO-only list (owner is typically null).
     q = q.eq("mode", "seo");
     if (params.adminOversight && params.scope === "org" && params.ownerUserId) {
       q = q.eq("owner_user_id", params.ownerUserId);

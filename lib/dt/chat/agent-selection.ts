@@ -5,8 +5,8 @@ import type { DtChatMode } from "@/lib/dt/types";
  * Agent and chat-mode rules for the chat shell.
  *
  * Kept outside the component so the SEO workspace rules stay testable:
- * the SEO area offers every agent, but only SEO advisor conversations
- * belong to the SEO chat list.
+ * the SEO area offers every agent. Twin chats are created as mode=default
+ * and appear in the SEO sidebar via the seo_workspace list filter.
  */
 export type DtSelectableAgent = {
   id: string;

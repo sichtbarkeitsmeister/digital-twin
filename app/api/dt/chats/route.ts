@@ -10,7 +10,7 @@ import type { DtChatMode } from "@/lib/dt/types";
 const listSchema = z.object({
   org: z.string().uuid(),
   scope: z.enum(["mine", "team", "all", "org"]).default("mine"),
-  mode: z.enum(["default", "seo", "team"]).optional(),
+  mode: z.enum(["default", "seo", "team", "seo_workspace"]).optional(),
   archived: z
     .string()
     .optional()
@@ -54,7 +54,7 @@ export async function GET(req: Request) {
     }
   }
 
-  if (parsed.data.mode === "seo") {
+  if (parsed.data.mode === "seo" || parsed.data.mode === "seo_workspace") {
     const gate = await requireDtSeoAccess(
       auth.supabase,
       auth.userId!,
