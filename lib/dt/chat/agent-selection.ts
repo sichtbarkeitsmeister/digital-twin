@@ -56,8 +56,8 @@ export function resolveChatModeForCreate(input: {
 }
 
 /**
- * In the SEO workspace advisor and twin conversations live in different lists,
- * so switching between them must open a fresh chat instead of moving the current one.
+ * Switching the selected agent must not reassign an existing chat.
+ * Each persona keeps its own conversations; open a fresh draft instead.
  */
 export function shouldStartNewChatOnAgentSwitch(input: {
   seoMode?: boolean;
@@ -65,8 +65,10 @@ export function shouldStartNewChatOnAgentSwitch(input: {
   activeChatMode?: DtChatMode | null;
   targetAgent: DtSelectableAgent;
 }): boolean {
-  if (!input.seoMode || !input.hasActiveChat) return false;
-  return isSeoAdvisorAgent(input.targetAgent) !== (input.activeChatMode === "seo");
+  void input.seoMode;
+  void input.activeChatMode;
+  void input.targetAgent;
+  return input.hasActiveChat;
 }
 
 /** The last-chat pointer is stored per area, based on the chat's own mode. */

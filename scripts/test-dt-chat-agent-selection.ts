@@ -67,7 +67,7 @@ function testChatModeForCreate() {
 }
 
 function testAgentSwitchStartsNewChat() {
-  // SEO chat open, twin picked → fresh chat instead of moving the SEO chat.
+  // Any open chat + agent switch → fresh chat (never reassign agent_id).
   assert.equal(
     shouldStartNewChatOnAgentSwitch({
       seoMode: true,
@@ -77,8 +77,6 @@ function testAgentSwitchStartsNewChat() {
     }),
     true,
   );
-
-  // Twin chat open, advisor picked → fresh chat as well.
   assert.equal(
     shouldStartNewChatOnAgentSwitch({
       seoMode: true,
@@ -88,8 +86,6 @@ function testAgentSwitchStartsNewChat() {
     }),
     true,
   );
-
-  // Twin to twin inside the SEO workspace keeps the chat.
   assert.equal(
     shouldStartNewChatOnAgentSwitch({
       seoMode: true,
@@ -97,24 +93,24 @@ function testAgentSwitchStartsNewChat() {
       activeChatMode: "default",
       targetAgent: peter,
     }),
-    false,
+    true,
+  );
+  assert.equal(
+    shouldStartNewChatOnAgentSwitch({
+      hasActiveChat: true,
+      activeChatMode: "default",
+      targetAgent: peter,
+    }),
+    true,
   );
 
-  // Without an open chat or outside the SEO workspace nothing special happens.
+  // Without an open chat nothing special happens.
   assert.equal(
     shouldStartNewChatOnAgentSwitch({
       seoMode: true,
       hasActiveChat: false,
       activeChatMode: null,
       targetAgent: benno,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldStartNewChatOnAgentSwitch({
-      hasActiveChat: true,
-      activeChatMode: "default",
-      targetAgent: peter,
     }),
     false,
   );
