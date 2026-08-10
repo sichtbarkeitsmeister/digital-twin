@@ -4,6 +4,7 @@ import {
   Bot,
   Globe,
   LineChart,
+  MessageSquareOff,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -112,6 +113,7 @@ function AgentActions(props: {
   canDisable: boolean;
   onStartEdit: () => void;
   onToggleEnabled: (next: boolean) => void;
+  onDeleteChats?: () => void;
   onDelete: () => void;
   onRequestChange: () => void;
   compact?: boolean;
@@ -160,6 +162,20 @@ function AgentActions(props: {
         <Pencil className="size-3.5" aria-hidden />
         {!props.compact ? "Bearbeiten" : null}
       </DtPillButton>
+      {props.onDeleteChats ? (
+        <DtPillButton
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={props.busy}
+          className="px-2.5 text-sbkm-ink-600 hover:bg-sbkm-navy/5 hover:text-sbkm-navy dark:text-white/55 dark:hover:bg-white/10 dark:hover:text-white"
+          onClick={props.onDeleteChats}
+          aria-label={`Chats von ${props.agent.name} löschen`}
+          title={`Chats von „${props.agent.name}" löschen`}
+        >
+          <MessageSquareOff className="size-4" aria-hidden />
+        </DtPillButton>
+      ) : null}
       {!props.alwaysOn ? (
         <DtPillButton
           type="button"
@@ -190,6 +206,7 @@ export function DtAgentListItem(props: {
   onSaveEdit: () => void;
   onCancelEdit: () => void;
   onToggleEnabled: (next: boolean) => void;
+  onDeleteChats?: () => void;
   onDelete: () => void;
   onRequestChange: () => void;
   canDisable: boolean;
@@ -282,6 +299,7 @@ export function DtAgentListItem(props: {
         canDisable={props.canDisable}
         onStartEdit={props.onStartEdit}
         onToggleEnabled={props.onToggleEnabled}
+        onDeleteChats={props.onDeleteChats}
         onDelete={props.onDelete}
         onRequestChange={props.onRequestChange}
         compact={props.compact}

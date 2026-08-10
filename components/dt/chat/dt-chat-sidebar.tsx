@@ -59,9 +59,12 @@ export function DtChatSidebar(props: {
   onSelectChat: (id: string) => void;
   onNewChat: () => void;
   onDeleteChat: (id: string) => void;
-  /** Wipe chats for the current org/context (header trash). */
+  /** Wipe chats for the currently selected agent only. */
   onDeleteAllChats?: () => void;
   deleteAllBusy?: boolean;
+  /** Disable header wipe when no agent is selected. */
+  deleteAllDisabled?: boolean;
+  deleteAllLabel?: string;
   onRenameChat: (chatId: string, title: string) => Promise<boolean>;
   onShareChat?: (chatId: string) => Promise<boolean>;
   currentUserId?: string | null;
@@ -326,12 +329,18 @@ export function DtChatSidebar(props: {
               <button
                 type="button"
                 onClick={props.onDeleteAllChats}
-                disabled={props.deleteAllBusy || props.chats.length === 0}
-                aria-label="Alle Chats löschen"
-                title="Alle Chats löschen"
+                disabled={
+                  props.deleteAllBusy ||
+                  props.deleteAllDisabled ||
+                  props.chats.length === 0
+                }
+                aria-label={props.deleteAllLabel ?? "Chats dieses Agenten löschen"}
+                title={props.deleteAllLabel ?? "Chats dieses Agenten löschen"}
                 className={cn(
                   "inline-grid h-7 w-7 place-items-center rounded-pill transition",
-                  props.chats.length === 0 || props.deleteAllBusy
+                  props.deleteAllBusy ||
+                    props.deleteAllDisabled ||
+                    props.chats.length === 0
                     ? "cursor-not-allowed text-sbkm-ink-500/40 dark:text-white/25"
                     : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30",
                 )}
