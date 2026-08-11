@@ -5,7 +5,10 @@ import { Check, ChevronDown, ClipboardList, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { cn } from "@/components/dt/cn";
-import type { SurveyExamQuestion } from "@/lib/dt/survey-exam-questions";
+import type {
+  SurveyExamAudience,
+  SurveyExamQuestion,
+} from "@/lib/dt/survey-exam-questions";
 
 export function DtPersonaTestingPanel(props: {
   agentId: string;
@@ -15,6 +18,7 @@ export function DtPersonaTestingPanel(props: {
   onPickQuestion: (question: string, expectedHint: string) => void;
 }) {
   const [questions, setQuestions] = useState<SurveyExamQuestion[]>([]);
+  const [audience, setAudience] = useState<SurveyExamAudience>("persona");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
@@ -24,6 +28,7 @@ export function DtPersonaTestingPanel(props: {
   useEffect(() => {
     if (!props.enabled) {
       setQuestions([]);
+      setAudience("persona");
       setError(null);
       setSentIds(new Set());
       setActiveHint(null);
@@ -44,6 +49,7 @@ export function DtPersonaTestingPanel(props: {
         const json = (await res.json()) as {
           ok?: boolean;
           available?: boolean;
+          audience?: SurveyExamAudience;
           questions?: SurveyExamQuestion[];
           message?: string;
         };
@@ -53,6 +59,7 @@ export function DtPersonaTestingPanel(props: {
           setError(json.message ?? "Prüfungsfragen konnten nicht geladen werden.");
           return;
         }
+        setAudience(json.audience === "company" ? "company" : "persona");
         setQuestions(json.questions ?? []);
         if (!json.available || !(json.questions?.length ?? 0)) {
           setError("Keine Prüfungsfragen aus der Umfrage abgeleitet.");
@@ -78,6 +85,7 @@ export function DtPersonaTestingPanel(props: {
   );
 
   const nextQuestion = openQuestions[0] ?? null;
+  const panelTitle = audience === "company" ? "Firmen-Prüffragen" : "Persona-Prüffragen";
 
   function pick(q: SurveyExamQuestion) {
     if (props.isBusy || props.disabled) return;
@@ -105,7 +113,7 @@ export function DtPersonaTestingPanel(props: {
         >
           <ClipboardList className="h-3.5 w-3.5 shrink-0 text-sbkm-navy dark:text-white" aria-hidden />
           <span className="truncate text-xs font-semibold text-sbkm-navy dark:text-white">
-            Prüfungsfragen
+            {panelTitle}
             {!loading && questions.length > 0 ? (
               <span className="font-medium text-sbkm-ink-500 dark:text-white/50">
                 {" "}
