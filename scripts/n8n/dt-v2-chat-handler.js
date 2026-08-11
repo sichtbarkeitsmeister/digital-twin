@@ -678,14 +678,10 @@ if (!ghostMode) {
   messageId = insertAssistant.data[0].id;
 }
 
+// Auto-title is owned by Next.js (`resolveDtAutoTitleAfterTurn`): at the latest
+// after the 2nd user message. Do not truncate-title here — that would lock the
+// chat name too early and block the AI title on the next turn.
 let title = null;
-if (!ghostMode && (chat.title === "Neuer Chat" || !String(chat.title || "").trim())) {
-  title = message.replace(/\s+/g, " ").slice(0, 60) || assistantText.slice(0, 60);
-  await supabaseFetch(`/rest/v1/dt_chats?id=eq.${chatId}`, {
-    method: "PATCH",
-    body: { title },
-  });
-}
 
 return [
   {

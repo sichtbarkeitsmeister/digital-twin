@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { extractAnthropicText } from "@/lib/ai/anthropic-helpers";
+import { fallbackDtChatTitle } from "@/lib/dt/chat-title";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import {
   getDtSitePageContent,
@@ -438,8 +439,7 @@ export async function callDtAnthropicChat(params: {
   };
 }
 
+/** Sync truncation fallback (migration / callers without Anthropic). Prefer `resolveDtAutoTitleAfterTurn`. */
 export function suggestChatTitle(userMessage: string, assistantMessage: string): string {
-  const raw = userMessage.trim() || assistantMessage.trim();
-  const oneLine = raw.replace(/\s+/g, " ").slice(0, 60);
-  return oneLine.length > 0 ? oneLine : "Neuer Chat";
+  return fallbackDtChatTitle(userMessage, assistantMessage);
 }
