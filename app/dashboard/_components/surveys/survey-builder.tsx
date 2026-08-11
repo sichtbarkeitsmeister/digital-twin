@@ -83,7 +83,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { SurveyAiAssistant } from "@/components/surveys/survey-ai-assistant";
 import { DtSelect } from "@/components/dt/dt-select";
 
 import { SurveyProgress } from "@/app/dashboard/_components/surveys/survey-progress";
@@ -2010,27 +2009,6 @@ export function SurveyBuilder({
           }}
         />
       ) : null}
-
-      <SurveyAiAssistant
-        title="KI Survey Assistant"
-        buildContext={() => {
-          const page = dbSurveyId
-            ? ("survey_builder_edit" as const)
-            : ("survey_builder_new" as const);
-          return {
-            mode: "builder" as const,
-            page,
-            surveyId: dbSurveyId,
-            visibility,
-            slug,
-            notificationEmails,
-            currentSurvey: survey,
-          };
-        }}
-        getContextSummary={(ctx) =>
-          `${ctx.page} | surveyId=${ctx.surveyId ?? "new"} | visibility=${ctx.visibility} | slug=${ctx.slug ?? "—"}`
-        }
-      />
     </div>
   );
 }

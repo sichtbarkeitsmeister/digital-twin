@@ -12,7 +12,6 @@ import { CreateSurveyFolderButton } from "@/app/dashboard/surveys/_components/cr
 import { DeleteSurveyFolderButton } from "@/app/dashboard/surveys/_components/delete-survey-folder-button";
 import { SurveyFolderAssignmentMenu } from "@/app/dashboard/surveys/_components/survey-folder-assignment-menu";
 import { SurveyImportButton } from "@/app/dashboard/surveys/_components/survey-import-button";
-import { SurveysAiAssistant } from "@/app/dashboard/surveys/_components/surveys-ai-assistant";
 import { SurveysToolbar } from "@/app/dashboard/surveys/_components/surveys-toolbar";
 import { SurveyRowActions } from "@/app/dashboard/surveys/_components/survey-row-actions";
 
@@ -505,16 +504,6 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
           ) : null}
         </CardContent>
       </Card>
-      <SurveysAiAssistant
-        surveys={(surveys ?? []).map((s) => ({
-          id: s.id,
-          title: s.title,
-          description: s.description ?? "",
-          visibility: s.visibility,
-          folderId: s.folder_id ?? null,
-        }))}
-        folders={(folders ?? []).map((f) => ({ id: f.id, name: f.name }))}
-      />
     </div>
   );
 }

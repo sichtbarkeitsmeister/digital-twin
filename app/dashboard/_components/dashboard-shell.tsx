@@ -1,4 +1,5 @@
 import type * as React from "react";
+import { Suspense } from "react";
 
 import { DashboardPrefetcher } from "@/app/dashboard/_components/dashboard-prefetcher";
 import { DashboardHeaderProvider } from "@/app/dashboard/_components/dashboard-header-slot";
@@ -6,6 +7,7 @@ import { DashboardLogoLink } from "@/app/dashboard/_components/dashboard-logo-li
 import { DashboardSidebar } from "@/app/dashboard/_components/dashboard-sidebar";
 import { DashboardMainArea } from "@/app/dashboard/_components/dashboard-main-area";
 import { DashboardTopBar } from "@/app/dashboard/_components/dashboard-top-bar";
+import { DashboardStickySurveyAiAssistant } from "@/app/dashboard/_components/dashboard-sticky-survey-ai-assistant";
 import { DtPageShell } from "@/components/dt/dt-page-shell";
 
 export function DashboardShell({
@@ -58,6 +60,12 @@ export function DashboardShell({
       </div>
 
       <DashboardPrefetcher isPlatformAdmin={isPlatformAdmin} />
+
+      {isPlatformAdmin ? (
+        <Suspense fallback={null}>
+          <DashboardStickySurveyAiAssistant />
+        </Suspense>
+      ) : null}
     </DtPageShell>
   );
 }

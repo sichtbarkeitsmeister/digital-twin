@@ -7,7 +7,6 @@ import { LayoutGroup } from "framer-motion";
 import { FileSearch, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 
-import { DtAgentsAiAssistant } from "@/components/dt/agents/dt-agents-ai-assistant";
 import { DtAgentEditRequestModal } from "@/components/dt/agents/dt-agent-edit-request-modal";
 import {
   DtAgentEditRequestsPanel,
@@ -704,10 +703,6 @@ export function DtAgentsManager(props: {
           void refresh(true);
         }}
       />
-
-      {canDirectlyEdit && orgId ? (
-        <DtAgentsAiAssistant organisationId={orgId} agentId={editingId} />
-      ) : null}
     </div>
   );
 }
