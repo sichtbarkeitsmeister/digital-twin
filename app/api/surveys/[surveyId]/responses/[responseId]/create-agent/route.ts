@@ -68,13 +68,17 @@ export async function POST(
   }
 
   const agent = parsed.data.agent;
+  const avatarPart = agent.prompt_template.trim();
   const { agentId, error } = await createDtPersonaAgent({
     organisationId: parsed.data.organisationId,
     payload: {
       name: agent.name,
       role: agent.role,
       slug: agent.slug,
-      prompt_template: agent.prompt_template,
+      // Stub kept for UI/fallback; live rules come from global DigitalTwin prompt.
+      prompt_template: `Avatar: ${agent.name}`,
+      prompt_append: avatarPart,
+      uses_global_prompt: true,
       avatar_data: agent.avatar_data,
       quick_actions: agent.quick_actions ?? [],
       source_survey_id: surveyId,

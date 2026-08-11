@@ -257,11 +257,12 @@ export async function loadDtAgentContextBundle(input: {
     sections.push(
       section({
         id: "prompt_append",
-        title: "Zusätzliche Anweisungen",
+        title: prospect ? "Avatar-spezifisch" : "Zusätzliche Anweisungen",
         sourceLabel: "Agent",
         sourceType: "agent",
-        description:
-          "Organisationsspezifische Ergänzungen, die auf dem Basis-Prompt aufsetzen.",
+        description: prospect
+          ? "Persönlichkeit, Situation und Sprachstil dieses Wunschkunden (zusätzlich zum globalen DigitalTwin-Prompt)."
+          : "Organisationsspezifische Ergänzungen, die auf dem Basis-Prompt aufsetzen.",
         content: promptAppend,
         editHref: agentsEditHref,
       }),
@@ -270,11 +271,12 @@ export async function loadDtAgentContextBundle(input: {
     sections.push(
       section({
         id: "prompt_append",
-        title: "Zusätzliche Anweisungen",
+        title: prospect ? "Avatar-spezifisch" : "Zusätzliche Anweisungen",
         sourceLabel: "Agent",
         sourceType: "agent",
-        description:
-          "Organisationsspezifische Ergänzungen — aktuell leer.",
+        description: prospect
+          ? "Avatar-spezifischer Teil — aktuell leer."
+          : "Organisationsspezifische Ergänzungen — aktuell leer.",
         content: "",
         isEmpty: true,
         editHref: agentsEditHref,

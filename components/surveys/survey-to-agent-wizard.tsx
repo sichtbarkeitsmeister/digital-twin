@@ -1174,11 +1174,16 @@ export function SurveyToAgentWizard(props: {
                 </div>
                 <div className="grid gap-2 sm:col-span-2">
                   <div className="flex items-center justify-between gap-2">
-                    <Label htmlFor="agent-prompt">Persona-Prompt</Label>
+                    <Label htmlFor="agent-prompt">Avatar-spezifischer Teil</Label>
                     <span className="text-xs tabular-nums text-secondary">
                       {promptChars.toLocaleString("de-DE")} Zeichen
                     </span>
                   </div>
+                  <p className="text-xs text-secondary">
+                    Wird beim Anlegen an den globalen DigitalTwin-Prompt gehängt (Interessent /
+                    Pre-Sale). Hier nur Persönlichkeit, Situation und Sprachstil — keine
+                    Firmen-Enzyklopädie.
+                  </p>
                   <Textarea
                     id="agent-prompt"
                     value={preview.prompt_template}
@@ -1263,12 +1268,17 @@ export function SurveyToAgentWizard(props: {
               </CardHeader>
               <CardContent className="grid gap-4">
                 {usesGlobalPrompt ? (
-                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
-                    Dieser Agent nutzte einen globalen Basis-Prompt. Beim Übernehmen wird
-                    der organisations-spezifische Prompt aktualisiert und die globale
-                    Synchronisation deaktiviert.
+                  <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-200">
+                    Dieser Agent nutzt den globalen DigitalTwin-Prompt. Verfeinert wird nur der
+                    avatar-spezifische Teil — die globale Synchronisation bleibt aktiv.
                   </p>
-                ) : null}
+                ) : (
+                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+                    Dieser Agent hatte noch keinen globalen DigitalTwin-Prompt. Beim Übernehmen
+                    wird der Text als avatar-spezifischer Teil gespeichert und an den globalen
+                    Wunschkunden-Prompt gehängt.
+                  </p>
+                )}
 
                 <div className="flex flex-wrap gap-2">
                   {refinePreview.changed_sections.map((section) => (

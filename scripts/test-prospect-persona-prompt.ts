@@ -4,16 +4,18 @@ import {
   buildDtSystemPrompt,
   isProspectPersonaKind,
 } from "../lib/dt/prompts/build-system-prompt";
+import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "../lib/dt/prompts/digital-twin-global-prompt";
 import {
   DEFAULT_SURVEY_REFINE_AGENT_GLOBAL_PROMPT,
   DEFAULT_SURVEY_TO_AGENT_GLOBAL_PROMPT,
 } from "../lib/dt/survey-agent-global-prompts";
+import { resolveAvatarSpecificPrompt } from "../lib/dt/survey-to-agent-service";
 
 function testKindDetection() {
   assert.equal(isProspectPersonaKind("wunschkunde"), true);
   assert.equal(isProspectPersonaKind("persona", "joachim"), true);
   assert.equal(isProspectPersonaKind("persona", "preview_persona"), true);
-  assert.equal(isProspectPersonaKind("persona", "default"), false);
+  assert.equal(isProspectPersonaKind("persona", "default"), true);
   assert.equal(isProspectPersonaKind("seo_advisor"), false);
   assert.equal(isProspectPersonaKind("persona"), true);
   console.log("kind detection: ok");
@@ -24,8 +26,12 @@ function testProspectPromptOmitsBrandEncyclopedia() {
     agent: {
       name: "Joachim",
       role: "Angehöriger / Außerklinische Intensivpflege",
-      prompt_template:
-        "## WAS DU KANNST\nDu erklärst Ayags und nennst die Website https://example.com",
+      prompt_template: DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT.replace(
+        /\{\{\s*organisation\s*\}\}/gi,
+        "Intensivpflege Ayags GmbH",
+      ),
+      prompt_append:
+        "## DEINE SITUATION\nIch suche Unterstützung für die Pflege zuhause.",
       kind: "persona",
       slug: "joachim",
     },
@@ -39,19 +45,22 @@ function testProspectPromptOmitsBrandEncyclopedia() {
 
   assert.match(prompt, /Interessent \/ Wunschkunde/);
   assert.match(prompt, /Rollen-Ausrichtung \(verbindlich/);
-  assert.match(prompt, /kein Markenbotschafter/i);
+  assert.match(prompt, /## Avatar-spezifisch/);
+  assert.match(prompt, /Pre-Sale/);
   assert.doesNotMatch(prompt, /^Website: https:\/\/www\.intensivpflege-ayags\.de\./m);
   assert.doesNotMatch(prompt, /Fokus-Keyword: Intensivpflege Hamm/);
-  assert.match(prompt, /Interessenten-\/Wunschkunden-Persona/);
   console.log("prospect prompt framing: ok");
 }
 
-function testDefaultTwinKeepsOrgMetadata() {
+function testDefaultTwinIsAlsoProspect() {
   const prompt = buildDtSystemPrompt({
     agent: {
       name: "DigitalTwin",
-      role: "Assistent",
-      prompt_template: "Du hilfst dem Team.",
+      role: "Standard-Avatar",
+      prompt_template: DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT.replace(
+        /\{\{\s*organisation\s*\}\}/gi,
+        "Intensivpflege Ayags GmbH",
+      ),
       kind: "persona",
       slug: "default",
     },
@@ -63,27 +72,46 @@ function testDefaultTwinKeepsOrgMetadata() {
     mode: "default",
   });
 
-  assert.match(prompt, /Website: https:\/\/www\.intensivpflege-ayags\.de/);
-  assert.match(prompt, /Fokus-Keyword: Intensivpflege Hamm/);
-  assert.doesNotMatch(prompt, /Rollen-Ausrichtung \(verbindlich/);
-  assert.match(prompt, /DigitalTwin-Assistent/);
-  console.log("default twin keeps org metadata: ok");
+  assert.doesNotMatch(prompt, /^Website: https:\/\/www\.intensivpflege-ayags\.de\./m);
+  assert.match(prompt, /Rollen-Ausrichtung \(verbindlich/);
+  assert.match(prompt, /Interessenten-\/Wunschkunden-Persona/);
+  console.log("default twin is prospect: ok");
 }
 
-function testSurveyDefaultsMentionProspectRules() {
-  assert.match(DEFAULT_SURVEY_TO_AGENT_GLOBAL_PROMPT, /Rollen-Ausrichtung/);
+function testSurveyDefaultsAreAvatarSpecific() {
+  assert.match(DEFAULT_SURVEY_TO_AGENT_GLOBAL_PROMPT, /avatar-spezifischen Teil/);
+  assert.match(DEFAULT_SURVEY_TO_AGENT_GLOBAL_PROMPT, /Pre-Sale/);
   assert.match(DEFAULT_SURVEY_TO_AGENT_GLOBAL_PROMPT, /kein Markenbotschafter/i);
-  assert.match(
-    DEFAULT_SURVEY_TO_AGENT_GLOBAL_PROMPT,
-    /Fragen, die der Mitarbeiter an die Persona stellen würde/,
-  );
+  assert.match(DEFAULT_SURVEY_REFINE_AGENT_GLOBAL_PROMPT, /avatar-spezifischen Teil/);
   assert.match(DEFAULT_SURVEY_REFINE_AGENT_GLOBAL_PROMPT, /Markenbotschafter/);
-  assert.match(DEFAULT_SURVEY_REFINE_AGENT_GLOBAL_PROMPT, /Interessent zurück/);
-  console.log("survey default prompts: ok");
+  assert.match(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT, /WER MIT DIR SPRICHT/);
+  assert.match(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT, /Pre-Sale/);
+  console.log("survey + digital twin defaults: ok");
+}
+
+function testResolveAvatarSpecificPrompt() {
+  assert.equal(
+    resolveAvatarSpecificPrompt({
+      uses_global_prompt: true,
+      prompt_template: "stub",
+      prompt_append: "Ich bin Joachim und unsicher.",
+    }),
+    "Ich bin Joachim und unsicher.",
+  );
+  assert.equal(
+    resolveAvatarSpecificPrompt({
+      uses_global_prompt: false,
+      prompt_template: "Vollständiger Solo-Prompt",
+      prompt_append: null,
+    }),
+    "Vollständiger Solo-Prompt",
+  );
+  console.log("resolve avatar-specific prompt: ok");
 }
 
 testKindDetection();
 testProspectPromptOmitsBrandEncyclopedia();
-testDefaultTwinKeepsOrgMetadata();
-testSurveyDefaultsMentionProspectRules();
+testDefaultTwinIsAlsoProspect();
+testSurveyDefaultsAreAvatarSpecific();
+testResolveAvatarSpecificPrompt();
 console.log("all prospect persona prompt tests passed");

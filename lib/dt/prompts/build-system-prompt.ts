@@ -26,16 +26,14 @@ export type DtPromptOrg = {
 };
 
 /**
- * Interviewed prospect (Wunschkunde / Umfrage-Persona), not staff voice.
- * Excludes the org DigitalTwin (`slug=default`, kind persona).
+ * Interviewed prospect (Wunschkunde / Umfrage-Persona / Default-DigitalTwin).
+ * Not staff/SEO voice — matches the global DigitalTwin Wunschkunden-Prompt.
  */
 export function isProspectPersonaKind(
   kind?: string | null,
-  slug?: string | null,
+  _slug?: string | null,
 ): boolean {
-  if (kind === "wunschkunde") return true;
-  if (kind === "persona" && slug !== "default") return true;
-  return false;
+  return kind === "wunschkunde" || kind === "persona";
 }
 
 function buildProspectStaticSystemText(): string {
@@ -95,7 +93,11 @@ export function buildDtSystemPrompt(input: {
   ];
 
   if (input.agent.prompt_append?.trim()) {
-    blocks.push("", "## Zusätzliche Anweisungen", input.agent.prompt_append.trim());
+    blocks.push(
+      "",
+      prospect ? "## Avatar-spezifisch" : "## Zusätzliche Anweisungen",
+      input.agent.prompt_append.trim(),
+    );
   }
 
   // After persona text so a mis-generated "brand ambassador" prompt cannot win.

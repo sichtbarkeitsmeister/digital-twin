@@ -33,6 +33,17 @@ import {
 } from "@/lib/dt/survey-to-agent-prompt";
 import { generateSurveyAgentRefinement } from "@/lib/dt/survey-refine-agent-prompt";
 
+/** Avatar-specific text: prompt_append when on global DigitalTwin, else full prompt. */
+export function resolveAvatarSpecificPrompt(agent: {
+  prompt_template?: string | null;
+  prompt_append?: string | null;
+  uses_global_prompt?: boolean | null;
+}): string {
+  const append = agent.prompt_append?.trim() ?? "";
+  if (agent.uses_global_prompt && append) return append;
+  return agent.prompt_template?.trim() || append;
+}
+
 async function buildSurveyContextWithOptionalClarifications(input: {
   surveyId: string;
   responseId: string;
@@ -349,7 +360,9 @@ export async function startAgentGenerationBatchFromSurvey(input: {
 
     const { data: agent } = await supabase
       .from("dt_agents")
-      .select("id, name, role, kind, slug, prompt_template, uses_global_prompt, organisation_id")
+      .select(
+        "id, name, role, kind, slug, prompt_template, prompt_append, uses_global_prompt, organisation_id",
+      )
       .eq("id", input.agentId)
       .maybeSingle();
 
@@ -364,7 +377,7 @@ export async function startAgentGenerationBatchFromSurvey(input: {
       agentName: agent.name,
       agentRole: agent.role,
       agentKind: agent.kind,
-      currentPromptTemplate: agent.prompt_template,
+      currentPromptTemplate: resolveAvatarSpecificPrompt(agent),
       usesGlobalPrompt: Boolean(agent.uses_global_prompt),
       extraRules: input.extraRules,
     });
@@ -512,7 +525,9 @@ export async function pollAgentGenerationBatchFromSurvey(input: {
 
   const { data: agent } = await supabase
     .from("dt_agents")
-    .select("id, name, role, kind, slug, prompt_template, uses_global_prompt, organisation_id")
+    .select(
+      "id, name, role, kind, slug, prompt_template, prompt_append, uses_global_prompt, organisation_id",
+    )
     .eq("id", input.agentId)
     .maybeSingle();
 
@@ -525,7 +540,7 @@ export async function pollAgentGenerationBatchFromSurvey(input: {
     status: "ready" as const,
     mode: "refine" as const,
     refinement: polled.refinement,
-    currentPrompt: agent.prompt_template,
+    currentPrompt: resolveAvatarSpecificPrompt(agent),
     usesGlobalPrompt: Boolean(agent.uses_global_prompt),
     agent: {
       id: agent.id,
@@ -572,7 +587,9 @@ export async function generateAgentRefinementFromSurvey(input: {
 
   const { data: agent } = await supabase
     .from("dt_agents")
-    .select("id, name, role, kind, slug, prompt_template, uses_global_prompt, organisation_id")
+    .select(
+      "id, name, role, kind, slug, prompt_template, prompt_append, uses_global_prompt, organisation_id",
+    )
     .eq("id", input.agentId)
     .maybeSingle();
 
@@ -601,7 +618,7 @@ export async function generateAgentRefinementFromSurvey(input: {
     agentName: agent.name,
     agentRole: agent.role,
     agentKind: agent.kind,
-    currentPromptTemplate: agent.prompt_template,
+    currentPromptTemplate: resolveAvatarSpecificPrompt(agent),
     usesGlobalPrompt: Boolean(agent.uses_global_prompt),
     extraRules: input.extraRules,
   });
@@ -649,7 +666,7 @@ export async function applyAgentRefinementFromSurvey(input: {
   const supabase = createServiceClient();
   const { data: agent } = await supabase
     .from("dt_agents")
-    .select("id, organisation_id, uses_global_prompt")
+    .select("id, organisation_id, uses_global_prompt, prompt_append")
     .eq("id", input.agentId)
     .maybeSingle();
 
@@ -657,14 +674,18 @@ export async function applyAgentRefinementFromSurvey(input: {
     return { ok: false as const, status: 404, message: "Agent nicht gefunden." };
   }
 
+  const avatarPart = input.promptTemplate.trim();
+
+  // Keep / attach global DigitalTwin rules; survey output is avatar-specific.
   const patch: Record<string, unknown> = {
-    prompt_template: input.promptTemplate,
+    prompt_append: avatarPart,
+    uses_global_prompt: true,
     source_survey_id: input.surveyId,
     source_survey_response_id: input.responseId,
   };
-
-  if (agent.uses_global_prompt) {
-    patch.uses_global_prompt = false;
+  // If the agent previously had a full standalone prompt, leave a short stub.
+  if (!agent.uses_global_prompt) {
+    patch.prompt_template = "Avatar-spezifischer Teil in den zusätzlichen Anweisungen.";
   }
 
   const { ok, error } = await updateDtAgent({

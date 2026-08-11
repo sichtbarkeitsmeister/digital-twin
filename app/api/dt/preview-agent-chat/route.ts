@@ -5,6 +5,7 @@ import { callDtAnthropicChat } from "@/lib/dt/anthropic-chat";
 import { requireAuthUser } from "@/lib/dt/db";
 import { canManageDtAgents } from "@/lib/dt/org-access";
 import { buildDtSystemPrompt } from "@/lib/dt/prompts/build-system-prompt";
+import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "@/lib/dt/prompts/digital-twin-global-prompt";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -64,16 +65,33 @@ export async function POST(req: Request) {
     .eq("id", parsed.data.organisationId)
     .maybeSingle();
 
+  const orgName =
+    orgConfig?.display_name?.trim() || org?.name || parsed.data.name;
+
+  const { data: defaultTpl } = await auth.supabase
+    .from("dt_agent_templates")
+    .select("default_prompt")
+    .eq("slug", "default")
+    .maybeSingle();
+  const globalTwin =
+    defaultTpl?.default_prompt?.trim() || DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT;
+  const resolvedGlobal = globalTwin.replace(
+    /\{\{\s*organisation\s*\}\}/gi,
+    orgName,
+  );
+
+  // Preview mirrors saved agents: global DigitalTwin rules + avatar-specific part.
   const system = buildDtSystemPrompt({
     agent: {
       name: parsed.data.name,
       role: parsed.data.role?.trim() || null,
-      prompt_template: parsed.data.promptTemplate,
+      prompt_template: resolvedGlobal,
+      prompt_append: parsed.data.promptTemplate,
       kind: "persona",
       slug: "preview_persona",
     },
     org: {
-      display_name: orgConfig?.display_name?.trim() || org?.name || parsed.data.name,
+      display_name: orgName,
       website_url: orgConfig?.website_url,
     },
     mode: "ghost",
