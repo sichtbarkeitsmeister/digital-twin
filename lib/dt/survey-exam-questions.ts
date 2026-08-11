@@ -161,14 +161,34 @@ export function extractConcreteFactSlices(value: string): FactSlice[] {
     if (key) push(key, label, val);
   }
 
-  // Slash- or semicolon-separated "Label: value" chunks on one line
-  for (const part of text.split(/\s*[|;/]\s*/)) {
-    const m = part.match(/^(.{2,40}?)\s*[:：]\s*(.+)$/);
-    if (!m) continue;
-    const label = m[1]!.trim();
-    const val = m[2]!.trim();
-    const key = classifySliceLabel(label);
-    if (key) push(key, label, val);
+  // Slash-, semicolon- or comma-separated "Label: value" / "Label value" chunks
+  for (const part of text.split(/\s*[|;/]\s*|\s*,\s+/)) {
+    const chunk = part.trim();
+    if (!chunk) continue;
+    const withColon = chunk.match(/^(.{2,40}?)\s*[:：]\s*(.+)$/);
+    if (withColon) {
+      const label = withColon[1]!.trim();
+      const val = withColon[2]!.trim();
+      const key = classifySliceLabel(label);
+      if (key) push(key, label, val);
+      continue;
+    }
+    const agePart = chunk.match(/^alter(?:sgruppe)?\s+(.+)$/i);
+    if (agePart?.[1]) {
+      push("age", "Alter", agePart[1].trim());
+      continue;
+    }
+    const sizePart = chunk.match(
+      /^(?:praxisgröße|praxisgroesse|behandler|mitarbeiter|teamgröße|teamgroesse)\s+(.+)$/i,
+    );
+    if (sizePart?.[1]) {
+      push("size", "Praxisgröße", sizePart[1].trim());
+      continue;
+    }
+    const focusPart = chunk.match(/^(?:schwerpunkt(?:e)?|spezialisierung(?:en)?)\s+(.+)$/i);
+    if (focusPart?.[1]) {
+      push("focus", "Schwerpunkte", focusPart[1].trim());
+    }
   }
 
   // Inline patterns when labels are missing
