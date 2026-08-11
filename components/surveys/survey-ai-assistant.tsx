@@ -8,11 +8,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SurveyAiChatShell } from "@/components/surveys/survey-ai-chat-shell";
 
 type PageContext = {
-  page: "survey_list" | "survey_builder_new" | "survey_builder_edit";
+  page:
+    | "survey_list"
+    | "survey_builder_new"
+    | "survey_builder_edit"
+    | "dt_agents"
+    | "survey_to_agent";
   surveyId: string | null;
   visibility?: "private" | "public";
   slug?: string | null;
   notificationEmails?: string[];
+  organisationId?: string | null;
+  agentId?: string | null;
 };
 
 type Props<TContext extends PageContext> = {

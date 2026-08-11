@@ -47,6 +47,7 @@ import {
 } from "@/lib/ai/survey-model-config";
 import { runMultiPhaseSurveyCreation } from "@/lib/ai/survey-multiphase-create";
 import { buildQuestionnairePasteProposal } from "@/lib/ai/survey-markdown-paste";
+import { loadDtAgentsForSurveyAssistant } from "@/lib/ai/load-dt-agents-for-survey-assistant";
 import {
   describeSurveyProposalValidationError,
   normalizeSurveyAiProposalInput,
@@ -92,11 +93,19 @@ const requestSchema = z
         `Nachricht zu lang (max. ${SURVEY_AI_MAX_MESSAGE_CHARS.toLocaleString("de-DE")} Zeichen). Bitte kürzen oder als Datei anhängen.`,
       ),
     pageContext: z.object({
-      page: z.enum(["survey_list", "survey_builder_new", "survey_builder_edit"]),
+      page: z.enum([
+        "survey_list",
+        "survey_builder_new",
+        "survey_builder_edit",
+        "dt_agents",
+        "survey_to_agent",
+      ]),
       surveyId: z.string().uuid().nullable().optional(),
       visibility: z.enum(["private", "public"]).optional(),
       slug: z.string().nullable().optional(),
       notificationEmails: z.array(z.string()).optional(),
+      organisationId: z.string().uuid().nullable().optional(),
+      agentId: z.string().uuid().nullable().optional(),
     }),
     attachments: z.array(attachmentInboundSchema).optional().default([]),
   })
@@ -860,7 +869,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
     const { data: surveys } = await auth.supabase
       .from("surveys")
-      .select("id,title,description,visibility,folder_id,updated_at")
+      .select("id,title,description,visibility,folder_id,organisation_id,updated_at")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .limit(SURVEY_RANK_POOL);
@@ -972,6 +981,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       description: string | null;
       visibility: "private" | "public";
       folder_id: string | null;
+      organisation_id: string | null;
       updated_at: string;
     };
 
@@ -1034,6 +1044,19 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     emit("status", { message: "Ich bereite den Kontext vor..." });
     const pastedWebsiteContent = await buildPastedUrlContextText(parsed.data.content);
 
+    const surveyOrgIds = rankedSurveys
+      .slice(0, MAX_KNOWN_SURVEYS)
+      .map((s: SurveyRankRow) => s.organisation_id)
+      .filter((id): id is string => Boolean(id));
+
+    const { knownAgents, focusedAgentPrompts } = await loadDtAgentsForSurveyAssistant({
+      supabase: auth.supabase,
+      organisationId: parsed.data.pageContext.organisationId ?? null,
+      agentId: parsed.data.pageContext.agentId ?? null,
+      surveyOrganisationIds: surveyOrgIds,
+      userMessage: parsed.data.content,
+    });
+
     const systemPromptInput: SurveyChatSystemPromptInput = {
       globalUserRules: globalAssistantRules,
       chatUserRules: assistantRulesFromChat,
@@ -1043,6 +1066,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         visibility: parsed.data.pageContext.visibility,
         slug: parsed.data.pageContext.slug,
         notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
+        organisationId: parsed.data.pageContext.organisationId ?? null,
+        agentId: parsed.data.pageContext.agentId ?? null,
       },
       surveys: rankedSurveys
         .filter((s: SurveyRankRow & { score: number }) => knownSurveyIds.has(s.id))
@@ -1078,6 +1103,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           return base;
         },
       ),
+      knownAgents,
+      focusedAgentPrompts,
       attachmentSummaries: attachmentSummaries.map(
         (a) => `${a.fileName} (${a.mimeType}, ${a.sizeBytes} bytes)`,
       ),

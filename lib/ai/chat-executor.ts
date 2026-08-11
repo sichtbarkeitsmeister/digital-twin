@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { SurveyAiProposal } from "@/lib/ai/survey-assistant-types";
 import { applySurveyPatchOperations } from "@/lib/ai/survey-patch";
 import { validateUniqueSurveyIds } from "@/lib/ai/survey-id-guards";
+import { updateDtAgent } from "@/lib/dt/db";
 import {
   assignSurveyFolderAction,
   createSurveyFolderAction,
@@ -319,6 +320,70 @@ async function applyNonBatchSurveyProposal(proposal: NonBatchSurveyProposal): Pr
     };
   }
 
+  if (proposal.kind === "edit_dt_agent_prompt") {
+    const supabase = await createClient();
+    const { data: agent } = await supabase
+      .from("dt_agents")
+      .select(
+        "id, organisation_id, name, slug, prompt_template, prompt_append, uses_global_prompt",
+      )
+      .eq("id", proposal.agentId)
+      .maybeSingle();
+
+    if (!agent) {
+      return { ok: false, message: "Agent nicht gefunden." };
+    }
+    if (
+      proposal.organisationId &&
+      proposal.organisationId !== agent.organisation_id
+    ) {
+      return { ok: false, message: "Agent gehört nicht zur angegebenen Organisation." };
+    }
+
+    const target = proposal.target ?? "prompt_template";
+    const previousPromptTemplate = agent.prompt_template ?? "";
+    const previousPromptAppend = agent.prompt_append ?? null;
+    const previousUsesGlobal = Boolean(agent.uses_global_prompt);
+
+    const patch: Record<string, unknown> =
+      target === "prompt_append"
+        ? { prompt_append: proposal.prompt }
+        : {
+            prompt_template: proposal.prompt,
+            // Standalone prompt edit: leave global sync as-is unless target is template
+            // while agent was global — then keep append and turn sync off so the new body wins.
+            ...(previousUsesGlobal
+              ? { uses_global_prompt: false }
+              : {}),
+          };
+
+    const { ok, error } = await updateDtAgent({
+      agentId: proposal.agentId,
+      patch,
+    });
+    if (!ok) {
+      return {
+        ok: false,
+        message: error ?? "Agent-Prompt konnte nicht gespeichert werden.",
+      };
+    }
+
+    const label = proposal.agentName?.trim() || agent.name;
+    return {
+      ok: true,
+      message: `Prompt von „${label}“ aktualisiert.`,
+      navigateTo: `/dashboard/verwaltung/agents?org=${encodeURIComponent(agent.organisation_id)}`,
+      revertPayload: {
+        kind: "revert_dt_agent_prompt",
+        agentId: proposal.agentId,
+        previousPromptTemplate,
+        previousPromptAppend,
+        previousUsesGlobalPrompt: previousUsesGlobal,
+        target,
+      },
+    };
+  }
+
   return { ok: false, message: "Dieser Vorschlag kann serverseitig nicht ausgeführt werden." };
 }
 
@@ -560,6 +625,44 @@ export async function revertSurveyProposal(
       name: payload.previousName,
     });
     return { ok: res.ok, message: res.message };
+  }
+
+  if (kind === "revert_dt_agent_prompt" && typeof payload.agentId === "string") {
+    const previousTemplate =
+      typeof payload.previousPromptTemplate === "string"
+        ? payload.previousPromptTemplate
+        : "";
+    const previousAppend =
+      typeof payload.previousPromptAppend === "string"
+        ? payload.previousPromptAppend
+        : payload.previousPromptAppend === null
+          ? null
+          : undefined;
+    const previousUsesGlobal =
+      typeof payload.previousUsesGlobalPrompt === "boolean"
+        ? payload.previousUsesGlobalPrompt
+        : undefined;
+
+    const patch: Record<string, unknown> = {
+      prompt_template: previousTemplate,
+    };
+    if (previousAppend !== undefined) {
+      patch.prompt_append = previousAppend;
+    }
+    if (previousUsesGlobal !== undefined) {
+      patch.uses_global_prompt = previousUsesGlobal;
+    }
+
+    const { ok, error } = await updateDtAgent({
+      agentId: payload.agentId,
+      patch,
+    });
+    return {
+      ok,
+      message: ok
+        ? "Agent-Prompt wurde zurückgesetzt."
+        : (error ?? "Revert des Agent-Prompts fehlgeschlagen."),
+    };
   }
 
   return { ok: false, message: "Kein gültiger Revert-Payload vorhanden." };
