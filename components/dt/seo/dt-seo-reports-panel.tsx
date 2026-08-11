@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, Loader2, Mail, Square, X } from "lucide-react";
+import { ChevronRight, Loader2, Mail, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
@@ -45,6 +45,7 @@ export function DtSeoReportsPanel(props: {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sendToOwner, setSendToOwner] = useState(false);
   const [reportRecipientEmail, setReportRecipientEmail] = useState<string | null>(null);
@@ -189,6 +190,27 @@ export function DtSeoReportsPanel(props: {
     }
     toast.success("Report abgebrochen.");
     if (activeId === reportId) setActiveId(null);
+    await refresh();
+  }
+
+  async function deleteReport(reportId: string) {
+    if (!window.confirm("Report wirklich löschen? Das kann nicht rückgängig gemacht werden.")) {
+      return;
+    }
+    setDeletingId(reportId);
+    const res = await fetch(`/api/dt/seo/reports/${encodeURIComponent(reportId)}`, {
+      method: "DELETE",
+    });
+    const json = (await res.json()) as { ok?: boolean; message?: string };
+    setDeletingId(null);
+    if (!json.ok) {
+      toast.error(json.message ?? "Report konnte nicht gelöscht werden.");
+      await refresh();
+      return;
+    }
+    toast.success("Report gelöscht.");
+    if (activeId === reportId) setActiveId(null);
+    setReports((prev) => prev.filter((r) => r.id !== reportId));
     await refresh();
   }
 
@@ -389,7 +411,7 @@ export function DtSeoReportsPanel(props: {
                   {inProgress && props.canTrigger ? (
                     <button
                       type="button"
-                      disabled={stoppingId === r.id}
+                      disabled={stoppingId === r.id || deletingId === r.id}
                       onClick={() => void stopReport(r.id)}
                       className="inline-flex items-center gap-1.5 rounded-pill border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors duration-150 hover:bg-red-100 disabled:opacity-60 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
                     >
@@ -399,6 +421,22 @@ export function DtSeoReportsPanel(props: {
                         <Square className="h-3.5 w-3.5 fill-current" aria-hidden />
                       )}
                       Stoppen
+                    </button>
+                  ) : null}
+                  {props.canTrigger ? (
+                    <button
+                      type="button"
+                      disabled={deletingId === r.id || stoppingId === r.id}
+                      onClick={() => void deleteReport(r.id)}
+                      aria-label="Report löschen"
+                      title="Löschen"
+                      className="inline-flex items-center justify-center rounded-pill border border-red-300/80 bg-white p-1.5 text-red-600 transition-colors duration-150 hover:bg-red-50 disabled:opacity-60 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/60"
+                    >
+                      {deletingId === r.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                      )}
                     </button>
                   ) : null}
                   <Badge variant={reportBadgeVariant(r.state)}>{reportStateLabel(r.state)}</Badge>
