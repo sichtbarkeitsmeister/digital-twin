@@ -179,9 +179,15 @@ const personaQs = buildSurveyExamQuestions(dentalFacts.facts, {
 });
 
 assert.ok(personaQs.some((q) => /wie heißt du/i.test(q.question)));
-assert.ok(personaQs.some((q) => /erzähl mal kurz|wer bist du/i.test(q.question)));
-assert.ok(personaQs.some((q) => /alter|altersgruppe/i.test(q.question)));
-assert.ok(personaQs.some((q) => /wie gehst du|kontakt/i.test(q.question)));
+assert.ok(
+  personaQs.some((q) => /wie alt bist du|altersgruppe/i.test(q.question)),
+  "Age should be asked as a concrete fact probe",
+);
+assert.ok(
+  !personaQs.some((q) => /erzähl mal kurz:\s*wer bist du/i.test(q.question)),
+  "Soft bio dump should not replace concrete fact probes",
+);
+assert.ok(personaQs.some((q) => /wie nimmst du erstmals kontakt|kontakt/i.test(q.question)));
 assert.ok(
   personaQs.some(
     (q) =>
@@ -210,6 +216,59 @@ assert.ok(
 assert.ok(
   personaQs.every((q) => !q.factId || q.expectedHint.trim().length > 0),
   "Fact-tied probes must expose the questionnaire expectation",
+);
+
+// Packed description → split into concrete MA / Alter / Schwerpunkt probes
+const packedDescFacts = extractSurveyFacts({
+  surveyTitle: "Packed",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_packed",
+            type: "textarea" as const,
+            title: "Beschreibung des idealen Wunsch-Zahnarztes in 3-5 Sätzen",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_packed:
+      "Alter: 35-45\nPraxisgröße: 1-6 Behandler\nSchwerpunkte: Implantologie und Prothetik",
+  },
+  fieldQuestions: [],
+});
+const packedQs = buildSurveyExamQuestions(packedDescFacts.facts, {
+  audience: "persona",
+  maxQuestions: 10,
+});
+assert.ok(
+  packedQs.some((q) => /wie viele mitarbeiter|behandler|wie groß ist die praxis/i.test(q.question)),
+  "Practice size must become a concrete MA/Behandler question",
+);
+assert.ok(
+  packedQs.some((q) => /wie alt bist du|altersgruppe/i.test(q.question)),
+  "Age slice must become its own question",
+);
+assert.ok(
+  packedQs.some((q) => /schwerpunkte hast du/i.test(q.question)),
+  "Specializations must become their own question",
+);
+assert.ok(
+  packedQs.some((q) => /1-6 Behandler/i.test(q.expectedHint)),
+  "SOLL for size probe must expose 1-6 Behandler",
+);
+assert.ok(
+  !packedQs.some((q) => /erzähl mal kurz/i.test(q.question)),
+  "Packed description must not collapse into soft bio question",
 );
 
 const companyQs = buildSurveyExamQuestions(dentalFacts.facts, {
