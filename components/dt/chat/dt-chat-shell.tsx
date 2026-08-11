@@ -14,6 +14,7 @@ import { DtWunschkundenPanel } from "@/components/dt/chat/dt-wunschkunden-panel"
 import { DtChatComposer } from "@/components/dt/chat/dt-chat-composer";
 import { DtChatLightbox } from "@/components/dt/chat/dt-chat-lightbox";
 import { DtGhostBanner } from "@/components/dt/chat/dt-ghost-banner";
+import { DtPersonaTestingRail } from "@/components/dt/chat/dt-persona-testing-rail";
 import {
   DtChatSidebar,
   type DtChatSearchHit,
@@ -125,6 +126,7 @@ export function DtChatShell(props: {
   >(new Map());
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<DtAttachmentDraft[]>([]);
+  const [personaTesting, setPersonaTesting] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
   const [textMode, setTextMode] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -165,6 +167,12 @@ export function DtChatShell(props: {
     () => agents.find((a) => a.id === selectedAgentId) ?? null,
     [agents, selectedAgentId],
   );
+
+  const personaTestingAvailable = agentSupportsPersonaTesting(selectedAgent);
+
+  useEffect(() => {
+    setPersonaTesting(false);
+  }, [selectedAgentId, personaTestingAvailable]);
 
   const quickActions = useMemo(() => getQuickActionsForAgent(selectedAgent), [selectedAgent]);
 
@@ -1304,7 +1312,8 @@ export function DtChatShell(props: {
 
             <AnimatePresence>{ghostMode ? <DtGhostBanner /> : null}</AnimatePresence>
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               {isInitialLoading && !ghostMode ? (
                 <DtChatSkeleton />
               ) : (
@@ -1317,9 +1326,13 @@ export function DtChatShell(props: {
                   agentEmoji={displayAgentEmoji}
                   teamMode={showChatAuthors}
                   authorLabels={authorLabels}
-                  suggestedFollowUps={messages.length === 0 ? quickActions : undefined}
+                  suggestedFollowUps={
+                    messages.length === 0 && !personaTesting ? quickActions : undefined
+                  }
                   onSuggestedFollowUp={
-                    messages.length === 0 ? (text) => setPrompt(text) : undefined
+                    messages.length === 0 && !personaTesting
+                      ? (text) => setPrompt(text)
+                      : undefined
                   }
                   seoTasks={props.seoMode || isSeoChat ? seoTasks : undefined}
                   emptyHint={
@@ -1393,6 +1406,18 @@ export function DtChatShell(props: {
                   }
                 />
               )}
+              </div>
+
+              {personaTesting && selectedAgentId && personaTestingAvailable ? (
+                <DtPersonaTestingRail
+                  agentId={selectedAgentId}
+                  enabled={personaTesting}
+                  isBusy={isBusy}
+                  disabled={isInitialLoading && !ghostMode}
+                  onPickQuestion={setPrompt}
+                  className="absolute inset-y-0 right-0 z-20 shadow-[0_0_24px_rgba(46,46,80,0.12)] md:static md:z-auto md:shadow-none"
+                />
+              ) : null}
             </div>
 
             {status ? (
@@ -1416,11 +1441,13 @@ export function DtChatShell(props: {
               onTextModeChange={setTextMode}
               attachments={attachments}
               agentName={displayAgentName}
-              personaTestingAvailable={agentSupportsPersonaTesting(selectedAgent)}
+              personaTestingAvailable={personaTestingAvailable}
               personaTestingAgentId={selectedAgentId}
               personaTestingLabel={
                 selectedAgent?.kind === "seo_advisor" ? "company" : "persona"
               }
+              personaTesting={personaTesting}
+              onPersonaTestingChange={setPersonaTesting}
               onAddFiles={(files) => void processFiles(files)}
               onRemoveAttachment={(index) => {
                 setAttachments((prev) => {

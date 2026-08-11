@@ -13,7 +13,6 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 import { DtAttachmentChips } from "@/components/dt/chat/dt-attachment-chips";
-import { DtPersonaTestingPanel } from "@/components/dt/chat/dt-persona-testing-panel";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { cn } from "@/components/dt/cn";
 import {
@@ -52,12 +51,15 @@ export function DtChatComposer(props: {
   personaTestingAgentId?: string | null;
   /** Label hint for the Testing control (persona vs company). */
   personaTestingLabel?: "persona" | "company";
+  /** Controlled Testing mode (rail lives beside the chat). */
+  personaTesting?: boolean;
+  onPersonaTestingChange?: (enabled: boolean) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [quickActionsOpen, setQuickActionsOpen] = useState(
     () => !props.quickActionsDefaultCollapsed,
   );
-  const [personaTesting, setPersonaTesting] = useState(false);
+  const personaTesting = props.personaTesting ?? false;
   const canSend =
     (props.value.trim().length > 0 || props.attachments.length > 0) &&
     !props.isBusy &&
@@ -66,11 +68,6 @@ export function DtChatComposer(props: {
   useEffect(() => {
     setQuickActionsOpen(!props.quickActionsDefaultCollapsed);
   }, [props.quickActionsDefaultCollapsed]);
-
-  // Default off when switching agents or when testing is no longer available.
-  useEffect(() => {
-    setPersonaTesting(false);
-  }, [props.personaTestingAgentId, props.personaTestingAvailable]);
 
   return (
     <div
@@ -118,16 +115,6 @@ export function DtChatComposer(props: {
       </AnimatePresence>
 
       <div className="mx-auto w-full max-w-3xl">
-        {props.personaTestingAvailable && props.personaTestingAgentId && personaTesting ? (
-          <DtPersonaTestingPanel
-            agentId={props.personaTestingAgentId}
-            enabled={personaTesting}
-            isBusy={props.isBusy}
-            disabled={props.disabled}
-            onPickQuestion={(question) => props.onChange(question)}
-          />
-        ) : null}
-
         {props.quickActions.length > 0 && !personaTesting ? (
           <div className="mb-2">
             <button
@@ -319,7 +306,7 @@ export function DtChatComposer(props: {
                       ? "Firmen-Prüffragen aus dem Anbieter-Fragebogen ein-/ausblenden"
                       : "Persona-Prüffragen aus dem Kunden-Fragebogen ein-/ausblenden"
                   }
-                  onClick={() => setPersonaTesting((v) => !v)}
+                  onClick={() => props.onPersonaTestingChange?.(!personaTesting)}
                   className={cn(
                     iconBtn,
                     "w-auto gap-1.5 px-2.5",

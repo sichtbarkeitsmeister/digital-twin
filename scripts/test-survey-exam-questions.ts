@@ -71,8 +71,9 @@ assert.ok(questions.length >= 4);
 // Fact probes first — warmups are last (verification priority).
 assert.ok(questions[0]?.factId, "first question should be tied to a survey fact");
 assert.ok(questions.some((q) => /aufmerksam geworden/i.test(q.question)));
-assert.ok(questions.some((q) => /Sorgen|Einwände|zurück/i.test(q.question)));
-assert.ok(questions.some((q) => /Reihenfolge|erster Stelle/i.test(q.question)));
+assert.ok(questions.some((q) => /Sorgen|Einwände|beschäftigt/i.test(q.question)));
+assert.ok(questions.some((q) => /wichtigsten|Priorität|Reihenfolge|sortieren/i.test(q.question)));
+assert.ok(!questions.some((q) => /was steht bei dir bei/i.test(q.question)));
 assert.ok(questions.some((q) => q.id.startsWith("warmup_")));
 assert.match(
   questions.find((q) => q.factId === "fact_001")?.expectedHint ?? "",
@@ -178,13 +179,16 @@ const personaQs = buildSurveyExamQuestions(dentalFacts.facts, {
 });
 
 assert.ok(personaQs.some((q) => /wie heißt du/i.test(q.question)));
-assert.ok(personaQs.some((q) => /stell dich bitte vor|wer bist du/i.test(q.question)));
-assert.ok(personaQs.some((q) => /wie alt bist du/i.test(q.question)));
-assert.ok(personaQs.some((q) => /wie nimmst du/i.test(q.question)));
+assert.ok(personaQs.some((q) => /erzähl mal kurz|wer bist du/i.test(q.question)));
+assert.ok(personaQs.some((q) => /alter|altersgruppe/i.test(q.question)));
+assert.ok(personaQs.some((q) => /wie gehst du|kontakt/i.test(q.question)));
 assert.ok(
   personaQs.some(
-    (q) => /kontaktwege/i.test(q.question) && (/dir|Reihenfolge|erster Stelle/i.test(q.question)),
+    (q) =>
+      /labor|partner|anbieter|reihenfolge|priorität/i.test(q.question) &&
+      !/was steht bei dir bei/i.test(q.question),
   ),
+  "Ranking probes should sound natural (not checklist-style)",
 );
 assert.ok(
   !personaQs.some((q) => /erzähl mir bitte: name des digitalen kunden-avatars/i.test(q.question)),
