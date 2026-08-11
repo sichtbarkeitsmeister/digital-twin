@@ -2,7 +2,10 @@ import type { DtUserOrganisation } from "@/lib/dt/load-user-organisations";
 import { createClient } from "@/lib/supabase/server";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 
-export type DtSeoOrganisation = DtUserOrganisation & { seoEnabled: boolean };
+export type DtSeoOrganisation = DtUserOrganisation & {
+  seoEnabled: boolean;
+  websiteUrl: string | null;
+};
 
 export async function loadDtSeoOrganisations(userId: string): Promise<{
   organisations: DtSeoOrganisation[];
@@ -18,7 +21,7 @@ export async function loadDtSeoOrganisations(userId: string): Promise<{
 
   const { data: rows } = await supabase
     .from("dt_org_config")
-    .select("organisation_id,seo_enabled,disabled,organisations(id,name,slug)")
+    .select("organisation_id,seo_enabled,disabled,website_url,organisations(id,name,slug)")
     .order("display_name", { ascending: true });
 
   const organisations: DtSeoOrganisation[] = [];
@@ -36,6 +39,7 @@ export async function loadDtSeoOrganisations(userId: string): Promise<{
       orgRole: "admin",
       canManageAgents: true,
       seoEnabled: Boolean(row.seo_enabled) && !row.disabled,
+      websiteUrl: row.website_url?.trim() || null,
     });
   }
 

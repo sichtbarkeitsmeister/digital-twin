@@ -29,7 +29,7 @@ export function DashboardTopBar() {
         <div className="flex min-w-0 items-center gap-3">
           <DashboardLogoLink size="sidebar" className="shrink-0 lg:hidden" />
           {showOrgBar ? (
-            <div className="min-w-[10rem] max-w-xs sm:min-w-[12rem] sm:max-w-sm">
+            <div className="min-w-0 max-w-[min(100%,28rem)] flex-1 sm:max-w-xl">
               <DashboardTopBarOrgSelector />
             </div>
           ) : null}

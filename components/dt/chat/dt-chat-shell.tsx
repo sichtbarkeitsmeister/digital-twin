@@ -25,6 +25,7 @@ import { DtChatParticipantsBadge } from "@/components/dt/chat/dt-chat-participan
 import type { DtChatMessageItem } from "@/components/dt/chat/dt-chat-message";
 import { DashboardButton } from "@/components/dashboard-button";
 import { DtLogo } from "@/components/dt/dt-logo";
+import { DtOrgWebsiteButton } from "@/components/dt/dt-org-website-button";
 import { DtThemeToggle } from "@/components/dt/dt-theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { readDtLastChatId, writeDtLastChatId } from "@/lib/dt/client-storage";
@@ -205,6 +206,7 @@ export function DtChatShell(props: {
   });
   const selectedOrg = props.organisations.find((o) => o.id === selectedOrgId);
   const canManageAgents = Boolean(selectedOrg?.canManageAgents);
+  const selectedWebsiteUrl = selectedOrg?.websiteUrl ?? null;
   const contextMode = isSeoChat
     ? "seo"
     : chatScope === "team"
@@ -1194,6 +1196,7 @@ export function DtChatShell(props: {
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+              <DtOrgWebsiteButton websiteUrl={selectedWebsiteUrl} className="hidden sm:inline-flex" />
               <DtChatParticipantsBadge participants={participants} />
               {activeChat?.title && !ghostMode ? (
                 <p className="hidden max-w-[8rem] truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55 md:block lg:max-w-[12rem]">
@@ -1288,6 +1291,7 @@ export function DtChatShell(props: {
                 contextHref={contextHref}
               />
               <div className="ml-auto flex min-w-0 items-center gap-2">
+                <DtOrgWebsiteButton websiteUrl={selectedWebsiteUrl} />
                 <DtChatParticipantsBadge participants={participants} />
                 {activeChat?.title && !ghostMode ? (
                   <p className="max-w-[10rem] truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55 sm:max-w-[14rem]">

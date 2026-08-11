@@ -23,7 +23,13 @@ import type { DtChatListScope } from "@/lib/dt/db";
 import type { DtOversightMember } from "@/lib/dt/oversight";
 import type { DtChatRow } from "@/lib/dt/types";
 
-export type DtOrgOption = { id: string; name: string; slug: string | null };
+export type DtOrgOption = {
+  id: string;
+  name: string;
+  slug: string | null;
+  /** From `dt_org_config.website_url` when available. */
+  websiteUrl?: string | null;
+};
 
 export type DtChatSearchHit = {
   chatId: string;
