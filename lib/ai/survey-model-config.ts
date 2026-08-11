@@ -39,7 +39,7 @@ export function resolveSurveyUtilityModels(): string[] {
 }
 
 const ACTION_VERB_RE =
-  /\b(erstell(?:e|en)|leg(?:e|en)\s+(?:eine|einen|an)|create|generier(?:e|en)|generate|füg(?:e|en)\s+hinzu|add|einfüg|bearbeit(?:e|en)|edit|änder(?:e|en)|change|update|patch|korrigier(?:e|en)|fix|reparier(?:e|en)|lösch(?:e|en)|delete|entfern(?:e|en)|remove|veröffentlich(?:e|en)|publish|unpublish|depublish|ordner|folder|speicher(?:e|n)|abspeicher(?:e|n)|umbenenn(?:e|en)|rename|zuweis(?:e|en)|assign|überarbeit(?:e|en)|rewrite|ersetz(?:e|en)|replace|duplikat|duplicate\s*id|infotext|schritt\s+\d+|step\s+\d+|frage(?:n)?\s+(?:hinzu|ändern|entfernen))\b/i;
+  /\b(erstell(?:e|en)|leg(?:e|en)\s+(?:eine|einen|an)|create|generier(?:e|en)|generate|füg(?:e|en)\s+hinzu|add|einfüg|bearbeit(?:e|en)|edit|änder(?:e|en)|change|update|patch|korrigier(?:e|en)|fix|reparier(?:e|en)|lösch(?:e|en)|delete|entfern(?:e|en)|remove|veröffentlich(?:e|en)|publish|unpublish|depublish|ordner|folder|speicher(?:e|n)|abspeicher(?:e|n)|umbenenn(?:e|en)|rename|zuweis(?:e|en)|assign|überarbeit(?:e|en)|rewrite|ersetz(?:e|en)|replace|duplikat|duplicate\s*id|infotext|schritt\s+\d+|step\s+\d+|frage(?:n)?\s+(?:hinzu|ändern|entfernen)|prompt|persona|agent(?:en)?|wunschkunde|avatar)\b/i;
 
 const CHAT_SIGNAL_RE =
   /\b(was\s+(?:ist|sind|bedeutet)|wie\s+(?:funktioniert|kann|soll|würde)|warum|erklär(?:e| mir|ung)|explain|hilf\s+mir\s+(?:bei|beim|zu\s+verstehen)|brainstorm|ideen\s+für|best\s+practice|unterschied\s+zwischen)\b/i;
@@ -48,7 +48,12 @@ const QUESTION_ONLY_RE = /^\s*(?:was|wie|warum|welche|wann|wo|who|what|how|why|c
 
 type ActionIntentInput = {
   userMessage: string;
-  page: "survey_list" | "survey_builder_new" | "survey_builder_edit";
+  page:
+    | "survey_list"
+    | "survey_builder_new"
+    | "survey_builder_edit"
+    | "dt_agents"
+    | "survey_to_agent";
   /** Last assistant message looked like action JSON */
   recentAssistantWasAction?: boolean;
 };
@@ -67,7 +72,12 @@ export function isLikelySurveyActionIntent(input: ActionIntentInput): boolean {
     return true;
   }
 
-  if (input.page === "survey_builder_edit" || input.page === "survey_builder_new") {
+  if (
+    input.page === "survey_builder_edit" ||
+    input.page === "survey_builder_new" ||
+    input.page === "dt_agents" ||
+    input.page === "survey_to_agent"
+  ) {
     if (CHAT_SIGNAL_RE.test(text) || QUESTION_ONLY_RE.test(text)) return false;
     if (text.length > 80 && !text.endsWith("?")) return true;
   }

@@ -42,11 +42,18 @@ import {
 } from "@/lib/ai/survey-ai-attachments-shared";
 
 type PageContext = {
-  page: "survey_list" | "survey_builder_new" | "survey_builder_edit";
+  page:
+    | "survey_list"
+    | "survey_builder_new"
+    | "survey_builder_edit"
+    | "dt_agents"
+    | "survey_to_agent";
   surveyId: string | null;
   visibility?: "private" | "public";
   slug?: string | null;
   notificationEmails?: string[];
+  organisationId?: string | null;
+  agentId?: string | null;
 };
 
 type AttachmentDraft = {
@@ -205,11 +212,19 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         ? "Du bist gerade in der Umfrage-Liste."
         : props.pageContext.page === "survey_builder_new"
           ? "Du erstellst gerade eine neue Umfrage."
-          : "Du bearbeitest gerade eine bestehende Umfrage.";
+          : props.pageContext.page === "dt_agents"
+            ? "Du bist in der Agenten-Verwaltung (DigitalTwin)."
+            : props.pageContext.page === "survey_to_agent"
+              ? "Du konvertierst gerade eine Umfrage zu einem Agenten."
+              : "Du bearbeitest gerade eine bestehende Umfrage.";
     const details = [
       props.pageContext.surveyId
         ? `Survey-ID: ${props.pageContext.surveyId}`
         : null,
+      props.pageContext.organisationId
+        ? `Org: ${props.pageContext.organisationId}`
+        : null,
+      props.pageContext.agentId ? `Agent: ${props.pageContext.agentId}` : null,
       props.pageContext.visibility
         ? `Sichtbarkeit: ${props.pageContext.visibility}`
         : null,

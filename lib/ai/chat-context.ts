@@ -38,11 +38,41 @@ type CandidateSurveyContext = {
 };
 
 type PageContext = {
-  page: "survey_list" | "survey_builder_new" | "survey_builder_edit";
+  page:
+    | "survey_list"
+    | "survey_builder_new"
+    | "survey_builder_edit"
+    | "dt_agents"
+    | "survey_to_agent";
   surveyId: string | null;
   visibility?: "private" | "public";
   slug?: string | null;
   notificationEmails?: string[];
+  organisationId?: string | null;
+  agentId?: string | null;
+};
+
+export type KnownDtAgentSnapshot = {
+  id: string;
+  organisationId: string;
+  organisationName?: string | null;
+  name: string;
+  role: string | null;
+  slug: string;
+  kind: string;
+  usesGlobalPrompt: boolean;
+  promptExcerpt: string;
+  appendExcerpt: string | null;
+};
+
+export type FocusedDtAgentPrompt = {
+  id: string;
+  name: string;
+  role: string | null;
+  slug: string;
+  usesGlobalPrompt: boolean;
+  promptTemplate: string;
+  promptAppend: string | null;
 };
 
 export type SurveyChatSystemPromptInput = {
@@ -52,6 +82,8 @@ export type SurveyChatSystemPromptInput = {
   surveys: SurveySnapshot[];
   folders: FolderSnapshot[];
   candidateSurveyContexts: CandidateSurveyContext[];
+  knownAgents?: KnownDtAgentSnapshot[];
+  focusedAgentPrompts?: FocusedDtAgentPrompt[];
   attachmentSummaries: string[];
   conversationSummary: string;
   pastedWebsiteContent?: string | null;
@@ -71,7 +103,7 @@ export function buildSurveyChatStaticSystemText(): string {
     "In action mode, respond with exactly one valid JSON object and nothing else.",
     "In action mode, NEVER use markdown code fences (no ```json).",
     "In action mode, the response must be parseable with JSON.parse without manual fixes.",
-    "Allowed actions in action mode: batch (multi-step), create_survey, edit_survey_definition, patch_survey_definition, update_survey_metadata, create_folder, rename_folder, delete_folder, assign_folder, publish, unpublish, delete_survey.",
+    "Allowed actions in action mode: batch (multi-step), create_survey, edit_survey_definition, patch_survey_definition, update_survey_metadata, create_folder, rename_folder, delete_folder, assign_folder, publish, unpublish, delete_survey, edit_dt_agent_prompt.",
     "Folder management: use create_folder to create a folder (name only). Use rename_folder to change a folder name (folderId from Known folders). Use delete_folder to remove a folder (surveys in it are unassigned first).",
     "To put a survey in a folder: use assign_folder with surveyId and folderId (UUID from Known folders, or null to remove from folder).",
     "NEVER use create_survey to create a folder, and NEVER suggest a dummy/temporary survey to obtain a folder. create_survey is only for new surveys.",
@@ -96,6 +128,14 @@ export function buildSurveyChatStaticSystemText(): string {
     "If there are multiple plausible matching surveys (e.g. two cafe surveys), ask a clarifying question first and DO NOT emit action JSON yet.",
     "When user asks to create survey, return full survey JSON with exact version 1 schema.",
     "If request is ambiguous, ask a short clarifying question in German and do not emit action JSON.",
+    "",
+    "DigitalTwin agent prompts (persona / Wunschkunde):",
+    "When the user asks to change an agent/persona system prompt or avatar-specific instructions (e.g. \"passe Joachims Prompt an\", \"kein Markenbotschafter\", \"ändere WAS DU WEISST\"), use action kind=edit_dt_agent_prompt.",
+    "edit_dt_agent_prompt JSON shape: { \"kind\":\"edit_dt_agent_prompt\", \"summary\":\"…\", \"agentId\":\"<uuid from Known agents>\", \"agentName\":\"optional\", \"organisationId\":\"optional uuid\", \"target\":\"prompt_template\"|\"prompt_append\", \"prompt\":\"<FULL replacement text>\" }.",
+    "target=prompt_append when the agent uses_global_prompt and the change is only the avatar-specific part; otherwise target=prompt_template for the full/standalone system prompt.",
+    "Always return the COMPLETE revised prompt text in \"prompt\" (not a diff). Keep German. Persona remains Interessent/Wunschkunde (Pre-Sale) unless the user explicitly asks otherwise — never invent company encyclopedia facts.",
+    "Pick agentId from Known agents / Focused agent prompts. If several agents match the name, ask which organisation/agent first.",
+    "Do NOT use survey patch/edit actions for agent prompts.",
     "",
     PASTED_URL_PROMPT_HINT_EN,
     "",
@@ -177,6 +217,8 @@ export function buildSurveyChatDynamicSystemText(input: {
   surveys: SurveySnapshot[];
   folders: FolderSnapshot[];
   candidateSurveyContexts: CandidateSurveyContext[];
+  knownAgents?: KnownDtAgentSnapshot[];
+  focusedAgentPrompts?: FocusedDtAgentPrompt[];
   attachmentSummaries: string[];
   conversationSummary: string;
   pastedWebsiteContent?: string | null;
@@ -187,6 +229,8 @@ export function buildSurveyChatDynamicSystemText(input: {
     `Known surveys: ${JSON.stringify(input.surveys)}`,
     `Candidate survey contexts for edits (definition included only when open in builder): ${JSON.stringify(input.candidateSurveyContexts)}`,
     `Known folders: ${JSON.stringify(input.folders)}`,
+    `Known DigitalTwin agents (for edit_dt_agent_prompt): ${JSON.stringify(input.knownAgents ?? [])}`,
+    `Focused agent prompts (full text when relevant): ${JSON.stringify(input.focusedAgentPrompts ?? [])}`,
     `Attachment summaries (current user message): ${JSON.stringify(input.attachmentSummaries)}`,
   ];
 
