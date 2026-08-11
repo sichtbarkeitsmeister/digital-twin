@@ -131,18 +131,15 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     looksLikeQuestion(raw) &&
     /\b(du|dir|dich|dein|deine|deiner|deinem|deinen)\b/i.test(raw)
   ) {
-    return `${raw.replace(/\?$/, "")} — bitte möglichst konkret.`;
+    return softenExistingQuestion(raw);
   }
 
   if (looksLikeQuestion(raw) && isCustomerProfileMetaTitle(raw)) {
-    const rewritten = rewriteCustomerThirdPersonToSecondPerson(raw);
-    return /bitte möglichst konkret/i.test(rewritten)
-      ? rewritten
-      : `${rewritten.replace(/\?$/, "")}?`;
+    return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
   }
 
   if (looksLikeQuestion(raw) && !isCustomerProfileMetaTitle(raw)) {
-    return raw;
+    return softenExistingQuestion(raw);
   }
 
   if (
@@ -152,54 +149,81 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     /priorit|reihenfolge|ranking/i.test(raw)
   ) {
     const topic = topicFromCustomerMetaTitle(raw) || raw;
-    const top = firstRankingItem(fact.value);
-    if (top) {
-      return `Was steht bei dir bei „${topic}“ an erster Stelle — und wie lautet die komplette Reihenfolge?`;
+    if (/kontaktweg|aufmerksam|findest|suche|kanal|empfehlung|google|messe/i.test(`${topic} ${raw}`)) {
+      return (
+        "Worüber findest du typischerweise ein neues Labor oder einen neuen Partner — " +
+        "was kommt für dich zuerst, und wie sieht die Reihenfolge dahinter aus?"
+      );
     }
-    return `Nenne mir bitte deine Reihenfolge bei „${topic}“ — was ist dir am wichtigsten, und warum?`;
+    if (/entscheid|anbieterwahl|kriterium|wichtig/i.test(`${topic} ${raw}`)) {
+      return (
+        "Wonach entscheidest du dich für einen Anbieter — " +
+        "was hat für dich die höchste Priorität, und was kommt danach?"
+      );
+    }
+    return (
+      `Wenn du an „${shortTopic(topic)}" denkst: was ist dir am wichtigsten, ` +
+      "und wie würdest du die Reihenfolge dahinter sortieren?"
+    );
   }
 
   if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/i.test(raw) || /ideal.*wunsch/i.test(raw)) {
-    return "Stell dich bitte vor: Wer bist du, was prägt deine Situation, und worauf legst du besonders Wert?";
+    return "Erzähl mal kurz: Wer bist du, was prägt dich gerade, und worauf legst du besonders Wert?";
   }
 
   if (/\balter\b/i.test(raw)) {
-    return "Wie alt bist du — oder in welcher Altersgruppe siehst du dich?";
+    return "In welchem Alter bzw. welcher Altersgruppe siehst du dich?";
   }
 
   if (/praxisgröße|praxisgroesse|mitarbeiter|teamgröße|teamgroesse|betriebsgröße/i.test(raw)) {
-    return "Wie groß ist deine Praxis oder dein Betrieb — wie seid ihr aufgestellt?";
+    return "Wie groß ist eure Praxis oder euer Betrieb — wie seid ihr so aufgestellt?";
   }
 
   if (/einzugsgebiet|region|standort|gebiet/i.test(raw)) {
-    return "Wo bist du tätig, und aus welchem Einzugsgebiet kommst du bzw. kommen deine Patienten/Kunden?";
+    return "Wo bist du unterwegs, und aus welcher Region kommen deine Patienten oder Kunden?";
   }
 
   if (/kontaktweg|kontakt auf|erstkontakt|erreichen/i.test(raw)) {
-    return "Wie nimmst du typischerweise Kontakt zu Anbietern auf — welche Wege nutzt du zuerst?";
+    return "Wie gehst du typischerweise auf Anbieter zu — welchen Weg nutzt du zuerst?";
   }
 
   if (/schwerpunkt/i.test(raw)) {
-    return "Was sind die Schwerpunkte deiner Arbeit oder Praxis — bitte konkret?";
+    return "Was sind die Schwerpunkte bei dir in der Praxis — worauf liegt der Fokus?";
   }
 
   if (/sorg|einwand|hürde|problem|schmerz|ärger|frust/i.test(raw)) {
-    return "Was sind gerade deine größten Sorgen oder Einwände — was hält dich zurück?";
+    return "Was beschäftigt dich gerade am meisten — welche Sorgen oder Einwände hast du?";
   }
 
   if (/entscheid|kriterium|wichtig/i.test(raw)) {
-    return "Wonach entscheidest du dich für einen Anbieter — was muss unbedingt stimmen?";
+    return "Wonach suchst du dir einen Anbieter aus — was muss für dich unbedingt stimmen?";
   }
 
   if (isCustomerProfileMetaTitle(raw)) {
     const topic = topicFromCustomerMetaTitle(raw);
     if (!topic || topic.length < 3) {
-      return "Erzähl mir bitte konkret von dir und deiner Situation.";
+      return "Erzähl mir kurz von dir und deiner Situation.";
     }
-    return `Dazu „${topic}“: Was trifft auf dich zu — bitte aus deiner Sicht?`;
+    return `Zu „${shortTopic(topic)}": Was trifft auf dich zu — aus deiner Sicht?`;
   }
 
-  return `Zu „${raw}“: Was gilt für dich persönlich — bitte so, wie du es einem Berater erzählen würdest?`;
+  return `Zu „${shortTopic(raw)}": Was gilt für dich persönlich?`;
+}
+
+function shortTopic(topic: string): string {
+  const t = topic.replace(/\s+/g, " ").trim();
+  return t.length <= 48 ? t : `${t.slice(0, 47)}…`;
+}
+
+function softenExistingQuestion(raw: string): string {
+  let q = raw.replace(/\s+/g, " ").trim().replace(/[?？]+$/g, "");
+  // Drop exam-speak that makes questions sound like a checklist.
+  q = q.replace(/\s*[—–-]\s*bitte möglichst konkret\.?$/i, "");
+  q = q.replace(/\s*bitte möglichst konkret\.?$/i, "");
+  q = q.replace(/\s*und wie lautet die komplette Reihenfolge\.?$/i, "");
+  q = q.replace(/\s*was steht bei dir bei\s*[„"][^„"]+[“"]\s*an erster Stelle/gi, "");
+  if (!q || q.length < 8) return `${raw.replace(/[?？]+$/g, "")}?`;
+  return `${q}?`;
 }
 
 function toCompanyInterviewQuestion(fact: SurveyFact): string {
@@ -210,11 +234,10 @@ function toCompanyInterviewQuestion(fact: SurveyFact): string {
   }
 
   if (fact.fieldType === "ranking" || fact.fieldType === "checkbox" || fact.fieldType === "text_list") {
-    const top = firstRankingItem(fact.value);
-    if (top) {
-      return `Was steht bei euch bei „${raw}“ an erster Stelle — und wie lautet die komplette Reihenfolge laut Fragebogen?`;
-    }
-    return `Nennt mir bitte die Reihenfolge/Punkte zu „${raw}“ so, wie sie im Fragebogen stehen.`;
+    return (
+      `Zu „${shortTopic(raw)}": Was steht bei euch ganz oben — ` +
+      "und wie lautet die Reihenfolge laut Fragebogen?"
+    );
   }
 
   if (/\d/.test(fact.value) || /%|€|euro|stern|platz|nr\.?/i.test(fact.value)) {
@@ -258,7 +281,7 @@ function isCompanyOnlyFactForPersona(fact: SurveyFact): boolean {
   return false;
 }
 
-function hintFromValue(value: string, max = 200): string {
+function hintFromValue(value: string, max = 420): string {
   const one = value.replace(/\s+/g, " ").trim();
   if (!one) return "(keine Angabe im Fragebogen)";
   return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
