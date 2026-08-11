@@ -526,8 +526,9 @@ export function DtAgentsManager(props: {
                   onRequestChange={() => setRequestAgent(agent)}
                   canDisable={canDisableAgent(agent)}
                   alwaysOn={isProtectedAlwaysOn(agent)}
+                  organisationId={orgId}
                   globalPromptPreview={
-                    agent.is_default
+                    agent.is_default || agent.uses_global_prompt
                       ? globalPromptForAgent(agent, globalPrompts)
                       : undefined
                   }
