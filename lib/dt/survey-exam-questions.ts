@@ -12,25 +12,20 @@ export type SurveyExamQuestion = {
   kind: SurveyFact["kind"];
 };
 
+/** Soft openers last — fact probes come first so Testing verifies questionnaire coverage. */
 const PERSONA_WARMUP: Array<{ id: string; question: string }> = [
   {
     id: "warmup_pain",
-    question: "Was beschäftigt dich gerade am meisten — was liegt dir besonders auf dem Herzen?",
-  },
-  {
-    id: "warmup_now",
-    question: "Was ist für dich gerade die größte Herausforderung?",
+    question:
+      "Was beschäftigt dich gerade am meisten — und was davon würdest du einem Anbieter als Erstes erzählen?",
   },
 ];
 
 const COMPANY_WARMUP: Array<{ id: string; question: string }> = [
   {
     id: "warmup_company_known",
-    question: "Wofür seid ihr bekannt — was sollen Kunden über euch wissen?",
-  },
-  {
-    id: "warmup_company_diff",
-    question: "Was unterscheidet euch vom Wettbewerb?",
+    question:
+      "Wenn ich euer Unternehmen in einem Satz treffen soll: Wofür seid ihr bekannt, und was dürfen wir nicht weglassen?",
   },
 ];
 
@@ -83,7 +78,6 @@ function rewriteCustomerThirdPersonToSecondPerson(question: string): string {
   q = q.replace(/\bWelche Wege nutzen\b/gi, "Welche Wege nutzt");
   q = q.replace(/\bWas erwarten\b/gi, "Was erwartest");
   q = q.replace(/\bWas brauchen\b/gi, "Was brauchst");
-  q = q.replace(/\bWas sind\b/gi, "Was sind"); // kept; often followed by noun phrase
 
   q = q.replace(/\bWunsch-?Zahnärzt(?:e|en|in|innen)?\b/gi, "du");
   q = q.replace(/\bWunsch-?Kund(?:e|en|in|innen)?\b/gi, "du");
@@ -92,7 +86,6 @@ function rewriteCustomerThirdPersonToSecondPerson(question: string): string {
   q = q.replace(/\bdie\s+meisten\s+Wunsch[\w-]*\b/gi, "du");
   q = q.replace(/\btypische\s+Wunsch[\w-]*\b/gi, "du");
 
-  // Cleanup awkward "du du" / "zu du" artifacts
   q = q.replace(/\bdu\s+du\b/gi, "du");
   q = q.replace(/\bzu\s+du\b/gi, "zu dir");
   q = q.replace(/\bvon\s+du\b/gi, "von dir");
@@ -113,32 +106,45 @@ function topicFromCustomerMetaTitle(title: string): string {
     .trim();
 }
 
+function firstRankingItem(value: string): string | null {
+  const numbered = value.match(/(?:^|\n)\s*1\.\s*([^\n]+)/);
+  if (numbered?.[1]?.trim()) return numbered[1].trim();
+
+  const m = value.match(/(?:^|[\n,;])\s*([^\n,;]+)/);
+  const item = m?.[1]?.replace(/^\d+\.\s*/, "").trim();
+  if (item && !/^rangfolge\b/i.test(item) && !/^nicht gewählt\b/i.test(item)) {
+    return item.length > 1 ? item : null;
+  }
+  return null;
+}
+
+/** Ask so the twin must surface the stored fact — not just chat vaguely. */
 function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
-  if (!raw) return "Erzähl mir bitte etwas über dich.";
+  if (!raw) return "Erzähl mir bitte konkret etwas über dich und deine Situation.";
 
-  // Admin/meta naming fields → identity probe
   if (/^(name des digitalen kunden-avatars|avatar-?name)$/i.test(raw)) {
-    return "Wie heißt du?";
+    return "Wie heißt du — und wie soll ich dich ansprechen?";
   }
 
-  // Already a usable 2nd-person question
   if (
     looksLikeQuestion(raw) &&
     /\b(du|dir|dich|dein|deine|deiner|deinem|deinen)\b/i.test(raw)
   ) {
-    return raw;
+    return `${raw.replace(/\?$/, "")} — bitte möglichst konkret.`;
   }
 
   if (looksLikeQuestion(raw) && isCustomerProfileMetaTitle(raw)) {
-    return rewriteCustomerThirdPersonToSecondPerson(raw);
+    const rewritten = rewriteCustomerThirdPersonToSecondPerson(raw);
+    return /bitte möglichst konkret/i.test(rewritten)
+      ? rewritten
+      : `${rewritten.replace(/\?$/, "")}?`;
   }
 
   if (looksLikeQuestion(raw) && !isCustomerProfileMetaTitle(raw)) {
     return raw;
   }
 
-  // Rankings / lists first — keep the topic, don't collapse into generic contact probes.
   if (
     fact.fieldType === "ranking" ||
     fact.fieldType === "checkbox" ||
@@ -146,12 +152,15 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     /priorit|reihenfolge|ranking/i.test(raw)
   ) {
     const topic = topicFromCustomerMetaTitle(raw) || raw;
-    return `Was ist dir bei „${topic}“ besonders wichtig — und warum in dieser Reihenfolge?`;
+    const top = firstRankingItem(fact.value);
+    if (top) {
+      return `Was steht bei dir bei „${topic}“ an erster Stelle — und wie lautet die komplette Reihenfolge?`;
+    }
+    return `Nenne mir bitte deine Reihenfolge bei „${topic}“ — was ist dir am wichtigsten, und warum?`;
   }
 
-  // Profile meta → concrete Du-probes
   if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/i.test(raw) || /ideal.*wunsch/i.test(raw)) {
-    return "Erzähl mir bitte kurz von dir — wer bist du, und was ist dir in deiner Situation besonders wichtig?";
+    return "Stell dich bitte vor: Wer bist du, was prägt deine Situation, und worauf legst du besonders Wert?";
   }
 
   if (/\balter\b/i.test(raw)) {
@@ -167,34 +176,52 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   }
 
   if (/kontaktweg|kontakt auf|erstkontakt|erreichen/i.test(raw)) {
-    return "Wie nimmst du typischerweise Kontakt zu Anbietern auf — welche Wege nutzt du?";
+    return "Wie nimmst du typischerweise Kontakt zu Anbietern auf — welche Wege nutzt du zuerst?";
   }
 
   if (/schwerpunkt/i.test(raw)) {
-    return "Was sind die Schwerpunkte deiner Arbeit oder Praxis?";
+    return "Was sind die Schwerpunkte deiner Arbeit oder Praxis — bitte konkret?";
+  }
+
+  if (/sorg|einwand|hürde|problem|schmerz|ärger|frust/i.test(raw)) {
+    return "Was sind gerade deine größten Sorgen oder Einwände — was hält dich zurück?";
+  }
+
+  if (/entscheid|kriterium|wichtig/i.test(raw)) {
+    return "Wonach entscheidest du dich für einen Anbieter — was muss unbedingt stimmen?";
   }
 
   if (isCustomerProfileMetaTitle(raw)) {
     const topic = topicFromCustomerMetaTitle(raw);
     if (!topic || topic.length < 3) {
-      return "Erzähl mir bitte etwas über dich und deine Situation.";
+      return "Erzähl mir bitte konkret von dir und deiner Situation.";
     }
-    return `Erzähl mir bitte aus deiner Sicht: ${topic}`;
+    return `Dazu „${topic}“: Was trifft auf dich zu — bitte aus deiner Sicht?`;
   }
 
-  return `Erzähl mir bitte: ${raw}`;
+  return `Zu „${raw}“: Was gilt für dich persönlich — bitte so, wie du es einem Berater erzählen würdest?`;
 }
 
 function toCompanyInterviewQuestion(fact: SurveyFact): string {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
-  if (!raw) return "Was sollten wir über euer Unternehmen wissen?";
-  if (looksLikeQuestion(raw)) return raw;
-
-  if (fact.fieldType === "ranking" || fact.fieldType === "checkbox" || fact.fieldType === "text_list") {
-    return `Was ist euch bei „${raw}“ besonders wichtig — und warum in dieser Reihenfolge?`;
+  if (!raw) return "Welche Unternehmensfakten müssen wir aus dem Fragebogen treffen?";
+  if (looksLikeQuestion(raw)) {
+    return `${raw.replace(/\?$/, "")} — bitte mit den konkreten Angaben aus eurem Wissen.`;
   }
 
-  return `Erzähl mir bitte: ${raw}`;
+  if (fact.fieldType === "ranking" || fact.fieldType === "checkbox" || fact.fieldType === "text_list") {
+    const top = firstRankingItem(fact.value);
+    if (top) {
+      return `Was steht bei euch bei „${raw}“ an erster Stelle — und wie lautet die komplette Reihenfolge laut Fragebogen?`;
+    }
+    return `Nennt mir bitte die Reihenfolge/Punkte zu „${raw}“ so, wie sie im Fragebogen stehen.`;
+  }
+
+  if (/\d/.test(fact.value) || /%|€|euro|stern|platz|nr\.?/i.test(fact.value)) {
+    return `Zu „${raw}“: Welche konkreten Zahlen oder Fakten gelten bei euch?`;
+  }
+
+  return `Zu „${raw}“: Was steht dazu in eurem Unternehmenswissen — bitte wörtlich und vollständig genug?`;
 }
 
 /**
@@ -211,13 +238,17 @@ function isCompanyOnlyFactForPersona(fact: SurveyFact): boolean {
   );
 }
 
-function hintFromValue(value: string, max = 160): string {
+function hintFromValue(value: string, max = 200): string {
   const one = value.replace(/\s+/g, " ").trim();
+  if (!one) return "(keine Angabe im Fragebogen)";
   return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
 }
 
 /**
  * Build an interviewer script from questionnaire facts (deterministic, no LLM).
+ *
+ * Goal: verify that survey answers were transferred and that the twin
+ * thinks/acts/reacts accordingly — fact probes first, soft warmup last.
  *
  * - `persona`: ask the Wunschkunde as “du” (customer situation).
  * - `company`: ask the SEO/company twin about firm facts.
@@ -226,7 +257,7 @@ export function buildSurveyExamQuestions(
   facts: SurveyFact[],
   options?: { maxQuestions?: number; audience?: SurveyExamAudience },
 ): SurveyExamQuestion[] {
-  const maxQuestions = options?.maxQuestions ?? 14;
+  const maxQuestions = options?.maxQuestions ?? 16;
   const audience: SurveyExamAudience = options?.audience ?? "persona";
   const out: SurveyExamQuestion[] = [];
   const seenNorm = new Set<string>();
@@ -238,26 +269,13 @@ export function buildSurveyExamQuestions(
     out.push(q);
   }
 
-  const warmups = audience === "company" ? COMPANY_WARMUP : PERSONA_WARMUP;
-  for (const w of warmups) {
-    push({
-      id: w.id,
-      question: w.question,
-      expectedHint:
-        audience === "company"
-          ? "Offene Firmenfrage — Inhalt aus Anbieter-Wissen prüfen."
-          : "Offene Einstiegsfrage — Inhalt aus Persona-Prompt prüfen.",
-      factId: "",
-      kind: "answer",
-    });
-  }
-
   const answerFacts = facts.filter((f) => f.kind === "answer");
   const followUps = facts.filter((f) => f.kind === "follow_up");
+  // Concrete questionnaire answers first — that is what Testing must verify.
   const ordered = [...answerFacts, ...followUps];
 
   for (const fact of ordered) {
-    if (out.length >= maxQuestions) break;
+    if (out.length >= maxQuestions - 1) break;
 
     if (audience === "persona" && isCompanyOnlyFactForPersona(fact)) {
       continue;
@@ -276,6 +294,23 @@ export function buildSurveyExamQuestions(
       factId: fact.id,
       kind: fact.kind,
     });
+  }
+
+  // One soft opener at the end (optional coverage of tone/behavior).
+  const warmups = audience === "company" ? COMPANY_WARMUP : PERSONA_WARMUP;
+  if (out.length < maxQuestions) {
+    for (const w of warmups) {
+      push({
+        id: w.id,
+        question: w.question,
+        expectedHint:
+          audience === "company"
+            ? "Verhaltenscheck: Firmenwissen und Tonalität aus dem Anbieter-Fragebogen."
+            : "Verhaltenscheck: Haltung/Tonalität der Persona aus dem Fragebogen.",
+        factId: "",
+        kind: "answer",
+      });
+    }
   }
 
   return out.slice(0, maxQuestions);

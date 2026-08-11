@@ -52,7 +52,13 @@ const bundle = extractSurveyFacts({
   answers: {
     f1: "Über eine Empfehlung von Freunden",
     f2: "Die Entwöhnung und der Alltag zu Hause",
-    f3: ["o1", "o2"],
+    f3: {
+      items: [
+        { kind: "preset", label: "Vertrauen" },
+        { kind: "preset", label: "Preis" },
+      ],
+      excludedPresets: [],
+    },
   },
   fieldQuestions: [],
 });
@@ -62,11 +68,16 @@ const questions = buildSurveyExamQuestions(bundle.facts, {
   audience: "persona",
 });
 assert.ok(questions.length >= 4);
+// Fact probes first — warmups are last (verification priority).
+assert.ok(questions[0]?.factId, "first question should be tied to a survey fact");
 assert.ok(questions.some((q) => /aufmerksam geworden/i.test(q.question)));
-assert.ok(questions.some((q) => /Sorgen/i.test(q.question)));
-assert.ok(questions.some((q) => /Prioritäten/i.test(q.question)));
-assert.ok(questions[0]?.id.startsWith("warmup_"));
-assert.match(questions.find((q) => q.factId === "fact_001")?.expectedHint ?? "", /Empfehlung/);
+assert.ok(questions.some((q) => /Sorgen|Einwände|zurück/i.test(q.question)));
+assert.ok(questions.some((q) => /Reihenfolge|erster Stelle/i.test(q.question)));
+assert.ok(questions.some((q) => q.id.startsWith("warmup_")));
+assert.match(
+  questions.find((q) => q.factId === "fact_001")?.expectedHint ?? "",
+  /Empfehlung/,
+);
 
 // Company-perspective persona survey → Du-questions for the Wunschkunde
 const dentalDefinition = {
@@ -140,7 +151,13 @@ const dentalFacts = extractSurveyFacts({
     f_desc: "Qualitätsfokus, Laborwechsel nach schlechter Erfahrung.",
     f_age: "45–55",
     f_contact: "Über Empfehlungen von Kollegen",
-    f_rank: ["o1", "o2"],
+    f_rank: {
+      items: [
+        { kind: "preset", label: "Empfehlung" },
+        { kind: "preset", label: "Messe" },
+      ],
+      excludedPresets: [],
+    },
     f_company: "Mit Qualitätsorientierten Praxen",
   },
   fieldQuestions: [],
@@ -152,12 +169,12 @@ const personaQs = buildSurveyExamQuestions(dentalFacts.facts, {
 });
 
 assert.ok(personaQs.some((q) => /wie heißt du/i.test(q.question)));
-assert.ok(personaQs.some((q) => /erzähl mir bitte kurz von dir/i.test(q.question)));
+assert.ok(personaQs.some((q) => /stell dich bitte vor|wer bist du/i.test(q.question)));
 assert.ok(personaQs.some((q) => /wie alt bist du/i.test(q.question)));
 assert.ok(personaQs.some((q) => /wie nimmst du/i.test(q.question)));
 assert.ok(
   personaQs.some(
-    (q) => /kontaktwege/i.test(q.question) && /dir/i.test(q.question),
+    (q) => /kontaktwege/i.test(q.question) && (/dir|Reihenfolge|erster Stelle/i.test(q.question)),
   ),
 );
 assert.ok(
@@ -170,13 +187,21 @@ assert.ok(
   !personaQs.some((q) => /arbeitet unser labor/i.test(q.question)),
   "Company-only facts must not become Wunschkunde exam questions",
 );
+assert.ok(
+  personaQs.every((q) => !q.factId || q.expectedHint.trim().length > 0),
+  "Fact-tied probes must expose the questionnaire expectation",
+);
 
 const companyQs = buildSurveyExamQuestions(dentalFacts.facts, {
   audience: "company",
   maxQuestions: 12,
 });
-assert.ok(companyQs[0]?.id.startsWith("warmup_company"));
+assert.ok(companyQs.some((q) => q.id.startsWith("warmup_company")));
 assert.ok(companyQs.some((q) => /labor am liebsten/i.test(q.question)));
-assert.ok(companyQs.some((q) => /unterscheidet euch/i.test(q.question)));
+assert.ok(companyQs[0]?.factId, "company testing should lead with fact verification");
+assert.match(
+  companyQs.find((q) => /labor am liebsten/i.test(q.question))?.expectedHint ?? "",
+  /Qualitätsorientierten/,
+);
 
 console.log("survey-exam-questions tests: ok");
