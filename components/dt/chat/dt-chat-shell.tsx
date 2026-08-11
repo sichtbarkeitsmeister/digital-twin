@@ -9,6 +9,7 @@ import {
   getQuickActionsForAgent,
   type DtAgentOption,
 } from "@/components/dt/chat/dt-agent-switcher";
+import { agentSupportsPersonaTesting } from "@/lib/dt/persona-testing";
 import { DtWunschkundenPanel } from "@/components/dt/chat/dt-wunschkunden-panel";
 import { DtChatComposer } from "@/components/dt/chat/dt-chat-composer";
 import { DtChatLightbox } from "@/components/dt/chat/dt-chat-lightbox";
@@ -1411,6 +1412,8 @@ export function DtChatShell(props: {
               onTextModeChange={setTextMode}
               attachments={attachments}
               agentName={displayAgentName}
+              personaTestingAvailable={agentSupportsPersonaTesting(selectedAgent)}
+              personaTestingAgentId={selectedAgentId}
               onAddFiles={(files) => void processFiles(files)}
               onRemoveAttachment={(index) => {
                 setAttachments((prev) => {

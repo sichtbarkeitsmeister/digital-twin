@@ -15,8 +15,18 @@ import { parseQuickActions } from "@/lib/dt/types";
 
 export type DtAgentOption = Pick<
   DtAgentRow,
-  "id" | "name" | "role" | "quick_actions" | "slug" | "kind" | "avatar_data"
+  | "id"
+  | "name"
+  | "role"
+  | "quick_actions"
+  | "slug"
+  | "kind"
+  | "avatar_data"
+  | "source_survey_id"
+  | "source_survey_response_id"
 >;
+
+export { agentSupportsPersonaTesting } from "@/lib/dt/persona-testing";
 
 const AGENT_DROPDOWN_THRESHOLD = 4;
 

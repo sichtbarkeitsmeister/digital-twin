@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronDown,
+  ClipboardList,
   Ghost,
   Paperclip,
   PenLine,
@@ -12,6 +13,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 import { DtAttachmentChips } from "@/components/dt/chat/dt-attachment-chips";
+import { DtPersonaTestingPanel } from "@/components/dt/chat/dt-persona-testing-panel";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { cn } from "@/components/dt/cn";
 import {
@@ -44,11 +46,16 @@ export function DtChatComposer(props: {
   onDragHighlight?: (v: boolean) => void;
   /** Active avatar name for the default placeholder. */
   agentName?: string;
+  /** Survey-built persona: show optional Persona-Testing toggle. */
+  personaTestingAvailable?: boolean;
+  /** Selected agent id — used to load exam questions when testing is on. */
+  personaTestingAgentId?: string | null;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [quickActionsOpen, setQuickActionsOpen] = useState(
     () => !props.quickActionsDefaultCollapsed,
   );
+  const [personaTesting, setPersonaTesting] = useState(false);
   const canSend =
     (props.value.trim().length > 0 || props.attachments.length > 0) &&
     !props.isBusy &&
@@ -57,6 +64,11 @@ export function DtChatComposer(props: {
   useEffect(() => {
     setQuickActionsOpen(!props.quickActionsDefaultCollapsed);
   }, [props.quickActionsDefaultCollapsed]);
+
+  // Default off when switching agents or when testing is no longer available.
+  useEffect(() => {
+    setPersonaTesting(false);
+  }, [props.personaTestingAgentId, props.personaTestingAvailable]);
 
   return (
     <div
@@ -104,7 +116,17 @@ export function DtChatComposer(props: {
       </AnimatePresence>
 
       <div className="mx-auto w-full max-w-3xl">
-        {props.quickActions.length > 0 ? (
+        {props.personaTestingAvailable && props.personaTestingAgentId && personaTesting ? (
+          <DtPersonaTestingPanel
+            agentId={props.personaTestingAgentId}
+            enabled={personaTesting}
+            isBusy={props.isBusy}
+            disabled={props.disabled}
+            onPickQuestion={(question) => props.onChange(question)}
+          />
+        ) : null}
+
+        {props.quickActions.length > 0 && !personaTesting ? (
           <div className="mb-2">
             <button
               type="button"
@@ -174,6 +196,7 @@ export function DtChatComposer(props: {
             "relative overflow-hidden rounded-2xl border border-sbkm-navy/12 bg-white/90 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(46,46,80,0.06)] transition-[box-shadow,border-color] duration-200 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/35 before:to-transparent focus-within:border-sbkm-mint/45 focus-within:shadow-[0_0_0_3px_rgba(122,255,199,0.18),0_8px_24px_rgba(46,46,80,0.08)] dark:border-white/12 dark:bg-white/[0.07] dark:before:via-white/15 dark:focus-within:border-sbkm-mint/35",
             props.ghostMode && "border-amber-400/25 dark:border-amber-400/20",
             props.textMode && "border-violet-400/25 dark:border-violet-400/20",
+            personaTesting && "border-sky-400/25 dark:border-sky-400/20",
             props.disabled && "opacity-60",
           )}
         >
@@ -185,7 +208,9 @@ export function DtChatComposer(props: {
                 ? "Ghost-Chat — wird nicht gespeichert …"
                 : props.textMode
                   ? "Text-Modus — SEO-Text, der menschlich klingt …"
-                  : `Nachricht an ${props.agentName?.trim() || "deinen DigitalTwin"} …`
+                  : personaTesting
+                    ? `Persona-Testing — Prüfungsfrage an ${props.agentName?.trim() || "die Persona"} …`
+                    : `Nachricht an ${props.agentName?.trim() || "deinen DigitalTwin"} …`
             }
             rows={2}
             disabled={props.isBusy || props.disabled}
@@ -274,6 +299,26 @@ export function DtChatComposer(props: {
                 <PenLine className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="hidden text-xs font-bold sm:inline">Text</span>
               </button>
+
+              {props.personaTestingAvailable && props.personaTestingAgentId ? (
+                <button
+                  type="button"
+                  aria-pressed={personaTesting}
+                  aria-label="Persona-Testing"
+                  disabled={props.isBusy}
+                  title="Prüfungsfragen aus dem Fragebogen ein-/ausblenden"
+                  onClick={() => setPersonaTesting((v) => !v)}
+                  className={cn(
+                    iconBtn,
+                    "w-auto gap-1.5 px-2.5",
+                    personaTesting &&
+                      "border-sky-400/40 bg-sky-100/90 text-sky-950 hover:bg-sky-100 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:bg-sky-500/25",
+                  )}
+                >
+                  <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="hidden text-xs font-bold sm:inline">Testing</span>
+                </button>
+              ) : null}
             </div>
 
             {props.isBusy ? (
