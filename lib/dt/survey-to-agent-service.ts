@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 
 import { updateDtAgent } from "@/lib/dt/db";
+import { ensureAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
 import {
   pollSurveyAgentBatch,
   startSurveyAgentCoverageRepairBatch,
@@ -674,7 +675,7 @@ export async function applyAgentRefinementFromSurvey(input: {
     return { ok: false as const, status: 404, message: "Agent nicht gefunden." };
   }
 
-  const avatarPart = input.promptTemplate.trim();
+  const avatarPart = ensureAvatarGlobalPromptAnchor(input.promptTemplate);
 
   // Keep / attach global DigitalTwin rules; survey output is avatar-specific.
   const patch: Record<string, unknown> = {

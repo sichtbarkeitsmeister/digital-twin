@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createDtPersonaAgent } from "@/lib/dt/db";
+import { ensureAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
 import {
   loadSurveyResponseBundle,
   mapPersonaAgentRpcError,
@@ -68,7 +69,7 @@ export async function POST(
   }
 
   const agent = parsed.data.agent;
-  const avatarPart = agent.prompt_template.trim();
+  const avatarPart = ensureAvatarGlobalPromptAnchor(agent.prompt_template);
   const { agentId, error } = await createDtPersonaAgent({
     organisationId: parsed.data.organisationId,
     payload: {
