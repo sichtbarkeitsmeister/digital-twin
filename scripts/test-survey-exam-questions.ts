@@ -138,6 +138,14 @@ const dentalDefinition = {
           required: false,
           options: [],
         },
+        {
+          id: "f_company_named",
+          type: "text" as const,
+          title: "Mit welchen Zahnärzten arbeitet TM Dentaltechnik am liebsten zusammen?",
+          description: "",
+          required: false,
+          options: [],
+        },
       ],
     },
   ],
@@ -159,13 +167,14 @@ const dentalFacts = extractSurveyFacts({
       excludedPresets: [],
     },
     f_company: "Mit Qualitätsorientierten Praxen",
+    f_company_named: "Mit Qualitätsorientierten Praxen",
   },
   fieldQuestions: [],
 });
 
 const personaQs = buildSurveyExamQuestions(dentalFacts.facts, {
   audience: "persona",
-  maxQuestions: 12,
+  maxQuestions: 14,
 });
 
 assert.ok(personaQs.some((q) => /wie heißt du/i.test(q.question)));
@@ -186,6 +195,13 @@ assert.ok(
 assert.ok(
   !personaQs.some((q) => /arbeitet unser labor/i.test(q.question)),
   "Company-only facts must not become Wunschkunde exam questions",
+);
+assert.ok(
+  !personaQs.some((q) => /tm dentaltechnik/i.test(q.question)),
+  "Named-company probes must not become Wunschkunde exam questions",
+);
+assert.ok(
+  !personaQs.some((q) => /arbeitet tm dentaltechnik/i.test(q.question)),
 );
 assert.ok(
   personaQs.every((q) => !q.factId || q.expectedHint.trim().length > 0),

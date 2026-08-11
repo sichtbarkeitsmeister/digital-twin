@@ -225,17 +225,37 @@ function toCompanyInterviewQuestion(fact: SurveyFact): string {
 }
 
 /**
- * Skip company-only facts when probing a Wunschkunde persona
- * (e.g. “Mit welchen Zahnärzten arbeitet die Firma …”).
+ * Skip company-only facts when probing a Wunschkunde persona.
+ * Catches firm names (“TM Dentaltechnik”), “am liebsten zusammen”, Labor/Kanzlei, etc.
  */
 function isCompanyOnlyFactForPersona(fact: SurveyFact): boolean {
   const t = `${fact.fieldTitle} ${fact.label}`.toLowerCase();
   if (isCustomerProfileMetaTitle(t)) return false;
-  return (
-    /\b(firma|unternehmen|organisation|labor|kanzlei|unsere?|ihr|euch|wettbewerb|mitbewerber)\b/.test(
+
+  // “Mit welchen X arbeitet [Firma] am liebsten zusammen?”
+  if (
+    /mit welchen\b/.test(t) &&
+    /arbeitet/.test(t) &&
+    /(zusammen|liebsten|partner)/.test(t)
+  ) {
+    return true;
+  }
+
+  if (/arbeitet .*\bam liebsten\b|\bam liebsten zusammen\b/.test(t)) {
+    return true;
+  }
+
+  // Org / firm vocabulary (unless clearly about the customer's own practice as Wunschkunde).
+  if (
+    /\b(firma|unternehmen|organisation|labor|kanzlei|gmbh|partmbb|dentaltechnik|mitbewerber|wettbewerb|unsere?|ihr\b|euch)\b/.test(
       t,
-    ) && !/\b(wunsch|ideal|typische|kunde|kunden|avatar|persona)\b/.test(t)
-  );
+    )
+  ) {
+    if (/\b(meine|deine|wunsch|ideal|typische)\b/.test(t)) return false;
+    return true;
+  }
+
+  return false;
 }
 
 function hintFromValue(value: string, max = 200): string {
