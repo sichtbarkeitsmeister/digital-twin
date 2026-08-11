@@ -16,6 +16,7 @@
     "test:chat-agent-selection": "tsx scripts/test-dt-chat-agent-selection.ts",
     "test:dt-chat-title": "tsx scripts/test-dt-chat-title.ts",
     "test:dt-org-website-button": "tsx scripts/test-dt-org-website-button.ts",
+    "test:dt-delete-agent": "tsx scripts/test-dt-delete-agent.ts",
     "test:seo-indexability": "tsx scripts/test-seo-indexability-audit.ts",
     "test:safe-fetch-url": "tsx scripts/test-safe-fetch-url.ts",
     "test:auth-error-messages": "tsx scripts/test-auth-error-messages.ts",

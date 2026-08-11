@@ -232,12 +232,7 @@ export async function updateDtAgent(params: {
   return { ok: true, error: null };
 }
 
-export async function deleteDtAgent(agentId: string): Promise<{ ok: boolean; error: string | null }> {
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("dt_delete_agent", { p_agent_id: agentId });
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, error: null };
-}
+export { deleteDtAgent } from "@/lib/dt/delete-agent";
 
 export async function createDtChat(params: {
   organisationId: string;

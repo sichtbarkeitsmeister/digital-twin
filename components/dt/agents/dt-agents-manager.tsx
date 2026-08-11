@@ -26,6 +26,7 @@ import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtTabs } from "@/components/dt/dt-tabs";
 import type { DtAgentEditRequestRow } from "@/lib/dt/agent-edit-requests";
 import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { isProtectedSeoAdvisorAgent } from "@/lib/dt/delete-agent-policy";
 import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
 import { cn } from "@/components/dt/cn";
@@ -42,7 +43,7 @@ type GlobalPrompts = {
 type PageView = "agents" | "prompts";
 
 function isProtectedAlwaysOn(agent: AgentRow): boolean {
-  return agent.is_default && agent.slug === "seo_advisor";
+  return isProtectedSeoAdvisorAgent(agent);
 }
 
 function globalPromptForAgent(agent: AgentRow, prompts: GlobalPrompts): string {

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { deleteDtAgent, requireAuthUser, updateDtAgent } from "@/lib/dt/db";
+import {
+  deleteDtAgent,
+  deleteDtAgentErrorCode,
+  deleteDtAgentUserMessage,
+} from "@/lib/dt/delete-agent";
+import { requireAuthUser, updateDtAgent } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents } from "@/lib/dt/org-access";
 
 const patchSchema = z.object({
@@ -115,23 +120,6 @@ export async function PATCH(
   return NextResponse.json({ ok: true, agent });
 }
 
-function deleteAgentMessage(code: string | undefined): string {
-  switch (code) {
-    case "default_agent_protected":
-      return "Der SEO-Berater kann nicht entfernt werden.";
-    case "last_enabled_agent":
-      return "Mindestens ein aktiver Agent muss in der Organisation bleiben.";
-    case "agent_has_chats":
-      return "Agent hat noch Chats — zuerst deaktivieren oder Chats löschen.";
-    case "agent_not_found":
-      return "Agent nicht gefunden.";
-    case "forbidden":
-      return "Keine Berechtigung.";
-    default:
-      return "Agent konnte nicht gelöscht werden.";
-  }
-}
-
 export async function DELETE(
   _: Request,
   context: { params: Promise<{ agentId: string }> },
@@ -144,7 +132,7 @@ export async function DELETE(
   const { agentId } = await context.params;
   const { data: existing } = await auth.supabase
     .from("dt_agents")
-    .select("organisation_id")
+    .select("organisation_id,slug,kind,name")
     .eq("id", agentId)
     .maybeSingle();
 
@@ -165,19 +153,9 @@ export async function DELETE(
 
   const deleted = await deleteDtAgent(agentId);
   if (!deleted.ok) {
-    const code = deleted.error?.includes("default_agent_protected")
-      ? "default_agent_protected"
-      : deleted.error?.includes("last_enabled_agent")
-        ? "last_enabled_agent"
-        : deleted.error?.includes("agent_has_chats")
-          ? "agent_has_chats"
-          : deleted.error?.includes("agent_not_found")
-            ? "agent_not_found"
-            : deleted.error?.includes("forbidden")
-              ? "forbidden"
-              : undefined;
+    const code = deleteDtAgentErrorCode(deleted.error);
     return NextResponse.json(
-      { ok: false, message: deleteAgentMessage(code) },
+      { ok: false, message: deleteDtAgentUserMessage(code) },
       { status: 400 },
     );
   }
