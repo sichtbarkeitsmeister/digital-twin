@@ -1049,7 +1049,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       .map((s: SurveyRankRow) => s.organisation_id)
       .filter((id): id is string => Boolean(id));
 
-    const { knownAgents, focusedAgentPrompts } = await loadDtAgentsForSurveyAssistant({
+    const { knownAgents, focusedAgentPrompts, focusedAgentSurveyFacts } =
+      await loadDtAgentsForSurveyAssistant({
       supabase: auth.supabase,
       organisationId: parsed.data.pageContext.organisationId ?? null,
       agentId: parsed.data.pageContext.agentId ?? null,
@@ -1105,6 +1106,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       ),
       knownAgents,
       focusedAgentPrompts,
+      focusedAgentSurveyFacts,
       attachmentSummaries: attachmentSummaries.map(
         (a) => `${a.fileName} (${a.mimeType}, ${a.sizeBytes} bytes)`,
       ),

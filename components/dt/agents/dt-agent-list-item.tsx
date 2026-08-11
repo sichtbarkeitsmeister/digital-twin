@@ -18,11 +18,13 @@ import {
   agentFormValuesFromRow,
   type DtAgentFormValues,
 } from "@/components/dt/agents/dt-agent-form-fields";
+import { DtAgentSurveyCoverageCheck } from "@/components/dt/agents/dt-agent-survey-coverage-check";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/dt/cn";
 import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
+import { agentSupportsPersonaTesting } from "@/lib/dt/persona-testing";
 
 export type DtAgentListItemRow = {
   id: string;
@@ -37,6 +39,8 @@ export type DtAgentListItemRow = {
   quick_actions: unknown;
   is_default: boolean;
   uses_global_prompt: boolean;
+  source_survey_id?: string | null;
+  source_survey_response_id?: string | null;
 };
 
 function agentIcon(kind: string, slug: string): LucideIcon {
@@ -243,6 +247,27 @@ export function DtAgentListItem(props: {
           globalPromptPreview={props.globalPromptPreview}
           hideEnabled={props.alwaysOn}
         />
+        {props.canDirectlyEdit && agentSupportsPersonaTesting(agent) ? (
+          <DtAgentSurveyCoverageCheck
+            className="mt-4"
+            agentId={agent.id}
+            agentName={agent.name}
+            available
+            disabled={props.busy}
+            promptTemplate={props.editValues.prompt}
+            promptAppend={props.editValues.promptAppend}
+            onInsertIntoPrompt={(insertion) => {
+              const target = props.editValues.usesGlobalPrompt ? "promptAppend" : "prompt";
+              const current =
+                target === "promptAppend"
+                  ? props.editValues.promptAppend
+                  : props.editValues.prompt;
+              props.onEditValuesChange({
+                [target]: `${current.trimEnd()}${insertion}`,
+              });
+            }}
+          />
+        ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           <DtPillButton type="button" size="sm" disabled={props.busy} onClick={props.onSaveEdit}>
             Speichern

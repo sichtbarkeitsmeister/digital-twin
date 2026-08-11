@@ -28,6 +28,7 @@
     "test:survey-paste-retry": "tsx scripts/test-survey-paste-retry.ts",
     "test:persona-testing": "tsx scripts/test-persona-testing.ts",
     "test:survey-exam-questions": "tsx scripts/test-survey-exam-questions.ts",
+    "test:agent-survey-coverage": "tsx scripts/test-agent-survey-coverage.ts",
     "types:generate": "tsx scripts/generate-types.ts",
     "env:check": "node -e \"console.log('URL=',process.env.NEXT_PUBLIC_SUPABASE_URL); console.log('KEY=',(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'').slice(0,8));\"",
     "env:check:next": "node -e \"require('@next/env').loadEnvConfig(process.cwd(), false); console.log('URL=',process.env.NEXT_PUBLIC_SUPABASE_URL); console.log('KEY=',(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'').slice(0,8));\"",

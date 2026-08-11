@@ -63,6 +63,8 @@ export type KnownDtAgentSnapshot = {
   usesGlobalPrompt: boolean;
   promptExcerpt: string;
   appendExcerpt: string | null;
+  sourceSurveyId?: string | null;
+  sourceSurveyResponseId?: string | null;
 };
 
 export type FocusedDtAgentPrompt = {
@@ -73,6 +75,19 @@ export type FocusedDtAgentPrompt = {
   usesGlobalPrompt: boolean;
   promptTemplate: string;
   promptAppend: string | null;
+  sourceSurveyId?: string | null;
+  sourceSurveyResponseId?: string | null;
+};
+
+/** Filled questionnaire answers for a focused survey-built agent. */
+export type FocusedDtAgentSurveyFacts = {
+  agentId: string;
+  agentName: string;
+  surveyId: string;
+  responseId: string;
+  surveyTitle: string;
+  factCount: number;
+  factsChecklist: string;
 };
 
 export type SurveyChatSystemPromptInput = {
@@ -84,6 +99,7 @@ export type SurveyChatSystemPromptInput = {
   candidateSurveyContexts: CandidateSurveyContext[];
   knownAgents?: KnownDtAgentSnapshot[];
   focusedAgentPrompts?: FocusedDtAgentPrompt[];
+  focusedAgentSurveyFacts?: FocusedDtAgentSurveyFacts[];
   attachmentSummaries: string[];
   conversationSummary: string;
   pastedWebsiteContent?: string | null;
@@ -136,6 +152,9 @@ export function buildSurveyChatStaticSystemText(): string {
     "Always return the COMPLETE revised prompt text in \"prompt\" (not a diff). Keep German. Persona remains Interessent/Wunschkunde (Pre-Sale) unless the user explicitly asks otherwise — never invent company encyclopedia facts.",
     "Pick agentId from Known agents / Focused agent prompts. If several agents match the name, ask which organisation/agent first.",
     "Do NOT use survey patch/edit actions for agent prompts.",
+    "Focused agent survey facts: when present, these are the FILLED questionnaire answers (not just stepOutline) for that agent’s source survey response.",
+    "Use them to verify whether the DigitalTwin prompt absorbed rankings, names, numbers and statements. Compare Focused agent prompts against Focused agent survey facts when the user asks if a persona was built correctly.",
+    "Questionnaire answers themselves are read-only here — propose edit_dt_agent_prompt to fix the twin, do not invent missing answers.",
     "",
     PASTED_URL_PROMPT_HINT_EN,
     "",
@@ -219,6 +238,7 @@ export function buildSurveyChatDynamicSystemText(input: {
   candidateSurveyContexts: CandidateSurveyContext[];
   knownAgents?: KnownDtAgentSnapshot[];
   focusedAgentPrompts?: FocusedDtAgentPrompt[];
+  focusedAgentSurveyFacts?: FocusedDtAgentSurveyFacts[];
   attachmentSummaries: string[];
   conversationSummary: string;
   pastedWebsiteContent?: string | null;
@@ -231,6 +251,7 @@ export function buildSurveyChatDynamicSystemText(input: {
     `Known folders: ${JSON.stringify(input.folders)}`,
     `Known DigitalTwin agents (for edit_dt_agent_prompt): ${JSON.stringify(input.knownAgents ?? [])}`,
     `Focused agent prompts (full text when relevant): ${JSON.stringify(input.focusedAgentPrompts ?? [])}`,
+    `Focused agent survey facts (filled questionnaire answers for coverage checks): ${JSON.stringify(input.focusedAgentSurveyFacts ?? [])}`,
     `Attachment summaries (current user message): ${JSON.stringify(input.attachmentSummaries)}`,
   ];
 
