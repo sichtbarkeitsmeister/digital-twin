@@ -191,7 +191,7 @@ assert.ok(personaQs.some((q) => /wie nimmst du erstmals kontakt|kontakt/i.test(q
 assert.ok(
   personaQs.some(
     (q) =>
-      /labor|partner|anbieter|reihenfolge|priorität/i.test(q.question) &&
+      /partner|anbieter|reihenfolge|priorität/i.test(q.question) &&
       !/was steht bei dir bei/i.test(q.question),
   ),
   "Ranking probes should sound natural (not checklist-style)",
@@ -218,7 +218,7 @@ assert.ok(
   "Fact-tied probes must expose the questionnaire expectation",
 );
 
-// Packed description → split into concrete MA / Alter / Schwerpunkt probes
+// Packed dental description → Behandler only because the SOLL text contains it
 const packedDescFacts = extractSurveyFacts({
   surveyTitle: "Packed",
   definition: {
@@ -251,15 +251,15 @@ const packedQs = buildSurveyExamQuestions(packedDescFacts.facts, {
   maxQuestions: 10,
 });
 assert.ok(
-  packedQs.some((q) => /wie viele mitarbeiter|behandler|wie groß ist die praxis/i.test(q.question)),
-  "Practice size must become a concrete MA/Behandler question",
+  packedQs.some((q) => /behandler|praxisgröße|wie groß ist die praxis/i.test(q.question)),
+  "Practice size probe may use Behandler only when present in SOLL",
 );
 assert.ok(
   packedQs.some((q) => /wie alt bist du|altersgruppe/i.test(q.question)),
   "Age slice must become its own question",
 );
 assert.ok(
-  packedQs.some((q) => /schwerpunkte hast du/i.test(q.question)),
+  packedQs.some((q) => /schwerpunkt/i.test(q.question)),
   "Specializations must become their own question",
 );
 assert.ok(
@@ -267,9 +267,105 @@ assert.ok(
   "SOLL for size probe must expose 1-6 Behandler",
 );
 assert.ok(
-  !packedQs.some((q) => /erzähl mal kurz/i.test(q.question)),
-  "Packed description must not collapse into soft bio question",
+  !packedQs.some((q) => /nenn mir konkret:.*behandler/i.test(q.question)),
+  "Must not use the old dental multi-fact checklist dump",
 );
+
+// Care relative description must NOT invent dental Behandler/Labor wording
+const careFacts = extractSurveyFacts({
+  surveyTitle: "Care",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_care",
+            type: "textarea" as const,
+            title: "Beschreibung des idealen Wunschkunden in 3-5 Sätzen",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_contact_care",
+            type: "text" as const,
+            title: "Wie nehmen Wunschkunden erstmals Kontakt auf?",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_care:
+      "Ehefrau, Anfang 50, Beatmungspflichtig, konnte nach Jahren langsamer Entwöhnung wieder alleine atmen",
+    f_contact_care: "Über Empfehlung und Website",
+  },
+  fieldQuestions: [],
+});
+const careQs = buildSurveyExamQuestions(careFacts.facts, {
+  audience: "persona",
+  maxQuestions: 10,
+});
+assert.ok(
+  careQs.some((q) => /situation|beschreibt dich/i.test(q.question)),
+  "Care description should ask for the questionnaire situation",
+);
+assert.ok(
+  !careQs.some((q) => /behandler|praxis|labor/i.test(q.question)),
+  "Care persona must not get dental-hardcoded probes",
+);
+assert.ok(
+  careQs.some((q) => /Ehefrau|Beatmung|Entwöhnung/i.test(q.expectedHint)),
+);
+
+// Homeowner / renovation: no Labor/Behandler either
+const homeFacts = extractSurveyFacts({
+  surveyTitle: "Home",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_home",
+            type: "textarea" as const,
+            title: "Beschreibung des idealen Wunschkunden",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_budget",
+            type: "text" as const,
+            title: "Typisches Budget der Wunschkunden",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_home: "40+ Angestellter, Freiberufler oder Unternehmer; Interesse Dachgeschossausbau",
+    f_budget: "150-200k",
+  },
+  fieldQuestions: [],
+});
+const homeQs = buildSurveyExamQuestions(homeFacts.facts, {
+  audience: "persona",
+  maxQuestions: 10,
+});
+assert.ok(homeQs.some((q) => /budget/i.test(q.question)));
+assert.ok(!homeQs.some((q) => /behandler|labor|praxis/i.test(q.question)));
 
 const companyQs = buildSurveyExamQuestions(dentalFacts.facts, {
   audience: "company",

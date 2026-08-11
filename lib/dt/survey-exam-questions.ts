@@ -132,7 +132,7 @@ type FactSlice = { key: string; label: string; value: string };
 
 /**
  * Pull concrete sub-facts out of long description answers
- * (e.g. "Alter: 35-45 / Praxisgröße: 1-6 Behandler / …").
+ * using the questionnaire's own labels (domain-agnostic).
  */
 export function extractConcreteFactSlices(value: string): FactSlice[] {
   const text = value.replace(/\r/g, "").trim();
@@ -157,93 +157,117 @@ export function extractConcreteFactSlices(value: string): FactSlice[] {
     if (!m) continue;
     const label = m[1]!.trim();
     const val = m[2]!.trim();
-    const key = classifySliceLabel(label);
-    if (key) push(key, label, val);
+    push(classifySliceKey(label), label, val);
   }
 
-  // Slash- or semicolon-separated "Label: value" chunks on one line
-  for (const part of text.split(/\s*[|;/]\s*/)) {
-    const m = part.match(/^(.{2,40}?)\s*[:：]\s*(.+)$/);
-    if (!m) continue;
-    const label = m[1]!.trim();
-    const val = m[2]!.trim();
-    const key = classifySliceLabel(label);
-    if (key) push(key, label, val);
+  // Slash-, semicolon- or comma-separated labeled chunks
+  for (const part of text.split(/\s*[|;/]\s*|\s*,\s+/)) {
+    const chunk = part.trim();
+    if (!chunk) continue;
+    const withColon = chunk.match(/^(.{2,40}?)\s*[:：]\s*(.+)$/);
+    if (withColon) {
+      const label = withColon[1]!.trim();
+      push(classifySliceKey(label), label, withColon[2]!.trim());
+      continue;
+    }
+    const agePart = chunk.match(/^alter(?:sgruppe)?\s+(.+)$/i);
+    if (agePart?.[1]) {
+      push("age", "Alter", agePart[1].trim());
+      continue;
+    }
+    const sizePart = chunk.match(
+      /^(.{0,24}?(?:größe|groesse|mitarbeiter|behandler|team|anzahl)[^:]{0,20})\s+(.+)$/i,
+    );
+    if (sizePart?.[1] && sizePart[2] && /\d/.test(sizePart[2])) {
+      push("size", sizePart[1].trim(), sizePart[2].trim());
+      continue;
+    }
+    const focusPart = chunk.match(/^(?:schwerpunkt(?:e)?|spezialisierung(?:en)?)\s+(.+)$/i);
+    if (focusPart?.[1]) {
+      push("focus", "Schwerpunkte", focusPart[1].trim());
+    }
   }
 
-  // Inline patterns when labels are missing
-  const age =
-    text.match(/\balter(?:sgruppe)?\b[^0-9]{0,16}(\d{2}\s*[–\-bis]+\s*\d{2}|\d{2})/i) ??
-    text.match(/\b(\d{2}\s*[–\-]\s*\d{2})\s*(?:jahre|jährig)?/i);
+  // Inline age only when explicitly labeled (avoid false positives like budgets).
+  const age = text.match(/\balter(?:sgruppe)?\b[^0-9]{0,16}(\d{2}\s*[–\-bis]+\s*\d{2}|\d{2})/i);
   if (age?.[1]) push("age", "Alter", age[1].trim());
-
-  const size =
-    text.match(
-      /\b(?:praxisgröße|praxisgroesse|behandler|mitarbeiter|teamgröße|teamgroesse|ma\b)[^0-9]{0,24}(\d+\s*[–\-bis]+\s*\d+|\d+)/i,
-    ) ?? text.match(/\b(\d+\s*[–\-]\s*\d+)\s*(?:behandler|mitarbeiter|ma|personen|köpfe)/i);
-  if (size?.[1]) {
-    const around = text.slice(Math.max(0, (size.index ?? 0) - 10), (size.index ?? 0) + size[0].length + 24);
-    push("size", "Praxisgröße", around.replace(/\s+/g, " ").trim());
-  }
-
-  const focus = text.match(
-    /\bschwerpunkt(?:e)?\b\s*[:：]?\s*([^\n|;]{3,120})/i,
-  );
-  if (focus?.[1]) push("focus", "Schwerpunkte", focus[1].trim());
 
   return slices;
 }
 
-function classifySliceLabel(label: string): string | null {
+function classifySliceKey(label: string): string {
   const t = label.toLowerCase();
   if (/\balter\b/.test(t)) return "age";
-  if (/praxis|behandler|mitarbeiter|team|betriebs|größe|groesse|\bma\b|anzahl/.test(t)) {
+  if (/größe|groesse|mitarbeiter|behandler|team|betriebs|\bma\b|anzahl|praxis/.test(t)) {
     return "size";
   }
   if (/schwerpunkt|spezial|fokus|fachricht/.test(t)) return "focus";
   if (/\bname\b|ansprech/.test(t)) return "name";
-  if (/region|standort|einzugs|gebiet/.test(t)) return "region";
+  if (/region|standort|einzugs|gebiet|ort/.test(t)) return "region";
   if (/kontakt/.test(t)) return "contact";
-  return null;
+  if (/budget|kosten|preis|invest/.test(t)) return "budget";
+  return "topic";
 }
 
+/**
+ * Build a probe from the slice's own questionnaire label — never invent
+ * industry terms (Labor, Behandler, Praxis) unless they appear in the label/value.
+ */
 function concreteQuestionForSlice(slice: FactSlice): string {
+  const label = shortTopic(slice.label);
+  const hay = `${slice.label} ${slice.value}`.toLowerCase();
+
   switch (slice.key) {
     case "age":
       return "Wie alt bist du — bzw. welche Altersgruppe trifft auf dich zu?";
-    case "size":
-      return "Wie viele Mitarbeiter bzw. Behandler habt ihr — wie groß ist die Praxis?";
-    case "focus":
-      return "Welche fachlichen Schwerpunkte hast du?";
     case "name":
       return "Wie heißt du — und wie soll ich dich ansprechen?";
+    case "size":
+      if (/behandler/i.test(hay)) {
+        return "Wie viele Behandler habt ihr — welche Praxisgröße trifft zu?";
+      }
+      if (/mitarbeiter|team|\bma\b/i.test(hay)) {
+        return "Wie viele Mitarbeiter bzw. wie groß ist euer Team?";
+      }
+      if (/praxis/i.test(hay)) {
+        return "Wie groß ist eure Praxis — welche Größenordnung trifft zu?";
+      }
+      return `Was gilt bei dir konkret zur Größe / Anzahl („${label}")?`;
+    case "focus":
+      return `Welche Schwerpunkte oder Themen sind bei dir zentral („${label}")?`;
     case "region":
-      return "Wo bist du unterwegs, und aus welcher Region kommen deine Patienten?";
+      return `Wo bzw. in welcher Region trifft „${label}" auf dich zu?`;
     case "contact":
-      return "Wie nimmst du erstmals Kontakt zu einem Anbieter oder Labor auf?";
+      return "Wie nimmst du typischerweise erstmals Kontakt zu einem Anbieter auf?";
+    case "budget":
+      return `Welches Budget bzw. welche Größenordnung gilt bei dir („${label}")?`;
     default:
-      return `Was gilt bei dir konkret zu „${shortTopic(slice.label)}"?`;
+      return `Was gilt bei dir konkret zu „${label}"?`;
   }
 }
 
-/** Priority: name/age/size/focus before soft narrative probes. */
+/** Priority: identity/facts before soft narrative probes. */
 function factProbePriority(fact: SurveyFact, question: string): number {
   const hay = `${fact.fieldTitle} ${fact.label} ${question}`.toLowerCase();
   if (/wie heißt du|avatar-?name|name des digitalen/.test(hay)) return 10;
   if (/\balter\b|altersgruppe|wie alt/.test(hay)) return 20;
-  if (/mitarbeiter|behandler|praxisgröße|praxisgroesse|wie viele ma|wie groß ist/.test(hay)) {
-    return 30;
-  }
-  if (/schwerpunkt|spezial/.test(hay)) return 40;
-  if (/kontakt|aufmerksam|findest.*labor|partner/.test(hay)) return 50;
-  if (/erzähl mal kurz|wer bist du|beschäftigt dich/.test(hay)) return 90;
+  if (/größe|groesse|mitarbeiter|behandler|team|anzahl|budget/.test(hay)) return 30;
+  if (/schwerpunkt|spezial|situation|beschreibung/.test(hay)) return 40;
+  if (/kontakt|aufmerksam|partner|anbieter|kanal/.test(hay)) return 50;
+  if (/beschäftigt dich|erzähl mir kurz von dir/.test(hay)) return 90;
   return 60;
 }
 
-/** Ask so the twin must surface the stored fact — concrete, checkable probes. */
+/**
+ * Ask so the twin must surface the stored fact.
+ * Wording follows the field title / answer — no fixed industry vocabulary.
+ */
 function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
-  if (!raw) return "Erzähl mir bitte konkret etwas über dich und deine Situation.";
+  const hay = `${raw} ${fact.value}`;
+  if (!raw) {
+    return "Was beschreibt dich und deine Situation — bitte mit den konkreten Angaben?";
+  }
 
   if (/^(name des digitalen kunden-avatars|avatar-?name)$/i.test(raw)) {
     return "Wie heißt du — und wie soll ich dich ansprechen?";
@@ -258,19 +282,28 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
       raw,
     )
   ) {
-    return "Wie viele Mitarbeiter bzw. Behandler habt ihr — wie groß ist die Praxis?";
+    if (/behandler/i.test(hay)) {
+      return "Wie viele Behandler habt ihr — welche Praxisgröße trifft zu?";
+    }
+    if (/mitarbeiter|team|\bma\b/i.test(hay)) {
+      return "Wie viele Mitarbeiter bzw. wie groß ist euer Team?";
+    }
+    if (/praxis/i.test(hay)) {
+      return "Wie groß ist eure Praxis — welche Größenordnung trifft zu?";
+    }
+    return `Zu „${shortTopic(raw)}": Welche konkrete Größe oder Anzahl gilt für dich?`;
   }
 
   if (/schwerpunkt/i.test(raw)) {
-    return "Welche fachlichen Schwerpunkte hast du?";
+    return `Welche Schwerpunkte sind bei dir zentral — laut „${shortTopic(raw)}"?`;
   }
 
   if (/einzugsgebiet|region|standort|gebiet/i.test(raw)) {
-    return "Wo bist du unterwegs, und aus welcher Region kommen deine Patienten oder Kunden?";
+    return `Zu „${shortTopic(raw)}": Welche Region oder welcher Ort gilt für dich?`;
   }
 
   if (/kontaktweg|kontakt auf|erstkontakt|erreichen|erstmals kontakt/i.test(raw)) {
-    return "Wie nimmst du erstmals Kontakt zu einem Anbieter oder Labor auf?";
+    return "Wie nimmst du typischerweise erstmals Kontakt zu einem Anbieter auf?";
   }
 
   if (/sorg|einwand|hürde|problem|schmerz|ärger|frust/i.test(raw)) {
@@ -281,13 +314,13 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     return "Wonach suchst du dir einen Anbieter aus — was muss für dich unbedingt stimmen?";
   }
 
-  // Long bio/description fields: prefer concrete multi-fact ask only as fallback
-  // when we could not split the value (handled in personaProbesFromFact).
+  if (/budget|kosten|preis|invest/i.test(raw)) {
+    return `Welches Budget bzw. welche Größenordnung gilt bei dir („${shortTopic(raw)}")?`;
+  }
+
+  // Description / bio fields: ask for the questionnaire situation, not a dental checklist.
   if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/i.test(raw) || /ideal.*wunsch/i.test(raw)) {
-    return (
-      "Nenn mir konkret: Wie alt bist du, wie viele Behandler bzw. Mitarbeiter habt ihr, " +
-      "und welche fachlichen Schwerpunkte hast du?"
-    );
+    return "Was beschreibt dich und deine Situation konkret — bitte mit den Angaben aus dem Fragebogen?";
   }
 
   if (
@@ -314,7 +347,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     const topic = topicFromCustomerMetaTitle(raw) || raw;
     if (/kontaktweg|aufmerksam|findest|suche|kanal|empfehlung|google|messe/i.test(`${topic} ${raw}`)) {
       return (
-        "Worüber findest du typischerweise ein neues Labor oder einen neuen Partner — " +
+        "Worüber findest du typischerweise einen neuen Anbieter oder Partner — " +
         "was kommt für dich zuerst, und wie sieht die Reihenfolge dahinter aus?"
       );
     }
@@ -333,7 +366,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   if (isCustomerProfileMetaTitle(raw)) {
     const topic = topicFromCustomerMetaTitle(raw);
     if (!topic || topic.length < 3) {
-      return "Erzähl mir kurz von dir und deiner Situation.";
+      return "Was beschreibt dich und deine Situation — bitte möglichst konkret?";
     }
     return `Zu „${shortTopic(topic)}": Was trifft auf dich zu — bitte möglichst konkret?`;
   }
@@ -409,12 +442,12 @@ function personaProbesFromFact(fact: SurveyFact): Array<{
   question: string;
   expectedHint: string;
 }> {
-  // Long description answers often pack Alter / Praxisgröße / Schwerpunkte — split them.
-  if (isDescriptionMetaField(fact) || fact.value.length > 160) {
+  // Long / structured answers: split into probes from the questionnaire's own labels.
+  if (isDescriptionMetaField(fact) || fact.value.length > 120) {
     const slices = extractConcreteFactSlices(fact.value);
     if (slices.length >= 2) {
-      return slices.map((slice) => ({
-        idSuffix: `_${slice.key}`,
+      return slices.map((slice, index) => ({
+        idSuffix: `_${slice.key}${index > 0 ? `_${index}` : ""}`,
         question: concreteQuestionForSlice(slice),
         expectedHint: hintFromValue(slice.value),
       }));
@@ -435,8 +468,8 @@ function personaProbesFromFact(fact: SurveyFact): Array<{
 /**
  * Build an interviewer script from questionnaire facts (deterministic, no LLM).
  *
- * Goal: verify that survey answers were transferred and that the twin
- * thinks/acts/reacts accordingly — concrete fact probes first, soft warmup last.
+ * Goal: verify that survey answers were transferred — probes follow each
+ * questionnaire's own field titles/values (no fixed industry wording).
  *
  * - `persona`: ask the Wunschkunde as “du” (customer situation).
  * - `company`: ask the SEO/company twin about firm facts.

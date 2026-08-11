@@ -61,6 +61,7 @@ const facts = extractSurveyFacts({
 const questions = buildSurveyExamQuestions(facts.facts, { maxQuestions: 6 });
 assert.ok(questions.length >= 2);
 assert.ok(questions.some((q) => /Sorgen/i.test(q.question)));
-assert.ok(questions[0]?.id.startsWith("warmup_"));
+assert.ok(questions[0]?.factId, "fact probes come before warmups");
+assert.ok(questions.some((q) => q.id.startsWith("warmup_")));
 
 console.log("persona-testing tests: ok");
