@@ -561,7 +561,65 @@ export function formatFactsForCoverageRepair(input: {
   return lines.length > 0 ? lines.join("\n") : "(keine Facts)";
 }
 
-/** Drop-in context builder used by persona + anbieter paths. */
+/**
+ * Company knowledge for the SEO advisor: topic + fact, no avatar pipeline noise.
+ * Keeps the field title as context (so numbers/answers stay interpretable) but
+ * drops fact_IDs, Pflicht-Checkliste, coverage stats, and duplicated detail blocks.
+ */
+export function formatSurveyFactsForSeoKnowledge(bundle: SurveyFactsBundle): string {
+  if (bundle.facts.length === 0) {
+    return "Keine verwertbaren Unternehmensfakten gefunden.";
+  }
+
+  const lines: string[] = [];
+  let currentStep = "";
+  let lastFieldId = "";
+
+  for (const fact of bundle.facts) {
+    if (fact.stepTitle !== currentStep) {
+      currentStep = fact.stepTitle;
+      lastFieldId = "";
+      if (lines.length > 0) lines.push("");
+      lines.push(`## ${currentStep}`);
+      lines.push("");
+    }
+
+    if (fact.kind === "answer") {
+      if (lastFieldId && lastFieldId !== fact.fieldId) lines.push("");
+      lines.push(`**${fact.fieldTitle}**`);
+      lines.push(fact.value.trim());
+      lastFieldId = fact.fieldId;
+      continue;
+    }
+
+    // Remark / follow-up: nest under the same topic when possible.
+    if (fact.fieldId !== lastFieldId) {
+      if (lastFieldId) lines.push("");
+      lines.push(`**${fact.fieldTitle}**`);
+      lastFieldId = fact.fieldId;
+    }
+
+    if (fact.kind === "remark") {
+      const remarkBody = fact.value.trim();
+      const label = fact.label.trim();
+      const compact =
+        remarkBody === label
+          ? remarkBody
+          : remarkBody.startsWith(label)
+            ? remarkBody.slice(label.length).trim() || remarkBody
+            : remarkBody;
+      lines.push(`_Bemerkung:_ ${compact}`);
+      continue;
+    }
+
+    lines.push(`_Nachfrage:_ ${fact.label.trim()}`);
+    lines.push(fact.value.trim());
+  }
+
+  return lines.join("\n").trim();
+}
+
+/** Context builder for survey → persona (includes coverage checklist). */
 export function buildSurveyResponseContextForAgent(input: {
   surveyTitle: string;
   definition: unknown;
@@ -569,4 +627,14 @@ export function buildSurveyResponseContextForAgent(input: {
   fieldQuestions: SurveyFieldQuestionRow[];
 }): string {
   return formatSurveyFactsForAgentContext(extractSurveyFacts(input));
+}
+
+/** SEO knowledge body from questionnaire facts (1:1, no LLM). */
+export function buildSurveyResponseContextForSeo(input: {
+  surveyTitle: string;
+  definition: unknown;
+  answers: Record<string, unknown>;
+  fieldQuestions: SurveyFieldQuestionRow[];
+}): string {
+  return formatSurveyFactsForSeoKnowledge(extractSurveyFacts(input));
 }

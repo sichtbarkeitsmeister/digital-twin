@@ -47,6 +47,10 @@ const knowledge = buildAnbieterSeoKnowledgeBlock({
 assert.match(knowledge, /Einfach Entrümpelung Düsseldorf/);
 assert.match(knowledge, /Firmenname/);
 assert.doesNotMatch(knowledge, /### Leer/);
+assert.doesNotMatch(knowledge, /fact_001/);
+assert.doesNotMatch(knowledge, /Pflicht-Checkliste/);
+assert.doesNotMatch(knowledge, /Coverage:/);
+assert.match(knowledge, /\*\*Firmenname\*\*/);
 
 const mergedEmpty = mergeAnbieterKnowledgeIntoPromptAppend(null, knowledge);
 assert.match(mergedEmpty, new RegExp(ANBIETER_WISSEN_START));

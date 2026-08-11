@@ -2,10 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { updateDtAgent } from "@/lib/dt/db";
 import { ensureSeoAdvisorAgent } from "@/lib/dt/seo/ensure-seo-agent";
-import {
-  buildSurveyResponseContextForAgent,
-  type SurveyFieldQuestionRow,
-} from "@/lib/dt/survey-to-agent-context";
+import { buildSurveyResponseContextForSeo } from "@/lib/dt/survey-facts";
+import type { SurveyFieldQuestionRow } from "@/lib/dt/survey-to-agent-context";
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeSurveyPurpose } from "@/lib/surveys/purpose";
 
@@ -25,7 +23,7 @@ export function buildAnbieterSeoKnowledgeBlock(input: {
   fieldQuestions: SurveyFieldQuestionRow[];
   responseId: string;
 }): string {
-  const qa = buildSurveyResponseContextForAgent({
+  const facts = buildSurveyResponseContextForSeo({
     surveyTitle: input.surveyTitle,
     definition: input.definition,
     answers: input.answers,
@@ -39,9 +37,10 @@ export function buildAnbieterSeoKnowledgeBlock(input: {
     `Stand: ${new Date().toISOString().slice(0, 10)}`,
     "",
     "Die folgenden Angaben sind verbindliche Unternehmensfakten (1:1 aus dem Fragebogen).",
-    "Nutze sie für Firmenfragen, Texte und SEO-Empfehlungen — nichts erfinden.",
+    "Nutze Zahlen, Namen und Aussagen wörtlich für Firmenfragen, Texte und SEO — nichts erfinden.",
+    "Die Fettschrift ist nur das Thema/die Frage; darunter steht der Fakt.",
     "",
-    qa,
+    facts,
   ].join("\n");
 }
 
