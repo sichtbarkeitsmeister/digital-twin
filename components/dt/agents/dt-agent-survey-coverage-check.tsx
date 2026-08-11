@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ClipboardCheck, Link2, Loader2 } from "lucide-react";
 
 import { FactCoverageReview } from "@/components/surveys/fact-coverage-review";
@@ -15,8 +15,7 @@ import {
 import { cn } from "@/components/dt/cn";
 
 /**
- * Compare the current DigitalTwin prompt draft against a completed questionnaire.
- * Allows picking and permanently assigning which questionnaire this twin belongs to.
+ * Always-visible questionnaire assignment + optional Abgleich against current answers.
  */
 export function DtAgentSurveyCoverageCheck(props: {
   agentId: string;
@@ -31,13 +30,11 @@ export function DtAgentSurveyCoverageCheck(props: {
   }) => void;
   disabled?: boolean;
   className?: string;
-  /** Render only the trigger button (results still expand below in place). */
-  buttonOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingSource, setSavingSource] = useState(false);
-  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sourceMessage, setSourceMessage] = useState<string | null>(null);
   const [options, setOptions] = useState<AgentCoverageSurveyOption[]>([]);
@@ -71,6 +68,31 @@ export function DtAgentSurveyCoverageCheck(props: {
     return { options: list, defaultResponseId: defaultId };
   }, [props.agentId, props.agentName]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingOptions(true);
+    setError(null);
+    void loadOptions()
+      .then((loaded) => {
+        if (cancelled) return;
+        setOptions(loaded.options);
+        setSelectedResponseId((prev) => prev ?? loaded.defaultResponseId);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setOptions([]);
+        setError(
+          err instanceof Error ? err.message : "Fragebögen konnten nicht geladen werden.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOptions(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadOptions]);
+
   const runCheck = useCallback(
     async (responseIdOverride?: string | null) => {
       if (props.disabled) return;
@@ -84,7 +106,7 @@ export function DtAgentSurveyCoverageCheck(props: {
         let list = options;
         let responseId = responseIdOverride ?? selectedResponseId;
 
-        if (list.length === 0 || !responseId) {
+        if (list.length === 0) {
           setLoadingOptions(true);
           const loaded = await loadOptions();
           list = loaded.options;
@@ -196,12 +218,7 @@ export function DtAgentSurveyCoverageCheck(props: {
     } finally {
       setSavingSource(false);
     }
-  }, [
-    options,
-    props,
-    savingSource,
-    selectedResponseId,
-  ]);
+  }, [options, props, savingSource, selectedResponseId]);
 
   const openGaps =
     (coverage?.missingCount ?? 0) + (coverage?.weakCount ?? 0) - acceptedFactIds.size;
@@ -225,15 +242,100 @@ export function DtAgentSurveyCoverageCheck(props: {
 
   return (
     <div className={cn("grid gap-3", props.className)}>
+      <div className="grid gap-2 rounded-2xl border border-sbkm-navy/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04] sm:p-4">
+        <DtSelect
+          label="Zugehöriger Fragebogen"
+          size="sm"
+          fullWidth
+          value={selectedResponseId ?? selectOptions[0]?.value ?? ""}
+          disabled={
+            props.disabled || loadingOptions || savingSource || selectOptions.length === 0
+          }
+          options={
+            selectOptions.length > 0
+              ? selectOptions
+              : [
+                  {
+                    value: "",
+                    label: loadingOptions
+                      ? "Fragebögen werden geladen …"
+                      : "Keine abgeschlossenen Fragebögen",
+                    disabled: true,
+                  },
+                ]
+          }
+          onValueChange={(value) => {
+            if (!value) return;
+            setSelectedResponseId(value);
+            setSourceMessage(null);
+            setCoverage(null);
+            setError(null);
+            setOpen(false);
+          }}
+          placeholder="Fragebogen wählen"
+        />
+        <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+          Welcher ausgefüllte Fragebogen gehört zu diesem Zwilling? Speichere die Zuordnung,
+          damit Abgleich und Testing denselben Fragebogen nutzen.
+        </p>
+
+        {loadingOptions ? (
+          <p className="flex items-center gap-2 text-xs text-sbkm-ink-600 dark:text-white/55">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            Fragebögen werden geladen …
+          </p>
+        ) : null}
+
+        {canSaveSource ? (
+          <div>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={props.disabled || savingSource}
+              onClick={() => void saveAsSource()}
+              className="gap-1.5"
+            >
+              {savingSource ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Link2 className="size-4" aria-hidden />
+              )}
+              Als Herkunft speichern
+            </DtPillButton>
+          </div>
+        ) : selected?.isSource ? (
+          <p className="text-xs font-medium text-sbkm-mint">
+            Dieser Fragebogen ist als Herkunft des Zwillings gespeichert.
+          </p>
+        ) : selected?.usedByOtherAgentName ? (
+          <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+            Bereits bei „{selected.usedByOtherAgentName}“ hinterlegt — Abgleich trotzdem
+            möglich.
+          </p>
+        ) : null}
+
+        {sourceMessage ? (
+          <p
+            className={cn(
+              "text-xs",
+              /gespeichert/i.test(sourceMessage) ? "text-sbkm-mint" : "text-destructive",
+            )}
+          >
+            {sourceMessage}
+          </p>
+        ) : null}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <DtPillButton
           type="button"
           size="sm"
           variant="outline"
-          disabled={props.disabled || busy}
+          disabled={props.disabled || busy || !selectedResponseId}
           onClick={() => void runCheck()}
           className="gap-1.5 border-sbkm-navy/25 bg-white font-semibold dark:border-white/20 dark:bg-white/5"
-          title="Prompt mit dem aktuellen Fragebogen vergleichen"
+          title="Prompt mit dem ausgewählten Fragebogen vergleichen"
         >
           {busy ? (
             <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -256,75 +358,10 @@ export function DtAgentSurveyCoverageCheck(props: {
 
       {open ? (
         <div className="rounded-2xl border border-sbkm-navy/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04] sm:p-4">
-          {selectOptions.length > 0 && !loadingOptions ? (
-            <div className="mb-3 grid gap-2">
-              <DtSelect
-                label="Zugehöriger Fragebogen"
-                size="sm"
-                fullWidth
-                value={selectedResponseId ?? selectOptions[0]?.value ?? ""}
-                disabled={props.disabled || busy || savingSource}
-                options={selectOptions}
-                onValueChange={(value) => {
-                  setSelectedResponseId(value);
-                  setSourceMessage(null);
-                  void runCheck(value);
-                }}
-                placeholder="Fragebogen wählen"
-              />
-              <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-                Wähle den Fragebogen, zu dem dieser Zwilling gehört. Der Abgleich nutzt
-                immer die aktuellen Antworten.
-              </p>
-              {canSaveSource ? (
-                <div>
-                  <DtPillButton
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={props.disabled || busy || savingSource}
-                    onClick={() => void saveAsSource()}
-                    className="gap-1.5"
-                  >
-                    {savingSource ? (
-                      <Loader2 className="size-4 animate-spin" aria-hidden />
-                    ) : (
-                      <Link2 className="size-4" aria-hidden />
-                    )}
-                    Als Herkunft speichern
-                  </DtPillButton>
-                </div>
-              ) : selected?.isSource ? (
-                <p className="text-xs font-medium text-sbkm-mint">
-                  Dieser Fragebogen ist als Herkunft des Zwillings gespeichert.
-                </p>
-              ) : selected?.usedByOtherAgentName ? (
-                <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-                  Bereits bei „{selected.usedByOtherAgentName}“ hinterlegt — Abgleich
-                  trotzdem möglich.
-                </p>
-              ) : null}
-              {sourceMessage ? (
-                <p
-                  className={cn(
-                    "text-xs",
-                    /gespeichert/i.test(sourceMessage)
-                      ? "text-sbkm-mint"
-                      : "text-destructive",
-                  )}
-                >
-                  {sourceMessage}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {busy || loadingOptions ? (
+          {busy ? (
             <p className="flex items-center gap-2 text-sm text-sbkm-ink-600 dark:text-white/55">
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              {loadingOptions
-                ? "Fragebögen werden geladen …"
-                : "Prompt wird mit dem aktuellen Fragebogen verglichen …"}
+              Prompt wird mit dem aktuellen Fragebogen verglichen …
             </p>
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
