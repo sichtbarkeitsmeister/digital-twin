@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { ClipboardCheck, Loader2 } from "lucide-react";
+import { ClipboardCheck, Link2, Loader2 } from "lucide-react";
 
 import { FactCoverageReview } from "@/components/surveys/fact-coverage-review";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -9,14 +9,14 @@ import { DtSelect } from "@/components/dt/dt-select";
 import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
 import {
   formatCoverageOptionLabel,
-  pickDefaultCoverageOption,
+  suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "@/lib/dt/agent-survey-coverage-option-helpers";
 import { cn } from "@/components/dt/cn";
 
 /**
  * Compare the current DigitalTwin prompt draft against a completed questionnaire.
- * Always available — pick any org survey response (current answers), not only stored lineage.
+ * Allows picking and permanently assigning which questionnaire this twin belongs to.
  */
 export function DtAgentSurveyCoverageCheck(props: {
   agentId: string;
@@ -24,6 +24,11 @@ export function DtAgentSurveyCoverageCheck(props: {
   promptTemplate: string;
   promptAppend: string;
   onInsertIntoPrompt: (insertion: string) => void;
+  /** Called after the twin↔questionnaire link was saved. */
+  onSourceSaved?: (source: {
+    sourceSurveyId: string;
+    sourceSurveyResponseId: string;
+  }) => void;
   disabled?: boolean;
   className?: string;
   /** Render only the trigger button (results still expand below in place). */
@@ -31,8 +36,10 @@ export function DtAgentSurveyCoverageCheck(props: {
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [savingSource, setSavingSource] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceMessage, setSourceMessage] = useState<string | null>(null);
   const [options, setOptions] = useState<AgentCoverageSurveyOption[]>([]);
   const [selectedResponseId, setSelectedResponseId] = useState<string | null>(null);
   const [surveyTitle, setSurveyTitle] = useState<string | null>(null);
@@ -59,10 +66,10 @@ export function DtAgentSurveyCoverageCheck(props: {
     const list = Array.isArray(json.options) ? json.options : [];
     const defaultId =
       json.defaultResponseId ??
-      pickDefaultCoverageOption(list)?.responseId ??
+      suggestCoverageOptionForAgent(list, props.agentName)?.responseId ??
       null;
     return { options: list, defaultResponseId: defaultId };
-  }, [props.agentId]);
+  }, [props.agentId, props.agentName]);
 
   const runCheck = useCallback(
     async (responseIdOverride?: string | null) => {
@@ -70,6 +77,7 @@ export function DtAgentSurveyCoverageCheck(props: {
       setOpen(true);
       setBusy(true);
       setError(null);
+      setSourceMessage(null);
       setCoverage(null);
 
       try {
@@ -144,6 +152,57 @@ export function DtAgentSurveyCoverageCheck(props: {
     ],
   );
 
+  const saveAsSource = useCallback(async () => {
+    const selected = options.find((o) => o.responseId === selectedResponseId);
+    if (!selected || props.disabled || savingSource) return;
+    if (selected.usedByOtherAgentName) {
+      setSourceMessage(
+        `Bereits dem Zwilling „${selected.usedByOtherAgentName}“ zugeordnet.`,
+      );
+      return;
+    }
+
+    setSavingSource(true);
+    setSourceMessage(null);
+    try {
+      const res = await fetch(`/api/dt/agents/${props.agentId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceSurveyId: selected.surveyId,
+          sourceSurveyResponseId: selected.responseId,
+        }),
+      });
+      const json = (await res.json()) as { ok?: boolean; message?: string };
+      if (!json.ok) {
+        setSourceMessage(json.message ?? "Zuordnung konnte nicht gespeichert werden.");
+        return;
+      }
+      setOptions((prev) =>
+        prev.map((o) => ({
+          ...o,
+          isSource: o.responseId === selected.responseId,
+          usedByOtherAgentName:
+            o.responseId === selected.responseId ? null : o.usedByOtherAgentName,
+        })),
+      );
+      setSourceMessage("Fragebogen als Herkunft dieses Zwillings gespeichert.");
+      props.onSourceSaved?.({
+        sourceSurveyId: selected.surveyId,
+        sourceSurveyResponseId: selected.responseId,
+      });
+    } catch {
+      setSourceMessage("Zuordnung konnte nicht gespeichert werden.");
+    } finally {
+      setSavingSource(false);
+    }
+  }, [
+    options,
+    props,
+    savingSource,
+    selectedResponseId,
+  ]);
+
   const openGaps =
     (coverage?.missingCount ?? 0) + (coverage?.weakCount ?? 0) - acceptedFactIds.size;
   const allOk =
@@ -151,6 +210,12 @@ export function DtAgentSurveyCoverageCheck(props: {
     coverage.total > 0 &&
     coverage.missingCount === 0 &&
     coverage.weakCount === 0;
+
+  const selected = options.find((o) => o.responseId === selectedResponseId) ?? null;
+  const canSaveSource =
+    Boolean(selected) &&
+    !selected?.isSource &&
+    !selected?.usedByOtherAgentName;
 
   const selectOptions = options.map((o) => ({
     value: o.responseId,
@@ -192,20 +257,65 @@ export function DtAgentSurveyCoverageCheck(props: {
       {open ? (
         <div className="rounded-2xl border border-sbkm-navy/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04] sm:p-4">
           {selectOptions.length > 0 && !loadingOptions ? (
-            <div className="mb-3">
+            <div className="mb-3 grid gap-2">
               <DtSelect
-                label="Fragebogen"
+                label="Zugehöriger Fragebogen"
                 size="sm"
                 fullWidth
                 value={selectedResponseId ?? selectOptions[0]?.value ?? ""}
-                disabled={props.disabled || busy}
+                disabled={props.disabled || busy || savingSource}
                 options={selectOptions}
                 onValueChange={(value) => {
                   setSelectedResponseId(value);
+                  setSourceMessage(null);
                   void runCheck(value);
                 }}
-                placeholder="Umfrage-Antwort wählen"
+                placeholder="Fragebogen wählen"
               />
+              <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                Wähle den Fragebogen, zu dem dieser Zwilling gehört. Der Abgleich nutzt
+                immer die aktuellen Antworten.
+              </p>
+              {canSaveSource ? (
+                <div>
+                  <DtPillButton
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={props.disabled || busy || savingSource}
+                    onClick={() => void saveAsSource()}
+                    className="gap-1.5"
+                  >
+                    {savingSource ? (
+                      <Loader2 className="size-4 animate-spin" aria-hidden />
+                    ) : (
+                      <Link2 className="size-4" aria-hidden />
+                    )}
+                    Als Herkunft speichern
+                  </DtPillButton>
+                </div>
+              ) : selected?.isSource ? (
+                <p className="text-xs font-medium text-sbkm-mint">
+                  Dieser Fragebogen ist als Herkunft des Zwillings gespeichert.
+                </p>
+              ) : selected?.usedByOtherAgentName ? (
+                <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                  Bereits bei „{selected.usedByOtherAgentName}“ hinterlegt — Abgleich
+                  trotzdem möglich.
+                </p>
+              ) : null}
+              {sourceMessage ? (
+                <p
+                  className={cn(
+                    "text-xs",
+                    /gespeichert/i.test(sourceMessage)
+                      ? "text-sbkm-mint"
+                      : "text-destructive",
+                  )}
+                >
+                  {sourceMessage}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -232,7 +342,7 @@ export function DtAgentSurveyCoverageCheck(props: {
                 </p>
                 <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
                   Vergleicht die aktuellen Prompt-Texte mit den aktuellen
-                  Fragebogen-Antworten (auch ohne gespeicherte Herkunft).
+                  Fragebogen-Antworten.
                 </p>
                 <p className="mt-2 text-sm text-sbkm-navy dark:text-white">
                   {coverage.coveredCount}/{coverage.total} Facts erkannt

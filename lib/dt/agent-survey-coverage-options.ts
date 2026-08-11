@@ -6,6 +6,7 @@ export type { AgentCoverageSurveyOption } from "@/lib/dt/agent-survey-coverage-o
 export {
   formatCoverageOptionLabel,
   pickDefaultCoverageOption,
+  suggestCoverageOptionForAgent,
 } from "@/lib/dt/agent-survey-coverage-option-helpers";
 
 /**
@@ -14,6 +15,7 @@ export {
  */
 export async function listSurveyResponsesForAgentCoverage(input: {
   organisationId: string;
+  agentId?: string | null;
   agentKind?: string | null;
   sourceSurveyId?: string | null;
   sourceResponseId?: string | null;
@@ -115,6 +117,28 @@ export async function listSurveyResponsesForAgentCoverage(input: {
           completedAt: sourceRow.completed_at ?? null,
           isSource: true,
         });
+      }
+    }
+  }
+
+  const responseIds = options.map((o) => o.responseId);
+  if (responseIds.length > 0) {
+    const { data: owners } = await supabase
+      .from("dt_agents")
+      .select("id, name, source_survey_response_id")
+      .in("source_survey_response_id", responseIds);
+
+    const ownerByResponse = new Map<string, { id: string; name: string }>();
+    for (const owner of owners ?? []) {
+      const rid = owner.source_survey_response_id;
+      if (typeof rid !== "string") continue;
+      ownerByResponse.set(rid, { id: owner.id, name: owner.name });
+    }
+
+    for (const option of options) {
+      const owner = ownerByResponse.get(option.responseId);
+      if (owner && owner.id !== input.agentId) {
+        option.usedByOtherAgentName = owner.name;
       }
     }
   }
