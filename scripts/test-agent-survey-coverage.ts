@@ -11,6 +11,7 @@ import {
   suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "../lib/dt/agent-survey-coverage-option-helpers";
+import { pickBestSurveyResponseForCoverage } from "../lib/dt/agent-survey-coverage-options";
 import type { SurveyFact } from "../lib/dt/survey-facts";
 
 const facts: SurveyFact[] = [
@@ -120,5 +121,23 @@ const usedLabel = formatCoverageOptionLabel({
   usedByOtherAgentName: "Nadine Müller",
 });
 assert.match(usedLabel, /Nadine Müller/);
+
+const best = pickBestSurveyResponseForCoverage([
+  {
+    id: "r-old",
+    status: "in_progress",
+    completed_at: null,
+    updated_at: "2026-08-01T12:00:00.000Z",
+    answers: { a: 1 },
+  },
+  {
+    id: "r-done",
+    status: "completed",
+    completed_at: "2026-07-01T12:00:00.000Z",
+    updated_at: "2026-07-01T12:00:00.000Z",
+    answers: { a: 1 },
+  },
+]);
+assert.equal(best?.id, "r-done");
 
 console.log("agent-survey-coverage tests: ok");

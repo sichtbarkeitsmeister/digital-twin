@@ -57,11 +57,23 @@ export async function loadAgentSurveyFactsBundle(
     return { ok: false, status: 404, message: "Antwort nicht gefunden." };
   }
 
-  if (response.status !== "completed") {
+  if (response.status !== "completed" && !isRecord(response.answers)) {
     return {
       ok: false,
       status: 400,
-      message: "Nur abgeschlossene Antworten können abgeglichen werden.",
+      message: "Diese Antwort hat noch keine ausgefüllten Angaben.",
+    };
+  }
+
+  if (
+    response.status !== "completed" &&
+    isRecord(response.answers) &&
+    Object.keys(response.answers).length === 0
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      message: "Diese Antwort hat noch keine ausgefüllten Angaben.",
     };
   }
 
