@@ -33,7 +33,7 @@ const PROMPT_META: Record<
   survey_to_agent: {
     title: "Umfrage → Agent (Neu)",
     description:
-      "Nur für Kunden-Persona-Fragebögen: System-Prompt, wenn daraus ein neuer Persona-Avatar generiert wird. Anbieter-Umfragen nutzen diesen Prompt nicht.",
+      "Nur für Kunden-Persona-Fragebögen: erzeugt einen Interessenten/Wunschkunden (kein Markenbotschafter). Anbieter-Umfragen nutzen diesen Prompt nicht.",
     icon: ClipboardList,
     placeholder:
       "Prompt für die JSON-Ausgabe (name, role, slug, prompt_template, …). Platzhalter {{reference_examples}} für Referenz-Agenten.",
@@ -41,7 +41,7 @@ const PROMPT_META: Record<
   survey_refine_agent: {
     title: "Umfrage → Agent (Verfeinern)",
     description:
-      "System-Prompt, wenn ein bestehender Agent anhand neuer Umfrage-Antworten verfeinert wird.",
+      "Verfeinert bestehende Personas anhand neuer Umfrage-Antworten und korrigiert Markenbotschafter-Ausrichtung zurück auf Interessent.",
     icon: ClipboardList,
   },
 };

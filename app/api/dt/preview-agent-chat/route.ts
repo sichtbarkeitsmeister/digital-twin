@@ -70,6 +70,7 @@ export async function POST(req: Request) {
       role: parsed.data.role?.trim() || null,
       prompt_template: parsed.data.promptTemplate,
       kind: "persona",
+      slug: "preview_persona",
     },
     org: {
       display_name: orgConfig?.display_name?.trim() || org?.name || parsed.data.name,
