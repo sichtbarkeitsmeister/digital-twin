@@ -247,26 +247,41 @@ export function DtAgentListItem(props: {
           globalPromptPreview={props.globalPromptPreview}
           hideEnabled={props.alwaysOn}
         />
-        {props.canDirectlyEdit && agentSupportsPersonaTesting(agent) ? (
-          <DtAgentSurveyCoverageCheck
-            className="mt-4"
-            agentId={agent.id}
-            agentName={agent.name}
-            available
-            disabled={props.busy}
-            promptTemplate={props.editValues.prompt}
-            promptAppend={props.editValues.promptAppend}
-            onInsertIntoPrompt={(insertion) => {
-              const target = props.editValues.usesGlobalPrompt ? "promptAppend" : "prompt";
-              const current =
-                target === "promptAppend"
-                  ? props.editValues.promptAppend
-                  : props.editValues.prompt;
-              props.onEditValuesChange({
-                [target]: `${current.trimEnd()}${insertion}`,
-              });
-            }}
-          />
+        {props.canDirectlyEdit &&
+        agent.kind !== "seo_advisor" &&
+        agent.slug !== "seo_advisor" ? (
+          <div className="mt-4 grid gap-2 rounded-2xl border border-sbkm-navy/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.03] sm:p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-sbkm-ink-500 dark:text-white/50">
+              Fragebogen-Abgleich
+            </p>
+            {agentSupportsPersonaTesting(agent) ? (
+              <DtAgentSurveyCoverageCheck
+                agentId={agent.id}
+                agentName={agent.name}
+                available
+                disabled={props.busy}
+                promptTemplate={props.editValues.prompt}
+                promptAppend={props.editValues.promptAppend}
+                onInsertIntoPrompt={(insertion) => {
+                  const target = props.editValues.usesGlobalPrompt
+                    ? "promptAppend"
+                    : "prompt";
+                  const current =
+                    target === "promptAppend"
+                      ? props.editValues.promptAppend
+                      : props.editValues.prompt;
+                  props.onEditValuesChange({
+                    [target]: `${current.trimEnd()}${insertion}`,
+                  });
+                }}
+              />
+            ) : (
+              <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+                Keine Fragebogen-Herkunft hinterlegt — Abgleich ist nur für
+                Agenten möglich, die aus einer Umfrage-Antwort erzeugt wurden.
+              </p>
+            )}
+          </div>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           <DtPillButton type="button" size="sm" disabled={props.busy} onClick={props.onSaveEdit}>
