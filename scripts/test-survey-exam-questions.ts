@@ -5,7 +5,11 @@
 import assert from "node:assert/strict";
 
 import { extractSurveyFacts } from "../lib/dt/survey-facts";
-import { buildSurveyExamQuestions } from "../lib/dt/survey-exam-questions";
+import {
+  buildSurveyExamQuestions,
+  fixGermanDuVerbAgreement,
+  rewriteCustomerThirdPersonToSecondPerson,
+} from "../lib/dt/survey-exam-questions";
 
 const definition = {
   steps: [
@@ -313,8 +317,12 @@ const careQs = buildSurveyExamQuestions(careFacts.facts, {
   maxQuestions: 10,
 });
 assert.ok(
-  careQs.some((q) => /situation|beschreibt dich/i.test(q.question)),
-  "Care description should ask for the questionnaire situation",
+  careQs.some((q) => /wer bist du|beschäftigt dich|situation/i.test(q.question)),
+  "Care description should ask in sales-discovery tone",
+);
+assert.ok(
+  !careQs.some((q) => /fragebogen/i.test(q.question)),
+  "Persona probes must not mention the questionnaire",
 );
 assert.ok(
   !careQs.some((q) => /behandler|praxis|labor/i.test(q.question)),
@@ -364,7 +372,8 @@ const homeQs = buildSurveyExamQuestions(homeFacts.facts, {
   audience: "persona",
   maxQuestions: 10,
 });
-assert.ok(homeQs.some((q) => /budget/i.test(q.question)));
+assert.ok(homeQs.some((q) => /budget|preisspanne/i.test(q.question)));
+assert.ok(!homeQs.some((q) => /gilt bei dir \(\„|welches budget bzw/i.test(q.question)));
 assert.ok(!homeQs.some((q) => /behandler|labor|praxis/i.test(q.question)));
 
 const companyQs = buildSurveyExamQuestions(dentalFacts.facts, {
@@ -378,5 +387,153 @@ assert.match(
   companyQs.find((q) => /labor am liebsten/i.test(q.question))?.expectedHint ?? "",
   /Qualitätsorientierten/,
 );
+
+// Grammar + sales tone: employee talking to prospect, no “diese du”, no dry budget wrap
+assert.equal(
+  rewriteCustomerThirdPersonToSecondPerson("Wie alt sind diese Personen meistens?"),
+  "Wie alt bist du meistens?",
+);
+assert.equal(
+  rewriteCustomerThirdPersonToSecondPerson(
+    "Welche Situation hat diese Personen zu Einfach Entrümpelung geführt?",
+  ),
+  "Was hat dich zu uns geführt?",
+);
+assert.equal(
+  rewriteCustomerThirdPersonToSecondPerson(
+    "Was erzählen Wunschkunden über ihre Lebenssituation im Erstgespräch?",
+  ),
+  "Was erzählst du über deine Lebenssituation im Erstgespräch?",
+);
+assert.equal(
+  fixGermanDuVerbAgreement("Was erzählen du über Ihre Situation? Wie beschreiben sie es?"),
+  "Was erzählst du über deine Situation? Wie beschreibst du es?",
+);
+
+const declutterFacts = extractSurveyFacts({
+  surveyTitle: "Entrümpelung",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_age",
+            type: "text" as const,
+            title: "Wie alt sind diese Personen meistens?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_why",
+            type: "text" as const,
+            title: "Welche Situation hat diese Personen zu Einfach Entrümpelung geführt?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_tell",
+            type: "text" as const,
+            title: "Was erzählen diese Personen über die Situation im ersten Gespräch?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_react",
+            type: "text" as const,
+            title: "Wie reagieren Wunschkunden typischerweise auf den Preis?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_price_unsure",
+            type: "text" as const,
+            title: "Ab welchem Preis oder bei welchen Aussagen werden Wunschkunden unsicher?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_fixed",
+            type: "text" as const,
+            title: "Wollen Wunschkunden lieber einen festen Preis?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_range",
+            type: "text" as const,
+            title: "In welcher Preisspanne bewegen sich typische Aufträge?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_budget",
+            type: "text" as const,
+            title: "Typisches Budget der Wunschkunden",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_desc",
+            type: "textarea" as const,
+            title: "Beschreibung des idealen Wunschkunden in 3-5 Sätzen",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_age: "55-75",
+    f_why: "Nach einem Todesfall bleibt eine volle Wohnung zurück.",
+    f_tell: "„Ich weiß nicht, wo ich anfangen soll.“",
+    f_react: "Meist erleichtert.",
+    f_price_unsure: "Ab ca. 3.000 Euro.",
+    f_fixed: "Ja, lieber einen festen Preis.",
+    f_range: "800–2.500 Euro",
+    f_budget: "800–2.500 Euro",
+    f_desc: "Angehörige, die nach einem Todesfall räumen müssen.",
+  },
+  fieldQuestions: [],
+});
+const declutterQs = buildSurveyExamQuestions(declutterFacts.facts, {
+  audience: "persona",
+  maxQuestions: 16,
+});
+assert.ok(
+  declutterQs.some((q) => /wie alt bist du/i.test(q.question)),
+  "Age probe should be natural Du-form",
+);
+assert.ok(!declutterQs.some((q) => /diese du|sind diese|personen/i.test(q.question)));
+assert.ok(
+  declutterQs.some((q) => /zu uns geführt|was hat dich/i.test(q.question)),
+  "Why-us should sound like a sales discovery question",
+);
+assert.ok(!declutterQs.some((q) => /einfach entrümpelung/i.test(q.question)));
+assert.ok(declutterQs.some((q) => /erzählst du/i.test(q.question)));
+assert.ok(!declutterQs.some((q) => /erzählen du/i.test(q.question)));
+assert.ok(
+  declutterQs.some((q) => /reagierst du.*preis|preis.*reagierst/i.test(q.question)),
+);
+assert.ok(declutterQs.some((q) => /festen preis|willst du lieber/i.test(q.question)));
+assert.ok(
+  !declutterQs.some((q) => /welches budget bzw|gilt bei dir \(\„/i.test(q.question)),
+  "Must not wrap every price topic in the dry budget template",
+);
+assert.ok(declutterQs.some((q) => /preisspanne bewegst du dich/i.test(q.question)));
+assert.ok(declutterQs.some((q) => /wer bist du/i.test(q.question)));
+assert.ok(!declutterQs.some((q) => /fragebogen/i.test(q.question)));
 
 console.log("survey-exam-questions tests: ok");
