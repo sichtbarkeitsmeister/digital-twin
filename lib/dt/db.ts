@@ -158,7 +158,10 @@ export async function listDtChats(params: {
   return (data ?? []) as DtChatRow[];
 }
 
-export async function loadAgentsForOrgManage(organisationId: string): Promise<
+export async function loadAgentsForOrgManage(
+  organisationId: string,
+  client?: Awaited<ReturnType<typeof createClient>>,
+): Promise<
   Array<
     DtAgentRow & {
       template_id: string | null;
@@ -171,7 +174,7 @@ export async function loadAgentsForOrgManage(organisationId: string): Promise<
     }
   >
 > {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
   const { data } = await supabase
     .from("dt_agents")
     .select(

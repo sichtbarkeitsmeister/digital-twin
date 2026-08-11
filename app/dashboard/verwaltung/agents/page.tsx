@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { DtAgentsManager } from "@/components/dt/agents/dt-agents-manager";
+import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { loadAgentsForOrgManage } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents } from "@/lib/dt/org-access";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { createClient } from "@/lib/supabase/server";
@@ -18,7 +20,10 @@ async function AgentsPageContent({
 
   if (!user) redirect("/auth/login");
 
-  const { organisations: adminOrgs } = await loadDtManageOrganisations(user.id);
+  const [{ organisations: adminOrgs }, initialCanDirectlyEdit] = await Promise.all([
+    loadDtManageOrganisations(user.id),
+    canDirectlyEditDtAgents(supabase, user.id),
+  ]);
 
   if (adminOrgs.length === 0) {
     redirect("/dashboard");
@@ -29,13 +34,17 @@ async function AgentsPageContent({
       ? searchParams.org
       : adminOrgs[0]!.id;
 
-  const initialCanDirectlyEdit = await canDirectlyEditDtAgents(supabase, user.id);
+  const rawAgents = await loadAgentsForOrgManage(initialOrgId, supabase);
+  const initialAgents = initialCanDirectlyEdit
+    ? rawAgents
+    : filterAgentsHiddenFromOrgMembers(rawAgents);
 
   return (
     <DtAgentsManager
       organisations={adminOrgs}
       initialOrgId={initialOrgId}
       initialCanDirectlyEdit={initialCanDirectlyEdit}
+      initialAgents={initialAgents}
     />
   );
 }

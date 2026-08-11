@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { LayoutGroup } from "framer-motion";
 import { FileSearch, Plus, Users } from "lucide-react";
@@ -94,17 +94,28 @@ function AgentsSidebarSkeleton() {
   );
 }
 
+function isValidOrgId(
+  orgId: string | null | undefined,
+  organisations: Array<{ id: string }>,
+): orgId is string {
+  return Boolean(orgId && organisations.some((organisation) => organisation.id === orgId));
+}
+
 export function DtAgentsManager(props: {
   organisations: Array<{ id: string; name: string }>;
   initialOrgId: string;
   initialCanDirectlyEdit?: boolean;
+  /** Server-fetched agents for initialOrgId — skips first-paint skeleton. */
+  initialAgents?: AgentRow[];
 }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const hasSsrAgents = props.initialAgents !== undefined;
   const [orgId, setOrgId] = useState(props.initialOrgId);
-  const [agents, setAgents] = useState<AgentRow[]>([]);
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [orgReady, setOrgReady] = useState(false);
+  const [agents, setAgents] = useState<AgentRow[]>(() => props.initialAgents ?? []);
+  const [initialLoading, setInitialLoading] = useState(() => !hasSsrAgents);
   const [refreshing, setRefreshing] = useState(false);
   const [canDirectlyEdit, setCanDirectlyEdit] = useState(
     props.initialCanDirectlyEdit ?? false,
@@ -114,25 +125,38 @@ export function DtAgentsManager(props: {
   const [pageView, setPageView] = useState<PageView>(() =>
     searchParams.get("view") === "prompts" ? "prompts" : "agents",
   );
+  const secondaryLoadedForOrgRef = useRef<string | null>(null);
+
+  // Resolve preferred org before the first client fetch (URL > localStorage > SSR).
+  useLayoutEffect(() => {
+    const fromUrl = searchParams.get("org");
+    let nextOrgId = props.initialOrgId;
+    if (isValidOrgId(fromUrl, props.organisations)) {
+      nextOrgId = fromUrl;
+    } else {
+      const stored = readSelectedOrganisationId();
+      if (isValidOrgId(stored, props.organisations)) {
+        nextOrgId = stored;
+      }
+    }
+    setOrgId(nextOrgId);
+    if (nextOrgId !== props.initialOrgId || !hasSsrAgents) {
+      setInitialLoading(true);
+      if (nextOrgId !== props.initialOrgId) setAgents([]);
+    }
+    setOrgReady(true);
+    // Only bootstrap once; later URL org changes are handled below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
+    if (!orgReady) return;
     const fromUrl = searchParams.get("org");
-    if (
-      fromUrl &&
-      props.organisations.some((organisation) => organisation.id === fromUrl)
-    ) {
-      setOrgId(fromUrl);
-      setEditingId(null);
-      setInitialLoading(true);
-      return;
-    }
-
-    const stored = readSelectedOrganisationId();
-    if (stored && props.organisations.some((organisation) => organisation.id === stored)) {
-      setOrgId(stored);
-      setInitialLoading(true);
-    }
-  }, [searchParams, props.organisations]);
+    if (!isValidOrgId(fromUrl, props.organisations) || fromUrl === orgId) return;
+    setOrgId(fromUrl);
+    setEditingId(null);
+    setInitialLoading(true);
+  }, [searchParams, props.organisations, orgReady, orgId]);
 
   useEffect(() => {
     if (searchParams.get("view") === "prompts") {
@@ -210,29 +234,11 @@ export function DtAgentsManager(props: {
     [],
   );
 
-  const refreshRequests = useCallback(async () => {
-    if (!orgId) return;
-    const res = await fetch(`/api/dt/agents/edit-requests?org=${encodeURIComponent(orgId)}`);
-    const json = (await res.json()) as { ok?: boolean; requests?: DtAgentEditRequestRow[] };
-    if (json.ok && json.requests) setEditRequests(json.requests);
-  }, [orgId]);
-
-  const refresh = useCallback(async (silent = false) => {
-    if (silent) setRefreshing(true);
-    else setInitialLoading(true);
-
-    const [manageRes, globalRes, checklistRes] = await Promise.all([
-      fetch(`/api/dt/agents/manage?org=${encodeURIComponent(orgId)}`),
-      fetch("/api/dt/agents/default-prompt"),
-      fetch("/api/dt/platform-settings/seo-checklist"),
-      refreshRequests(),
-    ]);
-
-    const manageJson = (await manageRes.json()) as {
-      ok?: boolean;
-      agents?: AgentRow[];
-      canDirectlyEdit?: boolean;
-    };
+  const applyManageJson = useCallback((manageJson: {
+    ok?: boolean;
+    agents?: AgentRow[];
+    canDirectlyEdit?: boolean;
+  }) => {
     if (manageJson.ok && manageJson.agents) {
       const nextAgents = manageJson.canDirectlyEdit
         ? manageJson.agents
@@ -240,6 +246,21 @@ export function DtAgentsManager(props: {
       setAgents(nextAgents);
     }
     if (manageJson.ok) setCanDirectlyEdit(Boolean(manageJson.canDirectlyEdit));
+  }, []);
+
+  const refreshRequests = useCallback(async () => {
+    if (!orgId) return;
+    const res = await fetch(`/api/dt/agents/edit-requests?org=${encodeURIComponent(orgId)}`);
+    const json = (await res.json()) as { ok?: boolean; requests?: DtAgentEditRequestRow[] };
+    if (json.ok && json.requests) setEditRequests(json.requests);
+  }, [orgId]);
+
+  const refreshSecondary = useCallback(async () => {
+    const [globalRes, checklistRes] = await Promise.all([
+      fetch("/api/dt/agents/default-prompt"),
+      fetch("/api/dt/platform-settings/seo-checklist"),
+      refreshRequests(),
+    ]);
 
     const globalJson = (await globalRes.json()) as {
       ok?: boolean;
@@ -266,13 +287,77 @@ export function DtAgentsManager(props: {
       setGlobalChecklistDraft(text);
     }
 
-    if (silent) setRefreshing(false);
-    else setInitialLoading(false);
+    secondaryLoadedForOrgRef.current = orgId;
   }, [orgId, refreshRequests]);
 
+  const refreshAgents = useCallback(async (opts: { silent?: boolean; dim?: boolean } = {}) => {
+    const silent = Boolean(opts.silent);
+    const dim = opts.dim ?? silent;
+    if (dim) setRefreshing(true);
+    else if (!silent) setInitialLoading(true);
+
+    try {
+      const manageRes = await fetch(`/api/dt/agents/manage?org=${encodeURIComponent(orgId)}`);
+      const manageJson = (await manageRes.json()) as {
+        ok?: boolean;
+        agents?: AgentRow[];
+        canDirectlyEdit?: boolean;
+      };
+      applyManageJson(manageJson);
+    } finally {
+      if (dim) setRefreshing(false);
+      else if (!silent) setInitialLoading(false);
+    }
+  }, [orgId, applyManageJson]);
+
+  const refresh = useCallback(async (silent = false) => {
+    await Promise.all([
+      refreshAgents({ silent, dim: silent }),
+      refreshSecondary(),
+    ]);
+  }, [refreshAgents, refreshSecondary]);
+
+  // First paint: show SSR agents immediately; only skeleton when org differs or no SSR data.
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!orgReady) return;
+
+    const canUseSsr = hasSsrAgents && orgId === props.initialOrgId;
+    let cancelled = false;
+
+    void (async () => {
+      if (canUseSsr) {
+        setInitialLoading(false);
+        // Soft revalidate list + load prompts/checklist without blocking or dimming.
+        await Promise.all([
+          refreshAgents({ silent: true, dim: false }),
+          refreshSecondary(),
+        ]);
+        return;
+      }
+
+      if (!cancelled) setInitialLoading(true);
+      await refreshAgents({ silent: false });
+      if (!cancelled) void refreshSecondary();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    orgReady,
+    orgId,
+    hasSsrAgents,
+    props.initialOrgId,
+    refreshAgents,
+    refreshSecondary,
+  ]);
+
+  // When switching to the prompts tab, ensure secondary data is loaded.
+  useEffect(() => {
+    if (pageView !== "prompts") return;
+    if (secondaryLoadedForOrgRef.current === orgId) return;
+    void refreshSecondary();
+  }, [pageView, orgId, refreshSecondary]);
 
   function writeAgentQuery(agentId: string | null) {
     const params = new URLSearchParams(searchParams.toString());
