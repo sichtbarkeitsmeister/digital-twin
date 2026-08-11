@@ -9,6 +9,7 @@ import {
   extractSurveyFacts,
   formatFactsForCoverageRepair,
   formatSurveyFactsForAgentContext,
+  formatSurveyFactsForSeoKnowledge,
   summarizeSurveyFactCoverage,
   unresolvedSurveyFactCoverageIds,
 } from "../lib/dt/survey-facts";
@@ -109,6 +110,14 @@ const viaCompat = buildSurveyResponseContextForAgent({
   fieldQuestions,
 });
 assert.match(viaCompat, /fact_001/);
+
+const seoKnowledge = formatSurveyFactsForSeoKnowledge(bundle);
+assert.doesNotMatch(seoKnowledge, /fact_001/);
+assert.doesNotMatch(seoKnowledge, /Pflicht-Checkliste/);
+assert.match(seoKnowledge, /\*\*.*\*\*/);
+assert.match(seoKnowledge, /1–3 Wochen/);
+assert.match(seoKnowledge, /_Bemerkung:_/);
+assert.match(seoKnowledge, /Alex Müller/);
 
 const covered = checkSurveyFactsCoverage({
   facts: bundle.facts,

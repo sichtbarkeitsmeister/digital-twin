@@ -204,16 +204,111 @@ export function isRankingAnswerValid(raw: unknown, presetLabels: string[], requi
   return state.items.length > 0;
 }
 
-export function formatRankingAnswerForDisplay(raw: unknown, presetLabels: string[]): string {
-  // Unanswered ranking → empty string (never invent order from form options).
-  if (!hasStoredRankingAnswer(raw)) return "";
+export type RankingOptionRef = { id: string; label: string };
 
-  const { items } = coerceRankingState(raw, presetLabels);
-  if (items.length === 0) return "";
-  return items
-    .map((it, idx) => {
-      const text = it.kind === "preset" ? it.label : it.label.trim() || "(ohne Text)";
-      return `${idx + 1}. ${text}`;
-    })
-    .join(", ");
+/**
+ * Resolve a stored ranking for export/context — never invents form-definition order.
+ * Supports payload format, label arrays, and option-id arrays.
+ */
+export function resolveRankingExport(
+  raw: unknown,
+  options: RankingOptionRef[],
+): { ranked: string[]; excluded: string[] } | null {
+  if (!hasStoredRankingAnswer(raw)) return null;
+
+  const presets = options.map((o) => o.label);
+  const presetSet = new Set(presets);
+  const labelById = new Map(options.map((o) => [o.id, o.label]));
+
+  function resolveToken(token: string): string | null {
+    if (presetSet.has(token)) return token;
+    const viaId = labelById.get(token);
+    return viaId ?? null;
+  }
+
+  if (isRankingPayload(raw)) {
+    const ranked: string[] = [];
+    const seen = new Set<string>();
+    for (const entry of raw.items) {
+      if (!isRecord(entry)) continue;
+      if (entry.kind === "preset" && typeof entry.label === "string") {
+        const label = resolveToken(entry.label);
+        if (!label || seen.has(label)) continue;
+        seen.add(label);
+        ranked.push(label);
+        continue;
+      }
+      if (entry.kind === "custom" && typeof entry.id === "string") {
+        const label = typeof entry.label === "string" ? entry.label.trim() : "";
+        if (!label || seen.has(`c:${entry.id}`)) continue;
+        seen.add(`c:${entry.id}`);
+        ranked.push(label);
+      }
+    }
+    if (ranked.length === 0) return null;
+
+    const excludedFromPayload = Array.isArray(raw.excludedPresets)
+      ? raw.excludedPresets.filter((x): x is string => typeof x === "string" && presetSet.has(x))
+      : [];
+    const excluded =
+      excludedFromPayload.length > 0
+        ? excludedFromPayload
+        : presets.filter((label) => !ranked.includes(label));
+
+    return { ranked, excluded };
+  }
+
+  if (Array.isArray(raw) && raw.every((x) => typeof x === "string")) {
+    const ranked: string[] = [];
+    const seen = new Set<string>();
+    for (const token of raw as string[]) {
+      const label = resolveToken(token);
+      if (!label || seen.has(label)) continue;
+      seen.add(label);
+      ranked.push(label);
+    }
+    if (ranked.length === 0) return null;
+    return {
+      ranked,
+      excluded: presets.filter((label) => !ranked.includes(label)),
+    };
+  }
+
+  if (typeof raw === "string" && raw.trim()) {
+    // Rare legacy: single string — keep as one custom rank entry.
+    return { ranked: [raw.trim()], excluded: presets };
+  }
+
+  return null;
+}
+
+/** Inline display (UI chips / short previews). Does not invent unanswered rankings. */
+export function formatRankingAnswerForDisplay(raw: unknown, presetLabels: string[]): string {
+  const resolved = resolveRankingExport(
+    raw,
+    presetLabels.map((label) => ({ id: label, label })),
+  );
+  if (!resolved || resolved.ranked.length === 0) return "";
+  return resolved.ranked.map((text, idx) => `${idx + 1}. ${text}`).join(", ");
+}
+
+/**
+ * Knowledge / agent context: numbered list, correct order, excluded options explicit.
+ * Pass full field options so option-id answers resolve to labels.
+ */
+export function formatRankingAnswerForKnowledge(
+  raw: unknown,
+  options: RankingOptionRef[],
+): string {
+  const resolved = resolveRankingExport(raw, options);
+  if (!resolved || resolved.ranked.length === 0) return "";
+
+  const lines = [
+    "Rangfolge (1 = höchste Priorität):",
+    ...resolved.ranked.map((text, idx) => `${idx + 1}. ${text}`),
+  ];
+  if (resolved.excluded.length > 0) {
+    lines.push(`Nicht gewählt: ${resolved.excluded.join("; ")}`);
+  }
+  return lines.join("\n");
 }

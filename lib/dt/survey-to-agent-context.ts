@@ -5,7 +5,7 @@ import {
   RADIO_OTHER_TOKEN,
 } from "@/lib/surveys/other-option";
 import {
-  formatRankingAnswerForDisplay,
+  formatRankingAnswerForKnowledge,
   hasStoredRankingAnswer,
 } from "@/lib/surveys/ranking-answer";
 import { formatTextListAnswerForDisplay } from "@/lib/surveys/text-list-answer";
@@ -66,13 +66,15 @@ export function normalizeSurveyAnswer(v: unknown, field?: SurveyField): string {
   }
   if (field?.type === "ranking") {
     if (!hasStoredRankingAnswer(v)) return "";
-    const labels = field.options.map((o) => o.label);
-    const formatted = formatRankingAnswerForDisplay(v, labels);
+    const formatted = formatRankingAnswerForKnowledge(
+      v,
+      field.options.map((o) => ({ id: o.id, label: o.label })),
+    );
     if (formatted) return formatted;
     if (Array.isArray(v)) {
       return v
         .map((x, idx) => `${idx + 1}. ${typeof x === "string" ? x : JSON.stringify(x)}`)
-        .join(", ");
+        .join("\n");
     }
     return "";
   }

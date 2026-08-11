@@ -250,7 +250,7 @@ export function SurveyAnbieterToSeoWizard(props: Props) {
               Wissens-Vorschau (1:1)
             </h2>
             <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-              So landen die Daten im SEO-Berater — ohne KI-Umschreibung.
+              Unternehmensfakten als Thema + Inhalt — ohne fact-IDs und ohne KI-Umschreibung.
             </p>
           </div>
         </div>
