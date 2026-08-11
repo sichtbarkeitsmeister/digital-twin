@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { callDtAnthropicChat, suggestChatTitle } from "@/lib/dt/anthropic-chat";
+import { callDtAnthropicChat } from "@/lib/dt/anthropic-chat";
 import { assembleDtChatFromDb } from "@/lib/dt/assemble-chat-prompt";
 import {
   buildAttachmentMetadataForMessage,
@@ -9,12 +10,16 @@ import {
   persistDtChatAttachments,
   prepareInboundAttachments,
 } from "@/lib/dt/attachments";
+import {
+  DEFAULT_DT_CHAT_TITLE,
+  resolveDtAutoTitleAfterTurn,
+  shouldAutoTitleDtChat,
+} from "@/lib/dt/chat-title";
 import { getDtChatOrNull, requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import {
   callDtN8nChat,
   mapN8nResultToAssistantRow,
-  resolveTitleAfterChat,
 } from "@/lib/dt/n8n-chat";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
@@ -51,6 +56,72 @@ async function trackLlmUsage(input: {
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
   });
+}
+
+/** Load recent turns + user count, then maybe persist an auto-generated title. */
+async function maybePersistDtAutoTitle(input: {
+  supabase: SupabaseClient;
+  chatId: string;
+  currentTitle: string;
+  latestUserText: string;
+  assistantText: string;
+  /**
+   * When true (n8n path): ignore truncate titles from the workflow and undo a
+   * premature DB write so naming can still happen on the 2nd user question.
+   */
+  clearPrematureExternalTitle?: boolean;
+}): Promise<string | null> {
+  const [{ count }, { data: recent }] = await Promise.all([
+    input.supabase
+      .from("dt_chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("chat_id", input.chatId)
+      .eq("role", "user"),
+    input.supabase
+      .from("dt_chat_messages")
+      .select("role, content")
+      .eq("chat_id", input.chatId)
+      .order("created_at", { ascending: true })
+      .limit(4),
+  ]);
+
+  const userMessageCount = count ?? 0;
+  const allow = shouldAutoTitleDtChat({
+    currentTitle: input.currentTitle,
+    userMessageCount,
+    assistantText: input.assistantText,
+  });
+
+  if (!allow) {
+    if (
+      input.clearPrematureExternalTitle &&
+      (input.currentTitle.trim() === DEFAULT_DT_CHAT_TITLE || input.currentTitle.trim().length === 0)
+    ) {
+      // Old n8n builds truncated the title on the 1st turn; reset so the 2nd turn can AI-title.
+      await input.supabase
+        .from("dt_chats")
+        .update({ title: DEFAULT_DT_CHAT_TITLE })
+        .eq("id", input.chatId)
+        .neq("title", DEFAULT_DT_CHAT_TITLE);
+    }
+    return null;
+  }
+
+  const titleSuggestion = await resolveDtAutoTitleAfterTurn({
+    currentTitle: input.currentTitle,
+    userMessageCount,
+    latestUserText: input.latestUserText,
+    assistantText: input.assistantText,
+    recentMessages: (recent ?? []).map((m) => ({
+      role: String(m.role),
+      content: String(m.content ?? ""),
+    })),
+  });
+
+  if (!titleSuggestion) return null;
+
+  await input.supabase.from("dt_chats").update({ title: titleSuggestion }).eq("id", input.chatId);
+  return titleSuggestion;
 }
 
 function finalizeAssistantSeoContent(text: string, mode: DtChatMode) {
@@ -283,11 +354,15 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       }
 
       const titleSuggestion = !ghostMode
-        ? resolveTitleAfterChat(chat, content, n8n.content ?? "", n8n.title)
+        ? await maybePersistDtAutoTitle({
+            supabase: auth.supabase,
+            chatId,
+            currentTitle: chat.title,
+            latestUserText: content,
+            assistantText: n8n.content ?? "",
+            clearPrematureExternalTitle: true,
+          })
         : null;
-      if (titleSuggestion) {
-        await auth.supabase.from("dt_chats").update({ title: titleSuggestion }).eq("id", chatId);
-      }
 
       return NextResponse.json({
         ok: true,
@@ -406,14 +481,15 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     };
   }
 
-  const titleSuggestion =
-    !ghostMode && (chat.title === "Neuer Chat" || chat.title.trim().length === 0)
-      ? suggestChatTitle(content, finalized.content)
-      : null;
-
-  if (titleSuggestion) {
-    await auth.supabase.from("dt_chats").update({ title: titleSuggestion }).eq("id", chatId);
-  }
+  const titleSuggestion = !ghostMode
+    ? await maybePersistDtAutoTitle({
+        supabase: auth.supabase,
+        chatId,
+        currentTitle: chat.title,
+        latestUserText: content,
+        assistantText: finalized.content,
+      })
+    : null;
 
   return NextResponse.json({
     ok: true,

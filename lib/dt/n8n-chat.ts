@@ -1,4 +1,3 @@
-import { suggestChatTitle } from "@/lib/dt/anthropic-chat";
 import type { DtChatRow } from "@/lib/dt/types";
 import type { DtMessageRow } from "@/lib/dt/types";
 
@@ -85,15 +84,4 @@ export function mapN8nResultToAssistantRow(
     stopped: false,
     created_at: new Date().toISOString(),
   };
-}
-
-export function resolveTitleAfterChat(
-  chat: DtChatRow,
-  userText: string,
-  assistantText: string,
-  n8nTitle?: string | null,
-): string | null {
-  if (n8nTitle?.trim()) return n8nTitle.trim();
-  if (chat.title !== "Neuer Chat" && chat.title.trim().length > 0) return null;
-  return suggestChatTitle(userText, assistantText);
 }
