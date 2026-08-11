@@ -11,8 +11,10 @@ import {
 } from "../lib/dt/survey-to-agent-context";
 import {
   formatRankingAnswerForDisplay,
+  formatRankingAnswerForKnowledge,
   hasStoredRankingAnswer,
   isRankingAnswerValid,
+  resolveRankingExport,
 } from "../lib/surveys/ranking-answer";
 import type { SurveyField } from "../lib/surveys/types";
 
@@ -45,6 +47,27 @@ assert.match(formatted, /^1\. Option B/);
 assert.match(formatted, /2\. Option A/);
 assert.doesNotMatch(formatted, /5,0 Sterne/);
 
+const knowledge = formatRankingAnswerForKnowledge(realRanking, rankingOptions);
+assert.match(knowledge, /Rangfolge/);
+assert.match(knowledge, /^1\. Option B$/m);
+assert.match(knowledge, /^2\. Option A$/m);
+assert.match(knowledge, /Nicht gewählt: 5,0 Sterne \/ 171 Bewertungen/);
+assert.doesNotMatch(knowledge, /3\. 5,0 Sterne/);
+
+// Option-id arrays must resolve to labels in the stored order (not form order).
+const fromIds = resolveRankingExport(["o2", "o1"], rankingOptions);
+assert.deepEqual(fromIds?.ranked, ["Option B", "Option A"]);
+assert.deepEqual(fromIds?.excluded, ["5,0 Sterne / 171 Bewertungen"]);
+const knowledgeFromIds = formatRankingAnswerForKnowledge(["o2", "o1"], rankingOptions);
+assert.match(knowledgeFromIds, /^1\. Option B$/m);
+assert.match(knowledgeFromIds, /^2\. Option A$/m);
+assert.doesNotMatch(knowledgeFromIds, /3\./);
+
+// Label arrays: keep order, do not append unranked presets as fake lower ranks.
+const fromLabels = resolveRankingExport(["Option B", "Option A"], rankingOptions);
+assert.deepEqual(fromLabels?.ranked, ["Option B", "Option A"]);
+assert.ok(fromLabels?.excluded.includes("5,0 Sterne / 171 Bewertungen"));
+
 // --- normalizeSurveyAnswer ranking ---
 const rankingField: SurveyField = {
   id: "f-rank",
@@ -56,6 +79,8 @@ const rankingField: SurveyField = {
 };
 assert.equal(normalizeSurveyAnswer(undefined, rankingField), "");
 assert.ok(normalizeSurveyAnswer(realRanking, rankingField).includes("1. Option B"));
+assert.match(normalizeSurveyAnswer(["o2", "o1"], rankingField), /^1\. Option B$/m);
+assert.match(normalizeSurveyAnswer(["o2", "o1"], rankingField), /Nicht gewählt/);
 
 // --- placeholders ---
 assert.equal(isPlaceholderOrEmptyAnswer(""), true);

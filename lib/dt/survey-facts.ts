@@ -587,7 +587,14 @@ export function formatSurveyFactsForSeoKnowledge(bundle: SurveyFactsBundle): str
     if (fact.kind === "answer") {
       if (lastFieldId && lastFieldId !== fact.fieldId) lines.push("");
       lines.push(`**${fact.fieldTitle}**`);
-      lines.push(fact.value.trim());
+      if (fact.fieldType === "ranking") {
+        // Keep numbered ranking lines intact (not collapsed to one prose line).
+        for (const line of fact.value.split("\n").map((l) => l.trim()).filter(Boolean)) {
+          lines.push(line);
+        }
+      } else {
+        lines.push(fact.value.trim());
+      }
       lastFieldId = fact.fieldId;
       continue;
     }

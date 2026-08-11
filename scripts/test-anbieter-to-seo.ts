@@ -52,6 +52,88 @@ assert.doesNotMatch(knowledge, /Pflicht-Checkliste/);
 assert.doesNotMatch(knowledge, /Coverage:/);
 assert.match(knowledge, /\*\*Firmenname\*\*/);
 
+const rankingKnowledge = buildAnbieterSeoKnowledgeBlock({
+  surveyTitle: "Anbieter Ranking",
+  organisationName: "MSH",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Positionierung",
+        description: "",
+        fields: [
+          {
+            id: "f-rank",
+            type: "ranking",
+            title: "Prioritäten der Mandanten",
+            description: "",
+            required: true,
+            options: [
+              { id: "o1", label: "Geschwindigkeit" },
+              { id: "o2", label: "Rechtssicherheit" },
+              { id: "o3", label: "Preis" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    "f-rank": {
+      items: [
+        { kind: "preset", label: "Rechtssicherheit" },
+        { kind: "preset", label: "Geschwindigkeit" },
+      ],
+      excludedPresets: ["Preis"],
+    },
+  },
+  fieldQuestions: [],
+  responseId: "resp-rank",
+});
+
+assert.match(rankingKnowledge, /\*\*Prioritäten der Mandanten\*\*/);
+assert.match(rankingKnowledge, /Rangfolge \(1 = höchste Priorität\):/);
+assert.match(rankingKnowledge, /^1\. Rechtssicherheit$/m);
+assert.match(rankingKnowledge, /^2\. Geschwindigkeit$/m);
+assert.match(rankingKnowledge, /Nicht gewählt: Preis/);
+assert.doesNotMatch(rankingKnowledge, /3\. Preis/);
+assert.doesNotMatch(rankingKnowledge, /1\. Geschwindigkeit/);
+
+// Option ids must keep the respondent order, not the form definition order.
+const rankingFromIds = buildAnbieterSeoKnowledgeBlock({
+  surveyTitle: "Anbieter Ranking IDs",
+  organisationName: "MSH",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Positionierung",
+        description: "",
+        fields: [
+          {
+            id: "f-rank",
+            type: "ranking",
+            title: "Prioritäten",
+            description: "",
+            required: true,
+            options: [
+              { id: "o1", label: "Geschwindigkeit" },
+              { id: "o2", label: "Rechtssicherheit" },
+              { id: "o3", label: "Preis" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  answers: { "f-rank": ["o2", "o1"] },
+  fieldQuestions: [],
+  responseId: "resp-rank-ids",
+});
+assert.match(rankingFromIds, /^1\. Rechtssicherheit$/m);
+assert.match(rankingFromIds, /^2\. Geschwindigkeit$/m);
+assert.doesNotMatch(rankingFromIds, /^1\. Geschwindigkeit$/m);
+
 const mergedEmpty = mergeAnbieterKnowledgeIntoPromptAppend(null, knowledge);
 assert.match(mergedEmpty, new RegExp(ANBIETER_WISSEN_START));
 assert.match(mergedEmpty, /Anbieter-Wissen/);
