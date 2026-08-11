@@ -45,24 +45,32 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     .maybeSingle();
 
   const isPlatformAdmin = profile?.role === "admin";
-  const canManageIntegrations = isPlatformAdmin
-    ? true
-    : await userCanManageAnyIntegrations(user.id);
-  const canManageDtAgents = await userCanManageAnyDtAgents(user.id);
-  const canViewDtUsage = await userCanViewAnyDtUsage(user.id);
-  const showLeads = await userHasAnyLeads(user.id);
-  const pendingSurveyQuestionsCount = isPlatformAdmin
-    ? (
-        await supabase
+
+  // Run independent nav/permission checks in parallel. Admins skip redundant
+  // profile lookups that the helpers would otherwise repeat.
+  const [
+    canManageIntegrations,
+    canManageDtAgents,
+    canViewDtUsage,
+    showLeads,
+    pendingSurveyQuestionsCount,
+    pendingAgentEditRequestsCount,
+  ] = await Promise.all([
+    isPlatformAdmin ? Promise.resolve(true) : userCanManageAnyIntegrations(user.id),
+    isPlatformAdmin ? Promise.resolve(true) : userCanManageAnyDtAgents(user.id),
+    isPlatformAdmin ? Promise.resolve(true) : userCanViewAnyDtUsage(user.id),
+    isPlatformAdmin ? Promise.resolve(true) : userHasAnyLeads(user.id),
+    isPlatformAdmin
+      ? supabase
           .from("survey_field_questions")
           .select("id", { count: "exact", head: true })
           .is("answer", null)
-      ).count ?? 0
-    : 0;
-
-  const pendingAgentEditRequestsCount = isPlatformAdmin
-    ? await countPendingDtAgentEditRequests(supabase)
-    : 0;
+          .then((r) => r.count ?? 0)
+      : Promise.resolve(0),
+    isPlatformAdmin
+      ? countPendingDtAgentEditRequests(supabase)
+      : Promise.resolve(0),
+  ]);
 
   return (
     <DashboardShell

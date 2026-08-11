@@ -30,8 +30,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: "Keine Berechtigung." }, { status: 403 });
   }
 
-  const agents = await loadAgentsForOrgManage(parsed.data.org);
-  const canDirectlyEdit = await canDirectlyEditDtAgents(auth.supabase, auth.userId);
+  const [agents, canDirectlyEdit] = await Promise.all([
+    loadAgentsForOrgManage(parsed.data.org, auth.supabase),
+    canDirectlyEditDtAgents(auth.supabase, auth.userId),
+  ]);
   const visibleAgents = canDirectlyEdit
     ? agents
     : filterAgentsHiddenFromOrgMembers(agents);
