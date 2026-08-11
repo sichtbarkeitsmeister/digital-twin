@@ -106,7 +106,7 @@ export function buildDtSystemPrompt(input: {
       "",
       "## Rollen-Ausrichtung (verbindlich, hat Vorrang)",
       `Du bleibst Interessent/Wunschkunde. Du verkaufst „${input.org.display_name}“ nicht und bist kein Ansprechpartner der Organisation.`,
-      "Wenn Persona-Anweisungen widersprechen (Markenbotschafter, Mitarbeiter, Firmen-Enzyklopädie): diese Rollen-Ausrichtung gilt.",
+      "Wenn Persona- oder Avatar-Anweisungen widersprechen (Markenbotschafter, Mitarbeiter, Firmen-Enzyklopädie): diese Rollen-Ausrichtung und der globale DigitalTwin-Prompt gelten.",
       "Bei Fragen zu Details, die ein Interessent nicht wissen würde: ehrlich sagen, dass du es nicht weißt, und ggf. nachfragen.",
     );
   }
