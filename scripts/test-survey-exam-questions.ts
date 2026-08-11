@@ -5,7 +5,11 @@
 import assert from "node:assert/strict";
 
 import { extractSurveyFacts } from "../lib/dt/survey-facts";
-import { buildSurveyExamQuestions } from "../lib/dt/survey-exam-questions";
+import {
+  buildSurveyExamQuestions,
+  fixGermanDuVerbAgreement,
+  rewriteCustomerThirdPersonToSecondPerson,
+} from "../lib/dt/survey-exam-questions";
 
 const definition = {
   steps: [
@@ -313,12 +317,16 @@ const careQs = buildSurveyExamQuestions(careFacts.facts, {
   maxQuestions: 10,
 });
 assert.ok(
-  careQs.some((q) => /situation|beschreibt dich/i.test(q.question)),
-  "Care description should ask for the questionnaire situation",
+  careQs.some((q) => /wer du bist|situation|beschreibt dich/i.test(q.question)),
+  "Care description should ask for the persona situation in-character",
 );
 assert.ok(
   !careQs.some((q) => /behandler|praxis|labor/i.test(q.question)),
   "Care persona must not get dental-hardcoded probes",
+);
+assert.ok(
+  !careQs.some((q) => /fragebogen/i.test(q.question)),
+  "Persona-facing probes must not mention the questionnaire meta",
 );
 assert.ok(
   careQs.some((q) => /Ehefrau|Beatmung|Entwöhnung/i.test(q.expectedHint)),
@@ -378,5 +386,67 @@ assert.match(
   companyQs.find((q) => /labor am liebsten/i.test(q.question))?.expectedHint ?? "",
   /Qualitätsorientierten/,
 );
+
+// Grammar: Wunschkunde 3rd-person → correct Du-forms
+assert.equal(
+  rewriteCustomerThirdPersonToSecondPerson(
+    "Welche Berufs- oder Lebenssituation haben Wunschkunden typischerweise?",
+  ),
+  "Welche Berufs- oder Lebenssituation hast du typischerweise?",
+);
+assert.equal(
+  rewriteCustomerThirdPersonToSecondPerson(
+    "Was erzählen Wunschkunden über ihre Lebenssituation im Erstgespräch?",
+  ),
+  "Was erzählst du über deine Lebenssituation im Erstgespräch?",
+);
+assert.equal(
+  fixGermanDuVerbAgreement("Was erzählen du über Ihre Situation? Wie beschreiben sie es?"),
+  "Was erzählst du über deine Situation? Wie beschreibst du es?",
+);
+
+const grammarFacts = extractSurveyFacts({
+  surveyTitle: "Grammar",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_job",
+            type: "text" as const,
+            title: "Welche Berufs- oder Lebenssituation haben Wunschkunden typischerweise?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_tell",
+            type: "text" as const,
+            title: "Was erzählen Wunschkunden über ihre Lebenssituation im Erstgespräch?",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_job: "Selbstständig, Mitte 40 bis Mitte 50",
+    f_tell: "Erschöpft, enttäuscht von der Schulmedizin",
+  },
+  fieldQuestions: [],
+});
+const grammarQs = buildSurveyExamQuestions(grammarFacts.facts, {
+  audience: "persona",
+  maxQuestions: 8,
+});
+assert.ok(grammarQs.some((q) => /hast du typischerweise/i.test(q.question)));
+assert.ok(grammarQs.some((q) => /erzählst du über deine/i.test(q.question)));
+assert.ok(!grammarQs.some((q) => /\bhaben du\b|\berzählen du\b|\bihre\b|\bSie\b/i.test(q.question)));
+assert.ok(!grammarQs.some((q) => /fragebogen/i.test(q.question)));
 
 console.log("survey-exam-questions tests: ok");
