@@ -211,6 +211,7 @@ export function DtAgentListItem(props: {
   onRequestChange: () => void;
   canDisable: boolean;
   alwaysOn?: boolean;
+  organisationId?: string;
   globalPromptPreview?: string;
   /** Render as a row inside a divided list (no outer card). */
   compact?: boolean;
@@ -219,6 +220,11 @@ export function DtAgentListItem(props: {
 }) {
   const { agent } = props;
   const Icon = agentIcon(agent.kind, agent.slug);
+  const supportsGlobalSync = agent.is_default || Boolean(agent.uses_global_prompt);
+  const supportsAppend =
+    agent.is_default ||
+    Boolean(agent.uses_global_prompt) ||
+    Boolean(agent.prompt_append?.trim());
 
   if (props.isEditing) {
     return (
@@ -238,8 +244,9 @@ export function DtAgentListItem(props: {
           values={props.editValues}
           onChange={props.onEditValuesChange}
           disabled={props.busy}
-          supportsGlobalSync={agent.is_default}
-          supportsAppend={agent.is_default}
+          organisationId={props.organisationId}
+          supportsGlobalSync={supportsGlobalSync}
+          supportsAppend={supportsAppend}
           globalPromptPreview={props.globalPromptPreview}
           hideEnabled={props.alwaysOn}
         />

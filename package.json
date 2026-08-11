@@ -20,6 +20,7 @@
     "test:org-slug": "tsx scripts/test-org-slug.ts",
     "test:seo-report-readiness": "tsx scripts/test-seo-report-readiness.ts",
     "test:prospect-persona-prompt": "tsx scripts/test-prospect-persona-prompt.ts",
+    "test:revise-agent-prompt": "tsx scripts/test-revise-agent-prompt.ts",
     "test:survey-paste-retry": "tsx scripts/test-survey-paste-retry.ts",
     "types:generate": "tsx scripts/generate-types.ts",
     "env:check": "node -e \"console.log('URL=',process.env.NEXT_PUBLIC_SUPABASE_URL); console.log('KEY=',(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'').slice(0,8));\"",

@@ -2,6 +2,7 @@
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { DtAgentPromptAiAssist } from "@/components/dt/agents/dt-agent-prompt-ai-assist";
 import { DtAgentQuickActionsField } from "@/components/dt/agents/dt-agent-quick-actions-field";
 import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
 import { parseQuickActions } from "@/lib/dt/types";
@@ -21,6 +22,8 @@ export function DtAgentFormFields(props: {
   values: DtAgentFormValues;
   onChange: (patch: Partial<DtAgentFormValues>) => void;
   disabled?: boolean;
+  /** Org for AI prompt-assist API. */
+  organisationId?: string;
   /** Hide the per-org prompt field (prompt is managed globally). */
   hidePrompt?: boolean;
   /** Replacement copy shown instead of the prompt when it is hidden. */
@@ -38,6 +41,7 @@ export function DtAgentFormFields(props: {
     values,
     onChange,
     disabled,
+    organisationId,
     hidePrompt,
     promptNote,
     hideEnabled,
@@ -55,6 +59,16 @@ export function DtAgentFormFields(props: {
     }
     onChange({ usesGlobalPrompt: next });
   }
+
+  const showOwnPrompt = supportsGlobalSync ? !values.usesGlobalPrompt : !hidePrompt;
+  const showAppend = Boolean(supportsAppend);
+  const assistTarget: "prompt" | "prompt_append" =
+    values.usesGlobalPrompt && showAppend ? "prompt_append" : "prompt";
+  const assistText =
+    assistTarget === "prompt_append" ? values.promptAppend : values.prompt;
+  const showAiAssist =
+    Boolean(organisationId) &&
+    (assistTarget === "prompt" ? showOwnPrompt : showAppend);
 
   return (
     <div className="grid gap-3">
@@ -150,19 +164,43 @@ export function DtAgentFormFields(props: {
         </label>
       )}
 
-      {supportsAppend ? (
+      {showAppend ? (
         <label className="grid gap-1 text-sm">
           <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-            Zusätzliche Anweisungen (optional)
+            {values.usesGlobalPrompt
+              ? "Avatar-spezifisch / Zusätzliche Anweisungen"
+              : "Zusätzliche Anweisungen (optional)"}
           </span>
           <Textarea
             value={values.promptAppend}
             disabled={disabled}
             onChange={(e) => onChange({ promptAppend: e.target.value })}
             className="min-h-[100px] text-sm"
-            placeholder="Ergänzungen nur für diese Organisation — werden auf den Basis-Prompt gelegt."
+            placeholder={
+              values.usesGlobalPrompt
+                ? "Persönlichkeit, Situation, Sprachstil dieses Wunschkunden."
+                : "Ergänzungen nur für diese Organisation — werden auf den Basis-Prompt gelegt."
+            }
           />
         </label>
+      ) : null}
+
+      {showAiAssist && organisationId ? (
+        <DtAgentPromptAiAssist
+          organisationId={organisationId}
+          agentName={values.name}
+          agentRole={values.role}
+          target={assistTarget}
+          currentText={assistText}
+          disabled={disabled}
+          onApply={(next) =>
+            onChange(
+              assistTarget === "prompt_append"
+                ? { promptAppend: next }
+                : { prompt: next },
+            )
+          }
+        />
       ) : null}
 
       <DtAgentQuickActionsField
