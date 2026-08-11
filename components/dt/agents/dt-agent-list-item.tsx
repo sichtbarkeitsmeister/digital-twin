@@ -24,7 +24,6 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/dt/cn";
 import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
-import { agentSupportsPersonaTesting } from "@/lib/dt/persona-testing";
 
 export type DtAgentListItemRow = {
   id: string;
@@ -252,7 +251,6 @@ export function DtAgentListItem(props: {
             <DtAgentSurveyCoverageCheck
               agentId={agent.id}
               agentName={agent.name}
-              available={agentSupportsPersonaTesting(agent)}
               disabled={props.busy}
               promptTemplate={props.editValues.prompt}
               promptAppend={props.editValues.promptAppend}
