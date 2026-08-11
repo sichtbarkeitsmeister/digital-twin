@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { LayoutGroup } from "framer-motion";
 import { FileSearch, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -100,6 +100,8 @@ export function DtAgentsManager(props: {
   initialCanDirectlyEdit?: boolean;
 }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [orgId, setOrgId] = useState(props.initialOrgId);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -157,6 +159,19 @@ export function DtAgentsManager(props: {
     survey_to_agent: "",
     survey_refine_agent: "",
   });
+
+  // Keep Survey-KI focus in sync when opening an agent from deep links.
+  useEffect(() => {
+    const agentFromUrl = searchParams.get("agent");
+    if (!agentFromUrl) return;
+    if (editingId === agentFromUrl) return;
+    const row = agents.find((a) => a.id === agentFromUrl);
+    if (!row) return;
+    setEditingId(row.id);
+    setEditValues(agentFormValuesFromRow(row));
+    setPageView("agents");
+  }, [searchParams, agents, editingId]);
+
   const [globalPromptDraft, setGlobalPromptDraft] = useState<GlobalPrompts>({
     default: "",
     seo_advisor: "",
@@ -259,10 +274,24 @@ export function DtAgentsManager(props: {
     void refresh();
   }, [refresh]);
 
+  function writeAgentQuery(agentId: string | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (agentId) params.set("agent", agentId);
+    else params.delete("agent");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
   function startEdit(agent: AgentRow) {
     setEditingId(agent.id);
     setEditValues(agentFormValuesFromRow(agent));
     setPageView("agents");
+    writeAgentQuery(agent.id);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    writeAgentQuery(null);
   }
 
   async function deleteAgentChats(
@@ -340,7 +369,10 @@ export function DtAgentsManager(props: {
         ? `Agent „${agent.name}" und ${chatsCleared.deletedCount} Chat${chatsCleared.deletedCount === 1 ? "" : "s"} entfernt.`
         : `Agent „${agent.name}" entfernt.`,
     );
-    if (editingId === agent.id) setEditingId(null);
+    if (editingId === agent.id) {
+      setEditingId(null);
+      writeAgentQuery(null);
+    }
     await refresh(true);
   }
 
@@ -375,6 +407,7 @@ export function DtAgentsManager(props: {
       return;
     }
     setEditingId(null);
+    writeAgentQuery(null);
     toast.success("Agent gespeichert.");
     await refresh(true);
   }
@@ -518,7 +551,7 @@ export function DtAgentsManager(props: {
                   onEditValuesChange={(patch) => setEditValues((v) => ({ ...v, ...patch }))}
                   onStartEdit={() => startEdit(agent)}
                   onSaveEdit={() => void saveEdit()}
-                  onCancelEdit={() => setEditingId(null)}
+                  onCancelEdit={cancelEdit}
                   onToggleEnabled={(next) => void toggleEnabled(agent, next)}
                   onDeleteChats={
                     canDirectlyEdit ? () => void clearAgentChats(agent) : undefined

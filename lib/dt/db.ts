@@ -166,6 +166,8 @@ export async function loadAgentsForOrgManage(organisationId: string): Promise<
       prompt_append: string | null;
       is_default: boolean;
       uses_global_prompt: boolean;
+      source_survey_id: string | null;
+      source_survey_response_id: string | null;
     }
   >
 > {
@@ -173,7 +175,7 @@ export async function loadAgentsForOrgManage(organisationId: string): Promise<
   const { data } = await supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,is_default,uses_global_prompt",
+      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,is_default,uses_global_prompt,source_survey_id,source_survey_response_id",
     )
     .eq("organisation_id", organisationId)
     .order("position", { ascending: true })
@@ -185,6 +187,8 @@ export async function loadAgentsForOrgManage(organisationId: string): Promise<
       prompt_append: string | null;
       is_default: boolean;
       uses_global_prompt: boolean;
+      source_survey_id: string | null;
+      source_survey_response_id: string | null;
     }
   >;
 }
