@@ -55,6 +55,7 @@ export function DtPersonaTestingRail(props: {
   const [expanded, setExpanded] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
   const lastCheckedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -80,7 +81,9 @@ export function DtPersonaTestingRail(props: {
 
     void (async () => {
       try {
-        const res = await fetch(`/api/dt/agents/${props.agentId}/exam-questions`);
+        const res = await fetch(`/api/dt/agents/${props.agentId}/exam-questions`, {
+          cache: "no-store",
+        });
         const json = (await res.json()) as {
           ok?: boolean;
           available?: boolean;
@@ -112,7 +115,7 @@ export function DtPersonaTestingRail(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.enabled, props.agentId]);
+  }, [props.enabled, props.agentId, reloadToken]);
 
   const askedIds = useMemo(() => new Set(asked.map((q) => q.id)), [asked]);
   const openQuestions = useMemo(
@@ -124,6 +127,14 @@ export function DtPersonaTestingRail(props: {
   const title = audience === "company" ? "Firmen-Check" : "Persona-Check";
   const passCount = asked.filter((q) => q.verdict === "pass").length;
   const failCount = asked.filter((q) => q.verdict === "fail").length;
+  const canContinue =
+    Boolean(nextQuestion) &&
+    !props.isBusy &&
+    !props.disabled &&
+    (!active ||
+      active.verdict !== null ||
+      Boolean(active.aiSuggestion) ||
+      active.replyPhase === "checked");
 
   function pick(q: SurveyExamQuestion) {
     if (props.isBusy || props.disabled) return;
@@ -160,6 +171,23 @@ export function DtPersonaTestingRail(props: {
 
   function setVerdict(id: string, verdict: Exclude<PersonaExamVerdict, null>) {
     setAsked((prev) => prev.map((q) => (q.id === id ? { ...q, verdict } : q)));
+  }
+
+  /** Confirm current item (AI hint if needed) and send the next exam question. */
+  function continueTesting() {
+    if (!nextQuestion || props.isBusy || props.disabled) return;
+    if (active && active.verdict === null && active.aiSuggestion) {
+      setAsked((prev) =>
+        prev.map((q) =>
+          q.id === active.id ? { ...q, verdict: active.aiSuggestion!.suggested } : q,
+        ),
+      );
+    }
+    pick(nextQuestion);
+  }
+
+  function reloadQuestions() {
+    setReloadToken((n) => n + 1);
   }
 
   async function runAiCheck(exam: AskedExam, assistantAnswer: string, force = false) {
@@ -317,29 +345,40 @@ export function DtPersonaTestingRail(props: {
             ) : (
               <>
                 <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
-                  „Nächste Frage“ sendet direkt. Unter SOLL erscheint danach groß{" "}
-                  <span className="font-semibold text-emerald-700 dark:text-emerald-300">Stimmt</span>{" "}
-                  oder{" "}
-                  <span className="font-semibold text-red-700 dark:text-red-300">Stimmt nicht</span>
-                  — du bestätigst das Ergebnis.
+                  Nach dem KI-Hinweis bewertest du mit Stimmt / Weicht ab — dann{" "}
+                  <span className="font-semibold text-sbkm-navy dark:text-white">Weitertesten</span>{" "}
+                  für die nächste konkrete Prüffrage.
                 </p>
 
-                {nextQuestion ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {nextQuestion ? (
+                    <button
+                      type="button"
+                      disabled={props.isBusy || props.disabled || (Boolean(active) && !canContinue)}
+                      onClick={() => (active ? continueTesting() : pick(nextQuestion))}
+                      className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-pill bg-sbkm-navy px-4 text-sm font-semibold text-white shadow-[0_6px_16px_rgba(46,46,80,0.18)] transition hover:bg-sbkm-navy/90 disabled:opacity-50 dark:bg-sbkm-mint dark:text-sbkm-navy sm:flex-none"
+                    >
+                      {asked.length === 0 ? "Erste Frage" : "Weitertesten"}
+                      <ChevronRight className="size-4" aria-hidden />
+                    </button>
+                  ) : questions.length > 0 ? (
+                    <p className="inline-flex items-center gap-1.5 text-sm font-medium text-sbkm-mint">
+                      <Check className="size-4" aria-hidden />
+                      Alle Fragen gestellt
+                    </p>
+                  ) : null}
+
                   <button
                     type="button"
-                    disabled={props.isBusy || props.disabled}
-                    onClick={() => pick(nextQuestion)}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-pill bg-sbkm-navy px-4 text-sm font-semibold text-white shadow-[0_6px_16px_rgba(46,46,80,0.18)] transition hover:bg-sbkm-navy/90 disabled:opacity-50 dark:bg-sbkm-mint dark:text-sbkm-navy"
+                    disabled={loading || props.isBusy}
+                    onClick={reloadQuestions}
+                    title="Prüffragen neu aus dem Fragebogen laden"
+                    className="inline-flex h-11 items-center gap-1.5 rounded-pill border border-sbkm-navy/15 bg-white/80 px-3 text-xs font-semibold text-sbkm-navy transition hover:bg-sbkm-navy/5 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white"
                   >
-                    Nächste Frage
-                    <ChevronRight className="size-4" aria-hidden />
+                    <RefreshCw className={cn("size-3.5", loading && "animate-spin")} aria-hidden />
+                    Neu laden
                   </button>
-                ) : questions.length > 0 ? (
-                  <p className="inline-flex items-center gap-1.5 text-sm font-medium text-sbkm-mint">
-                    <Check className="size-4" aria-hidden />
-                    Alle Fragen gestellt
-                  </p>
-                ) : null}
+                </div>
 
                 {active ? (
                   <div className="grid gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/85 p-4 shadow-[0_8px_24px_rgba(46,46,80,0.06)] dark:border-white/10 dark:bg-white/[0.05]">
@@ -500,11 +539,32 @@ export function DtPersonaTestingRail(props: {
                           Weicht ab
                         </button>
                       </div>
+
+                      {nextQuestion ? (
+                        <button
+                          type="button"
+                          disabled={!canContinue}
+                          onClick={continueTesting}
+                          className="mt-3 inline-flex h-12 w-full items-center justify-center gap-2 rounded-pill bg-sbkm-mint px-4 text-sm font-bold text-sbkm-navy shadow-[0_6px_16px_rgba(46,46,80,0.12)] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          Weitertesten
+                          <ChevronRight className="size-4" aria-hidden />
+                        </button>
+                      ) : null}
+                      {active && !active.verdict && active.aiSuggestion && nextQuestion ? (
+                        <p className="mt-1.5 text-center text-[11px] text-sbkm-ink-500 dark:text-white/50">
+                          Übernimmt den KI-Vorschlag und stellt die nächste Frage.
+                        </p>
+                      ) : active?.verdict && nextQuestion ? (
+                        <p className="mt-1.5 text-center text-[11px] text-sbkm-ink-500 dark:text-white/50">
+                          Nächste konkrete Prüffrage absenden.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-sbkm-navy/15 px-4 py-8 text-center text-sm text-sbkm-ink-500 dark:border-white/15 dark:text-white/50">
-                    Noch keine Frage gestellt — „Nächste Frage“ startet den Check.
+                    Noch keine Frage gestellt — „Erste Frage“ startet den Check.
                   </div>
                 )}
 

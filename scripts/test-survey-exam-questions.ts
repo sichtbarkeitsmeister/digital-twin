@@ -271,6 +271,45 @@ assert.ok(
   "Packed description must not collapse into soft bio question",
 );
 
+// Comma-separated packed description without colons on every field
+const commaPacked = extractSurveyFacts({
+  surveyTitle: "CommaPacked",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_comma",
+            type: "textarea" as const,
+            title: "Beschreibung des idealen Wunsch-Zahnarztes in 3-5 Sätzen",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_comma: "Alter 35-45, Praxisgröße 1-6 Behandler, Schwerpunkte Implantologie und Prothetik",
+  },
+  fieldQuestions: [],
+});
+const commaQs = buildSurveyExamQuestions(commaPacked.facts, {
+  audience: "persona",
+  maxQuestions: 10,
+});
+assert.ok(
+  commaQs.some((q) => /wie viele mitarbeiter|behandler/i.test(q.question)),
+  "Comma-packed size must become MA/Behandler question",
+);
+assert.ok(commaQs.some((q) => /1-6 Behandler/i.test(q.expectedHint)));
+assert.ok(commaQs.some((q) => /wie alt bist du/i.test(q.question)));
+assert.ok(commaQs.some((q) => /schwerpunkte hast du/i.test(q.question)));
+
 const companyQs = buildSurveyExamQuestions(dentalFacts.facts, {
   audience: "company",
   maxQuestions: 12,
