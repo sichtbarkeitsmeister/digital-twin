@@ -33,6 +33,7 @@ import type {
 import { resolveClarificationSourcePool } from "@/lib/dt/survey-clarifications";
 import { ClarificationImportPreview } from "@/components/surveys/clarification-import-preview";
 import { FactCoverageReview } from "@/components/surveys/fact-coverage-review";
+import { SurveyAgentPreviewChat } from "@/components/surveys/survey-agent-preview-chat";
 import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
 import { unresolvedSurveyFactCoverageIds } from "@/lib/dt/survey-facts";
 
@@ -1202,6 +1203,16 @@ export function SurveyToAgentWizard(props: {
             </Card>
           </motion.div>
 
+          <motion.div variants={item}>
+            <SurveyAgentPreviewChat
+              organisationId={orgId}
+              agentName={preview.name}
+              agentRole={preview.role}
+              promptTemplate={preview.prompt_template}
+              disabled={loading || creating || repairBusy}
+            />
+          </motion.div>
+
           <motion.div variants={item} className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" onClick={goToKlaerungen}>
               Zurück
@@ -1320,6 +1331,16 @@ export function SurveyToAgentWizard(props: {
                 </div>
               </CardContent>
             </Card>
+          </motion.div>
+
+          <motion.div variants={item}>
+            <SurveyAgentPreviewChat
+              organisationId={orgId}
+              agentName={refineAgent?.name ?? "Agent"}
+              agentRole={refineAgent?.role ?? null}
+              promptTemplate={refinePreview.prompt_template}
+              disabled={loading || creating}
+            />
           </motion.div>
 
           <motion.div variants={item} className="flex flex-wrap gap-2">
