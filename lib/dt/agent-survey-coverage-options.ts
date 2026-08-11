@@ -18,6 +18,40 @@ function hasAnswerPayload(answers: unknown): boolean {
   return Object.keys(answers).length > 0;
 }
 
+function normalizeName(v: string): string {
+  return v.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Match survey folders to an organisation by name.
+ * Folders are the Umfragen-Explorer groups (often named like the org).
+ */
+export function matchSurveyFoldersToOrganisationName(
+  folders: Array<{ id: string; name: string }>,
+  organisationName: string,
+): Array<{ id: string; name: string }> {
+  const org = normalizeName(organisationName);
+  if (!org) return [];
+
+  const exact = folders.filter((f) => normalizeName(f.name) === org);
+  if (exact.length > 0) return exact;
+
+  const orgTokens = org.split(" ").filter((t) => t.length >= 3);
+
+  // Soft match: shared meaningful tokens (handles “Ruth Hennes” vs “Hennes”).
+  return folders.filter((f) => {
+    const name = normalizeName(f.name);
+    if (name.length < 4) return false;
+    if (org.includes(name) || name.includes(org)) return true;
+    const folderTokens = name.split(" ").filter((t) => t.length >= 3);
+    if (folderTokens.length === 0 || orgTokens.length === 0) return false;
+    const shared = folderTokens.filter((t) => orgTokens.includes(t));
+    // Require at least 2 shared tokens, or 1 strong token (≥6 chars) plus another.
+    if (shared.length >= 2) return true;
+    return shared.some((t) => t.length >= 6) && shared.length >= 1 && folderTokens.length <= 3;
+  });
+}
+
 function pickBestResponse<T extends {
   id: string;
   status: string;
@@ -51,9 +85,8 @@ type SurveyListRow = {
 };
 
 /**
- * Questionnaire responses for prompt↔survey Abgleich / Herkunft.
- * Lists org surveys (and same-folder siblings) with a usable answer —
- * not a global “recent 120” slice that can drop older org questionnaires.
+ * Questionnaire options for Abgleich / Herkunft.
+ * Primary source: all surveys in the organisation's Umfragen-Ordner (by folder name).
  */
 export async function listSurveyResponsesForAgentCoverage(input: {
   organisationId: string;
@@ -64,10 +97,19 @@ export async function listSurveyResponsesForAgentCoverage(input: {
   limit?: number;
 }): Promise<AgentCoverageSurveyOption[]> {
   const supabase = createServiceClient();
-  const limit = input.limit ?? 40;
+  const limit = input.limit ?? 80;
   const preferAnbieter =
     input.agentKind === "seo_advisor" || input.agentKind === "seo";
 
+  const { data: organisation } = await supabase
+    .from("organisations")
+    .select("id, name")
+    .eq("id", input.organisationId)
+    .maybeSingle();
+
+  const surveyById = new Map<string, SurveyListRow>();
+
+  // 1) Surveys linked by organisation_id
   const { data: orgSurveys, error: surveysError } = await supabase
     .from("surveys")
     .select("id, title, purpose, organisation_id, folder_id, deleted_at, updated_at")
@@ -78,36 +120,43 @@ export async function listSurveyResponsesForAgentCoverage(input: {
 
   if (surveysError) {
     console.warn("[dt] listSurveyResponsesForAgentCoverage surveys:", surveysError.message);
-    return [];
   }
-
-  const surveyById = new Map<string, SurveyListRow>();
   for (const s of orgSurveys ?? []) {
     surveyById.set(s.id, s as SurveyListRow);
   }
 
-  // Include other surveys in the same folders (Umfragen-Explorer groups by folder).
-  const folderIds = [
-    ...new Set(
-      [...surveyById.values()]
-        .map((s) => s.folder_id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0),
-    ),
-  ];
-  if (folderIds.length > 0) {
+  // 2) All surveys in folders named like the organisation (Umfragen-Explorer).
+  const { data: folders } = await supabase
+    .from("survey_folders")
+    .select("id, name")
+    .order("name", { ascending: true })
+    .limit(500);
+
+  const matchedFolders = matchSurveyFoldersToOrganisationName(
+    folders ?? [],
+    organisation?.name ?? "",
+  );
+  const folderIds = new Set(matchedFolders.map((f) => f.id));
+
+  // Also keep folders already referenced by org-linked surveys.
+  for (const s of surveyById.values()) {
+    if (s.folder_id) folderIds.add(s.folder_id);
+  }
+
+  if (folderIds.size > 0) {
     const { data: folderSurveys } = await supabase
       .from("surveys")
       .select("id, title, purpose, organisation_id, folder_id, deleted_at, updated_at")
-      .in("folder_id", folderIds)
+      .in("folder_id", [...folderIds])
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
-      .limit(80);
+      .limit(120);
     for (const s of folderSurveys ?? []) {
-      if (!surveyById.has(s.id)) surveyById.set(s.id, s as SurveyListRow);
+      surveyById.set(s.id, s as SurveyListRow);
     }
   }
 
-  // Surveys already used as source by agents in this org.
+  // 3) Surveys already used as source by agents in this org.
   const { data: agentSources } = await supabase
     .from("dt_agents")
     .select("source_survey_id")
@@ -143,7 +192,7 @@ export async function listSurveyResponsesForAgentCoverage(input: {
     .select("id, survey_id, status, completed_at, updated_at, answers")
     .in("survey_id", surveyIds)
     .order("updated_at", { ascending: false })
-    .limit(400);
+    .limit(500);
 
   if (responsesError) {
     console.warn(
@@ -175,6 +224,8 @@ export async function listSurveyResponsesForAgentCoverage(input: {
       if (sourceResp) best = sourceResp;
     }
 
+    // Folder questionnaires without an answer yet: still list with a placeholder
+    // response id only when we have a row; otherwise skip (Abgleich needs answers).
     if (!best) continue;
 
     const isSource =
@@ -264,9 +315,7 @@ export async function listSurveyResponsesForAgentCoverage(input: {
         ? 1
         : 0;
     if (aPurposeScore !== bPurposeScore) return bPurposeScore - aPurposeScore;
-    const at = a.completedAt ?? "";
-    const bt = b.completedAt ?? "";
-    return bt.localeCompare(at);
+    return a.surveyTitle.localeCompare(b.surveyTitle, "de");
   });
 
   return options;

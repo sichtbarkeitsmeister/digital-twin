@@ -11,7 +11,7 @@ import {
   suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "../lib/dt/agent-survey-coverage-option-helpers";
-import { pickBestSurveyResponseForCoverage } from "../lib/dt/agent-survey-coverage-options";
+import { pickBestSurveyResponseForCoverage, matchSurveyFoldersToOrganisationName } from "../lib/dt/agent-survey-coverage-options";
 import type { SurveyFact } from "../lib/dt/survey-facts";
 
 const facts: SurveyFact[] = [
@@ -139,5 +139,23 @@ const best = pickBestSurveyResponseForCoverage([
   },
 ]);
 assert.equal(best?.id, "r-done");
+
+const folders = [
+  { id: "f1", name: "Zahnarztpraxis Ruth Hennes" },
+  { id: "f2", name: "Kolb & Sartor" },
+  { id: "f3", name: "Zahnarztpraxis Hennes" },
+];
+assert.deepEqual(
+  matchSurveyFoldersToOrganisationName(folders, "Zahnarztpraxis Ruth Hennes").map(
+    (f) => f.id,
+  ),
+  ["f1"],
+);
+assert.ok(
+  matchSurveyFoldersToOrganisationName(
+    [{ id: "f3", name: "Zahnarztpraxis Hennes" }],
+    "Zahnarztpraxis Ruth Hennes",
+  ).some((f) => f.id === "f3"),
+);
 
 console.log("agent-survey-coverage tests: ok");
