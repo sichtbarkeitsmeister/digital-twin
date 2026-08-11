@@ -1209,6 +1209,8 @@ export function SurveyToAgentWizard(props: {
               agentName={preview.name}
               agentRole={preview.role}
               promptTemplate={preview.prompt_template}
+              surveyId={props.surveyId}
+              responseId={props.responseId}
               disabled={loading || creating || repairBusy}
             />
           </motion.div>
@@ -1339,6 +1341,8 @@ export function SurveyToAgentWizard(props: {
               agentName={refineAgent?.name ?? "Agent"}
               agentRole={refineAgent?.role ?? null}
               promptTemplate={refinePreview.prompt_template}
+              surveyId={props.surveyId}
+              responseId={props.responseId}
               disabled={loading || creating}
             />
           </motion.div>
