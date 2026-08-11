@@ -5,7 +5,10 @@ import {
   comparePromptToSurveyFacts,
   loadAgentSurveyFactsBundle,
 } from "@/lib/dt/agent-survey-coverage";
-import { listSurveyResponsesForAgentCoverage } from "@/lib/dt/agent-survey-coverage-options";
+import {
+  listSurveyResponsesForAgentCoverage,
+  suggestCoverageOptionForAgent,
+} from "@/lib/dt/agent-survey-coverage-options";
 import { requireAuthUser } from "@/lib/dt/db";
 import { isMemberOfOrganisation } from "@/lib/dashboard/org-context";
 
@@ -33,7 +36,7 @@ export async function GET(
   const { data: agent, error } = await auth.supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,kind,source_survey_id,source_survey_response_id",
+      "id,organisation_id,name,kind,source_survey_id,source_survey_response_id",
     )
     .eq("id", agentId)
     .maybeSingle();
@@ -53,16 +56,23 @@ export async function GET(
 
   const options = await listSurveyResponsesForAgentCoverage({
     organisationId: agent.organisation_id as string,
+    agentId: agent.id as string,
     agentKind: agent.kind as string,
     sourceSurveyId: agent.source_survey_id as string | null,
     sourceResponseId: agent.source_survey_response_id as string | null,
   });
 
+  const suggested = suggestCoverageOptionForAgent(
+    options,
+    (agent.name as string) ?? "",
+  );
+
   return NextResponse.json({
     ok: true,
     options,
-    defaultResponseId:
-      options.find((o) => o.isSource)?.responseId ?? options[0]?.responseId ?? null,
+    sourceSurveyId: agent.source_survey_id,
+    sourceResponseId: agent.source_survey_response_id,
+    defaultResponseId: suggested?.responseId ?? null,
   });
 }
 
@@ -116,11 +126,14 @@ export async function POST(
   if (!surveyId || !responseId) {
     const options = await listSurveyResponsesForAgentCoverage({
       organisationId: agent.organisation_id as string,
+      agentId: agent.id as string,
       agentKind: agent.kind as string,
       sourceSurveyId: agent.source_survey_id as string | null,
       sourceResponseId: agent.source_survey_response_id as string | null,
     });
-    const pick = options[0] ?? null;
+    const pick =
+      suggestCoverageOptionForAgent(options, (agent.name as string) ?? "") ??
+      null;
     if (!pick) {
       return NextResponse.json(
         {
@@ -138,6 +151,7 @@ export async function POST(
   // Ensure selected response belongs to an accessible org survey (or agent source).
   const options = await listSurveyResponsesForAgentCoverage({
     organisationId: agent.organisation_id as string,
+    agentId: agent.id as string,
     agentKind: agent.kind as string,
     sourceSurveyId: agent.source_survey_id as string | null,
     sourceResponseId: agent.source_survey_response_id as string | null,

@@ -8,6 +8,7 @@ import { comparePromptToSurveyFacts } from "../lib/dt/agent-survey-coverage";
 import {
   formatCoverageOptionLabel,
   pickDefaultCoverageOption,
+  suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "../lib/dt/agent-survey-coverage-option-helpers";
 import type { SurveyFact } from "../lib/dt/survey-facts";
@@ -82,5 +83,42 @@ assert.equal(pickDefaultCoverageOption([]), null);
 const label = formatCoverageOptionLabel(options[1]!);
 assert.match(label, /Herkunfts-Umfrage/);
 assert.match(label, /Herkunft/);
+
+const unmarked: AgentCoverageSurveyOption[] = [
+  {
+    surveyId: "s-fam",
+    responseId: "r-fam",
+    surveyTitle: "Kunden-Persona – Die Prophylaxe-Familie",
+    purpose: "persona",
+    completedAt: "2026-07-02T12:00:00.000Z",
+    isSource: false,
+  },
+  {
+    surveyId: "s-markus",
+    responseId: "r-markus",
+    surveyTitle: "Kunden-Persona – Markus Ohlig",
+    purpose: "persona",
+    completedAt: "2026-06-01T12:00:00.000Z",
+    isSource: false,
+  },
+];
+
+assert.equal(
+  suggestCoverageOptionForAgent(unmarked, "Markus Ohlig")?.responseId,
+  "r-markus",
+);
+assert.equal(
+  suggestCoverageOptionForAgent(
+    unmarked.map((o, i) => ({ ...o, isSource: i === 0 })),
+    "Markus Ohlig",
+  )?.responseId,
+  "r-fam",
+);
+
+const usedLabel = formatCoverageOptionLabel({
+  ...unmarked[0]!,
+  usedByOtherAgentName: "Nadine Müller",
+});
+assert.match(usedLabel, /Nadine Müller/);
 
 console.log("agent-survey-coverage tests: ok");

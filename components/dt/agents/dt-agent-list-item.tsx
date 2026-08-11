@@ -212,6 +212,10 @@ export function DtAgentListItem(props: {
   onDeleteChats?: () => void;
   onDelete: () => void;
   onRequestChange: () => void;
+  onSourceSaved?: (source: {
+    sourceSurveyId: string;
+    sourceSurveyResponseId: string;
+  }) => void;
   canDisable: boolean;
   alwaysOn?: boolean;
   globalPromptPreview?: string;
@@ -254,6 +258,7 @@ export function DtAgentListItem(props: {
               disabled={props.busy}
               promptTemplate={props.editValues.prompt}
               promptAppend={props.editValues.promptAppend}
+              onSourceSaved={props.onSourceSaved}
               onInsertIntoPrompt={(insertion) => {
                 const target = props.editValues.usesGlobalPrompt
                   ? "promptAppend"
