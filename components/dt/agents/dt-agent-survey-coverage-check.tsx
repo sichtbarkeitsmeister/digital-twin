@@ -274,10 +274,10 @@ export function DtAgentSurveyCoverageCheck(props: {
           }}
           placeholder="Fragebogen wählen"
         />
-        <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-          Welcher ausgefüllte Fragebogen gehört zu diesem Zwilling? Speichere die Zuordnung,
-          damit Abgleich und Testing denselben Fragebogen nutzen.
-        </p>
+                <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                  Alle Fragebögen aus dem Umfragen-Ordner dieser Organisation. Speichere die
+                  Zuordnung, damit Abgleich und Testing denselben Fragebogen nutzen.
+                </p>
 
         {loadingOptions ? (
           <p className="flex items-center gap-2 text-xs text-sbkm-ink-600 dark:text-white/55">
