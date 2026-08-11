@@ -170,6 +170,14 @@ export function DtChatShell(props: {
 
   const personaTestingAvailable = agentSupportsPersonaTesting(selectedAgent);
 
+  const lastAssistantContent = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg?.role === "assistant" && msg.content?.trim()) return msg.content;
+    }
+    return null;
+  }, [messages]);
+
   useEffect(() => {
     setPersonaTesting(false);
   }, [selectedAgentId, personaTestingAvailable]);
@@ -1414,8 +1422,9 @@ export function DtChatShell(props: {
                   enabled={personaTesting}
                   isBusy={isBusy}
                   disabled={isInitialLoading && !ghostMode}
+                  lastAssistantContent={lastAssistantContent}
                   onPickQuestion={setPrompt}
-                  className="absolute inset-y-0 right-0 z-20 shadow-[0_0_24px_rgba(46,46,80,0.12)] md:static md:z-auto md:shadow-none"
+                  className="absolute inset-y-0 right-0 z-20 shadow-[0_0_28px_rgba(46,46,80,0.14)] md:static md:z-auto md:shadow-none"
                 />
               ) : null}
             </div>
