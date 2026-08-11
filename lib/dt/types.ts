@@ -12,6 +12,9 @@ export type DtAgentRow = {
   position: number;
   /** Persona structured fields (disg, emoji, …) — optional in list queries. */
   avatar_data?: unknown;
+  /** Survey lineage for Persona-Testing exam questions (optional in list queries). */
+  source_survey_id?: string | null;
+  source_survey_response_id?: string | null;
 };
 
 export type DtOrgConfigRow = {
