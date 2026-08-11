@@ -557,6 +557,20 @@ export function DtAgentsManager(props: {
                     canDirectlyEdit ? () => void clearAgentChats(agent) : undefined
                   }
                   onDelete={() => void deleteAgent(agent)}
+                  onSourceSaved={(source) => {
+                    setAgents((prev) =>
+                      prev.map((a) =>
+                        a.id === agent.id
+                          ? {
+                              ...a,
+                              source_survey_id: source.sourceSurveyId,
+                              source_survey_response_id: source.sourceSurveyResponseId,
+                            }
+                          : a,
+                      ),
+                    );
+                    toast.success("Fragebogen-Herkunft gespeichert.");
+                  }}
                   onRequestChange={() => setRequestAgent(agent)}
                   canDisable={canDisableAgent(agent)}
                   alwaysOn={isProtectedAlwaysOn(agent)}

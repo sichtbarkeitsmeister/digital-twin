@@ -9,16 +9,40 @@ import {
 import { requireAuthUser, updateDtAgent } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents } from "@/lib/dt/org-access";
 
-const patchSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
-  role: z.string().trim().max(120).nullable().optional(),
-  promptTemplate: z.string().max(32_000).optional(),
-  promptAppend: z.string().max(32_000).nullable().optional(),
-  usesGlobalPrompt: z.boolean().optional(),
-  quickActions: z.array(z.string().trim().min(1).max(200)).max(12).optional(),
-  isEnabled: z.boolean().optional(),
-  position: z.number().int().min(0).max(999).optional(),
-});
+const patchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    role: z.string().trim().max(120).nullable().optional(),
+    promptTemplate: z.string().max(32_000).optional(),
+    promptAppend: z.string().max(32_000).nullable().optional(),
+    usesGlobalPrompt: z.boolean().optional(),
+    quickActions: z.array(z.string().trim().min(1).max(200)).max(12).optional(),
+    isEnabled: z.boolean().optional(),
+    position: z.number().int().min(0).max(999).optional(),
+    /** Persist which questionnaire response this twin belongs to. */
+    sourceSurveyId: z.string().uuid().nullable().optional(),
+    sourceSurveyResponseId: z.string().uuid().nullable().optional(),
+  })
+  .superRefine((val, ctx) => {
+    const hasSurvey = val.sourceSurveyId !== undefined;
+    const hasResponse = val.sourceSurveyResponseId !== undefined;
+    if (hasSurvey !== hasResponse) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fragebogen und Antwort müssen gemeinsam gesetzt werden.",
+      });
+      return;
+    }
+    if (!hasSurvey) return;
+    const surveyNull = val.sourceSurveyId === null;
+    const responseNull = val.sourceSurveyResponseId === null;
+    if (surveyNull !== responseNull) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fragebogen-Herkunft unvollständig.",
+      });
+    }
+  });
 
 export async function GET(
   _: Request,
@@ -57,7 +81,7 @@ export async function PATCH(
   const { agentId } = await context.params;
   const { data: existing } = await auth.supabase
     .from("dt_agents")
-    .select("organisation_id")
+    .select("id,organisation_id,kind")
     .eq("id", agentId)
     .maybeSingle();
 
@@ -85,6 +109,52 @@ export async function PATCH(
     );
   }
 
+  if (
+    parsed.data.sourceSurveyId !== undefined &&
+    parsed.data.sourceSurveyResponseId !== undefined &&
+    parsed.data.sourceSurveyId &&
+    parsed.data.sourceSurveyResponseId
+  ) {
+    const { listSurveyResponsesForAgentCoverage } = await import(
+      "@/lib/dt/agent-survey-coverage-options"
+    );
+    const options = await listSurveyResponsesForAgentCoverage({
+      organisationId: existing.organisation_id as string,
+      agentId,
+      agentKind: existing.kind as string,
+      sourceSurveyId: parsed.data.sourceSurveyId,
+      sourceResponseId: parsed.data.sourceSurveyResponseId,
+    });
+    const allowedSource = options.some(
+      (o) =>
+        o.surveyId === parsed.data.sourceSurveyId &&
+        o.responseId === parsed.data.sourceSurveyResponseId,
+    );
+    if (!allowedSource) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "Dieser Fragebogen gehört nicht zur Organisation oder ist nicht abgeschlossen.",
+        },
+        { status: 400 },
+      );
+    }
+    const taken = options.find(
+      (o) =>
+        o.responseId === parsed.data.sourceSurveyResponseId &&
+        o.usedByOtherAgentName,
+    );
+    if (taken?.usedByOtherAgentName) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: `Dieser Fragebogen ist bereits dem Zwilling „${taken.usedByOtherAgentName}“ zugeordnet.`,
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   const patch: Record<string, unknown> = {};
   if (parsed.data.name !== undefined) patch.name = parsed.data.name;
   if (parsed.data.role !== undefined) patch.role = parsed.data.role;
@@ -96,6 +166,12 @@ export async function PATCH(
   if (parsed.data.quickActions !== undefined) patch.quick_actions = parsed.data.quickActions;
   if (parsed.data.isEnabled !== undefined) patch.is_enabled = parsed.data.isEnabled;
   if (parsed.data.position !== undefined) patch.position = parsed.data.position;
+  if (parsed.data.sourceSurveyId !== undefined) {
+    patch.source_survey_id = parsed.data.sourceSurveyId;
+  }
+  if (parsed.data.sourceSurveyResponseId !== undefined) {
+    patch.source_survey_response_id = parsed.data.sourceSurveyResponseId;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ ok: false, message: "Keine Änderungen übergeben." }, { status: 400 });
@@ -103,16 +179,25 @@ export async function PATCH(
 
   const updated = await updateDtAgent({ agentId, patch });
   if (!updated.ok) {
+    const msg = updated.error ?? "Speichern fehlgeschlagen.";
+    const conflict =
+      /agent_already_created_for_response/i.test(msg) ||
+      /duplicate key|unique/i.test(msg);
     return NextResponse.json(
-      { ok: false, message: updated.error ?? "Speichern fehlgeschlagen." },
-      { status: 500 },
+      {
+        ok: false,
+        message: conflict
+          ? "Dieser Fragebogen ist bereits einem anderen Zwilling zugeordnet."
+          : msg,
+      },
+      { status: conflict ? 409 : 500 },
     );
   }
 
   const { data: agent } = await auth.supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,uses_global_prompt",
+      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,uses_global_prompt,source_survey_id,source_survey_response_id",
     )
     .eq("id", agentId)
     .single();

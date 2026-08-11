@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { ClipboardCheck, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ClipboardCheck, Link2, Loader2 } from "lucide-react";
 
 import { FactCoverageReview } from "@/components/surveys/fact-coverage-review";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -9,14 +9,13 @@ import { DtSelect } from "@/components/dt/dt-select";
 import type { SurveyFactCoverageSummary } from "@/lib/dt/survey-facts";
 import {
   formatCoverageOptionLabel,
-  pickDefaultCoverageOption,
+  suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "@/lib/dt/agent-survey-coverage-option-helpers";
 import { cn } from "@/components/dt/cn";
 
 /**
- * Compare the current DigitalTwin prompt draft against a completed questionnaire.
- * Always available — pick any org survey response (current answers), not only stored lineage.
+ * Always-visible questionnaire assignment + optional Abgleich against current answers.
  */
 export function DtAgentSurveyCoverageCheck(props: {
   agentId: string;
@@ -24,15 +23,20 @@ export function DtAgentSurveyCoverageCheck(props: {
   promptTemplate: string;
   promptAppend: string;
   onInsertIntoPrompt: (insertion: string) => void;
+  /** Called after the twin↔questionnaire link was saved. */
+  onSourceSaved?: (source: {
+    sourceSurveyId: string;
+    sourceSurveyResponseId: string;
+  }) => void;
   disabled?: boolean;
   className?: string;
-  /** Render only the trigger button (results still expand below in place). */
-  buttonOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [savingSource, setSavingSource] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sourceMessage, setSourceMessage] = useState<string | null>(null);
   const [options, setOptions] = useState<AgentCoverageSurveyOption[]>([]);
   const [selectedResponseId, setSelectedResponseId] = useState<string | null>(null);
   const [surveyTitle, setSurveyTitle] = useState<string | null>(null);
@@ -59,10 +63,35 @@ export function DtAgentSurveyCoverageCheck(props: {
     const list = Array.isArray(json.options) ? json.options : [];
     const defaultId =
       json.defaultResponseId ??
-      pickDefaultCoverageOption(list)?.responseId ??
+      suggestCoverageOptionForAgent(list, props.agentName)?.responseId ??
       null;
     return { options: list, defaultResponseId: defaultId };
-  }, [props.agentId]);
+  }, [props.agentId, props.agentName]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingOptions(true);
+    setError(null);
+    void loadOptions()
+      .then((loaded) => {
+        if (cancelled) return;
+        setOptions(loaded.options);
+        setSelectedResponseId((prev) => prev ?? loaded.defaultResponseId);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setOptions([]);
+        setError(
+          err instanceof Error ? err.message : "Fragebögen konnten nicht geladen werden.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOptions(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadOptions]);
 
   const runCheck = useCallback(
     async (responseIdOverride?: string | null) => {
@@ -70,13 +99,14 @@ export function DtAgentSurveyCoverageCheck(props: {
       setOpen(true);
       setBusy(true);
       setError(null);
+      setSourceMessage(null);
       setCoverage(null);
 
       try {
         let list = options;
         let responseId = responseIdOverride ?? selectedResponseId;
 
-        if (list.length === 0 || !responseId) {
+        if (list.length === 0) {
           setLoadingOptions(true);
           const loaded = await loadOptions();
           list = loaded.options;
@@ -144,6 +174,52 @@ export function DtAgentSurveyCoverageCheck(props: {
     ],
   );
 
+  const saveAsSource = useCallback(async () => {
+    const selected = options.find((o) => o.responseId === selectedResponseId);
+    if (!selected || props.disabled || savingSource) return;
+    if (selected.usedByOtherAgentName) {
+      setSourceMessage(
+        `Bereits dem Zwilling „${selected.usedByOtherAgentName}“ zugeordnet.`,
+      );
+      return;
+    }
+
+    setSavingSource(true);
+    setSourceMessage(null);
+    try {
+      const res = await fetch(`/api/dt/agents/${props.agentId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceSurveyId: selected.surveyId,
+          sourceSurveyResponseId: selected.responseId,
+        }),
+      });
+      const json = (await res.json()) as { ok?: boolean; message?: string };
+      if (!json.ok) {
+        setSourceMessage(json.message ?? "Zuordnung konnte nicht gespeichert werden.");
+        return;
+      }
+      setOptions((prev) =>
+        prev.map((o) => ({
+          ...o,
+          isSource: o.responseId === selected.responseId,
+          usedByOtherAgentName:
+            o.responseId === selected.responseId ? null : o.usedByOtherAgentName,
+        })),
+      );
+      setSourceMessage("Fragebogen als Herkunft dieses Zwillings gespeichert.");
+      props.onSourceSaved?.({
+        sourceSurveyId: selected.surveyId,
+        sourceSurveyResponseId: selected.responseId,
+      });
+    } catch {
+      setSourceMessage("Zuordnung konnte nicht gespeichert werden.");
+    } finally {
+      setSavingSource(false);
+    }
+  }, [options, props, savingSource, selectedResponseId]);
+
   const openGaps =
     (coverage?.missingCount ?? 0) + (coverage?.weakCount ?? 0) - acceptedFactIds.size;
   const allOk =
@@ -151,6 +227,12 @@ export function DtAgentSurveyCoverageCheck(props: {
     coverage.total > 0 &&
     coverage.missingCount === 0 &&
     coverage.weakCount === 0;
+
+  const selected = options.find((o) => o.responseId === selectedResponseId) ?? null;
+  const canSaveSource =
+    Boolean(selected) &&
+    !selected?.isSource &&
+    !selected?.usedByOtherAgentName;
 
   const selectOptions = options.map((o) => ({
     value: o.responseId,
@@ -160,15 +242,100 @@ export function DtAgentSurveyCoverageCheck(props: {
 
   return (
     <div className={cn("grid gap-3", props.className)}>
+      <div className="grid gap-2 rounded-2xl border border-sbkm-navy/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04] sm:p-4">
+        <DtSelect
+          label="Zugehöriger Fragebogen"
+          size="sm"
+          fullWidth
+          value={selectedResponseId ?? selectOptions[0]?.value ?? ""}
+          disabled={
+            props.disabled || loadingOptions || savingSource || selectOptions.length === 0
+          }
+          options={
+            selectOptions.length > 0
+              ? selectOptions
+              : [
+                  {
+                    value: "",
+                    label: loadingOptions
+                      ? "Fragebögen werden geladen …"
+                      : "Keine abgeschlossenen Fragebögen",
+                    disabled: true,
+                  },
+                ]
+          }
+          onValueChange={(value) => {
+            if (!value) return;
+            setSelectedResponseId(value);
+            setSourceMessage(null);
+            setCoverage(null);
+            setError(null);
+            setOpen(false);
+          }}
+          placeholder="Fragebogen wählen"
+        />
+                <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                  Alle Fragebögen aus dem Umfragen-Ordner dieser Organisation. Speichere die
+                  Zuordnung, damit Abgleich und Testing denselben Fragebogen nutzen.
+                </p>
+
+        {loadingOptions ? (
+          <p className="flex items-center gap-2 text-xs text-sbkm-ink-600 dark:text-white/55">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            Fragebögen werden geladen …
+          </p>
+        ) : null}
+
+        {canSaveSource ? (
+          <div>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={props.disabled || savingSource}
+              onClick={() => void saveAsSource()}
+              className="gap-1.5"
+            >
+              {savingSource ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Link2 className="size-4" aria-hidden />
+              )}
+              Als Herkunft speichern
+            </DtPillButton>
+          </div>
+        ) : selected?.isSource ? (
+          <p className="text-xs font-medium text-sbkm-mint">
+            Dieser Fragebogen ist als Herkunft des Zwillings gespeichert.
+          </p>
+        ) : selected?.usedByOtherAgentName ? (
+          <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+            Bereits bei „{selected.usedByOtherAgentName}“ hinterlegt — Abgleich trotzdem
+            möglich.
+          </p>
+        ) : null}
+
+        {sourceMessage ? (
+          <p
+            className={cn(
+              "text-xs",
+              /gespeichert/i.test(sourceMessage) ? "text-sbkm-mint" : "text-destructive",
+            )}
+          >
+            {sourceMessage}
+          </p>
+        ) : null}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <DtPillButton
           type="button"
           size="sm"
           variant="outline"
-          disabled={props.disabled || busy}
+          disabled={props.disabled || busy || !selectedResponseId}
           onClick={() => void runCheck()}
           className="gap-1.5 border-sbkm-navy/25 bg-white font-semibold dark:border-white/20 dark:bg-white/5"
-          title="Prompt mit dem aktuellen Fragebogen vergleichen"
+          title="Prompt mit dem ausgewählten Fragebogen vergleichen"
         >
           {busy ? (
             <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -191,30 +358,10 @@ export function DtAgentSurveyCoverageCheck(props: {
 
       {open ? (
         <div className="rounded-2xl border border-sbkm-navy/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04] sm:p-4">
-          {selectOptions.length > 0 && !loadingOptions ? (
-            <div className="mb-3">
-              <DtSelect
-                label="Fragebogen"
-                size="sm"
-                fullWidth
-                value={selectedResponseId ?? selectOptions[0]?.value ?? ""}
-                disabled={props.disabled || busy}
-                options={selectOptions}
-                onValueChange={(value) => {
-                  setSelectedResponseId(value);
-                  void runCheck(value);
-                }}
-                placeholder="Umfrage-Antwort wählen"
-              />
-            </div>
-          ) : null}
-
-          {busy || loadingOptions ? (
+          {busy ? (
             <p className="flex items-center gap-2 text-sm text-sbkm-ink-600 dark:text-white/55">
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              {loadingOptions
-                ? "Fragebögen werden geladen …"
-                : "Prompt wird mit dem aktuellen Fragebogen verglichen …"}
+              Prompt wird mit dem aktuellen Fragebogen verglichen …
             </p>
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
@@ -232,7 +379,7 @@ export function DtAgentSurveyCoverageCheck(props: {
                 </p>
                 <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
                   Vergleicht die aktuellen Prompt-Texte mit den aktuellen
-                  Fragebogen-Antworten (auch ohne gespeicherte Herkunft).
+                  Fragebogen-Antworten.
                 </p>
                 <p className="mt-2 text-sm text-sbkm-navy dark:text-white">
                   {coverage.coveredCount}/{coverage.total} Facts erkannt

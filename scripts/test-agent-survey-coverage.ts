@@ -8,8 +8,10 @@ import { comparePromptToSurveyFacts } from "../lib/dt/agent-survey-coverage";
 import {
   formatCoverageOptionLabel,
   pickDefaultCoverageOption,
+  suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "../lib/dt/agent-survey-coverage-option-helpers";
+import { pickBestSurveyResponseForCoverage, matchSurveyFoldersToOrganisationName } from "../lib/dt/agent-survey-coverage-options";
 import type { SurveyFact } from "../lib/dt/survey-facts";
 
 const facts: SurveyFact[] = [
@@ -82,5 +84,78 @@ assert.equal(pickDefaultCoverageOption([]), null);
 const label = formatCoverageOptionLabel(options[1]!);
 assert.match(label, /Herkunfts-Umfrage/);
 assert.match(label, /Herkunft/);
+
+const unmarked: AgentCoverageSurveyOption[] = [
+  {
+    surveyId: "s-fam",
+    responseId: "r-fam",
+    surveyTitle: "Kunden-Persona – Die Prophylaxe-Familie",
+    purpose: "persona",
+    completedAt: "2026-07-02T12:00:00.000Z",
+    isSource: false,
+  },
+  {
+    surveyId: "s-markus",
+    responseId: "r-markus",
+    surveyTitle: "Kunden-Persona – Markus Ohlig",
+    purpose: "persona",
+    completedAt: "2026-06-01T12:00:00.000Z",
+    isSource: false,
+  },
+];
+
+assert.equal(
+  suggestCoverageOptionForAgent(unmarked, "Markus Ohlig")?.responseId,
+  "r-markus",
+);
+assert.equal(
+  suggestCoverageOptionForAgent(
+    unmarked.map((o, i) => ({ ...o, isSource: i === 0 })),
+    "Markus Ohlig",
+  )?.responseId,
+  "r-fam",
+);
+
+const usedLabel = formatCoverageOptionLabel({
+  ...unmarked[0]!,
+  usedByOtherAgentName: "Nadine Müller",
+});
+assert.match(usedLabel, /Nadine Müller/);
+
+const best = pickBestSurveyResponseForCoverage([
+  {
+    id: "r-old",
+    status: "in_progress",
+    completed_at: null,
+    updated_at: "2026-08-01T12:00:00.000Z",
+    answers: { a: 1 },
+  },
+  {
+    id: "r-done",
+    status: "completed",
+    completed_at: "2026-07-01T12:00:00.000Z",
+    updated_at: "2026-07-01T12:00:00.000Z",
+    answers: { a: 1 },
+  },
+]);
+assert.equal(best?.id, "r-done");
+
+const folders = [
+  { id: "f1", name: "Zahnarztpraxis Ruth Hennes" },
+  { id: "f2", name: "Kolb & Sartor" },
+  { id: "f3", name: "Zahnarztpraxis Hennes" },
+];
+assert.deepEqual(
+  matchSurveyFoldersToOrganisationName(folders, "Zahnarztpraxis Ruth Hennes").map(
+    (f) => f.id,
+  ),
+  ["f1"],
+);
+assert.ok(
+  matchSurveyFoldersToOrganisationName(
+    [{ id: "f3", name: "Zahnarztpraxis Hennes" }],
+    "Zahnarztpraxis Ruth Hennes",
+  ).some((f) => f.id === "f3"),
+);
 
 console.log("agent-survey-coverage tests: ok");
