@@ -42,6 +42,8 @@ export function DtPersonaTestingRail(props: {
   disabled?: boolean;
   /** Latest assistant reply in the active chat — used for AI SOLL/IST check. */
   lastAssistantContent?: string | null;
+  /** Latest user message — used to match the active exam question. */
+  lastUserContent?: string | null;
   onPickQuestion: (question: string) => void;
   className?: string;
 }) {
@@ -221,23 +223,37 @@ export function DtPersonaTestingRail(props: {
   }, [props.enabled, props.isBusy, active?.id, active?.replyPhase]);
 
   // After the twin finishes, compare IST vs SOLL.
+  // Also fire when the latest user message matches the active exam question
+  // (covers cases where pending_send → in_flight was missed).
   useEffect(() => {
     if (!props.enabled || props.isBusy || checking) return;
-    if (!active || active.replyPhase !== "in_flight") return;
-    if (active.verdict || active.aiSuggestion || active.aiError) return;
+    if (!active || active.verdict || active.aiSuggestion) return;
     const answer = props.lastAssistantContent?.trim();
     if (!answer) return;
+
+    const normalize = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+    const userMsg = props.lastUserContent?.trim() ?? "";
+    const questionMatched =
+      Boolean(userMsg) && normalize(userMsg) === normalize(active.question);
+    const phaseReady =
+      active.replyPhase === "in_flight" ||
+      (active.replyPhase === "checked" && !active.aiSuggestion && !active.aiError);
+
+    if (!questionMatched && !phaseReady) return;
+
     void runAiCheck(active, answer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     props.enabled,
     props.isBusy,
     props.lastAssistantContent,
+    props.lastUserContent,
     active?.id,
     active?.replyPhase,
     active?.verdict,
     active?.aiSuggestion,
     active?.aiError,
+    active?.question,
     checking,
   ]);
 
@@ -301,8 +317,11 @@ export function DtPersonaTestingRail(props: {
             ) : (
               <>
                 <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
-                  Nach der Twin-Antwort erscheint unter SOLL ein grüner/roter KI-Hinweis. Du gibst
-                  danach das letzte Wort.
+                  „Nächste Frage“ sendet direkt. Unter SOLL erscheint danach groß{" "}
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-300">Stimmt</span>{" "}
+                  oder{" "}
+                  <span className="font-semibold text-red-700 dark:text-red-300">Stimmt nicht</span>
+                  — du bestätigst das Ergebnis.
                 </p>
 
                 {nextQuestion ? (
@@ -426,7 +445,7 @@ export function DtPersonaTestingRail(props: {
                       </div>
                     ) : active.replyPhase === "pending_send" ? (
                       <p className="rounded-xl border border-dashed border-sbkm-navy/15 px-3 py-3 text-sm text-sbkm-ink-500 dark:border-white/15 dark:text-white/55">
-                        Frage ist bereit — jetzt absenden, dann kommt der KI-Check.
+                        Frage wird gesendet — danach kommt der KI-Check.
                       </p>
                     ) : (
                       <div className="rounded-xl border border-dashed border-sbkm-navy/15 px-3 py-3 dark:border-white/15">

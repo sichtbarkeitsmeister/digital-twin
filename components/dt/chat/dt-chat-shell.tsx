@@ -178,6 +178,14 @@ export function DtChatShell(props: {
     return null;
   }, [messages]);
 
+  const lastUserContent = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg?.role === "user" && msg.content?.trim()) return msg.content;
+    }
+    return null;
+  }, [messages]);
+
   useEffect(() => {
     setPersonaTesting(false);
   }, [selectedAgentId, personaTestingAvailable]);
@@ -866,8 +874,8 @@ export function DtChatShell(props: {
     return json.chat.id;
   };
 
-  const handleSend = async () => {
-    const text = prompt.trim();
+  const handleSend = async (overrideText?: string) => {
+    const text = (overrideText ?? prompt).trim();
     if ((!text && attachments.length === 0) || isBusy) return;
     if (!selectedAgentId) {
       setStatus("Bitte einen Agenten wählen.");
@@ -1423,7 +1431,11 @@ export function DtChatShell(props: {
                   isBusy={isBusy}
                   disabled={isInitialLoading && !ghostMode}
                   lastAssistantContent={lastAssistantContent}
-                  onPickQuestion={setPrompt}
+                  lastUserContent={lastUserContent}
+                  onPickQuestion={(question) => {
+                    setPrompt(question);
+                    void handleSend(question);
+                  }}
                   className="absolute inset-y-0 right-0 z-20 shadow-[0_0_28px_rgba(46,46,80,0.14)] md:static md:z-auto md:shadow-none"
                 />
               ) : null}

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { parseExamAnswerSuggestion } from "../lib/dt/exam-answer-check";
+import {
+  heuristicExamAnswerSuggestion,
+  parseExamAnswerSuggestion,
+} from "../lib/dt/exam-answer-check";
 
 assert.deepEqual(
   parseExamAnswerSuggestion(
@@ -19,5 +22,18 @@ assert.equal(
   )?.suggested,
   "fail",
 );
+
+const passHeuristic = heuristicExamAnswerSuggestion({
+  expectedHint: "Telefon, E-Mail, Persönlich vor Ort / bei Fortbildung",
+  assistantAnswer:
+    "Ich rufe meist telefonisch an, schreibe eine E-Mail oder spreche persönlich vor Ort bei Fortbildungen.",
+});
+assert.equal(passHeuristic.suggested, "pass");
+
+const failHeuristic = heuristicExamAnswerSuggestion({
+  expectedHint: "Telefon, E-Mail, Persönlich vor Ort",
+  assistantAnswer: "Ich warte einfach ab und hoffe auf Weiterempfehlungen.",
+});
+assert.equal(failHeuristic.suggested, "fail");
 
 console.log("exam-answer-check parse tests: ok");

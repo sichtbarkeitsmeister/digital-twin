@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
-import { checkExamAnswerAgainstExpected } from "@/lib/dt/exam-answer-check";
+import { checkExamAnswerAgainstExpectedOrHeuristic } from "@/lib/dt/exam-answer-check";
 
 const bodySchema = z.object({
   question: z.string().trim().min(1).max(2_000),
@@ -25,14 +25,16 @@ export async function POST(req: Request) {
   }
 
   try {
-    const suggestion = await checkExamAnswerAgainstExpected(parsed.data);
-    if (!suggestion) {
-      return NextResponse.json(
-        { ok: false, message: "KI-Prüfung nicht verfügbar." },
-        { status: 502 },
-      );
-    }
-    return NextResponse.json({ ok: true, suggestion });
+    const suggestion = await checkExamAnswerAgainstExpectedOrHeuristic(parsed.data);
+    return NextResponse.json({
+      ok: true,
+      suggestion: {
+        suggested: suggestion.suggested,
+        reason: suggestion.reason,
+        confidence: suggestion.confidence,
+      },
+      via: suggestion.via,
+    });
   } catch (error) {
     console.warn("[dt] exam-answer-check route failed", error);
     return NextResponse.json(

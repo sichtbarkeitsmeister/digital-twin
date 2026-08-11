@@ -47,6 +47,52 @@ export function parseExamAnswerSuggestion(raw: string): ExamAnswerCheckSuggestio
   }
 }
 
+/** Tokenize SOLL text into comparable chunks (words / short phrases). */
+export function examHintTokens(expectedHint: string): string[] {
+  return expectedHint
+    .toLowerCase()
+    .split(/[\n,;/|•·]+/)
+    .flatMap((part) => part.trim().split(/\s+/))
+    .map((t) => t.replace(/[^\p{L}\p{N}\-äöüÄÖÜß]/gu, "").trim())
+    .filter((t) => t.length >= 4);
+}
+
+/**
+ * Offline fallback when Anthropic is unavailable — rough keyword overlap so the
+ * UI always gets a green/red hint instead of failing silently.
+ */
+export function heuristicExamAnswerSuggestion(input: {
+  expectedHint: string;
+  assistantAnswer: string;
+}): ExamAnswerCheckSuggestion {
+  const tokens = examHintTokens(input.expectedHint);
+  const answer = input.assistantAnswer.toLowerCase();
+  if (tokens.length === 0) {
+    return {
+      suggested: "fail",
+      reason: "SOLL-Inhalt ist unklar — bitte manuell prüfen.",
+      confidence: "low",
+    };
+  }
+  const hits = tokens.filter((t) => answer.includes(t));
+  const ratio = hits.length / tokens.length;
+  if (ratio >= 0.45 || hits.length >= 3) {
+    return {
+      suggested: "pass",
+      reason: `Wesentliche SOLL-Begriffe kommen vor (${hits.slice(0, 4).join(", ")}).`,
+      confidence: ratio >= 0.7 ? "medium" : "low",
+    };
+  }
+  return {
+    suggested: "fail",
+    reason:
+      hits.length === 0
+        ? "Die erwarteten Fragebogen-Angaben sind in der Antwort kaum erkennbar."
+        : `Nur teilweise abgedeckt (${hits.slice(0, 3).join(", ")}); Kerninhalt fehlt.`,
+    confidence: "low",
+  };
+}
+
 /** Cheap Haiku check: does the twin answer cover the questionnaire expectation? */
 export async function checkExamAnswerAgainstExpected(input: {
   question: string;
@@ -90,4 +136,15 @@ export async function checkExamAnswerAgainstExpected(input: {
   }
 
   return null;
+}
+
+/** AI check with heuristic fallback — always returns a verdict for the UI. */
+export async function checkExamAnswerAgainstExpectedOrHeuristic(input: {
+  question: string;
+  expectedHint: string;
+  assistantAnswer: string;
+}): Promise<ExamAnswerCheckSuggestion & { via: "ai" | "heuristic" }> {
+  const ai = await checkExamAnswerAgainstExpected(input);
+  if (ai) return { ...ai, via: "ai" };
+  return { ...heuristicExamAnswerSuggestion(input), via: "heuristic" };
 }
