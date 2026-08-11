@@ -204,6 +204,16 @@ function describeBatchStepInPlainLanguage(raw: unknown): string {
     if (summary) return summary;
     return "Umfrage-Inhalt ersetzen";
   }
+  if (kind === "edit_dt_agent_prompt") {
+    if (summary) return summary;
+    const agentName =
+      typeof (s as { agentName?: unknown }).agentName === "string"
+        ? (s as { agentName: string }).agentName.trim()
+        : "";
+    return agentName
+      ? `Agent-Prompt anpassen: ${agentName}`
+      : "DigitalTwin-Agent-Prompt anpassen";
+  }
   if (kind === "rename_folder") {
     if (summary) return summary;
     return "Ordner umbenennen";
@@ -241,6 +251,7 @@ function getFriendlyProposalLines(value: unknown, action?: AiChatAction | null) 
     const kindLabel: Record<string, string> = {
       patch_survey_definition: "Gezielte Bearbeitung bestehender Umfrage",
       edit_survey_definition: "Umfrage-Inhalt umfassend aktualisieren",
+      edit_dt_agent_prompt: "DigitalTwin-Agent-Prompt anpassen",
       create_survey: "Neue Umfrage erstellen",
       create_folder: "Neuen Ordner erstellen",
       rename_folder: "Ordner umbenennen",
@@ -263,6 +274,34 @@ function getFriendlyProposalLines(value: unknown, action?: AiChatAction | null) 
     proposal.steps.forEach((raw, idx) => {
       lines.push(`${idx + 1}. ${describeBatchStepInPlainLanguage(raw)}`);
     });
+    return lines;
+  }
+
+  if (proposal.kind === "edit_dt_agent_prompt") {
+    const p = proposal as {
+      agentId?: unknown;
+      agentName?: unknown;
+      organisationId?: unknown;
+      target?: unknown;
+      prompt?: unknown;
+    };
+    if (typeof p.agentName === "string" && p.agentName.trim()) {
+      lines.push(`Betroffener Agent: ${p.agentName.trim()}`);
+    }
+    if (typeof p.agentId === "string") {
+      lines.push(`Agent-ID: ${p.agentId}`);
+    }
+    if (typeof p.organisationId === "string") {
+      lines.push(`Organisation: ${p.organisationId}`);
+    }
+    if (p.target === "prompt_append") {
+      lines.push("Feld: Avatar-spezifisch / Zusätzliche Anweisungen");
+    } else {
+      lines.push("Feld: System-/Basis-Prompt");
+    }
+    if (typeof p.prompt === "string") {
+      lines.push(`Neuer Prompt: ${p.prompt.trim().length.toLocaleString("de-DE")} Zeichen`);
+    }
     return lines;
   }
 

@@ -151,6 +151,19 @@ const updateSurveyMetadataProposalSchema = z.object({
   description: z.string().trim().optional(),
 });
 
+/** Revise a DigitalTwin persona prompt (system prompt or avatar append). */
+const editDtAgentPromptProposalSchema = z.object({
+  kind: z.literal("edit_dt_agent_prompt"),
+  summary: z.string().min(1),
+  agentId: z.string().uuid(),
+  agentName: z.string().trim().min(1).max(120).optional(),
+  organisationId: z.string().uuid().optional(),
+  /** Which stored field to overwrite. */
+  target: z.enum(["prompt_template", "prompt_append"]).default("prompt_template"),
+  /** Full replacement text for the target field. */
+  prompt: z.string().trim().min(40).max(120_000),
+});
+
 /** ref names for chaining inside batch steps (surveyRef / folderRef point at earlier refs). */
 const batchIdentifierRefSchema = z
   .string()
@@ -213,6 +226,7 @@ export const surveyAiBatchStepSchema = z.union([
   deleteFolderProposalSchema,
   deleteProposalSchema,
   updateSurveyMetadataProposalSchema,
+  editDtAgentPromptProposalSchema,
 ]);
 
 const batchProposalSchema = z
@@ -250,6 +264,7 @@ export const surveyAiProposalSchema = z.discriminatedUnion("kind", [
   unpublishProposalSchema,
   deleteProposalSchema,
   updateSurveyMetadataProposalSchema,
+  editDtAgentPromptProposalSchema,
   batchProposalSchema,
 ]);
 
