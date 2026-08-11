@@ -213,6 +213,7 @@ export async function assembleDtChatFromDb(input: {
       prompt_template: resolvedPromptTemplate,
       prompt_append: agent.prompt_append,
       kind: agent.kind,
+      slug: agent.slug,
     },
     org: {
       display_name: orgConfig?.display_name ?? agent.name,
@@ -305,6 +306,7 @@ export async function assembleDtChatEphemeral(input: {
       prompt_template: resolvedPromptTemplate,
       prompt_append: agent.prompt_append,
       kind: agent.kind,
+      slug: agent.slug,
     },
     org: {
       display_name: orgConfig?.display_name ?? agent.name,

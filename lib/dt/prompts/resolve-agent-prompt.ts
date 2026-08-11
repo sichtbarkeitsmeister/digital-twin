@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "@/lib/dt/prompts/digital-twin-global-prompt";
+
 const DEFAULT_FALLBACK = "Du bist ein hilfreicher Assistent.";
 const ORG_PLACEHOLDER = /\{\{\s*organisation\s*\}\}/gi;
 
@@ -55,7 +57,11 @@ export async function resolveDtAgentPrompt(
     }
   }
 
-  const resolved = globalPrompt?.trim();
+  const resolved =
+    globalPrompt?.trim() ||
+    (slugForGlobalTemplate(agent) === "default"
+      ? DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT
+      : null);
   if (!resolved) return own;
 
   return resolved.replace(ORG_PLACEHOLDER, orgName);

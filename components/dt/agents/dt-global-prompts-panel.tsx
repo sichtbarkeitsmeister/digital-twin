@@ -21,7 +21,7 @@ const PROMPT_META: Record<
   default: {
     title: "DigitalTwin",
     description:
-      "Allgemeiner Assistent für Team und Kunden. Wird in jedem Chat als Standard-Agent genutzt.",
+      "Globaler Wunschkunden-Prompt (Interessent/Pre-Sale). Avatar-Persönlichkeit liegt im avatar-spezifischen Teil je Agent.",
     icon: Sparkles,
   },
   seo_advisor: {
@@ -33,7 +33,7 @@ const PROMPT_META: Record<
   survey_to_agent: {
     title: "Umfrage → Agent (Neu)",
     description:
-      "Nur für Kunden-Persona-Fragebögen: System-Prompt, wenn daraus ein neuer Persona-Avatar generiert wird. Anbieter-Umfragen nutzen diesen Prompt nicht.",
+      "Erzeugt den avatar-spezifischen Teil eines Wunschkunden; der Agent nutzt den globalen DigitalTwin-Prompt.",
     icon: ClipboardList,
     placeholder:
       "Prompt für die JSON-Ausgabe (name, role, slug, prompt_template, …). Platzhalter {{reference_examples}} für Referenz-Agenten.",
@@ -41,7 +41,7 @@ const PROMPT_META: Record<
   survey_refine_agent: {
     title: "Umfrage → Agent (Verfeinern)",
     description:
-      "System-Prompt, wenn ein bestehender Agent anhand neuer Umfrage-Antworten verfeinert wird.",
+      "Verfeinert nur den avatar-spezifischen Teil; globale DigitalTwin-Regeln bleiben aktiv und Markenbotschafter-Ton wird korrigiert.",
     icon: ClipboardList,
   },
 };
