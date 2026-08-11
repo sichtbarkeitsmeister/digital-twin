@@ -8,7 +8,7 @@ import {
   Loader2,
   PanelRightClose,
   PanelRightOpen,
-  Sparkles,
+  RefreshCw,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -22,15 +22,18 @@ import type {
 
 export type PersonaExamVerdict = "pass" | "fail" | null;
 
+type ReplyPhase = "idle" | "pending_send" | "in_flight" | "checked";
+
 type AskedExam = SurveyExamQuestion & {
   verdict: PersonaExamVerdict;
+  replyPhase: ReplyPhase;
   aiSuggestion?: ExamAnswerCheckSuggestion | null;
   aiError?: string | null;
 };
 
 /**
  * Collapsible testing rail beside the chat: question bank, expected
- * questionnaire answer, optional AI hint, and human final verdict.
+ * questionnaire answer, AI SOLL/IST hint, and human final verdict.
  */
 export function DtPersonaTestingRail(props: {
   agentId: string;
@@ -51,7 +54,6 @@ export function DtPersonaTestingRail(props: {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const lastCheckedKeyRef = useRef<string | null>(null);
-  const wasBusyRef = useRef(false);
 
   useEffect(() => {
     if (!props.enabled) {
@@ -125,8 +127,29 @@ export function DtPersonaTestingRail(props: {
     if (props.isBusy || props.disabled) return;
     props.onPickQuestion(q.question);
     setAsked((prev) => {
-      if (prev.some((p) => p.id === q.id)) return prev;
-      return [...prev, { ...q, verdict: null, aiSuggestion: null, aiError: null }];
+      if (prev.some((p) => p.id === q.id)) {
+        return prev.map((p) =>
+          p.id === q.id
+            ? {
+                ...p,
+                verdict: null,
+                replyPhase: "pending_send",
+                aiSuggestion: null,
+                aiError: null,
+              }
+            : p,
+        );
+      }
+      return [
+        ...prev,
+        {
+          ...q,
+          verdict: null,
+          replyPhase: "pending_send",
+          aiSuggestion: null,
+          aiError: null,
+        },
+      ];
     });
     setActiveId(q.id);
     setExpanded(true);
@@ -137,9 +160,9 @@ export function DtPersonaTestingRail(props: {
     setAsked((prev) => prev.map((q) => (q.id === id ? { ...q, verdict } : q)));
   }
 
-  async function runAiCheck(exam: AskedExam, assistantAnswer: string) {
-    const key = `${exam.id}::${assistantAnswer.slice(0, 80)}`;
-    if (lastCheckedKeyRef.current === key) return;
+  async function runAiCheck(exam: AskedExam, assistantAnswer: string, force = false) {
+    const key = `${exam.id}::${assistantAnswer.slice(0, 120)}`;
+    if (!force && lastCheckedKeyRef.current === key) return;
     lastCheckedKeyRef.current = key;
     setChecking(true);
     try {
@@ -162,6 +185,7 @@ export function DtPersonaTestingRail(props: {
           q.id === exam.id
             ? {
                 ...q,
+                replyPhase: "checked",
                 aiSuggestion: json.ok && json.suggestion ? json.suggestion : null,
                 aiError: json.ok ? null : (json.message ?? "KI-Prüfung fehlgeschlagen."),
               }
@@ -172,7 +196,12 @@ export function DtPersonaTestingRail(props: {
       setAsked((prev) =>
         prev.map((q) =>
           q.id === exam.id
-            ? { ...q, aiSuggestion: null, aiError: "KI-Prüfung fehlgeschlagen." }
+            ? {
+                ...q,
+                replyPhase: "checked",
+                aiSuggestion: null,
+                aiError: "KI-Prüfung fehlgeschlagen.",
+              }
             : q,
         ),
       );
@@ -181,19 +210,36 @@ export function DtPersonaTestingRail(props: {
     }
   }
 
-  // After the twin finishes answering, auto-suggest Stimmt / Weicht ab.
+  // Mark in-flight once the twin starts answering the pending exam question.
   useEffect(() => {
-    const wasBusy = wasBusyRef.current;
-    wasBusyRef.current = Boolean(props.isBusy);
+    if (!props.enabled || !active) return;
+    if (!props.isBusy) return;
+    if (active.replyPhase !== "pending_send") return;
+    setAsked((prev) =>
+      prev.map((q) => (q.id === active.id ? { ...q, replyPhase: "in_flight" } : q)),
+    );
+  }, [props.enabled, props.isBusy, active?.id, active?.replyPhase]);
 
-    if (!props.enabled || props.isBusy || wasBusy !== true) return;
-    if (!active || active.verdict || active.aiSuggestion) return;
+  // After the twin finishes, compare IST vs SOLL.
+  useEffect(() => {
+    if (!props.enabled || props.isBusy || checking) return;
+    if (!active || active.replyPhase !== "in_flight") return;
+    if (active.verdict || active.aiSuggestion || active.aiError) return;
     const answer = props.lastAssistantContent?.trim();
-    if (!answer || answer.length < 8) return;
-
+    if (!answer) return;
     void runAiCheck(active, answer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when a reply finishes
-  }, [props.isBusy, props.enabled, props.lastAssistantContent, active?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    props.enabled,
+    props.isBusy,
+    props.lastAssistantContent,
+    active?.id,
+    active?.replyPhase,
+    active?.verdict,
+    active?.aiSuggestion,
+    active?.aiError,
+    checking,
+  ]);
 
   if (!props.enabled) return null;
 
@@ -255,8 +301,8 @@ export function DtPersonaTestingRail(props: {
             ) : (
               <>
                 <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
-                  Frage stellen → Twin-Antwort lesen. Die KI schlägt vor, ob die SOLL-Angabe
-                  vorkommt — du bestätigst das Ergebnis.
+                  Nach der Twin-Antwort erscheint unter SOLL ein grüner/roter KI-Hinweis. Du gibst
+                  danach das letzte Wort.
                 </p>
 
                 {nextQuestion ? (
@@ -296,44 +342,111 @@ export function DtPersonaTestingRail(props: {
                       </p>
                     </div>
 
-                    {checking ? (
-                      <p className="flex items-center gap-2 rounded-xl border border-sky-400/25 bg-sky-500/10 px-3 py-2.5 text-xs text-sky-950 dark:text-sky-100">
-                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                        KI prüft Antwort gegen SOLL …
-                      </p>
+                    {/* Prominent AI verdict directly under SOLL */}
+                    {checking ||
+                    active.replyPhase === "in_flight" ||
+                    (active.replyPhase === "pending_send" && props.isBusy) ? (
+                      <div className="flex items-center gap-2 rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-3 text-sm text-sky-950 dark:text-sky-100">
+                        <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
+                        {props.isBusy || active.replyPhase === "pending_send"
+                          ? "Twin antwortet …"
+                          : "KI prüft Antwort gegen SOLL …"}
+                      </div>
                     ) : active.aiSuggestion ? (
                       <div
+                        role="status"
+                        aria-live="polite"
                         className={cn(
-                          "rounded-xl border px-3 py-2.5",
+                          "rounded-xl border-2 px-4 py-4",
                           active.aiSuggestion.suggested === "pass"
-                            ? "border-emerald-500/35 bg-emerald-500/10"
-                            : "border-red-500/35 bg-red-500/10",
+                            ? "border-emerald-500/50 bg-emerald-500/15"
+                            : "border-red-500/50 bg-red-500/15",
                         )}
                       >
-                        <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-sbkm-navy dark:text-white">
-                          <Sparkles className="size-3.5 text-sbkm-mint" aria-hidden />
-                          KI-Hinweis ·{" "}
-                          {active.aiSuggestion.suggested === "pass" ? "eher Stimmt" : "eher Weicht ab"}
-                          <span className="font-medium normal-case tracking-normal text-sbkm-ink-500 dark:text-white/50">
-                            ({active.aiSuggestion.confidence})
-                          </span>
+                        <p
+                          className={cn(
+                            "text-xl font-bold tracking-tight",
+                            active.aiSuggestion.suggested === "pass"
+                              ? "text-emerald-700 dark:text-emerald-300"
+                              : "text-red-700 dark:text-red-300",
+                          )}
+                        >
+                          {active.aiSuggestion.suggested === "pass" ? (
+                            <span className="inline-flex items-center gap-2">
+                              <Check className="size-6" aria-hidden />
+                              Stimmt
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              <X className="size-6" aria-hidden />
+                              Stimmt nicht
+                            </span>
+                          )}
                         </p>
-                        <p className="mt-1 text-sm leading-relaxed text-sbkm-navy dark:text-white/90">
+                        <p
+                          className={cn(
+                            "mt-2 text-sm leading-relaxed",
+                            active.aiSuggestion.suggested === "pass"
+                              ? "text-emerald-900/85 dark:text-emerald-100/90"
+                              : "text-red-900/85 dark:text-red-100/90",
+                          )}
+                        >
                           {active.aiSuggestion.reason}
+                        </p>
+                        <p className="mt-2 text-[11px] text-sbkm-ink-500 dark:text-white/50">
+                          KI-Vorschlag
+                          {active.aiSuggestion.confidence === "high"
+                            ? " · hohe Sicherheit"
+                            : active.aiSuggestion.confidence === "low"
+                              ? " · unsicher"
+                              : ""}{" "}
+                          — bitte unten bestätigen.
                         </p>
                       </div>
                     ) : active.aiError ? (
-                      <p className="rounded-xl border border-sbkm-navy/10 bg-white/70 px-3 py-2 text-xs text-sbkm-ink-500 dark:border-white/10 dark:bg-white/5 dark:text-white/55">
-                        {active.aiError} — bitte manuell bewerten.
-                      </p>
-                    ) : props.isBusy ? (
-                      <p className="text-xs text-sbkm-ink-500 dark:text-white/55">
-                        Warte auf Twin-Antwort …
+                      <div className="rounded-xl border border-sbkm-navy/10 bg-white/70 px-3 py-3 dark:border-white/10 dark:bg-white/5">
+                        <p className="text-sm font-semibold text-sbkm-navy dark:text-white">
+                          Prüfung fehlgeschlagen
+                        </p>
+                        <p className="mt-1 text-xs text-sbkm-ink-500 dark:text-white/55">
+                          {active.aiError}
+                        </p>
+                        {props.lastAssistantContent?.trim() ? (
+                          <button
+                            type="button"
+                            className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-white"
+                            onClick={() =>
+                              void runAiCheck(active, props.lastAssistantContent!.trim(), true)
+                            }
+                          >
+                            <RefreshCw className="size-3.5" aria-hidden />
+                            Erneut prüfen
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : active.replyPhase === "pending_send" ? (
+                      <p className="rounded-xl border border-dashed border-sbkm-navy/15 px-3 py-3 text-sm text-sbkm-ink-500 dark:border-white/15 dark:text-white/55">
+                        Frage ist bereit — jetzt absenden, dann kommt der KI-Check.
                       </p>
                     ) : (
-                      <p className="text-xs text-sbkm-ink-500 dark:text-white/55">
-                        Sende die Frage — danach kommt der KI-Hinweis automatisch.
-                      </p>
+                      <div className="rounded-xl border border-dashed border-sbkm-navy/15 px-3 py-3 dark:border-white/15">
+                        <p className="text-sm text-sbkm-ink-500 dark:text-white/55">
+                          Noch kein KI-Ergebnis.
+                        </p>
+                        {props.lastAssistantContent?.trim() ? (
+                          <button
+                            type="button"
+                            disabled={checking}
+                            className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline disabled:opacity-50 dark:text-white"
+                            onClick={() =>
+                              void runAiCheck(active, props.lastAssistantContent!.trim(), true)
+                            }
+                          >
+                            <RefreshCw className="size-3.5" aria-hidden />
+                            Jetzt prüfen
+                          </button>
+                        ) : null}
+                      </div>
                     )}
 
                     <div>
@@ -418,13 +531,24 @@ export function DtPersonaTestingRail(props: {
                           <span className="line-clamp-2 font-medium text-sbkm-navy dark:text-white">
                             {q.question}
                           </span>
-                          <span className="mt-1 block text-[11px] text-sbkm-ink-500 dark:text-white/45">
+                          <span
+                            className={cn(
+                              "mt-1 block text-[11px] font-semibold",
+                              q.verdict === "pass" || q.aiSuggestion?.suggested === "pass"
+                                ? "text-emerald-700 dark:text-emerald-300"
+                                : q.verdict === "fail" || q.aiSuggestion?.suggested === "fail"
+                                  ? "text-red-700 dark:text-red-300"
+                                  : "text-sbkm-ink-500 dark:text-white/45",
+                            )}
+                          >
                             {q.verdict === "pass"
-                              ? "✓ Stimmt"
+                              ? "✓ Von dir: Stimmt"
                               : q.verdict === "fail"
-                                ? "✗ Weicht ab"
+                                ? "✗ Von dir: Weicht ab"
                                 : q.aiSuggestion
-                                  ? `KI: eher ${q.aiSuggestion.suggested === "pass" ? "Stimmt" : "Weicht ab"} — bitte bestätigen`
+                                  ? q.aiSuggestion.suggested === "pass"
+                                    ? "KI: Stimmt — bitte bestätigen"
+                                    : "KI: Stimmt nicht — bitte bestätigen"
                                   : "Noch nicht bewertet"}
                           </span>
                         </button>
