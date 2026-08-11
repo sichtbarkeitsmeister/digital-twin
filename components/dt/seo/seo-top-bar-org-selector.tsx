@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import { DtOrgWebsiteButton } from "@/components/dt/dt-org-website-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { isSeoWorkspacePath } from "@/lib/dt/seo/dashboard-path";
 import { useDtSeoWorkspaceUrl } from "@/lib/dt/seo/workspace-url";
@@ -62,6 +63,8 @@ export function SeoTopBarOrgSelector() {
     return organisations[0]?.id ?? "";
   }, [searchParams, allowedIds, organisations]);
 
+  const selected = organisations.find((organisation) => organisation.id === orgId) ?? null;
+
   const syncOrgToUrl = useCallback(
     (nextOrgId: string) => {
       if (!nextOrgId || !allowedIds.has(nextOrgId)) return;
@@ -116,26 +119,29 @@ export function SeoTopBarOrgSelector() {
   }
 
   return (
-    <DtSelect
-      className="w-full min-w-[12rem] max-w-sm"
-      label={undefined}
-      srLabel="Organisation"
-      size="sm"
-      triggerClassName="w-full"
-      fullWidth
-      menuMaxHeight="max-h-72"
-      elevated
-      value={orgId}
-      onValueChange={handleOrgChange}
-      disabled={organisations.length <= 1}
-      options={organisations.map((organisation) => ({
-        value: organisation.id,
-        label: organisation.name,
-        description:
-          !organisation.seoEnabled && isPlatformAdmin
-            ? "SEO deaktiviert"
-            : organisation.slug ?? undefined,
-      }))}
-    />
+    <div className="flex min-w-0 items-center gap-2">
+      <DtSelect
+        className="min-w-[10rem] max-w-sm flex-1"
+        label={undefined}
+        srLabel="Organisation"
+        size="sm"
+        triggerClassName="w-full"
+        fullWidth
+        menuMaxHeight="max-h-72"
+        elevated
+        value={orgId}
+        onValueChange={handleOrgChange}
+        disabled={organisations.length <= 1}
+        options={organisations.map((organisation) => ({
+          value: organisation.id,
+          label: organisation.name,
+          description:
+            !organisation.seoEnabled && isPlatformAdmin
+              ? "SEO deaktiviert"
+              : organisation.slug ?? undefined,
+        }))}
+      />
+      <DtOrgWebsiteButton websiteUrl={selected?.websiteUrl} />
+    </div>
   );
 }

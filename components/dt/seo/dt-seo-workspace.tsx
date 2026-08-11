@@ -57,6 +57,7 @@ export function DtSeoWorkspace(props: {
         name: o.name,
         slug: o.slug,
         canManageAgents: o.canManageAgents,
+        websiteUrl: o.websiteUrl,
       })),
     [props.organisations],
   );
