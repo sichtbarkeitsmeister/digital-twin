@@ -20,7 +20,9 @@ export async function GET(
   }
 
   const { surveyId, responseId } = await context.params;
-  const loaded = await loadSurveyExamQuestionsForResponse(surveyId, responseId);
+  const loaded = await loadSurveyExamQuestionsForResponse(surveyId, responseId, {
+    audience: "persona",
+  });
   if (!loaded.ok) {
     return NextResponse.json(
       { ok: false, message: loaded.message },
@@ -30,6 +32,7 @@ export async function GET(
 
   return NextResponse.json({
     ok: true,
+    audience: loaded.audience,
     surveyTitle: loaded.surveyTitle,
     factCount: loaded.factCount,
     questions: loaded.questions,

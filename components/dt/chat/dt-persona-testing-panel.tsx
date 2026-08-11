@@ -5,7 +5,10 @@ import { Check, ChevronDown, ClipboardList, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { cn } from "@/components/dt/cn";
-import type { SurveyExamQuestion } from "@/lib/dt/survey-exam-questions";
+import type {
+  SurveyExamAudience,
+  SurveyExamQuestion,
+} from "@/lib/dt/survey-exam-questions";
 
 export function DtPersonaTestingPanel(props: {
   agentId: string;
@@ -15,6 +18,7 @@ export function DtPersonaTestingPanel(props: {
   onPickQuestion: (question: string, expectedHint: string) => void;
 }) {
   const [questions, setQuestions] = useState<SurveyExamQuestion[]>([]);
+  const [audience, setAudience] = useState<SurveyExamAudience>("persona");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
@@ -24,6 +28,7 @@ export function DtPersonaTestingPanel(props: {
   useEffect(() => {
     if (!props.enabled) {
       setQuestions([]);
+      setAudience("persona");
       setError(null);
       setSentIds(new Set());
       setActiveHint(null);
@@ -44,6 +49,7 @@ export function DtPersonaTestingPanel(props: {
         const json = (await res.json()) as {
           ok?: boolean;
           available?: boolean;
+          audience?: SurveyExamAudience;
           questions?: SurveyExamQuestion[];
           message?: string;
         };
@@ -53,6 +59,7 @@ export function DtPersonaTestingPanel(props: {
           setError(json.message ?? "Prüfungsfragen konnten nicht geladen werden.");
           return;
         }
+        setAudience(json.audience === "company" ? "company" : "persona");
         setQuestions(json.questions ?? []);
         if (!json.available || !(json.questions?.length ?? 0)) {
           setError("Keine Prüfungsfragen aus der Umfrage abgeleitet.");
@@ -78,6 +85,7 @@ export function DtPersonaTestingPanel(props: {
   );
 
   const nextQuestion = openQuestions[0] ?? null;
+  const panelTitle = audience === "company" ? "Firmen-Prüffragen" : "Persona-Prüffragen";
 
   function pick(q: SurveyExamQuestion) {
     if (props.isBusy || props.disabled) return;
@@ -105,7 +113,7 @@ export function DtPersonaTestingPanel(props: {
         >
           <ClipboardList className="h-3.5 w-3.5 shrink-0 text-sbkm-navy dark:text-white" aria-hidden />
           <span className="truncate text-xs font-semibold text-sbkm-navy dark:text-white">
-            Prüfungsfragen
+            {panelTitle}
             {!loading && questions.length > 0 ? (
               <span className="font-medium text-sbkm-ink-500 dark:text-white/50">
                 {" "}
@@ -160,30 +168,41 @@ export function DtPersonaTestingPanel(props: {
             ) : error && questions.length === 0 ? (
               <p className="pt-1 text-xs text-sbkm-ink-500 dark:text-white/55">{error}</p>
             ) : openQuestions.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5 pt-1.5">
-                {openQuestions.slice(0, 8).map((q) => (
-                  <button
-                    key={q.id}
-                    type="button"
-                    disabled={props.isBusy || props.disabled}
-                    title={q.expectedHint}
-                    onClick={() => pick(q)}
-                    className="max-w-full rounded-pill border border-sbkm-navy/12 bg-white/75 px-2.5 py-1 text-left text-[11px] font-semibold leading-snug text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
-                  >
-                    <span className="line-clamp-2">{q.question}</span>
-                  </button>
-                ))}
-                {openQuestions.length > 8 ? (
-                  <span className="self-center text-[11px] text-sbkm-ink-500 dark:text-white/50">
-                    +{openQuestions.length - 8} weitere über „Nächste Frage“
-                  </span>
-                ) : null}
-              </div>
+              <>
+                <p className="pt-1 text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/55">
+                  Prüft, ob Fragebogen-Angaben übernommen wurden und der Twin
+                  entsprechend denkt und reagiert.
+                </p>
+                <div className="flex flex-wrap gap-1.5 pt-1.5">
+                  {openQuestions.slice(0, 8).map((q) => (
+                    <button
+                      key={q.id}
+                      type="button"
+                      disabled={props.isBusy || props.disabled}
+                      title={
+                        q.expectedHint
+                          ? `Muss vorkommen: ${q.expectedHint}`
+                          : q.question
+                      }
+                      onClick={() => pick(q)}
+                      className="max-w-full rounded-pill border border-sbkm-navy/12 bg-white/75 px-2.5 py-1 text-left text-[11px] font-semibold leading-snug text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
+                    >
+                      <span className="line-clamp-2">{q.question}</span>
+                    </button>
+                  ))}
+                  {openQuestions.length > 8 ? (
+                    <span className="self-center text-[11px] text-sbkm-ink-500 dark:text-white/50">
+                      +{openQuestions.length - 8} weitere über „Nächste Frage“
+                    </span>
+                  ) : null}
+                </div>
+              </>
             ) : null}
 
             {activeHint && !props.isBusy ? (
               <p className="mt-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-950 dark:text-amber-100">
-                <span className="font-semibold">Erwartung aus Fragebogen:</span> {activeHint}
+                <span className="font-semibold">Muss in der Antwort vorkommen:</span>{" "}
+                {activeHint}
               </p>
             ) : null}
           </motion.div>

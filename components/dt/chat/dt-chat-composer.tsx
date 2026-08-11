@@ -46,10 +46,12 @@ export function DtChatComposer(props: {
   onDragHighlight?: (v: boolean) => void;
   /** Active avatar name for the default placeholder. */
   agentName?: string;
-  /** Survey-built persona: show optional Persona-Testing toggle. */
+  /** Survey-built agent: show optional Testing toggle (persona or company probes). */
   personaTestingAvailable?: boolean;
   /** Selected agent id — used to load exam questions when testing is on. */
   personaTestingAgentId?: string | null;
+  /** Label hint for the Testing control (persona vs company). */
+  personaTestingLabel?: "persona" | "company";
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [quickActionsOpen, setQuickActionsOpen] = useState(
@@ -209,7 +211,9 @@ export function DtChatComposer(props: {
                 : props.textMode
                   ? "Text-Modus — SEO-Text, der menschlich klingt …"
                   : personaTesting
-                    ? `Persona-Testing — Prüfungsfrage an ${props.agentName?.trim() || "die Persona"} …`
+                    ? props.personaTestingLabel === "company"
+                      ? `Firmen-Testing — Prüffrage an ${props.agentName?.trim() || "den SEO-Berater"} …`
+                      : `Persona-Testing — Prüfungsfrage an ${props.agentName?.trim() || "die Persona"} …`
                     : `Nachricht an ${props.agentName?.trim() || "deinen DigitalTwin"} …`
             }
             rows={2}
@@ -304,9 +308,17 @@ export function DtChatComposer(props: {
                 <button
                   type="button"
                   aria-pressed={personaTesting}
-                  aria-label="Persona-Testing"
+                  aria-label={
+                    props.personaTestingLabel === "company"
+                      ? "Firmen-Testing"
+                      : "Persona-Testing"
+                  }
                   disabled={props.isBusy}
-                  title="Prüfungsfragen aus dem Fragebogen ein-/ausblenden"
+                  title={
+                    props.personaTestingLabel === "company"
+                      ? "Firmen-Prüffragen aus dem Anbieter-Fragebogen ein-/ausblenden"
+                      : "Persona-Prüffragen aus dem Kunden-Fragebogen ein-/ausblenden"
+                  }
                   onClick={() => setPersonaTesting((v) => !v)}
                   className={cn(
                     iconBtn,

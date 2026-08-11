@@ -196,7 +196,11 @@ export async function applyAnbieterSurveyToSeoAgent(input: {
 
   const { ok, error } = await updateDtAgent({
     agentId: agent.id,
-    patch: { prompt_append: nextAppend },
+    patch: {
+      prompt_append: nextAppend,
+      source_survey_id: input.surveyId,
+      source_survey_response_id: input.responseId,
+    },
   });
 
   if (!ok) {

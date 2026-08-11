@@ -1418,6 +1418,9 @@ export function DtChatShell(props: {
               agentName={displayAgentName}
               personaTestingAvailable={agentSupportsPersonaTesting(selectedAgent)}
               personaTestingAgentId={selectedAgentId}
+              personaTestingLabel={
+                selectedAgent?.kind === "seo_advisor" ? "company" : "persona"
+              }
               onAddFiles={(files) => void processFiles(files)}
               onRemoveAttachment={(index) => {
                 setAttachments((prev) => {
