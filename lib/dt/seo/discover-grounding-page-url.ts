@@ -7,6 +7,8 @@ const PROBE_TIMEOUT_MS = 8_000;
 export const GROUNDING_PAGE_PATH_CANDIDATES = [
   "/grounding/",
   "/grounding",
+  "/grounding-page/",
+  "/grounding-page",
   "/llms/",
   "/geo-grounding/",
 ] as const;

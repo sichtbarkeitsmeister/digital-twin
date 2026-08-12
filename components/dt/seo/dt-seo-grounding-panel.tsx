@@ -236,7 +236,8 @@ export function DtSeoGroundingPanel(props: {
         <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
           Alle {GROUNDING_PAGE_INTERVAL_MONTHS} Monate aktualisieren. Ab{" "}
           {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis. Fehlt die URL,
-          sucht der Twin automatisch unter der Website (z. B. /grounding/) und liest das Datum.
+          sucht der Twin automatisch unter der Website (z. B. /grounding/ oder
+          /grounding-page/) und liest das Datum.
         </p>
       </div>
 
