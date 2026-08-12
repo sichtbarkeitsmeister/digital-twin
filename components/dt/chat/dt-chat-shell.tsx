@@ -9,7 +9,7 @@ import {
   getQuickActionsForAgent,
   type DtAgentOption,
 } from "@/components/dt/chat/dt-agent-switcher";
-import { agentSupportsPersonaTesting } from "@/lib/dt/persona-testing";
+import { agentSupportsPersonaTesting, personaTestingModeTitle } from "@/lib/dt/persona-testing";
 import { DtWunschkundenPanel } from "@/components/dt/chat/dt-wunschkunden-panel";
 import { DtChatComposer } from "@/components/dt/chat/dt-chat-composer";
 import { DtChatLightbox } from "@/components/dt/chat/dt-chat-lightbox";
@@ -219,6 +219,15 @@ export function DtChatShell(props: {
 
   const displayAgentName = selectedAgent?.name ?? "DigitalTwin";
   const displayAgentRole = selectedAgent?.role ?? null;
+  const testingAudienceLabel =
+    selectedAgent?.kind === "seo_advisor" ? "company" : "persona";
+  const testingModeTitle = personaTestingModeTitle(testingAudienceLabel);
+  const headerChatTitle =
+    personaTesting && personaTestingAvailable
+      ? testingModeTitle
+      : activeChat?.title && !ghostMode
+        ? activeChat.title
+        : null;
   const displayAgentDisg = selectedAgent
     ? extractAgentDisg(selectedAgent.avatar_data)
     : null;
@@ -1222,9 +1231,9 @@ export function DtChatShell(props: {
             <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
               <DtOrgWebsiteButton websiteUrl={selectedWebsiteUrl} className="hidden sm:inline-flex" />
               <DtChatParticipantsBadge participants={participants} />
-              {activeChat?.title && !ghostMode ? (
+              {headerChatTitle ? (
                 <p className="hidden max-w-[8rem] truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55 md:block lg:max-w-[12rem]">
-                  {activeChat.title}
+                  {headerChatTitle}
                 </p>
               ) : null}
               <DtThemeToggle />
@@ -1317,9 +1326,9 @@ export function DtChatShell(props: {
               <div className="ml-auto flex min-w-0 items-center gap-2">
                 <DtOrgWebsiteButton websiteUrl={selectedWebsiteUrl} />
                 <DtChatParticipantsBadge participants={participants} />
-                {activeChat?.title && !ghostMode ? (
+                {headerChatTitle ? (
                   <p className="max-w-[10rem] truncate text-xs font-semibold tabular-nums text-sbkm-ink-600 dark:text-white/55 sm:max-w-[14rem]">
-                    {activeChat.title}
+                    {headerChatTitle}
                   </p>
                 ) : null}
               </div>

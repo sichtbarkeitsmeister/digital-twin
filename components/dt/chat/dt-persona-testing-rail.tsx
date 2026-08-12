@@ -15,6 +15,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { cn } from "@/components/dt/cn";
 import type { ExamAnswerCheckSuggestion } from "@/lib/dt/exam-answer-check";
+import { personaTestingModeTitle } from "@/lib/dt/persona-testing";
 import type {
   SurveyExamAudience,
   SurveyExamQuestion,
@@ -121,7 +122,7 @@ export function DtPersonaTestingRail(props: {
   );
   const active = asked.find((q) => q.id === activeId) ?? asked[asked.length - 1] ?? null;
   const nextQuestion = openQuestions[0] ?? null;
-  const title = audience === "company" ? "Firmen-Check" : "Persona-Check";
+  const title = personaTestingModeTitle(audience === "company" ? "company" : "persona");
   const passCount = asked.filter((q) => q.verdict === "pass").length;
   const failCount = asked.filter((q) => q.verdict === "fail").length;
 

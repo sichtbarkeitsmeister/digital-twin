@@ -20,6 +20,10 @@ import {
   DT_MAX_ATTACHMENTS,
 } from "@/lib/dt/attachments-shared";
 import type { DtAttachmentDraft } from "@/lib/dt/client-attachments";
+import {
+  personaTestingModeTitle,
+  personaTestingPlaceholder,
+} from "@/lib/dt/persona-testing";
 
 const iconBtn =
   "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-transparent text-sbkm-navy transition duration-150 hover:border-sbkm-navy/10 hover:bg-sbkm-mint/15 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:pointer-events-none disabled:opacity-50 dark:text-white dark:hover:border-white/10 dark:hover:bg-white/10";
@@ -198,9 +202,10 @@ export function DtChatComposer(props: {
                 : props.textMode
                   ? "Text-Modus — SEO-Text, der menschlich klingt …"
                   : personaTesting
-                    ? props.personaTestingLabel === "company"
-                      ? `Firmen-Testing — Prüffrage an ${props.agentName?.trim() || "den SEO-Berater"} …`
-                      : `Persona-Testing — Prüfungsfrage an ${props.agentName?.trim() || "die Persona"} …`
+                    ? personaTestingPlaceholder(
+                        props.personaTestingLabel,
+                        props.agentName,
+                      )
                     : `Nachricht an ${props.agentName?.trim() || "deinen DigitalTwin"} …`
             }
             rows={2}
@@ -295,16 +300,12 @@ export function DtChatComposer(props: {
                 <button
                   type="button"
                   aria-pressed={personaTesting}
-                  aria-label={
-                    props.personaTestingLabel === "company"
-                      ? "Firmen-Testing"
-                      : "Persona-Testing"
-                  }
+                  aria-label={personaTestingModeTitle(props.personaTestingLabel)}
                   disabled={props.isBusy}
                   title={
                     props.personaTestingLabel === "company"
-                      ? "Firmen-Prüffragen aus dem Anbieter-Fragebogen ein-/ausblenden"
-                      : "Persona-Prüffragen aus dem Kunden-Fragebogen ein-/ausblenden"
+                      ? "Firmen-Test: Prüffragen aus dem Anbieter-Fragebogen ein-/ausblenden"
+                      : "Persona-Test: Prüffragen aus dem Kunden-Fragebogen ein-/ausblenden"
                   }
                   onClick={() => props.onPersonaTestingChange?.(!personaTesting)}
                   className={cn(
@@ -315,7 +316,11 @@ export function DtChatComposer(props: {
                   )}
                 >
                   <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
-                  <span className="hidden text-xs font-bold sm:inline">Testing</span>
+                  <span className="hidden text-xs font-bold sm:inline">
+                    {personaTesting
+                      ? personaTestingModeTitle(props.personaTestingLabel)
+                      : "Test"}
+                  </span>
                 </button>
               ) : null}
             </div>

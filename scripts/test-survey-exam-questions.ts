@@ -71,14 +71,18 @@ const questions = buildSurveyExamQuestions(bundle.facts, {
   maxQuestions: 10,
   audience: "persona",
 });
-assert.ok(questions.length >= 4);
+assert.ok(questions.length >= 3);
 // Fact probes first — warmups are last (verification priority).
 assert.ok(questions[0]?.factId, "first question should be tied to a survey fact");
 assert.ok(questions.some((q) => /aufmerksam geworden/i.test(q.question)));
 assert.ok(questions.some((q) => /Sorgen|Einwände|beschäftigt/i.test(q.question)));
 assert.ok(questions.some((q) => /wichtigsten|Priorität|Reihenfolge|sortieren/i.test(q.question)));
 assert.ok(!questions.some((q) => /was steht bei dir bei/i.test(q.question)));
-assert.ok(questions.some((q) => q.id.startsWith("warmup_")));
+// Warmup is skipped when a fact probe already covers the opening theme.
+assert.ok(
+  questions.some((q) => q.id.startsWith("warmup_")) ||
+    questions.some((q) => /beschäftigt dich/i.test(q.question)),
+);
 assert.match(
   questions.find((q) => q.factId === "fact_001")?.expectedHint ?? "",
   /Empfehlung/,
@@ -459,7 +463,10 @@ const grammarQs = buildSurveyExamQuestions(grammarFacts.facts, {
 assert.ok(
   grammarQs.some((q) => /beruflich|lebenssituation|hast du typischerweise/i.test(q.question)),
 );
-assert.ok(grammarQs.some((q) => /erzählst du über deine/i.test(q.question)));
+assert.ok(
+  grammarQs.some((q) => /beschäftigt dich|erzählst du über deine/i.test(q.question)),
+  "Erstgespräch / Situation becomes the canonical opening probe",
+);
 assert.ok(!grammarQs.some((q) => /\bhaben du\b|\berzählen du\b|\bihre\b|\bSie\b/i.test(q.question)));
 assert.ok(!grammarQs.some((q) => /fragebogen/i.test(q.question)));
 
@@ -575,7 +582,9 @@ assert.ok(
   "Why-us should sound like a sales discovery question",
 );
 assert.ok(!declutterQs.some((q) => /einfach entrümpelung/i.test(q.question)));
-assert.ok(declutterQs.some((q) => /erzählst du/i.test(q.question)));
+assert.ok(
+  declutterQs.some((q) => /erzählst du|beschäftigt dich|zuerst sprechen/i.test(q.question)),
+);
 assert.ok(!declutterQs.some((q) => /erzählen du/i.test(q.question)));
 assert.ok(
   declutterQs.some((q) => /reagierst du.*preis|preis.*reagierst/i.test(q.question)),
@@ -586,7 +595,215 @@ assert.ok(
   "Must not wrap every price topic in the dry budget template",
 );
 assert.ok(declutterQs.some((q) => /preisspanne bewegst du dich/i.test(q.question)));
-assert.ok(declutterQs.some((q) => /wer bist du/i.test(q.question)));
+assert.ok(declutterQs.some((q) => /beschäftigt dich|wer bist du/i.test(q.question)));
 assert.ok(!declutterQs.some((q) => /fragebogen/i.test(q.question)));
+
+// Heilpraktiker-style: company funnel / avatar setup must not stay as meta probes
+const heilFacts = extractSurveyFacts({
+  surveyTitle: "Heilpraktiker",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_avatar",
+            type: "text" as const,
+            title: "Wie soll der digitale Patienten-Avatar heißen?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_noshow",
+            type: "text" as const,
+            title:
+              "Falls bekannt – warum haben Interessenten nach erstem Kontakt nicht zurückgerufen oder den Termin nicht wahrgenommen?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_notice",
+            type: "text" as const,
+            title:
+              "Woran merkt man, dass Patienten bereits online recherchiert haben? Was erwähnen oder fragen sie?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_unseen",
+            type: "text" as const,
+            title:
+              "Welche Fragen stellen Patienten, die die Website offensichtlich noch NICHT gesehen haben?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_content",
+            type: "text" as const,
+            title: "Welche Art von Inhalten hast du online gefunden, bevor du die Praxis kontaktiert hast?",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_avatar: "Heike",
+    f_noshow: "Unsicherheit und Preis",
+    f_notice: "Sie nennen Symptome und Foren",
+    f_unseen: "Öffnungszeiten und Anfahrt",
+    f_content: "Blogartikel zu Erschöpfung",
+  },
+  fieldQuestions: [],
+});
+const heilPersonaQs = buildSurveyExamQuestions(heilFacts.facts, {
+  audience: "persona",
+  maxQuestions: 16,
+});
+assert.ok(
+  heilPersonaQs.some((q) => /wie heißt du/i.test(q.question)),
+  "Patienten-Avatar name → Du-Anrede",
+);
+assert.ok(
+  !heilPersonaQs.some((q) => /patienten-?avatar heißen|digitale patienten-avatar/i.test(q.question)),
+  "Meta avatar-setup wording must not appear in Persona-Check",
+);
+assert.ok(
+  !heilPersonaQs.some((q) => /interessenten|nicht zurückgerufen|nicht wahrgenommen/i.test(q.question)),
+  "No-Show / Interessenten-Fragen gehören nicht in den Persona-Check",
+);
+assert.ok(
+  !heilPersonaQs.some((q) => /woran merkt man|welche fragen stellen patienten/i.test(q.question)),
+  "Staff-observation questions belong to Firmen-Check",
+);
+assert.ok(
+  heilPersonaQs.some((q) => /inhalten|online gefunden/i.test(q.question)),
+  "Echte Du-Frage zur Online-Recherche bleibt",
+);
+
+const heilCompanyQs = buildSurveyExamQuestions(heilFacts.facts, {
+  audience: "company",
+  maxQuestions: 16,
+});
+assert.ok(
+  heilCompanyQs.some((q) => /interessenten|nicht zurückgerufen|nicht wahrgenommen/i.test(q.question)),
+  "No-Show-Frage bleibt im Firmen-Check",
+);
+assert.ok(
+  heilCompanyQs.some((q) => /woran merkt man|fragen stellen patienten/i.test(q.question)),
+  "Beobachtungsfragen bleiben im Firmen-Check",
+);
+
+// Overlapping “zuerst erzählen” / Situation / Erstgespräch → one opening probe
+const overlapFacts = extractSurveyFacts({
+  surveyTitle: "Overlap",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_worry",
+            type: "text" as const,
+            title: "Was sind deine größten Sorgen?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_erst",
+            type: "text" as const,
+            title: "Was erzählst du über deine Situation im Erstgespräch? Wie beschreibst du es wörtlich?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_leben",
+            type: "text" as const,
+            title: "Was erzählst du über deine Lebenssituation im Erstgespräch?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_bio",
+            type: "textarea" as const,
+            title: "Beschreibung des idealen Wunschkunden in 3-5 Sätzen",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_contact_a",
+            type: "text" as const,
+            title: "Welchen Weg haben Patienten vor dem Erstkontakt typischerweise hinter sich?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_contact_b",
+            type: "text" as const,
+            title: "Wie kontaktieren Patienten die Praxis überwiegend?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_contact_c",
+            type: "text" as const,
+            title: "Wie kam der Kontakt zu Patienten typischerweise zustande?",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_worry: "Erschöpfung und Unsicherheit",
+    f_erst: "Ich bin seit Monaten fertig.",
+    f_leben: "Alleinerziehend, chronisch erschöpft.",
+    f_bio: "Privatpatientin mit chronischer Erschöpfung.",
+    f_contact_a: "Online-Recherche, dann Anruf",
+    f_contact_b: "Telefon",
+    f_contact_c: "Über die Website",
+  },
+  fieldQuestions: [],
+});
+const overlapQs = buildSurveyExamQuestions(overlapFacts.facts, {
+  audience: "persona",
+  maxQuestions: 16,
+});
+const openingQs = overlapQs.filter((q) =>
+  /beschäftigt dich|erstgespräch|wer bist du|erzählst du über deine/i.test(q.question),
+);
+assert.equal(
+  openingQs.length,
+  1,
+  `Only one opening/situation probe expected, got: ${openingQs.map((q) => q.question).join(" | ")}`,
+);
+const contactQs = overlapQs.filter(
+  (q) =>
+    /\bkontakt/i.test(q.question) ||
+    /erstkontakt|hinter dir|weg hast du/i.test(q.question),
+);
+assert.equal(
+  contactQs.length,
+  1,
+  `Only one contact-path probe expected, got: ${contactQs.map((q) => q.question).join(" | ")}`,
+);
 
 console.log("survey-exam-questions tests: ok");
