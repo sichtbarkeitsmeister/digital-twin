@@ -455,14 +455,27 @@ export function DtSeoGroundingPanel(props: {
               <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
                 URL der Grounding Page
               </span>
-              <input
-                type="url"
-                value={url}
-                disabled={!props.canEdit || saving || detecting}
-                placeholder="https://…"
-                onChange={(e) => setUrl(e.target.value)}
-                className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="url"
+                  value={url}
+                  disabled={!props.canEdit || saving || detecting}
+                  placeholder="https://…"
+                  onChange={(e) => setUrl(e.target.value)}
+                  className="h-10 min-w-0 flex-1 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                />
+                {url.trim() ? (
+                  <a
+                    href={url.trim()}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex size-10 items-center justify-center rounded-xl border border-sbkm-navy/15 text-sbkm-navy hover:bg-sbkm-mint/15 dark:border-white/15 dark:text-sbkm-mint"
+                    title="Grounding Page öffnen"
+                  >
+                    <ExternalLink className="size-4" aria-hidden />
+                  </a>
+                ) : null}
+              </div>
             </label>
 
             <label className="grid gap-1.5">
