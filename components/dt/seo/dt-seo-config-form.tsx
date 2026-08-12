@@ -40,9 +40,9 @@ const selectClassName = cn(
 );
 
 const REPORT_TIMEFRAME_OPTIONS = [
-  { value: "last_7_days", label: "Letzte 7 Tage" },
+  { value: "last_90_days", label: "Letzte 90 Tage (3 Monate)" },
   { value: "last_30_days", label: "Letzte 30 Tage" },
-  { value: "last_90_days", label: "Letzte 90 Tage" },
+  { value: "last_7_days", label: "Letzte 7 Tage" },
 ] as const;
 
 function googleAccountSelectValue(stored: string | null | undefined): string {
@@ -418,7 +418,7 @@ export function DtSeoConfigForm(props: {
             id="dt-timeframe"
             className={selectClassName}
             disabled={!props.canEdit || busy}
-            value={config.report_timeframe || "last_30_days"}
+            value={config.report_timeframe || "last_90_days"}
             onChange={(e) => void save({ reportTimeframe: e.target.value })}
           >
             {REPORT_TIMEFRAME_OPTIONS.map((opt) => (

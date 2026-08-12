@@ -15,9 +15,9 @@ export type LegacySeoClientConfig = {
 };
 
 export function mapReportTimeframe(value: string | null | undefined): string {
-  const tf = String(value ?? "last_30_days").trim();
+  const tf = String(value ?? "last_90_days").trim();
   if (tf === "last_7_days" || tf === "last_30_days" || tf === "last_90_days") return tf;
-  return "last_30_days";
+  return "last_90_days";
 }
 
 export function buildLegacySeoClientConfig(input: {

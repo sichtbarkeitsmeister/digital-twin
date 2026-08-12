@@ -153,7 +153,7 @@ export function timeframeLabel(timeframe: string | null | undefined): string {
     case "last_30_days":
       return "Letzte 30 Tage";
     case "last_90_days":
-      return "Letzte 90 Tage";
+      return "Letzte 90 Tage (3 Monate)";
     default:
       return timeframe?.trim() || "—";
   }
