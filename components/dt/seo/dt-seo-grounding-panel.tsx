@@ -35,6 +35,7 @@ type GroundingPayload = {
   url: string | null;
   uploadedAt: string | null;
   notes: string | null;
+  llmsTxtUrl?: string | null;
   schedule: GroundingPageSchedule;
 };
 
@@ -92,6 +93,7 @@ export function DtSeoGroundingPanel(props: {
   const [error, setError] = useState<string | null>(null);
   const [uploadedAt, setUploadedAt] = useState("");
   const [url, setUrl] = useState("");
+  const [llmsTxtUrl, setLlmsTxtUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [lastDetection, setLastDetection] = useState<string | null>(null);
   const [llmsTxt, setLlmsTxt] = useState<LlmsTxtStatus | null>(null);
@@ -122,6 +124,11 @@ export function DtSeoGroundingPanel(props: {
       setData(json.grounding);
       setUploadedAt(toDateInputValue(json.grounding.uploadedAt));
       setUrl(json.grounding.url ?? json.discoveredUrl ?? "");
+      setLlmsTxtUrl(
+        json.grounding.llmsTxtUrl ??
+          (json.llmsTxt?.found ? json.llmsTxt.url : "") ??
+          "",
+      );
       setNotes(json.grounding.notes ?? "");
       setLlmsTxt(json.llmsTxt ?? null);
       if (json.autoApplied && json.grounding.uploadedAt) {
@@ -163,6 +170,7 @@ export function DtSeoGroundingPanel(props: {
           organisationId: props.organisationId,
           uploadedAt: uploadedAt ? uploadedAt : null,
           url: url.trim() || null,
+          llmsTxtUrl: llmsTxtUrl.trim() || null,
           notes: notes.trim() || null,
         }),
       });
@@ -170,6 +178,7 @@ export function DtSeoGroundingPanel(props: {
         ok?: boolean;
         message?: string;
         grounding?: GroundingPayload;
+        llmsTxt?: LlmsTxtStatus;
       };
       if (!res.ok || !json.ok || !json.grounding) {
         toast.error(json.message ?? "Speichern fehlgeschlagen.");
@@ -178,7 +187,13 @@ export function DtSeoGroundingPanel(props: {
       setData(json.grounding);
       setUploadedAt(toDateInputValue(json.grounding.uploadedAt));
       setUrl(json.grounding.url ?? "");
+      setLlmsTxtUrl(
+        json.grounding.llmsTxtUrl ??
+          (json.llmsTxt?.found ? json.llmsTxt.url : "") ??
+          "",
+      );
       setNotes(json.grounding.notes ?? "");
+      if (json.llmsTxt) setLlmsTxt(json.llmsTxt);
       toast.success("Grounding-Page aktualisiert.");
     } catch {
       toast.error("Speichern fehlgeschlagen.");
@@ -373,22 +388,51 @@ export function DtSeoGroundingPanel(props: {
                 {llmsTxt == null ? "…" : llmsTxt.found ? "Gefunden" : "Fehlt"}
               </Badge>
             </div>
-            {llmsTxt?.found ? (
-              <div className="grid gap-1 text-sm text-sbkm-navy dark:text-white">
-                <a
-                  href={llmsTxt.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 font-semibold underline-offset-2 hover:underline dark:text-sbkm-mint"
-                >
-                  {llmsTxt.url}
-                  <ExternalLink className="size-3.5" aria-hidden />
-                </a>
-                <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-                  Last-Modified: {formatDeDate(llmsTxt.lastModified)}
-                  {llmsTxt.bytes > 0 ? ` · ${Math.round(llmsTxt.bytes / 1024)} KB` : ""}
-                </p>
+
+            {(data?.url || url) ? (
+              <a
+                href={data?.url || url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
+              >
+                Grounding Page öffnen
+                <ExternalLink className="size-3.5" aria-hidden />
+              </a>
+            ) : null}
+
+            <label className="grid gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                URL der llms.txt
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="url"
+                  value={llmsTxtUrl}
+                  disabled={!props.canEdit || saving || detecting}
+                  placeholder="https://…/llms.txt"
+                  onChange={(e) => setLlmsTxtUrl(e.target.value)}
+                  className="h-10 min-w-0 flex-1 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                />
+                {llmsTxtUrl.trim() ? (
+                  <a
+                    href={llmsTxtUrl.trim()}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex size-10 items-center justify-center rounded-xl border border-sbkm-navy/15 text-sbkm-navy hover:bg-sbkm-mint/15 dark:border-white/15 dark:text-sbkm-mint"
+                    title="llms.txt öffnen"
+                  >
+                    <ExternalLink className="size-4" aria-hidden />
+                  </a>
+                ) : null}
               </div>
+            </label>
+
+            {llmsTxt?.found ? (
+              <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                Erreichbar · Last-Modified: {formatDeDate(llmsTxt.lastModified)}
+                {llmsTxt.bytes > 0 ? ` · ${Math.round(llmsTxt.bytes / 1024)} KB` : ""}
+              </p>
             ) : (
               <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
                 {llmsTxt?.message ?? "Noch nicht geprüft."}
