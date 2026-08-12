@@ -3,10 +3,15 @@ import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { detectGroundingPageUploadedAt } from "@/lib/dt/seo/detect-grounding-page-date";
+import {
+  checkLlmsTxt,
+  discoverGroundingPageUrl,
+} from "@/lib/dt/seo/discover-grounding-page-url";
 import { evaluateGroundingPageSchedule } from "@/lib/dt/seo/grounding-page-schedule";
 
 const SELECT =
-  "organisation_id,grounding_page_url,grounding_page_uploaded_at,grounding_page_notes";
+  "organisation_id,website_url,grounding_page_url,grounding_page_uploaded_at,grounding_page_notes";
 
 const patchSchema = z.object({
   organisationId: z.string().uuid(),
@@ -52,7 +57,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: "Nicht angemeldet." }, { status: 401 });
   }
 
-  const orgId = new URL(req.url).searchParams.get("org");
+  const reqUrl = new URL(req.url);
+  const orgId = reqUrl.searchParams.get("org");
+  const auto = reqUrl.searchParams.get("auto") === "1";
   if (!orgId) {
     return NextResponse.json({ ok: false, message: "Organisation fehlt." }, { status: 400 });
   }
@@ -75,7 +82,77 @@ export async function GET(req: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, grounding: serialize(data) });
+  let row = data;
+  let discoveredUrl: string | null = null;
+  let discoveryMessage: string | null = null;
+  let discoverySource: "footer" | "path_probe" | null = null;
+  let autoApplied = false;
+
+  const llmsTxt = await checkLlmsTxt(row.website_url);
+
+  if (!row.grounding_page_url) {
+    const discovered = await discoverGroundingPageUrl(row.website_url);
+    if (discovered.ok) {
+      discoveredUrl = discovered.url;
+      discoverySource = discovered.source;
+    } else {
+      discoveryMessage = discovered.message;
+    }
+  }
+
+  // First visit: persist discovered URL + live date so the form is not empty.
+  if (auto && !row.grounding_page_url && discoveredUrl) {
+    const detected = await detectGroundingPageUploadedAt(discoveredUrl);
+    const sourceHint = discoverySource === "footer" ? "Footer" : "Pfad";
+    const noteLine = detected.ok
+      ? `Auto (${sourceHint}): ${detected.sourceLabel} (${new Date().toISOString().slice(0, 10)})`
+      : `Auto (${sourceHint}): URL erkannt (${new Date().toISOString().slice(0, 10)})`;
+
+    const { data: updated, error: updateError } = await auth.supabase
+      .from("dt_org_config")
+      .update({
+        grounding_page_url: detected.ok
+          ? detected.finalUrl || discoveredUrl
+          : discoveredUrl,
+        grounding_page_uploaded_at: detected.ok
+          ? detected.detectedAt
+          : row.grounding_page_uploaded_at,
+        grounding_page_notes: row.grounding_page_notes?.trim()
+          ? row.grounding_page_notes
+          : noteLine,
+      })
+      .eq("organisation_id", orgId)
+      .select(SELECT)
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      row = updated;
+      autoApplied = true;
+      discoveredUrl = updated.grounding_page_url;
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    grounding: serialize(row),
+    websiteUrl: row.website_url ?? null,
+    discoveredUrl: row.grounding_page_url ?? discoveredUrl,
+    discoveryMessage,
+    discoverySource,
+    autoApplied,
+    llmsTxt: llmsTxt.ok
+      ? {
+          found: true as const,
+          url: llmsTxt.url,
+          lastModified: llmsTxt.lastModified,
+          bytes: llmsTxt.bytes,
+        }
+      : {
+          found: false as const,
+          message: llmsTxt.message,
+          tried: llmsTxt.tried,
+        },
+  });
 }
 
 export async function PATCH(req: Request) {
@@ -110,7 +187,9 @@ export async function PATCH(req: Request) {
     .from("dt_org_config")
     .update(patch)
     .eq("organisation_id", orgId)
-    .select(SELECT)
+    .select(
+      "organisation_id,grounding_page_url,grounding_page_uploaded_at,grounding_page_notes",
+    )
     .maybeSingle();
 
   if (error || !data) {
