@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, Loader2, Radar } from "lucide-react";
 import { toast } from "sonner";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
@@ -75,10 +75,12 @@ export function DtSeoGroundingPanel(props: {
   const [data, setData] = useState<GroundingPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [detecting, setDetecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadedAt, setUploadedAt] = useState("");
   const [url, setUrl] = useState("");
   const [notes, setNotes] = useState("");
+  const [lastDetection, setLastDetection] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -154,6 +156,59 @@ export function DtSeoGroundingPanel(props: {
     }
   }
 
+  async function detectFromPage(apply: boolean) {
+    if (!props.canEdit) return;
+    const targetUrl = url.trim();
+    if (!targetUrl) {
+      toast.error("Bitte zuerst die URL der Grounding Page eintragen.");
+      return;
+    }
+    setDetecting(true);
+    setLastDetection(null);
+    try {
+      const res = await fetch("/api/dt/seo/grounding/detect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          organisationId: props.organisationId,
+          url: targetUrl,
+          apply,
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        detection?: {
+          detectedAt: string;
+          sourceLabel: string;
+          finalUrl?: string;
+        };
+        grounding?: GroundingPayload;
+      };
+      if (!res.ok || !json.ok || !json.detection) {
+        toast.error(json.message ?? "Datum konnte nicht gelesen werden.");
+        return;
+      }
+      const detectedDay = toDateInputValue(json.detection.detectedAt);
+      setUploadedAt(detectedDay);
+      if (json.detection.finalUrl) setUrl(json.detection.finalUrl);
+      setLastDetection(
+        `${formatDeDate(json.detection.detectedAt)} · ${json.detection.sourceLabel}`,
+      );
+      if (json.grounding) {
+        setData(json.grounding);
+        setNotes(json.grounding.notes ?? "");
+        toast.success("Datum von der Seite gelesen und gespeichert.");
+      } else {
+        toast.success("Datum von der Seite gelesen — bitte Speichern.");
+      }
+    } catch {
+      toast.error("Datum konnte nicht gelesen werden.");
+    } finally {
+      setDetecting(false);
+    }
+  }
+
   function markUploadedToday() {
     setUploadedAt(new Date().toISOString().slice(0, 10));
   }
@@ -166,8 +221,8 @@ export function DtSeoGroundingPanel(props: {
         </h2>
         <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
           Alle {GROUNDING_PAGE_INTERVAL_MONTHS} Monate aktualisieren. Ab{" "}
-          {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis — die
-          Automatisierung kommt später; hier tracken wir Upload und Termin.
+          {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis. Mit hinterlegter
+          URL kann das Upload-Datum von der Live-Seite gelesen werden.
         </p>
       </div>
 
@@ -249,8 +304,8 @@ export function DtSeoGroundingPanel(props: {
               <div className="flex gap-2 rounded-xl bg-sbkm-navy/5 px-3 py-2.5 text-sm text-sbkm-ink-600 dark:bg-white/5 dark:text-white/60">
                 <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden />
                 <p>
-                  Noch kein Upload-Datum hinterlegt. Sobald die Page live ist, Datum (und optional
-                  URL) speichern.
+                  Noch kein Upload-Datum hinterlegt. URL eintragen und „Von Seite lesen“ nutzen —
+                  oder Datum manuell setzen.
                 </p>
               </div>
             )}
@@ -274,9 +329,24 @@ export function DtSeoGroundingPanel(props: {
                 Upload erfassen
               </h3>
               <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
-                Manuell, bis die Automatisierung greift. Speichern setzt den 3-Monats-Takt neu.
+                Ideal: URL hinterlegen und Datum automatisch von der Seite lesen (Last-Modified /
+                Meta / JSON-LD). Manuell bleibt möglich.
               </p>
             </div>
+
+            <label className="grid gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                URL der Grounding Page
+              </span>
+              <input
+                type="url"
+                value={url}
+                disabled={!props.canEdit || saving || detecting}
+                placeholder="https://…"
+                onChange={(e) => setUrl(e.target.value)}
+                className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+              />
+            </label>
 
             <label className="grid gap-1.5">
               <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
@@ -286,36 +356,42 @@ export function DtSeoGroundingPanel(props: {
                 <input
                   type="date"
                   value={uploadedAt}
-                  disabled={!props.canEdit || saving}
+                  disabled={!props.canEdit || saving || detecting}
                   onChange={(e) => setUploadedAt(e.target.value)}
                   className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm font-semibold text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
                 />
                 {props.canEdit ? (
-                  <DtPillButton
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={saving}
-                    onClick={markUploadedToday}
-                  >
-                    Heute
-                  </DtPillButton>
+                  <>
+                    <DtPillButton
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={saving || detecting || !url.trim()}
+                      onClick={() => void detectFromPage(true)}
+                      className="gap-1.5"
+                    >
+                      {detecting ? (
+                        <Loader2 className="size-4 animate-spin" aria-hidden />
+                      ) : (
+                        <Radar className="size-4" aria-hidden />
+                      )}
+                      Von Seite lesen
+                    </DtPillButton>
+                    <DtPillButton
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={saving || detecting}
+                      onClick={markUploadedToday}
+                    >
+                      Heute
+                    </DtPillButton>
+                  </>
                 ) : null}
               </div>
-            </label>
-
-            <label className="grid gap-1.5">
-              <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
-                URL (optional)
-              </span>
-              <input
-                type="url"
-                value={url}
-                disabled={!props.canEdit || saving}
-                placeholder="https://…"
-                onChange={(e) => setUrl(e.target.value)}
-                className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
-              />
+              {lastDetection ? (
+                <p className="text-xs text-sbkm-mint">Erkannt: {lastDetection}</p>
+              ) : null}
             </label>
 
             <label className="grid gap-1.5">
@@ -324,7 +400,7 @@ export function DtSeoGroundingPanel(props: {
               </span>
               <textarea
                 value={notes}
-                disabled={!props.canEdit || saving}
+                disabled={!props.canEdit || saving || detecting}
                 rows={3}
                 placeholder="z. B. wo gehostet, was geändert wurde…"
                 onChange={(e) => setNotes(e.target.value)}
@@ -337,7 +413,7 @@ export function DtSeoGroundingPanel(props: {
                 <DtPillButton
                   type="button"
                   size="sm"
-                  disabled={saving}
+                  disabled={saving || detecting}
                   onClick={() => void save()}
                 >
                   {saving ? (
