@@ -6,6 +6,10 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { surveySchema } from "@/lib/surveys/schema";
+import {
+  buildDuplicatedSurveyTitle,
+  withNewSurveyDefinitionId,
+} from "@/lib/surveys/duplicate";
 import { createClient } from "@/lib/supabase/server";
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
 import { renderBrandedEmail } from "@/lib/email/templates";
@@ -765,6 +769,146 @@ export async function importSurveyBundleAction(
   return {
     ok: true,
     message: "Umfrage (inkl. Antworten) importiert.",
+    data: { surveyId: createdSurvey.id },
+  };
+}
+
+const duplicateSurveySchema = z.object({
+  surveyId: z.string().uuid(),
+  /** When true, copy the first response + field questions (if any). */
+  includeAnswers: z.boolean().optional().default(false),
+});
+
+export async function duplicateSurveyAction(
+  input: z.input<typeof duplicateSurveySchema>,
+): Promise<ActionState<{ surveyId: string }>> {
+  const parsed = duplicateSurveySchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
+  const { supabase, userId } = auth;
+
+  const { data: source } = await supabase
+    .from("surveys")
+    .select(
+      "id,title,description,notification_emails,purpose,folder_id,definition",
+    )
+    .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!source?.definition) return { ok: false, message: "Umfrage nicht gefunden." };
+
+  const definitionParsed = surveySchema.safeParse(source.definition);
+  if (!definitionParsed.success) {
+    return {
+      ok: false,
+      message: definitionParsed.error.issues[0]?.message ?? "Ungültige Umfrage-Definition.",
+    };
+  }
+
+  const purpose =
+    source.purpose === "anbieter" || source.purpose === "persona"
+      ? source.purpose
+      : "persona";
+  const notificationEmails = normalizeEmails(
+    ((source.notification_emails ?? []) as string[]).filter(Boolean),
+  );
+
+  const { data: createdSurvey, error: surveyError } = await supabase
+    .from("surveys")
+    .insert({
+      title: buildDuplicatedSurveyTitle(source.title ?? "Umfrage"),
+      description: source.description ?? "",
+      visibility: "private",
+      slug: null,
+      published_at: null,
+      notification_emails: notificationEmails,
+      purpose,
+      folder_id: source.folder_id ?? null,
+      // Do not copy organisation_id — assignment stays explicit on the responses flow.
+      definition: withNewSurveyDefinitionId(definitionParsed.data),
+      created_by_user_id: userId,
+    })
+    .select("id")
+    .single();
+
+  if (surveyError || !createdSurvey?.id) {
+    return { ok: false, message: "Umfrage konnte nicht dupliziert werden." };
+  }
+
+  if (parsed.data.includeAnswers) {
+    const { data: sourceResponse } = await supabase
+      .from("survey_responses")
+      .select("id,status,answers,completed_at")
+      .eq("survey_id", source.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (sourceResponse) {
+      const tokenHashHex = `\\x${randomBytes(32).toString("hex")}`;
+      const { data: createdResponse, error: responseError } = await supabase
+        .from("survey_responses")
+        .insert({
+          survey_id: createdSurvey.id,
+          status: sourceResponse.status,
+          answers: sourceResponse.answers ?? {},
+          completed_at: sourceResponse.completed_at ?? null,
+          token_hash: tokenHashHex,
+        })
+        .select("id")
+        .single();
+
+      if (responseError || !createdResponse?.id) {
+        return {
+          ok: false,
+          message: "Umfrage dupliziert, aber Antworten konnten nicht kopiert werden.",
+          data: { surveyId: createdSurvey.id },
+        };
+      }
+
+      const { data: sourceQuestions } = await supabase
+        .from("survey_field_questions")
+        .select("field_id,kind,question,asked_at,answer,answered_at")
+        .eq("survey_id", source.id)
+        .eq("response_id", sourceResponse.id)
+        .order("asked_at", { ascending: true });
+
+      if ((sourceQuestions ?? []).length > 0) {
+        const rows = (sourceQuestions ?? []).map((q) => ({
+          survey_id: createdSurvey.id,
+          response_id: createdResponse.id,
+          field_id: q.field_id,
+          kind: q.kind ?? "question",
+          question: q.question,
+          asked_at: q.asked_at ?? undefined,
+          answer: q.answer ?? null,
+          answered_at: q.answered_at ?? null,
+        }));
+        const { error: questionError } = await supabase
+          .from("survey_field_questions")
+          .insert(rows);
+        if (questionError) {
+          return {
+            ok: false,
+            message: "Umfrage dupliziert, aber Rückfragen konnten nicht kopiert werden.",
+            data: { surveyId: createdSurvey.id },
+          };
+        }
+      }
+    }
+  }
+
+  revalidatePath("/dashboard/surveys");
+  revalidatePath(`/dashboard/surveys/${createdSurvey.id}/edit`);
+  return {
+    ok: true,
+    message: parsed.data.includeAnswers
+      ? "Umfrage inkl. Antworten dupliziert."
+      : "Umfrage dupliziert.",
     data: { surveyId: createdSurvey.id },
   };
 }
