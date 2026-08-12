@@ -354,7 +354,7 @@ export async function runDtMigration(opts: MigrationOptions): Promise<{
         sistrix_domain: str(row.sistrix_domain) || null,
         focus_keyword: str(row.focus_keyword) || null,
         report_recipient_email: str(row.recipient_email) || null,
-        report_timeframe: str(row.timeframe) || "last_30_days",
+        report_timeframe: str(row.timeframe) || "last_90_days",
         seo_enabled: bool(row.aktiv),
         seo_checklist: row.seo_checklist ?? [],
         sitemap_url: str(row.sitemap_url) || null,
