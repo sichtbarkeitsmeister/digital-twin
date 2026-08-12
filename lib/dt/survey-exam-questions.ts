@@ -13,11 +13,13 @@ export type SurveyExamQuestion = {
 };
 
 /** Soft openers last — fact probes first. Tone: company employee talking to a prospect. */
+const PERSONA_OPENING_QUESTION =
+  "Was beschäftigt dich gerade am meisten — und worüber würdest du mit uns zuerst sprechen wollen?";
+
 const PERSONA_WARMUP: Array<{ id: string; question: string }> = [
   {
     id: "warmup_pain",
-    question:
-      "Was beschäftigt dich gerade am meisten — und worüber würdest du mit uns zuerst sprechen wollen?",
+    question: PERSONA_OPENING_QUESTION,
   },
 ];
 
@@ -173,8 +175,13 @@ export function rewriteCustomerThirdPersonToSecondPerson(question: string): stri
   q = q.replace(/\bbei\s+du\b/gi, "bei dir");
   q = q.replace(/\büber\s+sie\b/gi, "über dich");
   q = q.replace(/\bmit\s+sie\b/gi, "mit dir");
+  q = q.replace(/\bbevor\s+sie\b/gi, "bevor du");
+  q = q.replace(/\bhinter\s+sich\b/gi, "hinter dir");
   q = q.replace(/\bwas sagen sie\b/gi, "was sagst du");
   q = q.replace(/\bsagst\s+sie\b/gi, "sagst du");
+  q = q.replace(/\bbeschreibst\s+sie\b/gi, "beschreibst du");
+  q = q.replace(/\berzählst\s+sie\b/gi, "erzählst du");
+  q = q.replace(/\bkontaktierten\b/gi, "kontaktiert hast");
   q = q.replace(/\bhat\s+du\b/gi, "hast du");
   q = q.replace(/\s+/g, " ").trim();
 
@@ -210,6 +217,10 @@ export function fixGermanDuVerbAgreement(text: string): string {
     });
     q = q.replace(/\büber\s+sie\b/gi, "über dich");
     q = q.replace(/\bmit\s+sie\b/gi, "mit dir");
+    q = q.replace(/\bbevor\s+sie\b/gi, "bevor du");
+    q = q.replace(/\bhinter\s+sich\b/gi, "hinter dir");
+    q = q.replace(/\bbeschreibst\s+sie\b/gi, "beschreibst du");
+    q = q.replace(/\berzählst\s+sie\b/gi, "erzählst du");
   }
 
   const verbMap: Array<[RegExp, string]> = [
@@ -486,7 +497,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
   const hay = `${raw} ${fact.value}`;
   if (!raw) {
-    return "Erzähl mir doch kurz: Wer bist du, und was beschäftigt dich gerade?";
+    return PERSONA_OPENING_QUESTION;
   }
 
   if (isAvatarNameField(raw)) {
@@ -534,7 +545,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   }
 
   if (/sorg|einwand|hürde|problem|schmerz|ärger|frust/i.test(raw)) {
-    return "Was beschäftigt dich gerade am meisten — und was würdest du uns dazu als Erstes erzählen?";
+    return PERSONA_OPENING_QUESTION;
   }
 
   if (/entscheid|kriterium|wichtig/i.test(raw) && !looksLikeQuestion(raw)) {
@@ -556,6 +567,14 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     return "Wie gehst du mit dem Preis um — worauf achtest du besonders?";
   }
 
+  // Erstgespräch / “was erzählst du zuerst” → one canonical opener (deduped later too).
+  if (
+    /erstgespräch/i.test(raw) ||
+    (/erzähl|beschreib/i.test(raw) && /(situation|leben|wörtlich|zuerst|als erstes)/i.test(raw))
+  ) {
+    return PERSONA_OPENING_QUESTION;
+  }
+
   if (
     /berufs|lebenssituation|lebenslage/i.test(raw) &&
     !/erzählen|beschreiben|erstgespräch|erzähl/i.test(raw)
@@ -565,7 +584,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
 
   // Description / bio: in-character sales discovery, no questionnaire meta.
   if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/i.test(raw) || /ideal.*wunsch/i.test(raw)) {
-    return "Erzähl mir doch kurz: Wer bist du, und was beschäftigt dich gerade?";
+    return PERSONA_OPENING_QUESTION;
   }
 
   // Prefer natural rewrite of the original survey question (sales conversation).
@@ -603,12 +622,44 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   if (isCustomerProfileMetaTitle(raw)) {
     const topic = topicFromCustomerMetaTitle(raw);
     if (!topic || topic.length < 3) {
-      return "Erzähl mir doch kurz: Wer bist du, und was beschäftigt dich gerade?";
+      return PERSONA_OPENING_QUESTION;
     }
     return `Zu „${shortTopic(topic)}": Was trifft auf dich zu?`;
   }
 
   return `Erzähl mir kurz zu „${shortTopic(raw)}" — was trifft auf dich zu?`;
+}
+
+/**
+ * Collapse near-duplicate persona probes (exact wording already deduped via seenNorm).
+ * Keep the highest-priority probe per theme after sort.
+ */
+export function personaDedupeTheme(question: string): string | null {
+  const q = question.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!q) return null;
+
+  if (
+    /beschäftigt dich/.test(q) ||
+    /als erstes erzähl|zuerst (?:sprechen|erzähl)/.test(q) ||
+    /erstgespräch/.test(q) ||
+    /wer bist du/.test(q) ||
+    (/erzählst du über deine/.test(q) && /(situation|leben)/.test(q))
+  ) {
+    return "opening_situation";
+  }
+
+  if (
+    (/\bkontakt/.test(q) || /erstkontakt|erreichen|hinter dir|weg hast du/.test(q)) &&
+    !/inhalt|online|recherch|gefunden/.test(q)
+  ) {
+    return "kontakt_weg";
+  }
+
+  if (/beruflich|lebenssituation|lebenslage/.test(q)) {
+    return "beruf_leben";
+  }
+
+  return null;
 }
 
 function toCompanyInterviewQuestion(fact: SurveyFact): string {
@@ -787,9 +838,20 @@ export function buildSurveyExamQuestions(
 
   draft.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 
-  const out: SurveyExamQuestion[] = draft
-    .slice(0, Math.max(0, maxQuestions - 1))
-    .map(({ priority: _p, ...q }) => q);
+  const seenThemes = new Set<string>();
+  const out: SurveyExamQuestion[] = [];
+  for (const item of draft) {
+    if (out.length >= Math.max(0, maxQuestions - 1)) break;
+    if (audience === "persona") {
+      const theme = personaDedupeTheme(item.question);
+      if (theme) {
+        if (seenThemes.has(theme)) continue;
+        seenThemes.add(theme);
+      }
+    }
+    const { priority: _p, ...q } = item;
+    out.push(q);
+  }
 
   // One soft opener at the end (optional coverage of tone/behavior).
   const warmups = audience === "company" ? COMPANY_WARMUP : PERSONA_WARMUP;
@@ -797,6 +859,11 @@ export function buildSurveyExamQuestions(
     for (const w of warmups) {
       const key = w.question.toLowerCase().replace(/\s+/g, " ").trim();
       if (seenNorm.has(key)) continue;
+      if (audience === "persona") {
+        const theme = personaDedupeTheme(w.question);
+        if (theme && seenThemes.has(theme)) continue;
+        if (theme) seenThemes.add(theme);
+      }
       seenNorm.add(key);
       out.push({
         id: w.id,

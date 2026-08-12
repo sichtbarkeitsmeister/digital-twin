@@ -71,14 +71,18 @@ const questions = buildSurveyExamQuestions(bundle.facts, {
   maxQuestions: 10,
   audience: "persona",
 });
-assert.ok(questions.length >= 4);
+assert.ok(questions.length >= 3);
 // Fact probes first — warmups are last (verification priority).
 assert.ok(questions[0]?.factId, "first question should be tied to a survey fact");
 assert.ok(questions.some((q) => /aufmerksam geworden/i.test(q.question)));
 assert.ok(questions.some((q) => /Sorgen|Einwände|beschäftigt/i.test(q.question)));
 assert.ok(questions.some((q) => /wichtigsten|Priorität|Reihenfolge|sortieren/i.test(q.question)));
 assert.ok(!questions.some((q) => /was steht bei dir bei/i.test(q.question)));
-assert.ok(questions.some((q) => q.id.startsWith("warmup_")));
+// Warmup is skipped when a fact probe already covers the opening theme.
+assert.ok(
+  questions.some((q) => q.id.startsWith("warmup_")) ||
+    questions.some((q) => /beschäftigt dich/i.test(q.question)),
+);
 assert.match(
   questions.find((q) => q.factId === "fact_001")?.expectedHint ?? "",
   /Empfehlung/,
@@ -459,7 +463,10 @@ const grammarQs = buildSurveyExamQuestions(grammarFacts.facts, {
 assert.ok(
   grammarQs.some((q) => /beruflich|lebenssituation|hast du typischerweise/i.test(q.question)),
 );
-assert.ok(grammarQs.some((q) => /erzählst du über deine/i.test(q.question)));
+assert.ok(
+  grammarQs.some((q) => /beschäftigt dich|erzählst du über deine/i.test(q.question)),
+  "Erstgespräch / Situation becomes the canonical opening probe",
+);
 assert.ok(!grammarQs.some((q) => /\bhaben du\b|\berzählen du\b|\bihre\b|\bSie\b/i.test(q.question)));
 assert.ok(!grammarQs.some((q) => /fragebogen/i.test(q.question)));
 
@@ -575,7 +582,9 @@ assert.ok(
   "Why-us should sound like a sales discovery question",
 );
 assert.ok(!declutterQs.some((q) => /einfach entrümpelung/i.test(q.question)));
-assert.ok(declutterQs.some((q) => /erzählst du/i.test(q.question)));
+assert.ok(
+  declutterQs.some((q) => /erzählst du|beschäftigt dich|zuerst sprechen/i.test(q.question)),
+);
 assert.ok(!declutterQs.some((q) => /erzählen du/i.test(q.question)));
 assert.ok(
   declutterQs.some((q) => /reagierst du.*preis|preis.*reagierst/i.test(q.question)),
@@ -586,7 +595,7 @@ assert.ok(
   "Must not wrap every price topic in the dry budget template",
 );
 assert.ok(declutterQs.some((q) => /preisspanne bewegst du dich/i.test(q.question)));
-assert.ok(declutterQs.some((q) => /wer bist du/i.test(q.question)));
+assert.ok(declutterQs.some((q) => /beschäftigt dich|wer bist du/i.test(q.question)));
 assert.ok(!declutterQs.some((q) => /fragebogen/i.test(q.question)));
 
 // Heilpraktiker-style: company funnel / avatar setup must not stay as meta probes
@@ -691,6 +700,110 @@ assert.ok(
 assert.ok(
   heilCompanyQs.some((q) => /woran merkt man|fragen stellen patienten/i.test(q.question)),
   "Beobachtungsfragen bleiben im Firmen-Check",
+);
+
+// Overlapping “zuerst erzählen” / Situation / Erstgespräch → one opening probe
+const overlapFacts = extractSurveyFacts({
+  surveyTitle: "Overlap",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_worry",
+            type: "text" as const,
+            title: "Was sind deine größten Sorgen?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_erst",
+            type: "text" as const,
+            title: "Was erzählst du über deine Situation im Erstgespräch? Wie beschreibst du es wörtlich?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_leben",
+            type: "text" as const,
+            title: "Was erzählst du über deine Lebenssituation im Erstgespräch?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_bio",
+            type: "textarea" as const,
+            title: "Beschreibung des idealen Wunschkunden in 3-5 Sätzen",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_contact_a",
+            type: "text" as const,
+            title: "Welchen Weg haben Patienten vor dem Erstkontakt typischerweise hinter sich?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_contact_b",
+            type: "text" as const,
+            title: "Wie kontaktieren Patienten die Praxis überwiegend?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_contact_c",
+            type: "text" as const,
+            title: "Wie kam der Kontakt zu Patienten typischerweise zustande?",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_worry: "Erschöpfung und Unsicherheit",
+    f_erst: "Ich bin seit Monaten fertig.",
+    f_leben: "Alleinerziehend, chronisch erschöpft.",
+    f_bio: "Privatpatientin mit chronischer Erschöpfung.",
+    f_contact_a: "Online-Recherche, dann Anruf",
+    f_contact_b: "Telefon",
+    f_contact_c: "Über die Website",
+  },
+  fieldQuestions: [],
+});
+const overlapQs = buildSurveyExamQuestions(overlapFacts.facts, {
+  audience: "persona",
+  maxQuestions: 16,
+});
+const openingQs = overlapQs.filter((q) =>
+  /beschäftigt dich|erstgespräch|wer bist du|erzählst du über deine/i.test(q.question),
+);
+assert.equal(
+  openingQs.length,
+  1,
+  `Only one opening/situation probe expected, got: ${openingQs.map((q) => q.question).join(" | ")}`,
+);
+const contactQs = overlapQs.filter(
+  (q) =>
+    /\bkontakt/i.test(q.question) ||
+    /erstkontakt|hinter dir|weg hast du/i.test(q.question),
+);
+assert.equal(
+  contactQs.length,
+  1,
+  `Only one contact-path probe expected, got: ${contactQs.map((q) => q.question).join(" | ")}`,
 );
 
 console.log("survey-exam-questions tests: ok");

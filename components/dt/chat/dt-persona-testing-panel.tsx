@@ -5,6 +5,7 @@ import { Check, ChevronDown, ClipboardList, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { cn } from "@/components/dt/cn";
+import { personaTestingModeTitle } from "@/lib/dt/persona-testing";
 import type {
   SurveyExamAudience,
   SurveyExamQuestion,
@@ -85,7 +86,7 @@ export function DtPersonaTestingPanel(props: {
   );
 
   const nextQuestion = openQuestions[0] ?? null;
-  const panelTitle = audience === "company" ? "Firmen-Prüffragen" : "Persona-Prüffragen";
+  const panelTitle = personaTestingModeTitle(audience === "company" ? "company" : "persona");
 
   function pick(q: SurveyExamQuestion) {
     if (props.isBusy || props.disabled) return;
