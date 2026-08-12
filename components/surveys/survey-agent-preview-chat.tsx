@@ -80,6 +80,12 @@ export function SurveyAgentPreviewChat(props: {
     };
   }, [props.surveyId, props.responseId]);
 
+  const updateExamQuestion = useCallback((id: string, question: string) => {
+    setExamQuestions((prev) =>
+      prev.map((q) => (q.id === id ? { ...q, question } : q)),
+    );
+  }, []);
+
   const sendContent = useCallback(
     async (content: string, examId?: string, expectedHint?: string) => {
       const text = content.trim();
@@ -161,6 +167,7 @@ export function SurveyAgentPreviewChat(props: {
 
   const openExamQuestions = examQuestions.filter((q) => !sentExamIds.has(q.id));
   const nextExam = openExamQuestions[0] ?? null;
+  const visibleExamQuestions = openExamQuestions.slice(0, 8);
 
   return (
     <Card
@@ -175,8 +182,8 @@ export function SurveyAgentPreviewChat(props: {
           Probe-Chat / Prüfung mit {props.agentName}
         </CardTitle>
         <CardDescription>
-          Fragebogen-Fragen als Prüfskript — tippe oder klicke eine Frage. Antworten werden
-          nicht gespeichert; nutzt den aktuellen Persona-Prompt.
+          Fragebogen-Fragen als Prüfskript — Text beliebig anpassen, dann stellen. Antworten
+          werden nicht gespeichert; nutzt den aktuellen Persona-Prompt.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -192,7 +199,12 @@ export function SurveyAgentPreviewChat(props: {
                   type="button"
                   size="sm"
                   variant="secondary"
-                  disabled={busy || props.disabled || examLoading}
+                  disabled={
+                    busy ||
+                    props.disabled ||
+                    examLoading ||
+                    !nextExam.question.trim()
+                  }
                   onClick={() =>
                     void sendContent(nextExam.question, nextExam.id, nextExam.expectedHint)
                   }
@@ -213,26 +225,49 @@ export function SurveyAgentPreviewChat(props: {
                 <Loader2 className="size-4 animate-spin" aria-hidden />
                 Fragen werden vorbereitet …
               </p>
-            ) : openExamQuestions.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {openExamQuestions.slice(0, 8).map((q) => (
-                  <button
+            ) : visibleExamQuestions.length > 0 ? (
+              <ul className="grid gap-2">
+                {visibleExamQuestions.map((q, index) => (
+                  <li
                     key={q.id}
-                    type="button"
-                    disabled={busy || props.disabled}
-                    title={q.expectedHint}
-                    onClick={() => void sendContent(q.question, q.id, q.expectedHint)}
-                    className="max-w-full rounded-full border border-sbkm-navy/15 bg-white px-3 py-1.5 text-left text-xs font-medium text-sbkm-navy transition hover:border-sbkm-mint hover:bg-sbkm-mint/10 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-sbkm-mint/15"
+                    className="flex flex-col gap-2 rounded-xl border border-sbkm-navy/10 bg-white p-2.5 dark:border-white/10 dark:bg-white/5 sm:flex-row sm:items-end"
                   >
-                    <span className="line-clamp-2">{q.question}</span>
-                  </button>
+                    <label className="grid min-w-0 flex-1 gap-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/45">
+                        Frage {index + 1}
+                        {q.expectedHint ? (
+                          <span className="ml-1.5 font-normal normal-case tracking-normal text-sbkm-ink-600/80 dark:text-white/40">
+                            · SOLL: {q.expectedHint}
+                          </span>
+                        ) : null}
+                      </span>
+                      <Textarea
+                        value={q.question}
+                        onChange={(e) => updateExamQuestion(q.id, e.target.value)}
+                        rows={2}
+                        disabled={busy || props.disabled}
+                        aria-label={`Prüfungsfrage ${index + 1} bearbeiten`}
+                        className="min-h-[64px] resize-y text-sm"
+                      />
+                    </label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={busy || props.disabled || !q.question.trim()}
+                      onClick={() => void sendContent(q.question, q.id, q.expectedHint)}
+                      className="shrink-0 gap-1.5 self-stretch sm:self-end"
+                    >
+                      <Send className="size-3.5" aria-hidden />
+                      Stellen
+                    </Button>
+                  </li>
                 ))}
                 {openExamQuestions.length > 8 ? (
-                  <span className="self-center text-xs text-muted-foreground">
-                    +{openExamQuestions.length - 8} weitere über „Nächste Frage“
-                  </span>
+                  <li className="text-xs text-muted-foreground">
+                    +{openExamQuestions.length - 8} weitere über „Nächste Frage stellen“
+                  </li>
                 ) : null}
-              </div>
+              </ul>
             ) : examQuestions.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Keine Prüfungsfragen aus der Umfrage abgeleitet.
