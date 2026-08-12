@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { updateDtAgent } from "@/lib/dt/db";
 import { ensureSeoAdvisorAgent } from "@/lib/dt/seo/ensure-seo-agent";
+import { syncOrgFocusKeywordFromAnbieter } from "@/lib/dt/seo/focus-keywords-from-anbieter";
 import { buildSurveyResponseContextForSeo } from "@/lib/dt/survey-facts";
 import type { SurveyFieldQuestionRow } from "@/lib/dt/survey-to-agent-context";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -216,6 +217,40 @@ export async function applyAnbieterSurveyToSeoAgent(input: {
     .update({ organisation_id: input.organisationId })
     .eq("id", input.surveyId)
     .is("deleted_at", null);
+
+  // Fokus-Keywords from the Anbieter questionnaire → org SEO config
+  try {
+    const { data: appliedSurvey } = await input.supabase
+      .from("surveys")
+      .select("definition, title")
+      .eq("id", input.surveyId)
+      .maybeSingle();
+    const { data: appliedResponse } = await input.supabase
+      .from("survey_responses")
+      .select("answers")
+      .eq("id", input.responseId)
+      .eq("survey_id", input.surveyId)
+      .maybeSingle();
+    if (appliedSurvey && appliedResponse) {
+      const ans =
+        appliedResponse.answers &&
+        typeof appliedResponse.answers === "object" &&
+        !Array.isArray(appliedResponse.answers)
+          ? (appliedResponse.answers as Record<string, unknown>)
+          : {};
+      await syncOrgFocusKeywordFromAnbieter({
+        organisationId: input.organisationId,
+        supabase: input.supabase,
+        definition: appliedSurvey.definition,
+        answers: ans,
+        surveyId: input.surveyId,
+        surveyTitle: appliedSurvey.title,
+        responseId: input.responseId,
+      });
+    }
+  } catch (e) {
+    console.error("Failed to sync focus keywords from Anbieter survey", e);
+  }
 
   return {
     ok: true as const,
