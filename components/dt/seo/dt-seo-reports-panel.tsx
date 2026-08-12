@@ -120,15 +120,15 @@ export function DtSeoReportsPanel(props: {
               setActiveId(null);
               if (state === "error" || state === "cancelled") {
                 const msg = j.report?.state_message?.trim();
-                setStatus(
-                  msg
-                    ? msg.startsWith("Fehler:")
-                      ? msg
-                      : `Fehler: ${msg}`
-                    : state === "cancelled"
-                      ? "Fehler: Report abgebrochen."
-                      : "Fehler: Report-Erstellung fehlgeschlagen.",
-                );
+                const text = msg
+                  ? msg.startsWith("Fehler:")
+                    ? msg
+                    : `Fehler: ${msg}`
+                  : state === "cancelled"
+                    ? "Fehler: Report abgebrochen."
+                    : "Fehler: Report-Erstellung fehlgeschlagen.";
+                setStatus(text);
+                toast.error(text);
               }
               void refresh();
             }
@@ -440,6 +440,9 @@ export function DtSeoReportsPanel(props: {
                     </button>
                   ) : null}
                   <Badge variant={reportBadgeVariant(r.state)}>{reportStateLabel(r.state)}</Badge>
+                  {r.trigger_source === "monthly_scheduler" ? (
+                    <Badge variant="outline">Monatlich</Badge>
+                  ) : null}
                   <Link href={href} aria-label="Report öffnen">
                     <ChevronRight
                       className="h-4 w-4 text-sbkm-ink-400 dark:text-white/40"

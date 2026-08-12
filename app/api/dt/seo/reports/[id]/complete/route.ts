@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { verifyDtInternalWebhookSecret } from "@/lib/dt/internal-webhook";
-import { sendDtSeoReportToOwner } from "@/lib/dt/seo/notify-owner";
+import {
+  sendDtSeoReportFailureAlert,
+  sendDtSeoReportToOwner,
+} from "@/lib/dt/seo/notify-owner";
 import { syncSeoTasksFromReportRecommendations } from "@/lib/dt/seo/report-task-sync";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -33,7 +36,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
   // finished), ignore any late callbacks from n8n so the final state sticks.
   const { data: current } = await supabase
     .from("dt_seo_reports")
-    .select("id, state, send_to_owner, owner_sent_at")
+    .select("id, state, send_to_owner, owner_sent_at, trigger_source, organisation_id")
     .eq("id", id)
     .maybeSingle();
 
@@ -105,6 +108,23 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
       }
     } catch (mailError) {
       console.error("[seo/report/complete] report email failed:", mailError);
+    }
+  }
+
+  if (parsed.data.state === "error") {
+    try {
+      const alert = await sendDtSeoReportFailureAlert({
+        supabase,
+        organisationId: data.organisation_id,
+        reportId: id,
+        stateMessage: parsed.data.stateMessage ?? data.state_message ?? null,
+        triggerSource: (current as { trigger_source?: string | null }).trigger_source,
+      });
+      if (!alert.sent) {
+        console.warn("[seo/report/complete] failure alert skipped:", alert.reason);
+      }
+    } catch (alertError) {
+      console.error("[seo/report/complete] failure alert failed:", alertError);
     }
   }
 

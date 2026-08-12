@@ -23,6 +23,7 @@ export type OrgOverviewSeoReport = {
   id: string;
   state: string;
   stateLabel: string;
+  stateMessage: string | null;
   finishedAt: string | null;
   createdAt: string;
   actionCount: number;
@@ -241,7 +242,7 @@ export async function loadOrgOverview(
     supabase
       .from("dt_seo_reports")
       .select(
-        "id,state,finished_at,created_at,recipient_type,send_to_owner,owner_sent_at,payload",
+        "id,state,state_message,finished_at,created_at,recipient_type,send_to_owner,owner_sent_at,payload",
       )
       .eq("organisation_id", organisationId)
       .order("created_at", { ascending: false })
@@ -304,6 +305,7 @@ export async function loadOrgOverview(
       id: r.id,
       state: r.state,
       stateLabel: reportStateLabel(r.state),
+      stateMessage: (r as { state_message?: string | null }).state_message ?? null,
       finishedAt: r.finished_at,
       createdAt: r.created_at,
       actionCount: parsed.recommendations.length,
