@@ -13,8 +13,8 @@ const patchSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     role: z.string().trim().max(120).nullable().optional(),
-    promptTemplate: z.string().max(32_000).optional(),
-    promptAppend: z.string().max(32_000).nullable().optional(),
+    promptTemplate: z.string().max(120_000).optional(),
+    promptAppend: z.string().max(120_000).nullable().optional(),
     usesGlobalPrompt: z.boolean().optional(),
     quickActions: z.array(z.string().trim().min(1).max(200)).max(12).optional(),
     isEnabled: z.boolean().optional(),

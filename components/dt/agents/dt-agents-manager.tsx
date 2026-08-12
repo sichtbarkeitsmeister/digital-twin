@@ -477,6 +477,8 @@ export function DtAgentsManager(props: {
       if (!editValues.usesGlobalPrompt) {
         body.promptTemplate = editValues.prompt;
       }
+    } else if (editingAgent?.uses_global_prompt) {
+      // Survey personas keep the Avatar stub in prompt_template; content lives in append.
     } else {
       body.promptTemplate = editValues.prompt;
     }

@@ -31,6 +31,10 @@ export function DtAgentFormFields(props: {
   supportsGlobalSync?: boolean;
   /** Show additional instructions textarea (stacked on base prompt). */
   supportsAppend?: boolean;
+  /** Label for the append field (defaults to generic org-extra copy). */
+  appendLabel?: string;
+  /** Helper under the append field. */
+  appendHint?: string;
   /** Global template preview for synced mode / prefill on unsync. */
   globalPromptPreview?: string;
 }) {
@@ -43,6 +47,8 @@ export function DtAgentFormFields(props: {
     hideEnabled,
     supportsGlobalSync,
     supportsAppend,
+    appendLabel,
+    appendHint,
     globalPromptPreview,
   } = props;
   const inputClass =
@@ -153,15 +159,22 @@ export function DtAgentFormFields(props: {
       {supportsAppend ? (
         <label className="grid gap-1 text-sm">
           <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-            Zusätzliche Anweisungen (optional)
+            {appendLabel ?? "Zusätzliche Anweisungen (optional)"}
           </span>
           <Textarea
             value={values.promptAppend}
             disabled={disabled}
             onChange={(e) => onChange({ promptAppend: e.target.value })}
-            className="min-h-[100px] text-sm"
-            placeholder="Ergänzungen nur für diese Organisation — werden auf den Basis-Prompt gelegt."
+            className="min-h-[180px] text-sm"
+            placeholder={
+              appendHint
+                ? undefined
+                : "Ergänzungen nur für diese Organisation — werden auf den Basis-Prompt gelegt."
+            }
           />
+          {appendHint ? (
+            <p className="text-xs text-sbkm-ink-500 dark:text-white/40">{appendHint}</p>
+          ) : null}
         </label>
       ) : null}
 

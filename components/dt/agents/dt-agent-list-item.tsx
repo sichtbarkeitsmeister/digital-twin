@@ -246,10 +246,37 @@ export function DtAgentListItem(props: {
           onChange={props.onEditValuesChange}
           disabled={props.busy}
           supportsGlobalSync={agent.is_default}
-          supportsAppend={agent.is_default}
+          supportsAppend={
+            agent.is_default ||
+            agent.uses_global_prompt ||
+            Boolean(agent.prompt_append?.trim()) ||
+            Boolean(agent.source_survey_id)
+          }
+          hidePrompt={agent.uses_global_prompt && !agent.is_default}
+          promptNote={
+            agent.uses_global_prompt && !agent.is_default
+              ? "Basis-Verhalten kommt aus dem globalen DigitalTwin-Prompt. Der eigentliche Avatar-Text aus der Umfrage steht darunter."
+              : undefined
+          }
+          appendLabel={
+            agent.source_survey_id || (agent.uses_global_prompt && !agent.is_default)
+              ? "Avatar-Prompt (aus Umfrage)"
+              : undefined
+          }
+          appendHint={
+            agent.source_survey_id || (agent.uses_global_prompt && !agent.is_default)
+              ? "Das ist der beim Umwandeln erzeugte Persona-Teil. Er wird im Chat auf den globalen Prompt gelegt."
+              : undefined
+          }
           globalPromptPreview={props.globalPromptPreview}
           hideEnabled={props.alwaysOn}
         />
+        {agent.source_survey_id && !props.editValues.promptAppend.trim() ? (
+          <p className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
+            Kein Avatar-Prompt gespeichert. Bitte die Umfrage-Antwort erneut umwandeln
+            (bestehenden Agenten vorher löschen) oder den Text manuell einfügen.
+          </p>
+        ) : null}
         <div className="mt-4 grid gap-3">
           {props.canDirectlyEdit ? (
             <DtAgentSurveyCoverageCheck
