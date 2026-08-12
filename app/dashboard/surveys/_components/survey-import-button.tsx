@@ -11,6 +11,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  QUESTIONNAIRE_FILE_ACCEPT,
+  readQuestionnaireFileText,
+} from "@/lib/surveys/read-questionnaire-file-text";
 
 type PendingRawFile = { name: string; text: string };
 
@@ -51,9 +55,12 @@ export function SurveyImportButton() {
       return;
     }
     setError(null);
-    setStatus(null);
+    setStatus(
+      "Import läuft… Bei freien Word-Texten wertet die KI Fragen und Antworten aus (kann etwas dauern).",
+    );
     startTransition(async () => {
       const res = await importRawFilledQuestionnairesBatchAction({ items });
+      setStatus(null);
       if (!res.ok || !res.data?.results?.length) {
         setError(res.message);
         return;
@@ -97,11 +104,23 @@ export function SurveyImportButton() {
 
   async function addRawFiles(fileList: FileList | null) {
     if (!fileList?.length) return;
+    setError(null);
+    setStatus("Dateien werden gelesen…");
     const next: PendingRawFile[] = [];
+    const errors: string[] = [];
     for (const file of Array.from(fileList)) {
-      const text = await file.text();
-      next.push({ name: file.name, text });
+      try {
+        const text = await readQuestionnaireFileText(file);
+        next.push({ name: file.name, text });
+      } catch (e) {
+        errors.push(e instanceof Error ? e.message : `„${file.name}“ konnte nicht gelesen werden.`);
+      }
     }
+    setStatus(null);
+    if (errors.length > 0) {
+      setError(errors.join(" "));
+    }
+    if (next.length === 0) return;
     setFiles((prev) => {
       const byName = new Map(prev.map((f) => [f.name, f]));
       for (const f of next) byName.set(f.name, f);
@@ -163,10 +182,11 @@ export function SurveyImportButton() {
               {tab === "raw" ? (
                 <div className="grid gap-3">
                   <p className="text-sm text-muted-foreground">
-                    Mehrere Dateien möglich (z. B. Wunschkunde + separater Anbieter-Bogen).
-                    In einem Paste mehrere Bögen mit{" "}
-                    <code className="text-xs">=====</code> trennen — oder hintereinander
-                    einfügen, wenn beide mit „Wunschkunde…“ / „Anbieter…“ starten.
+                    <strong className="font-semibold text-foreground">Text hier einfügen</strong>{" "}
+                    (Strg+V) — kompletter Fragebogen aus Word oder E-Mail. Die KI erkennt Fragen und
+                    Antworten auch ohne „Antwort:“-Zeilen. Alternativ{" "}
+                    <code className="text-xs">.docx</code>/<code className="text-xs">.txt</code>{" "}
+                    laden (auch mehrere).
                   </p>
                   <Input
                     value={title}
@@ -177,8 +197,17 @@ export function SurveyImportButton() {
                   <Textarea
                     value={rawText}
                     disabled={isPending}
-                    placeholder={`Wunschkunde & Avatar\n5 Felder\n…\n\nAntwort: …\n\n=====\n\nAnbieter-Fragebogen\n…`}
-                    className="min-h-[220px] font-mono text-xs"
+                    placeholder={`Gesamten Fragebogen hier einfügen…
+
+📋 Positionierung
+Wie positioniert ihr euch?
+
+Wir sind …
+
+⚙️ Angebot
+Was bietet ihr an?
+…`}
+                    className="min-h-[280px] font-mono text-xs"
                     onChange={(e) => setRawText(e.target.value)}
                   />
                   <div className="flex flex-wrap items-center gap-2">
@@ -186,7 +215,7 @@ export function SurveyImportButton() {
                       ref={rawFileInputRef}
                       type="file"
                       multiple
-                      accept=".txt,.md,text/plain,text/markdown"
+                      accept={QUESTIONNAIRE_FILE_ACCEPT}
                       className="hidden"
                       onChange={(e) => {
                         const list = e.currentTarget.files;
@@ -202,7 +231,7 @@ export function SurveyImportButton() {
                       onClick={() => rawFileInputRef.current?.click()}
                     >
                       <FileUp className="mr-2 h-4 w-4" />
-                      Dateien laden (mehrere)
+                      Dateien laden (.docx / .txt)
                     </Button>
                     {files.length > 0 ? (
                       <span className="text-xs text-muted-foreground">
