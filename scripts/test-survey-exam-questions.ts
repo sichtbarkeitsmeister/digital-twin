@@ -76,7 +76,13 @@ assert.ok(questions.length >= 3);
 assert.ok(questions[0]?.factId, "first question should be tied to a survey fact");
 assert.ok(questions.some((q) => /aufmerksam geworden/i.test(q.question)));
 assert.ok(questions.some((q) => /Sorgen|Einwände|beschäftigt/i.test(q.question)));
-assert.ok(questions.some((q) => /wichtigsten|Priorität|Reihenfolge|sortieren/i.test(q.question)));
+assert.ok(
+  questions.some((q) =>
+    /wichtigsten|Priorität|Reihenfolge|sortieren|Anbieter aus|unbedingt stimmen/i.test(
+      q.question,
+    ),
+  ),
+);
 assert.ok(!questions.some((q) => /was steht bei dir bei/i.test(q.question)));
 // Warmup is skipped when a fact probe already covers the opening theme.
 assert.ok(
@@ -267,7 +273,7 @@ assert.ok(
   "Age slice must become its own question",
 );
 assert.ok(
-  packedQs.some((q) => /schwerpunkt/i.test(q.question)),
+  packedQs.some((q) => /schwerpunkt|fokus|besonders wichtig/i.test(q.question)),
   "Specializations must become their own question",
 );
 assert.ok(
@@ -804,6 +810,98 @@ assert.equal(
   contactQs.length,
   1,
   `Only one contact-path probe expected, got: ${contactQs.map((q) => q.question).join(" | ")}`,
+);
+
+// Dry questionnaire labels must become natural spoken probes (no “Zu „Feld“ …”)
+const dryFacts = extractSurveyFacts({
+  surveyTitle: "Dori",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_org",
+            type: "text" as const,
+            title: "Organisationsgröße Schulung",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_age_range",
+            type: "text" as const,
+            title: "Altersbereich Ansprechpartners",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_phrase",
+            type: "text" as const,
+            title: "Häufigste Formulierung beim ersten Kontakt — 1",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_role",
+            type: "ranking" as const,
+            title: "Funktion Schulungs-Ansprechpartners",
+            description: "",
+            required: false,
+            options: [
+              { id: "o1", label: "Einkauf" },
+              { id: "o2", label: "HR" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_org: "Mittelgroß (20–100 Mitarbeiter)",
+    f_age_range: "35–45 Jahre",
+    f_phrase: "Bekommen wir eine Unterweisung vor Ort?",
+    f_role: {
+      items: [
+        { kind: "preset", label: "Einkauf" },
+        { kind: "preset", label: "HR" },
+      ],
+      excludedPresets: [],
+    },
+  },
+  fieldQuestions: [],
+});
+const dryQs = buildSurveyExamQuestions(dryFacts.facts, {
+  audience: "persona",
+  maxQuestions: 16,
+});
+assert.ok(
+  dryQs.every((q) => !/[—–]/.test(q.question)),
+  "Persona probes must not use em/en dashes",
+);
+assert.ok(
+  dryQs.every((q) => !/zu\s*[„"]|trifft auf dich zu|erzähl mir kurz zu/i.test(q.question)),
+  `No questionnaire-meta wrappers, got: ${dryQs.map((q) => q.question).join(" | ")}`,
+);
+assert.ok(
+  dryQs.some((q) => /organisation|mitarbeiter|team|groß/i.test(q.question)),
+  "Org size becomes a natural size question",
+);
+assert.ok(
+  dryQs.some((q) => /wie alt bist du/i.test(q.question)),
+  "Altersbereich becomes age question",
+);
+assert.ok(
+  dryQs.some((q) => /erstes|kontakt aufnimmst|sagst du typischerweise/i.test(q.question)),
+  "Contact phrasing becomes a spoken question",
+);
+assert.ok(
+  dryQs.some((q) => /rolle|wichtigsten|aufgabe/i.test(q.question)),
+  "Role ranking becomes a natural priority question",
 );
 
 console.log("survey-exam-questions tests: ok");
