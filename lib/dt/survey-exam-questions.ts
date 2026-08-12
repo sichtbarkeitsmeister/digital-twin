@@ -54,11 +54,23 @@ function isCustomerProfileMetaTitle(title: string): boolean {
     /\bwunsch/.test(t) ||
     /\bideal(?:en|e|er|es)?\b/.test(t) ||
     /\btypische[rns]?\b/.test(t) ||
-    /\bkunden-?avatar\b/.test(t) ||
-    /\bdigitale[rn]?\s+kunden\b/.test(t) ||
+    /\b(?:kunden|patienten)-?avatar\b/.test(t) ||
+    /\bdigitale[rn]?\s+(?:kunden|patienten)\b/.test(t) ||
     /\bavatar-?name\b/.test(t) ||
+    /(?:wie\s+soll|name\s+des).{0,40}\bavatar\b/.test(t) ||
     /\bzielgruppe\b/.test(t) ||
     /\bpersona\b/.test(t)
+  );
+}
+
+/** Avatar naming / setup fields → ask the persona for their name instead. */
+function isAvatarNameField(title: string): boolean {
+  const t = stripDecorations(title).toLowerCase();
+  return (
+    /^(name des digitalen (?:kunden|patienten)-?avatars|avatar-?name)$/i.test(t) ||
+    /wie soll .{0,40}\bavatar\b.{0,20}heißen/.test(t) ||
+    /(?:kunden|patienten)-?avatar.{0,20}(heißen|name)/.test(t) ||
+    /name .{0,30}(?:kunden|patienten)-?avatar/.test(t)
   );
 }
 
@@ -477,7 +489,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     return "Erzähl mir doch kurz: Wer bist du, und was beschäftigt dich gerade?";
   }
 
-  if (/^(name des digitalen kunden-avatars|avatar-?name)$/i.test(raw)) {
+  if (isAvatarNameField(raw)) {
     return "Wie heißt du — und wie darf ich dich ansprechen?";
   }
 
@@ -638,6 +650,25 @@ function isCompanyOnlyFactForPersona(fact: SurveyFact): boolean {
   }
 
   if (/arbeitet .*\bam liebsten\b|\bam liebsten zusammen\b/.test(t)) {
+    return true;
+  }
+
+  // Firm ops / funnel metrics — not something to ask the Wunschkunde.
+  if (
+    /\binteressent/.test(t) &&
+    /(nicht zurück|nicht wahrgenommen|absage|no-?show|kein termin|nicht erschienen)/.test(t)
+  ) {
+    return true;
+  }
+  if (/(termin|gespräch).{0,40}nicht wahrgenommen|nicht zurückgerufen/.test(t)) {
+    return true;
+  }
+  // Staff observation about patients/customers (3rd person), not Du-discovery.
+  if (/woran merkt man\b/.test(t)) return true;
+  if (
+    /welche fragen stellen\b/.test(t) &&
+    /\b(patienten|kunden|interessenten|leute|menschen)\b/.test(t)
+  ) {
     return true;
   }
 

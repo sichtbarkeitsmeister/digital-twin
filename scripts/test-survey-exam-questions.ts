@@ -589,4 +589,108 @@ assert.ok(declutterQs.some((q) => /preisspanne bewegst du dich/i.test(q.question
 assert.ok(declutterQs.some((q) => /wer bist du/i.test(q.question)));
 assert.ok(!declutterQs.some((q) => /fragebogen/i.test(q.question)));
 
+// Heilpraktiker-style: company funnel / avatar setup must not stay as meta probes
+const heilFacts = extractSurveyFacts({
+  surveyTitle: "Heilpraktiker",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_avatar",
+            type: "text" as const,
+            title: "Wie soll der digitale Patienten-Avatar heißen?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_noshow",
+            type: "text" as const,
+            title:
+              "Falls bekannt – warum haben Interessenten nach erstem Kontakt nicht zurückgerufen oder den Termin nicht wahrgenommen?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_notice",
+            type: "text" as const,
+            title:
+              "Woran merkt man, dass Patienten bereits online recherchiert haben? Was erwähnen oder fragen sie?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_unseen",
+            type: "text" as const,
+            title:
+              "Welche Fragen stellen Patienten, die die Website offensichtlich noch NICHT gesehen haben?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_content",
+            type: "text" as const,
+            title: "Welche Art von Inhalten hast du online gefunden, bevor du die Praxis kontaktiert hast?",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_avatar: "Heike",
+    f_noshow: "Unsicherheit und Preis",
+    f_notice: "Sie nennen Symptome und Foren",
+    f_unseen: "Öffnungszeiten und Anfahrt",
+    f_content: "Blogartikel zu Erschöpfung",
+  },
+  fieldQuestions: [],
+});
+const heilPersonaQs = buildSurveyExamQuestions(heilFacts.facts, {
+  audience: "persona",
+  maxQuestions: 16,
+});
+assert.ok(
+  heilPersonaQs.some((q) => /wie heißt du/i.test(q.question)),
+  "Patienten-Avatar name → Du-Anrede",
+);
+assert.ok(
+  !heilPersonaQs.some((q) => /patienten-?avatar heißen|digitale patienten-avatar/i.test(q.question)),
+  "Meta avatar-setup wording must not appear in Persona-Check",
+);
+assert.ok(
+  !heilPersonaQs.some((q) => /interessenten|nicht zurückgerufen|nicht wahrgenommen/i.test(q.question)),
+  "No-Show / Interessenten-Fragen gehören nicht in den Persona-Check",
+);
+assert.ok(
+  !heilPersonaQs.some((q) => /woran merkt man|welche fragen stellen patienten/i.test(q.question)),
+  "Staff-observation questions belong to Firmen-Check",
+);
+assert.ok(
+  heilPersonaQs.some((q) => /inhalten|online gefunden/i.test(q.question)),
+  "Echte Du-Frage zur Online-Recherche bleibt",
+);
+
+const heilCompanyQs = buildSurveyExamQuestions(heilFacts.facts, {
+  audience: "company",
+  maxQuestions: 16,
+});
+assert.ok(
+  heilCompanyQs.some((q) => /interessenten|nicht zurückgerufen|nicht wahrgenommen/i.test(q.question)),
+  "No-Show-Frage bleibt im Firmen-Check",
+);
+assert.ok(
+  heilCompanyQs.some((q) => /woran merkt man|fragen stellen patienten/i.test(q.question)),
+  "Beobachtungsfragen bleiben im Firmen-Check",
+);
+
 console.log("survey-exam-questions tests: ok");
