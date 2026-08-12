@@ -39,6 +39,7 @@
     "dt:n8n:seo-report": "node scripts/clone-dt-v2-seo-report-from-legacy.mjs",
     "dt:n8n:monthly-collect": "node scripts/deploy-dt-v2-monthly-analytics-collect.mjs",
     "dt:n8n:monthly-scheduler": "node scripts/deploy-dt-v2-monthly-analytics-scheduled.mjs",
+    "dt:n8n:seo-report-scheduler": "node scripts/deploy-dt-v2-seo-report-scheduled.mjs",
     "dt:n8n:gsc-url-inspection": "node scripts/deploy-dt-v2-gsc-url-inspection.mjs",
     "test:url-index-status": "tsx scripts/test-url-index-status.ts"
   },

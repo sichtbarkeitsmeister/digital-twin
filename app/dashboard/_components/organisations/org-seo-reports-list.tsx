@@ -25,6 +25,12 @@ function reportStateLabel(state: string): string {
   }
 }
 
+function reportBadgeVariant(state: string): "secondary" | "destructive" | "outline" {
+  if (state === "done") return "secondary";
+  if (state === "error" || state === "cancelled") return "destructive";
+  return "outline";
+}
+
 export function OrgSeoReportsList(props: {
   organisationId: string;
   onOpenReport: (reportId: string) => void;
@@ -59,9 +65,7 @@ export function OrgSeoReportsList(props: {
     void load();
   }, [load]);
 
-  const visible = reports.filter(
-    (r) => r.id !== props.excludeReportId && r.state === "done",
-  );
+  const visible = reports.filter((r) => r.id !== props.excludeReportId);
 
   if (loading) {
     return <p className="text-xs text-secondary">Weitere Reports werden geladen …</p>;
@@ -89,21 +93,28 @@ export function OrgSeoReportsList(props: {
                 <span className="text-sm font-medium text-primary">
                   {formatOrgDate(report.finished_at ?? report.created_at)}
                 </span>
-                <Badge variant="secondary" className="text-[10px]">
+                <Badge variant={reportBadgeVariant(report.state)} className="text-[10px]">
                   {reportStateLabel(report.state)}
                 </Badge>
               </div>
+              {report.state === "error" && report.state_message ? (
+                <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                  {report.state_message}
+                </p>
+              ) : null}
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-8 shrink-0 px-2 text-xs"
-              onClick={() => props.onOpenReport(report.id)}
-            >
-              Ansehen
-              <ArrowRight className="size-3.5" />
-            </Button>
+            {report.state === "done" || report.state === "error" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 gap-1"
+                onClick={() => props.onOpenReport(report.id)}
+              >
+                {report.state === "error" ? "Details" : "Ansehen"}
+                <ArrowRight className="size-3.5" />
+              </Button>
+            ) : null}
           </li>
         ))}
       </ul>

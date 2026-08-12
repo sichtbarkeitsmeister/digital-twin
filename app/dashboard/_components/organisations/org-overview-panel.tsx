@@ -363,7 +363,12 @@ export function OrgOverviewPanel(props: {
                           <span className="text-sm font-medium text-primary">Letzter Report</span>
                           <Badge
                             variant={
-                              overview.seoReport.state === "done" ? "secondary" : "outline"
+                              overview.seoReport.state === "done"
+                                ? "secondary"
+                                : overview.seoReport.state === "error" ||
+                                    overview.seoReport.state === "cancelled"
+                                  ? "destructive"
+                                  : "outline"
                             }
                           >
                             {overview.seoReport.stateLabel}
@@ -382,8 +387,15 @@ export function OrgOverviewPanel(props: {
                             {overview.seoReport.ownerDelivery.label}
                           </p>
                         ) : null}
+                        {overview.seoReport.state === "error" && overview.seoReport.stateMessage ? (
+                          <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                            {overview.seoReport.stateMessage}
+                          </p>
+                        ) : null}
                       </div>
-                      {overview.seoReport.state === "done" && canViewSeoReports ? (
+                      {(overview.seoReport.state === "done" ||
+                        overview.seoReport.state === "error") &&
+                      canViewSeoReports ? (
                         <Button
                           type="button"
                           size="sm"
@@ -391,7 +403,9 @@ export function OrgOverviewPanel(props: {
                           className="h-8 shrink-0 transition-transform duration-150 active:scale-[0.98]"
                           onClick={() => setReportModalId(overview.seoReport!.id)}
                         >
-                          Report ansehen
+                          {overview.seoReport.state === "error"
+                            ? "Fehlerdetails ansehen"
+                            : "Report ansehen"}
                           <ArrowRight className="size-3.5" />
                         </Button>
                       ) : null}

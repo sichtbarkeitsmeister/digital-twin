@@ -9,6 +9,7 @@ Maps the production workflow **Sichtbarkeitsmeister SEO-Report** (`6voT3Eu7jFETc
 | **DT v2 - SEO Report** | `POST /webhook/dt-seo-report` `{ reportId }` | Clone of legacy + patches |
 | **DT v2 - Monthly Analytics** | `POST /webhook/dt-monthly-analytics` `{ organisationId }` | GSC + GA4 nodes (legacy credentials) |
 | **DT v2 - Monthly Analytics Scheduler** | Cron `0 3 1 * *` | Lists orgs → triggers collect webhook |
+| **DT v2 - SEO Report Scheduler** | Cron `0 4 1 * *` | Queues monthly SEO reports for all ready orgs |
 
 Legacy workflow is **not modified**.
 
@@ -21,6 +22,7 @@ Legacy workflow is **not modified**.
 | `GET /api/dt/internal/seo-orgs` | All `seo_enabled` orgs (scheduler) |
 | `GET /api/dt/internal/seo-org/[orgId]/config` | Per-org config for monthly job |
 | `POST /api/dt/internal/seo-monthly-stats` | Upsert `dt_seo_monthly_stats` |
+| `POST /api/dt/internal/seo-reports/queue` | Queue monthly SEO report(s); body `{}` = all ready orgs |
 
 All internal routes: header `X-DT-Webhook-Secret: $DT_INTERNAL_WEBHOOK_SECRET`.
 
@@ -36,7 +38,7 @@ All internal routes: header `X-DT-Webhook-Secret: $DT_INTERNAL_WEBHOOK_SECRET`.
 | HTTP Request → OLD `seo_cache` | **Removed** (payload saved on `done` only) |
 | SEO Cache: Status Done | **DT Complete Done** → `/complete` + tasks |
 | SEO Cache: Status Error | **DT Complete Error** |
-| Monatlicher Trigger | **Removed** (use portal button or scheduler) |
+| Monatlicher Trigger | **DT v2 - SEO Report Scheduler** (`npm run dt:n8n:seo-report-scheduler`) |
 
 ## Deploy
 
@@ -46,6 +48,7 @@ npm run dt:n8n:chat               # DT v2 - Chat: Handler-Code + Werkzeuge
 npm run dt:n8n:seo-report
 npm run dt:n8n:monthly-collect
 npm run dt:n8n:monthly-scheduler
+npm run dt:n8n:seo-report-scheduler
 ```
 
 **GSC URL Inspection (Stichprobe):** Workflow `DT v2 - GSC URL Inspection`, Webhook

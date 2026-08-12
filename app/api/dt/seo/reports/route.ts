@@ -41,7 +41,7 @@ export async function GET(req: Request) {
   const { data, error } = await auth.supabase
     .from("dt_seo_reports")
     .select(
-      "id,organisation_id,recipient_type,recipient_email,send_to_owner,owner_sent_at,state,state_message,pdf_path,followup_due_at,started_at,finished_at,created_at,updated_at",
+      "id,organisation_id,recipient_type,recipient_email,send_to_owner,owner_sent_at,state,state_message,pdf_path,followup_due_at,started_at,finished_at,created_at,updated_at,trigger_source",
     )
     .eq("organisation_id", parsed.data.org)
     .order("created_at", { ascending: false })

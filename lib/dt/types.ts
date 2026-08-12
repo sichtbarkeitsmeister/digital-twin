@@ -85,6 +85,8 @@ export type DtSeoReportRow = {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+  /** manual | monthly_scheduler | null (legacy) */
+  trigger_source?: string | null;
 };
 
 export type DtSitePageRow = {
