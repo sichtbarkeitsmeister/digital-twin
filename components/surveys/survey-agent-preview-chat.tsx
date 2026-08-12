@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ClipboardList, Loader2, MessageCircle, Send } from "lucide-react";
+import { Check, ClipboardList, Loader2, MessageCircle, Send, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,6 +84,16 @@ export function SurveyAgentPreviewChat(props: {
     setExamQuestions((prev) =>
       prev.map((q) => (q.id === id ? { ...q, question } : q)),
     );
+  }, []);
+
+  const removeExamQuestion = useCallback((id: string) => {
+    setExamQuestions((prev) => prev.filter((q) => q.id !== id));
+    setSentExamIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }, []);
 
   const sendContent = useCallback(
@@ -182,8 +192,8 @@ export function SurveyAgentPreviewChat(props: {
           Probe-Chat / Prüfung mit {props.agentName}
         </CardTitle>
         <CardDescription>
-          Fragebogen-Fragen als Prüfskript — Text beliebig anpassen, dann stellen. Antworten
-          werden nicht gespeichert; nutzt den aktuellen Persona-Prompt.
+          Fragebogen-Fragen als Prüfskript. Text anpassen, unpassende Fragen löschen, dann
+          stellen. Antworten werden nicht gespeichert; nutzt den aktuellen Persona-Prompt.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -250,16 +260,31 @@ export function SurveyAgentPreviewChat(props: {
                         className="min-h-[64px] resize-y text-sm"
                       />
                     </label>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={busy || props.disabled || !q.question.trim()}
-                      onClick={() => void sendContent(q.question, q.id, q.expectedHint)}
-                      className="shrink-0 gap-1.5 self-stretch sm:self-end"
-                    >
-                      <Send className="size-3.5" aria-hidden />
-                      Stellen
-                    </Button>
+                    <div className="flex shrink-0 flex-row gap-2 self-stretch sm:flex-col sm:self-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || props.disabled || !q.question.trim()}
+                        onClick={() => void sendContent(q.question, q.id, q.expectedHint)}
+                        className="gap-1.5"
+                      >
+                        <Send className="size-3.5" aria-hidden />
+                        Stellen
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || props.disabled}
+                        onClick={() => removeExamQuestion(q.id)}
+                        aria-label={`Frage ${index + 1} löschen`}
+                        title="Frage entfernen"
+                        className="gap-1.5 border-red-300/80 text-red-700 hover:bg-red-50 hover:text-red-800 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/40"
+                      >
+                        <Trash2 className="size-3.5" aria-hidden />
+                        Löschen
+                      </Button>
+                    </div>
                   </li>
                 ))}
                 {openExamQuestions.length > 8 ? (
@@ -270,7 +295,8 @@ export function SurveyAgentPreviewChat(props: {
               </ul>
             ) : examQuestions.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Keine Prüfungsfragen aus der Umfrage abgeleitet.
+                Keine Prüfungsfragen mehr. Seite neu laden, um das Skript aus dem Fragebogen
+                zurückzusetzen.
               </p>
             ) : null}
           </div>
