@@ -63,34 +63,191 @@ function isCustomerProfileMetaTitle(title: string): boolean {
 }
 
 /**
- * Rewrite 3rd-person “Wunschkunde/ideal customer” wording into a Du-question
- * for interviewing the persona avatar.
+ * Rewrite 3rd-person / formal “Wunschkunde” wording into a natural Du-question.
+ * Also repairs common plural/formal verb leftovers (“haben du” → “hast du”).
  */
-function rewriteCustomerThirdPersonToSecondPerson(question: string): string {
+export function rewriteCustomerThirdPersonToSecondPerson(question: string): string {
   let q = question.trim();
 
-  q = q.replace(/\bWie nehmen\b/gi, "Wie nimmst");
-  q = q.replace(/\bWie kommen\b/gi, "Wie kommst");
-  q = q.replace(/\bWie wählen\b/gi, "Wie wählst");
-  q = q.replace(/\bWie entscheiden\b/gi, "Wie entscheidest");
-  q = q.replace(/\bWie suchen\b/gi, "Wie suchst");
-  q = q.replace(/\bWorauf legen\b/gi, "Worauf legst");
-  q = q.replace(/\bWelche Wege nutzen\b/gi, "Welche Wege nutzt");
-  q = q.replace(/\bWas erwarten\b/gi, "Was erwartest");
-  q = q.replace(/\bWas brauchen\b/gi, "Was brauchst");
-
+  // Subject phrases → du (before verb rewrites that key off "du")
   q = q.replace(/\bWunsch-?Zahnärzt(?:e|en|in|innen)?\b/gi, "du");
   q = q.replace(/\bWunsch-?Kund(?:e|en|in|innen)?\b/gi, "du");
   q = q.replace(/\bWunsch-?[\wäöüÄÖÜß-]+\b/gi, "du");
   q = q.replace(/\bideal(?:en|e|er|es)?\s+Kund(?:e|en|in|innen)?\b/gi, "du");
   q = q.replace(/\bdie\s+meisten\s+Wunsch[\w-]*\b/gi, "du");
   q = q.replace(/\btypische\s+Wunsch[\w-]*\b/gi, "du");
+  q = q.replace(/\bdie\s+meisten\s+(?:Kund(?:en|innen)|Patient(?:en|innen))\b/gi, "du");
+  q = q.replace(/\btypische[rns]?\s+(?:Kund(?:e|en|in|innen)|Patient(?:en|in|innen))\b/gi, "du");
+
+  // Formal Sie/Ihr → du/dein (survey copy often mixes register)
+  q = q.replace(/\bIhnen\b/g, "dir");
+  q = q.replace(/\bIhre[rnms]?\b/g, (m) => {
+    const map: Record<string, string> = {
+      Ihre: "deine",
+      Ihrer: "deiner",
+      Ihrem: "deinem",
+      Ihren: "deinen",
+      Ihres: "deines",
+    };
+    return map[m] ?? "deine";
+  });
+  q = q.replace(/\bSie\b/g, "du");
+  q = q.replace(/\bihre[rnms]?\b/gi, (m) => {
+    const lower = m.toLowerCase();
+    const map: Record<string, string> = {
+      ihre: "deine",
+      ihrer: "deiner",
+      ihrem: "deinem",
+      ihren: "deinen",
+      ihres: "deines",
+    };
+    return map[lower] ?? "deine";
+  });
+
+  // Common question openings with plural/3rd-person verb before subject was rewritten
+  q = q.replace(/\bWie nehmen\b/gi, "Wie nimmst");
+  q = q.replace(/\bWie kommen\b/gi, "Wie kommst");
+  q = q.replace(/\bWie wählen\b/gi, "Wie wählst");
+  q = q.replace(/\bWie entscheiden\b/gi, "Wie entscheidest");
+  q = q.replace(/\bWie suchen\b/gi, "Wie suchst");
+  q = q.replace(/\bWie fühlen\b/gi, "Wie fühlst");
+  q = q.replace(/\bWie beschreiben\b/gi, "Wie beschreibst");
+  q = q.replace(/\bWie erzählen\b/gi, "Wie erzählst");
+  q = q.replace(/\bWorauf legen\b/gi, "Worauf legst");
+  q = q.replace(/\bWelche Wege nutzen\b/gi, "Welche Wege nutzt");
+  q = q.replace(/\bWas erwarten\b/gi, "Was erwartest");
+  q = q.replace(/\bWas brauchen\b/gi, "Was brauchst");
+  q = q.replace(/\bWas erzählen\b/gi, "Was erzählst");
+  q = q.replace(/\bWas beschreiben\b/gi, "Was beschreibst");
+  q = q.replace(/\bWelche ([^?]{3,80}?)\bhaben\b/gi, "Welche $1hast");
+
+  q = fixGermanDuVerbAgreement(q);
 
   q = q.replace(/\bdu\s+du\b/gi, "du");
   q = q.replace(/\bzu\s+du\b/gi, "zu dir");
   q = q.replace(/\bvon\s+du\b/gi, "von dir");
   q = q.replace(/\bbei\s+du\b/gi, "bei dir");
+  q = q.replace(/\büber\s+sie\b/gi, "über dich");
+  q = q.replace(/\bmit\s+sie\b/gi, "mit dir");
   q = q.replace(/\s+/g, " ").trim();
+
+  return q;
+}
+
+/**
+ * Repair leftover plural/formal verbs next to “du”
+ * (e.g. “haben du”, “erzählen du”, “du haben”).
+ */
+export function fixGermanDuVerbAgreement(text: string): string {
+  let q = text;
+
+  // If we already address “du”, normalize leftover formal/3rd-person possessives.
+  if (/\bdu\b/i.test(q)) {
+    q = q.replace(/\bIhnen\b/g, "dir");
+    q = q.replace(/\bIhre[rnms]?\b/g, (m) => {
+      const map: Record<string, string> = {
+        Ihre: "deine",
+        Ihrer: "deiner",
+        Ihrem: "deinem",
+        Ihren: "deinen",
+        Ihres: "deines",
+      };
+      return map[m] ?? "deine";
+    });
+    q = q.replace(/\bihre[rnms]?\b/gi, (m) => {
+      const lower = m.toLowerCase();
+      const map: Record<string, string> = {
+        ihre: "deine",
+        ihrer: "deiner",
+        ihrem: "deinem",
+        ihren: "deinen",
+        ihres: "deines",
+      };
+      return map[lower] ?? "deine";
+    });
+    q = q.replace(/\büber\s+sie\b/gi, "über dich");
+    q = q.replace(/\bmit\s+sie\b/gi, "mit dir");
+  }
+
+  const verbMap: Array<[RegExp, string]> = [
+    [/\bhaben\s+du\b/gi, "hast du"],
+    [/\bdu\s+haben\b/gi, "du hast"],
+    [/\bsind\s+du\b/gi, "bist du"],
+    [/\bdu\s+sind\b/gi, "du bist"],
+    [/\bist\s+du\b/gi, "bist du"],
+    [/\berzählen\s+du\b/gi, "erzählst du"],
+    [/\bdu\s+erzählen\b/gi, "du erzählst"],
+    [/\bbeschreiben\s+du\b/gi, "beschreibst du"],
+    [/\bdu\s+beschreiben\b/gi, "du beschreibst"],
+    [/\bmachen\s+du\b/gi, "machst du"],
+    [/\bdu\s+machen\b/gi, "du machst"],
+    [/\bnehmen\s+du\b/gi, "nimmst du"],
+    [/\bdu\s+nehmen\b/gi, "du nimmst"],
+    [/\bkommen\s+du\b/gi, "kommst du"],
+    [/\bdu\s+kommen\b/gi, "du kommst"],
+    [/\bsuchen\s+du\b/gi, "suchst du"],
+    [/\bdu\s+suchen\b/gi, "du suchst"],
+    [/\bwählen\s+du\b/gi, "wählst du"],
+    [/\bdu\s+wählen\b/gi, "du wählst"],
+    [/\bfühlen\s+du\b/gi, "fühlst du"],
+    [/\bdu\s+fühlen\b/gi, "du fühlst"],
+    [/\bsehen\s+du\b/gi, "siehst du"],
+    [/\bdu\s+sehen\b/gi, "du siehst"],
+    [/\bfinden\s+du\b/gi, "findest du"],
+    [/\bdu\s+finden\b/gi, "du findest"],
+    [/\bnutzen\s+du\b/gi, "nutzt du"],
+    [/\bdu\s+nutzen\b/gi, "du nutzt"],
+    [/\blegen\s+du\b/gi, "legst du"],
+    [/\bdu\s+legen\b/gi, "du legst"],
+    [/\bstehen\s+du\b/gi, "stehst du"],
+    [/\bdu\s+stehen\b/gi, "du stehst"],
+    [/\bgehen\s+du\b/gi, "gehst du"],
+    [/\bdu\s+gehen\b/gi, "du gehst"],
+    [/\bleben\s+du\b/gi, "lebst du"],
+    [/\bdu\s+leben\b/gi, "du lebst"],
+    [/\bdenken\s+du\b/gi, "denkst du"],
+    [/\bdu\s+denken\b/gi, "du denkst"],
+    [/\bwissen\s+du\b/gi, "weißt du"],
+    [/\bdu\s+wissen\b/gi, "du weißt"],
+    [/\bkennen\s+du\b/gi, "kennst du"],
+    [/\bdu\s+kennen\b/gi, "du kennst"],
+    [/\bkönnen\s+du\b/gi, "kannst du"],
+    [/\bdu\s+können\b/gi, "du kannst"],
+    [/\bmüssen\s+du\b/gi, "musst du"],
+    [/\bdu\s+müssen\b/gi, "du musst"],
+    [/\bwollen\s+du\b/gi, "willst du"],
+    [/\bdu\s+wollen\b/gi, "du willst"],
+    [/\bsollen\s+du\b/gi, "sollst du"],
+    [/\bdu\s+sollen\b/gi, "du sollst"],
+    [/\bwerden\s+du\b/gi, "wirst du"],
+    [/\bdu\s+werden\b/gi, "du wirst"],
+    [/\berwarten\s+du\b/gi, "erwartest du"],
+    [/\bdu\s+erwarten\b/gi, "du erwartest"],
+    [/\bbrauchen\s+du\b/gi, "brauchst du"],
+    [/\bdu\s+brauchen\b/gi, "du brauchst"],
+    [/\bentscheiden\s+du\b/gi, "entscheidest du"],
+    [/\bdu\s+entscheiden\b/gi, "du entscheidest"],
+    [/\barbeiten\s+du\b/gi, "arbeitest du"],
+    [/\bdu\s+arbeiten\b/gi, "du arbeitest"],
+    // “beschreiben sie es” leftovers after Sie→du
+    [/\bbeschreiben\s+du\b/gi, "beschreibst du"],
+    [/\berzählen\s+sie\b/gi, "erzählst du"],
+    [/\bbeschreiben\s+sie\b/gi, "beschreibst du"],
+  ];
+
+  for (const [pattern, replacement] of verbMap) {
+    q = q.replace(pattern, replacement);
+  }
+
+  // Generic weak-verb fallback: “…en du” → “…st du” (erzählen→erzählst already covered;
+  // catches e.g. “melden du”, “planen du”)
+  q = q.replace(/\b([a-zäöüß]{3,})en\s+du\b/gi, (_m, stem: string) => {
+    const s = String(stem);
+    // Avoid mangling already-correct or irregular forms we didn't map
+    if (/^(sei|werd|hab|k[oö]nn|m[uü]ss|woll|soll|wiss)$/i.test(s)) return `${s}en du`;
+    if (/[td]$/i.test(s)) return `${s}est du`;
+    return `${s}st du`;
+  });
 
   return q;
 }
@@ -113,11 +270,17 @@ function shortTopic(topic: string): string {
 
 function softenExistingQuestion(raw: string): string {
   let q = raw.replace(/\s+/g, " ").trim().replace(/[?？]+$/g, "");
-  // Drop exam-speak that makes questions sound like a checklist.
+  // Drop exam-speak that makes questions sound like a checklist / meta.
   q = q.replace(/\s*[—–-]\s*bitte möglichst konkret\.?$/i, "");
   q = q.replace(/\s*bitte möglichst konkret\.?$/i, "");
   q = q.replace(/\s*und wie lautet die komplette Reihenfolge\.?$/i, "");
   q = q.replace(/\s*was steht bei dir bei\s*[„"][^„"]+[“"]\s*an erster Stelle/gi, "");
+  q = q.replace(/\s*[—–-]\s*bitte mit den Angaben aus dem Fragebogen\.?$/i, "");
+  q = q.replace(/\s*bitte mit den Angaben aus dem Fragebogen\.?$/i, "");
+  q = q.replace(/\s*aus dem Fragebogen\.?/gi, "");
+  q = q.replace(/\s*laut Fragebogen\.?/gi, "");
+  q = fixGermanDuVerbAgreement(q);
+  q = q.replace(/\s+/g, " ").trim();
   if (!q || q.length < 8) return `${raw.replace(/[?？]+$/g, "")}?`;
   return `${q}?`;
 }
@@ -266,7 +429,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
   const hay = `${raw} ${fact.value}`;
   if (!raw) {
-    return "Was beschreibt dich und deine Situation — bitte mit den konkreten Angaben?";
+    return "Erzähl mir konkret, wer du bist und was dich in deiner Situation ausmacht.";
   }
 
   if (/^(name des digitalen kunden-avatars|avatar-?name)$/i.test(raw)) {
@@ -295,7 +458,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   }
 
   if (/schwerpunkt/i.test(raw)) {
-    return `Welche Schwerpunkte sind bei dir zentral — laut „${shortTopic(raw)}"?`;
+    return `Welche Schwerpunkte sind bei dir zentral — bezogen auf „${shortTopic(raw)}"?`;
   }
 
   if (/einzugsgebiet|region|standort|gebiet/i.test(raw)) {
@@ -318,16 +481,23 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     return `Welches Budget bzw. welche Größenordnung gilt bei dir („${shortTopic(raw)}")?`;
   }
 
-  // Description / bio fields: ask for the questionnaire situation, not a dental checklist.
+  if (
+    /berufs|lebenssituation|lebenslage/i.test(raw) &&
+    !/erzählen|beschreiben|erstgespräch|erzähl/i.test(raw)
+  ) {
+    return "Welche Berufs- oder Lebenssituation hast du typischerweise?";
+  }
+
+  // Description / bio fields: in-character, no meta “Fragebogen” wording.
   if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/i.test(raw) || /ideal.*wunsch/i.test(raw)) {
-    return "Was beschreibt dich und deine Situation konkret — bitte mit den Angaben aus dem Fragebogen?";
+    return "Erzähl mir konkret, wer du bist und was dich in deiner Situation ausmacht.";
   }
 
   if (
     looksLikeQuestion(raw) &&
     /\b(du|dir|dich|dein|deine|deiner|deinem|deinen)\b/i.test(raw)
   ) {
-    return softenExistingQuestion(raw);
+    return softenExistingQuestion(fixGermanDuVerbAgreement(raw));
   }
 
   if (looksLikeQuestion(raw) && isCustomerProfileMetaTitle(raw)) {
@@ -335,7 +505,11 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   }
 
   if (looksLikeQuestion(raw) && !isCustomerProfileMetaTitle(raw)) {
-    return softenExistingQuestion(raw);
+    // Still may be 3rd-person customer copy without “Wunsch…” in the title.
+    if (/\b(kund|patient|sie|ihre|haben|erzählen|beschreiben)\b/i.test(raw)) {
+      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
+    }
+    return softenExistingQuestion(fixGermanDuVerbAgreement(raw));
   }
 
   if (
@@ -366,7 +540,7 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   if (isCustomerProfileMetaTitle(raw)) {
     const topic = topicFromCustomerMetaTitle(raw);
     if (!topic || topic.length < 3) {
-      return "Was beschreibt dich und deine Situation — bitte möglichst konkret?";
+      return "Erzähl mir konkret, wer du bist und was dich in deiner Situation ausmacht.";
     }
     return `Zu „${shortTopic(topic)}": Was trifft auf dich zu — bitte möglichst konkret?`;
   }
