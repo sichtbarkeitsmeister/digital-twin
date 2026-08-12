@@ -60,7 +60,10 @@ const facts = extractSurveyFacts({
 
 const questions = buildSurveyExamQuestions(facts.facts, { maxQuestions: 6 });
 assert.ok(questions.length >= 2);
-assert.ok(questions.some((q) => /Sorgen/i.test(q.question)));
+assert.ok(
+  questions.some((q) => /beschäftigt dich|Sorgen|erzählen/i.test(q.question)),
+  "Worry/pain fields should become a natural sales discovery probe",
+);
 assert.ok(questions[0]?.factId, "fact probes come before warmups");
 assert.ok(questions.some((q) => q.id.startsWith("warmup_")));
 

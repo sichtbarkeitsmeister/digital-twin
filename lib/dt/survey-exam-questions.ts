@@ -12,12 +12,12 @@ export type SurveyExamQuestion = {
   kind: SurveyFact["kind"];
 };
 
-/** Soft openers last — fact probes come first so Testing verifies questionnaire coverage. */
+/** Soft openers last — fact probes first. Tone: company employee talking to a prospect. */
 const PERSONA_WARMUP: Array<{ id: string; question: string }> = [
   {
     id: "warmup_pain",
     question:
-      "Was beschäftigt dich gerade am meisten — und was davon würdest du einem Anbieter als Erstes erzählen?",
+      "Was beschäftigt dich gerade am meisten — und worüber würdest du mit uns zuerst sprechen wollen?",
   },
 ];
 
@@ -63,23 +63,45 @@ function isCustomerProfileMetaTitle(title: string): boolean {
 }
 
 /**
- * Rewrite 3rd-person / formal “Wunschkunde” wording into a natural Du-question.
- * Also repairs common plural/formal verb leftovers (“haben du” → “hast du”).
+ * Rewrite 3rd-person / formal “Wunschkunde” wording into a natural Du-question
+ * as if a company employee is getting to know a prospect.
  */
 export function rewriteCustomerThirdPersonToSecondPerson(question: string): string {
   let q = question.trim();
 
-  // Subject phrases → du (before verb rewrites that key off "du")
+  // Multi-word subject phrases first (avoids “diese du”)
+  q = q.replace(/\bdiese\s+Wunsch-?[\wäöüÄÖÜß-]+\b/gi, "du");
+  q = q.replace(/\bdieser\s+Wunsch-?[\wäöüÄÖÜß-]+\b/gi, "du");
+  q = q.replace(/\bdieses\s+Wunsch-?[\wäöüÄÖÜß-]+\b/gi, "du");
+  q = q.replace(/\bdie\s+Wunsch-?[\wäöüÄÖÜß-]+\b/gi, "du");
+  q = q.replace(/\bder\s+Wunsch-?[\wäöüÄÖÜß-]+\b/gi, "du");
+  q = q.replace(/\bden\s+Wunsch-?[\wäöüÄÖÜß-]+\b/gi, "dich");
+  q = q.replace(/\bdem\s+Wunsch-?[\wäöüÄÖÜß-]+\b/gi, "dir");
+  q = q.replace(
+    /\bdiese\s+(?:Kund(?:en|innen)|Patient(?:en|innen)|Personen|Leute|Menschen)\b/gi,
+    "du",
+  );
+  q = q.replace(/\bdie\s+(?:Personen|Leute|Menschen)\b/gi, "du");
+  q = q.replace(/\bdieser\s+Person\b/gi, "dir");
+  q = q.replace(/\bdiese\s+Person\b/gi, "du");
+  q = q.replace(/\bdie\s+Person\b/gi, "du");
+
   q = q.replace(/\bWunsch-?Zahnärzt(?:e|en|in|innen)?\b/gi, "du");
   q = q.replace(/\bWunsch-?Kund(?:e|en|in|innen)?\b/gi, "du");
   q = q.replace(/\bWunsch-?[\wäöüÄÖÜß-]+\b/gi, "du");
   q = q.replace(/\bideal(?:en|e|er|es)?\s+Kund(?:e|en|in|innen)?\b/gi, "du");
   q = q.replace(/\bdie\s+meisten\s+Wunsch[\w-]*\b/gi, "du");
   q = q.replace(/\btypische\s+Wunsch[\w-]*\b/gi, "du");
-  q = q.replace(/\bdie\s+meisten\s+(?:Kund(?:en|innen)|Patient(?:en|innen))\b/gi, "du");
-  q = q.replace(/\btypische[rns]?\s+(?:Kund(?:e|en|in|innen)|Patient(?:en|in|innen))\b/gi, "du");
+  q = q.replace(/\bdie\s+meisten\s+(?:Kund(?:en|innen)|Patient(?:en|innen)|Personen)\b/gi, "du");
+  q = q.replace(
+    /\btypische[rns]?\s+(?:Kund(?:e|en|in|innen)|Patient(?:en|in|innen)|Personen)\b/gi,
+    "du",
+  );
 
-  // Formal Sie/Ihr → du/dein (survey copy often mixes register)
+  // Leftover determiners before du (“diese du”, “die du”)
+  q = q.replace(/\b(?:diese[rns]?|jene[rns]?|solche[rns]?|die|der|das)\s+du\b/gi, "du");
+
+  // Formal Sie/Ihr → du/dein
   q = q.replace(/\bIhnen\b/g, "dir");
   q = q.replace(/\bIhre[rnms]?\b/g, (m) => {
     const map: Record<string, string> = {
@@ -104,13 +126,20 @@ export function rewriteCustomerThirdPersonToSecondPerson(question: string): stri
     return map[lower] ?? "deine";
   });
 
-  // Common question openings with plural/3rd-person verb before subject was rewritten
+  // Brand after “zu …” → “zu uns” (only Capitalized brand tokens, not following verbs)
+  q = q.replace(
+    /\bzu\s+(?!uns\b|dir\b|mir\b|hause\b)(?:[A-ZÄÖÜ][\wÄÖÜäöüß-]*(?:\s+[A-ZÄÖÜ][\wÄÖÜäöüß-]*){0,3})\b/g,
+    "zu uns",
+  );
+
+  q = q.replace(/\bWie alt sind\b/gi, "Wie alt bist");
   q = q.replace(/\bWie nehmen\b/gi, "Wie nimmst");
   q = q.replace(/\bWie kommen\b/gi, "Wie kommst");
   q = q.replace(/\bWie wählen\b/gi, "Wie wählst");
   q = q.replace(/\bWie entscheiden\b/gi, "Wie entscheidest");
   q = q.replace(/\bWie suchen\b/gi, "Wie suchst");
   q = q.replace(/\bWie fühlen\b/gi, "Wie fühlst");
+  q = q.replace(/\bWie reagieren\b/gi, "Wie reagierst");
   q = q.replace(/\bWie beschreiben\b/gi, "Wie beschreibst");
   q = q.replace(/\bWie erzählen\b/gi, "Wie erzählst");
   q = q.replace(/\bWorauf legen\b/gi, "Worauf legst");
@@ -119,7 +148,10 @@ export function rewriteCustomerThirdPersonToSecondPerson(question: string): stri
   q = q.replace(/\bWas brauchen\b/gi, "Was brauchst");
   q = q.replace(/\bWas erzählen\b/gi, "Was erzählst");
   q = q.replace(/\bWas beschreiben\b/gi, "Was beschreibst");
+  q = q.replace(/\bWas sagen\b/gi, "Was sagst");
+  q = q.replace(/\bWollen\b/g, "Willst");
   q = q.replace(/\bWelche ([^?]{3,80}?)\bhaben\b/gi, "Welche $1hast");
+  q = q.replace(/\bWelche Situation hat (?:dich|du)\b/gi, "Was hat dich");
 
   q = fixGermanDuVerbAgreement(q);
 
@@ -129,19 +161,18 @@ export function rewriteCustomerThirdPersonToSecondPerson(question: string): stri
   q = q.replace(/\bbei\s+du\b/gi, "bei dir");
   q = q.replace(/\büber\s+sie\b/gi, "über dich");
   q = q.replace(/\bmit\s+sie\b/gi, "mit dir");
+  q = q.replace(/\bwas sagen sie\b/gi, "was sagst du");
+  q = q.replace(/\bsagst\s+sie\b/gi, "sagst du");
+  q = q.replace(/\bhat\s+du\b/gi, "hast du");
   q = q.replace(/\s+/g, " ").trim();
 
   return q;
 }
 
-/**
- * Repair leftover plural/formal verbs next to “du”
- * (e.g. “haben du”, “erzählen du”, “du haben”).
- */
+/** Repair leftover plural/formal verbs next to “du”. */
 export function fixGermanDuVerbAgreement(text: string): string {
   let q = text;
 
-  // If we already address “du”, normalize leftover formal/3rd-person possessives.
   if (/\bdu\b/i.test(q)) {
     q = q.replace(/\bIhnen\b/g, "dir");
     q = q.replace(/\bIhre[rnms]?\b/g, (m) => {
@@ -229,8 +260,10 @@ export function fixGermanDuVerbAgreement(text: string): string {
     [/\bdu\s+entscheiden\b/gi, "du entscheidest"],
     [/\barbeiten\s+du\b/gi, "arbeitest du"],
     [/\bdu\s+arbeiten\b/gi, "du arbeitest"],
-    // “beschreiben sie es” leftovers after Sie→du
-    [/\bbeschreiben\s+du\b/gi, "beschreibst du"],
+    [/\breagieren\s+du\b/gi, "reagierst du"],
+    [/\bdu\s+reagieren\b/gi, "du reagierst"],
+    [/\bsagen\s+du\b/gi, "sagst du"],
+    [/\bdu\s+sagen\b/gi, "du sagst"],
     [/\berzählen\s+sie\b/gi, "erzählst du"],
     [/\bbeschreiben\s+sie\b/gi, "beschreibst du"],
   ];
@@ -239,11 +272,8 @@ export function fixGermanDuVerbAgreement(text: string): string {
     q = q.replace(pattern, replacement);
   }
 
-  // Generic weak-verb fallback: “…en du” → “…st du” (erzählen→erzählst already covered;
-  // catches e.g. “melden du”, “planen du”)
   q = q.replace(/\b([a-zäöüß]{3,})en\s+du\b/gi, (_m, stem: string) => {
     const s = String(stem);
-    // Avoid mangling already-correct or irregular forms we didn't map
     if (/^(sei|werd|hab|k[oö]nn|m[uü]ss|woll|soll|wiss)$/i.test(s)) return `${s}en du`;
     if (/[td]$/i.test(s)) return `${s}est du`;
     return `${s}st du`;
@@ -270,7 +300,6 @@ function shortTopic(topic: string): string {
 
 function softenExistingQuestion(raw: string): string {
   let q = raw.replace(/\s+/g, " ").trim().replace(/[?？]+$/g, "");
-  // Drop exam-speak that makes questions sound like a checklist / meta.
   q = q.replace(/\s*[—–-]\s*bitte möglichst konkret\.?$/i, "");
   q = q.replace(/\s*bitte möglichst konkret\.?$/i, "");
   q = q.replace(/\s*und wie lautet die komplette Reihenfolge\.?$/i, "");
@@ -283,6 +312,22 @@ function softenExistingQuestion(raw: string): string {
   q = q.replace(/\s+/g, " ").trim();
   if (!q || q.length < 8) return `${raw.replace(/[?？]+$/g, "")}?`;
   return `${q}?`;
+}
+
+/** Only true budget/price-range fields — not every question that mentions “Preis”. */
+function isPrimaryBudgetField(raw: string): boolean {
+  const t = raw.toLowerCase();
+  if (/reagier|aussage|fester preis|ab welchem preis|lieber einen festen|preisspanne bewegen sich/i.test(t)) {
+    return false;
+  }
+  if (looksLikeQuestion(raw) && /preis/i.test(t) && !/\bbudget\b/i.test(t) && raw.length > 55) {
+    return false;
+  }
+  return (
+    /^(typisches?\s+)?budget\b/i.test(t) ||
+    /\bwelches budget\b/i.test(t) ||
+    (/\bbudget\b/i.test(t) && raw.length < 70)
+  );
 }
 
 function hintFromValue(value: string, max = 420): string {
@@ -373,8 +418,8 @@ function classifySliceKey(label: string): string {
 }
 
 /**
- * Build a probe from the slice's own questionnaire label — never invent
- * industry terms (Labor, Behandler, Praxis) unless they appear in the label/value.
+ * Build a sales-style probe from the slice's own questionnaire label.
+ * Industry terms only when they appear in the label/value.
  */
 function concreteQuestionForSlice(slice: FactSlice): string {
   const label = shortTopic(slice.label);
@@ -382,30 +427,30 @@ function concreteQuestionForSlice(slice: FactSlice): string {
 
   switch (slice.key) {
     case "age":
-      return "Wie alt bist du — bzw. welche Altersgruppe trifft auf dich zu?";
+      return "Darf ich fragen: Wie alt bist du ungefähr?";
     case "name":
-      return "Wie heißt du — und wie soll ich dich ansprechen?";
+      return "Wie heißt du — und wie darf ich dich ansprechen?";
     case "size":
       if (/behandler/i.test(hay)) {
-        return "Wie viele Behandler habt ihr — welche Praxisgröße trifft zu?";
+        return "Wie viele Behandler seid ihr — wie groß ist die Praxis?";
       }
       if (/mitarbeiter|team|\bma\b/i.test(hay)) {
-        return "Wie viele Mitarbeiter bzw. wie groß ist euer Team?";
+        return "Wie groß ist euer Team — wie viele Mitarbeiter seid ihr ungefähr?";
       }
       if (/praxis/i.test(hay)) {
-        return "Wie groß ist eure Praxis — welche Größenordnung trifft zu?";
+        return "Wie groß ist eure Praxis ungefähr?";
       }
-      return `Was gilt bei dir konkret zur Größe / Anzahl („${label}")?`;
+      return `Wie sieht das bei dir mit „${label}" aus — welche Größenordnung trifft zu?`;
     case "focus":
-      return `Welche Schwerpunkte oder Themen sind bei dir zentral („${label}")?`;
+      return `Worauf liegt bei dir der Fokus — was ist dir bei „${label}" besonders wichtig?`;
     case "region":
-      return `Wo bzw. in welcher Region trifft „${label}" auf dich zu?`;
+      return `Wo bist du unterwegs — welche Region trifft bei „${label}" auf dich zu?`;
     case "contact":
-      return "Wie nimmst du typischerweise erstmals Kontakt zu einem Anbieter auf?";
+      return "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
     case "budget":
-      return `Welches Budget bzw. welche Größenordnung gilt bei dir („${label}")?`;
+      return "In welcher Preisspanne bewegst du dich ungefähr?";
     default:
-      return `Was gilt bei dir konkret zu „${label}"?`;
+      return `Erzähl mir kurz zu „${label}" — was trifft auf dich zu?`;
   }
 }
 
@@ -414,30 +459,34 @@ function factProbePriority(fact: SurveyFact, question: string): number {
   const hay = `${fact.fieldTitle} ${fact.label} ${question}`.toLowerCase();
   if (/wie heißt du|avatar-?name|name des digitalen/.test(hay)) return 10;
   if (/\balter\b|altersgruppe|wie alt/.test(hay)) return 20;
-  if (/größe|groesse|mitarbeiter|behandler|team|anzahl|budget/.test(hay)) return 30;
-  if (/schwerpunkt|spezial|situation|beschreibung/.test(hay)) return 40;
+  if (/größe|groesse|mitarbeiter|behandler|team|anzahl|budget|preisspanne/.test(hay)) return 30;
+  if (/schwerpunkt|spezial|situation|beschreibung|wer bist du/.test(hay)) return 40;
   if (/kontakt|aufmerksam|partner|anbieter|kanal/.test(hay)) return 50;
-  if (/beschäftigt dich|erzähl mir kurz von dir/.test(hay)) return 90;
+  if (/beschäftigt dich|mit uns zuerst/.test(hay)) return 90;
   return 60;
 }
 
 /**
- * Ask so the twin must surface the stored fact.
- * Wording follows the field title / answer — no fixed industry vocabulary.
+ * Ask as a company employee getting to know the twin as a prospect.
+ * Prefer rewritten survey questions over dry exam templates.
  */
 function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
   const hay = `${raw} ${fact.value}`;
   if (!raw) {
-    return "Erzähl mir konkret, wer du bist und was dich in deiner Situation ausmacht.";
+    return "Erzähl mir doch kurz: Wer bist du, und was beschäftigt dich gerade?";
   }
 
   if (/^(name des digitalen kunden-avatars|avatar-?name)$/i.test(raw)) {
-    return "Wie heißt du — und wie soll ich dich ansprechen?";
+    return "Wie heißt du — und wie darf ich dich ansprechen?";
   }
 
-  if (/\balter\b/i.test(raw)) {
-    return "Wie alt bist du — bzw. welche Altersgruppe trifft auf dich zu?";
+  if (
+    /\balter\b/i.test(raw) ||
+    /^wie alt\b/i.test(raw) ||
+    (/wie alt\b/i.test(raw) && /meist/i.test(raw))
+  ) {
+    return "Darf ich fragen: Wie alt bist du ungefähr?";
   }
 
   if (
@@ -446,67 +495,75 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     )
   ) {
     if (/behandler/i.test(hay)) {
-      return "Wie viele Behandler habt ihr — welche Praxisgröße trifft zu?";
+      return "Wie viele Behandler seid ihr — wie groß ist die Praxis?";
     }
     if (/mitarbeiter|team|\bma\b/i.test(hay)) {
-      return "Wie viele Mitarbeiter bzw. wie groß ist euer Team?";
+      return "Wie groß ist euer Team — wie viele Mitarbeiter seid ihr ungefähr?";
     }
     if (/praxis/i.test(hay)) {
-      return "Wie groß ist eure Praxis — welche Größenordnung trifft zu?";
+      return "Wie groß ist eure Praxis ungefähr?";
     }
-    return `Zu „${shortTopic(raw)}": Welche konkrete Größe oder Anzahl gilt für dich?`;
+    return `Wie sieht das bei dir mit „${shortTopic(raw)}" aus?`;
   }
 
-  if (/schwerpunkt/i.test(raw)) {
-    return `Welche Schwerpunkte sind bei dir zentral — bezogen auf „${shortTopic(raw)}"?`;
+  if (/schwerpunkt/i.test(raw) && !looksLikeQuestion(raw)) {
+    return "Worauf liegt bei dir der Fokus — was ist dir besonders wichtig?";
   }
 
-  if (/einzugsgebiet|region|standort|gebiet/i.test(raw)) {
-    return `Zu „${shortTopic(raw)}": Welche Region oder welcher Ort gilt für dich?`;
+  if (/einzugsgebiet|region|standort|gebiet/i.test(raw) && !looksLikeQuestion(raw)) {
+    return "Wo bist du unterwegs — welche Region trifft auf dich zu?";
   }
 
   if (/kontaktweg|kontakt auf|erstkontakt|erreichen|erstmals kontakt/i.test(raw)) {
-    return "Wie nimmst du typischerweise erstmals Kontakt zu einem Anbieter auf?";
+    if (looksLikeQuestion(raw)) {
+      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
+    }
+    return "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
   }
 
   if (/sorg|einwand|hürde|problem|schmerz|ärger|frust/i.test(raw)) {
-    return "Was beschäftigt dich gerade am meisten — welche Sorgen oder Einwände hast du?";
+    return "Was beschäftigt dich gerade am meisten — und was würdest du uns dazu als Erstes erzählen?";
   }
 
-  if (/entscheid|kriterium|wichtig/i.test(raw)) {
+  if (/entscheid|kriterium|wichtig/i.test(raw) && !looksLikeQuestion(raw)) {
     return "Wonach suchst du dir einen Anbieter aus — was muss für dich unbedingt stimmen?";
   }
 
-  if (/budget|kosten|preis|invest/i.test(raw)) {
-    return `Welches Budget bzw. welche Größenordnung gilt bei dir („${shortTopic(raw)}")?`;
+  // True budget fields only — price-reaction / negotiation questions keep a sales rewrite.
+  if (isPrimaryBudgetField(raw)) {
+    return "In welcher Preisspanne bewegst du dich ungefähr?";
+  }
+  // Company-style price-range of “Aufträge” → ask the prospect about their range.
+  if (/preisspanne|budget|preis/i.test(raw) && /\baufträge?\b/i.test(raw)) {
+    return "In welcher Preisspanne bewegst du dich ungefähr?";
+  }
+  if (/reagier.*preis|preis.*reagier|fester preis|ab welchem preis|lieber einen festen/i.test(raw)) {
+    if (looksLikeQuestion(raw)) {
+      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
+    }
+    return "Wie gehst du mit dem Preis um — worauf achtest du besonders?";
   }
 
   if (
     /berufs|lebenssituation|lebenslage/i.test(raw) &&
     !/erzählen|beschreiben|erstgespräch|erzähl/i.test(raw)
   ) {
-    return "Welche Berufs- oder Lebenssituation hast du typischerweise?";
+    return "Was machst du beruflich — bzw. wie sieht deine Lebenssituation gerade aus?";
   }
 
-  // Description / bio fields: in-character, no meta “Fragebogen” wording.
+  // Description / bio: in-character sales discovery, no questionnaire meta.
   if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/i.test(raw) || /ideal.*wunsch/i.test(raw)) {
-    return "Erzähl mir konkret, wer du bist und was dich in deiner Situation ausmacht.";
+    return "Erzähl mir doch kurz: Wer bist du, und was beschäftigt dich gerade?";
   }
 
-  if (
-    looksLikeQuestion(raw) &&
-    /\b(du|dir|dich|dein|deine|deiner|deinem|deinen)\b/i.test(raw)
-  ) {
-    return softenExistingQuestion(fixGermanDuVerbAgreement(raw));
-  }
-
-  if (looksLikeQuestion(raw) && isCustomerProfileMetaTitle(raw)) {
-    return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
-  }
-
-  if (looksLikeQuestion(raw) && !isCustomerProfileMetaTitle(raw)) {
-    // Still may be 3rd-person customer copy without “Wunsch…” in the title.
-    if (/\b(kund|patient|sie|ihre|haben|erzählen|beschreiben)\b/i.test(raw)) {
+  // Prefer natural rewrite of the original survey question (sales conversation).
+  if (looksLikeQuestion(raw)) {
+    if (
+      isCustomerProfileMetaTitle(raw) ||
+      /\b(kund|patient|wunsch|person|personen|leute|sie|ihre|haben|erzählen|beschreiben|sagen|diese|meist)\b/i.test(
+        raw,
+      )
+    ) {
       return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
     }
     return softenExistingQuestion(fixGermanDuVerbAgreement(raw));
@@ -522,30 +579,24 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
     if (/kontaktweg|aufmerksam|findest|suche|kanal|empfehlung|google|messe/i.test(`${topic} ${raw}`)) {
       return (
         "Worüber findest du typischerweise einen neuen Anbieter oder Partner — " +
-        "was kommt für dich zuerst, und wie sieht die Reihenfolge dahinter aus?"
+        "was kommt für dich zuerst?"
       );
     }
     if (/entscheid|anbieterwahl|kriterium|wichtig/i.test(`${topic} ${raw}`)) {
-      return (
-        "Wonach entscheidest du dich für einen Anbieter — " +
-        "was hat für dich die höchste Priorität, und was kommt danach?"
-      );
+      return "Wonach entscheidest du dich für einen Anbieter — was hat für dich die höchste Priorität?";
     }
-    return (
-      `Wenn du an „${shortTopic(topic)}" denkst: was ist dir am wichtigsten, ` +
-      "und wie würdest du die Reihenfolge dahinter sortieren?"
-    );
+    return `Wenn du an „${shortTopic(topic)}" denkst: was ist dir am wichtigsten?`;
   }
 
   if (isCustomerProfileMetaTitle(raw)) {
     const topic = topicFromCustomerMetaTitle(raw);
     if (!topic || topic.length < 3) {
-      return "Erzähl mir konkret, wer du bist und was dich in deiner Situation ausmacht.";
+      return "Erzähl mir doch kurz: Wer bist du, und was beschäftigt dich gerade?";
     }
-    return `Zu „${shortTopic(topic)}": Was trifft auf dich zu — bitte möglichst konkret?`;
+    return `Zu „${shortTopic(topic)}": Was trifft auf dich zu?`;
   }
 
-  return `Zu „${shortTopic(raw)}": Was gilt für dich persönlich — bitte mit den konkreten Angaben?`;
+  return `Erzähl mir kurz zu „${shortTopic(raw)}" — was trifft auf dich zu?`;
 }
 
 function toCompanyInterviewQuestion(fact: SurveyFact): string {
