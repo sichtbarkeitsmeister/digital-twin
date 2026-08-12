@@ -11,7 +11,12 @@ import {
 import { evaluateGroundingPageSchedule } from "@/lib/dt/seo/grounding-page-schedule";
 
 const SELECT =
-  "organisation_id,website_url,grounding_page_url,grounding_page_uploaded_at,grounding_page_notes";
+  "organisation_id,website_url,grounding_page_url,grounding_page_uploaded_at,grounding_page_notes,grounding_llms_txt_url";
+
+const optionalUrl = z
+  .union([z.string().trim().url().max(2000), z.literal(""), z.null()])
+  .optional()
+  .transform((v) => (v === undefined ? undefined : v === "" ? null : v));
 
 const patchSchema = z.object({
   organisationId: z.string().uuid(),
@@ -21,15 +26,15 @@ const patchSchema = z.object({
       z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum ungültig"),
       z.null(),
     ])
+    .optional()
     .transform((v) => {
+      if (v === undefined) return undefined;
       if (v == null) return null;
       if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `${v}T12:00:00.000Z`;
       return v;
     }),
-  url: z
-    .union([z.string().trim().url().max(2000), z.literal(""), z.null()])
-    .optional()
-    .transform((v) => (v === undefined ? undefined : v === "" ? null : v)),
+  url: optionalUrl,
+  llmsTxtUrl: optionalUrl,
   notes: z.string().trim().max(2000).nullable().optional(),
 });
 
@@ -38,6 +43,7 @@ function serialize(row: {
   grounding_page_url: string | null;
   grounding_page_uploaded_at: string | null;
   grounding_page_notes: string | null;
+  grounding_llms_txt_url?: string | null;
 }) {
   const schedule = evaluateGroundingPageSchedule({
     uploadedAt: row.grounding_page_uploaded_at,
@@ -47,6 +53,7 @@ function serialize(row: {
     url: row.grounding_page_url,
     uploadedAt: row.grounding_page_uploaded_at,
     notes: row.grounding_page_notes,
+    llmsTxtUrl: row.grounding_llms_txt_url ?? null,
     schedule,
   };
 }
@@ -88,7 +95,7 @@ export async function GET(req: Request) {
   let discoverySource: "footer" | "path_probe" | null = null;
   let autoApplied = false;
 
-  const llmsTxt = await checkLlmsTxt(row.website_url);
+  let llmsTxt = await checkLlmsTxt(row.website_url, row.grounding_llms_txt_url);
 
   if (!row.grounding_page_url) {
     const discovered = await discoverGroundingPageUrl(row.website_url);
@@ -100,35 +107,45 @@ export async function GET(req: Request) {
     }
   }
 
-  // First visit: persist discovered URL + live date so the form is not empty.
-  if (auto && !row.grounding_page_url && discoveredUrl) {
-    const detected = await detectGroundingPageUploadedAt(discoveredUrl);
-    const sourceHint = discoverySource === "footer" ? "Footer" : "Pfad";
-    const noteLine = detected.ok
-      ? `Auto (${sourceHint}): ${detected.sourceLabel} (${new Date().toISOString().slice(0, 10)})`
-      : `Auto (${sourceHint}): URL erkannt (${new Date().toISOString().slice(0, 10)})`;
+  // First visit: persist discovered grounding URL + live date (+ llms.txt if found).
+  if (
+    auto &&
+    ((!row.grounding_page_url && discoveredUrl) ||
+      (!row.grounding_llms_txt_url && llmsTxt.ok))
+  ) {
+    const patch: Record<string, unknown> = {};
 
-    const { data: updated, error: updateError } = await auth.supabase
-      .from("dt_org_config")
-      .update({
-        grounding_page_url: detected.ok
-          ? detected.finalUrl || discoveredUrl
-          : discoveredUrl,
-        grounding_page_uploaded_at: detected.ok
-          ? detected.detectedAt
-          : row.grounding_page_uploaded_at,
-        grounding_page_notes: row.grounding_page_notes?.trim()
-          ? row.grounding_page_notes
-          : noteLine,
-      })
-      .eq("organisation_id", orgId)
-      .select(SELECT)
-      .maybeSingle();
+    if (!row.grounding_page_url && discoveredUrl) {
+      const detected = await detectGroundingPageUploadedAt(discoveredUrl);
+      const sourceHint = discoverySource === "footer" ? "Footer" : "Pfad";
+      const noteLine = detected.ok
+        ? `Auto (${sourceHint}): ${detected.sourceLabel} (${new Date().toISOString().slice(0, 10)})`
+        : `Auto (${sourceHint}): URL erkannt (${new Date().toISOString().slice(0, 10)})`;
+      patch.grounding_page_url = detected.ok
+        ? detected.finalUrl || discoveredUrl
+        : discoveredUrl;
+      if (detected.ok) patch.grounding_page_uploaded_at = detected.detectedAt;
+      if (!row.grounding_page_notes?.trim()) patch.grounding_page_notes = noteLine;
+    }
 
-    if (!updateError && updated) {
-      row = updated;
-      autoApplied = true;
-      discoveredUrl = updated.grounding_page_url;
+    if (!row.grounding_llms_txt_url && llmsTxt.ok) {
+      patch.grounding_llms_txt_url = llmsTxt.url;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      const { data: updated, error: updateError } = await auth.supabase
+        .from("dt_org_config")
+        .update(patch)
+        .eq("organisation_id", orgId)
+        .select(SELECT)
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        row = updated;
+        autoApplied = Boolean(patch.grounding_page_url);
+        discoveredUrl = updated.grounding_page_url;
+        llmsTxt = await checkLlmsTxt(row.website_url, row.grounding_llms_txt_url);
+      }
     }
   }
 
@@ -175,21 +192,27 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }
 
-  const patch: Record<string, unknown> = {
-    grounding_page_uploaded_at: parsed.data.uploadedAt,
-  };
+  const patch: Record<string, unknown> = {};
+  if (parsed.data.uploadedAt !== undefined) {
+    patch.grounding_page_uploaded_at = parsed.data.uploadedAt;
+  }
   if (parsed.data.url !== undefined) patch.grounding_page_url = parsed.data.url;
+  if (parsed.data.llmsTxtUrl !== undefined) {
+    patch.grounding_llms_txt_url = parsed.data.llmsTxtUrl;
+  }
   if (parsed.data.notes !== undefined) {
     patch.grounding_page_notes = parsed.data.notes?.trim() || null;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ ok: false, message: "Keine Änderungen." }, { status: 400 });
   }
 
   const { data, error } = await auth.supabase
     .from("dt_org_config")
     .update(patch)
     .eq("organisation_id", orgId)
-    .select(
-      "organisation_id,grounding_page_url,grounding_page_uploaded_at,grounding_page_notes",
-    )
+    .select(SELECT)
     .maybeSingle();
 
   if (error || !data) {
@@ -199,5 +222,22 @@ export async function PATCH(req: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, grounding: serialize(data) });
+  const llmsTxt = await checkLlmsTxt(data.website_url, data.grounding_llms_txt_url);
+
+  return NextResponse.json({
+    ok: true,
+    grounding: serialize(data),
+    llmsTxt: llmsTxt.ok
+      ? {
+          found: true as const,
+          url: llmsTxt.url,
+          lastModified: llmsTxt.lastModified,
+          bytes: llmsTxt.bytes,
+        }
+      : {
+          found: false as const,
+          message: llmsTxt.message,
+          tried: llmsTxt.tried,
+        },
+  });
 }

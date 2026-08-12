@@ -279,11 +279,18 @@ export async function discoverGroundingPageUrl(
 
 /**
  * Check whether llms.txt is publicly available (usually shipped with the grounding page).
+ * Prefers an explicit override URL when provided.
  */
 export async function checkLlmsTxt(
   websiteUrl: string | null | undefined,
+  preferredUrl?: string | null,
 ): Promise<LlmsTxtCheckResult> {
-  const tried = buildLlmsTxtUrlCandidates(websiteUrl ?? "");
+  const preferred = preferredUrl?.trim() || "";
+  const tried = [
+    ...(preferred ? [preferred] : []),
+    ...buildLlmsTxtUrlCandidates(websiteUrl ?? ""),
+  ].filter((u, i, arr) => arr.indexOf(u) === i);
+
   if (tried.length === 0) {
     return {
       ok: false,

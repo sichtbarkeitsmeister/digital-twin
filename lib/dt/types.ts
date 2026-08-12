@@ -41,6 +41,7 @@ export type DtOrgConfigRow = {
   grounding_page_url?: string | null;
   grounding_page_uploaded_at?: string | null;
   grounding_page_notes?: string | null;
+  grounding_llms_txt_url?: string | null;
 };
 
 export type DtSeoTaskRow = {
