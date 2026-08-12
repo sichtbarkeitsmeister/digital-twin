@@ -209,22 +209,45 @@ export function DtAgentFormFields(props: {
   );
 }
 
+/** Stub left in prompt_template when the real text lives in prompt_append. */
+export function isAvatarPromptStub(prompt: string, name?: string): boolean {
+  const t = prompt.trim();
+  if (!t) return true;
+  if (name && t === `Avatar: ${name}`) return true;
+  // Short "Avatar: …" placeholder from survey→agent create
+  if (/^Avatar:\s+\S/i.test(t) && t.length < 120) return true;
+  return false;
+}
+
 export function agentFormValuesFromRow(agent: {
   name: string;
   role: string | null;
   prompt_template: string;
   prompt_append?: string | null;
   uses_global_prompt?: boolean;
+  source_survey_id?: string | null;
   quick_actions: unknown;
   is_enabled: boolean;
   position: number;
 }): DtAgentFormValues {
+  const append = (agent.prompt_append ?? "").trim();
+  const template = agent.prompt_template ?? "";
+  const surveyPersona = Boolean(agent.source_survey_id);
+
+  // Legacy / broken create: long persona text still in System-Prompt, append empty.
+  // Surface it in the single Avatar field so the form is not split across two boxes.
+  const promptAppend =
+    append ||
+    (surveyPersona && !isAvatarPromptStub(template, agent.name) ? template : "");
+
   return {
     name: agent.name,
     role: agent.role ?? "",
-    prompt: agent.prompt_template,
-    promptAppend: agent.prompt_append ?? "",
-    usesGlobalPrompt: agent.uses_global_prompt ?? false,
+    prompt: surveyPersona ? `Avatar: ${agent.name}` : template,
+    promptAppend,
+    usesGlobalPrompt: surveyPersona
+      ? true
+      : (agent.uses_global_prompt ?? false),
     quick: parseQuickActions(agent.quick_actions).join("\n"),
     enabled: agent.is_enabled,
     position: agent.position,
