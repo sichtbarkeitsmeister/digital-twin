@@ -477,8 +477,14 @@ export function DtAgentsManager(props: {
       if (!editValues.usesGlobalPrompt) {
         body.promptTemplate = editValues.prompt;
       }
-    } else if (editingAgent?.uses_global_prompt) {
-      // Survey personas keep the Avatar stub in prompt_template; content lives in append.
+    } else if (
+      editingAgent?.source_survey_id ||
+      editingAgent?.uses_global_prompt
+    ) {
+      // One editable field → prompt_append; shared rules from global DigitalTwin prompt.
+      body.usesGlobalPrompt = true;
+      body.promptTemplate = `Avatar: ${editValues.name}`;
+      body.promptAppend = editValues.promptAppend.trim() || null;
     } else {
       body.promptTemplate = editValues.prompt;
     }
