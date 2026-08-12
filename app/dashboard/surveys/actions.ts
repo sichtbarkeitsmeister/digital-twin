@@ -933,10 +933,6 @@ export async function importRawFilledQuestionnairesBatchAction(
     });
   }
 
-  // Prefer the survey title from the successful import message path — refresh titles
-  // from converted data when we only had generic labels.
-  // (Titles are already set via parse inside importRawFilledQuestionnaireAction.)
-
   if (results.length === 0) {
     return {
       ok: false,
