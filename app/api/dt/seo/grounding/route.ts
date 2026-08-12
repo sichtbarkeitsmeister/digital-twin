@@ -4,7 +4,10 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { detectGroundingPageUploadedAt } from "@/lib/dt/seo/detect-grounding-page-date";
-import { discoverGroundingPageUrl } from "@/lib/dt/seo/discover-grounding-page-url";
+import {
+  checkLlmsTxt,
+  discoverGroundingPageUrl,
+} from "@/lib/dt/seo/discover-grounding-page-url";
 import { evaluateGroundingPageSchedule } from "@/lib/dt/seo/grounding-page-schedule";
 
 const SELECT =
@@ -82,12 +85,16 @@ export async function GET(req: Request) {
   let row = data;
   let discoveredUrl: string | null = null;
   let discoveryMessage: string | null = null;
+  let discoverySource: "footer" | "path_probe" | null = null;
   let autoApplied = false;
+
+  const llmsTxt = await checkLlmsTxt(row.website_url);
 
   if (!row.grounding_page_url) {
     const discovered = await discoverGroundingPageUrl(row.website_url);
     if (discovered.ok) {
       discoveredUrl = discovered.url;
+      discoverySource = discovered.source;
     } else {
       discoveryMessage = discovered.message;
     }
@@ -96,9 +103,10 @@ export async function GET(req: Request) {
   // First visit: persist discovered URL + live date so the form is not empty.
   if (auto && !row.grounding_page_url && discoveredUrl) {
     const detected = await detectGroundingPageUploadedAt(discoveredUrl);
+    const sourceHint = discoverySource === "footer" ? "Footer" : "Pfad";
     const noteLine = detected.ok
-      ? `Auto: ${detected.sourceLabel} (${new Date().toISOString().slice(0, 10)})`
-      : `Auto: URL erkannt (${new Date().toISOString().slice(0, 10)})`;
+      ? `Auto (${sourceHint}): ${detected.sourceLabel} (${new Date().toISOString().slice(0, 10)})`
+      : `Auto (${sourceHint}): URL erkannt (${new Date().toISOString().slice(0, 10)})`;
 
     const { data: updated, error: updateError } = await auth.supabase
       .from("dt_org_config")
@@ -130,7 +138,20 @@ export async function GET(req: Request) {
     websiteUrl: row.website_url ?? null,
     discoveredUrl: row.grounding_page_url ?? discoveredUrl,
     discoveryMessage,
+    discoverySource,
     autoApplied,
+    llmsTxt: llmsTxt.ok
+      ? {
+          found: true as const,
+          url: llmsTxt.url,
+          lastModified: llmsTxt.lastModified,
+          bytes: llmsTxt.bytes,
+        }
+      : {
+          found: false as const,
+          message: llmsTxt.message,
+          tried: llmsTxt.tried,
+        },
   });
 }
 

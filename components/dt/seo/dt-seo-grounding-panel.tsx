@@ -17,6 +17,19 @@ import {
   GROUNDING_PAGE_WARN_DAYS,
 } from "@/lib/dt/seo/grounding-page-schedule";
 
+type LlmsTxtStatus =
+  | {
+      found: true;
+      url: string;
+      lastModified: string | null;
+      bytes: number;
+    }
+  | {
+      found: false;
+      message: string;
+      tried?: string[];
+    };
+
 type GroundingPayload = {
   organisationId: string;
   url: string | null;
@@ -81,6 +94,7 @@ export function DtSeoGroundingPanel(props: {
   const [url, setUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [lastDetection, setLastDetection] = useState<string | null>(null);
+  const [llmsTxt, setLlmsTxt] = useState<LlmsTxtStatus | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -96,7 +110,9 @@ export function DtSeoGroundingPanel(props: {
         grounding?: GroundingPayload;
         discoveredUrl?: string | null;
         discoveryMessage?: string | null;
+        discoverySource?: "footer" | "path_probe" | null;
         autoApplied?: boolean;
+        llmsTxt?: LlmsTxtStatus;
       };
       if (!res.ok || !json.ok || !json.grounding) {
         setError(json.message ?? "Grounding-Page konnte nicht geladen werden.");
@@ -107,10 +123,11 @@ export function DtSeoGroundingPanel(props: {
       setUploadedAt(toDateInputValue(json.grounding.uploadedAt));
       setUrl(json.grounding.url ?? json.discoveredUrl ?? "");
       setNotes(json.grounding.notes ?? "");
+      setLlmsTxt(json.llmsTxt ?? null);
       if (json.autoApplied && json.grounding.uploadedAt) {
-        setLastDetection(
-          `${formatDeDate(json.grounding.uploadedAt)} · automatisch erkannt`,
-        );
+        const via =
+          json.discoverySource === "footer" ? "Footer-Link" : "automatisch erkannt";
+        setLastDetection(`${formatDeDate(json.grounding.uploadedAt)} · ${via}`);
         toast.success("Grounding Page gefunden und Datum übernommen.");
       } else if (!json.grounding.url && json.discoveredUrl) {
         setUrl(json.discoveredUrl);
@@ -235,9 +252,9 @@ export function DtSeoGroundingPanel(props: {
         </h2>
         <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
           Alle {GROUNDING_PAGE_INTERVAL_MONTHS} Monate aktualisieren. Ab{" "}
-          {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis. Fehlt die URL,
-          sucht der Twin automatisch unter der Website (z. B. /grounding/ oder
-          /grounding-page/) und liest das Datum.
+          {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis. Der Twin sucht den
+          Grounding-Link im Footer (neben Impressum/Datenschutz), prüft zusätzlich{" "}
+          <code className="text-[0.85em]">llms.txt</code> und liest das Datum von der Live-Seite.
         </p>
       </div>
 
@@ -336,6 +353,47 @@ export function DtSeoGroundingPanel(props: {
                 <ExternalLink className="size-3.5" aria-hidden />
               </a>
             ) : null}
+          </DtGlassCard>
+
+          <DtGlassCard variant="subtle" className="grid gap-3 p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-sbkm-navy dark:text-white">llms.txt</h3>
+                <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
+                  Wird meist zusammen mit der Grounding Page ausgeliefert — hier separat geprüft.
+                </p>
+              </div>
+              <Badge
+                variant={llmsTxt?.found ? "secondary" : "outline"}
+                className={cn(
+                  llmsTxt?.found &&
+                    "bg-sbkm-mint/25 text-sbkm-navy dark:text-sbkm-mint",
+                )}
+              >
+                {llmsTxt == null ? "…" : llmsTxt.found ? "Gefunden" : "Fehlt"}
+              </Badge>
+            </div>
+            {llmsTxt?.found ? (
+              <div className="grid gap-1 text-sm text-sbkm-navy dark:text-white">
+                <a
+                  href={llmsTxt.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 font-semibold underline-offset-2 hover:underline dark:text-sbkm-mint"
+                >
+                  {llmsTxt.url}
+                  <ExternalLink className="size-3.5" aria-hidden />
+                </a>
+                <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
+                  Last-Modified: {formatDeDate(llmsTxt.lastModified)}
+                  {llmsTxt.bytes > 0 ? ` · ${Math.round(llmsTxt.bytes / 1024)} KB` : ""}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+                {llmsTxt?.message ?? "Noch nicht geprüft."}
+              </p>
+            )}
           </DtGlassCard>
 
           <DtGlassCard variant="subtle" className="grid gap-4 p-4 sm:p-5">
