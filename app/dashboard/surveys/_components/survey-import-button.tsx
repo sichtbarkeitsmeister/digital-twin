@@ -55,9 +55,12 @@ export function SurveyImportButton() {
       return;
     }
     setError(null);
-    setStatus(null);
+    setStatus(
+      "Import läuft… Bei freien Word-Texten wertet die KI Fragen und Antworten aus (kann etwas dauern).",
+    );
     startTransition(async () => {
       const res = await importRawFilledQuestionnairesBatchAction({ items });
+      setStatus(null);
       if (!res.ok || !res.data?.results?.length) {
         setError(res.message);
         return;
@@ -179,9 +182,11 @@ export function SurveyImportButton() {
               {tab === "raw" ? (
                 <div className="grid gap-3">
                   <p className="text-sm text-muted-foreground">
-                    Mehrere Dateien möglich — auch Word (<code className="text-xs">.docx</code>),
-                    z. B. Wunschkunde + separater Anbieter-Bogen. In einem Paste mehrere Bögen mit{" "}
-                    <code className="text-xs">=====</code> trennen.
+                    <strong className="font-semibold text-foreground">Text hier einfügen</strong>{" "}
+                    (Strg+V) — kompletter Fragebogen aus Word oder E-Mail. Die KI erkennt Fragen und
+                    Antworten auch ohne „Antwort:“-Zeilen. Alternativ{" "}
+                    <code className="text-xs">.docx</code>/<code className="text-xs">.txt</code>{" "}
+                    laden (auch mehrere).
                   </p>
                   <Input
                     value={title}
@@ -192,8 +197,17 @@ export function SurveyImportButton() {
                   <Textarea
                     value={rawText}
                     disabled={isPending}
-                    placeholder={`Wunschkunde & Avatar\n5 Felder\n…\n\nAntwort: …\n\n=====\n\nAnbieter-Fragebogen\n…`}
-                    className="min-h-[220px] font-mono text-xs"
+                    placeholder={`Gesamten Fragebogen hier einfügen…
+
+📋 Positionierung
+Wie positioniert ihr euch?
+
+Wir sind …
+
+⚙️ Angebot
+Was bietet ihr an?
+…`}
+                    className="min-h-[280px] font-mono text-xs"
                     onChange={(e) => setRawText(e.target.value)}
                   />
                   <div className="flex flex-wrap items-center gap-2">

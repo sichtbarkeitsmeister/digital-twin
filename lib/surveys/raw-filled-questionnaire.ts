@@ -41,7 +41,7 @@ function optionId(index: number): string {
   return slugId("opt", index);
 }
 
-/** True when text looks like an exported filled questionnaire (Antwort: lines). */
+/** True when text looks like a filled questionnaire worth importing. */
 export function isRawFilledQuestionnaire(text: string): boolean {
   const t = text.trim();
   if (t.length < 200) return false;
@@ -50,6 +50,19 @@ export function isRawFilledQuestionnaire(text: string): boolean {
   const felderCount = (t.match(/^\d+\s+Felder?\s*$/gim) ?? []).length;
   if (antwortCount >= 3) return true;
   if (antwortCount >= 2 && felderCount >= 1) return true;
+
+  // Loose Word / emoji pastes: many questions, or emoji section headers.
+  const questionMarks = (t.match(/\?/g) ?? []).length;
+  const emojiHeaders = (t.match(/^[\p{Extended_Pictographic}]/gmu) ?? []).length;
+  if (t.length >= 400 && questionMarks >= 4) return true;
+  if (t.length >= 300 && emojiHeaders >= 2 && questionMarks >= 3) return true;
+  if (
+    t.length >= 500 &&
+    /fragebogen|persona|wunschkunde|anbieter/i.test(t) &&
+    questionMarks >= 3
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -322,26 +335,145 @@ function parseSections(text: string): { title: string; sections: DraftSection[] 
   };
 }
 
+const EMOJI_PREFIX_RE =
+  /^(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]+\s*)+/u;
+
+function stripLeadingEmoji(line: string): string {
+  return line.replace(EMOJI_PREFIX_RE, "").trim();
+}
+
+function isLooseSectionHeader(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length > 90) return false;
+  if (/^#{1,3}\s+\S/.test(t)) return true;
+  if (EMOJI_PREFIX_RE.test(t) && stripLeadingEmoji(t).length >= 2) return true;
+  if (/^(?:abschnitt|teil|kapitel|sektion)\b/i.test(t)) return true;
+  return false;
+}
+
+function isLooseQuestionLine(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length > 280) return false;
+  if (ANTWORT_LINE_RE.test(t)) return false;
+  if (isLooseSectionHeader(t)) return false;
+  if (t.endsWith("?")) return true;
+  if (
+    /^(?:wie|was|welche|welcher|welches|wer|wo|wann|warum|wieso|weshalb|beschreib(?:en|e)?|nenn(?:en|e)?|gib|hast|habt|sind|ist|habt\s+ihr|haben\s+sie)\b/i.test(
+      t,
+    ) &&
+    t.length >= 12 &&
+    t.length <= 200
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isLooseHintLine(line: string): boolean {
+  const t = line.trim();
+  return /^(?:bitte|z\.\s*b\.|hinweis|optional|→|->|mehrfach|ankreuzen|sortier|nummerier)/i.test(
+    t,
+  );
+}
+
 /**
- * Convert a raw filled questionnaire export (sections + "Antwort:" lines)
- * into a survey definition plus answer map ready for importSurveyBundleAction.
+ * Word / emoji pastes without „N Felder“ / „Antwort:“ labels.
+ * Questions end with ? (or start with question words); following lines are the answer.
  */
-export function parseRawFilledQuestionnaire(
-  text: string,
-  opts?: { title?: string },
+function parseLooseSections(text: string): { title: string; sections: DraftSection[] } {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const sections: DraftSection[] = [];
+  const preamble: string[] = [];
+  let current: DraftSection | null = null;
+  let active: DraftField | null = null;
+
+  const ensureSection = (title: string) => {
+    current = { title: stripLeadingEmoji(title) || title, fields: [] };
+    sections.push(current);
+    active = null;
+  };
+
+  const flushActive = () => {
+    if (!active || !current) return;
+    active.answerRaw = active.answerRaw.trim();
+    active.description = active.description.trim();
+    current.fields.push(active);
+    active = null;
+  };
+
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+
+    const antwort = trimmed.match(ANTWORT_LINE_RE);
+    if (antwort && active) {
+      active.answerRaw = [active.answerRaw, antwort[1] ?? ""].filter(Boolean).join(" ").trim();
+      continue;
+    }
+
+    if (isLooseSectionHeader(trimmed)) {
+      flushActive();
+      ensureSection(trimmed.replace(/^#{1,3}\s+/, ""));
+      continue;
+    }
+
+    if (isLooseQuestionLine(trimmed)) {
+      if (!current) ensureSection("Allgemein");
+      flushActive();
+      active = { title: trimmed, description: "", answerRaw: "" };
+      continue;
+    }
+
+    if (!current) {
+      preamble.push(trimmed);
+      continue;
+    }
+
+    if (active) {
+      if (!active.answerRaw && isLooseHintLine(trimmed)) {
+        active.description = [active.description, trimmed].filter(Boolean).join("\n");
+      } else {
+        active.answerRaw = [active.answerRaw, trimmed].filter(Boolean).join("\n");
+      }
+      continue;
+    }
+
+    // Orphan prose under a section — start an implicit question from first sentence
+    // only if it looks substantial; otherwise ignore as section blurb.
+    if (trimmed.length >= 40 && /[.!?]$/.test(trimmed)) {
+      active = {
+        title: trimmed.length > 120 ? `${trimmed.slice(0, 117)}…` : trimmed,
+        description: "",
+        answerRaw: "",
+      };
+    }
+  }
+  flushActive();
+
+  const firstSectionTitle = sections[0]?.title ?? "";
+  const titleFromPreamble = preamble
+    .filter((l) => l !== firstSectionTitle && !isLooseSectionHeader(l))
+    .slice(0, 2)
+    .join(" — ")
+    .trim();
+
+  return {
+    title: titleFromPreamble || firstSectionTitle || "Importierter Fragebogen",
+    sections: sections.filter((s) => s.fields.length > 0),
+  };
+}
+
+function buildResultFromSections(
+  sections: DraftSection[],
+  title: string,
 ):
   | { ok: true; data: RawFilledParseResult }
   | { ok: false; message: string } {
-  if (!text.trim()) {
-    return { ok: false, message: "Leerer Text — bitte den Fragebogen einfügen." };
-  }
-
-  const { title: parsedTitle, sections } = parseSections(text);
   if (sections.length === 0) {
     return {
       ok: false,
       message:
-        "Keine Abschnitte erkannt. Erwartet wird das Export-Format mit „N Felder“ und „Antwort:“-Zeilen.",
+        "Keine Fragen erkannt. Bitte den kompletten Fragebogen einfügen (Word-Text, .docx oder Export mit „Antwort:“).",
     };
   }
 
@@ -356,21 +488,18 @@ export function parseRawFilledQuestionnaire(
     for (const draft of section.fields) {
       fieldIndex += 1;
       const { field, answer } = buildFieldAndAnswer(draft, fieldIndex);
-      // Skip empty ranking/checkbox shells with no options and no answer
       if (
         (field.type === "ranking" || field.type === "checkbox" || field.type === "radio") &&
         field.options.length === 0 &&
         answer == null
       ) {
-        // Keep as text field so the question is not lost
-        const textField: SurveyField = {
+        fields.push({
           id: field.id,
           type: "text",
           title: field.title,
           description: field.description,
           required: true,
-        };
-        fields.push(textField);
+        });
         continue;
       }
       if (
@@ -384,7 +513,7 @@ export function parseRawFilledQuestionnaire(
           description: field.description,
           required: true,
         });
-        if (answer != null && typeof draft.answerRaw === "string" && draft.answerRaw.trim()) {
+        if (draft.answerRaw.trim()) {
           answers[field.id] = draft.answerRaw.trim();
           answeredCount += 1;
         }
@@ -409,11 +538,11 @@ export function parseRawFilledQuestionnaire(
     return { ok: false, message: "Im Text wurden keine Fragen erkannt." };
   }
 
-  const title = (opts?.title?.trim() || parsedTitle).slice(0, 120);
+  const surveyTitle = title.slice(0, 120) || "Importierter Fragebogen";
   const survey: Survey = {
     version: 1,
     id: randomUUID(),
-    title,
+    title: surveyTitle,
     description: "Aus Roh-Fragebogen (Text) importiert — Fragen und Antworten übernommen.",
     infoTextEnabled: false,
     infoText: "",
@@ -435,7 +564,7 @@ export function parseRawFilledQuestionnaire(
   return {
     ok: true,
     data: {
-      title,
+      title: surveyTitle,
       description: survey.description,
       survey: validated.data,
       answers,
@@ -443,6 +572,41 @@ export function parseRawFilledQuestionnaire(
       stepCount: steps.length,
       answeredCount,
     },
+  };
+}
+
+/**
+ * Convert a raw filled questionnaire (strict export or loose Word paste)
+ * into a survey definition plus answer map ready for importSurveyBundleAction.
+ */
+export function parseRawFilledQuestionnaire(
+  text: string,
+  opts?: { title?: string },
+):
+  | { ok: true; data: RawFilledParseResult }
+  | { ok: false; message: string } {
+  if (!text.trim()) {
+    return { ok: false, message: "Leerer Text — bitte den Fragebogen einfügen." };
+  }
+
+  const strict = parseSections(text);
+  if (strict.sections.some((s) => s.fields.length > 0)) {
+    const title = (opts?.title?.trim() || strict.title).slice(0, 120);
+    const built = buildResultFromSections(strict.sections, title);
+    if (built.ok && built.data.fieldCount >= 1) return built;
+  }
+
+  const loose = parseLooseSections(text);
+  if (loose.sections.some((s) => s.fields.length > 0)) {
+    const title = (opts?.title?.trim() || loose.title).slice(0, 120);
+    const built = buildResultFromSections(loose.sections, title);
+    if (built.ok && built.data.fieldCount >= 1) return built;
+  }
+
+  return {
+    ok: false,
+    message:
+      "Keine Abschnitte/Fragen erkannt. Der Text wird ggf. per KI ausgewertet — oder bitte mit „Antwort:“-Zeilen bzw. klaren Fragen (…?) einfügen.",
   };
 }
 

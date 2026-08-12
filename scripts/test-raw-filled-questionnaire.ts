@@ -158,11 +158,53 @@ function testFileSampleIfPresent() {
   }
 }
 
+function testLooseEmojiPaste() {
+  const loose = `
+Anbieter-Persona für Allround
+
+Dieser Fragebogen erfasst die Positionierung.
+
+📋 Positionierung & Philosophie
+Wie positioniert sich Allround am Markt?
+
+Wir sind der zuverlässige Partner für Präzisionsteile und liefern termintreu.
+
+Was ist eure Unternehmensphilosophie?
+
+Qualität vor Quantität — jedes Teil wird geprüft.
+
+⚙️ Angebot
+Welche Leistungen bietet ihr an?
+
+Bitte alle zutreffenden ankreuzen.
+
+Zerspanung, Montage, Oberflächenbehandlung
+
+🎯 Zielkunden
+Wer kauft bei euch?
+
+Maschinenbauer und Medizingeräte-Hersteller.
+`.trim();
+
+  assert.equal(isRawFilledQuestionnaire(loose), true);
+  const parsed = parseRawFilledQuestionnaire(loose, {
+    title: "Anbieter-Persona für Allround Präzisionsteile GmbH",
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.ok(parsed.data.fieldCount >= 3, `expected >=3 fields, got ${parsed.data.fieldCount}`);
+  assert.ok(parsed.data.answeredCount >= 2);
+  console.log(
+    `loose emoji paste: ok (${parsed.data.fieldCount} fields, ${parsed.data.answeredCount} answers)`,
+  );
+}
+
 testDetection();
 testSplits();
 testParse();
 testFileSampleIfPresent();
 testMultiDocumentSplit();
+testLooseEmojiPaste();
 console.log("raw-filled-questionnaire: all ok");
 
 function testMultiDocumentSplit() {

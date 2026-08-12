@@ -785,8 +785,8 @@ const rawFilledImportSchema = z.object({
 });
 
 /**
- * Import a raw filled questionnaire export (plain text with „Antwort:“ lines)
- * as a new private survey + completed response — editable and publishable.
+ * Import a raw filled questionnaire (paste or file text) as a new private survey
+ * + completed response. Tries deterministic parsers first, then KI extraction.
  */
 export async function importRawFilledQuestionnaireAction(
   input: z.input<typeof rawFilledImportSchema>,
@@ -796,15 +796,32 @@ export async function importRawFilledQuestionnaireAction(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
   }
 
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
+
   const { parseRawFilledQuestionnaire, rawFilledToImportBundle } = await import(
     "@/lib/surveys/raw-filled-questionnaire"
   );
 
-  const converted = parseRawFilledQuestionnaire(parsed.data.text, {
+  let converted = parseRawFilledQuestionnaire(parsed.data.text, {
     title: parsed.data.title,
   });
+
   if (!converted.ok) {
-    return { ok: false, message: converted.message };
+    const { extractFilledQuestionnaireWithAi } = await import(
+      "@/lib/surveys/raw-filled-questionnaire-ai"
+    );
+    const ai = await extractFilledQuestionnaireWithAi({
+      text: parsed.data.text,
+      title: parsed.data.title,
+    });
+    if (!ai.ok) {
+      return {
+        ok: false,
+        message: `${converted.message} KI: ${ai.message}`,
+      };
+    }
+    converted = { ok: true, data: ai.data };
   }
 
   const bundle = rawFilledToImportBundle(converted.data);
@@ -817,13 +834,10 @@ export async function importRawFilledQuestionnaireAction(
   const responseId = imported.data.responseId;
 
   if (parsed.data.folderId) {
-    const auth = await requirePlatformAdmin();
-    if (auth.ok) {
-      await auth.supabase
-        .from("surveys")
-        .update({ folder_id: parsed.data.folderId })
-        .eq("id", surveyId);
-    }
+    await auth.supabase
+      .from("surveys")
+      .update({ folder_id: parsed.data.folderId })
+      .eq("id", surveyId);
   }
 
   if (responseId) {
