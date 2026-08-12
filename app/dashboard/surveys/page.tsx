@@ -411,6 +411,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                               responseHref={responseHref}
                               isPublic={isPublic}
                               pendingCount={pendingCount}
+                              hasResponses={Boolean(response?.id)}
                             />
                           </div>
                         </div>

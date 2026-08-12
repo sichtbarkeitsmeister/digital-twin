@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { Download, MoreHorizontal } from "lucide-react";
+import { Copy, Download, MoreHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import {
 
 import {
   deleteSurveyAction,
+  duplicateSurveyAction,
   exportSurveyBundleAction,
   publishSurveyAction,
   unpublishSurveyAction,
@@ -28,6 +29,7 @@ export function SurveyRowActions(props: {
   responseHref: string;
   isPublic: boolean;
   pendingCount: number;
+  hasResponses: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -118,6 +120,68 @@ export function SurveyRowActions(props: {
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault();
+            const ok = window.confirm(
+              `Umfrage „${props.title}“ als privaten Entwurf duplizieren?\n\nEs wird nur die Fragebogen-Definition kopiert (ohne Antworten).`,
+            );
+            if (!ok) return;
+
+            startTransition(async () => {
+              const res = await duplicateSurveyAction({
+                surveyId: props.surveyId,
+                includeAnswers: false,
+              });
+              if (!res.ok || !res.data?.surveyId) {
+                window.alert(res.message);
+                if (res.data?.surveyId) {
+                  router.push(`/dashboard/surveys/${res.data.surveyId}/edit`);
+                  router.refresh();
+                }
+                return;
+              }
+              router.push(`/dashboard/surveys/${res.data.surveyId}/edit`);
+              router.refresh();
+            });
+          }}
+        >
+          <Copy className="h-4 w-4" />
+          Duplizieren
+        </DropdownMenuItem>
+
+        {props.hasResponses ? (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              const ok = window.confirm(
+                `Umfrage „${props.title}“ inkl. Antworten als privaten Entwurf duplizieren?`,
+              );
+              if (!ok) return;
+
+              startTransition(async () => {
+                const res = await duplicateSurveyAction({
+                  surveyId: props.surveyId,
+                  includeAnswers: true,
+                });
+                if (!res.ok || !res.data?.surveyId) {
+                  window.alert(res.message);
+                  if (res.data?.surveyId) {
+                    router.push(`/dashboard/surveys/${res.data.surveyId}/edit`);
+                    router.refresh();
+                  }
+                  return;
+                }
+                router.push(`/dashboard/surveys/${res.data.surveyId}/edit`);
+                router.refresh();
+              });
+            }}
+          >
+            <Copy className="h-4 w-4" />
+            Duplizieren (inkl. Antworten)
+          </DropdownMenuItem>
+        ) : null}
+
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
             startTransition(async () => {
               const res = await exportSurveyBundleAction({ surveyId: props.surveyId });
               if (!res.ok || !res.data) {
@@ -160,4 +224,3 @@ export function SurveyRowActions(props: {
     </DropdownMenu>
   );
 }
-
