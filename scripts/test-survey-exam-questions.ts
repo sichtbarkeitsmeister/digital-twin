@@ -401,6 +401,12 @@ assert.equal(
 );
 assert.equal(
   rewriteCustomerThirdPersonToSecondPerson(
+    "Welche Berufs- oder Lebenssituation haben Wunschkunden typischerweise?",
+  ),
+  "Welche Berufs- oder Lebenssituation hast du typischerweise?",
+);
+assert.equal(
+  rewriteCustomerThirdPersonToSecondPerson(
     "Was erzählen Wunschkunden über ihre Lebenssituation im Erstgespräch?",
   ),
   "Was erzählst du über deine Lebenssituation im Erstgespräch?",
@@ -409,6 +415,53 @@ assert.equal(
   fixGermanDuVerbAgreement("Was erzählen du über Ihre Situation? Wie beschreiben sie es?"),
   "Was erzählst du über deine Situation? Wie beschreibst du es?",
 );
+
+// From #113: job/tell fields must stay grammatical; sales tone may soften job wording
+const grammarFacts = extractSurveyFacts({
+  surveyTitle: "Grammar",
+  definition: {
+    steps: [
+      {
+        id: "s1",
+        title: "Wunschkunde",
+        description: "",
+        fields: [
+          {
+            id: "f_job",
+            type: "text" as const,
+            title: "Welche Berufs- oder Lebenssituation haben Wunschkunden typischerweise?",
+            description: "",
+            required: false,
+            options: [],
+          },
+          {
+            id: "f_tell",
+            type: "text" as const,
+            title: "Was erzählen Wunschkunden über ihre Lebenssituation im Erstgespräch?",
+            description: "",
+            required: false,
+            options: [],
+          },
+        ],
+      },
+    ],
+  },
+  answers: {
+    f_job: "Selbstständig, Mitte 40 bis Mitte 50",
+    f_tell: "Erschöpft, enttäuscht von der Schulmedizin",
+  },
+  fieldQuestions: [],
+});
+const grammarQs = buildSurveyExamQuestions(grammarFacts.facts, {
+  audience: "persona",
+  maxQuestions: 8,
+});
+assert.ok(
+  grammarQs.some((q) => /beruflich|lebenssituation|hast du typischerweise/i.test(q.question)),
+);
+assert.ok(grammarQs.some((q) => /erzählst du über deine/i.test(q.question)));
+assert.ok(!grammarQs.some((q) => /\bhaben du\b|\berzählen du\b|\bihre\b|\bSie\b/i.test(q.question)));
+assert.ok(!grammarQs.some((q) => /fragebogen/i.test(q.question)));
 
 const declutterFacts = extractSurveyFacts({
   surveyTitle: "Entrümpelung",
