@@ -27,6 +27,7 @@
     "test:avatar-global-prompt-anchor": "tsx scripts/test-avatar-global-prompt-anchor.ts",
     "test:dashboard-sticky-survey-ai": "tsx scripts/test-dashboard-sticky-survey-ai.ts",
     "test:survey-paste-retry": "tsx scripts/test-survey-paste-retry.ts",
+    "test:raw-filled-questionnaire": "tsx scripts/test-raw-filled-questionnaire.ts",
     "test:persona-testing": "tsx scripts/test-persona-testing.ts",
     "test:survey-exam-questions": "tsx scripts/test-survey-exam-questions.ts",
     "test:agent-survey-coverage": "tsx scripts/test-agent-survey-coverage.ts",

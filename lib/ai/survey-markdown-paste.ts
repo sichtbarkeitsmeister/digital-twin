@@ -3,6 +3,10 @@ import { randomUUID } from "crypto";
 import { surveySchema, type SurveyParsed } from "@/lib/surveys/schema";
 import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
 import {
+  isRawFilledQuestionnaire,
+  parseRawFilledQuestionnaire,
+} from "@/lib/surveys/raw-filled-questionnaire";
+import {
   resolveFolderPlacementFromMessage,
   wrapProposalWithFolder,
 } from "@/lib/ai/survey-multiphase-create";
@@ -370,6 +374,36 @@ export function buildQuestionnairePasteProposal(input: {
 }):
   | { ok: true; proposal: Record<string, unknown>; stepCount: number; fieldCount: number }
   | { ok: false; message: string } {
+  // Prefer filled raw exports (Fragen + Antworten) over empty markdown templates.
+  if (isRawFilledQuestionnaire(input.userMessage)) {
+    const converted = parseRawFilledQuestionnaire(input.userMessage);
+    if (converted.ok) {
+      const createSurvey = {
+        kind: "create_survey" as const,
+        summary: `Ausgefüllten Roh-Fragebogen „${converted.data.title}“ übernommen (${converted.data.stepCount} Abschnitte, ${converted.data.fieldCount} Fragen, ${converted.data.answeredCount} Antworten).`,
+        title: converted.data.title,
+        description: converted.data.description,
+        notificationEmails: [] as string[],
+        survey: converted.data.survey,
+        initialResponse: {
+          status: "completed" as const,
+          answers: converted.data.answers,
+        },
+      };
+      const placement = resolveFolderPlacementFromMessage(
+        input.userMessage,
+        input.folders,
+      );
+      const proposal = wrapProposalWithFolder({ createSurvey, placement });
+      return {
+        ok: true,
+        proposal,
+        stepCount: converted.data.stepCount,
+        fieldCount: converted.data.fieldCount,
+      };
+    }
+  }
+
   const source = resolveQuestionnairePasteSource({
     userMessage: input.userMessage,
     priorUserMessages: input.priorUserMessages,

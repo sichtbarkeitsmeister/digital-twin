@@ -682,7 +682,7 @@ const importBundleSchema = z.object({
 
 export async function importSurveyBundleAction(
   input: { payload: unknown },
-): Promise<ActionState<{ surveyId: string }>> {
+): Promise<ActionState<{ surveyId: string; responseId?: string }>> {
   const parsed = importBundleSchema.safeParse(input.payload);
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültiger Import." };
@@ -770,6 +770,81 @@ export async function importSurveyBundleAction(
     ok: true,
     message: "Umfrage (inkl. Antworten) importiert.",
     data: { surveyId: createdSurvey.id },
+  };
+}
+
+const rawFilledImportSchema = z.object({
+  text: z.string().trim().min(50, "Text ist zu kurz."),
+  title: z.string().trim().max(120).optional(),
+  folderId: z.string().uuid().nullable().optional(),
+});
+
+/**
+ * Import a raw filled questionnaire export (plain text with „Antwort:“ lines)
+ * as a new private survey + completed response — editable and publishable.
+ */
+export async function importRawFilledQuestionnaireAction(
+  input: z.input<typeof rawFilledImportSchema>,
+): Promise<ActionState<{ surveyId: string; responseId?: string; fieldCount: number; answeredCount: number }>> {
+  const parsed = rawFilledImportSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const { parseRawFilledQuestionnaire, rawFilledToImportBundle } = await import(
+    "@/lib/surveys/raw-filled-questionnaire"
+  );
+
+  const converted = parseRawFilledQuestionnaire(parsed.data.text, {
+    title: parsed.data.title,
+  });
+  if (!converted.ok) {
+    return { ok: false, message: converted.message };
+  }
+
+  const bundle = rawFilledToImportBundle(converted.data);
+  const imported = await importSurveyBundleAction({ payload: bundle });
+  if (!imported.ok || !imported.data?.surveyId) {
+    return { ok: false, message: imported.message };
+  }
+
+  const surveyId = imported.data.surveyId;
+
+  if (parsed.data.folderId) {
+    const auth = await requirePlatformAdmin();
+    if (auth.ok) {
+      await auth.supabase
+        .from("surveys")
+        .update({ folder_id: parsed.data.folderId })
+        .eq("id", surveyId);
+    }
+  }
+
+  const auth = await requirePlatformAdmin();
+  let responseId: string | undefined;
+  if (auth.ok) {
+    const { data: response } = await auth.supabase
+      .from("survey_responses")
+      .select("id")
+      .eq("survey_id", surveyId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    responseId = response?.id;
+    if (responseId) {
+      revalidatePath(`/dashboard/surveys/${surveyId}/responses/${responseId}`);
+    }
+  }
+
+  return {
+    ok: true,
+    message: `Fragebogen mit ${converted.data.answeredCount} Antworten importiert (${converted.data.fieldCount} Fragen).`,
+    data: {
+      surveyId,
+      responseId,
+      fieldCount: converted.data.fieldCount,
+      answeredCount: converted.data.answeredCount,
+    },
   };
 }
 
