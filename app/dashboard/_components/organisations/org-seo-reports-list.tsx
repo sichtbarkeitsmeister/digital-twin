@@ -5,8 +5,10 @@ import { ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { DtSeoMonthlyReportBadge } from "@/components/dt/seo/dt-seo-monthly-report-badge";
 import { formatOrgDate } from "@/lib/dashboard/organisation-ui";
 import type { DtSeoReportRow } from "@/lib/dt/types";
+import { cn } from "@/lib/utils";
 
 function reportStateLabel(state: string): string {
   switch (state) {
@@ -86,7 +88,11 @@ export function OrgSeoReportsList(props: {
         {visible.map((report) => (
           <li
             key={report.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] px-3 py-2.5 dark:border-white/8 dark:bg-white/[0.03]"
+            className={cn(
+              "flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] px-3 py-2.5 dark:border-white/8 dark:bg-white/[0.03]",
+              report.trigger_source === "monthly_scheduler" &&
+                "border-l-4 border-l-sbkm-navy dark:border-l-sbkm-mint",
+            )}
           >
             <div className="min-w-0 grid gap-0.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -96,6 +102,7 @@ export function OrgSeoReportsList(props: {
                 <Badge variant={reportBadgeVariant(report.state)} className="text-[10px]">
                   {reportStateLabel(report.state)}
                 </Badge>
+                <DtSeoMonthlyReportBadge report={report} />
               </div>
               {report.state === "error" && report.state_message ? (
                 <p className="text-xs font-medium text-red-600 dark:text-red-400">
