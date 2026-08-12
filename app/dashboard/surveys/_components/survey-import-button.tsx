@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { FileUp, Upload, X } from "lucide-react";
 
 import {
-  importRawFilledQuestionnaireAction,
+  importRawFilledQuestionnairesBatchAction,
   importSurveyBundleAction,
 } from "@/app/dashboard/surveys/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+
+type PendingRawFile = { name: string; text: string };
 
 export function SurveyImportButton() {
   const router = useRouter();
@@ -18,7 +20,9 @@ export function SurveyImportButton() {
   const [tab, setTab] = useState<"raw" | "json">("raw");
   const [rawText, setRawText] = useState("");
   const [title, setTitle] = useState("");
+  const [files, setFiles] = useState<PendingRawFile[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const rawFileInputRef = useRef<HTMLInputElement>(null);
@@ -27,31 +31,47 @@ export function SurveyImportButton() {
     if (isPending) return;
     setIsOpen(false);
     setError(null);
+    setStatus(null);
   }
 
-  function importRaw(text: string) {
-    const trimmed = text.trim();
-    if (trimmed.length < 50) {
-      setError("Bitte den kompletten ausgefüllten Fragebogen einfügen.");
+  function importRaw() {
+    const items: Array<{ text: string; title?: string }> = [];
+    for (const file of files) {
+      items.push({
+        text: file.text,
+        title: title.trim() && files.length === 1 ? title.trim() : file.name.replace(/\.[^.]+$/, ""),
+      });
+    }
+    const pasted = rawText.trim();
+    if (pasted.length >= 50) {
+      items.push({ text: pasted, title: title.trim() || undefined });
+    }
+    if (items.length === 0) {
+      setError("Bitte Text einfügen und/oder eine oder mehrere Dateien laden.");
       return;
     }
     setError(null);
+    setStatus(null);
     startTransition(async () => {
-      const res = await importRawFilledQuestionnaireAction({
-        text: trimmed,
-        title: title.trim() || undefined,
-      });
-      if (!res.ok || !res.data?.surveyId) {
+      const res = await importRawFilledQuestionnairesBatchAction({ items });
+      if (!res.ok || !res.data?.results?.length) {
         setError(res.message);
         return;
       }
+      const { results, failed } = res.data;
       setRawText("");
       setTitle("");
+      setFiles([]);
       setIsOpen(false);
-      const target = res.data.responseId
-        ? `/dashboard/surveys/${res.data.surveyId}/responses/${res.data.responseId}`
-        : `/dashboard/surveys/${res.data.surveyId}/edit`;
-      router.push(target);
+      if (results.length === 1 && failed.length === 0) {
+        const one = results[0]!;
+        const target = one.responseId
+          ? `/dashboard/surveys/${one.surveyId}/responses/${one.responseId}`
+          : `/dashboard/surveys/${one.surveyId}/edit`;
+        router.push(target);
+      } else {
+        router.push("/dashboard/surveys");
+      }
       router.refresh();
     });
   }
@@ -75,6 +95,20 @@ export function SurveyImportButton() {
     });
   }
 
+  async function addRawFiles(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const next: PendingRawFile[] = [];
+    for (const file of Array.from(fileList)) {
+      const text = await file.text();
+      next.push({ name: file.name, text });
+    }
+    setFiles((prev) => {
+      const byName = new Map(prev.map((f) => [f.name, f]));
+      for (const f of next) byName.set(f.name, f);
+      return Array.from(byName.values());
+    });
+  }
+
   return (
     <>
       <Button type="button" variant="outline" onClick={() => setIsOpen(true)}>
@@ -89,7 +123,7 @@ export function SurveyImportButton() {
               <div>
                 <h2 className="text-lg font-semibold">Fragebogen importieren</h2>
                 <p className="text-sm text-muted-foreground">
-                  Rohtext mit Fragen und Antworten — oder fertiges JSON-Bundle.
+                  Ein oder mehrere ausgefüllte Roh-Fragebögen — oder fertiges JSON.
                 </p>
               </div>
               <Button
@@ -129,34 +163,35 @@ export function SurveyImportButton() {
               {tab === "raw" ? (
                 <div className="grid gap-3">
                   <p className="text-sm text-muted-foreground">
-                    Füge den kompletten ausgefüllten Text ein (Abschnitte mit „N Felder“ und
-                    Zeilen „Antwort: …“). Daraus werden Fragen, Antwortoptionen und die
-                    ausgefüllte Antwort angelegt — bearbeitbar und für Kunden veröffentlichbar.
+                    Mehrere Dateien möglich (z. B. Wunschkunde + separater Anbieter-Bogen).
+                    In einem Paste mehrere Bögen mit{" "}
+                    <code className="text-xs">=====</code> trennen — oder hintereinander
+                    einfügen, wenn beide mit „Wunschkunde…“ / „Anbieter…“ starten.
                   </p>
                   <Input
                     value={title}
                     disabled={isPending}
-                    placeholder="Optionaler Titel (sonst aus dem Text)"
+                    placeholder="Optionaler Titel (bei einer Datei / einem Paste)"
                     onChange={(e) => setTitle(e.target.value)}
                   />
                   <Textarea
                     value={rawText}
                     disabled={isPending}
-                    placeholder={`Wunschkunde & Avatar\n5 Felder\nWie soll der Avatar heißen?\n\nAntwort: Alex Müller\n…`}
-                    className="min-h-[280px] font-mono text-xs"
+                    placeholder={`Wunschkunde & Avatar\n5 Felder\n…\n\nAntwort: …\n\n=====\n\nAnbieter-Fragebogen\n…`}
+                    className="min-h-[220px] font-mono text-xs"
                     onChange={(e) => setRawText(e.target.value)}
                   />
                   <div className="flex flex-wrap items-center gap-2">
                     <input
                       ref={rawFileInputRef}
                       type="file"
+                      multiple
                       accept=".txt,.md,text/plain,text/markdown"
                       className="hidden"
                       onChange={(e) => {
-                        const file = e.currentTarget.files?.[0];
+                        const list = e.currentTarget.files;
                         e.currentTarget.value = "";
-                        if (!file) return;
-                        void file.text().then((text) => setRawText(text));
+                        void addRawFiles(list);
                       }}
                     />
                     <Button
@@ -167,9 +202,35 @@ export function SurveyImportButton() {
                       onClick={() => rawFileInputRef.current?.click()}
                     >
                       <FileUp className="mr-2 h-4 w-4" />
-                      .txt / .md laden
+                      Dateien laden (mehrere)
                     </Button>
+                    {files.length > 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        {files.length} Datei{files.length === 1 ? "" : "en"} gewählt
+                      </span>
+                    ) : null}
                   </div>
+                  {files.length > 0 ? (
+                    <ul className="grid gap-1 rounded-md border px-3 py-2 text-xs">
+                      {files.map((f) => (
+                        <li key={f.name} className="flex items-center justify-between gap-2">
+                          <span className="truncate">{f.name}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            disabled={isPending}
+                            onClick={() =>
+                              setFiles((prev) => prev.filter((x) => x.name !== f.name))
+                            }
+                          >
+                            Entfernen
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ) : (
                 <div className="grid gap-3">
@@ -206,6 +267,9 @@ export function SurveyImportButton() {
                   {error}
                 </p>
               ) : null}
+              {status ? (
+                <p className="mt-3 text-sm text-muted-foreground">{status}</p>
+              ) : null}
             </div>
 
             <div className="flex justify-end gap-2 border-t px-4 py-3">
@@ -215,10 +279,12 @@ export function SurveyImportButton() {
               {tab === "raw" ? (
                 <Button
                   type="button"
-                  disabled={isPending || rawText.trim().length < 50}
-                  onClick={() => importRaw(rawText)}
+                  disabled={
+                    isPending || (rawText.trim().length < 50 && files.length === 0)
+                  }
+                  onClick={() => importRaw()}
                 >
-                  {isPending ? "Importiere…" : "Importieren"}
+                  {isPending ? "Importiere…" : "Alle importieren"}
                 </Button>
               ) : null}
             </div>

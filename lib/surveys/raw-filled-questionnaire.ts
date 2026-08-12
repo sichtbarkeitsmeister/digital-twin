@@ -466,3 +466,99 @@ export function rawFilledToImportBundle(data: RawFilledParseResult) {
     fieldQuestions: [] as unknown[],
   };
 }
+
+const EXPLICIT_DOC_SEP_RE =
+  /\n{0,2}(?:={4,}|#{2,3}\s*(?:NEUER\s+)?FRAGEBOGEN(?:\s+\d+)?|-{5,})\s*\n{0,2}/i;
+
+/** Titles that often start a whole questionnaire (not just a mid-doc section). */
+const DOC_START_TITLE_RE =
+  /^(?:wunschkunde|arbeitgeber|anbieter|seo(?:\b|[\s_-])|persona|digital\s*twin|mitarbeiter|marke|branding|geo\b)/i;
+
+function antwortCountBefore(text: string, index: number): number {
+  const head = text.slice(0, index);
+  return (head.match(/^Antwort\s*:/gim) ?? []).length;
+}
+
+/**
+ * Split one paste/file blob into multiple questionnaires.
+ * Supports explicit separators (`=====`, `---`, `## FRAGEBOGEN`) and a heuristic
+ * for concatenated exports (e.g. Wunschkunde + separate Anbieter questionnaire).
+ */
+export function splitRawFilledDocuments(
+  text: string,
+): Array<{ label: string; text: string }> {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+
+  if (normalized.includes("\f")) {
+    const parts = normalized
+      .split("\f")
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 50);
+    if (parts.length > 1) {
+      return parts.map((t, i) => ({
+        label: `Fragebogen ${i + 1}`,
+        text: t,
+      }));
+    }
+  }
+
+  const explicit = normalized
+    .split(EXPLICIT_DOC_SEP_RE)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 50);
+  if (explicit.length > 1) {
+    const usable = explicit.filter(
+      (t) => (t.match(/^Antwort\s*:/gim) ?? []).length >= 2 || isRawFilledQuestionnaire(t),
+    );
+    if (usable.length > 1) {
+      return usable.map((t, i) => ({
+        label: `Fragebogen ${i + 1}`,
+        text: t,
+      }));
+    }
+  }
+
+  // Heuristic: new document when "Title\nN Felder" appears after enough prior answers
+  // and the title looks like a questionnaire start (Wunschkunde / Anbieter / …).
+  const lines = normalized.split("\n");
+  const cutIndexes: number[] = [0];
+  let offset = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const lineStart = offset;
+    offset += line.length + 1; // + \n
+
+    const title = line.trim();
+    if (!title || !DOC_START_TITLE_RE.test(title)) continue;
+
+    let j = i + 1;
+    while (j < lines.length && !(lines[j] ?? "").trim()) j += 1;
+    const next = (lines[j] ?? "").trim();
+    if (!FELDER_LINE_RE.test(next)) continue;
+
+    // Don't split at the very first document.
+    if (antwortCountBefore(normalized, lineStart) < 3) continue;
+    if (cutIndexes[cutIndexes.length - 1] === lineStart) continue;
+    cutIndexes.push(lineStart);
+  }
+
+  if (cutIndexes.length > 1) {
+    const parts: Array<{ label: string; text: string }> = [];
+    for (let c = 0; c < cutIndexes.length; c += 1) {
+      const start = cutIndexes[c]!;
+      const end = c + 1 < cutIndexes.length ? cutIndexes[c + 1]! : normalized.length;
+      const chunk = normalized.slice(start, end).trim();
+      if (chunk.length < 50) continue;
+      if ((chunk.match(/^Antwort\s*:/gim) ?? []).length < 2 && !isRawFilledQuestionnaire(chunk)) {
+        continue;
+      }
+      const firstLine = chunk.split("\n").find((l) => l.trim())?.trim() ?? `Fragebogen ${parts.length + 1}`;
+      parts.push({ label: firstLine.slice(0, 80), text: chunk });
+    }
+    if (parts.length > 1) return parts;
+  }
+
+  return [{ label: "Fragebogen", text: normalized }];
+}
+

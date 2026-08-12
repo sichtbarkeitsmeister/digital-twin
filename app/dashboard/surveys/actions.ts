@@ -721,6 +721,7 @@ export async function importSurveyBundleAction(
   }
 
   const firstResponse = parsed.data.responses[0];
+  let createdResponseId: string | undefined;
   if (firstResponse) {
     const tokenHashHex = `\\x${randomBytes(32).toString("hex")}`;
     const { data: createdResponse, error: responseError } = await supabase
@@ -738,6 +739,7 @@ export async function importSurveyBundleAction(
     if (responseError || !createdResponse?.id) {
       return { ok: false, message: "Antworten konnten nicht importiert werden." };
     }
+    createdResponseId = createdResponse.id;
 
     const sourceResponseId = firstResponse.id;
     const importQuestions = parsed.data.fieldQuestions.filter((q) =>
@@ -766,10 +768,13 @@ export async function importSurveyBundleAction(
 
   revalidatePath("/dashboard/surveys");
   revalidatePath(`/dashboard/surveys/${createdSurvey.id}/edit`);
+  if (createdResponseId) {
+    revalidatePath(`/dashboard/surveys/${createdSurvey.id}/responses/${createdResponseId}`);
+  }
   return {
     ok: true,
     message: "Umfrage (inkl. Antworten) importiert.",
-    data: { surveyId: createdSurvey.id },
+    data: { surveyId: createdSurvey.id, responseId: createdResponseId },
   };
 }
 
@@ -809,6 +814,7 @@ export async function importRawFilledQuestionnaireAction(
   }
 
   const surveyId = imported.data.surveyId;
+  const responseId = imported.data.responseId;
 
   if (parsed.data.folderId) {
     const auth = await requirePlatformAdmin();
@@ -820,20 +826,8 @@ export async function importRawFilledQuestionnaireAction(
     }
   }
 
-  const auth = await requirePlatformAdmin();
-  let responseId: string | undefined;
-  if (auth.ok) {
-    const { data: response } = await auth.supabase
-      .from("survey_responses")
-      .select("id")
-      .eq("survey_id", surveyId)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    responseId = response?.id;
-    if (responseId) {
-      revalidatePath(`/dashboard/surveys/${surveyId}/responses/${responseId}`);
-    }
+  if (responseId) {
+    revalidatePath(`/dashboard/surveys/${surveyId}/responses/${responseId}`);
   }
 
   return {
@@ -845,6 +839,120 @@ export async function importRawFilledQuestionnaireAction(
       fieldCount: converted.data.fieldCount,
       answeredCount: converted.data.answeredCount,
     },
+  };
+}
+
+const rawFilledBatchSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        text: z.string().trim().min(50),
+        title: z.string().trim().max(120).optional(),
+      }),
+    )
+    .min(1)
+    .max(30),
+  folderId: z.string().uuid().nullable().optional(),
+});
+
+/**
+ * Import one or more raw filled questionnaires (multi-file / multi-paste).
+ * Each item becomes its own survey + completed response.
+ */
+export async function importRawFilledQuestionnairesBatchAction(
+  input: z.input<typeof rawFilledBatchSchema>,
+): Promise<
+  ActionState<{
+    results: Array<{
+      title: string;
+      surveyId: string;
+      responseId?: string;
+      fieldCount: number;
+      answeredCount: number;
+    }>;
+    failed: Array<{ title: string; message: string }>;
+  }>
+> {
+  const parsed = rawFilledBatchSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const { splitRawFilledDocuments } = await import(
+    "@/lib/surveys/raw-filled-questionnaire"
+  );
+
+  // Expand each pasted blob in case it contains several questionnaires.
+  const expanded: Array<{ text: string; title?: string }> = [];
+  for (const item of parsed.data.items) {
+    const parts = splitRawFilledDocuments(item.text);
+    for (const part of parts) {
+      expanded.push({
+        text: part.text,
+        title: parts.length === 1 ? item.title : item.title || part.label,
+      });
+    }
+  }
+
+  if (expanded.length === 0) {
+    return { ok: false, message: "Keine Fragebögen im Text erkannt." };
+  }
+  if (expanded.length > 30) {
+    return { ok: false, message: "Maximal 30 Fragebögen pro Import." };
+  }
+
+  const results: Array<{
+    title: string;
+    surveyId: string;
+    responseId?: string;
+    fieldCount: number;
+    answeredCount: number;
+  }> = [];
+  const failed: Array<{ title: string; message: string }> = [];
+
+  for (let i = 0; i < expanded.length; i += 1) {
+    const item = expanded[i]!;
+    const res = await importRawFilledQuestionnaireAction({
+      text: item.text,
+      title: item.title,
+      folderId: parsed.data.folderId,
+    });
+    if (!res.ok || !res.data?.surveyId) {
+      failed.push({
+        title: item.title?.trim() || `Fragebogen ${i + 1}`,
+        message: res.message,
+      });
+      continue;
+    }
+    results.push({
+      title: item.title?.trim() || `Fragebogen ${i + 1}`,
+      surveyId: res.data.surveyId,
+      responseId: res.data.responseId,
+      fieldCount: res.data.fieldCount,
+      answeredCount: res.data.answeredCount,
+    });
+  }
+
+  // Prefer the survey title from the successful import message path — refresh titles
+  // from converted data when we only had generic labels.
+  // (Titles are already set via parse inside importRawFilledQuestionnaireAction.)
+
+  if (results.length === 0) {
+    return {
+      ok: false,
+      message: failed[0]?.message ?? "Kein Fragebogen konnte importiert werden.",
+      data: { results, failed },
+    };
+  }
+
+  revalidatePath("/dashboard/surveys");
+  return {
+    ok: true,
+    message:
+      failed.length === 0
+        ? `${results.length} Fragebogen${results.length === 1 ? "" : "bögen"} importiert.`
+        : `${results.length} importiert, ${failed.length} fehlgeschlagen.`,
+    data: { results, failed },
   };
 }
 

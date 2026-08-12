@@ -6,6 +6,7 @@ import {
   parseRawFilledQuestionnaire,
   splitCheckboxLabels,
   splitRankingLabels,
+  splitRawFilledDocuments,
 } from "../lib/surveys/raw-filled-questionnaire";
 
 const SAMPLE = `Wunschkunde & Avatar
@@ -161,4 +162,16 @@ testDetection();
 testSplits();
 testParse();
 testFileSampleIfPresent();
+testMultiDocumentSplit();
 console.log("raw-filled-questionnaire: all ok");
+
+function testMultiDocumentSplit() {
+  const withSep = `${SAMPLE}\n=====\nAnbieter Kenntnisse\n3 Felder\nWas bietet ihr an?\n\nAntwort: Entrümpelung\n\nWie lange gibt es euch?\n\nAntwort: 13 Jahre\n\nWo seid ihr aktiv?\n\nAntwort: Düsseldorf\n`;
+  const parts = splitRawFilledDocuments(withSep);
+  assert.equal(parts.length, 2, "separator should yield 2 docs");
+
+  const concatenated = `${SAMPLE}\n\nAnbieter & Leistungen\n3 Felder\nWas ist euer Kernangebot?\n\nBitte kurz beschreiben.\n\nAntwort: Entrümpelung und Haushaltsauflösung\n\nWelche Regionen bedient ihr?\n\nAntwort: Düsseldorf und Umgebung\n\nWie viele Mitarbeiter?\n\nAntwort: 8\n`;
+  const auto = splitRawFilledDocuments(concatenated);
+  assert.ok(auto.length >= 2, `auto-split expected >=2, got ${auto.length}`);
+  console.log(`multi-doc split: ok (sep=${parts.length}, auto=${auto.length})`);
+}
