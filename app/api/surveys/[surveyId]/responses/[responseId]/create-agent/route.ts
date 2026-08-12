@@ -109,7 +109,7 @@ export async function POST(
   // Guard against DB RPC drift (old dt_create_persona_agent ignored prompt_append).
   const { data: created } = await auth.supabase
     .from("dt_agents")
-    .select("id,prompt_append,uses_global_prompt")
+    .select("id,prompt_append,uses_global_prompt,template_id")
     .eq("id", agentId)
     .maybeSingle();
 
@@ -118,6 +118,7 @@ export async function POST(
 
   if (appendMissing || globalMissing) {
     const { updateDtAgent } = await import("@/lib/dt/db");
+    // dt_update_agent already supports prompt_append — repair even when create RPC is old.
     const repaired = await updateDtAgent({
       agentId,
       patch: {
@@ -143,7 +144,7 @@ export async function POST(
           ok: false,
           agentId,
           message:
-            "Agent angelegt, aber Avatar-Prompt wurde nicht gespeichert. Bitte in Supabase die Migration 20260811_survey_agent_prospect_orientation.sql ausführen (dt_create_persona_agent) und den Agenten erneut umwandeln.",
+            "Agent angelegt, aber Avatar-Prompt wurde nicht gespeichert. Bitte in Supabase die Datei database/migrations/20260812_fix_dt_create_persona_agent_prompt_append.sql ausführen und den Agenten löschen → erneut umwandeln.",
         },
         { status: 500 },
       );

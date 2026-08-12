@@ -252,10 +252,16 @@ export function DtAgentListItem(props: {
             Boolean(agent.prompt_append?.trim()) ||
             Boolean(agent.source_survey_id)
           }
-          hidePrompt={agent.uses_global_prompt && !agent.is_default}
+          // Survey personas always use the global DigitalTwin prompt; hide the
+          // stub System-Prompt even if uses_global_prompt was not persisted.
+          hidePrompt={
+            !agent.is_default &&
+            (agent.uses_global_prompt || Boolean(agent.source_survey_id))
+          }
           promptNote={
-            agent.uses_global_prompt && !agent.is_default
-              ? "Basis-Verhalten kommt aus dem globalen DigitalTwin-Prompt. Der eigentliche Avatar-Text aus der Umfrage steht darunter."
+            !agent.is_default &&
+            (agent.uses_global_prompt || Boolean(agent.source_survey_id))
+              ? "Basis-Verhalten kommt aus dem globalen DigitalTwin-Prompt (Tab „Globale Prompts“). Der eigentliche Avatar-Text aus der Umfrage steht darunter unter „Avatar-Prompt“."
               : undefined
           }
           appendLabel={
