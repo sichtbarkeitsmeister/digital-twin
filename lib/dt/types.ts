@@ -37,6 +37,10 @@ export type DtOrgConfigRow = {
   seo_checklist?: unknown;
   seo_checklist_personalized?: boolean;
   videos?: unknown;
+  /** Last grounding-page upload (LLM/GEO); refresh every 3 months. */
+  grounding_page_url?: string | null;
+  grounding_page_uploaded_at?: string | null;
+  grounding_page_notes?: string | null;
 };
 
 export type DtSeoTaskRow = {
