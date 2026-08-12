@@ -14,7 +14,7 @@ import { isMemberOfOrganisation } from "@/lib/dashboard/org-context";
 
 const bodySchema = z.object({
   promptTemplate: z.string().max(64_000),
-  promptAppend: z.string().max(32_000).nullable().optional(),
+    promptAppend: z.string().max(120_000).nullable().optional(),
   /** Optional override — compare against any completed response (current questionnaire data). */
   surveyId: z.string().uuid().optional(),
   responseId: z.string().uuid().optional(),
