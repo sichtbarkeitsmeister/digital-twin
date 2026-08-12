@@ -86,13 +86,17 @@ export function DtSeoGroundingPanel(props: {
     setLoading(true);
     setError(null);
     try {
+      const autoParam = props.canEdit ? "&auto=1" : "";
       const res = await fetch(
-        `/api/dt/seo/grounding?org=${encodeURIComponent(props.organisationId)}`,
+        `/api/dt/seo/grounding?org=${encodeURIComponent(props.organisationId)}${autoParam}`,
       );
       const json = (await res.json()) as {
         ok?: boolean;
         message?: string;
         grounding?: GroundingPayload;
+        discoveredUrl?: string | null;
+        discoveryMessage?: string | null;
+        autoApplied?: boolean;
       };
       if (!res.ok || !json.ok || !json.grounding) {
         setError(json.message ?? "Grounding-Page konnte nicht geladen werden.");
@@ -101,15 +105,25 @@ export function DtSeoGroundingPanel(props: {
       }
       setData(json.grounding);
       setUploadedAt(toDateInputValue(json.grounding.uploadedAt));
-      setUrl(json.grounding.url ?? "");
+      setUrl(json.grounding.url ?? json.discoveredUrl ?? "");
       setNotes(json.grounding.notes ?? "");
+      if (json.autoApplied && json.grounding.uploadedAt) {
+        setLastDetection(
+          `${formatDeDate(json.grounding.uploadedAt)} · automatisch erkannt`,
+        );
+        toast.success("Grounding Page gefunden und Datum übernommen.");
+      } else if (!json.grounding.url && json.discoveredUrl) {
+        setUrl(json.discoveredUrl);
+      } else if (!json.grounding.url && json.discoveryMessage) {
+        setLastDetection(json.discoveryMessage);
+      }
     } catch {
       setError("Grounding-Page konnte nicht geladen werden.");
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [props.organisationId]);
+  }, [props.canEdit, props.organisationId]);
 
   useEffect(() => {
     void refresh();
@@ -221,8 +235,8 @@ export function DtSeoGroundingPanel(props: {
         </h2>
         <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
           Alle {GROUNDING_PAGE_INTERVAL_MONTHS} Monate aktualisieren. Ab{" "}
-          {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis. Mit hinterlegter
-          URL kann das Upload-Datum von der Live-Seite gelesen werden.
+          {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis. Fehlt die URL,
+          sucht der Twin automatisch unter der Website (z. B. /grounding/) und liest das Datum.
         </p>
       </div>
 
