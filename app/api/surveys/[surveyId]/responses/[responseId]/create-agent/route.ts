@@ -70,6 +70,17 @@ export async function POST(
 
   const agent = parsed.data.agent;
   const avatarPart = ensureAvatarGlobalPromptAnchor(agent.prompt_template);
+  if (!avatarPart.trim()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "Avatar-Prompt ist leer — bitte die Vorschau neu erzeugen und erneut speichern.",
+      },
+      { status: 400 },
+    );
+  }
+
   const { agentId, error } = await createDtPersonaAgent({
     organisationId: parsed.data.organisationId,
     payload: {
@@ -93,6 +104,50 @@ export async function POST(
       { ok: false, message: mapPersonaAgentRpcError(error) },
       { status: 400 },
     );
+  }
+
+  // Guard against DB RPC drift (old dt_create_persona_agent ignored prompt_append).
+  const { data: created } = await auth.supabase
+    .from("dt_agents")
+    .select("id,prompt_append,uses_global_prompt")
+    .eq("id", agentId)
+    .maybeSingle();
+
+  const appendMissing = !String(created?.prompt_append ?? "").trim();
+  const globalMissing = created?.uses_global_prompt !== true;
+
+  if (appendMissing || globalMissing) {
+    const { updateDtAgent } = await import("@/lib/dt/db");
+    const repaired = await updateDtAgent({
+      agentId,
+      patch: {
+        prompt_append: avatarPart,
+        uses_global_prompt: true,
+        prompt_template: `Avatar: ${agent.name}`,
+      },
+    });
+
+    const { data: after } = await auth.supabase
+      .from("dt_agents")
+      .select("prompt_append,uses_global_prompt")
+      .eq("id", agentId)
+      .maybeSingle();
+
+    if (
+      !repaired.ok ||
+      !String(after?.prompt_append ?? "").trim() ||
+      after?.uses_global_prompt !== true
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          agentId,
+          message:
+            "Agent angelegt, aber Avatar-Prompt wurde nicht gespeichert. Bitte in Supabase die Migration 20260811_survey_agent_prospect_orientation.sql ausführen (dt_create_persona_agent) und den Agenten erneut umwandeln.",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json({ ok: true, agentId });
