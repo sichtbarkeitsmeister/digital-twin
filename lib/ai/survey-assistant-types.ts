@@ -97,6 +97,13 @@ const createSurveyProposalSchema = z.object({
   description: z.string().trim().default(""),
   notificationEmails: z.array(z.string()).default([]),
   survey: surveySchema,
+  /** Optional completed/in-progress answers created together with the survey (raw import). */
+  initialResponse: z
+    .object({
+      status: z.enum(["in_progress", "completed"]).default("completed"),
+      answers: z.record(z.string(), z.unknown()).default({}),
+    })
+    .optional(),
 });
 
 const createFolderProposalSchema = z.object({
@@ -188,6 +195,12 @@ const batchCreateSurveyStepSchema = z.object({
   description: z.string().trim().default(""),
   notificationEmails: z.array(z.string()).default([]),
   survey: surveySchema,
+  initialResponse: z
+    .object({
+      status: z.enum(["in_progress", "completed"]).default("completed"),
+      answers: z.record(z.string(), z.unknown()).default({}),
+    })
+    .optional(),
 });
 
 const batchAssignFolderRefStepSchema = z.object({

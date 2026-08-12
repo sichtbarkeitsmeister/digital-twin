@@ -162,6 +162,41 @@ async function applyNonBatchSurveyProposal(proposal: NonBatchSurveyProposal): Pr
     const uniqueCreated = validateUniqueSurveyIds(proposal.survey);
     if (!uniqueCreated.ok) return { ok: false, message: uniqueCreated.message };
 
+    if (proposal.initialResponse && Object.keys(proposal.initialResponse.answers ?? {}).length > 0) {
+      const { importSurveyBundleAction } = await import("@/app/dashboard/surveys/actions");
+      const imported = await importSurveyBundleAction({
+        payload: {
+          version: 1,
+          survey: {
+            title: proposal.title,
+            description: proposal.description ?? "",
+            notification_emails: proposal.notificationEmails ?? [],
+            definition: proposal.survey,
+          },
+          responses: [
+            {
+              status: proposal.initialResponse.status ?? "completed",
+              answers: proposal.initialResponse.answers ?? {},
+              completed_at:
+                (proposal.initialResponse.status ?? "completed") === "completed"
+                  ? new Date().toISOString()
+                  : null,
+            },
+          ],
+          fieldQuestions: [],
+        },
+      });
+      if (!imported.ok || !imported.data?.surveyId) {
+        return { ok: false, message: imported.message };
+      }
+      return {
+        ok: true,
+        message: "Umfrage inkl. Antworten erstellt.",
+        navigateTo: `/dashboard/surveys/${imported.data.surveyId}/responses`,
+        revertPayload: { kind: "revert_create", surveyId: imported.data.surveyId },
+      };
+    }
+
     const res = await upsertSurveyDraftAction({
       title: proposal.title,
       description: proposal.description ?? "",
@@ -441,6 +476,9 @@ async function applySurveyBatchProposal(
             description: step.description ?? "",
             notificationEmails: step.notificationEmails ?? [],
             survey: step.survey,
+            ...("initialResponse" in step && step.initialResponse
+              ? { initialResponse: step.initialResponse }
+              : {}),
           },
           meta,
         );
