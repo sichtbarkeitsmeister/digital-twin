@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
 import { useDtSeoWorkspaceUrl } from "@/lib/dt/seo/workspace-url";
 import { DtSeoConfigForm } from "@/components/dt/seo/dt-seo-config-form";
+import { DtSeoGroundingPanel } from "@/components/dt/seo/dt-seo-grounding-panel";
 import { DtSeoReportsPanel } from "@/components/dt/seo/dt-seo-reports-panel";
 import { DtSeoStatsOverview } from "@/components/dt/seo/dt-seo-stats-overview";
 import { DtSeoTaskBoard } from "@/components/dt/seo/dt-seo-task-board";
@@ -117,7 +118,7 @@ export function DtSeoWorkspace(props: {
             SEO ist für <span className="font-semibold">{selected.name}</span> noch nicht
             freigeschaltet.
             {canManage
-              ? " Ohne Freischaltung sind Chat, Statistik, Aufgaben und Reports gesperrt."
+              ? " Ohne Freischaltung sind Chat, Statistik, Aufgaben, Reports und Grounding gesperrt."
               : " Bitte einen Administrator kontaktieren."}
           </p>
           {canManage ? (
@@ -151,6 +152,7 @@ export function DtSeoWorkspace(props: {
           { id: "stats", label: "Statistik" },
           { id: "tasks", label: "Aufgaben" },
           { id: "reports", label: "Reports" },
+          { id: "grounding", label: "Grounding" },
           { id: "settings", label: "Einstellungen" },
         ]}
         active={tab}
@@ -248,6 +250,12 @@ export function DtSeoWorkspace(props: {
       {tab === "reports" && seoEnabled ? (
         <div className="min-h-0 flex-1">
           <DtSeoReportsPanel organisationId={orgId} canTrigger={canManage} />
+        </div>
+      ) : null}
+
+      {tab === "grounding" && seoEnabled ? (
+        <div className="min-h-0 flex-1">
+          <DtSeoGroundingPanel organisationId={orgId} canEdit={canManage} />
         </div>
       ) : null}
 

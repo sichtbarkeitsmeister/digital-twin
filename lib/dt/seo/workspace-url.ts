@@ -5,7 +5,14 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { writeSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
 
-export const DT_SEO_TAB_IDS = ["chat", "stats", "tasks", "reports", "settings"] as const;
+export const DT_SEO_TAB_IDS = [
+  "chat",
+  "stats",
+  "tasks",
+  "reports",
+  "grounding",
+  "settings",
+] as const;
 export type DtSeoTabId = (typeof DT_SEO_TAB_IDS)[number];
 
 export const DT_TASK_STATUS_IDS = ["open", "in_progress", "done", "wont_fix"] as const;
