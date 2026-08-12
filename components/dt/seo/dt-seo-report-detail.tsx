@@ -21,6 +21,7 @@ import {
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtTabs } from "@/components/dt/dt-tabs";
+import { DtSeoMonthlyReportBadge, isMonthlySeoReport } from "@/components/dt/seo/dt-seo-monthly-report-badge";
 import { DtSeoOwnerDeliveryBadge } from "@/components/dt/seo/dt-seo-owner-delivery-badge";
 import { DtSeoReportHtmlViewer } from "@/components/dt/seo/dt-seo-report-html-viewer";
 import { Badge } from "@/components/ui/badge";
@@ -443,6 +444,14 @@ export function DtSeoReportDetail(props: {
             label="Empfänger"
             value={`${recipientTypeLabel(report.recipient_type)} · ${report.recipient_email}`}
           />
+          <MetaField
+            label="Auslöser"
+            value={
+              isMonthlySeoReport(report)
+                ? "Monatlicher Scheduler (automatisch)"
+                : "Manuell"
+            }
+          />
           {report.send_to_owner ? (
             <MetaField
               label="Report-E-Mail"
@@ -589,7 +598,7 @@ export function DtSeoReportDetail(props: {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 grid gap-1.5">
             <p className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
-              SEO-Report
+              {isMonthlySeoReport(report) ? "Monatlicher SEO-Report" : "SEO-Report"}
             </p>
             <h1 className="text-2xl font-bold tracking-tight text-sbkm-navy dark:text-white">
               {hostname}
@@ -600,6 +609,7 @@ export function DtSeoReportDetail(props: {
               {report.recipient_email ? ` · ${report.recipient_email}` : null}
             </p>
             <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              <DtSeoMonthlyReportBadge report={report} />
               {parsed.kpis.length === 1 ? (
                 <span className="inline-flex items-center rounded-pill bg-sbkm-mint/15 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-sbkm-navy dark:bg-sbkm-mint/20 dark:text-white">
                   {parsed.kpis[0].label}: {parsed.kpis[0].value}

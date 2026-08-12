@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
+import { DtSeoMonthlyReportBadge, isMonthlySeoReport } from "@/components/dt/seo/dt-seo-monthly-report-badge";
 import { DtSeoOwnerDeliveryBadge } from "@/components/dt/seo/dt-seo-owner-delivery-badge";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -375,10 +376,15 @@ export function DtSeoReportsPanel(props: {
             const runtime = durationHint(r.started_at, r.finished_at);
             const inProgress = r.state === "queued" || r.state === "running";
             const isErrorish = r.state === "error" || r.state === "cancelled";
+            const isMonthly = isMonthlySeoReport(r);
             return (
               <DtGlassCard
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                className={cn(
+                  "flex flex-wrap items-center justify-between gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
+                  isMonthly &&
+                    "border-l-4 border-l-sbkm-navy bg-sbkm-navy/[0.03] dark:border-l-sbkm-mint dark:bg-sbkm-mint/[0.06]",
+                )}
               >
                 <Link
                   href={href}
@@ -407,6 +413,7 @@ export function DtSeoReportsPanel(props: {
                   ) : null}
                 </Link>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <DtSeoMonthlyReportBadge report={r} />
                   <DtSeoOwnerDeliveryBadge report={r} />
                   {inProgress && props.canTrigger ? (
                     <button
@@ -440,9 +447,6 @@ export function DtSeoReportsPanel(props: {
                     </button>
                   ) : null}
                   <Badge variant={reportBadgeVariant(r.state)}>{reportStateLabel(r.state)}</Badge>
-                  {r.trigger_source === "monthly_scheduler" ? (
-                    <Badge variant="outline">Monatlich</Badge>
-                  ) : null}
                   <Link href={href} aria-label="Report öffnen">
                     <ChevronRight
                       className="h-4 w-4 text-sbkm-ink-400 dark:text-white/40"
