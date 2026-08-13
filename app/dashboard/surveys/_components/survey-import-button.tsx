@@ -28,8 +28,8 @@ type RawImportApiResponse = {
   failed: Array<{ title: string; message: string }>;
 };
 
-/** Client abort slightly under route maxDuration (300s). */
-const RAW_IMPORT_CLIENT_TIMEOUT_MS = 290_000;
+/** Soft status nudges while waiting — do NOT abort the fetch (server may still finish). */
+const RAW_IMPORT_STATUS_MS = 45_000;
 
 export function SurveyImportButton() {
   const router = useRouter();
@@ -67,27 +67,29 @@ export function SurveyImportButton() {
         : "Import läuft… große Word-Dateien werden abschnittsweise per KI gelesen (oft 2–4 Min.).",
     );
 
-    const controller = new AbortController();
-    const timer = window.setTimeout(
-      () => controller.abort(),
-      RAW_IMPORT_CLIENT_TIMEOUT_MS,
-    );
+    // Never abort the client fetch on a timer: the API may still finish and save
+    // (user saw "abgebrochen" while the Allround survey was created successfully).
+    const startedAt = Date.now();
+    const statusTimer = window.setInterval(() => {
+      const mins = Math.max(1, Math.round((Date.now() - startedAt) / 60_000));
+      setStatus(
+        `Import läuft noch (${mins} Min.)… bitte Fenster offen lassen. Bei Erfolg erscheint die Umfrage in der Liste.`,
+      );
+    }, RAW_IMPORT_STATUS_MS);
 
     try {
-      // Route Handler with maxDuration=300 — Server Actions abort around ~120s.
       const res = await fetch("/api/surveys/import-raw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items }),
-        signal: controller.signal,
       });
       const data = (await res.json().catch(() => null)) as RawImportApiResponse | null;
       if (!data) {
         setStatus(null);
         setError(
           res.status === 504 || res.status === 524
-            ? "Import-Zeitlimit auf dem Server. Bitte erneut versuchen."
-            : `Import fehlgeschlagen (HTTP ${res.status}).`,
+            ? "Zeitlimit auf dem Server — bitte die Umfragen-Liste prüfen, ob der Import trotzdem durchlief, bevor du erneut importierst."
+            : `Import fehlgeschlagen (HTTP ${res.status}). Bitte die Umfragen-Liste prüfen.`,
         );
         return;
       }
@@ -120,15 +122,18 @@ export function SurveyImportButton() {
       router.refresh();
     } catch (e) {
       setStatus(null);
-      if (e instanceof DOMException && e.name === "AbortError") {
-        setError(
-          "Import abgebrochen (Zeitlimit ~5 Min.). Bitte erneut versuchen — bei sehr großen Dateien ggf. einzeln importieren.",
-        );
-      } else {
-        setError(e instanceof Error ? e.message : "Import unerwartet fehlgeschlagen.");
-      }
+      // Network drop / proxy cut — server may still have saved the survey.
+      setError(
+        e instanceof Error && /abort|failed to fetch|network/i.test(e.message)
+          ? "Verbindung unterbrochen. Der Import kann trotzdem durchgelaufen sein — bitte die Umfragen-Liste prüfen, bevor du erneut importierst."
+          : e instanceof Error
+            ? `${e.message} — bitte die Umfragen-Liste prüfen, bevor du erneut importierst.`
+            : "Import unerwartet fehlgeschlagen — bitte die Umfragen-Liste prüfen.",
+      );
+      router.push("/dashboard/surveys");
+      router.refresh();
     } finally {
-      window.clearTimeout(timer);
+      window.clearInterval(statusTimer);
       setRawImporting(false);
     }
   }
