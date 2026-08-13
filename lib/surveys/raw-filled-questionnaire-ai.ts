@@ -15,6 +15,7 @@ import {
   splitQuestionnaireIntoAiChunks,
 } from "@/lib/surveys/raw-filled-questionnaire-chunks";
 import {
+  buildRawFilledFromStructuredSteps,
   parseRawFilledQuestionnaire,
   type RawFilledParseResult,
 } from "@/lib/surveys/raw-filled-questionnaire";
@@ -31,8 +32,16 @@ const aiFieldSchema = z.object({
     .enum(["text", "checkbox", "ranking", "radio", "rating", "text_list"])
     .optional()
     .default("text"),
-  answer: z.string().optional().nullable().default(null),
-  options: z.array(z.string()).optional().default([]),
+  answer: z
+    .union([z.string(), z.number(), z.boolean(), z.null()])
+    .optional()
+    .nullable()
+    .transform((v) => (v == null ? null : String(v))),
+  options: z
+    .array(z.union([z.string(), z.number()]))
+    .optional()
+    .default([])
+    .transform((arr) => arr.map((x) => String(x).trim()).filter(Boolean)),
 });
 
 const aiStepSchema = z.object({
@@ -46,10 +55,18 @@ const aiExtractSchema = z.object({
   steps: z.array(aiStepSchema).min(1),
 });
 
-const aiChunkSchema = z.object({
+const aiChunkSchema = z.preprocess((raw) => {
+  if (!raw || typeof raw !== "object") return raw;
+  const obj = raw as Record<string, unknown>;
+  // Models sometimes return `questions` instead of `fields`.
+  if (!Array.isArray(obj.fields) && Array.isArray(obj.questions)) {
+    return { ...obj, fields: obj.questions };
+  }
+  return obj;
+}, z.object({
   title: z.string().min(1).optional(),
   fields: z.array(aiFieldSchema).min(1),
-});
+}));
 
 type AiStep = z.infer<typeof aiStepSchema>;
 type AiField = z.infer<typeof aiFieldSchema>;
@@ -363,11 +380,35 @@ export async function extractFilledQuestionnaireWithAi(input: {
     return { ok: false, message: "KI hat keine Fragen erkannt." };
   }
 
-  const exportText = buildStrictExportFromSteps(title, description, steps);
-  const converted = parseRawFilledQuestionnaire(exportText, { title });
-  if (!converted.ok) {
-    return { ok: false, message: converted.message };
+  const built = buildRawFilledFromStructuredSteps({
+    title: title || "Importierter Fragebogen",
+    description:
+      description ||
+      "Aus Roh-Fragebogen (KI-Strukturierung) importiert — Fragen und Antworten übernommen.",
+    steps: steps.map((s) => ({
+      title: s.title,
+      fields: s.fields.map((f) => ({
+        title: f.title,
+        description: f.description,
+        type: f.type,
+        answer: f.answer,
+        options: f.options,
+      })),
+    })),
+  });
+
+  if (!built.ok) {
+    // Last resort: legacy text export + parser (should rarely be needed).
+    const exportText = buildStrictExportFromSteps(title, description, steps);
+    const converted = parseRawFilledQuestionnaire(exportText, { title });
+    if (!converted.ok) {
+      return {
+        ok: false,
+        message: `KI-Struktur konnte nicht übernommen werden (${built.message}).`,
+      };
+    }
+    return { ok: true, data: converted.data, model: modelUsed || "ai" };
   }
 
-  return { ok: true, data: converted.data, model: modelUsed || "ai" };
+  return { ok: true, data: built.data, model: modelUsed || "ai" };
 }
