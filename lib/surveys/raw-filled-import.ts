@@ -2,6 +2,7 @@ import "server-only";
 
 import { revalidatePath } from "next/cache";
 
+import { persistImportedSurveyBundle } from "@/lib/surveys/persist-imported-survey-bundle";
 import { extractFilledQuestionnaireWithAi } from "@/lib/surveys/raw-filled-questionnaire-ai";
 import {
   parseRawFilledQuestionnaire,
@@ -71,10 +72,6 @@ export async function runRawFilledQuestionnairesBatch(params: {
     };
   }
 
-  const { importSurveyBundleAction } = await import(
-    "@/app/dashboard/surveys/actions"
-  );
-
   const results: RawFilledImportResultRow[] = [];
   const failed: Array<{ title: string; message: string }> = [];
 
@@ -90,7 +87,9 @@ export async function runRawFilledQuestionnairesBatch(params: {
     const parsedCount = converted.ok ? converted.data.fieldCount : 0;
     // Large Word dumps often under-parse deterministically — always try KI and keep the richer result.
     const shouldTryAi =
-      !converted.ok || (textLen >= 6_000 && parsedCount < 12) || (textLen >= 12_000 && parsedCount < 20);
+      !converted.ok ||
+      (textLen >= 6_000 && parsedCount < 12) ||
+      (textLen >= 12_000 && parsedCount < 20);
 
     if (shouldTryAi) {
       const ai = await extractFilledQuestionnaireWithAi({
@@ -102,14 +101,12 @@ export async function runRawFilledQuestionnairesBatch(params: {
           converted = { ok: true, data: ai.data };
         }
       } else if (!converted.ok) {
-        const parseMsg = converted.message.replace(/\s+/g, " ").trim();
+        const fragezeichen = (item.text.match(/\?/g) ?? []).length;
+        const antwortLines = (item.text.match(/^Antwort\s*:/gim) ?? []).length;
         const aiMsg = ai.message.replace(/\s+/g, " ").trim();
         failed.push({
           title: label,
-          message:
-            aiMsg === parseMsg || /Keine Abschnitte|keine Fragen/i.test(aiMsg)
-              ? `KI konnte den Fragebogen nicht strukturieren (${textLen.toLocaleString("de-DE")} Zeichen). Bitte erneut versuchen — oder Text mit klaren Fragen (?)/„Antwort:“-Zeilen einfügen. Details: ${aiMsg}`
-              : `${parseMsg} — KI: ${aiMsg}`,
+          message: `Import fehlgeschlagen (${textLen.toLocaleString("de-DE")} Zeichen, ${fragezeichen}× „?“, ${antwortLines}× „Antwort:“). ${aiMsg}`,
         });
         continue;
       }
@@ -121,8 +118,11 @@ export async function runRawFilledQuestionnairesBatch(params: {
     }
 
     const bundle = rawFilledToImportBundle(converted.data);
-    const imported = await importSurveyBundleAction({ payload: bundle });
-    if (!imported.ok || !imported.data?.surveyId) {
+    const imported = await persistImportedSurveyBundle({
+      payload: bundle,
+      folderId: params.folderId,
+    });
+    if (!imported.ok || !imported.surveyId) {
       failed.push({
         title: label,
         message: imported.message || "Speichern fehlgeschlagen.",
@@ -130,20 +130,10 @@ export async function runRawFilledQuestionnairesBatch(params: {
       continue;
     }
 
-    const surveyId = imported.data.surveyId;
-    const responseId = imported.data.responseId;
-
-    if (params.folderId) {
-      await auth.supabase
-        .from("surveys")
-        .update({ folder_id: params.folderId })
-        .eq("id", surveyId);
-    }
-
     results.push({
       title: converted.data.title || label,
-      surveyId,
-      responseId,
+      surveyId: imported.surveyId,
+      responseId: imported.responseId,
       fieldCount: converted.data.fieldCount,
       answeredCount: converted.data.answeredCount,
     });
