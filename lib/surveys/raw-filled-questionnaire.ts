@@ -357,8 +357,11 @@ function isLooseQuestionLine(line: string): boolean {
   if (ANTWORT_LINE_RE.test(t)) return false;
   if (isLooseSectionHeader(t)) return false;
   if (t.endsWith("?")) return true;
+  // Word forms often use prompts ending with ":" instead of "?".
+  if (t.endsWith(":") && t.length >= 8 && t.length <= 160) return true;
+  if (/^\d{1,2}[\.)]\s+\S.{6,}/.test(t) && t.length <= 200) return true;
   if (
-    /^(?:wie|was|welche|welcher|welches|wer|wo|wann|warum|wieso|weshalb|beschreib(?:en|e)?|nenn(?:en|e)?|gib|hast|habt|sind|ist|habt\s+ihr|haben\s+sie)\b/i.test(
+    /^(?:wie|was|welche|welcher|welches|wer|wo|wann|warum|wieso|weshalb|beschreib(?:en|e)?|nenn(?:en|e)?|gib|geben\s+sie|hast|habt|sind|ist|habt\s+ihr|haben\s+sie|erläutern?\s+sie|bitte\s+(?:beschreib|nenn|gib|geben))\b/i.test(
       t,
     ) &&
     t.length >= 12 &&
@@ -453,6 +456,102 @@ function parseLooseSections(text: string): { title: string; sections: DraftSecti
   const firstSectionTitle = sections[0]?.title ?? "";
   const titleFromPreamble = preamble
     .filter((l) => l !== firstSectionTitle && !isLooseSectionHeader(l))
+    .slice(0, 2)
+    .join(" — ")
+    .trim();
+
+  return {
+    title: titleFromPreamble || firstSectionTitle || "Importierter Fragebogen",
+    sections: sections.filter((s) => s.fields.length > 0),
+  };
+}
+
+/**
+ * Word layouts often use short prompt lines + answer paragraphs separated by blank lines,
+ * without "Antwort:" or trailing "?".
+ */
+function parseBlockPairSections(text: string): { title: string; sections: DraftSection[] } {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  const chunks = normalized.split(/\n{2,}/).map((c) => c.trim()).filter(Boolean);
+  const sections: DraftSection[] = [];
+  const preamble: string[] = [];
+  let current: DraftSection | null = null;
+
+  const ensure = (title: string) => {
+    current = { title: stripLeadingEmoji(title) || title, fields: [] };
+    sections.push(current);
+    return current;
+  };
+
+  for (const chunk of chunks) {
+    const lines = chunk.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) continue;
+    const first = lines[0]!;
+
+    if (lines.length === 1 && isLooseSectionHeader(first)) {
+      ensure(first.replace(/^#{1,3}\s+/, ""));
+      continue;
+    }
+
+    if (!current) {
+      if (isLooseSectionHeader(first) && lines.length >= 2) {
+        const section = ensure(first.replace(/^#{1,3}\s+/, ""));
+        const rest = lines.slice(1);
+        const q = rest[0]!;
+        const a = rest.slice(1).join("\n").trim();
+        if (q) {
+          section.fields.push({
+            title: q.length > 160 ? `${q.slice(0, 157)}…` : q,
+            description: "",
+            answerRaw: a,
+          });
+        }
+        continue;
+      }
+      if (lines.length === 1) {
+        preamble.push(first);
+        continue;
+      }
+      ensure("Allgemein");
+    }
+
+    const section = current!;
+
+    // Header + body in one chunk
+    if (isLooseSectionHeader(first) && lines.length >= 2) {
+      const next = ensure(first.replace(/^#{1,3}\s+/, ""));
+      const bodyLines = lines.slice(1);
+      const q = bodyLines[0]!;
+      next.fields.push({
+        title: q.length > 160 ? `${q.slice(0, 157)}…` : q,
+        description: "",
+        answerRaw: bodyLines.slice(1).join("\n").trim(),
+      });
+      continue;
+    }
+
+    const question = first;
+    const answer = lines.slice(1).join("\n").trim();
+    const looksLikePrompt =
+      isLooseQuestionLine(question) ||
+      (question.length <= 140 && answer.length >= 8) ||
+      (question.length <= 100 && lines.length >= 2);
+
+    if (!looksLikePrompt) {
+      if (!section.fields.length && preamble.length < 3) preamble.push(chunk);
+      continue;
+    }
+
+    section.fields.push({
+      title: question.length > 160 ? `${question.slice(0, 157)}…` : question,
+      description: "",
+      answerRaw: answer,
+    });
+  }
+
+  const firstSectionTitle = sections[0]?.title ?? "";
+  const titleFromPreamble = preamble
+    .filter((l) => l !== firstSectionTitle)
     .slice(0, 2)
     .join(" — ")
     .trim();
@@ -575,6 +674,81 @@ function buildResultFromSections(
   };
 }
 
+export type StructuredImportField = {
+  title: string;
+  description?: string;
+  type?: "text" | "checkbox" | "ranking" | "radio" | "rating" | "text_list";
+  answer?: string | null;
+  options?: string[];
+};
+
+export type StructuredImportStep = {
+  title: string;
+  fields: StructuredImportField[];
+};
+
+/**
+ * Build an importable survey directly from structured steps (e.g. KI JSON).
+ * Avoids fragile round-trip through the „N Felder / Antwort:“ text format.
+ */
+export function buildRawFilledFromStructuredSteps(input: {
+  title: string;
+  description?: string;
+  steps: StructuredImportStep[];
+}):
+  | { ok: true; data: RawFilledParseResult }
+  | { ok: false; message: string } {
+  const sections: DraftSection[] = input.steps
+    .map((step) => ({
+      title: step.title.replace(/\s+/g, " ").trim() || "Abschnitt",
+      fields: step.fields
+        .map((field) => {
+          const title = field.title.replace(/\s+/g, " ").trim();
+          if (!title) return null;
+          const typeHint =
+            field.type === "checkbox"
+              ? "Bitte alle zutreffenden Optionen ankreuzen."
+              : field.type === "ranking"
+                ? "Bitte nach Häufigkeit sortieren (oben = häufigste)."
+                : field.type === "radio"
+                  ? "Bitte eine Option wählen."
+                  : "";
+          const answerFromOptions =
+            field.options?.map((o) => o.trim()).filter(Boolean).join(", ") ?? "";
+          const answerRaw = (field.answer ?? "").toString().trim() || answerFromOptions;
+          return {
+            title,
+            description: [field.description?.trim() ?? "", typeHint]
+              .filter(Boolean)
+              .join("\n"),
+            answerRaw,
+          } satisfies DraftField;
+        })
+        .filter((f): f is DraftField => Boolean(f)),
+    }))
+    .filter((s) => s.fields.length > 0);
+
+  const built = buildResultFromSections(
+    sections,
+    input.title.trim() || "Importierter Fragebogen",
+  );
+  if (!built.ok) return built;
+  const description =
+    input.description?.trim() ||
+    "Aus Roh-Fragebogen (KI-Strukturierung) importiert — Fragen und Antworten übernommen.";
+  return {
+    ok: true,
+    data: {
+      ...built.data,
+      description,
+      survey: {
+        ...built.data.survey,
+        description,
+      },
+    },
+  };
+}
+
 /**
  * Convert a raw filled questionnaire (strict export or loose Word paste)
  * into a survey definition plus answer map ready for importSurveyBundleAction.
@@ -597,9 +771,19 @@ export function parseRawFilledQuestionnaire(
   }
 
   const loose = parseLooseSections(text);
-  if (loose.sections.some((s) => s.fields.length > 0)) {
-    const title = (opts?.title?.trim() || loose.title).slice(0, 120);
-    const built = buildResultFromSections(loose.sections, title);
+  const blocks = parseBlockPairSections(text);
+  const looseCount = loose.sections.reduce((n, s) => n + s.fields.length, 0);
+  const blockCount = blocks.sections.reduce((n, s) => n + s.fields.length, 0);
+  const best =
+    blockCount > looseCount
+      ? blocks
+      : looseCount > 0
+        ? loose
+        : blocks;
+
+  if (best.sections.some((s) => s.fields.length > 0)) {
+    const title = (opts?.title?.trim() || best.title).slice(0, 120);
+    const built = buildResultFromSections(best.sections, title);
     if (built.ok && built.data.fieldCount >= 1) return built;
   }
 

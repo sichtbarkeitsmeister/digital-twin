@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  buildRawFilledFromStructuredSteps,
   isRawFilledQuestionnaire,
   parseRawFilledQuestionnaire,
   splitCheckboxLabels,
@@ -237,6 +238,67 @@ Termintreue und Präzision.
   console.log(`ai chunk split: ok (${chunks.length} chunks)`);
 }
 
+function testWordBlockPairsWithoutQuestionMarks() {
+  const wordish = `
+Anbieter-Persona für Allround Präzisionsteile GmbH
+
+📋 Positionierung & Philosophie
+
+Marktpositionierung
+Allround ist der zuverlässige Partner für hochpräzise Dreh- und Frästeile in kleinen und mittleren Serien.
+
+Unternehmensphilosophie
+Qualität vor Quantität — jedes Teil wird vor dem Versand geprüft.
+
+⚙️ Angebot
+
+Kernleistungen
+Zerspanung, Montage und Oberflächenbehandlung für Maschinenbau und Medizintechnik.
+
+Zielbranchen
+Maschinenbauer, Medizingeräte-Hersteller und Sonderanlagenbau.
+`.trim();
+
+  const parsed = parseRawFilledQuestionnaire(wordish, {
+    title: "Anbieter-Persona Allround",
+  });
+  assert.equal(parsed.ok, true, parsed.ok ? "" : parsed.message);
+  if (!parsed.ok) return;
+  assert.ok(
+    parsed.data.fieldCount >= 3,
+    `expected >=3 fields from block pairs, got ${parsed.data.fieldCount}`,
+  );
+  assert.ok(parsed.data.answeredCount >= 3);
+  console.log(
+    `word block pairs: ok (${parsed.data.fieldCount} fields, ${parsed.data.answeredCount} answers)`,
+  );
+}
+
+function testStructuredAiBuild() {
+  const built = buildRawFilledFromStructuredSteps({
+    title: "Allround Anbieter",
+    steps: [
+      {
+        title: "Positionierung",
+        fields: [
+          { title: "Marktpositionierung", answer: "Spezialist für Präzisionsteile", type: "text" },
+          {
+            title: "Leistungen",
+            type: "checkbox",
+            answer: "Zerspanung, Montage",
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(built.ok, true, built.ok ? "" : built.message);
+  if (!built.ok) return;
+  assert.equal(built.data.fieldCount, 2);
+  assert.ok(built.data.answeredCount >= 1);
+  console.log(`structured AI build: ok (${built.data.fieldCount} fields)`);
+}
+
+
 testDetection();
 testSplits();
 testParse();
@@ -244,6 +306,8 @@ testFileSampleIfPresent();
 testMultiDocumentSplit();
 testLooseEmojiPaste();
 testAiChunkSplit();
+testWordBlockPairsWithoutQuestionMarks();
+testStructuredAiBuild();
 console.log("raw-filled-questionnaire: all ok");
 
 function testMultiDocumentSplit() {

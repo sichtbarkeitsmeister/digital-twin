@@ -86,19 +86,38 @@ export async function runRawFilledQuestionnairesBatch(params: {
       title: item.title,
     });
 
-    if (!converted.ok) {
+    const textLen = item.text.length;
+    const parsedCount = converted.ok ? converted.data.fieldCount : 0;
+    // Large Word dumps often under-parse deterministically — always try KI and keep the richer result.
+    const shouldTryAi =
+      !converted.ok || (textLen >= 6_000 && parsedCount < 12) || (textLen >= 12_000 && parsedCount < 20);
+
+    if (shouldTryAi) {
       const ai = await extractFilledQuestionnaireWithAi({
         text: item.text,
         title: item.title,
       });
-      if (!ai.ok) {
+      if (ai.ok) {
+        if (!converted.ok || ai.data.fieldCount > converted.data.fieldCount) {
+          converted = { ok: true, data: ai.data };
+        }
+      } else if (!converted.ok) {
+        const parseMsg = converted.message.replace(/\s+/g, " ").trim();
+        const aiMsg = ai.message.replace(/\s+/g, " ").trim();
         failed.push({
           title: label,
-          message: `${converted.message} KI: ${ai.message}`,
+          message:
+            aiMsg === parseMsg || /Keine Abschnitte|keine Fragen/i.test(aiMsg)
+              ? `KI konnte den Fragebogen nicht strukturieren (${textLen.toLocaleString("de-DE")} Zeichen). Bitte erneut versuchen — oder Text mit klaren Fragen (?)/„Antwort:“-Zeilen einfügen. Details: ${aiMsg}`
+              : `${parseMsg} — KI: ${aiMsg}`,
         });
         continue;
       }
-      converted = { ok: true, data: ai.data };
+    }
+
+    if (!converted.ok) {
+      failed.push({ title: label, message: converted.message });
+      continue;
     }
 
     const bundle = rawFilledToImportBundle(converted.data);
