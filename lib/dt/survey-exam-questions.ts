@@ -16,13 +16,6 @@ export type SurveyExamQuestion = {
 const PERSONA_OPENING_QUESTION =
   "Was beschäftigt dich gerade am meisten, und worüber würdest du mit uns zuerst sprechen wollen?";
 
-const PERSONA_WARMUP: Array<{ id: string; question: string }> = [
-  {
-    id: "warmup_pain",
-    question: PERSONA_OPENING_QUESTION,
-  },
-];
-
 const COMPANY_WARMUP: Array<{ id: string; question: string }> = [
   {
     id: "warmup_company_known",
@@ -759,6 +752,10 @@ export function personaDedupeTheme(question: string): string | null {
   const q = question.toLowerCase().replace(/\s+/g, " ").trim();
   if (!q) return null;
 
+  if (/stell dich bitte vor|wie heißt du.*wie alt|name.*alter.*situation/.test(q)) {
+    return "intro";
+  }
+
   if (
     /beschäftigt dich/.test(q) ||
     /als erstes erzähl|zuerst (?:sprechen|erzähl)/.test(q) ||
@@ -769,8 +766,16 @@ export function personaDedupeTheme(question: string): string | null {
     return "opening_situation";
   }
 
+  if (/starkes erlebnis|wow|begeistert|weiterempfehlen/.test(q) && /anbieter|arzt|anwalt|zahnarzt/.test(q)) {
+    return "wow";
+  }
+
+  if (/anbieter aus|unbedingt stimmen|höchste priorität|entscheidest du dich für einen anbieter/.test(q)) {
+    return "criteria";
+  }
+
   if (
-    (/\bkontakt/.test(q) || /erstkontakt|erreichen|hinter dir|weg hast du/.test(q)) &&
+    (/\bkontakt/.test(q) || /erstkontakt|erreichen|hinter dir|weg hast du|aufmerksam geworden/.test(q)) &&
     !/inhalt|online|recherch|gefunden/.test(q)
   ) {
     return "kontakt_weg";
@@ -780,7 +785,131 @@ export function personaDedupeTheme(question: string): string | null {
     return "beruf_leben";
   }
 
+  if (/preisspanne|budget|preis/.test(q) && /bewegst|ungefähr|acht/.test(q)) {
+    return "budget";
+  }
+
+  if (/personen seid ihr|mitarbeiter|wie groß ist euer|organisation ungefähr|praxis ungefähr/.test(q)) {
+    return "org_size";
+  }
+
+  if (/wie alt bist du/.test(q)) {
+    return "age";
+  }
+
+  if (/wie heißt du/.test(q)) {
+    return "name";
+  }
+
   return null;
+}
+
+/** Branchenwort für die Wow-Frage (Anbieter / Arzt / Anwalt …). */
+export function resolvePersonaProviderLabel(
+  facts: SurveyFact[],
+  surveyTitle?: string | null,
+): string {
+  const hay = `${surveyTitle ?? ""} ${facts
+    .map((f) => `${f.fieldTitle} ${f.label} ${f.value}`)
+    .join(" ")}`.toLowerCase();
+
+  if (/zahnarzt|zahnärzt/.test(hay)) return "Zahnarzt";
+  if (/\banwalt\b|rechtsanwalt|kanzlei|notar/.test(hay)) return "Anwalt";
+  if (/steuerberater/.test(hay)) return "Steuerberater";
+  if (/heilpraktiker|naturheil/.test(hay)) return "Heilpraktiker";
+  if (/\barzt\b|ärztin|patient|medizin|klinik/.test(hay)) return "Arzt";
+  if (/physiotherapeut|therapeut/.test(hay)) return "Therapeut";
+  if (/\bpraxis\b/.test(hay) && !/labor|dentaltechnik/.test(hay)) return "Arzt";
+  return "Anbieter";
+}
+
+function hintFromMatchingFacts(facts: SurveyFact[], pattern: RegExp, fallback: string): string {
+  const parts: string[] = [];
+  for (const fact of facts) {
+    const hay = `${fact.fieldTitle} ${fact.label}`;
+    if (!pattern.test(hay) && !pattern.test(fact.value)) continue;
+    const hint = hintFromValue(fact.value, 160);
+    if (hint && hint !== "(keine Angabe im Fragebogen)" && !parts.includes(hint)) {
+      parts.push(hint);
+    }
+    if (parts.length >= 3) break;
+  }
+  if (parts.length === 0) return fallback;
+  return parts.join(" · ");
+}
+
+/**
+ * Feste Kernfragen für den Persona-Test (immer zuerst, feste Reihenfolge).
+ * Danach optional konkrete Fragebogen-Fakten.
+ */
+export function buildPersonaCoreExamQuestions(
+  facts: SurveyFact[],
+  providerLabel?: string,
+  surveyTitle?: string | null,
+): SurveyExamQuestion[] {
+  const label = providerLabel ?? resolvePersonaProviderLabel(facts, surveyTitle);
+
+  const core: SurveyExamQuestion[] = [
+    {
+      id: "core_intro",
+      question:
+        "Stell dich bitte vor: Wie heißt du, wie alt bist du ungefähr, und was ist gerade deine Situation?",
+      expectedHint: hintFromMatchingFacts(
+        facts,
+        /name|avatar|alter|situation|beschreibung.*(wunsch|ideal|kunden|persona)/i,
+        "Name, Alter und Situation aus dem Fragebogen.",
+      ),
+      factId: "",
+      kind: "answer",
+    },
+    {
+      id: "core_job",
+      question: "Was machst du beruflich, und wie sieht deine Lebenssituation gerade aus?",
+      expectedHint: hintFromMatchingFacts(
+        facts,
+        /beruf|lebenssituation|lebenslage|arbeit/i,
+        "Beruf und Lebenssituation aus dem Fragebogen.",
+      ),
+      factId: "",
+      kind: "answer",
+    },
+    {
+      id: "core_wow",
+      question: `Was wäre für dich ein richtig starkes Erlebnis mit einem ${label}?`,
+      expectedHint: hintFromMatchingFacts(
+        facts,
+        /wow|begeister|highlight|erlebnis|weiterempfehl/i,
+        `Erwartetes Wow-Erlebnis / Weiterempfehlung (bezogen auf ${label}).`,
+      ),
+      factId: "",
+      kind: "answer",
+    },
+    {
+      id: "core_pain",
+      question: PERSONA_OPENING_QUESTION,
+      expectedHint: hintFromMatchingFacts(
+        facts,
+        /sorg|einwand|hürde|problem|schmerz|ärger|frust|beschäftigt|erstgespräch/i,
+        "Aktuelles Anliegen / worüber sie zuerst sprechen würde.",
+      ),
+      factId: "",
+      kind: "answer",
+    },
+    {
+      id: "core_criteria",
+      question:
+        "Wonach suchst du dir einen Anbieter aus, und was muss für dich unbedingt stimmen?",
+      expectedHint: hintFromMatchingFacts(
+        facts,
+        /entscheid|kriterium|priorit|anbieterwahl|wichtig/i,
+        "Entscheidungskriterien aus dem Fragebogen.",
+      ),
+      factId: "",
+      kind: "answer",
+    },
+  ];
+
+  return core.map((q) => ({ ...q, question: sanitizePersonaProbe(q.question) }));
 }
 
 function toCompanyInterviewQuestion(fact: SurveyFact): string {
@@ -901,109 +1030,146 @@ function personaProbesFromFact(fact: SurveyFact): Array<{
 /**
  * Build an interviewer script from questionnaire facts (deterministic, no LLM).
  *
- * Goal: verify that survey answers were transferred — probes follow each
- * questionnaire's own field titles/values (no fixed industry wording).
- *
- * - `persona`: ask the Wunschkunde as “du” (customer situation).
+ * - `persona`: fixed core discovery questions first, then optional fact probes.
  * - `company`: ask the SEO/company twin about firm facts.
  */
 export function buildSurveyExamQuestions(
   facts: SurveyFact[],
-  options?: { maxQuestions?: number; audience?: SurveyExamAudience },
+  options?: {
+    maxQuestions?: number;
+    audience?: SurveyExamAudience;
+    surveyTitle?: string | null;
+  },
 ): SurveyExamQuestion[] {
   const maxQuestions = options?.maxQuestions ?? 16;
   const audience: SurveyExamAudience = options?.audience ?? "persona";
+
+  if (audience === "persona") {
+    return buildPersonaExamScript(facts, maxQuestions, options?.surveyTitle);
+  }
+
   const draft: Array<SurveyExamQuestion & { priority: number }> = [];
   const seenNorm = new Set<string>();
 
   function push(q: SurveyExamQuestion, priority: number) {
-    const question =
-      audience === "persona" ? sanitizePersonaProbe(q.question) : q.question;
-    const key = question.toLowerCase().replace(/\s+/g, " ").trim();
+    const key = q.question.toLowerCase().replace(/\s+/g, " ").trim();
     if (!key || seenNorm.has(key)) return;
     seenNorm.add(key);
-    draft.push({ ...q, question, priority });
+    draft.push({ ...q, priority });
   }
 
   const answerFacts = facts.filter((f) => f.kind === "answer");
   const followUps = facts.filter((f) => f.kind === "follow_up");
-  // Concrete questionnaire answers first — that is what Testing must verify.
   const ordered = [...answerFacts, ...followUps];
 
   for (const fact of ordered) {
-    if (audience === "persona" && isCompanyOnlyFactForPersona(fact)) {
-      continue;
-    }
-
-    if (audience === "company") {
-      const question = toCompanyInterviewQuestion(fact);
-      push(
-        {
-          id: `exam_${fact.id}`,
-          question,
-          expectedHint: hintFromValue(fact.value),
-          factId: fact.id,
-          kind: fact.kind,
-        },
-        factProbePriority(fact, question),
-      );
-      continue;
-    }
-
-    for (const probe of personaProbesFromFact(fact)) {
-      push(
-        {
-          id: `exam_${fact.id}${probe.idSuffix}`,
-          question: probe.question,
-          expectedHint: probe.expectedHint,
-          factId: fact.id,
-          kind: fact.kind,
-        },
-        factProbePriority(fact, probe.question),
-      );
-    }
+    const question = toCompanyInterviewQuestion(fact);
+    push(
+      {
+        id: `exam_${fact.id}`,
+        question,
+        expectedHint: hintFromValue(fact.value),
+        factId: fact.id,
+        kind: fact.kind,
+      },
+      factProbePriority(fact, question),
+    );
   }
 
   draft.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 
-  const seenThemes = new Set<string>();
-  const out: SurveyExamQuestion[] = [];
-  for (const item of draft) {
-    if (out.length >= Math.max(0, maxQuestions - 1)) break;
-    if (audience === "persona") {
-      const theme = personaDedupeTheme(item.question);
-      if (theme) {
-        if (seenThemes.has(theme)) continue;
-        seenThemes.add(theme);
-      }
-    }
-    const { priority: _p, ...q } = item;
-    out.push(q);
-  }
+  const out: SurveyExamQuestion[] = draft
+    .slice(0, Math.max(0, maxQuestions - 1))
+    .map(({ priority: _p, ...q }) => q);
 
-  // One soft opener at the end (optional coverage of tone/behavior).
-  const warmups = audience === "company" ? COMPANY_WARMUP : PERSONA_WARMUP;
   if (out.length < maxQuestions) {
-    for (const w of warmups) {
+    for (const w of COMPANY_WARMUP) {
       const key = w.question.toLowerCase().replace(/\s+/g, " ").trim();
       if (seenNorm.has(key)) continue;
-      if (audience === "persona") {
-        const theme = personaDedupeTheme(w.question);
-        if (theme && seenThemes.has(theme)) continue;
-        if (theme) seenThemes.add(theme);
-      }
       seenNorm.add(key);
       out.push({
         id: w.id,
         question: w.question,
         expectedHint:
-          audience === "company"
-            ? "Verhaltenscheck: Firmenwissen und Tonalität aus dem Anbieter-Fragebogen."
-            : "Verhaltenscheck: Haltung/Tonalität der Persona aus dem Fragebogen.",
+          "Verhaltenscheck: Firmenwissen und Tonalität aus dem Anbieter-Fragebogen.",
         factId: "",
         kind: "answer",
       });
     }
+  }
+
+  return out.slice(0, maxQuestions);
+}
+
+function buildPersonaExamScript(
+  facts: SurveyFact[],
+  maxQuestions: number,
+  surveyTitle?: string | null,
+): SurveyExamQuestion[] {
+  const core = buildPersonaCoreExamQuestions(facts, undefined, surveyTitle);
+  const seenNorm = new Set(
+    core.map((q) => q.question.toLowerCase().replace(/\s+/g, " ").trim()),
+  );
+  const seenThemes = new Set<string>();
+  for (const q of core) {
+    const theme = personaDedupeTheme(q.question);
+    if (theme) seenThemes.add(theme);
+  }
+  // Intro already covers name/age/situation probes from the questionnaire.
+  seenThemes.add("name");
+  seenThemes.add("age");
+  seenThemes.add("intro");
+
+  const answerFacts = facts.filter((f) => f.kind === "answer");
+  const followUps = facts.filter((f) => f.kind === "follow_up");
+  const ordered = [...answerFacts, ...followUps];
+
+  const extras: Array<SurveyExamQuestion & { priority: number }> = [];
+
+  for (const fact of ordered) {
+    if (isCompanyOnlyFactForPersona(fact)) continue;
+
+    for (const probe of personaProbesFromFact(fact)) {
+      const question = sanitizePersonaProbe(probe.question);
+      const key = question.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!key || seenNorm.has(key)) continue;
+
+      const theme = personaDedupeTheme(question);
+      if (theme && seenThemes.has(theme)) continue;
+
+      // Skip soft openers / bio dumps; core already covers discovery.
+      if (
+        /stell dich bitte vor|beschäftigt dich gerade am meisten|starkes erlebnis mit einem/i.test(
+          question,
+        )
+      ) {
+        continue;
+      }
+
+      extras.push({
+        id: `exam_${fact.id}${probe.idSuffix}`,
+        question,
+        expectedHint: probe.expectedHint,
+        factId: fact.id,
+        kind: fact.kind,
+        priority: factProbePriority(fact, question),
+      });
+    }
+  }
+
+  extras.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+
+  const out: SurveyExamQuestion[] = [...core];
+  for (const item of extras) {
+    if (out.length >= maxQuestions) break;
+    const key = item.question.toLowerCase().replace(/\s+/g, " ").trim();
+    if (seenNorm.has(key)) continue;
+    const theme = personaDedupeTheme(item.question);
+    if (theme && seenThemes.has(theme)) continue;
+    seenNorm.add(key);
+    if (theme) seenThemes.add(theme);
+    const { priority: _p, ...q } = item;
+    out.push(q);
   }
 
   return out.slice(0, maxQuestions);

@@ -6,9 +6,11 @@ import assert from "node:assert/strict";
 
 import { extractSurveyFacts } from "../lib/dt/survey-facts";
 import {
+  buildPersonaCoreExamQuestions,
   buildSurveyExamQuestions,
   fixGermanDuVerbAgreement,
   naturalPersonaProbeFromTitle,
+  resolvePersonaProviderLabel,
   rewriteCustomerThirdPersonToSecondPerson,
   withoutEmDashes,
 } from "../lib/dt/survey-exam-questions";
@@ -73,27 +75,26 @@ const questions = buildSurveyExamQuestions(bundle.facts, {
   maxQuestions: 10,
   audience: "persona",
 });
-assert.ok(questions.length >= 3);
-// Fact probes first — warmups are last (verification priority).
-assert.ok(questions[0]?.factId, "first question should be tied to a survey fact");
-assert.ok(questions.some((q) => /aufmerksam geworden/i.test(q.question)));
-assert.ok(questions.some((q) => /Sorgen|Einwände|beschäftigt/i.test(q.question)));
+assert.ok(questions.length >= 5);
+assert.deepEqual(
+  questions.slice(0, 5).map((q) => q.id),
+  ["core_intro", "core_job", "core_wow", "core_pain", "core_criteria"],
+  "Persona script starts with the fixed core discovery questions",
+);
+assert.ok(questions.some((q) => /aufmerksam geworden|ins Gespräch/i.test(q.question)));
+assert.ok(questions.some((q) => /beschäftigt dich/i.test(q.question)));
 assert.ok(
   questions.some((q) =>
-    /wichtigsten|Priorität|Reihenfolge|sortieren|Anbieter aus|unbedingt stimmen/i.test(
-      q.question,
-    ),
+    /Anbieter aus|unbedingt stimmen/i.test(q.question),
   ),
 );
 assert.ok(!questions.some((q) => /was steht bei dir bei/i.test(q.question)));
-// Warmup is skipped when a fact probe already covers the opening theme.
-assert.ok(
-  questions.some((q) => q.id.startsWith("warmup_")) ||
-    questions.some((q) => /beschäftigt dich/i.test(q.question)),
-);
+assert.ok(!questions.some((q) => /[—–]/.test(q.question)));
 assert.match(
-  questions.find((q) => q.factId === "fact_001")?.expectedHint ?? "",
-  /Empfehlung/,
+  questions.find((q) => /aufmerksam|Gespräch/i.test(q.question) && q.factId)?.expectedHint ??
+    questions.find((q) => q.factId)?.expectedHint ??
+    "",
+  /Empfehlung|Freunden|Vertrauen|Entwöhnung/,
 );
 
 // Company-perspective persona survey → Du-questions for the Wunschkunde
@@ -194,23 +195,23 @@ const personaQs = buildSurveyExamQuestions(dentalFacts.facts, {
   maxQuestions: 14,
 });
 
-assert.ok(personaQs.some((q) => /wie heißt du/i.test(q.question)));
+assert.ok(personaQs.some((q) => /stell dich bitte vor|wie heißt du/i.test(q.question)));
 assert.ok(
-  personaQs.some((q) => /wie alt bist du|altersgruppe/i.test(q.question)),
-  "Age should be asked as a concrete fact probe",
+  personaQs.some((q) => /wie alt bist du/i.test(q.question)),
+  "Age is part of the core intro (or a concrete probe)",
 );
 assert.ok(
   !personaQs.some((q) => /erzähl mal kurz:\s*wer bist du/i.test(q.question)),
   "Soft bio dump should not replace concrete fact probes",
 );
-assert.ok(personaQs.some((q) => /wie nimmst du erstmals kontakt|kontakt/i.test(q.question)));
+assert.ok(personaQs.some((q) => /kontakt|ins Gespräch/i.test(q.question)));
 assert.ok(
   personaQs.some(
     (q) =>
-      /partner|anbieter|reihenfolge|priorität/i.test(q.question) &&
+      /anbieter aus|unbedingt stimmen|partner|priorität/i.test(q.question) &&
       !/was steht bei dir bei/i.test(q.question),
   ),
-  "Ranking probes should sound natural (not checklist-style)",
+  "Decision criteria covered by core or natural ranking probe",
 );
 assert.ok(
   !personaQs.some((q) => /erzähl mir bitte: name des digitalen kunden-avatars/i.test(q.question)),
@@ -918,5 +919,16 @@ assert.equal(
   withoutEmDashes("Wie heißt du — und wie darf ich dich ansprechen?"),
   "Wie heißt du, und wie darf ich dich ansprechen?",
 );
+
+// Fixed core + industry Wow label
+assert.equal(resolvePersonaProviderLabel(dentalFacts.facts, "Dental"), "Zahnarzt");
+assert.equal(resolvePersonaProviderLabel(heilFacts.facts, "Heilpraktiker"), "Heilpraktiker");
+const core = buildPersonaCoreExamQuestions(dentalFacts.facts, undefined, "Dental");
+assert.deepEqual(
+  core.map((q) => q.id),
+  ["core_intro", "core_job", "core_wow", "core_pain", "core_criteria"],
+);
+assert.match(core[2]!.question, /Zahnarzt/);
+assert.ok(core.every((q) => !/[—–]/.test(q.question)));
 
 console.log("survey-exam-questions tests: ok");
