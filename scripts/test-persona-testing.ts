@@ -64,7 +64,25 @@ assert.ok(
   questions.some((q) => /beschäftigt dich|Sorgen|erzählen/i.test(q.question)),
   "Worry/pain fields should become a natural sales discovery probe",
 );
-assert.ok(questions[0]?.factId, "fact probes come before warmups");
-assert.ok(questions.some((q) => q.id.startsWith("warmup_")));
+assert.ok(
+  questions.some((q) => q.id.startsWith("core_")),
+  "Persona-Check starts with the fixed core script",
+);
+
+const companyQuestions = buildSurveyExamQuestions(facts.facts, {
+  audience: "company",
+  maxQuestions: 6,
+  organisationName: "Online Media Atelier",
+});
+assert.ok(
+  companyQuestions.every(
+    (q) => !/\b(euch|eurem|seid ihr|habt ihr)\b/i.test(q.question),
+  ),
+  "Firmen-Test must not use ihr/euch",
+);
+assert.ok(
+  companyQuestions.some((q) => /Online Media Atelier/i.test(q.question)),
+  "Firmen-Test names the organisation",
+);
 
 console.log("persona-testing tests: ok");
