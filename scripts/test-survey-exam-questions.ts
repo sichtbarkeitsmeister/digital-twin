@@ -8,7 +8,9 @@ import { extractSurveyFacts } from "../lib/dt/survey-facts";
 import {
   buildSurveyExamQuestions,
   fixGermanDuVerbAgreement,
+  naturalPersonaProbeFromTitle,
   rewriteCustomerThirdPersonToSecondPerson,
+  withoutEmDashes,
 } from "../lib/dt/survey-exam-questions";
 
 const definition = {
@@ -888,7 +890,7 @@ assert.ok(
   `No questionnaire-meta wrappers, got: ${dryQs.map((q) => q.question).join(" | ")}`,
 );
 assert.ok(
-  dryQs.some((q) => /organisation|mitarbeiter|team|groß/i.test(q.question)),
+  dryQs.some((q) => /personen seid ihr|mitarbeiter|organisation|unternehmen/i.test(q.question)),
   "Org size becomes a natural size question",
 );
 assert.ok(
@@ -902,6 +904,19 @@ assert.ok(
 assert.ok(
   dryQs.some((q) => /rolle|wichtigsten|aufgabe/i.test(q.question)),
   "Role ranking becomes a natural priority question",
+);
+
+assert.equal(
+  naturalPersonaProbeFromTitle("Unternehmensgröße"),
+  "Wie viele Personen seid ihr im Unternehmen?",
+);
+assert.equal(
+  naturalPersonaProbeFromTitle("Formulierungen bei Bedarfsbeschreibung"),
+  "Wie beschreibst du typischerweise, was du brauchst?",
+);
+assert.equal(
+  withoutEmDashes("Wie heißt du — und wie darf ich dich ansprechen?"),
+  "Wie heißt du, und wie darf ich dich ansprechen?",
 );
 
 console.log("survey-exam-questions tests: ok");

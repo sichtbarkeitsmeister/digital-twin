@@ -369,7 +369,7 @@ export function naturalPersonaProbeFromTitle(
       hay,
     )
   ) {
-    return "Wie groß ist eure Organisation ungefähr?";
+    return "Wie viele Personen seid ihr im Unternehmen?";
   }
 
   if (
@@ -380,13 +380,13 @@ export function naturalPersonaProbeFromTitle(
     if (/behandler/.test(hay)) {
       return "Wie viele Behandler seid ihr, und wie groß ist die Praxis?";
     }
-    if (/mitarbeiter|team|\bma\b|organisation|unternehmen|betrieb|firma/.test(hay)) {
-      return "Wie groß ist euer Team, also wie viele Mitarbeiter seid ihr ungefähr?";
+    if (/mitarbeiter|team|\bma\b|organisation|unternehmen|betrieb|firma|personen/.test(hay)) {
+      return "Wie viele Personen seid ihr im Unternehmen?";
     }
     if (/praxis/.test(hay)) {
       return "Wie groß ist eure Praxis ungefähr?";
     }
-    return "Wie groß seid ihr ungefähr?";
+    return "Wie viele Personen seid ihr ungefähr?";
   }
 
   if (/schwerpunkt|spezial|fokus|fachricht/.test(hay) && !looksLikeQuestion(raw)) {
@@ -394,7 +394,15 @@ export function naturalPersonaProbeFromTitle(
   }
 
   if (/einzugsgebiet|region|standort|gebiet/.test(hay) && !looksLikeQuestion(raw)) {
-    return "Wo bist du unterwegs, welche Region trifft auf dich zu?";
+    return "Wo bist du unterwegs, welche Region passt zu dir?";
+  }
+
+  if (/bedarfsbeschreibung|was du brauchst|bedarf beschreib/.test(hay) || (/formulierung/.test(hay) && /bedarf/.test(hay))) {
+    return "Wie beschreibst du typischerweise, was du brauchst?";
+  }
+
+  if (/weiterempfehl|empfehlen|empfehlung/.test(hay) && /situation|aktiv|wann/.test(hay)) {
+    return "Wann würdest du einen Anbieter weiterempfehlen?";
   }
 
   if (
@@ -403,6 +411,18 @@ export function naturalPersonaProbeFromTitle(
     )
   ) {
     return "Was sagst du typischerweise als Erstes, wenn du Kontakt aufnimmst?";
+  }
+
+  if (/häufigste situation|situation(?:en)? bei|bestandsanlagen|anwendungsfall/.test(hay)) {
+    if (
+      fieldType === "ranking" ||
+      fieldType === "checkbox" ||
+      fieldType === "text_list" ||
+      /priorit|reihenfolge|ranking|wichtig/.test(hay)
+    ) {
+      return "Was kommt bei euch am häufigsten vor?";
+    }
+    return "In welchen Situationen steht ihr typischerweise?";
   }
 
   if (/kontaktweg|kontakt auf|erreichen|erstmals kontakt|wie kontakt/.test(hay)) {
@@ -499,8 +519,8 @@ export function naturalPersonaProbeFromTitle(
 
   if (isCustomerProfileMetaTitle(raw) || topic.length >= 3) {
     // Last resort: still conversational, never quote the field label.
-    if (/größe|groesse|anzahl|mitarbeiter|team|organisation/.test(hay)) {
-      return "Wie groß seid ihr ungefähr?";
+    if (/größe|groesse|anzahl|mitarbeiter|team|organisation|unternehmen|personen/.test(hay)) {
+      return "Wie viele Personen seid ihr im Unternehmen?";
     }
     if (/alter/.test(hay)) {
       return "Darf ich fragen: Wie alt bist du ungefähr?";
@@ -508,10 +528,30 @@ export function naturalPersonaProbeFromTitle(
     if (/kontakt|weg|kanal/.test(hay)) {
       return "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
     }
+    if (/situation/.test(hay)) {
+      return "In welchen Situationen steht ihr typischerweise?";
+    }
+    if (/formulierung|beschreib/.test(hay)) {
+      return "Wie sagst du das typischerweise mit eigenen Worten?";
+    }
     return "Kannst du mir das aus deiner Sicht kurz erzählen?";
   }
 
   return PERSONA_OPENING_QUESTION;
+}
+
+/** Final cleanup: no dashes, no questionnaire-meta wrappers. */
+export function sanitizePersonaProbe(question: string): string {
+  let q = withoutEmDashes(question).replace(/\s+/g, " ").trim();
+  if (/zu\s*[„"][^„"]+[“"]\s*:\s*was trifft/i.test(q) || /erzähl mir kurz zu\s*[„"]/i.test(q)) {
+    return "Kannst du mir das aus deiner Sicht kurz erzählen?";
+  }
+  if (/wenn du an\s*[„"][^„"]+[“"]\s*denkst/i.test(q)) {
+    return "Was ist dir dabei am wichtigsten?";
+  }
+  q = q.replace(/\s*[—–―‒]+\s*/g, ", ");
+  q = q.replace(/\s*,\s*,+/g, ",").replace(/\s{2,}/g, " ").trim();
+  return q;
 }
 
 function softenExistingQuestion(raw: string): string {
@@ -652,19 +692,19 @@ function concreteQuestionForSlice(slice: FactSlice): string {
     case "size":
       if (/behandler/i.test(hay)) {
         question = "Wie viele Behandler seid ihr, und wie groß ist die Praxis?";
-      } else if (/mitarbeiter|team|\bma\b|organisation|unternehmen/i.test(hay)) {
-        question = "Wie groß ist euer Team, also wie viele Mitarbeiter seid ihr ungefähr?";
+      } else if (/mitarbeiter|team|\bma\b|organisation|unternehmen|personen/i.test(hay)) {
+        question = "Wie viele Personen seid ihr im Unternehmen?";
       } else if (/praxis/i.test(hay)) {
         question = "Wie groß ist eure Praxis ungefähr?";
       } else {
-        question = "Wie groß seid ihr ungefähr?";
+        question = "Wie viele Personen seid ihr ungefähr?";
       }
       break;
     case "focus":
       question = "Worauf liegt bei dir der Fokus, und was ist dir besonders wichtig?";
       break;
     case "region":
-      question = "Wo bist du unterwegs, welche Region trifft auf dich zu?";
+      question = "Wo bist du unterwegs, welche Region passt zu dir?";
       break;
     case "contact":
       question = "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
@@ -676,7 +716,7 @@ function concreteQuestionForSlice(slice: FactSlice): string {
       question = naturalPersonaProbeFromTitle(slice.label, { value: slice.value });
   }
 
-  return withoutEmDashes(question);
+  return sanitizePersonaProbe(withoutEmDashes(question));
 }
 
 /** Priority: identity/facts before soft narrative probes. */
@@ -702,10 +742,12 @@ function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   }
 
   return withoutEmDashes(
-    naturalPersonaProbeFromTitle(raw, {
-      fieldType: fact.fieldType,
-      value: fact.value,
-    }),
+    sanitizePersonaProbe(
+      naturalPersonaProbeFromTitle(raw, {
+        fieldType: fact.fieldType,
+        value: fact.value,
+      }),
+    ),
   );
 }
 
@@ -875,10 +917,12 @@ export function buildSurveyExamQuestions(
   const seenNorm = new Set<string>();
 
   function push(q: SurveyExamQuestion, priority: number) {
-    const key = q.question.toLowerCase().replace(/\s+/g, " ").trim();
+    const question =
+      audience === "persona" ? sanitizePersonaProbe(q.question) : q.question;
+    const key = question.toLowerCase().replace(/\s+/g, " ").trim();
     if (!key || seenNorm.has(key)) return;
     seenNorm.add(key);
-    draft.push({ ...q, priority });
+    draft.push({ ...q, question, priority });
   }
 
   const answerFacts = facts.filter((f) => f.kind === "answer");
