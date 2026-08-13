@@ -16,13 +16,6 @@ export type SurveyExamQuestion = {
 const PERSONA_OPENING_QUESTION =
   "Was beschäftigt dich gerade am meisten, und worüber würdest du mit uns zuerst sprechen wollen?";
 
-const PERSONA_WARMUP: Array<{ id: string; question: string }> = [
-  {
-    id: "warmup_pain",
-    question: PERSONA_OPENING_QUESTION,
-  },
-];
-
 const COMPANY_WARMUP: Array<{ id: string; question: string }> = [
   {
     id: "warmup_company_known",
@@ -856,7 +849,7 @@ export function buildPersonaCoreExamQuestions(
 ): SurveyExamQuestion[] {
   const label = providerLabel ?? resolvePersonaProviderLabel(facts, surveyTitle);
 
-  return [
+  const core: SurveyExamQuestion[] = [
     {
       id: "core_intro",
       question:
@@ -914,7 +907,9 @@ export function buildPersonaCoreExamQuestions(
       factId: "",
       kind: "answer",
     },
-  ].map((q) => ({ ...q, question: sanitizePersonaProbe(q.question) }));
+  ];
+
+  return core.map((q) => ({ ...q, question: sanitizePersonaProbe(q.question) }));
 }
 
 function toCompanyInterviewQuestion(fact: SurveyFact): string {
