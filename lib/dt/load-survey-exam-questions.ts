@@ -84,7 +84,10 @@ export async function loadSurveyExamQuestionsForResponse(
   const audience: SurveyExamAudience =
     options?.audience ?? (surveyPurpose === "anbieter" ? "company" : "persona");
 
-  const questions = buildSurveyExamQuestions(facts.facts, { audience });
+  const questions = buildSurveyExamQuestions(facts.facts, {
+    audience,
+    surveyTitle: facts.surveyTitle,
+  });
 
   return {
     ok: true,
