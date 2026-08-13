@@ -12,9 +12,9 @@ export type SurveyExamQuestion = {
   kind: SurveyFact["kind"];
 };
 
-/** Soft openers last — fact probes first. Tone: company employee talking to a prospect. */
+/** Soft openers last. Tone: company employee talking to a prospect. */
 const PERSONA_OPENING_QUESTION =
-  "Was beschäftigt dich gerade am meisten — und worüber würdest du mit uns zuerst sprechen wollen?";
+  "Was beschäftigt dich gerade am meisten, und worüber würdest du mit uns zuerst sprechen wollen?";
 
 const PERSONA_WARMUP: Array<{ id: string; question: string }> = [
   {
@@ -30,6 +30,16 @@ const COMPANY_WARMUP: Array<{ id: string; question: string }> = [
       "Wenn ich euer Unternehmen in einem Satz treffen soll: Wofür seid ihr bekannt, und was dürfen wir nicht weglassen?",
   },
 ];
+
+/** No em/en dashes in spoken exam probes. */
+export function withoutEmDashes(text: string): string {
+  return text
+    .replace(/\s*[—–]\s*/g, ", ")
+    .replace(/\s*,\s*,+/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([?.!])/g, "$1")
+    .trim();
+}
 
 function looksLikeQuestion(text: string): boolean {
   const t = text.trim();
@@ -321,6 +331,229 @@ function shortTopic(topic: string): string {
   return t.length <= 48 ? t : `${t.slice(0, 47)}…`;
 }
 
+/** Drop questionnaire meta so probes talk to a person, not a field label. */
+function humanizeFieldTopic(title: string): string {
+  return stripDecorations(title)
+    .replace(/\s*[—–-]\s*\d+\s*$/g, "")
+    .replace(/\b(ansprechpartner(?:in|innen|s)?|kontaktperson(?:en)?)\b/gi, " ")
+    .replace(/\b(wunsch-?[\wäöüÄÖÜß-]+|ideal(?:en|e|er|es)?|typische[rns]?)\b/gi, " ")
+    .replace(/\b(fragebogen|ranking|rangfolge|mehrfachauswahl)\b/gi, " ")
+    .replace(/\b(der|des|die|dem|den|beim|für|zur|zum)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Map dry field titles to a natural Du-question.
+ * Never quote the questionnaire label back (“Zu „Feld“: …”).
+ */
+export function naturalPersonaProbeFromTitle(
+  title: string,
+  options?: { fieldType?: string | null; value?: string },
+): string {
+  const raw = stripDecorations(title);
+  const topic = humanizeFieldTopic(raw);
+  const hay = `${raw} ${topic} ${options?.value ?? ""}`.toLowerCase();
+  const fieldType = options?.fieldType ?? "";
+
+  if (isAvatarNameField(raw) || (/\bname\b/.test(hay) && /avatar|heißen|ansprech/.test(hay))) {
+    return "Wie heißt du, und wie darf ich dich ansprechen?";
+  }
+
+  if (/\balter(?:s|sbereich|sgruppe)?\b/.test(hay) || /^wie alt\b/i.test(raw)) {
+    return "Darf ich fragen: Wie alt bist du ungefähr?";
+  }
+
+  if (
+    /organisation(?:s)?größe|organisationsgroesse|unternehmensgröße|unternehmensgroesse|betriebsgröße|betriebsgroesse|firmengröße|firmengroesse/.test(
+      hay,
+    )
+  ) {
+    return "Wie viele Personen seid ihr im Unternehmen?";
+  }
+
+  if (
+    /praxisgröße|praxisgroesse|mitarbeiter|behandler|teamgröße|teamgroesse|betriebsgröße|anzahl.*(ma|mitarbeiter|behandler)|organisationsgröße|unternehmensgröße/.test(
+      hay,
+    )
+  ) {
+    if (/behandler/.test(hay)) {
+      return "Wie viele Behandler seid ihr, und wie groß ist die Praxis?";
+    }
+    if (/mitarbeiter|team|\bma\b|organisation|unternehmen|betrieb|firma|personen/.test(hay)) {
+      return "Wie viele Personen seid ihr im Unternehmen?";
+    }
+    if (/praxis/.test(hay)) {
+      return "Wie groß ist eure Praxis ungefähr?";
+    }
+    return "Wie viele Personen seid ihr ungefähr?";
+  }
+
+  if (/schwerpunkt|spezial|fokus|fachricht/.test(hay) && !looksLikeQuestion(raw)) {
+    return "Worauf liegt bei dir der Fokus, und was ist dir besonders wichtig?";
+  }
+
+  if (/einzugsgebiet|region|standort|gebiet/.test(hay) && !looksLikeQuestion(raw)) {
+    return "Wo bist du unterwegs, welche Region passt zu dir?";
+  }
+
+  if (/bedarfsbeschreibung|was du brauchst|bedarf beschreib/.test(hay) || (/formulierung/.test(hay) && /bedarf/.test(hay))) {
+    return "Wie beschreibst du typischerweise, was du brauchst?";
+  }
+
+  if (/weiterempfehl|empfehlen|empfehlung/.test(hay) && /situation|aktiv|wann/.test(hay)) {
+    return "Wann würdest du einen Anbieter weiterempfehlen?";
+  }
+
+  if (
+    /formulierung|wortlaut|sagst du|erste[rn]? kontakt|erstkontakt|erste[sr]? satz|ansprache/.test(
+      hay,
+    )
+  ) {
+    return "Was sagst du typischerweise als Erstes, wenn du Kontakt aufnimmst?";
+  }
+
+  if (/häufigste situation|situation(?:en)? bei|bestandsanlagen|anwendungsfall/.test(hay)) {
+    if (
+      fieldType === "ranking" ||
+      fieldType === "checkbox" ||
+      fieldType === "text_list" ||
+      /priorit|reihenfolge|ranking|wichtig/.test(hay)
+    ) {
+      return "Was kommt bei euch am häufigsten vor?";
+    }
+    return "In welchen Situationen steht ihr typischerweise?";
+  }
+
+  if (/kontaktweg|kontakt auf|erreichen|erstmals kontakt|wie kontakt/.test(hay)) {
+    if (looksLikeQuestion(raw)) {
+      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
+    }
+    return "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
+  }
+
+  if (/funktion|rolle|aufgabe|jobtitel|position|verantwortlich/.test(hay)) {
+    if (
+      fieldType === "ranking" ||
+      fieldType === "checkbox" ||
+      fieldType === "text_list" ||
+      /priorit|reihenfolge|ranking|wichtig/.test(hay)
+    ) {
+      return "Was ist dir in deiner Rolle am wichtigsten?";
+    }
+    return "Welche Aufgabe hast du bei euch hauptsächlich?";
+  }
+
+  if (/wow|begeisterung|begeistert|highlight|besonderes erlebnis/.test(hay)) {
+    if (looksLikeQuestion(raw)) {
+      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
+    }
+    return "Was wäre für dich ein richtig starkes Erlebnis mit einem Anbieter?";
+  }
+
+  if (/sorg|einwand|hürde|problem|schmerz|ärger|frust/.test(hay)) {
+    return PERSONA_OPENING_QUESTION;
+  }
+
+  if (/entscheid|kriterium|anbieterwahl|priorit/.test(hay) && !looksLikeQuestion(raw)) {
+    return "Wonach suchst du dir einen Anbieter aus, und was muss für dich unbedingt stimmen?";
+  }
+
+  if (isPrimaryBudgetField(raw)) {
+    return "In welcher Preisspanne bewegst du dich ungefähr?";
+  }
+  if (/preisspanne|budget|preis/.test(hay) && /\baufträge?\b/.test(hay)) {
+    return "In welcher Preisspanne bewegst du dich ungefähr?";
+  }
+  if (/reagier.*preis|preis.*reagier|fester preis|ab welchem preis|lieber einen festen/.test(hay)) {
+    if (looksLikeQuestion(raw)) {
+      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
+    }
+    return "Wie gehst du mit dem Preis um, und worauf achtest du besonders?";
+  }
+
+  if (
+    /erstgespräch/.test(hay) ||
+    (/erzähl|beschreib/.test(hay) && /(situation|leben|wörtlich|zuerst|als erstes)/.test(hay))
+  ) {
+    return PERSONA_OPENING_QUESTION;
+  }
+
+  if (
+    /berufs|lebenssituation|lebenslage/.test(hay) &&
+    !/erzählen|beschreiben|erstgespräch|erzähl/.test(hay)
+  ) {
+    return "Was machst du beruflich, und wie sieht deine Lebenssituation gerade aus?";
+  }
+
+  if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/.test(hay) || /ideal.*wunsch/.test(hay)) {
+    return PERSONA_OPENING_QUESTION;
+  }
+
+  if (looksLikeQuestion(raw)) {
+    if (
+      isCustomerProfileMetaTitle(raw) ||
+      /\b(kund|patient|wunsch|person|personen|leute|sie|ihre|haben|erzählen|beschreiben|sagen|diese|meist)\b/i.test(
+        raw,
+      )
+    ) {
+      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
+    }
+    return softenExistingQuestion(fixGermanDuVerbAgreement(raw));
+  }
+
+  if (
+    fieldType === "ranking" ||
+    fieldType === "checkbox" ||
+    fieldType === "text_list" ||
+    /priorit|reihenfolge|ranking/.test(hay)
+  ) {
+    if (/kontaktweg|aufmerksam|findest|suche|kanal|empfehlung|google|messe/.test(hay)) {
+      return "Worüber findest du typischerweise einen neuen Anbieter oder Partner, und was kommt für dich zuerst?";
+    }
+    if (/entscheid|anbieterwahl|kriterium|wichtig/.test(hay)) {
+      return "Wonach entscheidest du dich für einen Anbieter, und was hat für dich die höchste Priorität?";
+    }
+    return "Was ist dir dabei am wichtigsten?";
+  }
+
+  if (isCustomerProfileMetaTitle(raw) || topic.length >= 3) {
+    // Last resort: still conversational, never quote the field label.
+    if (/größe|groesse|anzahl|mitarbeiter|team|organisation|unternehmen|personen/.test(hay)) {
+      return "Wie viele Personen seid ihr im Unternehmen?";
+    }
+    if (/alter/.test(hay)) {
+      return "Darf ich fragen: Wie alt bist du ungefähr?";
+    }
+    if (/kontakt|weg|kanal/.test(hay)) {
+      return "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
+    }
+    if (/situation/.test(hay)) {
+      return "In welchen Situationen steht ihr typischerweise?";
+    }
+    if (/formulierung|beschreib/.test(hay)) {
+      return "Wie sagst du das typischerweise mit eigenen Worten?";
+    }
+    return "Kannst du mir das aus deiner Sicht kurz erzählen?";
+  }
+
+  return PERSONA_OPENING_QUESTION;
+}
+
+/** Final cleanup: no dashes, no questionnaire-meta wrappers. */
+export function sanitizePersonaProbe(question: string): string {
+  let q = withoutEmDashes(question).replace(/\s+/g, " ").trim();
+  if (/zu\s*[„"][^„"]+[“"]\s*:\s*was trifft/i.test(q) || /erzähl mir kurz zu\s*[„"]/i.test(q)) {
+    return "Kannst du mir das aus deiner Sicht kurz erzählen?";
+  }
+  if (/wenn du an\s*[„"][^„"]+[“"]\s*denkst/i.test(q)) {
+    return "Was ist dir dabei am wichtigsten?";
+  }
+  q = q.replace(/\s*[—–―‒]+\s*/g, ", ");
+  q = q.replace(/\s*,\s*,+/g, ",").replace(/\s{2,}/g, " ").trim();
+  return q;
+}
+
 function softenExistingQuestion(raw: string): string {
   let q = raw.replace(/\s+/g, " ").trim().replace(/[?？]+$/g, "");
   q = q.replace(/\s*[—–-]\s*bitte möglichst konkret\.?$/i, "");
@@ -332,8 +565,9 @@ function softenExistingQuestion(raw: string): string {
   q = q.replace(/\s*aus dem Fragebogen\.?/gi, "");
   q = q.replace(/\s*laut Fragebogen\.?/gi, "");
   q = fixGermanDuVerbAgreement(q);
+  q = withoutEmDashes(q);
   q = q.replace(/\s+/g, " ").trim();
-  if (!q || q.length < 8) return `${raw.replace(/[?？]+$/g, "")}?`;
+  if (!q || q.length < 8) return withoutEmDashes(`${raw.replace(/[?？]+$/g, "")}?`);
   return `${q}?`;
 }
 
@@ -445,36 +679,44 @@ function classifySliceKey(label: string): string {
  * Industry terms only when they appear in the label/value.
  */
 function concreteQuestionForSlice(slice: FactSlice): string {
-  const label = shortTopic(slice.label);
   const hay = `${slice.label} ${slice.value}`.toLowerCase();
+  let question: string;
 
   switch (slice.key) {
     case "age":
-      return "Darf ich fragen: Wie alt bist du ungefähr?";
+      question = "Darf ich fragen: Wie alt bist du ungefähr?";
+      break;
     case "name":
-      return "Wie heißt du — und wie darf ich dich ansprechen?";
+      question = "Wie heißt du, und wie darf ich dich ansprechen?";
+      break;
     case "size":
       if (/behandler/i.test(hay)) {
-        return "Wie viele Behandler seid ihr — wie groß ist die Praxis?";
+        question = "Wie viele Behandler seid ihr, und wie groß ist die Praxis?";
+      } else if (/mitarbeiter|team|\bma\b|organisation|unternehmen|personen/i.test(hay)) {
+        question = "Wie viele Personen seid ihr im Unternehmen?";
+      } else if (/praxis/i.test(hay)) {
+        question = "Wie groß ist eure Praxis ungefähr?";
+      } else {
+        question = "Wie viele Personen seid ihr ungefähr?";
       }
-      if (/mitarbeiter|team|\bma\b/i.test(hay)) {
-        return "Wie groß ist euer Team — wie viele Mitarbeiter seid ihr ungefähr?";
-      }
-      if (/praxis/i.test(hay)) {
-        return "Wie groß ist eure Praxis ungefähr?";
-      }
-      return `Wie sieht das bei dir mit „${label}" aus — welche Größenordnung trifft zu?`;
+      break;
     case "focus":
-      return `Worauf liegt bei dir der Fokus — was ist dir bei „${label}" besonders wichtig?`;
+      question = "Worauf liegt bei dir der Fokus, und was ist dir besonders wichtig?";
+      break;
     case "region":
-      return `Wo bist du unterwegs — welche Region trifft bei „${label}" auf dich zu?`;
+      question = "Wo bist du unterwegs, welche Region passt zu dir?";
+      break;
     case "contact":
-      return "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
+      question = "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
+      break;
     case "budget":
-      return "In welcher Preisspanne bewegst du dich ungefähr?";
+      question = "In welcher Preisspanne bewegst du dich ungefähr?";
+      break;
     default:
-      return `Erzähl mir kurz zu „${label}" — was trifft auf dich zu?`;
+      question = naturalPersonaProbeFromTitle(slice.label, { value: slice.value });
   }
+
+  return sanitizePersonaProbe(withoutEmDashes(question));
 }
 
 /** Priority: identity/facts before soft narrative probes. */
@@ -495,139 +737,18 @@ function factProbePriority(fact: SurveyFact, question: string): number {
  */
 function toPersonaInterviewQuestion(fact: SurveyFact): string | null {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
-  const hay = `${raw} ${fact.value}`;
   if (!raw) {
     return PERSONA_OPENING_QUESTION;
   }
 
-  if (isAvatarNameField(raw)) {
-    return "Wie heißt du — und wie darf ich dich ansprechen?";
-  }
-
-  if (
-    /\balter\b/i.test(raw) ||
-    /^wie alt\b/i.test(raw) ||
-    (/wie alt\b/i.test(raw) && /meist/i.test(raw))
-  ) {
-    return "Darf ich fragen: Wie alt bist du ungefähr?";
-  }
-
-  if (
-    /praxisgröße|praxisgroesse|mitarbeiter|behandler|teamgröße|teamgroesse|betriebsgröße|anzahl.*(ma|mitarbeiter|behandler)/i.test(
-      raw,
-    )
-  ) {
-    if (/behandler/i.test(hay)) {
-      return "Wie viele Behandler seid ihr — wie groß ist die Praxis?";
-    }
-    if (/mitarbeiter|team|\bma\b/i.test(hay)) {
-      return "Wie groß ist euer Team — wie viele Mitarbeiter seid ihr ungefähr?";
-    }
-    if (/praxis/i.test(hay)) {
-      return "Wie groß ist eure Praxis ungefähr?";
-    }
-    return `Wie sieht das bei dir mit „${shortTopic(raw)}" aus?`;
-  }
-
-  if (/schwerpunkt/i.test(raw) && !looksLikeQuestion(raw)) {
-    return "Worauf liegt bei dir der Fokus — was ist dir besonders wichtig?";
-  }
-
-  if (/einzugsgebiet|region|standort|gebiet/i.test(raw) && !looksLikeQuestion(raw)) {
-    return "Wo bist du unterwegs — welche Region trifft auf dich zu?";
-  }
-
-  if (/kontaktweg|kontakt auf|erstkontakt|erreichen|erstmals kontakt/i.test(raw)) {
-    if (looksLikeQuestion(raw)) {
-      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
-    }
-    return "Wie kommst du typischerweise das erste Mal mit einem Anbieter ins Gespräch?";
-  }
-
-  if (/sorg|einwand|hürde|problem|schmerz|ärger|frust/i.test(raw)) {
-    return PERSONA_OPENING_QUESTION;
-  }
-
-  if (/entscheid|kriterium|wichtig/i.test(raw) && !looksLikeQuestion(raw)) {
-    return "Wonach suchst du dir einen Anbieter aus — was muss für dich unbedingt stimmen?";
-  }
-
-  // True budget fields only — price-reaction / negotiation questions keep a sales rewrite.
-  if (isPrimaryBudgetField(raw)) {
-    return "In welcher Preisspanne bewegst du dich ungefähr?";
-  }
-  // Company-style price-range of “Aufträge” → ask the prospect about their range.
-  if (/preisspanne|budget|preis/i.test(raw) && /\baufträge?\b/i.test(raw)) {
-    return "In welcher Preisspanne bewegst du dich ungefähr?";
-  }
-  if (/reagier.*preis|preis.*reagier|fester preis|ab welchem preis|lieber einen festen/i.test(raw)) {
-    if (looksLikeQuestion(raw)) {
-      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
-    }
-    return "Wie gehst du mit dem Preis um — worauf achtest du besonders?";
-  }
-
-  // Erstgespräch / “was erzählst du zuerst” → one canonical opener (deduped later too).
-  if (
-    /erstgespräch/i.test(raw) ||
-    (/erzähl|beschreib/i.test(raw) && /(situation|leben|wörtlich|zuerst|als erstes)/i.test(raw))
-  ) {
-    return PERSONA_OPENING_QUESTION;
-  }
-
-  if (
-    /berufs|lebenssituation|lebenslage/i.test(raw) &&
-    !/erzählen|beschreiben|erstgespräch|erzähl/i.test(raw)
-  ) {
-    return "Was machst du beruflich — bzw. wie sieht deine Lebenssituation gerade aus?";
-  }
-
-  // Description / bio: in-character sales discovery, no questionnaire meta.
-  if (/beschreibung.*(wunsch|ideal|avatar|kunden|persona)/i.test(raw) || /ideal.*wunsch/i.test(raw)) {
-    return PERSONA_OPENING_QUESTION;
-  }
-
-  // Prefer natural rewrite of the original survey question (sales conversation).
-  if (looksLikeQuestion(raw)) {
-    if (
-      isCustomerProfileMetaTitle(raw) ||
-      /\b(kund|patient|wunsch|person|personen|leute|sie|ihre|haben|erzählen|beschreiben|sagen|diese|meist)\b/i.test(
-        raw,
-      )
-    ) {
-      return softenExistingQuestion(rewriteCustomerThirdPersonToSecondPerson(raw));
-    }
-    return softenExistingQuestion(fixGermanDuVerbAgreement(raw));
-  }
-
-  if (
-    fact.fieldType === "ranking" ||
-    fact.fieldType === "checkbox" ||
-    fact.fieldType === "text_list" ||
-    /priorit|reihenfolge|ranking/i.test(raw)
-  ) {
-    const topic = topicFromCustomerMetaTitle(raw) || raw;
-    if (/kontaktweg|aufmerksam|findest|suche|kanal|empfehlung|google|messe/i.test(`${topic} ${raw}`)) {
-      return (
-        "Worüber findest du typischerweise einen neuen Anbieter oder Partner — " +
-        "was kommt für dich zuerst?"
-      );
-    }
-    if (/entscheid|anbieterwahl|kriterium|wichtig/i.test(`${topic} ${raw}`)) {
-      return "Wonach entscheidest du dich für einen Anbieter — was hat für dich die höchste Priorität?";
-    }
-    return `Wenn du an „${shortTopic(topic)}" denkst: was ist dir am wichtigsten?`;
-  }
-
-  if (isCustomerProfileMetaTitle(raw)) {
-    const topic = topicFromCustomerMetaTitle(raw);
-    if (!topic || topic.length < 3) {
-      return PERSONA_OPENING_QUESTION;
-    }
-    return `Zu „${shortTopic(topic)}": Was trifft auf dich zu?`;
-  }
-
-  return `Erzähl mir kurz zu „${shortTopic(raw)}" — was trifft auf dich zu?`;
+  return withoutEmDashes(
+    sanitizePersonaProbe(
+      naturalPersonaProbeFromTitle(raw, {
+        fieldType: fact.fieldType,
+        value: fact.value,
+      }),
+    ),
+  );
 }
 
 /**
@@ -666,21 +787,26 @@ function toCompanyInterviewQuestion(fact: SurveyFact): string {
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
   if (!raw) return "Welche Unternehmensfakten müssen wir aus dem Fragebogen treffen?";
   if (looksLikeQuestion(raw)) {
-    return `${raw.replace(/\?$/, "")} — bitte mit den konkreten Angaben aus eurem Wissen.`;
+    return withoutEmDashes(
+      `${raw.replace(/\?$/, "")}, bitte mit den konkreten Angaben aus eurem Wissen.`,
+    );
   }
 
   if (fact.fieldType === "ranking" || fact.fieldType === "checkbox" || fact.fieldType === "text_list") {
-    return (
-      `Zu „${shortTopic(raw)}": Was steht bei euch ganz oben — ` +
-      "und wie lautet die Reihenfolge laut Fragebogen?"
+    return withoutEmDashes(
+      `Was steht bei euch bei „${shortTopic(raw)}" ganz oben, und wie lautet die Reihenfolge laut Fragebogen?`,
     );
   }
 
   if (/\d/.test(fact.value) || /%|€|euro|stern|platz|nr\.?/i.test(fact.value)) {
-    return `Zu „${raw}“: Welche konkreten Zahlen oder Fakten gelten bei euch?`;
+    return withoutEmDashes(
+      `Welche konkreten Zahlen oder Fakten gelten bei euch zu „${raw}"?`,
+    );
   }
 
-  return `Zu „${raw}“: Was steht dazu in eurem Unternehmenswissen — bitte wörtlich und vollständig genug?`;
+  return withoutEmDashes(
+    `Was steht bei euch zu „${raw}" im Unternehmenswissen, bitte wörtlich und vollständig genug?`,
+  );
 }
 
 /**
@@ -791,10 +917,12 @@ export function buildSurveyExamQuestions(
   const seenNorm = new Set<string>();
 
   function push(q: SurveyExamQuestion, priority: number) {
-    const key = q.question.toLowerCase().replace(/\s+/g, " ").trim();
+    const question =
+      audience === "persona" ? sanitizePersonaProbe(q.question) : q.question;
+    const key = question.toLowerCase().replace(/\s+/g, " ").trim();
     if (!key || seenNorm.has(key)) return;
     seenNorm.add(key);
-    draft.push({ ...q, priority });
+    draft.push({ ...q, question, priority });
   }
 
   const answerFacts = facts.filter((f) => f.kind === "answer");
