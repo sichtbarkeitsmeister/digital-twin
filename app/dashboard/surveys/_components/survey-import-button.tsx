@@ -211,8 +211,14 @@ export function SurveyImportButton() {
     });
 
     const totalChars = next.reduce((n, f) => n + f.chars, 0);
+    const antwortHints = next.reduce(
+      (n, f) => n + (f.text.match(/^Antwort\s*:/gim) ?? []).length,
+      0,
+    );
     setStatus(
-      `${next.length} Datei${next.length === 1 ? "" : "en"} geladen (${totalChars.toLocaleString("de-DE")} Zeichen). Import startet…`,
+      `${next.length} Datei${next.length === 1 ? "" : "en"} geladen (${totalChars.toLocaleString("de-DE")} Zeichen` +
+        (antwortHints > 0 ? `, ${antwortHints}× Antwort:` : "") +
+        "). Import startet…",
     );
 
     // Start import immediately after file pick — matches user expectation.

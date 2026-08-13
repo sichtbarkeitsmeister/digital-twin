@@ -13,6 +13,10 @@ import {
   normalizeWordQuestionnaireText,
   splitQuestionnaireIntoAiChunks,
 } from "../lib/surveys/raw-filled-questionnaire-chunks";
+import {
+  questionnaireHtmlToImportText,
+  pickBestDocxExtraction,
+} from "../lib/surveys/docx-questionnaire-html";
 
 const SAMPLE = `Wunschkunde & Avatar
 5 Felder
@@ -299,6 +303,38 @@ function testStructuredAiBuild() {
 }
 
 
+function testDocxHtmlTables() {
+  const html = `
+<h1>Anbieter-Persona Allround</h1>
+<p>Einleitungstext.</p>
+<table>
+  <tr><td>Frage</td><td>Antwort</td></tr>
+  <tr><td>Wie positioniert sich Allround am Markt?</td><td>Zuverlässiger Partner für Präzisionsteile</td></tr>
+  <tr><td>Welche Leistungen bietet ihr an?</td><td>Zerspanung, Montage</td></tr>
+  <tr><td>Wer sind die Zielkunden?</td><td>Maschinenbau und Medizintechnik</td></tr>
+</table>
+<h2>Philosophie</h2>
+<p>Was ist eure Philosophie?</p>
+<p>Qualität vor Quantität.</p>
+`;
+  const converted = questionnaireHtmlToImportText(html);
+  assert.match(converted, /Antwort:\s*Zuverlässiger Partner/);
+  assert.match(converted, /Antwort:\s*Zerspanung/);
+  const parsed = parseRawFilledQuestionnaire(converted, { title: "Allround" });
+  assert.equal(parsed.ok, true, parsed.ok ? "" : parsed.message);
+  if (!parsed.ok) return;
+  assert.ok(parsed.data.fieldCount >= 3, `expected >=3, got ${parsed.data.fieldCount}`);
+  assert.ok(parsed.data.answeredCount >= 2);
+
+  const picked = pickBestDocxExtraction({
+    htmlText: converted,
+    rawText: "Allround\nWie positioniert sich Allround am Markt?\nZuverlässiger Partner",
+  });
+  assert.ok(picked.includes("Antwort:"));
+  console.log(`docx html tables: ok (${parsed.data.fieldCount} fields)`);
+}
+
+
 testDetection();
 testSplits();
 testParse();
@@ -308,6 +344,7 @@ testLooseEmojiPaste();
 testAiChunkSplit();
 testWordBlockPairsWithoutQuestionMarks();
 testStructuredAiBuild();
+testDocxHtmlTables();
 console.log("raw-filled-questionnaire: all ok");
 
 function testMultiDocumentSplit() {
@@ -320,3 +357,4 @@ function testMultiDocumentSplit() {
   assert.ok(auto.length >= 2, `auto-split expected >=2, got ${auto.length}`);
   console.log(`multi-doc split: ok (sep=${parts.length}, auto=${auto.length})`);
 }
+

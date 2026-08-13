@@ -129,9 +129,14 @@ async function extractOneChunk(input: {
 }): Promise<{ ok: true; step: AiStep; model: string } | { ok: false; message: string }> {
   const system = [
     "Du extrahierst aus einem ABSCHNITT eines ausgefüllten Fragebogens Fragen und Antworten.",
+    "Der Text stammt oft aus Word (Tabellen, Überschriften, Absätze).",
     "Gib NUR JSON zurück:",
     '{ "title": "Abschnittstitel", "fields": [ { "title": "Frage", "description": "", "type": "text|checkbox|ranking|radio", "answer": "Antwort oder null", "options": [] } ] }',
-    "Regeln: keine erfundenen Antworten; Antworten wörtlich; jede erkennbare Frage aufnehmen.",
+    "Regeln:",
+    "- keine erfundenen Antworten; Antworten wörtlich übernehmen",
+    "- jede erkennbare Frage/Prompt-Zeile aufnehmen (auch ohne Fragezeichen)",
+    "- bei Tabellenzeilen: linke Spalte = Frage, rechte = Antwort",
+    "- kurze Label-Zeilen gefolgt von Fließtext: Label = Frage, Fließtext = Antwort",
   ].join("\n");
 
   try {

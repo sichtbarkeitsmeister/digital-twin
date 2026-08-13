@@ -3,6 +3,11 @@
  * Runs in the browser so Word docs can be imported without a server round-trip.
  */
 
+import {
+  pickBestDocxExtraction,
+  questionnaireHtmlToImportText,
+} from "@/lib/surveys/docx-questionnaire-html";
+
 function isDocxFile(file: File): boolean {
   const name = file.name.toLowerCase();
   if (name.endsWith(".docx")) return true;
@@ -25,23 +30,40 @@ function isPlainTextFile(file: File): boolean {
   );
 }
 
-async function extractDocxText(file: File): Promise<string> {
-  // Browser build — avoids Node `fs` in the client bundle.
-  const mod = (await import("mammoth/mammoth.browser")) as {
-    extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
-    default?: {
-      extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
-    };
+type MammothBrowser = {
+  convertToHtml: (input: {
+    arrayBuffer: ArrayBuffer;
+  }) => Promise<{ value: string }>;
+  extractRawText: (input: {
+    arrayBuffer: ArrayBuffer;
+  }) => Promise<{ value: string }>;
+};
+
+async function loadMammoth(): Promise<MammothBrowser> {
+  const mod = (await import("mammoth/mammoth.browser")) as MammothBrowser & {
+    default?: MammothBrowser;
   };
-  const mammoth = mod.default ?? mod;
+  return mod.default ?? mod;
+}
+
+async function extractDocxText(file: File): Promise<string> {
+  const mammoth = await loadMammoth();
   const arrayBuffer = await file.arrayBuffer();
   if (!arrayBuffer.byteLength) {
     throw new Error(
       `„${file.name}“ ist leer oder noch nicht vollständig geladen (SeaDrive: Datei erst lokal öffnen/syncen).`,
     );
   }
-  const result = await mammoth.extractRawText({ arrayBuffer });
-  const text = (result.value ?? "").replace(/\r\n/g, "\n").trim();
+
+  const [htmlResult, rawResult] = await Promise.all([
+    mammoth.convertToHtml({ arrayBuffer }).catch(() => ({ value: "" })),
+    mammoth.extractRawText({ arrayBuffer }).catch(() => ({ value: "" })),
+  ]);
+
+  const fromHtml = questionnaireHtmlToImportText(htmlResult.value ?? "");
+  const fromRaw = (rawResult.value ?? "").replace(/\r\n/g, "\n").trim();
+  const text = pickBestDocxExtraction({ htmlText: fromHtml, rawText: fromRaw });
+
   if (!text) {
     throw new Error(`„${file.name}“ enthält keinen lesbaren Text.`);
   }
