@@ -871,7 +871,8 @@ const rawFilledBatchSchema = z.object({
 
 /**
  * Import one or more raw filled questionnaires (multi-file / multi-paste).
- * Each item becomes its own survey + completed response.
+ * Prefer `/api/surveys/import-raw` from the client for large Word/KI imports
+ * (Server Actions are hard-capped around ~120s on Vercel).
  */
 export async function importRawFilledQuestionnairesBatchAction(
   input: z.input<typeof rawFilledBatchSchema>,
@@ -892,77 +893,18 @@ export async function importRawFilledQuestionnairesBatchAction(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
   }
 
-  const { splitRawFilledDocuments } = await import(
-    "@/lib/surveys/raw-filled-questionnaire"
+  const { runRawFilledQuestionnairesBatch } = await import(
+    "@/lib/surveys/raw-filled-import"
   );
+  const result = await runRawFilledQuestionnairesBatch({
+    items: parsed.data.items,
+    folderId: parsed.data.folderId,
+  });
 
-  // Expand each pasted blob in case it contains several questionnaires.
-  const expanded: Array<{ text: string; title?: string }> = [];
-  for (const item of parsed.data.items) {
-    const parts = splitRawFilledDocuments(item.text);
-    for (const part of parts) {
-      expanded.push({
-        text: part.text,
-        title: parts.length === 1 ? item.title : item.title || part.label,
-      });
-    }
-  }
-
-  if (expanded.length === 0) {
-    return { ok: false, message: "Keine Fragebögen im Text erkannt." };
-  }
-  if (expanded.length > 30) {
-    return { ok: false, message: "Maximal 30 Fragebögen pro Import." };
-  }
-
-  const results: Array<{
-    title: string;
-    surveyId: string;
-    responseId?: string;
-    fieldCount: number;
-    answeredCount: number;
-  }> = [];
-  const failed: Array<{ title: string; message: string }> = [];
-
-  for (let i = 0; i < expanded.length; i += 1) {
-    const item = expanded[i]!;
-    const res = await importRawFilledQuestionnaireAction({
-      text: item.text,
-      title: item.title,
-      folderId: parsed.data.folderId,
-    });
-    if (!res.ok || !res.data?.surveyId) {
-      failed.push({
-        title: item.title?.trim() || `Fragebogen ${i + 1}`,
-        message: res.message,
-      });
-      continue;
-    }
-    results.push({
-      title: item.title?.trim() || `Fragebogen ${i + 1}`,
-      surveyId: res.data.surveyId,
-      responseId: res.data.responseId,
-      fieldCount: res.data.fieldCount,
-      answeredCount: res.data.answeredCount,
-    });
-  }
-
-  if (results.length === 0) {
-    return {
-      ok: false,
-      message: failed[0]?.message ?? "Kein Fragebogen konnte importiert werden.",
-      data: { results, failed },
-    };
-  }
-
-  revalidatePath("/dashboard/surveys");
   return {
-    ok: true,
-    message:
-      failed.length === 0
-        ? `${results.length} Fragebogen${results.length === 1 ? "" : "bögen"} importiert.`
-        : `${results.length} importiert, ${failed.length} fehlgeschlagen.`,
-    data: { results, failed },
+    ok: result.ok,
+    message: result.message,
+    data: { results: result.results, failed: result.failed },
   };
 }
 

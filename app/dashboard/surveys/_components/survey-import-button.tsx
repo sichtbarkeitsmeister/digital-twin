@@ -4,10 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FileUp, Loader2, Upload, X } from "lucide-react";
 
-import {
-  importRawFilledQuestionnairesBatchAction,
-  importSurveyBundleAction,
-} from "@/app/dashboard/surveys/actions";
+import { importSurveyBundleAction } from "@/app/dashboard/surveys/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,6 +14,22 @@ import {
 } from "@/lib/surveys/read-questionnaire-file-text";
 
 type PendingRawFile = { name: string; text: string; chars: number };
+
+type RawImportApiResponse = {
+  ok: boolean;
+  message: string;
+  results: Array<{
+    title: string;
+    surveyId: string;
+    responseId?: string;
+    fieldCount: number;
+    answeredCount: number;
+  }>;
+  failed: Array<{ title: string; message: string }>;
+};
+
+/** Client abort slightly under route maxDuration (300s). */
+const RAW_IMPORT_CLIENT_TIMEOUT_MS = 290_000;
 
 export function SurveyImportButton() {
   const router = useRouter();
@@ -28,10 +41,11 @@ export function SurveyImportButton() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [readingFiles, setReadingFiles] = useState(false);
+  const [rawImporting, setRawImporting] = useState(false);
   const [isPending, startTransition] = useTransition();
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const rawFileInputRef = useRef<HTMLInputElement>(null);
-  const busy = isPending || readingFiles;
+  const busy = isPending || readingFiles || rawImporting;
 
   function close() {
     if (busy) return;
@@ -40,52 +54,83 @@ export function SurveyImportButton() {
     setStatus(null);
   }
 
-  function runImport(items: Array<{ text: string; title?: string }>) {
+  async function runImport(items: Array<{ text: string; title?: string }>) {
     if (items.length === 0) {
       setError("Bitte Text einfügen und/oder eine oder mehrere Dateien laden.");
       return;
     }
     setError(null);
+    setRawImporting(true);
     setStatus(
       items.length > 1
-        ? `${items.length} Fragebögen werden importiert… große Word-Dateien abschnittsweise per KI (kann 1–2 Min. dauern).`
-        : "Import läuft… große Word-Dateien werden abschnittsweise per KI gelesen (kann 1–2 Min. dauern).",
+        ? `${items.length} Fragebögen werden importiert… große Word-Dateien abschnittsweise per KI (oft 2–4 Min.).`
+        : "Import läuft… große Word-Dateien werden abschnittsweise per KI gelesen (oft 2–4 Min.).",
     );
-    startTransition(async () => {
-      try {
-        const res = await importRawFilledQuestionnairesBatchAction({ items });
-        if (!res.ok || !res.data?.results?.length) {
-          setStatus(null);
-          setError(res.message || "Import fehlgeschlagen.");
-          return;
-        }
-        const { results, failed } = res.data;
-        setRawText("");
-        setTitle("");
-        setFiles([]);
-        setIsOpen(false);
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(
+      () => controller.abort(),
+      RAW_IMPORT_CLIENT_TIMEOUT_MS,
+    );
+
+    try {
+      // Route Handler with maxDuration=300 — Server Actions abort around ~120s.
+      const res = await fetch("/api/surveys/import-raw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+        signal: controller.signal,
+      });
+      const data = (await res.json().catch(() => null)) as RawImportApiResponse | null;
+      if (!data) {
         setStatus(null);
-        if (failed.length > 0) {
-          window.alert(
-            `${results.length} importiert, ${failed.length} fehlgeschlagen:\n` +
-              failed.map((f) => `• ${f.title}: ${f.message}`).join("\n"),
-          );
-        }
-        if (results.length === 1 && failed.length === 0) {
-          const one = results[0]!;
-          const target = one.responseId
-            ? `/dashboard/surveys/${one.surveyId}/responses/${one.responseId}`
-            : `/dashboard/surveys/${one.surveyId}/edit`;
-          router.push(target);
-        } else {
-          router.push("/dashboard/surveys");
-        }
-        router.refresh();
-      } catch (e) {
+        setError(
+          res.status === 504 || res.status === 524
+            ? "Import-Zeitlimit auf dem Server. Bitte erneut versuchen."
+            : `Import fehlgeschlagen (HTTP ${res.status}).`,
+        );
+        return;
+      }
+      if (!data.ok || !data.results?.length) {
         setStatus(null);
+        setError(data.message || "Import fehlgeschlagen.");
+        return;
+      }
+      const { results, failed } = data;
+      setRawText("");
+      setTitle("");
+      setFiles([]);
+      setIsOpen(false);
+      setStatus(null);
+      if (failed.length > 0) {
+        window.alert(
+          `${results.length} importiert, ${failed.length} fehlgeschlagen:\n` +
+            failed.map((f) => `• ${f.title}: ${f.message}`).join("\n"),
+        );
+      }
+      if (results.length === 1 && failed.length === 0) {
+        const one = results[0]!;
+        const target = one.responseId
+          ? `/dashboard/surveys/${one.surveyId}/responses/${one.responseId}`
+          : `/dashboard/surveys/${one.surveyId}/edit`;
+        router.push(target);
+      } else {
+        router.push("/dashboard/surveys");
+      }
+      router.refresh();
+    } catch (e) {
+      setStatus(null);
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setError(
+          "Import abgebrochen (Zeitlimit ~5 Min.). Bitte erneut versuchen — bei sehr großen Dateien ggf. einzeln importieren.",
+        );
+      } else {
         setError(e instanceof Error ? e.message : "Import unerwartet fehlgeschlagen.");
       }
-    });
+    } finally {
+      window.clearTimeout(timer);
+      setRawImporting(false);
+    }
   }
 
   function importRaw() {
@@ -103,7 +148,7 @@ export function SurveyImportButton() {
     if (pasted.length >= 50) {
       items.push({ text: pasted, title: title.trim() || undefined });
     }
-    runImport(items);
+    void runImport(items);
   }
 
   function importJson(text: string) {
@@ -174,7 +219,7 @@ export function SurveyImportButton() {
           ? title.trim()
           : file.name.replace(/\.[^.]+$/, ""),
     }));
-    runImport(items);
+    void runImport(items);
   }
 
   return (
@@ -374,7 +419,7 @@ Was bietet ihr an?
                   disabled={busy || (rawText.trim().length < 50 && files.length === 0)}
                   onClick={() => importRaw()}
                 >
-                  {isPending ? (
+                  {rawImporting ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Importiere…

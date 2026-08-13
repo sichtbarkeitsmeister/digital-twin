@@ -249,6 +249,7 @@ export async function extractFilledQuestionnaireWithAi(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
+  // Prefer fast models — large Word imports must stay under the route budget.
   const fastModels = resolveSurveyUtilityModels();
   const strongModels = resolveSurveyActionModels();
   const normalized = normalizeWordQuestionnaireText(input.text);
@@ -259,73 +260,95 @@ export async function extractFilledQuestionnaireWithAi(input: {
   let steps: AiStep[] = [];
   let modelUsed = "";
 
-  const useChunking = chunks.length >= 2 || normalized.length > 8_000;
+  // Always chunk anything non-trivial — whole-doc calls time out on ~25k+ chars.
+  const useChunking = chunks.length >= 2 || normalized.length > 3_000;
 
   if (!useChunking) {
     const whole = await extractWholeDocument({
       anthropic,
-      models: [...fastModels, ...strongModels],
+      models: fastModels,
       text: normalized,
       title: input.title,
-      timeoutMs: 180_000,
+      timeoutMs: 60_000,
     });
-    if (!whole.ok) return whole;
-    title = input.title?.trim() || whole.title;
-    description = whole.description;
-    steps = whole.steps;
-    modelUsed = whole.model;
+    if (!whole.ok) {
+      const retry = await extractWholeDocument({
+        anthropic,
+        models: strongModels,
+        text: normalized,
+        title: input.title,
+        timeoutMs: 75_000,
+      });
+      if (!retry.ok) return retry;
+      title = input.title?.trim() || retry.title;
+      description = retry.description;
+      steps = retry.steps;
+      modelUsed = retry.model;
+    } else {
+      title = input.title?.trim() || whole.title;
+      description = whole.description;
+      steps = whole.steps;
+      modelUsed = whole.model;
+    }
   } else {
+    // Concurrency 3 keeps wall-clock under the 300s route budget for ~27k-char docs.
     const chunkResults = await mapPool(chunks, 3, async (chunk) =>
       extractOneChunk({
         anthropic,
-        models: [...fastModels, ...strongModels],
+        models: fastModels,
         titleHint: chunk.title,
         body: chunk.body,
-        timeoutMs: 75_000,
+        timeoutMs: 50_000,
       }),
     );
 
     const okSteps: AiStep[] = [];
     const errors: string[] = [];
+    const retryQueue: number[] = [];
+
     for (let i = 0; i < chunkResults.length; i += 1) {
       const r = chunkResults[i]!;
       if (r.ok) {
         okSteps.push(r.step);
         modelUsed = modelUsed || r.model;
       } else {
+        retryQueue.push(i);
         errors.push(`${chunks[i]!.title}: ${r.message}`);
       }
     }
 
-    if (okSteps.length === 0) {
-      const whole = await extractWholeDocument({
+    // Retry failed chunks once with the stronger model (sequential, short).
+    for (const i of retryQueue) {
+      const chunk = chunks[i]!;
+      const retry = await extractOneChunk({
         anthropic,
         models: strongModels,
-        text: normalized.slice(0, 35_000),
-        title: input.title,
-        timeoutMs: 240_000,
+        titleHint: chunk.title,
+        body: chunk.body,
+        timeoutMs: 60_000,
       });
-      if (!whole.ok) {
-        return {
-          ok: false,
-          message: `KI-Abschnitte fehlgeschlagen (${errors.slice(0, 3).join("; ")}). Gesamt: ${whole.message}`,
-        };
+      if (retry.ok) {
+        okSteps.push(retry.step);
+        modelUsed = modelUsed || retry.model;
       }
-      title = input.title?.trim() || whole.title;
-      description = whole.description;
-      steps = whole.steps;
-      modelUsed = whole.model;
-    } else {
-      steps = okSteps;
-      title =
-        input.title?.trim() ||
-        chunks.find((c) => /persona|fragebogen|anbieter|wunschkunde/i.test(c.title))
-          ?.title ||
-        chunks[0]?.title ||
-        "Importierter Fragebogen";
-      if (errors.length > 0) {
-        description = `Teilweise importiert — ${errors.length} Abschnitt(e) fehlgeschlagen.`;
-      }
+    }
+
+    if (okSteps.length === 0) {
+      return {
+        ok: false,
+        message: `KI-Abschnitte fehlgeschlagen (${errors.slice(0, 3).join("; ")}). Bitte erneut versuchen.`,
+      };
+    }
+
+    steps = okSteps;
+    title =
+      input.title?.trim() ||
+      chunks.find((c) => /persona|fragebogen|anbieter|wunschkunde/i.test(c.title))?.title ||
+      chunks[0]?.title ||
+      "Importierter Fragebogen";
+    const failedCount = chunks.length - okSteps.length;
+    if (failedCount > 0) {
+      description = `Teilweise importiert — ${failedCount} Abschnitt(e) fehlgeschlagen.`;
     }
   }
 
