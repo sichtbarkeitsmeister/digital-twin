@@ -3,6 +3,10 @@ import { z } from "zod";
 
 import { loadOrgConfig, requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import {
+  resolveAnbieterFocusKeywordsForOrg,
+  type AnbieterFocusKeywordsResult,
+} from "@/lib/dt/seo/focus-keywords-from-anbieter";
 import { normalizeGoogleAccount } from "@/lib/dt/seo/google-accounts";
 
 const ORG_CONFIG_SELECT =
@@ -19,7 +23,7 @@ const patchSchema = z.object({
   gscAccount: z.string().max(200).nullable().optional(),
   sistrixDomain: z.string().max(200).nullable().optional(),
   sitemapUrl: z.string().url().nullable().optional(),
-  focusKeyword: z.string().max(200).nullable().optional(),
+  focusKeyword: z.string().max(2_000).nullable().optional(),
   reportRecipientEmail: z.string().email().nullable().optional(),
   reportTimeframe: z
     .enum(["last_7_days", "last_30_days", "last_90_days"])
@@ -70,10 +74,53 @@ export async function GET(
     return NextResponse.json({ ok: false, message: "Konfiguration nicht gefunden." }, { status: 404 });
   }
 
+  let anbieterFocus: AnbieterFocusKeywordsResult = {
+    status: "no_survey",
+    joined: null,
+    keywords: [],
+    surveyId: null,
+    surveyTitle: null,
+    responseId: null,
+    matchedFieldTitles: [],
+  };
+  try {
+    anbieterFocus = await resolveAnbieterFocusKeywordsForOrg({
+      organisationId: orgId,
+      supabase: auth.supabase,
+    });
+    // Keep org config in sync when the questionnaire has keywords.
+    if (
+      anbieterFocus.status === "found" &&
+      anbieterFocus.joined &&
+      anbieterFocus.joined !== (config.focus_keyword ?? "").trim()
+    ) {
+      await auth.supabase
+        .from("dt_org_config")
+        .update({ focus_keyword: anbieterFocus.joined })
+        .eq("organisation_id", orgId);
+      (config as { focus_keyword?: string | null }).focus_keyword = anbieterFocus.joined;
+    }
+  } catch (e) {
+    console.error("resolveAnbieterFocusKeywordsForOrg failed", e);
+  }
+
   const organisationSlug = await loadOrganisationSlug(auth.supabase, orgId);
   return NextResponse.json({
     ok: true,
-    config: { ...config, organisation_slug: organisationSlug },
+    config: {
+      ...config,
+      organisation_slug: organisationSlug,
+      focus_keyword:
+        anbieterFocus.status === "found" && anbieterFocus.joined
+          ? anbieterFocus.joined
+          : config.focus_keyword,
+    },
+    anbieterFocusKeywords: {
+      status: anbieterFocus.status,
+      keywords: anbieterFocus.joined,
+      surveyTitle: anbieterFocus.surveyTitle,
+      matchedFieldTitles: anbieterFocus.matchedFieldTitles,
+    },
   });
 }
 

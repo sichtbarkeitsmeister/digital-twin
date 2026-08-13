@@ -71,6 +71,13 @@ type CrawlInfo = {
 
 const ACTIVE_CRAWL_STATUSES = new Set(["queued", "running"]);
 
+type AnbieterFocusKeywordsInfo = {
+  status: "found" | "empty" | "no_survey";
+  keywords: string | null;
+  surveyTitle: string | null;
+  matchedFieldTitles?: string[];
+};
+
 export function DtSeoConfigForm(props: {
   organisationId: string;
   canEdit: boolean;
@@ -79,6 +86,7 @@ export function DtSeoConfigForm(props: {
   onSeoEnabledChange?: (enabled: boolean) => void;
 }) {
   const [config, setConfig] = useState<Config | null>(null);
+  const [anbieterFocus, setAnbieterFocus] = useState<AnbieterFocusKeywordsInfo | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [crawlInfo, setCrawlInfo] = useState<CrawlInfo | null>(null);
@@ -96,10 +104,15 @@ export function DtSeoConfigForm(props: {
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/dt/org-config/${props.organisationId}`);
-    const json = (await res.json()) as { ok?: boolean; config?: Config };
+    const json = (await res.json()) as {
+      ok?: boolean;
+      config?: Config;
+      anbieterFocusKeywords?: AnbieterFocusKeywordsInfo;
+    };
     if (json.ok && json.config) {
       setConfig(json.config);
       setChecklistText(checklistToText(json.config.seo_checklist));
+      setAnbieterFocus(json.anbieterFocusKeywords ?? null);
     }
   }, [props.organisationId]);
 
@@ -321,11 +334,29 @@ export function DtSeoConfigForm(props: {
         <div className="grid gap-1">
           <Label htmlFor="dt-focus">Fokus-Keyword</Label>
           <Input
+            key={`focus-${config.focus_keyword ?? ""}`}
             id="dt-focus"
             defaultValue={config.focus_keyword ?? ""}
             disabled={!props.canEdit}
             onBlur={(e) => void save({ focusKeyword: e.target.value.trim() || null })}
           />
+          {anbieterFocus?.status === "found" && anbieterFocus.keywords ? (
+            <p className="text-xs text-sbkm-ink-500 dark:text-white/45">
+              Übernommen aus Anbieter-Fragebogen
+              {anbieterFocus.surveyTitle ? ` „${anbieterFocus.surveyTitle}“` : ""}.
+            </p>
+          ) : null}
+          {anbieterFocus?.status === "empty" ? (
+            <p className="text-xs font-medium text-red-600 dark:text-red-400">
+              Keine Fokuskeywords im Anbieter Fragebogen gefunden.
+            </p>
+          ) : null}
+          {anbieterFocus?.status === "no_survey" ? (
+            <p className="text-xs text-sbkm-ink-500 dark:text-white/45">
+              Kein verknüpfter Anbieter-Fragebogen — Keywords hier manuell pflegen oder Fragebogen
+              übernehmen.
+            </p>
+          ) : null}
         </div>
         <div className="grid gap-1">
           <Label htmlFor="dt-email">Report-E-Mail</Label>
