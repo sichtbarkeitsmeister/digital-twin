@@ -12,6 +12,7 @@ import {
 } from "@/lib/dt/attachments";
 import {
   DEFAULT_DT_CHAT_TITLE,
+  isProvisionalDtChatTitle,
   resolveDtAutoTitleAfterTurn,
   shouldAutoTitleDtChat,
 } from "@/lib/dt/chat-title";
@@ -71,10 +72,10 @@ async function maybePersistDtAutoTitle(input: {
    */
   clearPrematureExternalTitle?: boolean;
 }): Promise<string | null> {
-  const [{ count }, { data: recent }] = await Promise.all([
+  const [{ data: userRows }, { data: recent }] = await Promise.all([
     input.supabase
       .from("dt_chat_messages")
-      .select("id", { count: "exact", head: true })
+      .select("id")
       .eq("chat_id", input.chatId)
       .eq("role", "user"),
     input.supabase
@@ -85,7 +86,8 @@ async function maybePersistDtAutoTitle(input: {
       .limit(4),
   ]);
 
-  const userMessageCount = count ?? 0;
+  // Prefer explicit row list — `head: true` counts have been flaky under RLS.
+  const userMessageCount = userRows?.length ?? 0;
   const allow = shouldAutoTitleDtChat({
     currentTitle: input.currentTitle,
     userMessageCount,
@@ -93,16 +95,18 @@ async function maybePersistDtAutoTitle(input: {
   });
 
   if (!allow) {
+    const provisional =
+      input.currentTitle.trim() || DEFAULT_DT_CHAT_TITLE;
     if (
       input.clearPrematureExternalTitle &&
-      (input.currentTitle.trim() === DEFAULT_DT_CHAT_TITLE || input.currentTitle.trim().length === 0)
+      isProvisionalDtChatTitle(provisional)
     ) {
       // Old n8n builds truncated the title on the 1st turn; reset so the 2nd turn can AI-title.
       await input.supabase
         .from("dt_chats")
-        .update({ title: DEFAULT_DT_CHAT_TITLE })
+        .update({ title: provisional })
         .eq("id", input.chatId)
-        .neq("title", DEFAULT_DT_CHAT_TITLE);
+        .neq("title", provisional);
     }
     return null;
   }
@@ -120,7 +124,18 @@ async function maybePersistDtAutoTitle(input: {
 
   if (!titleSuggestion) return null;
 
-  await input.supabase.from("dt_chats").update({ title: titleSuggestion }).eq("id", input.chatId);
+  const { error: titleError } = await input.supabase
+    .from("dt_chats")
+    .update({ title: titleSuggestion })
+    .eq("id", input.chatId);
+  if (titleError) {
+    console.warn("[dt] auto chat title persist failed", {
+      chatId: input.chatId,
+      titleSuggestion,
+      message: titleError.message,
+    });
+    return null;
+  }
   return titleSuggestion;
 }
 
