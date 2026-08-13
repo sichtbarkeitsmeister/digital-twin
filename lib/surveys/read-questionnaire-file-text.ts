@@ -27,8 +27,19 @@ function isPlainTextFile(file: File): boolean {
 
 async function extractDocxText(file: File): Promise<string> {
   // Browser build — avoids Node `fs` in the client bundle.
-  const mammoth = await import("mammoth/mammoth.browser");
+  const mod = (await import("mammoth/mammoth.browser")) as {
+    extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
+    default?: {
+      extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
+    };
+  };
+  const mammoth = mod.default ?? mod;
   const arrayBuffer = await file.arrayBuffer();
+  if (!arrayBuffer.byteLength) {
+    throw new Error(
+      `„${file.name}“ ist leer oder noch nicht vollständig geladen (SeaDrive: Datei erst lokal öffnen/syncen).`,
+    );
+  }
   const result = await mammoth.extractRawText({ arrayBuffer });
   const text = (result.value ?? "").replace(/\r\n/g, "\n").trim();
   if (!text) {
@@ -48,7 +59,11 @@ export async function readQuestionnaireFileText(file: File): Promise<string> {
     return extractDocxText(file);
   }
   if (isPlainTextFile(file) || name.endsWith(".json")) {
-    return file.text();
+    const text = (await file.text()).trim();
+    if (!text) {
+      throw new Error(`„${file.name}“ ist leer.`);
+    }
+    return text;
   }
   throw new Error(
     `„${file.name}“ wird nicht unterstützt. Bitte .docx, .txt oder .md verwenden.`,
