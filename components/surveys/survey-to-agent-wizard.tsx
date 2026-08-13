@@ -595,10 +595,19 @@ export function SurveyToAgentWizard(props: {
             : `Test: ${preview?.name ?? "Persona"}`,
       }),
     });
-    const json = (await res.json()) as { ok?: boolean; chatId?: string };
-    if (json.ok && json.chatId) {
-      window.location.href = `/?org=${encodeURIComponent(orgId)}&chat=${encodeURIComponent(json.chatId)}`;
+    const json = (await res.json()) as {
+      ok?: boolean;
+      message?: string;
+      chat?: { id?: string };
+      chatId?: string;
+    };
+    // API returns `{ ok, chat }`; older clients expected `chatId`.
+    const chatId = json.chat?.id ?? json.chatId;
+    if (json.ok && chatId) {
+      window.location.href = `/?org=${encodeURIComponent(orgId)}&chat=${encodeURIComponent(chatId)}`;
+      return;
     }
+    setError(json.message ?? "Test-Chat konnte nicht gestartet werden.");
   }, [createdAgentId, orgId, wizardMode, refineAgent?.name, preview?.name]);
 
   const activePrompt =

@@ -6,13 +6,28 @@ import {
 } from "@/lib/ai/anthropic-helpers";
 
 export const DEFAULT_DT_CHAT_TITLE = "Neuer Chat";
+export const TEAM_DT_CHAT_TITLE = "Team-Chat";
 
 /** Minimum assistant reply length to allow early titling after the 1st user turn. */
 export const MEANINGFUL_ASSISTANT_REPLY_MIN_CHARS = 80;
 
 /**
+ * System placeholders that should still receive an auto-title once the chat
+ * has enough content. Manual renames and prior AI titles are left alone.
+ */
+export function isProvisionalDtChatTitle(title: string): boolean {
+  const t = title.trim();
+  if (!t) return true;
+  if (t === DEFAULT_DT_CHAT_TITLE) return true;
+  if (t === TEAM_DT_CHAT_TITLE) return true;
+  // Wizard / probe chats start as "Test: <Persona>" and must still be renamed.
+  if (/^Test:\s+/i.test(t)) return true;
+  return false;
+}
+
+/**
  * Auto-title timing (Digital Twin):
- * - Never retitle once the chat left the default title.
+ * - Never retitle once the chat left a provisional/system title.
  * - At the latest after the 2nd user message.
  * - Optionally earlier after the 1st turn when the assistant reply is meaningful.
  */
@@ -21,8 +36,7 @@ export function shouldAutoTitleDtChat(input: {
   userMessageCount: number;
   assistantText: string;
 }): boolean {
-  const title = input.currentTitle.trim();
-  if (title.length > 0 && title !== DEFAULT_DT_CHAT_TITLE) return false;
+  if (!isProvisionalDtChatTitle(input.currentTitle)) return false;
   if (input.userMessageCount >= 2) return true;
   if (input.userMessageCount >= 1 && isMeaningfulAssistantReply(input.assistantText)) {
     return true;
@@ -53,8 +67,22 @@ export function sanitizeDtChatTitle(raw: string): string | null {
       .map((line) => line.trim())
       .find((line) => line.length > 0) ?? "";
   const clipped = firstLine.replace(/\s+/g, " ").slice(0, 80).trim();
-  if (!clipped || clipped.toLowerCase() === DEFAULT_DT_CHAT_TITLE.toLowerCase()) return null;
+  if (!clipped || isProvisionalDtChatTitle(clipped)) return null;
   return clipped;
+}
+
+/** Keep test chats recognizable in the sidebar after auto-naming. */
+export function formatDtAutoTitleForCurrent(input: {
+  currentTitle: string;
+  nextTitle: string;
+}): string {
+  const next = input.nextTitle.trim().slice(0, 80);
+  if (!next) return DEFAULT_DT_CHAT_TITLE;
+  const wasTest = /^Test:\s+/i.test(input.currentTitle.trim());
+  if (wasTest && !/^Test:\s+/i.test(next)) {
+    return `Test: ${next}`.slice(0, 80);
+  }
+  return next;
 }
 
 function resolveDtTitleModels(): string[] {
@@ -135,16 +163,28 @@ export async function resolveDtAutoTitleAfterTurn(input: {
   }
 
   const preferred = input.preferredTitle?.trim();
-  if (preferred && preferred !== DEFAULT_DT_CHAT_TITLE) {
-    return preferred.slice(0, 80);
+  if (preferred && !isProvisionalDtChatTitle(preferred)) {
+    return formatDtAutoTitleForCurrent({
+      currentTitle: input.currentTitle,
+      nextTitle: preferred.slice(0, 80),
+    });
   }
 
   const generated = await generateDtChatTitleFromMessages({
     messages: input.recentMessages,
     anthropic: input.anthropic,
   });
-  if (generated) return generated;
+  if (generated) {
+    return formatDtAutoTitleForCurrent({
+      currentTitle: input.currentTitle,
+      nextTitle: generated,
+    });
+  }
 
   const fallback = fallbackDtChatTitle(input.latestUserText, input.assistantText);
-  return fallback === DEFAULT_DT_CHAT_TITLE ? null : fallback;
+  if (isProvisionalDtChatTitle(fallback)) return null;
+  return formatDtAutoTitleForCurrent({
+    currentTitle: input.currentTitle,
+    nextTitle: fallback,
+  });
 }
