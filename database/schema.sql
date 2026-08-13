@@ -577,6 +577,9 @@ $$;
 CREATE OR REPLACE FUNCTION public.allocate_unique_organisation_slug(base text)
 RETURNS text
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
 AS $$
 DECLARE
   candidate text;
@@ -612,6 +615,7 @@ RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
+SET row_security = off
 AS $$
 DECLARE
   org_id uuid;

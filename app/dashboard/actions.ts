@@ -75,7 +75,7 @@ function mapAdminCreateOrganisationError(error: {
     return "Die E-Mail-Adresse des Inhabers ist ungültig.";
   }
   if (raw.includes("invalid_slug") || raw.includes("slug_collision")) {
-    return "Der Slug ist ungültig oder bereits vergeben. Bitte einen anderen Slug wählen.";
+    return "Der Slug ist ungültig oder bereits vergeben. Bitte einen anderen Slug wählen oder leer lassen.";
   }
   if (
     code === "23505" ||
@@ -83,18 +83,24 @@ function mapAdminCreateOrganisationError(error: {
     raw.includes("unique") ||
     raw.includes("organisations_slug")
   ) {
-    return "Dieser Organisations-Slug existiert bereits. Bitte einen anderen Slug wählen.";
+    return "Dieser Organisations-Slug existiert bereits. Bitte einen anderen Slug wählen oder leer lassen.";
   }
   if (
     raw.includes("allocate_unique") ||
-    (raw.includes("function") && raw.includes("does not exist"))
+    raw.includes("slugify_organisation") ||
+    (raw.includes("function") && raw.includes("does not exist")) ||
+    raw.includes("could not find the function") ||
+    raw.includes("schema cache")
   ) {
-    return "Datenbank-Migration fehlt (Slug-Autofill). Bitte 20260805_org_slug_autofill.sql in Supabase ausführen.";
+    return "Datenbank-Funktion für Organisation anlegen fehlt oder ist veraltet. Bitte Migration 20260813_fix_admin_create_organisation_rls.sql (bzw. 20260805_org_slug_autofill.sql) in Supabase ausführen.";
   }
 
   // Keep a short technical hint so ops can fix without digging into server logs.
-  const short = (error.message ?? "").trim();
-  if (short && short.length < 180 && !short.includes("\n")) {
+  const short = [error.message, error.details, error.code]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(" — ");
+  if (short && short.length < 220 && !short.includes("\n")) {
     return `Organisation konnte nicht erstellt werden: ${short}`;
   }
   return "Organisation konnte nicht erstellt werden. Bitte später erneut versuchen.";
@@ -133,42 +139,79 @@ export async function adminCreateOrganisationAction(
       data: { user },
     } = await supabase.auth.getUser();
 
+    if (!user?.id) {
+      return { ok: false, message: "Nicht angemeldet." };
+    }
+    if (!(await isPlatformAdmin(supabase, user.id))) {
+      return {
+        ok: false,
+        message:
+          "Keine Berechtigung: Organisation anlegen ist nur für Plattform-Admins möglich.",
+      };
+    }
+
     // Create the organisation first. Welcome-mail setup must never block creation
     // (service-role / Auth-link failures previously aborted the whole action).
-    const { error } = await supabase.rpc("admin_create_organisation", {
-      org_name,
-      owner_email,
-      org_slug: resolvedSlug,
-    });
+    const { data: createdOrgId, error } = await supabase.rpc(
+      "admin_create_organisation",
+      {
+        org_name,
+        owner_email,
+        org_slug: resolvedSlug,
+      },
+    );
 
     if (error) {
-      console.warn("[admin] admin_create_organisation failed:", error.message, error.details);
+      console.warn(
+        "[admin] admin_create_organisation failed:",
+        error.message,
+        error.details,
+        error.code,
+        error.hint,
+      );
       return { ok: false, message: mapAdminCreateOrganisationError(error) };
+    }
+    if (!createdOrgId) {
+      return {
+        ok: false,
+        message:
+          "Organisation konnte nicht erstellt werden (keine ID von der Datenbank).",
+      };
     }
 
     let emailStatus: ReturnType<typeof formatOwnerWelcomeEmailStatus> = null;
     if (send_welcome) {
-      let loginLink: Awaited<ReturnType<typeof ensureOwnerLoginLink>> = null;
       try {
-        loginLink = await ensureOwnerLoginLink(owner_email);
+        let loginLink: Awaited<ReturnType<typeof ensureOwnerLoginLink>> = null;
+        try {
+          loginLink = await ensureOwnerLoginLink(owner_email);
+        } catch (err) {
+          console.warn(
+            "[admin] ensureOwnerLoginLink failed after org create:",
+            err instanceof Error ? err.message : err,
+          );
+        }
+
+        if (loginLink) {
+          const emailResult = await sendOrgOwnerWelcomeEmail({
+            email: owner_email,
+            organisationName: org_name,
+            link: loginLink.link,
+            isNewAccount: loginLink.isNewAccount,
+            triggeredByUserId: user.id,
+            organisationId: String(createdOrgId),
+          });
+          emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
+        } else {
+          emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
+        }
       } catch (err) {
         console.warn(
-          "[admin] ensureOwnerLoginLink failed after org create:",
+          "[admin] welcome email failed after org create:",
           err instanceof Error ? err.message : err,
         );
-      }
-
-      if (loginLink) {
-        const emailResult = await sendOrgOwnerWelcomeEmail({
-          email: owner_email,
-          organisationName: org_name,
-          link: loginLink.link,
-          isNewAccount: loginLink.isNewAccount,
-          triggeredByUserId: user?.id ?? null,
-        });
-        emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
-      } else {
-        emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
+        emailStatus =
+          "Organisation ist angelegt, Einladungs-E-Mail konnte nicht gesendet werden.";
       }
     }
 
