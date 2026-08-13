@@ -48,8 +48,8 @@ export function SurveyImportButton() {
     setError(null);
     setStatus(
       items.length > 1
-        ? `${items.length} Fragebögen werden importiert… (KI kann etwas dauern)`
-        : "Import läuft… Bei Word-Texten wertet die KI Fragen/Antworten aus (kann etwas dauern).",
+        ? `${items.length} Fragebögen werden importiert… große Word-Dateien abschnittsweise per KI (kann 1–2 Min. dauern).`
+        : "Import läuft… große Word-Dateien werden abschnittsweise per KI gelesen (kann 1–2 Min. dauern).",
     );
     startTransition(async () => {
       try {
@@ -166,6 +166,7 @@ export function SurveyImportButton() {
     );
 
     // Start import immediately after file pick — matches user expectation.
+    // Do not also import short textarea drafts (often leftover trial pastes).
     const items: Array<{ text: string; title?: string }> = next.map((file) => ({
       text: file.text,
       title:
@@ -173,11 +174,6 @@ export function SurveyImportButton() {
           ? title.trim()
           : file.name.replace(/\.[^.]+$/, ""),
     }));
-    // Keep already-pasted text as an extra questionnaire if present.
-    const pasted = rawText.trim();
-    if (pasted.length >= 50) {
-      items.push({ text: pasted, title: title.trim() || undefined });
-    }
     runImport(items);
   }
 

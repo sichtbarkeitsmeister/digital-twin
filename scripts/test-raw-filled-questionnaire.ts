@@ -8,6 +8,10 @@ import {
   splitRankingLabels,
   splitRawFilledDocuments,
 } from "../lib/surveys/raw-filled-questionnaire";
+import {
+  normalizeWordQuestionnaireText,
+  splitQuestionnaireIntoAiChunks,
+} from "../lib/surveys/raw-filled-questionnaire-chunks";
 
 const SAMPLE = `Wunschkunde & Avatar
 5 Felder
@@ -199,12 +203,47 @@ Maschinenbauer und Medizingeräte-Hersteller.
   );
 }
 
+function testAiChunkSplit() {
+  const big = `
+Anbieter-Persona Allround
+
+Einleitungstext über die Firma und den Fragebogen Zweck.
+
+📋 Positionierung & Philosophie
+Wie positioniert sich Allround am Markt?
+Wir sind der zuverlässige Partner.
+
+Was ist eure Philosophie?
+Qualität vor Quantität.
+
+⚙️ Angebot & Leistungen
+Welche Leistungen bietet ihr an?
+Zerspanung, Montage, Oberflächenbehandlung
+
+🎯 Zielkunden
+Wer sind eure wichtigsten Kunden?
+Maschinenbauer und Medizintechnik.
+
+⭐ Bewertungen
+Was loben Kunden am häufigsten?
+Termintreue und Präzision.
+`.trim();
+
+  const normalized = normalizeWordQuestionnaireText(big);
+  const chunks = splitQuestionnaireIntoAiChunks(normalized);
+  assert.ok(chunks.length >= 3, `expected >=3 chunks, got ${chunks.length}`);
+  assert.ok(chunks.some((c) => /Positionierung/i.test(c.title)));
+  assert.ok(chunks.some((c) => /Angebot/i.test(c.title)));
+  console.log(`ai chunk split: ok (${chunks.length} chunks)`);
+}
+
 testDetection();
 testSplits();
 testParse();
 testFileSampleIfPresent();
 testMultiDocumentSplit();
 testLooseEmojiPaste();
+testAiChunkSplit();
 console.log("raw-filled-questionnaire: all ok");
 
 function testMultiDocumentSplit() {

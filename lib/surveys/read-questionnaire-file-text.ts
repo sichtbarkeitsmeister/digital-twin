@@ -56,7 +56,11 @@ export async function readQuestionnaireFileText(file: File): Promise<string> {
     );
   }
   if (isDocxFile(file)) {
-    return extractDocxText(file);
+    const { normalizeWordQuestionnaireText } = await import(
+      "@/lib/surveys/raw-filled-questionnaire-chunks"
+    );
+    const text = await extractDocxText(file);
+    return normalizeWordQuestionnaireText(text);
   }
   if (isPlainTextFile(file) || name.endsWith(".json")) {
     const text = (await file.text()).trim();
