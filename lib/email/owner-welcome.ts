@@ -23,7 +23,17 @@ export async function ensureOwnerLoginLink(
   const normalized = email.trim().toLowerCase();
   if (!normalized) return null;
 
-  const service = createServiceClient();
+  let service: ReturnType<typeof createServiceClient>;
+  try {
+    service = createServiceClient();
+  } catch (err) {
+    console.warn(
+      "[email] owner login link: service client unavailable:",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+
   const { data: profile } = await service
     .from("profiles")
     .select("id, email")

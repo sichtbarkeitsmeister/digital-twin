@@ -42,86 +42,162 @@ const adminCreateOrganisationSchema = z.object({
     .trim()
     .toLowerCase()
     .email("Bitte eine gültige E-Mail-Adresse eingeben"),
-  org_slug: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z0-9-]+$/, "Slug: nur a-z, 0-9 und Bindestriche")
-    .min(2, "Slug ist zu kurz")
-    .max(64, "Slug ist zu lang")
-    .optional()
-    .or(z.literal("")),
+  org_slug: z.preprocess(
+    (v) => {
+      if (v == null) return "";
+      return String(v).trim().toLowerCase();
+    },
+    z.union([
+      z.literal(""),
+      z
+        .string()
+        .regex(/^[a-z0-9-]+$/, "Slug: nur a-z, 0-9 und Bindestriche")
+        .min(2, "Slug ist zu kurz")
+        .max(64, "Slug ist zu lang"),
+    ]),
+  ),
   send_welcome: checkboxOnSchema.default(true),
 });
+
+function mapAdminCreateOrganisationError(error: {
+  message?: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+}): string {
+  const raw = `${error.message ?? ""} ${error.details ?? ""} ${error.hint ?? ""}`.toLowerCase();
+  const code = (error.code ?? "").toLowerCase();
+
+  if (raw.includes("forbidden") || raw.includes("not_authenticated")) {
+    return "Keine Berechtigung: Organisation anlegen ist nur für Plattform-Admins möglich.";
+  }
+  if (raw.includes("invalid_email")) {
+    return "Die E-Mail-Adresse des Inhabers ist ungültig.";
+  }
+  if (raw.includes("invalid_slug") || raw.includes("slug_collision")) {
+    return "Der Slug ist ungültig oder bereits vergeben. Bitte einen anderen Slug wählen.";
+  }
+  if (
+    code === "23505" ||
+    raw.includes("duplicate") ||
+    raw.includes("unique") ||
+    raw.includes("organisations_slug")
+  ) {
+    return "Dieser Organisations-Slug existiert bereits. Bitte einen anderen Slug wählen.";
+  }
+  if (
+    raw.includes("allocate_unique") ||
+    (raw.includes("function") && raw.includes("does not exist"))
+  ) {
+    return "Datenbank-Migration fehlt (Slug-Autofill). Bitte 20260805_org_slug_autofill.sql in Supabase ausführen.";
+  }
+
+  // Keep a short technical hint so ops can fix without digging into server logs.
+  const short = (error.message ?? "").trim();
+  if (short && short.length < 180 && !short.includes("\n")) {
+    return `Organisation konnte nicht erstellt werden: ${short}`;
+  }
+  return "Organisation konnte nicht erstellt werden. Bitte später erneut versuchen.";
+}
 
 export async function adminCreateOrganisationAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const parsed = adminCreateOrganisationSchema.safeParse({
-    org_name: formData.get("org_name"),
-    owner_email: formData.get("owner_email"),
-    org_slug: formData.get("org_slug"),
-    send_welcome: formData.get("send_welcome"),
-  });
+  try {
+    const parsed = adminCreateOrganisationSchema.safeParse({
+      org_name: formData.get("org_name"),
+      owner_email: formData.get("owner_email"),
+      org_slug: formData.get("org_slug"),
+      send_welcome: formData.get("send_welcome"),
+    });
 
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
-  }
+    if (!parsed.success) {
+      return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
+    }
 
-  const { org_name, owner_email, org_slug, send_welcome } = parsed.data;
+    const { org_name, owner_email, org_slug, send_welcome } = parsed.data;
 
-  // Slug is required for SEO/n8n client routing — auto-fill from name when omitted.
-  const resolvedSlug = resolveOrganisationSlug({ slug: org_slug, name: org_name });
-  if (!resolvedSlug) {
+    // Slug is required for SEO/n8n client routing — auto-fill from name when omitted.
+    const resolvedSlug = resolveOrganisationSlug({ slug: org_slug, name: org_name });
+    if (!resolvedSlug) {
+      return {
+        ok: false,
+        message:
+          "Slug konnte nicht aus dem Organisationsnamen erzeugt werden. Bitte Slug manuell setzen.",
+      };
+    }
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    // Create the organisation first. Welcome-mail setup must never block creation
+    // (service-role / Auth-link failures previously aborted the whole action).
+    const { error } = await supabase.rpc("admin_create_organisation", {
+      org_name,
+      owner_email,
+      org_slug: resolvedSlug,
+    });
+
+    if (error) {
+      console.warn("[admin] admin_create_organisation failed:", error.message, error.details);
+      return { ok: false, message: mapAdminCreateOrganisationError(error) };
+    }
+
+    let emailStatus: ReturnType<typeof formatOwnerWelcomeEmailStatus> = null;
+    if (send_welcome) {
+      let loginLink: Awaited<ReturnType<typeof ensureOwnerLoginLink>> = null;
+      try {
+        loginLink = await ensureOwnerLoginLink(owner_email);
+      } catch (err) {
+        console.warn(
+          "[admin] ensureOwnerLoginLink failed after org create:",
+          err instanceof Error ? err.message : err,
+        );
+      }
+
+      if (loginLink) {
+        const emailResult = await sendOrgOwnerWelcomeEmail({
+          email: owner_email,
+          organisationName: org_name,
+          link: loginLink.link,
+          isNewAccount: loginLink.isNewAccount,
+          triggeredByUserId: user?.id ?? null,
+        });
+        emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
+      } else {
+        emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
+      }
+    }
+
+    revalidatePath("/dashboard/admin/organisations");
+    revalidatePath("/dashboard/admin/mails");
+    revalidatePath("/dashboard/organisations");
+    const baseMessage = "Organisation wurde angelegt.";
+    return {
+      ok: true,
+      message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
+    };
+  } catch (err) {
+    console.warn(
+      "[admin] adminCreateOrganisationAction crashed:",
+      err instanceof Error ? err.message : err,
+    );
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.includes("SUPABASE_SERVICE_ROLE_KEY") || msg.includes("NEXT_PUBLIC_SUPABASE_URL")) {
+      return {
+        ok: false,
+        message:
+          "Server-Konfiguration unvollständig (Supabase Service Role). Organisation konnte nicht vorbereitet werden.",
+      };
+    }
     return {
       ok: false,
-      message: "Slug konnte nicht aus dem Organisationsnamen erzeugt werden. Bitte Slug manuell setzen.",
+      message: "Organisation konnte nicht erstellt werden. Bitte später erneut versuchen.",
     };
   }
-
-  let loginLink: Awaited<ReturnType<typeof ensureOwnerLoginLink>> = null;
-  if (send_welcome) {
-    loginLink = await ensureOwnerLoginLink(owner_email);
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { error } = await supabase.rpc("admin_create_organisation", {
-    org_name,
-    owner_email,
-    org_slug: resolvedSlug,
-  });
-
-  if (error) {
-    return { ok: false, message: "Organisation konnte nicht erstellt werden." };
-  }
-
-  let emailStatus: ReturnType<typeof formatOwnerWelcomeEmailStatus> = null;
-  if (send_welcome && loginLink) {
-    const emailResult = await sendOrgOwnerWelcomeEmail({
-      email: owner_email,
-      organisationName: org_name,
-      link: loginLink.link,
-      isNewAccount: loginLink.isNewAccount,
-      triggeredByUserId: user?.id ?? null,
-    });
-    emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
-  } else if (send_welcome) {
-    emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
-  }
-
-  revalidatePath("/dashboard/admin/organisations");
-  revalidatePath("/dashboard/admin/mails");
-  revalidatePath("/dashboard/organisations");
-  const baseMessage = "Organisation wurde angelegt.";
-  return {
-    ok: true,
-    message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
-  };
 }
 
 const inviteSchema = z.object({
