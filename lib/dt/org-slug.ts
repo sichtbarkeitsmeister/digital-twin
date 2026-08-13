@@ -20,15 +20,23 @@ export function slugifyOrganisationName(name: string): string {
   return slug.slice(0, 64);
 }
 
-/** Prefer explicit slug; otherwise derive from organisation name. */
+/**
+ * Prefer explicit slug; otherwise derive from organisation name.
+ * Free-form slug input (spaces, umlauts, legal suffixes) is slugified the same
+ * way as the organisation name — users often paste the company name into the slug field.
+ */
 export function resolveOrganisationSlug(input: {
   slug?: string | null;
   name?: string | null;
 }): string | null {
-  const explicit = String(input.slug ?? "")
-    .trim()
-    .toLowerCase();
-  if (explicit && /^[a-z0-9-]+$/.test(explicit)) return explicit.slice(0, 64);
+  const explicitRaw = String(input.slug ?? "").trim();
+  if (explicitRaw) {
+    if (/^[a-z0-9-]+$/i.test(explicitRaw)) {
+      return explicitRaw.toLowerCase().slice(0, 64);
+    }
+    const fromExplicit = slugifyOrganisationName(explicitRaw);
+    if (fromExplicit) return fromExplicit;
+  }
 
   const fromName = slugifyOrganisationName(String(input.name ?? ""));
   return fromName || null;

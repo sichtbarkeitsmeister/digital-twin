@@ -45,7 +45,11 @@ const adminCreateOrganisationSchema = z.object({
   org_slug: z.preprocess(
     (v) => {
       if (v == null) return "";
-      return String(v).trim().toLowerCase();
+      const raw = String(v).trim();
+      if (!raw) return "";
+      // Accept free-form input (e.g. company name) and normalize to a valid slug.
+      const resolved = resolveOrganisationSlug({ slug: raw, name: "" });
+      return resolved ?? "";
     },
     z.union([
       z.literal(""),
@@ -87,9 +91,12 @@ function mapAdminCreateOrganisationError(error: {
   }
   if (
     raw.includes("allocate_unique") ||
-    (raw.includes("function") && raw.includes("does not exist"))
+    raw.includes("slugify_organisation") ||
+    (raw.includes("function") && raw.includes("does not exist")) ||
+    raw.includes("could not find the function") ||
+    raw.includes("schema cache")
   ) {
-    return "Datenbank-Migration fehlt (Slug-Autofill). Bitte 20260805_org_slug_autofill.sql in Supabase ausführen.";
+    return "Datenbank-Funktion für Organisation anlegen fehlt oder ist veraltet. Bitte Migration 20260813_fix_admin_create_organisation_rls.sql in Supabase ausführen.";
   }
 
   // Keep a short technical hint so ops can fix without digging into server logs.
@@ -654,5 +661,86 @@ export async function acceptOrganisationInviteAction(formData: FormData) {
 
   revalidatePath("/dashboard/inbox");
   revalidatePath("/dashboard/organisations");
+}
+
+const adminArchiveOrganisationSchema = z.object({
+  organisationId: z.string().uuid(),
+  /** Must match organisation name (case-insensitive) for the second confirmation. */
+  confirmName: z.string().trim().min(1, "Bitte den Organisationsnamen zur Bestätigung eingeben."),
+});
+
+/**
+ * Soft-delete (archive) an organisation. Platform admins only.
+ * Requires typing the organisation name as a second confirmation factor.
+ */
+export async function adminArchiveOrganisationAction(
+  input: z.input<typeof adminArchiveOrganisationSchema>,
+): Promise<ActionState> {
+  const parsed = adminArchiveOrganisationSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe.",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) return { ok: false, message: "Nicht angemeldet." };
+  if (!(await isPlatformAdmin(supabase, user.id))) {
+    return { ok: false, message: "Nur Plattform-Admins können Organisationen löschen." };
+  }
+
+  const { data: org } = await supabase
+    .from("organisations")
+    .select("id, name, archived_at")
+    .eq("id", parsed.data.organisationId)
+    .maybeSingle();
+
+  if (!org) return { ok: false, message: "Organisation nicht gefunden." };
+  if (org.archived_at) {
+    return { ok: true, message: "Organisation war bereits gelöscht." };
+  }
+
+  const expected = org.name.trim().toLowerCase();
+  const got = parsed.data.confirmName.trim().toLowerCase();
+  if (expected !== got) {
+    return {
+      ok: false,
+      message: "Bestätigung fehlgeschlagen: Der Organisationsname stimmt nicht überein.",
+    };
+  }
+
+  const { error } = await supabase.rpc("admin_archive_organisation", {
+    org_id: parsed.data.organisationId,
+  });
+  if (error) {
+    console.warn("[admin] admin_archive_organisation failed:", error.message);
+    const msg = (error.message ?? "").toLowerCase();
+    if (msg.includes("forbidden")) {
+      return { ok: false, message: "Keine Berechtigung zum Löschen." };
+    }
+    if (msg.includes("org_not_found")) {
+      return { ok: false, message: "Organisation nicht gefunden." };
+    }
+    if (msg.includes("could not find the function") || msg.includes("schema cache")) {
+      return {
+        ok: false,
+        message:
+          "Datenbank-Funktion fehlt. Bitte Migration 20260813_admin_archive_organisation.sql in Supabase ausführen.",
+      };
+    }
+    return {
+      ok: false,
+      message: `Organisation konnte nicht gelöscht werden: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/dashboard/admin/organisations");
+  revalidatePath("/dashboard/organisations");
+  revalidatePath(`/dashboard/organisations/${parsed.data.organisationId}`);
+  return { ok: true, message: "Organisation wurde gelöscht." };
 }
 

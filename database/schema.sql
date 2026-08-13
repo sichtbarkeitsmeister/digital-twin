@@ -577,6 +577,9 @@ $$;
 CREATE OR REPLACE FUNCTION public.allocate_unique_organisation_slug(base text)
 RETURNS text
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
 AS $$
 DECLARE
   candidate text;
@@ -612,6 +615,7 @@ RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
+SET row_security = off
 AS $$
 DECLARE
   org_id uuid;
@@ -665,6 +669,40 @@ BEGIN
   END IF;
 
   RETURN org_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_archive_organisation(org_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'not_authenticated';
+  END IF;
+  IF NOT public.is_platform_admin(auth.uid()) THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+
+  IF org_id IS NULL THEN
+    RAISE EXCEPTION 'invalid_org';
+  END IF;
+
+  UPDATE public.organisations
+  SET
+    archived_at = timezone('utc'::text, now()),
+    updated_at = timezone('utc'::text, now())
+  WHERE id = org_id
+    AND archived_at IS NULL;
+
+  IF NOT FOUND THEN
+    IF NOT EXISTS (SELECT 1 FROM public.organisations o WHERE o.id = org_id) THEN
+      RAISE EXCEPTION 'org_not_found';
+    END IF;
+  END IF;
 END;
 $$;
 

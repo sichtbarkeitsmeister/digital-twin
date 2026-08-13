@@ -37,10 +37,10 @@ export function AdminCreateOrgForm() {
           autoComplete="off"
         />
         <p className="text-xs text-secondary">
-          Leer lassen = automatisch aus dem Organisationsnamen (z.&nbsp;B. „MSH
-          Rechtsanwälte“ → <code className="text-xs">msh-rechtsanwaelte</code>).
-          Nur a-z, 0-9 und Bindestriche. Wird für SEO/n8n als Client-Key genutzt.
-          Bei Fehler „Slug bereits vergeben“ einfach einen anderen Slug eintragen.
+          Leer lassen = automatisch aus dem Organisationsnamen. Du kannst auch den
+          Firmennamen eintragen — er wird zu einem Slug normalisiert (a-z, 0-9, Bindestriche),
+          z.&nbsp;B. „MSH Rechtsanwälte“ → <code className="text-xs">msh-rechtsanwaelte</code>.
+          Wird für SEO/n8n als Client-Key genutzt.
         </p>
       </div>
 

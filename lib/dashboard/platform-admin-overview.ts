@@ -44,6 +44,7 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
     supabase
       .from("organisations")
       .select("id,name,slug,created_at,owner_user_id")
+      .is("archived_at", null)
       .order("created_at", { ascending: false })
       .limit(100),
     supabase.from("organisation_members").select("organisation_id"),
