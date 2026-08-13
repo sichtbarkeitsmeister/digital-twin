@@ -62,6 +62,7 @@ export async function GET(
 
   const loaded = await loadSurveyExamQuestionsForResponse(surveyId, responseId, {
     audience,
+    organisationId: agent.organisation_id as string,
   });
   if (!loaded.ok) {
     return NextResponse.json(
@@ -76,6 +77,7 @@ export async function GET(
     audience: loaded.audience,
     surveyTitle: loaded.surveyTitle,
     factCount: loaded.factCount,
+    organisationName: loaded.organisationName,
     questions: loaded.questions,
   });
 }

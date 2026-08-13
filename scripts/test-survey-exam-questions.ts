@@ -11,6 +11,7 @@ import {
   fixGermanDuVerbAgreement,
   naturalPersonaProbeFromTitle,
   resolvePersonaProviderLabel,
+  rewriteCompanyAddressingToOrgName,
   rewriteCustomerThirdPersonToSecondPerson,
   withoutEmDashes,
 } from "../lib/dt/survey-exam-questions";
@@ -392,6 +393,7 @@ assert.ok(!homeQs.some((q) => /behandler|labor|praxis/i.test(q.question)));
 const companyQs = buildSurveyExamQuestions(dentalFacts.facts, {
   audience: "company",
   maxQuestions: 12,
+  organisationName: "TM Dentaltechnik",
 });
 assert.ok(companyQs.some((q) => q.id.startsWith("warmup_company")));
 assert.ok(companyQs.some((q) => /labor am liebsten/i.test(q.question)));
@@ -399,6 +401,25 @@ assert.ok(companyQs[0]?.factId, "company testing should lead with fact verificat
 assert.match(
   companyQs.find((q) => /labor am liebsten/i.test(q.question))?.expectedHint ?? "",
   /Qualitätsorientierten/,
+);
+assert.ok(
+  companyQs.every((q) => !/\b(euch|eurem|eurer|euren|eure|euer|seid ihr|habt ihr)\b/i.test(q.question)),
+  "SEO/company probes must not address the agent as staff (ihr/euch)",
+);
+assert.ok(
+  companyQs.some((q) => /TM Dentaltechnik/i.test(q.question)),
+  "SEO/company probes must name the organisation",
+);
+assert.equal(
+  rewriteCompanyAddressingToOrgName(
+    "bitte mit den konkreten Angaben aus eurem Wissen.",
+    "Online Media Atelier",
+  ),
+  "bitte mit den konkreten Angaben zu Online Media Atelier.",
+);
+assert.match(
+  rewriteCompanyAddressingToOrgName("Was steht bei euch zu „USP“?", "Online Media Atelier"),
+  /bei Online Media Atelier/,
 );
 
 // Grammar + sales tone: employee talking to prospect, no “diese du”, no dry budget wrap
@@ -701,6 +722,7 @@ assert.ok(
 const heilCompanyQs = buildSurveyExamQuestions(heilFacts.facts, {
   audience: "company",
   maxQuestions: 16,
+  organisationName: "Heilpraxis Beispiel",
 });
 assert.ok(
   heilCompanyQs.some((q) => /interessenten|nicht zurückgerufen|nicht wahrgenommen/i.test(q.question)),
@@ -709,6 +731,10 @@ assert.ok(
 assert.ok(
   heilCompanyQs.some((q) => /woran merkt man|fragen stellen patienten/i.test(q.question)),
   "Beobachtungsfragen bleiben im Firmen-Check",
+);
+assert.ok(
+  heilCompanyQs.every((q) => !/\b(euch|eurem|seid ihr|habt ihr)\b/i.test(q.question)),
+  "Heilpraxis Firmen-Check ohne ihr/euch",
 );
 
 // Overlapping “zuerst erzählen” / Situation / Erstgespräch → one opening probe
