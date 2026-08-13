@@ -166,7 +166,7 @@ export function SurveyImportButton() {
     );
 
     // Start import immediately after file pick — matches user expectation.
-    const items = next.map((file) => ({
+    const items: Array<{ text: string; title?: string }> = next.map((file) => ({
       text: file.text,
       title:
         title.trim() && next.length === 1
