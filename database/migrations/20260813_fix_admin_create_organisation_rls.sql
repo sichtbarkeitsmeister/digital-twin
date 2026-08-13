@@ -94,8 +94,11 @@ BEGIN
   resolved_slug := nullif(trim(org_slug), '');
   IF resolved_slug IS NULL THEN
     resolved_slug := public.slugify_organisation_name(org_name);
-  ELSE
+  ELSIF resolved_slug ~ '^[a-zA-Z0-9-]+$' THEN
     resolved_slug := lower(resolved_slug);
+  ELSE
+    -- Free-form slug (e.g. company name with spaces/umlauts) → same rules as name.
+    resolved_slug := public.slugify_organisation_name(resolved_slug);
   END IF;
 
   IF resolved_slug IS NULL OR resolved_slug !~ '^[a-z0-9-]+$' THEN
