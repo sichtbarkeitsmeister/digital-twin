@@ -22,6 +22,7 @@ import {
   orgDetailCardClass,
 } from "@/app/dashboard/_components/organisations/org-overview-panel";
 import { TeamActions } from "@/app/dashboard/_components/organisations/team-actions";
+import { DeleteOrganisationButton } from "@/app/dashboard/_components/organisations/delete-organisation-button";
 import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button";
 import { ResendInviteButton } from "@/app/dashboard/_components/resend-invite-button";
 import { RevokeInviteButton } from "@/app/dashboard/_components/revoke-invite-button";
@@ -75,11 +76,11 @@ export async function OrganisationDetailView({
 
   const { data: organisation } = await supabase
     .from("organisations")
-    .select("id, name, slug, owner_user_id, created_at")
+    .select("id, name, slug, owner_user_id, created_at, archived_at")
     .eq("id", organisationId)
     .maybeSingle();
 
-  if (!organisation) {
+  if (!organisation || organisation.archived_at) {
     notFound();
   }
 
@@ -375,6 +376,31 @@ export async function OrganisationDetailView({
             </div>
           </div>
         </OrgDetailSection>
+
+        {platformAdmin ? (
+          <div
+            className={cn(
+              orgDetailCardClass,
+              "border-red-200/80 p-4 sm:p-5 dark:border-red-500/30",
+            )}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="grid gap-1">
+                <h2 className="text-sm font-semibold tracking-tight text-primary">
+                  Gefahrzone
+                </h2>
+                <p className="max-w-xl text-xs text-secondary sm:text-sm">
+                  Organisation aus der Plattform-Übersicht entfernen. Erfordert zwei
+                  Bestätigungen (Dialog + Namenseingabe). Nur Plattform-Admins.
+                </p>
+              </div>
+              <DeleteOrganisationButton
+                organisationId={organisationId}
+                organisationName={organisation.name}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
     </OrganisationPageShell>
   );
