@@ -7,7 +7,9 @@ import {
   normalizeSurveyAnswer,
 } from "@/lib/dt/survey-to-agent-context";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
+import { canAccessSurveyForDashboard } from "@/lib/surveys/survey-dashboard-access";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,11 +69,17 @@ export default async function SurveyResponseDetailPage({
     .maybeSingle();
 
   const isPlatformAdmin = profile?.role === "admin";
-  if (!isPlatformAdmin) {
+  const canAccess =
+    isPlatformAdmin ||
+    (await canAccessSurveyForDashboard({ userId, surveyId }));
+  if (!canAccess) {
     redirect("/dashboard/inbox");
   }
 
-  const { data: survey } = await supabase
+  // Surveys are RLS-locked to platform admins; after the access check we load via service role.
+  const db = isPlatformAdmin ? supabase : createServiceClient();
+
+  const { data: survey } = await db
     .from("surveys")
     .select("id,title,definition,purpose")
     .eq("id", surveyId)
@@ -82,7 +90,7 @@ export default async function SurveyResponseDetailPage({
   const surveyPurpose =
     (survey as { purpose?: string }).purpose === "anbieter" ? "anbieter" : "persona";
 
-  const { data: response } = await supabase
+  const { data: response } = await db
     .from("survey_responses")
     .select("id,status,answers,created_at,updated_at,completed_at")
     .eq("id", responseId)
@@ -95,7 +103,7 @@ export default async function SurveyResponseDetailPage({
       ? await findAgentForSurveyResponse(responseId)
       : null;
 
-  const { data: questions } = await supabase
+  const { data: questions } = await db
     .from("survey_field_questions")
     .select("id,field_id,kind,question,asked_at,answer,answered_at,answered_by_user_id")
     .eq("response_id", responseId)
@@ -147,10 +155,10 @@ export default async function SurveyResponseDetailPage({
       <div className="grid gap-1">
         <p className="text-sm text-secondary">
           <Link
-            href="/dashboard/surveys"
+            href="/dashboard/frageboegen"
             className="hover:text-primary transition-colors"
           >
-            ← Zurück zu Umfragen
+            ← Zurück zu Fragebögen
           </Link>
         </p>
         <h1 className="text-3xl font-bold tracking-tight">Antwort-Details</h1>

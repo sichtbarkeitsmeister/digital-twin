@@ -91,6 +91,16 @@ export function DashboardSidebar({
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
     ...(showLeads ? [{ label: "Leads", href: "/dashboard/leads", icon: Sparkles }] : []),
     { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },
+    ...(canManageDtAgents || isPlatformAdmin
+      ? [
+          {
+            label: "Fragebögen",
+            href: "/dashboard/frageboegen",
+            icon: ClipboardPenLine,
+            match: (pathname: string) => pathname.startsWith("/dashboard/frageboegen"),
+          },
+        ]
+      : []),
     ...(canManageIntegrations
       ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
       : []),
@@ -164,10 +174,11 @@ export function DashboardSidebar({
       match: (pathname: string) => pathname.startsWith("/dashboard/admin/mails"),
     },
     {
-      label: "Umfragen",
+      label: "Alle Umfragen",
       href: "/dashboard/surveys",
-      icon: ClipboardPenLine,
+      icon: ClipboardList,
       showDot: pendingSurveyQuestionsCount > 0,
+      match: (pathname: string) => pathname.startsWith("/dashboard/surveys"),
     },
   ];
 

@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 
+import { canAccessSurveyForDashboard } from "@/lib/surveys/survey-dashboard-access";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,10 +34,15 @@ export default async function SurveyResponsesPage({
 
   const isPlatformAdmin = profile?.role === "admin";
   if (!isPlatformAdmin) {
-    redirect("/dashboard/inbox");
+    const canAccess = await canAccessSurveyForDashboard({ userId, surveyId });
+    if (!canAccess) {
+      redirect("/dashboard/inbox");
+    }
   }
 
-  const { data: survey } = await supabase
+  const db = isPlatformAdmin ? supabase : createServiceClient();
+
+  const { data: survey } = await db
     .from("surveys")
     .select("id")
     .eq("id", surveyId)
@@ -44,7 +51,7 @@ export default async function SurveyResponsesPage({
 
   if (!survey) return notFound();
 
-  const { data: response } = await supabase
+  const { data: response } = await db
     .from("survey_responses")
     .select("id")
     .eq("survey_id", surveyId)
@@ -58,8 +65,8 @@ export default async function SurveyResponsesPage({
     <div className="grid gap-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-secondary">
-          <Link href="/dashboard/surveys" className="hover:text-primary transition-colors">
-            ← Zurück zu Umfragen
+          <Link href="/dashboard/frageboegen" className="hover:text-primary transition-colors">
+            ← Zurück zu Fragebögen
           </Link>
         </p>
         <Button asChild variant="outline" size="sm">
@@ -78,4 +85,3 @@ export default async function SurveyResponsesPage({
     </div>
   );
 }
-

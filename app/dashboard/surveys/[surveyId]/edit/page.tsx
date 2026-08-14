@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { canAccessSurveyForDashboard } from "@/lib/surveys/survey-dashboard-access";
 import type { Survey } from "@/lib/surveys/types";
 
 import { SurveyBuilder } from "@/app/dashboard/_components/surveys/survey-builder";
@@ -30,11 +32,17 @@ export default async function EditSurveyPage({
     .maybeSingle();
 
   const isPlatformAdmin = profile?.role === "admin";
-  if (!isPlatformAdmin) {
+  const canAccess =
+    isPlatformAdmin ||
+    (await canAccessSurveyForDashboard({ userId, surveyId }));
+  if (!canAccess) {
     redirect("/dashboard/inbox");
   }
 
-  const { data: survey } = await supabase
+  // Surveys are RLS-locked to platform admins; after the access check we load via service role.
+  const db = isPlatformAdmin ? supabase : createServiceClient();
+
+  const { data: survey } = await db
     .from("surveys")
     .select("id,definition,visibility,slug,notification_emails,purpose")
     .eq("id", surveyId)
@@ -42,10 +50,10 @@ export default async function EditSurveyPage({
     .maybeSingle();
 
   if (!survey?.definition) {
-    redirect("/dashboard/surveys");
+    redirect("/dashboard/frageboegen");
   }
 
-  const { data: latestResponses } = await supabase
+  const { data: latestResponses } = await db
     .from("survey_responses")
     .select("answers,updated_at")
     .eq("survey_id", surveyId)
@@ -72,4 +80,3 @@ export default async function EditSurveyPage({
     />
   );
 }
-
