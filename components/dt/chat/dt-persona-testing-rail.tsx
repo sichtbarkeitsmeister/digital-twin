@@ -9,6 +9,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   RefreshCw,
+  Send,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -16,9 +17,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/components/dt/cn";
 import type { ExamAnswerCheckSuggestion } from "@/lib/dt/exam-answer-check";
 import { personaTestingModeTitle } from "@/lib/dt/persona-testing";
-import type {
-  SurveyExamAudience,
-  SurveyExamQuestion,
+import {
+  resolveCustomExamExpectedHint,
+  type SurveyExamAudience,
+  type SurveyExamQuestion,
 } from "@/lib/dt/survey-exam-questions";
 
 export type PersonaExamVerdict = "pass" | "fail" | null;
@@ -30,6 +32,8 @@ type AskedExam = SurveyExamQuestion & {
   replyPhase: ReplyPhase;
   aiSuggestion?: ExamAnswerCheckSuggestion | null;
   aiError?: string | null;
+  /** How SOLL was chosen for freeform questions. */
+  sollSource?: "bank" | "matched" | "digest";
 };
 
 /**
@@ -56,6 +60,7 @@ export function DtPersonaTestingRail(props: {
   const [expanded, setExpanded] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [customQuestion, setCustomQuestion] = useState("");
   const lastCheckedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -67,6 +72,7 @@ export function DtPersonaTestingRail(props: {
       setActiveId(null);
       setExpanded(true);
       setChecking(false);
+      setCustomQuestion("");
       lastCheckedKeyRef.current = null;
       return;
     }
@@ -77,6 +83,7 @@ export function DtPersonaTestingRail(props: {
     setAsked([]);
     setActiveId(null);
     setExpanded(true);
+    setCustomQuestion("");
     lastCheckedKeyRef.current = null;
 
     void (async () => {
@@ -139,6 +146,7 @@ export function DtPersonaTestingRail(props: {
                 replyPhase: "pending_send",
                 aiSuggestion: null,
                 aiError: null,
+                sollSource: "bank",
               }
             : p,
         );
@@ -151,10 +159,44 @@ export function DtPersonaTestingRail(props: {
           replyPhase: "pending_send",
           aiSuggestion: null,
           aiError: null,
+          sollSource: "bank",
         },
       ];
     });
     setActiveId(q.id);
+    setExpanded(true);
+    lastCheckedKeyRef.current = null;
+  }
+
+  function pickCustom() {
+    if (props.isBusy || props.disabled) return;
+    const question = customQuestion.trim().replace(/\s+/g, " ");
+    if (!question || questions.length === 0) return;
+
+    const resolved = resolveCustomExamExpectedHint(question, questions);
+    if (!resolved.expectedHint.trim()) return;
+
+    const exam: SurveyExamQuestion = {
+      id: `custom_${Date.now()}`,
+      question,
+      expectedHint: resolved.expectedHint,
+      factId: "custom",
+      kind: "answer",
+    };
+    setCustomQuestion("");
+    props.onPickQuestion(exam.question);
+    setAsked((prev) => [
+      ...prev,
+      {
+        ...exam,
+        verdict: null,
+        replyPhase: "pending_send",
+        aiSuggestion: null,
+        aiError: null,
+        sollSource: resolved.source,
+      },
+    ]);
+    setActiveId(exam.id);
     setExpanded(true);
     lastCheckedKeyRef.current = null;
   }
@@ -318,7 +360,7 @@ export function DtPersonaTestingRail(props: {
             ) : (
               <>
                 <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
-                  „Nächste Frage“ sendet direkt. Unter SOLL erscheint danach groß{" "}
+                  „Nächste Frage“ oder eigene Prüffrage senden. Unter SOLL erscheint danach groß{" "}
                   <span className="font-semibold text-emerald-700 dark:text-emerald-300">Stimmt</span>{" "}
                   oder{" "}
                   <span className="font-semibold text-red-700 dark:text-red-300">Stimmt nicht</span>
@@ -342,6 +384,46 @@ export function DtPersonaTestingRail(props: {
                   </p>
                 ) : null}
 
+                {questions.length > 0 ? (
+                  <div className="grid gap-2">
+                    <label
+                      htmlFor="dt-persona-custom-exam"
+                      className="text-[11px] font-bold uppercase tracking-[0.08em] text-sbkm-ink-500 dark:text-white/45"
+                    >
+                      Eigene Prüffrage
+                    </label>
+                    <textarea
+                      id="dt-persona-custom-exam"
+                      rows={3}
+                      value={customQuestion}
+                      disabled={props.isBusy || props.disabled}
+                      onChange={(e) => setCustomQuestion(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          pickCustom();
+                        }
+                      }}
+                      placeholder="Eigene Frage eingeben — KI gleicht die Antwort mit dem Fragebogen ab …"
+                      className="w-full resize-y rounded-xl border border-sbkm-navy/15 bg-white/90 px-3 py-2.5 text-sm leading-snug text-sbkm-navy outline-none transition placeholder:text-sbkm-ink-400 focus:border-sbkm-mint/50 focus:ring-2 focus:ring-sbkm-mint/20 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white dark:placeholder:text-white/35"
+                    />
+                    <button
+                      type="button"
+                      disabled={
+                        props.isBusy ||
+                        props.disabled ||
+                        !customQuestion.trim() ||
+                        questions.length === 0
+                      }
+                      onClick={() => pickCustom()}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/85 px-4 text-sm font-semibold text-sbkm-navy transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white"
+                    >
+                      <Send className="size-3.5" aria-hidden />
+                      Frage stellen & abgleichen
+                    </button>
+                  </div>
+                ) : null}
+
                 {active ? (
                   <div className="grid gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/85 p-4 shadow-[0_8px_24px_rgba(46,46,80,0.06)] dark:border-white/10 dark:bg-white/[0.05]">
                     <div>
@@ -355,7 +437,9 @@ export function DtPersonaTestingRail(props: {
 
                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.12] p-3 dark:border-amber-400/25 dark:bg-amber-500/10">
                       <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-amber-900/75 dark:text-amber-100/75">
-                        SOLL aus Fragebogen
+                        {active.sollSource === "digest"
+                          ? "SOLL aus Fragebogen (KI filtert zur Frage)"
+                          : "SOLL aus Fragebogen"}
                       </p>
                       <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-amber-950 dark:text-amber-50">
                         {active.expectedHint}
@@ -505,7 +589,7 @@ export function DtPersonaTestingRail(props: {
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-sbkm-navy/15 px-4 py-8 text-center text-sm text-sbkm-ink-500 dark:border-white/15 dark:text-white/50">
-                    Noch keine Frage gestellt — „Nächste Frage“ startet den Check.
+                    Noch keine Frage gestellt — „Nächste Frage“ oder eigene Prüffrage starten den Check.
                   </div>
                 )}
 

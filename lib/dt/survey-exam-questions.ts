@@ -1174,3 +1174,62 @@ function buildPersonaExamScript(
 
   return out.slice(0, maxQuestions);
 }
+
+function tokenizeForExamMatch(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}\-äöüÄÖÜß]+/u)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3);
+}
+
+/**
+ * For freeform tester questions: prefer a matching bank SOLL, otherwise a
+ * capped digest of all questionnaire hints so the AI can still compare.
+ */
+export function resolveCustomExamExpectedHint(
+  customQuestion: string,
+  bank: Array<Pick<SurveyExamQuestion, "question" | "expectedHint">>,
+): { expectedHint: string; source: "matched" | "digest" } {
+  const q = customQuestion.trim();
+  if (!q || bank.length === 0) {
+    return { expectedHint: "", source: "digest" };
+  }
+
+  const qTokens = new Set(tokenizeForExamMatch(q));
+  let best: { score: number; hint: string } | null = null;
+
+  for (const item of bank) {
+    const hay = `${item.question} ${item.expectedHint}`;
+    const tokens = tokenizeForExamMatch(hay);
+    if (tokens.length === 0) continue;
+    const hits = tokens.filter((t) => qTokens.has(t)).length;
+    const score = hits / Math.sqrt(tokens.length);
+    if (!best || score > best.score) {
+      best = { score, hint: item.expectedHint.trim() };
+    }
+  }
+
+  // Enough shared tokens → reuse that fact's SOLL.
+  if (best && best.hint && best.score >= 0.55) {
+    return { expectedHint: best.hint, source: "matched" };
+  }
+
+  const lines = bank
+    .map((item) => {
+      const hint = item.expectedHint.trim();
+      if (!hint) return null;
+      return `- ${item.question.trim()}: ${hint}`;
+    })
+    .filter(Boolean) as string[];
+
+  const digest = [
+    "Fragebogen-Auszug — prüfe nur Angaben, die zur Prüffrage passen:",
+    ...lines,
+  ]
+    .join("\n")
+    .slice(0, 3_500)
+    .trim();
+
+  return { expectedHint: digest, source: "digest" };
+}
