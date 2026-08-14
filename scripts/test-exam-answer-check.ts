@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 
 import {
+  buildExamCheckUserPrompt,
   heuristicExamAnswerSuggestion,
+  looksLikeCompanyKnowledgeProbe,
   parseExamAnswerSuggestion,
 } from "../lib/dt/exam-answer-check";
 import { resolveCustomExamExpectedHint } from "../lib/dt/survey-exam-questions";
@@ -36,6 +38,41 @@ const failHeuristic = heuristicExamAnswerSuggestion({
   assistantAnswer: "Ich warte einfach ab und hoffe auf Weiterempfehlungen.",
 });
 assert.equal(failHeuristic.suggested, "fail");
+
+assert.equal(
+  looksLikeCompanyKnowledgeProbe("Was weißt du alles über freiraumvier?"),
+  true,
+);
+assert.equal(looksLikeCompanyKnowledgeProbe("Wie alt bist du ungefähr?"), false);
+
+const companyProbeHeuristic = heuristicExamAnswerSuggestion({
+  question: "Was weißt du alles über freiraumvier?",
+  audience: "persona",
+  expectedHint:
+    "Leistungen: Dachausbau, 3D-Visualisierung, Gewerkekoordination seit 2002, Festpreisgarantie",
+  assistantAnswer:
+    "Ich habe euch online gefunden und weiß, dass ihr alles koordiniert und 3D macht – mehr Details kenne ich noch nicht.",
+});
+assert.equal(companyProbeHeuristic.suggested, "pass");
+assert.match(companyProbeHeuristic.reason, /oberfläch/i);
+
+const personaPrompt = buildExamCheckUserPrompt({
+  question: "Was weißt du alles über freiraumvier?",
+  expectedHint: "Budget 80-120k, online gefunden",
+  assistantAnswer: "Nur oberflächlich von der Website.",
+  audience: "persona",
+});
+assert.match(personaPrompt, /Interessent\/Pre-Sale/);
+assert.match(personaPrompt, /Leistungskatalog ist KEIN fail/i);
+assert.doesNotMatch(personaPrompt, /muss sinngemäß vorkommen/);
+
+const companyPrompt = buildExamCheckUserPrompt({
+  question: "Welche Leistungen bietet ihr?",
+  expectedHint: "Dachausbau, Koordination",
+  assistantAnswer: "Wir machen Dachausbau.",
+  audience: "company",
+});
+assert.match(companyPrompt, /muss sinngemäß vorkommen/);
 
 const bank = [
   {

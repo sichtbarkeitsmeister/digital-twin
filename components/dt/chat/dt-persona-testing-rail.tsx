@@ -218,6 +218,7 @@ export function DtPersonaTestingRail(props: {
           question: exam.question,
           expectedHint: exam.expectedHint,
           assistantAnswer,
+          audience,
         }),
       });
       const json = (await res.json()) as {
