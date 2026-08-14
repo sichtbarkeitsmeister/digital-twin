@@ -112,9 +112,18 @@ export default async function OrganisationFrageboegenPage({
               orgPath="/dashboard/frageboegen"
             />
             {isPlatformAdmin ? (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/dashboard/surveys">Alle Umfragen</Link>
-              </Button>
+              <>
+                <Button asChild size="sm">
+                  <Link
+                    href={`/dashboard/frageboegen/neu?org=${encodeURIComponent(selectedOrganisationId)}`}
+                  >
+                    Fragebogen erzeugen
+                  </Link>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/dashboard/surveys">Alle Umfragen</Link>
+                </Button>
+              </>
             ) : null}
           </div>
         </div>
