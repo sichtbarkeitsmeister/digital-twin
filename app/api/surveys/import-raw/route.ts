@@ -7,9 +7,9 @@ import { requireSurveyPlatformAdmin } from "@/lib/surveys/platform-admin";
 /**
  * Long-running Word/KI import.
  * Must use a Route Handler (not a Server Action) so Vercel can honor maxDuration > ~120s.
+ * Note: do not set `runtime` — incompatible with nextConfig.cacheComponents (Next 16).
  */
 export const maxDuration = 300;
-export const runtime = "nodejs";
 
 const bodySchema = z.object({
   items: z
