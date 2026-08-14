@@ -8,6 +8,8 @@ import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { createServiceClient } from "@/lib/supabase/service";
 
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
 });

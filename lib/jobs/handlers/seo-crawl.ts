@@ -6,6 +6,7 @@ import {
   toCrawledPage,
   type DtCrawledPage,
 } from "@/lib/dt/seo/crawl-sitemap";
+import { reclaimStuckCrawlUrls } from "@/lib/dt/seo/reclaim-stuck-crawl-urls";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -43,6 +44,35 @@ type CrawlRow = {
 };
 
 type ClaimedUrl = { id: string; url: string; depth: number };
+
+async function claimCrawlUrls(
+  supabase: ReturnType<typeof createServiceClient>,
+  crawlId: string,
+  limit: number,
+): Promise<{ ok: true; urls: ClaimedUrl[] } | { ok: false; error: string }> {
+  const { data: claimed, error: claimError } = await supabase.rpc("dt_claim_crawl_urls", {
+    p_crawl_id: crawlId,
+    p_limit: limit,
+  });
+  if (claimError) {
+    return { ok: false, error: `Claim failed: ${claimError.message}` };
+  }
+  let urls = (claimed ?? []) as ClaimedUrl[];
+  if (urls.length === 0) {
+    const reclaimed = await reclaimStuckCrawlUrls(supabase, crawlId);
+    if (reclaimed > 0) {
+      const { data: again, error: againError } = await supabase.rpc("dt_claim_crawl_urls", {
+        p_crawl_id: crawlId,
+        p_limit: limit,
+      });
+      if (againError) {
+        return { ok: false, error: `Claim failed: ${againError.message}` };
+      }
+      urls = (again ?? []) as ClaimedUrl[];
+    }
+  }
+  return { ok: true, urls };
+}
 
 /**
  * Resumable background website crawl (kind: seo.crawl).
@@ -105,19 +135,15 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
     return { ok: true, result: { skipped: "cancelled" } };
   }
 
-  const { data: claimed, error: claimError } = await supabase.rpc("dt_claim_crawl_urls", {
-    p_crawl_id: crawlId,
-    p_limit: CHUNK_SIZE,
-  });
-
-  if (claimError) {
-    return { ok: false, error: `Claim failed: ${claimError.message}` };
+  const claimed = await claimCrawlUrls(supabase, crawlId, CHUNK_SIZE);
+  if (!claimed.ok) {
+    return { ok: false, error: claimed.error };
   }
 
-  const urls = (claimed ?? []) as ClaimedUrl[];
+  const urls = claimed.urls;
 
   if (urls.length === 0) {
-    const done = await finishIfEmpty(supabase, crawlId);
+    const done = await finishIfEmpty(supabase, crawlId, organisationId);
     return { ok: true, result: done };
   }
 
@@ -348,12 +374,14 @@ async function hasPendingUrls(
 async function finishIfEmpty(
   supabase: ReturnType<typeof createServiceClient>,
   crawlId: string,
+  organisationId: string,
 ): Promise<Record<string, unknown>> {
   const stillPending = await hasPendingUrls(supabase, crawlId);
   if (stillPending) {
     await enqueueJob({
       kind: "seo.crawl",
-      payload: { crawlId },
+      organisationId,
+      payload: { crawlId, organisationId },
       runAfter: new Date(Date.now() + 2000),
     });
     kickJobsWorker(3);
