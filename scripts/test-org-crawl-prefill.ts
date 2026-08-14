@@ -26,7 +26,7 @@ const context: OrgCrawlContext = {
     {
       url: "https://onlinemediaatelier.de/",
       title: "Home",
-      text: "Online Media Atelier · Strategische Social-Media-Beratung für den Mittelstand. Unser Fokus liegt auf nachhaltiger Befähigung der Kunden. Wir sind 12 Mitarbeiter in NRW. Was uns unterscheidet: praxisnahe Workshops statt Agentur-Blackbox.",
+      text: "Online Media Atelier · Strategische Social-Media-Beratung für den Mittelstand. Unser Fokus liegt auf nachhaltiger Befähigung der Kunden. Wir sind 12 Mitarbeiter in NRW. Was uns unterscheidet: praxisnahe Workshops statt Agentur-Blackbox. Geschäftsführerin: Julia Schröder. Mitbewerber sind oft klassische Social-Media-Agenturen ohne Wissensvermittlung.",
     },
   ],
   summaryText: "",
@@ -39,19 +39,23 @@ const prefills = suggestPrefillsFromCrawl({
     { key: "company_name", hint: "org_name" },
     { key: "website", hint: "website" },
     { key: "employee_count", hint: "employee_count" },
+    { key: "owner_name", hint: "owner_name" },
     { key: "focus", hint: "focus" },
     { key: "services", hint: "services" },
     { key: "usp", hint: "usp" },
     { key: "region", hint: "region" },
+    { key: "competitors", hint: "competitors" },
   ],
 });
 
 assert.equal(prefills.company_name?.value, "Online Media Atelier");
 assert.equal(prefills.website?.value, "https://onlinemediaatelier.de");
 assert.match(prefills.employee_count?.value ?? "", /12/);
+assert.equal(prefills.owner_name?.value, "Julia Schröder");
 assert.ok(prefills.focus?.value, "focus from crawl");
 assert.ok(prefills.services?.value || prefills.focus?.value, "services or focus");
 assert.ok(prefills.usp?.value, "usp from crawl");
 assert.ok(prefills.region?.value, "region from crawl");
+assert.ok(prefills.competitors?.value, "competitors from crawl");
 
 console.log("org-crawl-prefill: ok");

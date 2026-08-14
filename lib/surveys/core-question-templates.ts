@@ -5,11 +5,14 @@ export type CoreQuestionPrefillHint =
   | "org_name"
   | "website"
   | "employee_count"
+  | "owner_name"
   | "focus"
   | "region"
   | "usp"
   | "services"
   | "target_group"
+  | "competitors"
+  | "good_competitors"
   | "persona_name"
   | "persona_job"
   | "persona_age"
@@ -47,6 +50,16 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
     required: true,
     type: "text",
     prefillHint: "website",
+  },
+  {
+    key: "owner_name",
+    stepId: "core_company",
+    stepTitle: "Unternehmen",
+    title: "Wer ist Inhaber / Geschäftsführung / Hauptansprechpartner?",
+    description: "Name(n) aus Kundengespräch oder Impressum — später nicht nochmal abfragen.",
+    required: false,
+    type: "text",
+    prefillHint: "owner_name",
   },
   {
     key: "employee_count",
@@ -107,6 +120,28 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
     required: true,
     type: "text",
     prefillHint: "target_group",
+  },
+  {
+    key: "competitors",
+    stepId: "core_competition",
+    stepTitle: "Wettbewerb",
+    title: "Welche Mitbewerber sind relevant?",
+    description:
+      "Namen, Domains oder kurze Notizen aus dem Kundengespräch — möglichst direkt übernehmen.",
+    required: false,
+    type: "text",
+    prefillHint: "competitors",
+  },
+  {
+    key: "good_competitors",
+    stepId: "core_competition",
+    stepTitle: "Wettbewerb",
+    title: "Welche guten Wettbewerber / Vorbilder gibt es?",
+    description:
+      "Starke Anbieter, an denen man sich orientiert — oft nur im Gespräch genannt.",
+    required: false,
+    type: "text",
+    prefillHint: "good_competitors",
   },
 ];
 

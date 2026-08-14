@@ -31,7 +31,8 @@ function sourceBadge(source: string) {
   if (source === "organisation") return "Organisation";
   if (source === "website") return "Website";
   if (source === "crawl") return "Crawl";
-  if (source === "ai") return "KI aus Crawl";
+  if (source === "ai") return "KI";
+  if (source === "meeting") return "Kundengespräch";
   return "Leer";
 }
 
@@ -48,6 +49,12 @@ export function FragebogenFromOrgWizard(props: {
   const [extraPlacement, setExtraPlacement] = useState<"start" | "end">("end");
   const [savePrefills, setSavePrefills] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [legalCompanyName, setLegalCompanyName] = useState("");
+  const [ownerName, setOwnerName] = useState("");
+  const [competitors, setCompetitors] = useState("");
+  const [goodCompetitors, setGoodCompetitors] = useState("");
+  const [pagesOrLinks, setPagesOrLinks] = useState("");
+  const [meetingNotes, setMeetingNotes] = useState("");
   const [orgName, setOrgName] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -122,6 +129,14 @@ export function FragebogenFromOrgWizard(props: {
         ),
         includeAiExtras,
         extraPlacement,
+        meetingBriefing: {
+          legalCompanyName: legalCompanyName || null,
+          ownerName: ownerName || null,
+          competitors: competitors || null,
+          goodCompetitors: goodCompetitors || null,
+          pagesOrLinks: pagesOrLinks || null,
+          notes: meetingNotes || null,
+        },
       });
       setStatus(null);
       if (!res.ok || !res.data) {
@@ -339,7 +354,8 @@ export function FragebogenFromOrgWizard(props: {
           Fragebogen aus Organisation
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Organisation und Website/Crawl zuerst — dann Vorschau prüfen — danach speichern.
+          Nach dem Kundengespräch: Mitbewerber, Inhaber und Notizen hier eintragen — Crawl füllt
+          den Rest. Dann Vorschau prüfen und speichern.
         </p>
       </div>
 
@@ -396,7 +412,79 @@ export function FragebogenFromOrgWizard(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">2. Zweck</CardTitle>
+          <CardTitle className="text-base">2. Kundengespräch / Briefing</CardTitle>
+          <CardDescription>
+            Inhalte aus dem Meeting direkt übernehmen — der Kunde soll das später nicht nochmal
+            tippen. Leere Felder bleiben für Crawl/KI.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="legal-company">Offizieller Firmenname</Label>
+              <Input
+                id="legal-company"
+                value={legalCompanyName}
+                onChange={(e) => setLegalCompanyName(e.target.value)}
+                placeholder={orgName ? `z. B. ${orgName}` : "z. B. Musterdruck GmbH"}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="owner-name">Inhaber / Geschäftsführung</Label>
+              <Input
+                id="owner-name"
+                value={ownerName}
+                onChange={(e) => setOwnerName(e.target.value)}
+                placeholder="z. B. Max Mustermann"
+              />
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="competitors">Mitbewerber</Label>
+            <Textarea
+              id="competitors"
+              value={competitors}
+              onChange={(e) => setCompetitors(e.target.value)}
+              rows={2}
+              placeholder="Namen, Domains, kurze Notizen…"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="good-competitors">Gute Wettbewerber / Vorbilder</Label>
+            <Textarea
+              id="good-competitors"
+              value={goodCompetitors}
+              onChange={(e) => setGoodCompetitors(e.target.value)}
+              rows={2}
+              placeholder="Starke Anbieter, an denen man sich orientiert…"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="pages-links">Genannte Seiten / Links</Label>
+            <Textarea
+              id="pages-links"
+              value={pagesOrLinks}
+              onChange={(e) => setPagesOrLinks(e.target.value)}
+              rows={2}
+              placeholder="Landingpages, URLs, Seitennamen aus dem Gespräch…"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="meeting-notes">Weitere Gesprächsnotizen</Label>
+            <Textarea
+              id="meeting-notes"
+              value={meetingNotes}
+              onChange={(e) => setMeetingNotes(e.target.value)}
+              rows={3}
+              placeholder="Fokus, USP, Region, Zielgruppe, Besonderheiten…"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">3. Zweck</CardTitle>
           <CardDescription>Anbieter-Firmenwissen oder Wunschkunden-Persona.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -443,7 +531,7 @@ export function FragebogenFromOrgWizard(props: {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            3. Kernfragen ({selectedCount}/{coreItems.length})
+            4. Kernfragen ({selectedCount}/{coreItems.length})
           </CardTitle>
           <CardDescription>
             Feste Basis — abwählen, was hier nicht gebraucht wird.
@@ -482,10 +570,10 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Sparkles className="size-4" aria-hidden />
-            4. Individuelle Zusatzfragen
+            5. Individuelle Zusatzfragen
           </CardTitle>
           <CardDescription>
-            KI schlägt Sonderfragen aus dem Crawl vor — in der Prüfung noch entfernbar.
+            KI schlägt Sonderfragen aus Meeting/Crawl vor — in der Prüfung noch entfernbar.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
