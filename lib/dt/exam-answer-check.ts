@@ -5,6 +5,8 @@ import {
   isAnthropicModelNotFoundError,
 } from "@/lib/ai/anthropic-helpers";
 
+export type ExamAnswerCheckAudience = "persona" | "company";
+
 export type ExamAnswerCheckSuggestion = {
   suggested: "pass" | "fail";
   reason: string;
@@ -58,13 +60,44 @@ export function examHintTokens(expectedHint: string): string[] {
 }
 
 /**
+ * Questions that probe what the twin knows about the company/brand —
+ * for Wunschkunden only shallow external knowledge is expected.
+ */
+export function looksLikeCompanyKnowledgeProbe(question: string): boolean {
+  const t = question.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /was\s+(wei[sß]t|kennst|hast)\s+du.{0,40}über\b/u.test(t) ||
+    /welche[rn]?\s+leistungen/.test(t) ||
+    /was\s+bietet/.test(t) ||
+    /was\s+macht\s+.{0,40}(firma|unternehmen|praxis|anbieter)/.test(t) ||
+    /erzähl.{0,30}(von|über)\s+(der|dem|die|das)?\s*(firma|unternehmen|praxis)/.test(t) ||
+    /kennst\s+du\s+(unsere|eure)\s+(leistungen|firma|unternehmen)/.test(t)
+  );
+}
+
+/**
  * Offline fallback when Anthropic is unavailable — rough keyword overlap so the
  * UI always gets a green/red hint instead of failing silently.
  */
 export function heuristicExamAnswerSuggestion(input: {
   expectedHint: string;
   assistantAnswer: string;
+  question?: string;
+  audience?: ExamAnswerCheckAudience;
 }): ExamAnswerCheckSuggestion {
+  const audience = input.audience === "company" ? "company" : "persona";
+  const question = input.question?.trim() ?? "";
+
+  // Interessent asked about the company: shallow knowledge is the correct role.
+  if (audience === "persona" && looksLikeCompanyKnowledgeProbe(question)) {
+    return {
+      suggested: "pass",
+      reason:
+        "Als Interessent reicht oberflächliches Firmenwissen von außen — kein vollständiger Leistungskatalog nötig.",
+      confidence: "low",
+    };
+  }
+
   const tokens = examHintTokens(input.expectedHint);
   const answer = input.assistantAnswer.toLowerCase();
   if (tokens.length === 0) {
@@ -93,39 +126,77 @@ export function heuristicExamAnswerSuggestion(input: {
   };
 }
 
-/** Cheap Haiku check: does the twin answer cover the questionnaire expectation? */
-export async function checkExamAnswerAgainstExpected(input: {
+export function buildExamCheckUserPrompt(input: {
   question: string;
   expectedHint: string;
   assistantAnswer: string;
-}): Promise<ExamAnswerCheckSuggestion | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) return null;
+  audience?: ExamAnswerCheckAudience;
+}): string {
+  const audience = input.audience === "company" ? "company" : "persona";
 
-  const client = new Anthropic({ apiKey });
-  const userPrompt = [
-    "Prüffrage an die Persona:",
+  if (audience === "company") {
+    return [
+      "Prüffrage an den Firmen-/SEO-Assistenten:",
+      input.question.trim().slice(0, 800),
+      "",
+      "SOLL-Inhalt aus dem Anbieter-Fragebogen (muss sinngemäß vorkommen):",
+      input.expectedHint.trim().slice(0, 1500),
+      "",
+      "IST-Antwort:",
+      input.assistantAnswer.trim().slice(0, 4000),
+      "",
+      'Antworte NUR als JSON: {"suggested":"pass"|"fail","reason":"kurzer deutscher Satz","confidence":"high"|"medium"|"low"}',
+      "pass = Kerninhalt der zur Prüffrage passenden SOLL-Angaben ist sinngemäß enthalten (Paraphrase ok).",
+      "fail = Kerninhalt fehlt, ist falsch oder wird durch etwas anderes ersetzt.",
+      "Wenn der SOLL-Block mehrere Fakten enthält: nur die zur Prüffrage relevanten bewerten.",
+    ].join("\n");
+  }
+
+  return [
+    "Prüffrage an die Wunschkunden-/Interessenten-Persona:",
     input.question.trim().slice(0, 800),
     "",
-    "SOLL-Inhalt aus dem Fragebogen (muss sinngemäß vorkommen):",
+    "SOLL aus dem Fragebogen (Persona-Situation/Fakten — KEIN Anspruch auf Firmen-Enzyklopädie):",
     input.expectedHint.trim().slice(0, 1500),
     "",
     "IST-Antwort der Persona:",
     input.assistantAnswer.trim().slice(0, 4000),
     "",
     'Antworte NUR als JSON: {"suggested":"pass"|"fail","reason":"kurzer deutscher Satz","confidence":"high"|"medium"|"low"}',
-    "pass = Kerninhalt der zur Prüffrage passenden SOLL-Angaben ist sinngemäß enthalten (Paraphrase ok).",
-    "fail = Kerninhalt fehlt, ist falsch oder wird durch etwas anderes ersetzt.",
-    "Wenn der SOLL-Block mehrere Fragebogen-Fakten enthält: nur die zur Prüffrage relevanten bewerten, den Rest ignorieren.",
+    "Rolle: Die Persona ist Interessent/Pre-Sale. Sie kennt das Unternehmen nur so, wie man es von außen kennt (Website kurz gesehen, Werbung, Hörensagen) — nicht alle Leistungen, Preise oder internen Details.",
+    "Bei Fragen ZUR FIRMA / ZU LEISTUNGEN: pass, wenn die Antwort glaubwürdig oberflächlich bleibt. Ein fehlender vollständiger Leistungskatalog ist KEIN fail. fail nur bei erfundenem Insiderwissen, Widerspruch zu Persona-Fakten oder wenn sie plötzlich Markenbotschafter/Mitarbeiter wird.",
+    "Bei Fragen ZUR EIGENEN PERSON/SITUATION (Alter, Budget, Schmerz, Wie gefunden, …): pass, wenn die dazu passenden SOLL-Fakten sinngemäß vorkommen; fail, wenn Kerninhalt fehlt oder widerspricht.",
+    "Wenn der SOLL-Block mehrere Fakten enthält: nur die zur Prüffrage relevanten bewerten; Firmen-Detailkataloge nicht als Pflichtwissen der Persona behandeln.",
   ].join("\n");
+}
+
+function examCheckSystemPrompt(audience: ExamAnswerCheckAudience): string {
+  if (audience === "company") {
+    return "Du bist ein strenger aber fairer Prüfer für Firmen-/SEO-Assistenten. Vergleiche SOLL (Fragebogen) mit IST (Antwort). Kein Markdown, nur JSON.";
+  }
+  return "Du bist ein strenger aber fairer Prüfer für Wunschkunden-Personas (Interessenten). Persona-Fakten müssen stimmen; Firmenwissen darf nur oberflächlich sein. Kein Markdown, nur JSON.";
+}
+
+/** Cheap Haiku check: does the twin answer match questionnaire expectations for its role? */
+export async function checkExamAnswerAgainstExpected(input: {
+  question: string;
+  expectedHint: string;
+  assistantAnswer: string;
+  audience?: ExamAnswerCheckAudience;
+}): Promise<ExamAnswerCheckSuggestion | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  const audience = input.audience === "company" ? "company" : "persona";
+  const client = new Anthropic({ apiKey });
+  const userPrompt = buildExamCheckUserPrompt({ ...input, audience });
 
   for (const model of resolveExamCheckModels()) {
     try {
       const res = await client.messages.create({
         model,
         max_tokens: 220,
-        system:
-          "Du bist ein strenger aber fairer Prüfer für DigitalTwin-Personas. Vergleiche SOLL (Fragebogen) mit IST (Antwort). Kein Markdown, nur JSON.",
+        system: examCheckSystemPrompt(audience),
         messages: [{ role: "user", content: userPrompt }],
       });
       const suggestion = parseExamAnswerSuggestion(extractAnthropicText(res));
@@ -144,6 +215,7 @@ export async function checkExamAnswerAgainstExpectedOrHeuristic(input: {
   question: string;
   expectedHint: string;
   assistantAnswer: string;
+  audience?: ExamAnswerCheckAudience;
 }): Promise<ExamAnswerCheckSuggestion & { via: "ai" | "heuristic" }> {
   const ai = await checkExamAnswerAgainstExpected(input);
   if (ai) return { ...ai, via: "ai" };

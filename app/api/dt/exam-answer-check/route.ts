@@ -8,6 +8,7 @@ const bodySchema = z.object({
   question: z.string().trim().min(1).max(2_000),
   expectedHint: z.string().trim().min(1).max(4_000),
   assistantAnswer: z.string().trim().min(1).max(12_000),
+  audience: z.enum(["persona", "company"]).optional(),
 });
 
 export async function POST(req: Request) {
