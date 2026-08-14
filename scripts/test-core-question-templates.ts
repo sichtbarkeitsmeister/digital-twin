@@ -16,6 +16,9 @@ import { surveySchema } from "../lib/surveys/schema";
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "company_name"));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "employee_count"));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "focus"));
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "owner_name"));
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "competitors"));
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "good_competitors"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_pain"));
 
 assert.equal(coreQuestionsForPurpose("anbieter"), ANBIETER_CORE_QUESTIONS);

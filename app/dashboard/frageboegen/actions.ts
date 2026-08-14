@@ -81,6 +81,25 @@ export async function loadFragebogenWizardContextAction(input: {
   };
 }
 
+const meetingBriefingSchema = z
+  .object({
+    legalCompanyName: z.string().trim().max(200).optional().nullable(),
+    ownerName: z.string().trim().max(200).optional().nullable(),
+    competitors: z.string().trim().max(4000).optional().nullable(),
+    goodCompetitors: z.string().trim().max(4000).optional().nullable(),
+    pagesOrLinks: z.string().trim().max(4000).optional().nullable(),
+    notes: z.string().trim().max(8000).optional().nullable(),
+    focus: z.string().trim().max(2000).optional().nullable(),
+    services: z.string().trim().max(2000).optional().nullable(),
+    usp: z.string().trim().max(2000).optional().nullable(),
+    region: z.string().trim().max(500).optional().nullable(),
+    targetGroup: z.string().trim().max(2000).optional().nullable(),
+    employeeCount: z.string().trim().max(120).optional().nullable(),
+    website: z.string().trim().max(500).optional().nullable(),
+  })
+  .optional()
+  .nullable();
+
 const previewSchema = z.object({
   organisationId: z.string().uuid(),
   purpose: z.enum(["persona", "anbieter"]),
@@ -88,6 +107,7 @@ const previewSchema = z.object({
   selectedCoreKeys: z.array(z.string().min(1)).min(1),
   includeAiExtras: z.boolean().default(true),
   extraPlacement: z.enum(["start", "end"]).default("end"),
+  meetingBriefing: meetingBriefingSchema,
 });
 
 export async function previewFragebogenFromOrgAction(
@@ -109,6 +129,7 @@ export async function previewFragebogenFromOrgAction(
       selectedCoreKeys: parsed.data.selectedCoreKeys,
       includeAiExtras: parsed.data.includeAiExtras,
       extraPlacement: parsed.data.extraPlacement,
+      meetingBriefing: parsed.data.meetingBriefing,
     });
     return { ok: true, message: "Entwurf zur Prüfung bereit.", data: { draft } };
   } catch (err) {
@@ -127,7 +148,7 @@ const reviewQuestionSchema = z.object({
   description: z.string().default(""),
   included: z.boolean(),
   answer: z.string().default(""),
-  answerSource: z.enum(["organisation", "website", "crawl", "ai", "none"]),
+  answerSource: z.enum(["organisation", "website", "crawl", "ai", "meeting", "none"]),
   answerNote: z.string().default(""),
 });
 

@@ -16,7 +16,7 @@ export type OrgCrawlContext = {
   summaryText: string;
 };
 
-export type PrefillSource = "organisation" | "website" | "crawl" | "ai";
+export type PrefillSource = "organisation" | "website" | "crawl" | "ai" | "meeting";
 
 export type PrefillDraft = {
   value: string;
@@ -102,6 +102,39 @@ function extractRegion(blob: string): string | null {
   return null;
 }
 
+function looksLikePersonName(value: string): boolean {
+  const t = value.trim();
+  if (t.length < 4 || t.length > 80) return false;
+  if (/[.!?]{2,}|https?:|www\.|gmbh|ug\b|ag\b|e\.?\s*k\.?/i.test(t)) return false;
+  const parts = t.split(/\s+/).filter(Boolean);
+  if (parts.length < 2 || parts.length > 4) return false;
+  return parts.every((p) => /^[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ'-]{1,30}$/.test(p));
+}
+
+function extractOwnerName(blob: string): string | null {
+  const patterns = [
+    /(?:geschäftsführer(?:in)?|inhaber(?:in)?|founder|gründer(?:in)?|inhaberin|geschaeftsfuehrer(?:in)?)\s*[:\-]?\s*([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß'-]+){1,3})/i,
+    /([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß'-]+){1,3})\s*[,\-]?\s*(?:geschäftsführer(?:in)?|inhaber(?:in)?|gründer(?:in)?)/i,
+  ];
+  for (const re of patterns) {
+    const m = blob.match(re);
+    const candidate = (m?.[1] || "").trim();
+    if (candidate && looksLikePersonName(candidate)) return candidate;
+  }
+  return null;
+}
+
+function extractCompetitors(blob: string): string | null {
+  const sentence = firstSentenceAround(
+    blob,
+    [
+      /(?:mitbewerber|wettbewerber|konkurrenz|vergleichen\s+uns\s+mit|ähnlich\s+wie)[^.!?\n]{8,220}[.!?]?/i,
+    ],
+    280,
+  );
+  return sentence;
+}
+
 /**
  * Heuristic prefill from org config + crawl text.
  * Conservative: only fills when a signal is present; UI can edit/delete.
@@ -142,6 +175,30 @@ export function suggestPrefillsFromCrawl(input: {
           value,
           source: "crawl",
           note: "Aus Crawl-Text geschätzt — bitte prüfen",
+        };
+      }
+      continue;
+    }
+
+    if (item.hint === "owner_name") {
+      const value = extractOwnerName(blob);
+      if (value) {
+        out[item.key] = {
+          value,
+          source: "crawl",
+          note: "Name aus Crawl/Impressum-Signal — bitte prüfen",
+        };
+      }
+      continue;
+    }
+
+    if (item.hint === "competitors") {
+      const value = extractCompetitors(blob);
+      if (value) {
+        out[item.key] = {
+          value,
+          source: "crawl",
+          note: "Mitbewerber-Hinweis aus Crawl — meist besser aus dem Gespräch",
         };
       }
       continue;

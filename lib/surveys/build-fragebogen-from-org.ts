@@ -21,9 +21,17 @@ import {
   type PrefillDraft,
   type PrefillSource,
 } from "@/lib/surveys/org-crawl-context";
+import {
+  meetingBriefingContextText,
+  meetingBriefingHasContent,
+  suggestPrefillsFromMeeting,
+  type MeetingBriefing,
+} from "@/lib/surveys/meeting-briefing";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
 import { surveySchema } from "@/lib/surveys/schema";
 import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
+
+export type { MeetingBriefing };
 
 export type ExtraQuestionPlacement = "start" | "end";
 
@@ -69,6 +77,7 @@ async function generateExtrasAndAiPrefills(input: {
   organisationName: string;
   wunschkundeLabel?: string | null;
   crawlSummary: string;
+  meetingContext?: string;
   coreItems: Array<{ key: string; title: string; hasPrefill: boolean }>;
   includeAiExtras: boolean;
   maxExtras?: number;
@@ -84,6 +93,10 @@ async function generateExtrasAndAiPrefills(input: {
       ? `Anbieter-Fragebogen für „${input.organisationName}“ (Firmenwissen).`
       : `Kunden-Persona-Fragebogen für Wunschkunde „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“.`;
 
+  const meetingBlock = input.meetingContext?.trim()
+    ? `\nKundengespräch / Meeting-Briefing (PRIORITÄT — direkt übernehmen, nicht erfinden):\n${input.meetingContext.slice(0, 6000)}\n`
+    : "";
+
   const result = await callAnthropicFirstAvailable({
     anthropic,
     models: [DEFAULT_SURVEY_ACTION_MODEL],
@@ -91,7 +104,7 @@ async function generateExtrasAndAiPrefills(input: {
     timeoutMs: 55_000,
     stream: false,
     system:
-      "Du hilfst beim Aufbau deutscher Fragebögen. Nutze nur Informationen aus dem Crawl-Kontext. Antworte nur mit JSON.",
+      "Du hilfst beim Aufbau deutscher Fragebögen. Nutze Meeting-Briefing und Crawl. Meeting-Angaben haben Vorrang. Antworte nur mit JSON.",
     messages: [
       {
         role: "user",
@@ -102,13 +115,14 @@ ${input.coreItems.map((c) => `- [${c.key}] ${c.title}${c.hasPrefill ? " (schon v
 
 Noch ohne Prefill:
 ${missing.map((c) => `- ${c.key}: ${c.title}`).join("\n") || "(alle Kernfragen haben schon Prefill)"}
-
+${meetingBlock}
 Website-/Crawl-Kontext:
-${input.crawlSummary.slice(0, 10000)}
+${input.crawlSummary.slice(0, 8000)}
 
 Aufgabe:
-1) Für fehlende Kernfragen: kurze Antwortvorschläge NUR wenn der Crawl das klar hergibt (sonst weglassen).
-2) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen (nicht die Kernfragen wiederholen).` : "Keine Zusatzfragen (questions=[])."}
+1) Für fehlende Kernfragen: kurze Antwortvorschläge — zuerst aus Meeting, sonst nur wenn Crawl klar hergibt (sonst weglassen).
+2) Mitbewerber/gute Wettbewerber/Inhaber/Seiten-Links aus dem Meeting möglichst wörtlich übernehmen.
+3) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen (nicht die Kernfragen wiederholen).` : "Keine Zusatzfragen (questions=[])."}
 
 JSON:
 {
@@ -138,7 +152,7 @@ JSON:
       aiPrefills[key] = {
         value: value.slice(0, 500),
         source: "ai",
-        note: String(row.note ?? "KI-Vorschlag aus Crawl — bitte prüfen").slice(0, 160),
+        note: String(row.note ?? "KI-Vorschlag — bitte prüfen").slice(0, 160),
       };
     }
     const extras = input.includeAiExtras
@@ -163,6 +177,7 @@ export async function buildFragebogenReviewDraft(input: {
   selectedCoreKeys?: string[] | null;
   includeAiExtras?: boolean;
   extraPlacement?: ExtraQuestionPlacement;
+  meetingBriefing?: MeetingBriefing | null;
 }): Promise<FragebogenReviewDraft> {
   const purpose = input.purpose;
   const extraPlacement = input.extraPlacement ?? "end";
@@ -180,28 +195,73 @@ export async function buildFragebogenReviewDraft(input: {
     throw new Error("Mindestens eine Kernfrage muss ausgewählt sein.");
   }
 
+  const hints = selectedTemplates.map((t) => ({ key: t.key, hint: t.prefillHint }));
   const crawl = await loadOrgCrawlContext(input.organisationId);
   const heuristic = suggestPrefillsFromCrawl({
     context: crawl,
-    hints: selectedTemplates.map((t) => ({ key: t.key, hint: t.prefillHint })),
+    hints,
   });
+  const meeting = suggestPrefillsFromMeeting({
+    briefing: input.meetingBriefing ?? {},
+    hints,
+  });
+  const meetingText = meetingBriefingHasContent(input.meetingBriefing)
+    ? meetingBriefingContextText(input.meetingBriefing)
+    : "";
+
+  // Crawl first, then AI for gaps — Meeting wins over both.
+  const basePrefills: Record<string, PrefillDraft> = { ...heuristic };
 
   const aiBundle = await generateExtrasAndAiPrefills({
     purpose,
     organisationName: crawl.organisationName,
     wunschkundeLabel: input.wunschkundeLabel,
     crawlSummary: crawl.summaryText,
+    meetingContext: meetingText,
     includeAiExtras: Boolean(input.includeAiExtras),
     coreItems: selectedTemplates.map((t) => ({
       key: t.key,
       title: t.title,
-      hasPrefill: Boolean(heuristic[t.key]?.value),
+      hasPrefill: Boolean(basePrefills[t.key]?.value || meeting[t.key]?.value),
     })),
   });
 
-  const prefills: Record<string, PrefillDraft> = { ...heuristic };
+  const prefills: Record<string, PrefillDraft> = { ...basePrefills };
   for (const [key, draft] of Object.entries(aiBundle.aiPrefills)) {
     if (!prefills[key]) prefills[key] = draft;
+  }
+  for (const [key, draft] of Object.entries(meeting)) {
+    prefills[key] = draft;
+  }
+
+  // Seiten/Links aus dem Meeting als optionale Extra-Antwort-Notiz anhängen,
+  // wenn noch keine extra-Frage dazu existiert — als eigene „Notiz“-Extrafrage.
+  const pagesOrLinks = (input.meetingBriefing?.pagesOrLinks ?? "").trim();
+  const notes = (input.meetingBriefing?.notes ?? "").trim();
+  const meetingExtras: ReviewQuestionItem[] = [];
+  if (pagesOrLinks) {
+    meetingExtras.push({
+      id: "extra_meeting_pages_links",
+      kind: "extra",
+      title: "Welche Seiten, Landingpages oder Links wurden im Kundengespräch genannt?",
+      description: "Direkt aus dem Meeting — prüfen und bei Bedarf kürzen.",
+      included: true,
+      answer: pagesOrLinks.slice(0, 2000),
+      answerSource: "meeting",
+      answerNote: "Aus Kundengespräch übernommen",
+    });
+  }
+  if (notes) {
+    meetingExtras.push({
+      id: "extra_meeting_notes",
+      kind: "extra",
+      title: "Weitere relevante Punkte aus dem Kundengespräch",
+      description: "Freie Notizen aus dem Briefing — in Antworten überführen oder entfernen.",
+      included: true,
+      answer: notes.slice(0, 2000),
+      answerSource: "meeting",
+      answerNote: "Aus Kundengespräch übernommen",
+    });
   }
 
   const coreQuestions: ReviewQuestionItem[] = selectedTemplates.map((t) => {
@@ -219,16 +279,20 @@ export async function buildFragebogenReviewDraft(input: {
     };
   });
 
-  const extraQuestions: ReviewQuestionItem[] = aiBundle.extras.map((title, index) => ({
-    id: `extra_${slugifyKey(title)}_${index + 1}`,
-    kind: "extra" as const,
-    title,
-    description: "Individuelle Zusatzfrage aus Crawl/KI — bei Bedarf entfernen oder umformulieren.",
-    included: true,
-    answer: "",
-    answerSource: "none" as const,
-    answerNote: "",
-  }));
+  const extraQuestions: ReviewQuestionItem[] = [
+    ...meetingExtras,
+    ...aiBundle.extras.map((title, index) => ({
+      id: `extra_${slugifyKey(title)}_${index + 1}`,
+      kind: "extra" as const,
+      title,
+      description:
+        "Individuelle Zusatzfrage aus Crawl/KI — bei Bedarf entfernen oder umformulieren.",
+      included: true,
+      answer: "",
+      answerSource: "none" as const,
+      answerNote: "",
+    })),
+  ];
 
   const questions =
     extraPlacement === "start"
@@ -242,8 +306,8 @@ export async function buildFragebogenReviewDraft(input: {
 
   const description =
     purpose === "anbieter"
-      ? `Firmenfragebogen für ${crawl.organisationName}. Kernfragen fest + optionale Zusatzfragen aus Website-Crawl.`
-      : `Wunschkunden-Fragebogen für ${crawl.organisationName}. Kernfragen fest + optionale Zusatzfragen.`;
+      ? `Firmenfragebogen für ${crawl.organisationName}. Kernfragen + Meeting/Crawl-Vorlagen.`
+      : `Wunschkunden-Fragebogen für ${crawl.organisationName}. Kernfragen + optionale Zusatzfragen.`;
 
   return {
     title,
