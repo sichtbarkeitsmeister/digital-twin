@@ -1,12 +1,23 @@
+import { after } from "next/server";
+
 import { runDueJobs } from "@/lib/jobs/runner";
 
 /**
- * Process due jobs in the current Next.js process. Called right after enqueue
- * so crawls/reports progress without waiting for pg_cron (which may target a
- * different deployment URL).
+ * Process due jobs after the current request finishes (when possible).
+ * Without `after()`, Vercel may freeze the isolate as soon as the HTTP
+ * response is sent — crawls then die mid-chunk with URLs stuck in
+ * `processing`.
  */
 export function kickJobsWorker(batchSize = 3): void {
-  void runDueJobs({ batchSize }).catch((error) => {
-    console.error("[jobs] kick failed", error);
-  });
+  const run = () =>
+    runDueJobs({ batchSize }).catch((error) => {
+      console.error("[jobs] kick failed", error);
+    });
+
+  try {
+    after(run);
+  } catch {
+    // Not in a Next.js request context (e.g. nested kick from a job handler).
+    void run();
+  }
 }
