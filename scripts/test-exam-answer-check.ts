@@ -4,6 +4,7 @@ import {
   heuristicExamAnswerSuggestion,
   parseExamAnswerSuggestion,
 } from "../lib/dt/exam-answer-check";
+import { resolveCustomExamExpectedHint } from "../lib/dt/survey-exam-questions";
 
 assert.deepEqual(
   parseExamAnswerSuggestion(
@@ -35,5 +36,29 @@ const failHeuristic = heuristicExamAnswerSuggestion({
   assistantAnswer: "Ich warte einfach ab und hoffe auf Weiterempfehlungen.",
 });
 assert.equal(failHeuristic.suggested, "fail");
+
+const bank = [
+  {
+    question: "Wie alt bist du ungefähr?",
+    expectedHint: "Alter 35-45 Jahre",
+  },
+  {
+    question: "Was ärgert dich am meisten bei Anbietern?",
+    expectedHint: "Lange Wartezeiten und unklare Preise",
+  },
+];
+
+const matched = resolveCustomExamExpectedHint("Wie alt bist du?", bank);
+assert.equal(matched.source, "matched");
+assert.match(matched.expectedHint, /35-45/);
+
+const digest = resolveCustomExamExpectedHint(
+  "Erzähl mir etwas ganz anderes über deine Hobbys beim Segeln",
+  bank,
+);
+assert.equal(digest.source, "digest");
+assert.match(digest.expectedHint, /Fragebogen-Auszug/);
+assert.match(digest.expectedHint, /35-45/);
+assert.match(digest.expectedHint, /Wartezeiten/);
 
 console.log("exam-answer-check parse tests: ok");

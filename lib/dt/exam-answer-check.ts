@@ -114,8 +114,9 @@ export async function checkExamAnswerAgainstExpected(input: {
     input.assistantAnswer.trim().slice(0, 4000),
     "",
     'Antworte NUR als JSON: {"suggested":"pass"|"fail","reason":"kurzer deutscher Satz","confidence":"high"|"medium"|"low"}',
-    "pass = Kerninhalt der SOLL-Antwort ist sinngemäß enthalten (Paraphrase ok).",
+    "pass = Kerninhalt der zur Prüffrage passenden SOLL-Angaben ist sinngemäß enthalten (Paraphrase ok).",
     "fail = Kerninhalt fehlt, ist falsch oder wird durch etwas anderes ersetzt.",
+    "Wenn der SOLL-Block mehrere Fragebogen-Fakten enthält: nur die zur Prüffrage relevanten bewerten, den Rest ignorieren.",
   ].join("\n");
 
   for (const model of resolveExamCheckModels()) {
