@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Trash2 } from "lucide-react";
 
 import {
-  createFragebogenFromOrgAction,
+  createFragebogenFromReviewAction,
   loadFragebogenWizardContextAction,
+  previewFragebogenFromOrgAction,
 } from "@/app/dashboard/frageboegen/actions";
+import type { FragebogenReviewDraft } from "@/lib/surveys/build-fragebogen-from-org";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,9 +22,18 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 type CoreItem = { key: string; title: string; description: string };
+
+function sourceBadge(source: string) {
+  if (source === "organisation") return "Organisation";
+  if (source === "website") return "Website";
+  if (source === "crawl") return "Crawl";
+  if (source === "ai") return "KI aus Crawl";
+  return "Leer";
+}
 
 export function FragebogenFromOrgWizard(props: {
   organisationId: string;
@@ -30,6 +41,7 @@ export function FragebogenFromOrgWizard(props: {
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [step, setStep] = useState<"configure" | "review">("configure");
   const [purpose, setPurpose] = useState<"anbieter" | "persona">("anbieter");
   const [wunschkundeLabel, setWunschkundeLabel] = useState("");
   const [includeAiExtras, setIncludeAiExtras] = useState(true);
@@ -41,6 +53,7 @@ export function FragebogenFromOrgWizard(props: {
   const [pageCount, setPageCount] = useState(0);
   const [anbieterCore, setAnbieterCore] = useState<CoreItem[]>([]);
   const [personaCore, setPersonaCore] = useState<CoreItem[]>([]);
+  const [draft, setDraft] = useState<FragebogenReviewDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loadingCtx, setLoadingCtx] = useState(true);
@@ -91,16 +104,16 @@ export function FragebogenFromOrgWizard(props: {
     );
   }
 
-  function create() {
+  function runPreview() {
     setError(null);
     setStatus(null);
     startTransition(async () => {
       setStatus(
         includeAiExtras
-          ? "Fragebogen wird erzeugt (Kernfragen + KI-Zusatz aus Crawl)…"
-          : "Fragebogen wird aus Kernfragen erzeugt…",
+          ? "Vorschau wird erzeugt (Kernfragen + Crawl/KI)…"
+          : "Vorschau wird erzeugt…",
       );
-      const res = await createFragebogenFromOrgAction({
+      const res = await previewFragebogenFromOrgAction({
         organisationId: props.organisationId,
         purpose,
         wunschkundeLabel: purpose === "persona" ? wunschkundeLabel : null,
@@ -109,7 +122,52 @@ export function FragebogenFromOrgWizard(props: {
         ),
         includeAiExtras,
         extraPlacement,
+      });
+      setStatus(null);
+      if (!res.ok || !res.data) {
+        setError(res.message);
+        return;
+      }
+      setDraft(res.data.draft);
+      setStep("review");
+    });
+  }
+
+  function updateQuestion(
+    id: string,
+    patch: Partial<FragebogenReviewDraft["questions"][number]>,
+  ) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        questions: prev.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)),
+      };
+    });
+  }
+
+  function removeQuestion(id: string) {
+    updateQuestion(id, { included: false });
+  }
+
+  function clearAnswer(id: string) {
+    updateQuestion(id, {
+      answer: "",
+      answerSource: "none",
+      answerNote: "Manuell geleert",
+    });
+  }
+
+  function save() {
+    if (!draft) return;
+    setError(null);
+    setStatus(null);
+    startTransition(async () => {
+      setStatus("Fragebogen wird gespeichert…");
+      const res = await createFragebogenFromReviewAction({
+        organisationId: props.organisationId,
         savePrefills,
+        draft,
       });
       if (!res.ok || !res.data) {
         setStatus(null);
@@ -124,6 +182,156 @@ export function FragebogenFromOrgWizard(props: {
     });
   }
 
+  if (step === "review" && draft) {
+    const included = draft.questions.filter((q) => q.included);
+    const prefilled = included.filter((q) => q.answer.trim()).length;
+    return (
+      <div className="grid gap-6">
+        <div className="grid gap-1">
+          <h1 className="text-2xl font-bold tracking-tight text-primary">
+            Prüfung vor dem Speichern
+          </h1>
+          <p className="max-w-2xl text-sm text-secondary">
+            Fragen entfernen oder umformulieren, vorausgefüllte Antworten prüfen/löschen.
+            Erst danach wird der Fragebogen angelegt.
+          </p>
+        </div>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">{draft.title}</CardTitle>
+            <CardDescription>
+              {draft.organisationName} · {draft.crawlPageCount} Crawl-Seiten ·{" "}
+              {included.length} Fragen · {prefilled} vorausgefüllt
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2">
+            <Label htmlFor="draft-title">Titel</Label>
+            <Input
+              id="draft-title"
+              value={draft.title}
+              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+            />
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-3">
+          {draft.questions.map((q) => {
+            if (!q.included) return null;
+            return (
+              <Card key={q.id} className="border-sbkm-navy/10">
+                <CardContent className="grid gap-3 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="grid gap-1 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant={q.kind === "core" ? "default" : "secondary"}>
+                          {q.kind === "core" ? "Kernfrage" : "Zusatzfrage"}
+                        </Badge>
+                        <Badge variant="outline">{sourceBadge(q.answerSource)}</Badge>
+                      </div>
+                      <Input
+                        value={q.title}
+                        onChange={(e) => updateQuestion(q.id, { title: e.target.value })}
+                        className="font-medium"
+                      />
+                      {q.answerNote ? (
+                        <p className="text-xs text-secondary">{q.answerNote}</p>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-700"
+                      onClick={() => removeQuestion(q.id)}
+                    >
+                      <Trash2 className="size-3.5" aria-hidden />
+                      Entfernen
+                    </Button>
+                  </div>
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor={`answer-${q.id}`}>Antwort-Vorschlag</Label>
+                      {q.answer.trim() ? (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-secondary underline-offset-2 hover:underline"
+                          onClick={() => clearAnswer(q.id)}
+                        >
+                          Antwort leeren (veraltet)
+                        </button>
+                      ) : null}
+                    </div>
+                    <Textarea
+                      id={`answer-${q.id}`}
+                      value={q.answer}
+                      rows={2}
+                      placeholder="Noch keine Vorausfüllung — später im Fragebogen ausfüllen"
+                      onChange={(e) =>
+                        updateQuestion(q.id, {
+                          answer: e.target.value,
+                          answerSource: e.target.value.trim()
+                            ? q.answerSource === "none"
+                              ? "ai"
+                              : q.answerSource
+                            : "none",
+                          answerNote:
+                            e.target.value.trim() && q.answerSource === "none"
+                              ? "Manuell ergänzt"
+                              : q.answerNote,
+                        })
+                      }
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={savePrefills}
+            onChange={(e) => setSavePrefills(e.target.checked)}
+          />
+          Vorausgefüllte Antworten als Entwurf speichern
+        </label>
+
+        {error ? (
+          <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {status ? <p className="text-sm text-secondary">{status}</p> : null}
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" disabled={isPending || included.length === 0} onClick={save}>
+            {isPending ? (
+              <>
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+                Speichere…
+              </>
+            ) : (
+              "Fragebogen speichern"
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isPending}
+            onClick={() => {
+              setStep("configure");
+              setDraft(null);
+            }}
+          >
+            Zurück
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-6">
       <div className="grid gap-1">
@@ -131,8 +339,7 @@ export function FragebogenFromOrgWizard(props: {
           Fragebogen aus Organisation
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Organisation und Website/Crawl zuerst — dann Fragebogen mit festen Kernfragen und
-          optionalen KI-Zusatzfragen in wenigen Klicks.
+          Organisation und Website/Crawl zuerst — dann Vorschau prüfen — danach speichern.
         </p>
       </div>
 
@@ -157,10 +364,17 @@ export function FragebogenFromOrgWizard(props: {
               {pageCount} Seiten gecrawlt
             </Badge>
           </div>
-          <p className="text-xs text-secondary">
-            Website unter SEO-Einstellungen setzen und crawlen. Bekannte Fakten (Name, URL,
-            ggf. Mitarbeiterzahl) können vorausgefüllt werden und bleiben editierbar.
-          </p>
+          {pageCount === 0 ? (
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              Noch kein Crawl — Prefill/KI-Zusatzfragen werden dünn. Bitte zuerst Website setzen
+              und crawlen.
+            </p>
+          ) : (
+            <p className="text-xs text-secondary">
+              Crawl-Inhalte werden für Antwort-Vorschläge und Zusatzfragen genutzt. Alles bleibt
+              in der Prüfung editierbar.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button asChild size="sm" variant="outline">
               <Link
@@ -213,7 +427,7 @@ export function FragebogenFromOrgWizard(props: {
             </button>
           </div>
           {purpose === "persona" ? (
-            <div className="grid gap-2 max-w-md">
+            <div className="grid max-w-md gap-2">
               <Label htmlFor="wunschkunde">Wunschkunde / Avatar-Name</Label>
               <Input
                 id="wunschkunde"
@@ -232,7 +446,7 @@ export function FragebogenFromOrgWizard(props: {
             3. Kernfragen ({selectedCount}/{coreItems.length})
           </CardTitle>
           <CardDescription>
-            Feste Basis für jeden Fragebogen dieses Typs — abwählen, was hier nicht passt.
+            Feste Basis — abwählen, was hier nicht gebraucht wird.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-2">
@@ -271,8 +485,7 @@ export function FragebogenFromOrgWizard(props: {
             4. Individuelle Zusatzfragen
           </CardTitle>
           <CardDescription>
-            Die KI entscheidet anhand Crawl/Kontext, welche Sonderfragen für diese Firma bzw.
-            diesen Wunschkunden ergänzt werden.
+            KI schlägt Sonderfragen aus dem Crawl vor — in der Prüfung noch entfernbar.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -282,7 +495,7 @@ export function FragebogenFromOrgWizard(props: {
               checked={includeAiExtras}
               onChange={(e) => setIncludeAiExtras(e.target.checked)}
             />
-            KI-Zusatzfragen erzeugen
+            KI-Zusatzfragen vorschlagen
           </label>
           <div className="flex flex-wrap gap-2">
             <button
@@ -312,14 +525,6 @@ export function FragebogenFromOrgWizard(props: {
               Zusatzfragen am Anfang
             </button>
           </div>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={savePrefills}
-              onChange={(e) => setSavePrefills(e.target.checked)}
-            />
-            Bekannte Antworten vorausfüllen (Name/Website/Crawl) — später editierbar
-          </label>
         </CardContent>
       </Card>
 
@@ -334,15 +539,15 @@ export function FragebogenFromOrgWizard(props: {
         <Button
           type="button"
           disabled={isPending || loadingCtx || selectedCount === 0}
-          onClick={create}
+          onClick={runPreview}
         >
           {isPending ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              Erzeuge…
+              Erzeuge Vorschau…
             </>
           ) : (
-            "Fragebogen erzeugen"
+            "Zur Prüfung"
           )}
         </Button>
         <Button asChild type="button" variant="ghost">

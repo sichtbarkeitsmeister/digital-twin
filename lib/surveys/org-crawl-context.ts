@@ -2,35 +2,41 @@ import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { searchDtSitePages } from "@/lib/dt/seo/search-site-pages";
-import type { CoreQuestionPrefillHint } from "@/lib/surveys/core-question-templates";
+import type { OrgCrawlContext } from "@/lib/surveys/org-crawl-prefill";
 
-export type OrgCrawlContext = {
-  organisationId: string;
-  organisationName: string;
-  websiteUrl: string | null;
-  pageCount: number;
-  snippets: Array<{ url: string; title: string | null; snippet: string }>;
-  summaryText: string;
-};
+export type { OrgCrawlContext, PrefillDraft, PrefillSource } from "@/lib/surveys/org-crawl-prefill";
+export { suggestPrefillsFromCrawl } from "@/lib/surveys/org-crawl-prefill";
+
+function cleanExcerpt(text: string, max = 900): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, max);
+}
 
 export async function loadOrgCrawlContext(
   organisationId: string,
 ): Promise<OrgCrawlContext> {
   const supabase = createServiceClient();
 
-  const [{ data: org }, { data: config }, { count }] = await Promise.all([
-    supabase.from("organisations").select("id, name").eq("id", organisationId).maybeSingle(),
-    supabase
-      .from("dt_org_config")
-      .select("website_url")
-      .eq("organisation_id", organisationId)
-      .maybeSingle(),
-    supabase
-      .from("dt_site_pages")
-      .select("id", { count: "exact", head: true })
-      .eq("organisation_id", organisationId)
-      .eq("is_excluded", false),
-  ]);
+  const [{ data: org }, { data: config }, { count }, { data: topPages }] =
+    await Promise.all([
+      supabase.from("organisations").select("id, name").eq("id", organisationId).maybeSingle(),
+      supabase
+        .from("dt_org_config")
+        .select("website_url")
+        .eq("organisation_id", organisationId)
+        .maybeSingle(),
+      supabase
+        .from("dt_site_pages")
+        .select("id", { count: "exact", head: true })
+        .eq("organisation_id", organisationId)
+        .eq("is_excluded", false),
+      supabase
+        .from("dt_site_pages")
+        .select("url,title,h1,meta_description,text_content")
+        .eq("organisation_id", organisationId)
+        .eq("is_excluded", false)
+        .order("updated_at", { ascending: false })
+        .limit(12),
+    ]);
 
   const organisationName = org?.name?.trim() || "Organisation";
   const websiteUrl = config?.website_url?.trim() || null;
@@ -39,7 +45,8 @@ export async function loadOrgCrawlContext(
   const queries = [
     organisationName,
     "Über uns Leistungen Angebot Team",
-    "Kontakt Standort Region",
+    "Kontakt Standort Region Spezialisierung",
+    "USP Philosophie Unterschied Wettbewerbsvorteil",
   ];
   const seen = new Set<string>();
   const snippets: OrgCrawlContext["snippets"] = [];
@@ -54,9 +61,26 @@ export async function loadOrgCrawlContext(
         title: hit.title,
         snippet: hit.snippet,
       });
-      if (snippets.length >= 10) break;
+      if (snippets.length >= 12) break;
     }
-    if (snippets.length >= 10) break;
+    if (snippets.length >= 12) break;
+  }
+
+  const pageExcerpts: OrgCrawlContext["pageExcerpts"] = [];
+  for (const row of topPages ?? []) {
+    const title = (row.title || row.h1 || "").trim() || null;
+    const parts = [
+      row.meta_description?.trim() || "",
+      row.h1?.trim() || "",
+      row.text_content?.trim() || "",
+    ].filter(Boolean);
+    const text = cleanExcerpt(parts.join(" · "), 1200);
+    if (!text) continue;
+    pageExcerpts.push({
+      url: row.url,
+      title,
+      text,
+    });
   }
 
   const summaryText = [
@@ -64,9 +88,14 @@ export async function loadOrgCrawlContext(
     websiteUrl ? `Website: ${websiteUrl}` : "Website: (noch nicht hinterlegt)",
     `Crawl-Seiten: ${pageCount}`,
     "",
+    "### Suchtreffer",
     ...snippets.map(
-      (s, i) =>
-        `[${i + 1}] ${s.title || s.url}\nURL: ${s.url}\n${s.snippet}`,
+      (s, i) => `[S${i + 1}] ${s.title || s.url}\nURL: ${s.url}\n${s.snippet}`,
+    ),
+    "",
+    "### Seitenauszüge",
+    ...pageExcerpts.map(
+      (p, i) => `[P${i + 1}] ${p.title || p.url}\nURL: ${p.url}\n${p.text}`,
     ),
   ].join("\n");
 
@@ -76,58 +105,7 @@ export async function loadOrgCrawlContext(
     websiteUrl,
     pageCount,
     snippets,
+    pageExcerpts,
     summaryText,
   };
-}
-
-export type PrefillDraft = {
-  value: string;
-  source: "organisation" | "website" | "crawl";
-  note: string;
-};
-
-/**
- * Conservative prefill from org config + crawl snippets.
- * Only fills when confidence is high; UI can still edit/delete.
- */
-export function suggestPrefillsFromCrawl(input: {
-  context: OrgCrawlContext;
-  hints: Array<{ key: string; hint?: CoreQuestionPrefillHint }>;
-}): Record<string, PrefillDraft> {
-  const out: Record<string, PrefillDraft> = {};
-  const blob = input.context.summaryText.toLowerCase();
-
-  for (const item of input.hints) {
-    if (!item.hint) continue;
-    if (item.hint === "org_name" && input.context.organisationName) {
-      out[item.key] = {
-        value: input.context.organisationName,
-        source: "organisation",
-        note: "Aus Organisationsname übernommen",
-      };
-      continue;
-    }
-    if (item.hint === "website" && input.context.websiteUrl) {
-      out[item.key] = {
-        value: input.context.websiteUrl,
-        source: "website",
-        note: "Aus SEO-/Org-Konfiguration übernommen",
-      };
-      continue;
-    }
-    if (item.hint === "employee_count") {
-      const m = blob.match(
-        /(\d{1,4})\s*(?:mitarbeiter|beschäftigte|personen|teammitglieder|angestellte)/i,
-      );
-      if (m?.[1]) {
-        out[item.key] = {
-          value: `${m[1]} Personen (aus Website-Crawl, bitte prüfen)`,
-          source: "crawl",
-          note: "Aus Crawl-Text geschätzt — bitte prüfen/korrigieren",
-        };
-      }
-    }
-  }
-
-  return out;
 }

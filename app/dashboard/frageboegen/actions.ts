@@ -4,15 +4,19 @@ import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
-import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
-import { buildFragebogenFromOrg } from "@/lib/surveys/build-fragebogen-from-org";
+import { assignSurveyOrganisation } from "@/lib/dt/survey-to-agent-service";
+import {
+  buildFragebogenReviewDraft,
+  buildSurveyAndAnswersFromReview,
+  type FragebogenReviewDraft,
+} from "@/lib/surveys/build-fragebogen-from-org";
 import {
   ANBIETER_CORE_QUESTIONS,
   PERSONA_CORE_QUESTIONS,
 } from "@/lib/surveys/core-question-templates";
 import { loadOrgCrawlContext } from "@/lib/surveys/org-crawl-context";
-import { assignSurveyOrganisation } from "@/lib/dt/survey-to-agent-service";
+import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 export type ActionState<T = undefined> =
   | { ok: true; message: string; data?: T }
@@ -77,18 +81,73 @@ export async function loadFragebogenWizardContextAction(input: {
   };
 }
 
-const createSchema = z.object({
+const previewSchema = z.object({
   organisationId: z.string().uuid(),
   purpose: z.enum(["persona", "anbieter"]),
   wunschkundeLabel: z.string().trim().max(120).optional().nullable(),
   selectedCoreKeys: z.array(z.string().min(1)).min(1),
   includeAiExtras: z.boolean().default(true),
   extraPlacement: z.enum(["start", "end"]).default("end"),
-  savePrefills: z.boolean().default(true),
 });
 
-export async function createFragebogenFromOrgAction(
-  input: z.input<typeof createSchema>,
+export async function previewFragebogenFromOrgAction(
+  input: z.input<typeof previewSchema>,
+): Promise<ActionState<{ draft: FragebogenReviewDraft }>> {
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+
+  const parsed = previewSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  try {
+    const draft = await buildFragebogenReviewDraft({
+      organisationId: parsed.data.organisationId,
+      purpose: parsed.data.purpose,
+      wunschkundeLabel: parsed.data.wunschkundeLabel,
+      selectedCoreKeys: parsed.data.selectedCoreKeys,
+      includeAiExtras: parsed.data.includeAiExtras,
+      extraPlacement: parsed.data.extraPlacement,
+    });
+    return { ok: true, message: "Entwurf zur Prüfung bereit.", data: { draft } };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Vorschau konnte nicht erzeugt werden.",
+    };
+  }
+}
+
+const reviewQuestionSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(["core", "extra"]),
+  coreKey: z.string().optional(),
+  title: z.string().min(1),
+  description: z.string().default(""),
+  included: z.boolean(),
+  answer: z.string().default(""),
+  answerSource: z.enum(["organisation", "website", "crawl", "ai", "none"]),
+  answerNote: z.string().default(""),
+});
+
+const createFromReviewSchema = z.object({
+  organisationId: z.string().uuid(),
+  savePrefills: z.boolean().default(true),
+  draft: z.object({
+    title: z.string().trim().min(1),
+    description: z.string().default(""),
+    purpose: z.enum(["persona", "anbieter"]),
+    extraPlacement: z.enum(["start", "end"]),
+    crawlPageCount: z.number().int().nonnegative(),
+    websiteUrl: z.string().nullable(),
+    organisationName: z.string(),
+    questions: z.array(reviewQuestionSchema).min(1),
+  }),
+});
+
+export async function createFragebogenFromReviewAction(
+  input: z.input<typeof createFromReviewSchema>,
 ): Promise<
   ActionState<{
     surveyId: string;
@@ -101,25 +160,24 @@ export async function createFragebogenFromOrgAction(
   const auth = await requirePlatformAdmin();
   if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
 
-  const parsed = createSchema.safeParse(input);
+  const parsed = createFromReviewSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
   }
 
-  let draft;
+  let definition;
+  let answers: Record<string, string>;
   try {
-    draft = await buildFragebogenFromOrg({
-      organisationId: parsed.data.organisationId,
-      purpose: parsed.data.purpose,
-      wunschkundeLabel: parsed.data.wunschkundeLabel,
-      selectedCoreKeys: parsed.data.selectedCoreKeys,
-      includeAiExtras: parsed.data.includeAiExtras,
-      extraPlacement: parsed.data.extraPlacement,
+    const built = buildSurveyAndAnswersFromReview({
+      draft: parsed.data.draft,
+      savePrefills: parsed.data.savePrefills,
     });
+    definition = built.definition;
+    answers = built.answers;
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : "Fragebogen konnte nicht erzeugt werden.",
+      message: err instanceof Error ? err.message : "Fragebogen ungültig.",
     };
   }
 
@@ -131,7 +189,6 @@ export async function createFragebogenFromOrgAction(
     .maybeSingle();
   if (!org) return { ok: false, message: "Organisation nicht gefunden." };
 
-  // Ensure folder named like the organisation (reuse if present).
   let folderId: string | null = null;
   const { data: existingFolder } = await service
     .from("survey_folders")
@@ -152,13 +209,13 @@ export async function createFragebogenFromOrgAction(
   const { data: survey, error: surveyError } = await service
     .from("surveys")
     .insert({
-      title: draft.title,
-      description: draft.description,
+      title: parsed.data.draft.title,
+      description: parsed.data.draft.description,
       visibility: "private",
       slug: null,
       notification_emails: [],
-      purpose: draft.purpose,
-      definition: draft.definition,
+      purpose: parsed.data.draft.purpose,
+      definition,
       organisation_id: parsed.data.organisationId,
       folder_id: folderId,
       created_by_user_id: auth.userId,
@@ -173,12 +230,7 @@ export async function createFragebogenFromOrgAction(
   await assignSurveyOrganisation(survey.id, parsed.data.organisationId);
 
   let responseId: string | undefined;
-  const answers =
-    parsed.data.savePrefills && Object.keys(draft.suggestedAnswers).length > 0
-      ? draft.suggestedAnswers
-      : {};
-
-  if (Object.keys(answers).length > 0 || parsed.data.savePrefills) {
+  if (Object.keys(answers).length > 0) {
     const tokenHashHex = `\\x${randomBytes(32).toString("hex")}`;
     const { data: response, error: responseError } = await service
       .from("survey_responses")
@@ -190,14 +242,16 @@ export async function createFragebogenFromOrgAction(
       })
       .select("id")
       .single();
-    if (!responseError && response?.id) {
-      responseId = response.id;
-    }
+    if (!responseError && response?.id) responseId = response.id;
   }
 
   revalidatePath("/dashboard/surveys");
   revalidatePath("/dashboard/frageboegen");
   revalidatePath(`/dashboard/surveys/${survey.id}/edit`);
+
+  const extraCount = parsed.data.draft.questions.filter(
+    (q) => q.kind === "extra" && q.included,
+  ).length;
 
   return {
     ok: true,
@@ -205,9 +259,9 @@ export async function createFragebogenFromOrgAction(
     data: {
       surveyId: survey.id,
       responseId,
-      extraCount: draft.extraQuestionTitles.length,
-      prefillCount: Object.keys(draft.suggestedAnswers).length,
-      crawlPageCount: draft.crawlPageCount,
+      extraCount,
+      prefillCount: Object.keys(answers).length,
+      crawlPageCount: parsed.data.draft.crawlPageCount,
     },
   };
 }
