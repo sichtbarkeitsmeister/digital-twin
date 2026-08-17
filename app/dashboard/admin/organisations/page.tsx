@@ -82,9 +82,10 @@ async function AdminOrganisationsPageContent() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <div className="grid gap-4 xl:sticky xl:top-4 xl:self-start">
-          <Card className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">
-            <CardHeader>
-              <CardTitle className="tracking-tight">Organisation anlegen</CardTitle>
+          <Card
+            id="organisation-anlegen"
+            className="overflow-hidden scroll-mt-6 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
+          >
               <CardDescription>
                 Neue Organisation mit initialem Inhaber per E-Mail erstellen.
               </CardDescription>
