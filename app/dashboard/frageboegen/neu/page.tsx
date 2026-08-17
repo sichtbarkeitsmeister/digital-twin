@@ -25,14 +25,14 @@ export default async function NeueFragebogenPage({
   }
 
   const { organisations } = await loadDtManageOrganisations(user.id);
-  const selectedOrganisationId =
+
+  // Explicit ?org= wins; otherwise only auto-select when there is exactly one org.
+  const organisationId =
     orgParam && organisations.some((o) => o.id === orgParam)
       ? orgParam
-      : (organisations[0]?.id ?? null);
-
-  if (!selectedOrganisationId) {
-    redirect("/dashboard/frageboegen");
-  }
+      : organisations.length === 1
+        ? organisations[0]!.id
+        : null;
 
   return (
     <>
@@ -42,7 +42,7 @@ export default async function NeueFragebogenPage({
         />
       </Suspense>
       <FragebogenFromOrgWizard
-        organisationId={selectedOrganisationId}
+        organisationId={organisationId}
         organisations={organisations}
       />
     </>

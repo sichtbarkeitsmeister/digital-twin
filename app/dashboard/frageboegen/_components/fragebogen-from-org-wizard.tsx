@@ -11,6 +11,7 @@ import {
   previewFragebogenFromOrgAction,
 } from "@/app/dashboard/frageboegen/actions";
 import type { FragebogenReviewDraft } from "@/lib/surveys/build-fragebogen-from-org";
+import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,8 @@ import { cn } from "@/lib/utils";
 
 type CoreItem = { key: string; title: string; description: string };
 
+const CREATE_ORG_HREF = "/dashboard/admin/organisations#organisation-anlegen";
+
 function sourceBadge(source: string) {
   if (source === "organisation") return "Organisation";
   if (source === "website") return "Website";
@@ -37,10 +40,11 @@ function sourceBadge(source: string) {
 }
 
 export function FragebogenFromOrgWizard(props: {
-  organisationId: string;
+  organisationId: string | null;
   organisations: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
+  const organisationId = props.organisationId;
   const [isPending, startTransition] = useTransition();
   const [step, setStep] = useState<"configure" | "review">("configure");
   const [purpose, setPurpose] = useState<"anbieter" | "persona">("anbieter");
@@ -63,17 +67,27 @@ export function FragebogenFromOrgWizard(props: {
   const [draft, setDraft] = useState<FragebogenReviewDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [loadingCtx, setLoadingCtx] = useState(true);
+  const [loadingCtx, setLoadingCtx] = useState(Boolean(organisationId));
 
   const coreItems = purpose === "anbieter" ? anbieterCore : personaCore;
 
   useEffect(() => {
     let cancelled = false;
+    setDraft(null);
+    setStep("configure");
+    if (!organisationId) {
+      setLoadingCtx(false);
+      setOrgName("");
+      setWebsiteUrl(null);
+      setPageCount(0);
+      setError(null);
+      return;
+    }
     setLoadingCtx(true);
     setError(null);
     void (async () => {
       const res = await loadFragebogenWizardContextAction({
-        organisationId: props.organisationId,
+        organisationId,
       });
       if (cancelled) return;
       if (!res.ok || !res.data) {
@@ -92,7 +106,7 @@ export function FragebogenFromOrgWizard(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.organisationId]);
+  }, [organisationId]);
 
   useEffect(() => {
     const items = purpose === "anbieter" ? anbieterCore : personaCore;
@@ -112,6 +126,10 @@ export function FragebogenFromOrgWizard(props: {
   }
 
   function runPreview() {
+    if (!organisationId) {
+      setError("Bitte zuerst eine Organisation wählen oder anlegen.");
+      return;
+    }
     setError(null);
     setStatus(null);
     startTransition(async () => {
@@ -121,7 +139,7 @@ export function FragebogenFromOrgWizard(props: {
           : "Vorschau wird erzeugt…",
       );
       const res = await previewFragebogenFromOrgAction({
-        organisationId: props.organisationId,
+        organisationId,
         purpose,
         wunschkundeLabel: purpose === "persona" ? wunschkundeLabel : null,
         selectedCoreKeys: selectedKeys.filter((k) =>
@@ -174,13 +192,13 @@ export function FragebogenFromOrgWizard(props: {
   }
 
   function save() {
-    if (!draft) return;
+    if (!draft || !organisationId) return;
     setError(null);
     setStatus(null);
     startTransition(async () => {
       setStatus("Fragebogen wird gespeichert…");
       const res = await createFragebogenFromReviewAction({
-        organisationId: props.organisationId,
+        organisationId,
         savePrefills,
         draft,
       });
@@ -363,45 +381,81 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">1. Organisation & Crawl</CardTitle>
           <CardDescription>
-            {loadingCtx
-              ? "Lade Kontext…"
-              : `${orgName || "Organisation"} · ${pageCount} Crawl-Seiten`}
+            Organisation wählen — oft erst nach dem Kundengespräch angelegt. Crawl optional, aber
+            hilfreich.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="outline">{orgName || "…"}</Badge>
-            {websiteUrl ? (
-              <Badge variant="secondary">{websiteUrl}</Badge>
-            ) : (
-              <Badge variant="destructive">Keine Website hinterlegt</Badge>
-            )}
-            <Badge variant={pageCount > 0 ? "default" : "secondary"}>
-              {pageCount} Seiten gecrawlt
-            </Badge>
+          <div className="grid gap-2 max-w-md">
+            <Label>Organisation</Label>
+            <OrganisationSwitcher
+              organisations={props.organisations}
+              selectedOrganisationId={organisationId}
+              orgPath="/dashboard/frageboegen/neu"
+            />
           </div>
-          {pageCount === 0 ? (
+
+          <p className="text-xs text-secondary">
+            Ist die gewünschte Organisation nicht da? Dann bitte anlegen:{" "}
+            <Link
+              href={CREATE_ORG_HREF}
+              className="font-medium text-primary underline-offset-2 hover:underline"
+            >
+              Organisation anlegen
+            </Link>
+          </p>
+
+          {!organisationId ? (
             <p className="text-xs text-amber-800 dark:text-amber-200">
-              Noch kein Crawl — Prefill/KI-Zusatzfragen werden dünn. Bitte zuerst Website setzen
-              und crawlen.
+              Noch keine Organisation gewählt. Bitte oben auswählen oder neu anlegen — danach
+              Briefing und Crawl.
             </p>
+          ) : loadingCtx ? (
+            <p className="text-xs text-secondary">Lade Crawl-Kontext…</p>
           ) : (
-            <p className="text-xs text-secondary">
-              Crawl-Inhalte werden für Antwort-Vorschläge und Zusatzfragen genutzt. Alles bleibt
-              in der Prüfung editierbar.
-            </p>
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">{orgName || "…"}</Badge>
+                {websiteUrl ? (
+                  <Badge variant="secondary">{websiteUrl}</Badge>
+                ) : (
+                  <Badge variant="destructive">Keine Website hinterlegt</Badge>
+                )}
+                <Badge variant={pageCount > 0 ? "default" : "secondary"}>
+                  {pageCount} Seiten gecrawlt
+                </Badge>
+              </div>
+              {pageCount === 0 ? (
+                <p className="text-xs text-amber-800 dark:text-amber-200">
+                  Noch kein Crawl — Prefill/KI-Zusatzfragen werden dünn. Bitte zuerst Website setzen
+                  und crawlen (kann auch nach dem Anlegen der Organisation passieren).
+                </p>
+              ) : (
+                <p className="text-xs text-secondary">
+                  Crawl-Inhalte werden für Antwort-Vorschläge und Zusatzfragen genutzt. Alles bleibt
+                  in der Prüfung editierbar.
+                </p>
+              )}
+            </>
           )}
+
           <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm" variant="outline">
-              <Link
-                href={`/dashboard/verwaltung/seo?org=${encodeURIComponent(props.organisationId)}`}
-              >
-                SEO / Website / Crawl
-              </Link>
-            </Button>
+            {organisationId ? (
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  href={`/dashboard/verwaltung/seo?org=${encodeURIComponent(organisationId)}`}
+                >
+                  SEO / Website / Crawl
+                </Link>
+              </Button>
+            ) : null}
             <Button asChild size="sm" variant="ghost">
               <Link
-                href={`/dashboard/frageboegen?org=${encodeURIComponent(props.organisationId)}`}
+                href={
+                  organisationId
+                    ? `/dashboard/frageboegen?org=${encodeURIComponent(organisationId)}`
+                    : "/dashboard/frageboegen"
+                }
               >
                 Zurück zur Liste
               </Link>
@@ -626,7 +680,7 @@ export function FragebogenFromOrgWizard(props: {
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          disabled={isPending || loadingCtx || selectedCount === 0}
+          disabled={isPending || loadingCtx || !organisationId || selectedCount === 0}
           onClick={runPreview}
         >
           {isPending ? (
@@ -639,7 +693,13 @@ export function FragebogenFromOrgWizard(props: {
           )}
         </Button>
         <Button asChild type="button" variant="ghost">
-          <Link href={`/dashboard/frageboegen?org=${encodeURIComponent(props.organisationId)}`}>
+          <Link
+            href={
+              organisationId
+                ? `/dashboard/frageboegen?org=${encodeURIComponent(organisationId)}`
+                : "/dashboard/frageboegen"
+            }
+          >
             Abbrechen
           </Link>
         </Button>
