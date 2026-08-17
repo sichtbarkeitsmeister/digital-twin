@@ -86,6 +86,8 @@ async function AdminOrganisationsPageContent() {
             id="organisation-anlegen"
             className="overflow-hidden scroll-mt-6 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
           >
+            <CardHeader>
+              <CardTitle className="tracking-tight">Organisation anlegen</CardTitle>
               <CardDescription>
                 Neue Organisation mit initialem Inhaber per E-Mail erstellen.
               </CardDescription>
