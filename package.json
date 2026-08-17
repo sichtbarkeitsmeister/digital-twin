@@ -19,6 +19,7 @@
     "test:dt-delete-agent": "tsx scripts/test-dt-delete-agent.ts",
     "test:exam-answer-check": "tsx scripts/test-exam-answer-check.ts",
     "test:seo-crawl-reclaim": "tsx scripts/test-seo-crawl-reclaim.ts",
+    "test:seo-excluded-urls": "tsx scripts/test-seo-excluded-urls.ts",
     "test:seo-indexability": "tsx scripts/test-seo-indexability-audit.ts",
     "test:safe-fetch-url": "tsx scripts/test-safe-fetch-url.ts",
     "test:auth-error-messages": "tsx scripts/test-auth-error-messages.ts",

@@ -2,9 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { DtSitePageRow } from "@/lib/dt/types";
 
-const EXCLUDED_PATH =
-  /\/(impressum|datenschutz|agb|widerruf|privacy|legal)(\/|$)/i;
+const EXCLUDED_PATH = /\/(agb|widerruf|terms|cancellation)(\/|$)/i;
 
+/** Legal boilerplate that is usually not SEO-optimized (AGB/Widerruf). Impressum + Datenschutz are crawled. */
 export function isDtExcludedPageUrl(url: string): boolean {
   try {
     const path = new URL(url).pathname;
@@ -71,7 +71,7 @@ export const DT_SEO_MODE_INSTRUCTIONS = `
 - Unter „Andere SEO-Chats dieser Organisation“ findest du Auszüge aus früheren SEO-Gesprächen derselben Organisation. Beziehe dich darauf, wenn der Nutzer nach früheren Themen fragt — behaupte NICHT, du hättest keinen Zugriff auf frühere Gespräche.
 - Bevor du konkrete Verbesserungen vorschlägst, fasse die Ist-Situation kurz zusammen und frage: „Passt diese Zusammenfassung?“ Erst nach Bestätigung oder Korrektur mit Maßnahmen fortfahren.
 - Wenn keine Unterseite genannt ist, frage ausdrücklich, auf welche Seite du dich konzentrieren sollst, und biete die Liste der prüfbaren Unterseiten an.
-- Impressum, Datenschutz und rechtliche Seiten sind ausgeschlossen — nicht optimieren.
+- Impressum und Datenschutz werden mitgecrawlt (wichtig für Anbieter-Angaben). AGB/Widerruf bleiben ausgeschlossen — nicht für SEO-Optimierung vorschlagen.
 - Nutze den Abschnitt „Letzter SEO-Report“ für aktuelle Rankings, Keywords und Report-Empfehlungen; monatliche Trends nur für Verlaufsfragen.
 - Nutze die Liste „Bestehende SEO-Aufgaben“ unten: wiederhole keine Maßnahmen, die dort schon offen oder in Arbeit sind. Sage nicht, der Nutzer solle etwas als Aufgabe speichern, wenn es bereits im Board steht.
 - Das Aufgaben-Board erlaubt Hinzufügen, Bearbeiten und Löschen. Behaupte NIEMALS, du könntest Aufgaben nur vorschlagen/hinzufügen. Bestehende Tasks (mit id=…) bearbeitest/löschst du mit \`update_seo_task\` / \`delete_seo_task\`.
