@@ -22,7 +22,8 @@ export function DashboardPrefetcher({
         "/dashboard/admin/organisations",
         "/dashboard/admin/mails",
         "/dashboard/surveys",
-        "/dashboard/surveys/new",
+        "/dashboard/frageboegen",
+        "/dashboard/frageboegen/neu",
       );
     }
 

@@ -58,7 +58,11 @@ export function resolveDashboardSurveyAiPageContext(
     };
   }
 
-  if (pathname === "/dashboard/surveys/new") {
+  if (
+    pathname === "/dashboard/surveys/new" ||
+    pathname === "/dashboard/frageboegen/neu" ||
+    pathname.startsWith("/dashboard/frageboegen/neu/")
+  ) {
     return { page: "survey_builder_new", surveyId: null, organisationId: org };
   }
 
