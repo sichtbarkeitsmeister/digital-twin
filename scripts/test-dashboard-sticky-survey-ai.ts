@@ -25,8 +25,10 @@ function testSurveyBuilder() {
   assert.equal(edit.page, "survey_builder_edit");
   assert.equal(edit.surveyId, "31ddfdea-401b-4744-95d4-05b789adede0");
 
-  const neu = resolveDashboardSurveyAiPageContext("/dashboard/surveys/new", params(""));
+  const neu = resolveDashboardSurveyAiPageContext("/dashboard/frageboegen/neu", params(""));
   assert.equal(neu.page, "survey_builder_new");
+  const legacyNeu = resolveDashboardSurveyAiPageContext("/dashboard/surveys/new", params(""));
+  assert.equal(legacyNeu.page, "survey_builder_new");
   console.log("survey builder: ok");
 }
 

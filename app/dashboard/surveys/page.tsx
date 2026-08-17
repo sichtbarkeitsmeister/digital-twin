@@ -241,7 +241,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
           <SurveyImportButton />
           <CreateSurveyFolderButton />
           <Button asChild>
-            <Link href="/dashboard/surveys/new">Neue Umfrage</Link>
+            <Link href="/dashboard/frageboegen/neu">Neue Umfrage</Link>
           </Button>
         </div>
       </div>
@@ -424,7 +424,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
             <div className="text-sm text-secondary">
               {q || visibility !== "all" || folderFilter
                 ? "Keine Umfragen für diese Filter."
-                : "Noch keine Umfragen. Klicke auf „Neue Umfrage“, um deinen ersten Entwurf zu erstellen."}
+                : "Noch keine Umfragen. Klicke auf „Neue Umfrage“, um über den Wizard den ersten Entwurf zu erstellen."}
             </div>
             )}
           </div>

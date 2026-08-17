@@ -91,16 +91,6 @@ export function DashboardSidebar({
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
     ...(showLeads ? [{ label: "Leads", href: "/dashboard/leads", icon: Sparkles }] : []),
     { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },
-    ...(canManageDtAgents || isPlatformAdmin
-      ? [
-          {
-            label: "Fragebögen",
-            href: "/dashboard/frageboegen",
-            icon: ClipboardPenLine,
-            match: (pathname: string) => pathname.startsWith("/dashboard/frageboegen"),
-          },
-        ]
-      : []),
     ...(canManageIntegrations
       ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
       : []),
@@ -150,6 +140,16 @@ export function DashboardSidebar({
       : []),
   ];
 
+  const frageboegenItem: NavItem | null =
+    canManageDtAgents || isPlatformAdmin
+      ? {
+          label: "Fragebögen",
+          href: "/dashboard/frageboegen",
+          icon: ClipboardPenLine,
+          match: (pathname: string) => pathname.startsWith("/dashboard/frageboegen"),
+        }
+      : null;
+
   const adminItems: NavItem[] = [
     {
       label: "Agent-Anfragen",
@@ -173,14 +173,15 @@ export function DashboardSidebar({
       icon: Mail,
       match: (pathname: string) => pathname.startsWith("/dashboard/admin/mails"),
     },
-    {
-      label: "Alle Umfragen",
-      href: "/dashboard/surveys",
-      icon: ClipboardList,
-      showDot: pendingSurveyQuestionsCount > 0,
-      match: (pathname: string) => pathname.startsWith("/dashboard/surveys"),
-    },
   ];
+
+  const alleUmfragenItem: NavItem = {
+    label: "Alle Umfragen",
+    href: "/dashboard/surveys",
+    icon: ClipboardList,
+    showDot: pendingSurveyQuestionsCount > 0,
+    match: (pathname: string) => pathname.startsWith("/dashboard/surveys"),
+  };
 
   return (
     <div className="grid gap-4">
@@ -192,7 +193,7 @@ export function DashboardSidebar({
         ))}
       </nav>
 
-      {verwaltungItems.length > 0 || isPlatformAdmin ? (
+      {verwaltungItems.length > 0 || frageboegenItem || isPlatformAdmin ? (
         <div className="grid gap-2 pt-2">
           <div className="border-t border-sbkm-navy/10 pt-3 dark:border-white/10">
             <p className="px-2 text-[11px] font-bold uppercase tracking-[0.14em] text-sbkm-ink-500">
@@ -206,6 +207,8 @@ export function DashboardSidebar({
             {isPlatformAdmin
               ? adminItems.map((item) => <NavLink key={item.href} item={item} />)
               : null}
+            {frageboegenItem ? <NavLink key={frageboegenItem.href} item={frageboegenItem} /> : null}
+            {isPlatformAdmin ? <NavLink key={alleUmfragenItem.href} item={alleUmfragenItem} /> : null}
           </nav>
         </div>
       ) : null}
