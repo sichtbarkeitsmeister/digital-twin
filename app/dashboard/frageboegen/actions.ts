@@ -144,9 +144,21 @@ const reviewQuestionSchema = z.object({
   id: z.string().min(1),
   kind: z.enum(["core", "extra"]),
   coreKey: z.string().optional(),
-  title: z.string().min(1),
+  title: z.string(),
   description: z.string().default(""),
   included: z.boolean(),
+  required: z.boolean().default(false),
+  type: z
+    .enum(["text", "text_list", "radio", "checkbox", "rating", "ranking"])
+    .default("text"),
+  options: z
+    .array(z.object({ id: z.string().min(1), label: z.string() }))
+    .default([]),
+  allowOtherOption: z.boolean().optional(),
+  allowExtraEntries: z.boolean().optional(),
+  allowCustomEntries: z.boolean().optional(),
+  scaleMin: z.number().int().optional(),
+  scaleMax: z.number().int().optional(),
   answer: z.string().default(""),
   answerSource: z.enum(["organisation", "website", "crawl", "ai", "meeting", "none"]),
   answerNote: z.string().default(""),
