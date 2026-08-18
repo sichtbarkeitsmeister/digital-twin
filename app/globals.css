@@ -38,7 +38,8 @@
     --chart-5: 27 87% 67%;
     --radius: 1rem;
 
-    --font-clash: "Clash Display", system-ui, sans-serif;
+    /* Keep family-only so Tailwind `font-display` can fall back to Poppins. */
+    --font-clash: "Clash Display";
   }
 
   .dark {

@@ -125,7 +125,7 @@ export function LandingHero() {
         </FadeIn>
 
         <FadeIn delay={0.08}>
-          <h1 className="mt-7 font-display text-[clamp(2rem,3.8vw+0.6rem,3.75rem)] font-medium leading-[1.08] tracking-[-0.02em] text-balance text-sbkm-navy dark:text-white">
+          <h1 className="mt-7 font-display text-[clamp(2rem,3.8vw+0.6rem,3.75rem)] font-bold leading-[1.08] tracking-[-0.02em] text-balance text-sbkm-navy dark:text-white">
             Bevor ein Text auf Ihrer Website landet, wissen wir schon, ob er die
             richtigen Menschen anspricht.
           </h1>
