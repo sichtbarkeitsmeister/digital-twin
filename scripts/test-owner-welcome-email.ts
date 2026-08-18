@@ -6,7 +6,9 @@ import {
 } from "../lib/email/owner-welcome";
 import {
   formatMemberInviteEmailStatus,
+  formatSupabaseInviteFailure,
   memberInviteEmailSucceeded,
+  parseEmailRateLimitSeconds,
 } from "../lib/email/member-invite";
 
 assert.equal(
@@ -41,6 +43,20 @@ assert.match(
     true,
   ),
   /535 authentication failed/,
+);
+
+assert.equal(
+  parseEmailRateLimitSeconds(
+    "For security purposes, you can only request this after 58 seconds.",
+  ),
+  58,
+);
+assert.equal(parseEmailRateLimitSeconds("other error"), null);
+assert.match(
+  formatSupabaseInviteFailure(
+    "Supabase-Magic-Link fehlgeschlagen: For security purposes, you can only request this after 58 seconds.",
+  ),
+  /ca\. 58 Sekunden/,
 );
 
 console.log("owner-welcome / invite email status tests: ok");
