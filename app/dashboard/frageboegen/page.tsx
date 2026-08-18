@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
+import { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { createClient } from "@/lib/supabase/server";
 
@@ -146,9 +147,7 @@ export default async function OrganisationFrageboegenPage({
             ) : (
               <ul className="grid gap-2">
                 {surveys.map((survey) => {
-                  const href = survey.responseId
-                    ? `/dashboard/surveys/${survey.surveyId}/responses/${survey.responseId}`
-                    : `/dashboard/surveys/${survey.surveyId}/edit`;
+                  const href = organisationSurveyOpenHref(survey);
                   return (
                     <li key={survey.surveyId}>
                       <Link
@@ -177,7 +176,7 @@ export default async function OrganisationFrageboegenPage({
                             {statusLabel(survey.responseStatus)}
                           </Badge>
                           <span className="text-xs font-medium text-sbkm-navy dark:text-sbkm-mint">
-                            Öffnen →
+                            {href.startsWith("/s/") ? "Ausfüllen →" : "Öffnen →"}
                           </span>
                         </div>
                       </Link>

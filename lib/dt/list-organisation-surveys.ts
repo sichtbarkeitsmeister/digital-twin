@@ -4,6 +4,8 @@ import {
 import { normalizeSurveyPurpose, type SurveyPurpose } from "@/lib/surveys/purpose";
 import { createServiceClient } from "@/lib/supabase/service";
 
+export { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
+
 export type OrganisationSurveyListItem = {
   surveyId: string;
   title: string;
@@ -12,6 +14,8 @@ export type OrganisationSurveyListItem = {
   folderName: string | null;
   organisationId: string | null;
   updatedAt: string | null;
+  slug: string | null;
+  visibility: "public" | "private" | string | null;
   responseId: string | null;
   responseStatus: string | null;
   responseUpdatedAt: string | null;
@@ -25,7 +29,12 @@ type SurveyRow = {
   folder_id: string | null;
   deleted_at: string | null;
   updated_at: string | null;
+  slug: string | null;
+  visibility: string | null;
 };
+
+const SURVEY_LIST_COLUMNS =
+  "id, title, purpose, organisation_id, folder_id, deleted_at, updated_at, slug, visibility";
 
 /**
  * All questionnaires belonging to an organisation:
@@ -50,7 +59,7 @@ export async function listSurveysForOrganisation(input: {
 
   const { data: orgSurveys } = await supabase
     .from("surveys")
-    .select("id, title, purpose, organisation_id, folder_id, deleted_at, updated_at")
+    .select(SURVEY_LIST_COLUMNS)
     .eq("organisation_id", input.organisationId)
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
@@ -79,7 +88,7 @@ export async function listSurveysForOrganisation(input: {
   if (folderIds.size > 0) {
     const { data: folderSurveys } = await supabase
       .from("surveys")
-      .select("id, title, purpose, organisation_id, folder_id, deleted_at, updated_at")
+      .select(SURVEY_LIST_COLUMNS)
       .in("folder_id", [...folderIds])
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
@@ -105,7 +114,7 @@ export async function listSurveysForOrganisation(input: {
   if (missingIds.length > 0) {
     const { data: linked } = await supabase
       .from("surveys")
-      .select("id, title, purpose, organisation_id, folder_id, deleted_at, updated_at")
+      .select(SURVEY_LIST_COLUMNS)
       .in("id", missingIds)
       .is("deleted_at", null);
     for (const s of linked ?? []) {
@@ -150,6 +159,8 @@ export async function listSurveysForOrganisation(input: {
         folderName: s.folder_id ? folderNameById.get(s.folder_id) ?? null : null,
         organisationId: s.organisation_id,
         updatedAt: s.updated_at,
+        slug: typeof s.slug === "string" && s.slug.trim() ? s.slug : null,
+        visibility: s.visibility ?? null,
         responseId: response?.id ?? null,
         responseStatus: response?.status ?? null,
         responseUpdatedAt: response?.updatedAt ?? null,
