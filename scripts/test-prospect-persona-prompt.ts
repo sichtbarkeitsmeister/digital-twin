@@ -79,6 +79,8 @@ function testDefaultTwinIsAlsoProspect() {
   assert.match(prompt, /Rollen-Ausrichtung \(verbindlich/);
   assert.match(prompt, /Interessenten-\/Wunschkunden-Persona/);
   assert.match(prompt, /Biete dem Nutzer keine Hilfe an/);
+  assert.match(prompt, /Sprache & Grammatik/);
+  assert.match(prompt, /Sind du/);
   console.log("default twin is prospect: ok");
 }
 
@@ -92,6 +94,8 @@ function testSurveyDefaultsAreAvatarSpecific() {
   assert.match(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT, /Pre-Sale/);
   assert.match(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT, /kein Coach, kein Berater/);
   assert.match(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT, /Wie kann ich dir helfen/);
+  assert.match(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT, /Sind du/);
+  assert.match(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT, /Anrede konsequent/);
   console.log("survey + digital twin defaults: ok");
 }
 
