@@ -25,9 +25,16 @@ export type PlatformAdminStats = {
   withoutOwner: number;
 };
 
+export type PlatformAdminUser = {
+  id: string;
+  email: string;
+  createdAt: string;
+};
+
 export type PlatformAdminOverview = {
   organisations: PlatformAdminOrgRow[];
   stats: PlatformAdminStats;
+  platformAdmins: PlatformAdminUser[];
 };
 
 export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview> {
@@ -40,6 +47,7 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
     { data: configs },
     { data: agents },
     { data: reports },
+    { data: adminProfiles },
   ] = await Promise.all([
     supabase
       .from("organisations")
@@ -60,6 +68,11 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
       .from("dt_seo_reports")
       .select("organisation_id,finished_at,created_at")
       .order("created_at", { ascending: false }),
+    supabase
+      .from("profiles")
+      .select("id,email,created_at")
+      .eq("role", "admin")
+      .order("email", { ascending: true }),
   ]);
 
   const allOrgs = orgs ?? [];
@@ -160,5 +173,15 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
     withoutOwner: organisations.filter((o) => !o.ownerEmail).length,
   };
 
-  return { organisations, stats };
+  return {
+    organisations,
+    stats,
+    platformAdmins: (adminProfiles ?? [])
+      .filter((row) => Boolean(row.id))
+      .map((row) => ({
+        id: row.id,
+        email: row.email ?? "",
+        createdAt: row.created_at,
+      })),
+  };
 }

@@ -21,12 +21,15 @@ export function InviteMemberForm({
   onSuccess,
   initialEmail,
   submitLabel,
+  canGrantPlatformAdmin = false,
 }: {
   organisationId: string;
   onSuccess?: (message: string) => void;
   /** Prefill for resend flows. */
   initialEmail?: string;
   submitLabel?: string;
+  /** Platform admins can also unlock Verwaltung (orgs, Fragebögen, surveys). */
+  canGrantPlatformAdmin?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(
     inviteToOrganisationAction,
@@ -68,12 +71,36 @@ export function InviteMemberForm({
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="role">Rolle</Label>
+        <Label htmlFor="role">Rolle in der Organisation</Label>
         <Select id="role" name="role" defaultValue="employee" required>
           <option value="employee">Mitarbeiter</option>
           <option value="admin">Admin</option>
         </Select>
+        <p className="text-xs text-secondary">
+          Organisations-Admin darf nur in diesem Team einladen — nicht
+          Organisationen oder Fragebögen anlegen.
+        </p>
       </div>
+
+      {canGrantPlatformAdmin ? (
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+          <input
+            type="checkbox"
+            name="grant_platform_admin"
+            value="on"
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border border-primary accent-primary"
+          />
+          <span className="grid gap-1">
+            <span className="text-sm font-medium">
+              Zusätzlich Verwaltungszugang (Plattform-Admin)
+            </span>
+            <span className="text-xs text-secondary">
+              Sieht denselben Verwaltungsbereich: Organisationen anlegen,
+              Fragebögen, Alle Umfragen.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       {state.message ? (
         <p

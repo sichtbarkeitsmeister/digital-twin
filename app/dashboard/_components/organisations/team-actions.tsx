@@ -11,6 +11,7 @@ import { TransferOwnershipForm } from "@/app/dashboard/_components/transfer-owne
 export function TeamActions(props: {
   organisationId: string;
   canTransferOwnership: boolean;
+  canGrantPlatformAdmin?: boolean;
 }) {
   const [invite, setInvite] = useState(false);
   const [transfer, setTransfer] = useState(false);
@@ -44,11 +45,16 @@ export function TeamActions(props: {
       <CenteredModal
         open={invite}
         title="Mitglied einladen"
-        description="Es wird eine Einladungs-E-Mail mit Magic Link gesendet. Das Fenster bleibt offen, falls der Versand fehlschlägt."
+        description={
+          props.canGrantPlatformAdmin
+            ? "Einladungs-E-Mail mit Magic Link. Für Organisationen und Fragebögen zusätzlich Verwaltungszugang setzen."
+            : "Es wird eine Einladungs-E-Mail mit Magic Link gesendet. Das Fenster bleibt offen, falls der Versand fehlschlägt."
+        }
         onClose={() => setInvite(false)}
       >
         <InviteMemberForm
           organisationId={props.organisationId}
+          canGrantPlatformAdmin={props.canGrantPlatformAdmin}
           onSuccess={() => setInvite(false)}
         />
       </CenteredModal>

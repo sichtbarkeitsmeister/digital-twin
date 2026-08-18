@@ -14,6 +14,10 @@ import {
   ensureOwnerLoginLink,
 } from "@/lib/email/owner-welcome";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
+import {
+  applyPlatformAdminRole,
+  grantPlatformAdminByEmail,
+} from "@/lib/dt/platform-admin-grant";
 import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -230,7 +234,25 @@ const inviteSchema = z.object({
   organisation_id: z.string().uuid(),
   invited_email: z.string().trim().toLowerCase().email(),
   role: z.enum(["admin", "employee"]),
+  grant_platform_admin: checkboxOnSchema.default(false),
 });
+
+async function platformAdminGrantNote(opts: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string | undefined;
+  email: string;
+  requested: boolean;
+}): Promise<string> {
+  if (!opts.requested || !opts.userId) return "";
+  const grant = await grantPlatformAdminByEmail({
+    supabase: opts.supabase,
+    actorUserId: opts.userId,
+    email: opts.email,
+  });
+  return grant.ok
+    ? ` ${grant.message}`
+    : ` Verwaltungszugang nicht gesetzt: ${grant.message}`;
+}
 
 function isDuplicateInviteError(error: { message?: string; code?: string } | null): boolean {
   if (!error) return false;
@@ -252,6 +274,7 @@ export async function inviteToOrganisationAction(
     organisation_id: formData.get("organisation_id"),
     invited_email: formData.get("invited_email"),
     role: formData.get("role"),
+    grant_platform_admin: formData.get("grant_platform_admin"),
   });
 
   if (!parsed.success) {
@@ -328,12 +351,19 @@ export async function inviteToOrganisationAction(
           "Bitte im Posteingang manuell annehmen.",
       };
     }
+    const grantNote = await platformAdminGrantNote({
+      supabase,
+      userId: user?.id,
+      email: invitedEmail,
+      requested: parsed.data.grant_platform_admin,
+    });
     return {
       ok: true,
       emailSent: false,
       selfJoined: true,
       message:
-        "Du hast dich selbst eingeladen — Mitgliedschaft ist aktiv. Keine E-Mail nötig.",
+        "Du hast dich selbst eingeladen — Mitgliedschaft ist aktiv. Keine E-Mail nötig." +
+        grantNote,
     };
   }
 
@@ -345,6 +375,12 @@ export async function inviteToOrganisationAction(
   const organisationName = org?.name?.trim() || "euer DigitalTwin";
 
   const login = await ensureMemberInviteLoginLink(invitedEmail);
+  const grantNote = await platformAdminGrantNote({
+    supabase,
+    userId: user?.id,
+    email: invitedEmail,
+    requested: parsed.data.grant_platform_admin,
+  });
   const emailResult = login.ok
     ? await sendOrgMemberInviteEmail({
         email: invitedEmail,
@@ -377,7 +413,7 @@ export async function inviteToOrganisationAction(
       ok: true,
       emailSent: true,
       inviteLink,
-      message: `${prefix}${mailStatus}`,
+      message: `${prefix}${mailStatus}${grantNote}`,
     };
   }
 
@@ -401,9 +437,9 @@ export async function inviteToOrganisationAction(
       inviteLink,
       message: platformAdmin
         ? `${prefix}${mailStatus} Ersatzweise wurde ein Anmeldelink über Supabase ` +
-          `an ${invitedEmail} gesendet (Absender: noreply@mail.app.supabase.io).`
+          `an ${invitedEmail} gesendet (Absender: noreply@mail.app.supabase.io).${grantNote}`
         : `${prefix}Einladung an ${invitedEmail} gesendet. ` +
-          "Die E-Mail kann im Spam-Ordner landen.",
+          `Die E-Mail kann im Spam-Ordner landen.${grantNote}`,
     };
   }
 
@@ -414,9 +450,9 @@ export async function inviteToOrganisationAction(
     inviteLink,
     message: platformAdmin
       ? `${prefix}${mailStatus} Auch der Ersatzversand schlug fehl ` +
-        `(${fallback.reason}). Du kannst den Anmeldelink unten kopieren.`
+        `(${fallback.reason}). Du kannst den Anmeldelink unten kopieren.${grantNote}`
       : `${prefix}${mailStatus} Du kannst den Anmeldelink unten kopieren und ` +
-        "direkt weitergeben.",
+        `direkt weitergeben.${grantNote}`,
   };
 }
 
@@ -763,5 +799,80 @@ export async function adminArchiveOrganisationAction(
   revalidatePath("/dashboard/organisations");
   revalidatePath(`/dashboard/organisations/${parsed.data.organisationId}`);
   return { ok: true, message: "Organisation wurde gelöscht." };
+}
+
+const grantPlatformAdminSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Bitte eine gültige E-Mail-Adresse eingeben"),
+});
+
+function revalidatePlatformAdminPaths() {
+  revalidatePath("/dashboard", "layout");
+  revalidatePath("/dashboard/organisations");
+  revalidatePath("/dashboard/admin/organisations");
+}
+
+export async function grantPlatformAdminAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = grantPlatformAdminSchema.safeParse({
+    email: formData.get("email") ?? formData.get("invited_email"),
+  });
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) return { ok: false, message: "Nicht angemeldet." };
+
+  const result = await grantPlatformAdminByEmail({
+    supabase,
+    actorUserId: user.id,
+    email: parsed.data.email,
+  });
+  if (result.ok) revalidatePlatformAdminPaths();
+  return result;
+}
+
+const setPlatformAdminSchema = z.object({
+  target_user_id: z.string().uuid(),
+  make_admin: checkboxOnSchema.default(false),
+});
+
+export async function setPlatformAdminAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = setPlatformAdminSchema.safeParse({
+    target_user_id: formData.get("target_user_id"),
+    make_admin: formData.get("make_admin"),
+  });
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) return { ok: false, message: "Nicht angemeldet." };
+
+  const result = await applyPlatformAdminRole({
+    supabase,
+    actorUserId: user.id,
+    targetUserId: parsed.data.target_user_id,
+    makeAdmin: parsed.data.make_admin,
+  });
+  if (result.ok) revalidatePlatformAdminPaths();
+  return result;
 }
 

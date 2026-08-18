@@ -26,6 +26,7 @@ import { DeleteOrganisationButton } from "@/app/dashboard/_components/organisati
 import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button";
 import { ResendInviteButton } from "@/app/dashboard/_components/resend-invite-button";
 import { RevokeInviteButton } from "@/app/dashboard/_components/revoke-invite-button";
+import { SetPlatformAdminButton } from "@/app/dashboard/_components/set-platform-admin-button";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 
 export function OrganisationDetailFallback() {
@@ -113,7 +114,7 @@ export async function OrganisationDetailView({
   ] = await Promise.all([
     supabase
       .from("organisation_members")
-      .select("user_id, org_role, created_at, profiles ( email )")
+      .select("user_id, org_role, created_at, profiles ( email, role )")
       .eq("organisation_id", organisationId)
       .order("created_at", { ascending: true }),
     supabase
@@ -147,7 +148,7 @@ export async function OrganisationDetailView({
     user_id: string;
     org_role: string;
     created_at: string;
-    profiles?: { email: string } | Array<{ email: string }> | null;
+    profiles?: { email: string; role?: string | null } | Array<{ email: string; role?: string | null }> | null;
   }>;
 
   const invites = (invitesRaw ?? []) as Array<{
@@ -255,6 +256,7 @@ export async function OrganisationDetailView({
                 <TeamActions
                   organisationId={organisationId}
                   canTransferOwnership={canTransferOwnership}
+                  canGrantPlatformAdmin={platformAdmin}
                 />
               ) : null}
             </div>
@@ -277,6 +279,7 @@ export async function OrganisationDetailView({
                       ? (member.profiles[0] ?? null)
                       : (member.profiles ?? null);
                     const email = profileObj?.email ?? null;
+                    const isPlatformAdminMember = profileObj?.role === "admin";
                     const label = memberDisplayName(email);
 
                     const canKickThis = (() => {
@@ -303,18 +306,35 @@ export async function OrganisationDetailView({
                               <span className="truncate text-sm font-medium">{label}</span>
                               {isSelf ? <Badge variant="secondary">Du</Badge> : null}
                               <Badge variant="outline">{formatOrgRole(member.org_role)}</Badge>
+                              {isPlatformAdminMember ? (
+                                <Badge>Plattform-Admin</Badge>
+                              ) : null}
                             </div>
                             <p className="text-xs text-secondary">
                               Seit {formatOrgDate(member.created_at)}
                             </p>
                           </div>
                         </div>
-                        {canKickThis ? (
-                          <KickMemberButton
-                            organisationId={organisationId}
-                            targetUserId={member.user_id}
-                          />
-                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {platformAdmin && !isSelf && !isPlatformAdminMember ? (
+                            <SetPlatformAdminButton
+                              targetUserId={member.user_id}
+                              makeAdmin
+                            />
+                          ) : null}
+                          {platformAdmin && !isSelf && isPlatformAdminMember ? (
+                            <SetPlatformAdminButton
+                              targetUserId={member.user_id}
+                              makeAdmin={false}
+                            />
+                          ) : null}
+                          {canKickThis ? (
+                            <KickMemberButton
+                              organisationId={organisationId}
+                              targetUserId={member.user_id}
+                            />
+                          ) : null}
+                        </div>
                       </li>
                     );
                   })}
@@ -359,6 +379,7 @@ export async function OrganisationDetailView({
                               <ResendInviteButton
                                 organisationId={organisationId}
                                 email={invite.email}
+                                canGrantPlatformAdmin={platformAdmin}
                               />
                               <RevokeInviteButton
                                 inviteId={invite.id}

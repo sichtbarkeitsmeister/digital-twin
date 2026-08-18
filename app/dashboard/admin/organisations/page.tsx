@@ -4,6 +4,8 @@ import * as React from "react";
 import { ClipboardPenLine, Workflow } from "lucide-react";
 
 import { AdminCreateOrgForm } from "@/app/dashboard/_components/admin-create-org-form";
+import { GrantPlatformAdminForm } from "@/app/dashboard/_components/grant-platform-admin-form";
+import { SetPlatformAdminButton } from "@/app/dashboard/_components/set-platform-admin-button";
 import { PlatformAdminOrgHub } from "@/app/dashboard/_components/organisations/platform-admin-org-hub";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 import { loadPlatformAdminOverview } from "@/lib/dashboard/platform-admin-overview";
@@ -59,7 +61,7 @@ async function AdminOrganisationsPageContent() {
     redirect("/dashboard/inbox");
   }
 
-  const { organisations, stats } = await loadPlatformAdminOverview();
+  const { organisations, stats, platformAdmins } = await loadPlatformAdminOverview();
 
   return (
     <OrganisationPageShell>
@@ -94,6 +96,49 @@ async function AdminOrganisationsPageContent() {
             </CardHeader>
             <CardContent>
               <AdminCreateOrgForm />
+            </CardContent>
+          </Card>
+
+          <Card
+            id="verwaltungszugang"
+            className="overflow-hidden scroll-mt-6 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
+          >
+            <CardHeader>
+              <CardTitle className="tracking-tight">Verwaltungszugang</CardTitle>
+              <CardDescription>
+                Kolleginnen denselben Verwaltungsbereich geben — Organisationen,
+                Fragebögen und Umfragen anlegen. Organisations-Mitgliedschaft allein reicht nicht.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <GrantPlatformAdminForm />
+              {platformAdmins.length > 0 ? (
+                <ul className="grid gap-2 border-t border-border/60 pt-3">
+                  {platformAdmins.map((admin) => {
+                    const isSelf = admin.id === userId;
+                    return (
+                      <li
+                        key={admin.id}
+                        className="flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {admin.email || admin.id}
+                          </p>
+                        </div>
+                        {isSelf ? (
+                          <Badge variant="outline">Du</Badge>
+                        ) : (
+                          <SetPlatformAdminButton
+                            targetUserId={admin.id}
+                            makeAdmin={false}
+                          />
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </CardContent>
           </Card>
 

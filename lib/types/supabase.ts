@@ -1087,6 +1087,10 @@ export type Database = {
         Args: { p_answers: Json; p_mark_completed?: boolean; p_slug: string }
         Returns: undefined
       }
+      set_platform_admin: {
+        Args: { make_admin: boolean; target_user_id: string }
+        Returns: undefined
+      }
       transfer_organisation_ownership: {
         Args: { new_owner_user_id: string; org_id: string }
         Returns: undefined

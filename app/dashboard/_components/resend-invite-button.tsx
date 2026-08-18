@@ -9,9 +9,11 @@ import { CenteredModal } from "@/components/ui/centered-modal";
 export function ResendInviteButton({
   organisationId,
   email,
+  canGrantPlatformAdmin = false,
 }: {
   organisationId: string;
   email: string;
+  canGrantPlatformAdmin?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -41,6 +43,7 @@ export function ResendInviteButton({
           organisationId={organisationId}
           initialEmail={email}
           submitLabel="E-Mail erneut senden"
+          canGrantPlatformAdmin={canGrantPlatformAdmin}
           onSuccess={(message) => {
             setStatus(message);
             setOpen(false);
