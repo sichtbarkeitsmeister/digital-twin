@@ -186,6 +186,32 @@ function isAlreadyRegistered(message: string) {
   return m.includes("already been registered") || m.includes("already registered");
 }
 
+/** Parse Supabase "you can only request this after N seconds" rate limits. */
+export function parseEmailRateLimitSeconds(message: string): number | null {
+  const m = message.match(/after\s+(\d+)\s+seconds?/i);
+  if (!m?.[1]) return null;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function formatSupabaseInviteFailure(message: string): string {
+  const wait = parseEmailRateLimitSeconds(message);
+  if (wait != null) {
+    return (
+      `Supabase-Versand vorübergehend begrenzt — bitte in ca. ${wait} Sekunden erneut versuchen ` +
+      `(oder den Anmeldelink unten kopieren).`
+    );
+  }
+  if (/535|authentication failed|invalid login/i.test(message)) {
+    return `SMTP-Login fehlgeschlagen (${message}).`;
+  }
+  return message;
+}
+
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Fallback delivery through Supabase's own auth mailer.
  * Used when the project SMTP relay refuses our branded mail — the invitee still
@@ -219,8 +245,9 @@ export async function sendSupabaseAuthInviteEmail(input: {
   };
 
   const fail = async (reason: string): Promise<SupabaseAuthInviteResult> => {
-    await logEmailSend({ ...logContext, status: "failed", errorMessage: reason });
-    return { ok: false, reason };
+    const friendly = formatSupabaseInviteFailure(reason);
+    await logEmailSend({ ...logContext, status: "failed", errorMessage: friendly });
+    return { ok: false, reason: friendly };
   };
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -234,10 +261,38 @@ export async function sendSupabaseAuthInviteEmail(input: {
     return fail(err instanceof Error ? err.message : "Service-Role fehlt");
   }
 
-  if (input.isNewAccount) {
-    const { error } = await service.auth.admin.inviteUserByEmail(to, {
+  const sendInvite = async () =>
+    service.auth.admin.inviteUserByEmail(to, {
       redirectTo: inboxRedirectUrl(),
     });
+
+  const sendMagicLink = async () => {
+    const anon = createSupabaseClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    return anon.auth.signInWithOtp({
+      email: to,
+      options: { shouldCreateUser: false, emailRedirectTo: inboxRedirectUrl() },
+    });
+  };
+
+  /** One short automatic retry when Supabase rate-limits briefly. */
+  async function withRateLimitRetry<T extends { error: { message: string } | null }>(
+    run: () => Promise<T>,
+  ): Promise<T> {
+    let result = await run();
+    if (!result.error) return result;
+    const waitSec = parseEmailRateLimitSeconds(result.error.message);
+    // Only wait for short limits — longer waits would blow the request timeout.
+    if (waitSec == null || waitSec > 12) return result;
+    const waitMs = waitSec * 1000 + 400;
+    console.warn(`[email] supabase rate limit — waiting ${waitMs}ms then retry`);
+    await sleep(waitMs);
+    return run();
+  }
+
+  if (input.isNewAccount) {
+    const { error } = await withRateLimitRetry(sendInvite);
     if (!error) {
       await logEmailSend({
         ...logContext,
@@ -252,13 +307,7 @@ export async function sendSupabaseAuthInviteEmail(input: {
   }
 
   // Existing account: Supabase only mails a magic link through the public API.
-  const anon = createSupabaseClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { error } = await anon.auth.signInWithOtp({
-    email: to,
-    options: { shouldCreateUser: false, emailRedirectTo: inboxRedirectUrl() },
-  });
+  const { error } = await withRateLimitRetry(sendMagicLink);
   if (error) return fail(`Supabase-Magic-Link fehlgeschlagen: ${error.message}`);
 
   await logEmailSend({
