@@ -209,7 +209,15 @@ async function AdminMailsPageContent({
                     SMTP_HOST, SMTP_USER und SMTP_PASS (oder SMTP_PASSWORD) müssen gesetzt sein.
                   </p>
                 </div>
-              ) : null}
+              ) : (
+                <p className="text-xs text-secondary">
+                  Schlägt SMTP fehl (z.&nbsp;B. mailcow{" "}
+                  <code className="text-[11px]">535 authentication failed</code>
+                  ), greift der Supabase-Ersatzversand — prüfe die Logs unten auf{" "}
+                  <code className="text-[11px]">member_invite_supabase</code> /{" "}
+                  <code className="text-[11px]">owner_welcome_supabase</code>.
+                </p>
+              )}
             </div>
           </section>
 
