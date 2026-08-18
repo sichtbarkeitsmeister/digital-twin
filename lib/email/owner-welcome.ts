@@ -1,4 +1,8 @@
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
+import {
+  sendSupabaseAuthInviteEmail,
+  type SupabaseAuthInviteResult,
+} from "@/lib/email/member-invite";
 import { logEmailSend } from "@/lib/email/send-log";
 import { renderOrgOwnerWelcomeEmail } from "@/lib/email/templates/org-owner-welcome";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -15,6 +19,18 @@ export type OwnerWelcomeEmailResult =
 
 function ownerPortalRedirectUrl() {
   return `${getAppBaseUrl()}/`;
+}
+
+async function generateOwnerAuthLink(
+  service: ReturnType<typeof createServiceClient>,
+  email: string,
+  type: "invite" | "magiclink",
+) {
+  return service.auth.admin.generateLink({
+    type,
+    email,
+    options: { redirectTo: ownerPortalRedirectUrl() },
+  });
 }
 
 export async function ensureOwnerLoginLink(
@@ -40,15 +56,29 @@ export async function ensureOwnerLoginLink(
     .eq("email", normalized)
     .maybeSingle();
 
-  const isNewAccount = !profile?.id;
-  const linkType = isNewAccount ? "invite" : "magiclink";
-  const redirectTo = ownerPortalRedirectUrl();
+  let isNewAccount = !profile?.id;
+  let linkType: "invite" | "magiclink" = isNewAccount ? "invite" : "magiclink";
 
-  const { data: linkData, error: linkErr } = await service.auth.admin.generateLink({
-    type: linkType,
-    email: normalized,
-    options: { redirectTo },
-  });
+  let { data: linkData, error: linkErr } = await generateOwnerAuthLink(
+    service,
+    normalized,
+    linkType,
+  );
+
+  // Auth user may already exist even without a profiles row (or vice versa).
+  if (linkErr && linkType === "invite") {
+    console.warn(
+      "[email] owner invite link failed, trying magiclink:",
+      linkErr.message,
+    );
+    isNewAccount = false;
+    linkType = "magiclink";
+    ({ data: linkData, error: linkErr } = await generateOwnerAuthLink(
+      service,
+      normalized,
+      "magiclink",
+    ));
+  }
 
   if (linkErr) {
     console.warn("[email] owner login link:", linkErr.message);
@@ -140,6 +170,85 @@ export async function sendOrgOwnerWelcomeEmail(input: {
     console.warn("[email] owner welcome:", reason);
     return { ok: false, reason };
   }
+}
+
+export function ownerWelcomeEmailSucceeded(
+  result: OwnerWelcomeEmailResult | null,
+): boolean {
+  return Boolean(result?.ok && !result.skipped);
+}
+
+/**
+ * When branded SMTP fails/skips, deliver via Supabase auth mailer (same as
+ * member invites). SMTP at mailcow has historically rejected auth — without
+ * this fallback owner invites never arrive.
+ */
+export async function deliverOwnerWelcomeWithFallback(input: {
+  email: string;
+  organisationName: string;
+  organisationId?: string | null;
+  link: string | null;
+  isNewAccount: boolean;
+  triggeredByUserId?: string | null;
+}): Promise<{
+  branded: OwnerWelcomeEmailResult | null;
+  fallback: SupabaseAuthInviteResult | null;
+  emailSent: boolean;
+  statusMessage: string;
+}> {
+  let branded: OwnerWelcomeEmailResult | null = null;
+  if (input.link) {
+    branded = await sendOrgOwnerWelcomeEmail({
+      email: input.email,
+      organisationName: input.organisationName,
+      link: input.link,
+      isNewAccount: input.isNewAccount,
+      triggeredByUserId: input.triggeredByUserId,
+      organisationId: input.organisationId,
+    });
+    if (ownerWelcomeEmailSucceeded(branded)) {
+      return {
+        branded,
+        fallback: null,
+        emailSent: true,
+        statusMessage: "Einladungs-E-Mail wurde gesendet.",
+      };
+    }
+  }
+
+  const fallback = await sendSupabaseAuthInviteEmail({
+    email: input.email,
+    organisationId: input.organisationId,
+    organisationName: input.organisationName,
+    role: "owner",
+    isNewAccount: input.isNewAccount,
+    triggeredByUserId: input.triggeredByUserId,
+    logKind: "owner_welcome_supabase",
+  });
+
+  if (fallback.ok) {
+    const brandedNote = branded
+      ? formatOwnerWelcomeEmailStatus(branded, true)
+      : "Einladungs-E-Mail konnte nicht über SMTP gesendet werden.";
+    return {
+      branded,
+      fallback,
+      emailSent: true,
+      statusMessage:
+        `${brandedNote ?? "SMTP-Versand fehlgeschlagen."} ` +
+        "Ersatzweise wurde ein Anmeldelink über Supabase gesendet " +
+        "(Absender: noreply@mail.app.supabase.io) — Spam-Ordner prüfen.",
+    };
+  }
+
+  return {
+    branded,
+    fallback,
+    emailSent: false,
+    statusMessage:
+      formatOwnerWelcomeEmailStatus(branded, true) ??
+      `Einladungs-E-Mail fehlgeschlagen (${fallback.reason}).`,
+  };
 }
 
 export function formatOwnerWelcomeEmailStatus(

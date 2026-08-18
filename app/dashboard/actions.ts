@@ -10,9 +10,8 @@ import {
   sendSupabaseAuthInviteEmail,
 } from "@/lib/email/member-invite";
 import {
+  deliverOwnerWelcomeWithFallback,
   ensureOwnerLoginLink,
-  formatOwnerWelcomeEmailStatus,
-  sendOrgOwnerWelcomeEmail,
 } from "@/lib/email/owner-welcome";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
@@ -153,7 +152,9 @@ export async function adminCreateOrganisationAction(
       return { ok: false, message: mapAdminCreateOrganisationError(error) };
     }
 
-    let emailStatus: ReturnType<typeof formatOwnerWelcomeEmailStatus> = null;
+    let emailStatus: string | null = null;
+    let inviteLink: string | null = null;
+    let emailSent = false;
     if (send_welcome) {
       let loginLink: Awaited<ReturnType<typeof ensureOwnerLoginLink>> = null;
       try {
@@ -165,18 +166,34 @@ export async function adminCreateOrganisationAction(
         );
       }
 
-      if (loginLink) {
-        const emailResult = await sendOrgOwnerWelcomeEmail({
-          email: owner_email,
-          organisationName: org_name,
-          link: loginLink.link,
-          isNewAccount: loginLink.isNewAccount,
-          triggeredByUserId: user?.id ?? null,
-        });
-        emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
-      } else {
-        emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
+      inviteLink = loginLink?.link ?? null;
+
+      let organisationId: string | null = null;
+      try {
+        const service = createServiceClient();
+        const { data: orgRow } = await service
+          .from("organisations")
+          .select("id")
+          .eq("slug", resolvedSlug)
+          .maybeSingle();
+        organisationId = orgRow?.id ?? null;
+      } catch (err) {
+        console.warn(
+          "[admin] org id lookup after create failed:",
+          err instanceof Error ? err.message : err,
+        );
       }
+
+      const delivery = await deliverOwnerWelcomeWithFallback({
+        email: owner_email,
+        organisationName: org_name,
+        organisationId,
+        link: inviteLink,
+        isNewAccount: loginLink?.isNewAccount ?? true,
+        triggeredByUserId: user?.id ?? null,
+      });
+      emailStatus = delivery.statusMessage;
+      emailSent = delivery.emailSent;
     }
 
     revalidatePath("/dashboard/admin/organisations");
@@ -185,6 +202,8 @@ export async function adminCreateOrganisationAction(
     const baseMessage = "Organisation wurde angelegt.";
     return {
       ok: true,
+      emailSent,
+      inviteLink,
       message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
     };
   } catch (err) {
@@ -614,22 +633,22 @@ export async function transferOwnershipAction(
   const organisationName = orgRow?.name?.trim() || "deine Organisation";
   const send_welcome = parsed.data.send_welcome;
 
-  let emailStatus: ReturnType<typeof formatOwnerWelcomeEmailStatus> = null;
+  let emailStatus: string | null = null;
+  let inviteLink: string | null = null;
+  let emailSent = false;
   if (send_welcome) {
     const loginLink = await ensureOwnerLoginLink(parsed.data.new_owner_email);
-    if (loginLink) {
-      const emailResult = await sendOrgOwnerWelcomeEmail({
-        email: parsed.data.new_owner_email,
-        organisationName,
-        link: loginLink.link,
-        isNewAccount: loginLink.isNewAccount,
-        triggeredByUserId: user.id,
-        organisationId: parsed.data.organisation_id,
-      });
-      emailStatus = formatOwnerWelcomeEmailStatus(emailResult, send_welcome);
-    } else {
-      emailStatus = formatOwnerWelcomeEmailStatus(null, send_welcome);
-    }
+    inviteLink = loginLink?.link ?? null;
+    const delivery = await deliverOwnerWelcomeWithFallback({
+      email: parsed.data.new_owner_email,
+      organisationName,
+      organisationId: parsed.data.organisation_id,
+      link: inviteLink,
+      isNewAccount: loginLink?.isNewAccount ?? false,
+      triggeredByUserId: user.id,
+    });
+    emailStatus = delivery.statusMessage;
+    emailSent = delivery.emailSent;
   }
 
   revalidatePath("/dashboard/organisations");
@@ -637,6 +656,8 @@ export async function transferOwnershipAction(
   const baseMessage = `Ownership wurde an ${profile.email ?? parsed.data.new_owner_email} übertragen.`;
   return {
     ok: true,
+    emailSent,
+    inviteLink,
     message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
   };
 }
