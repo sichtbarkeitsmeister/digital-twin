@@ -87,6 +87,30 @@ export function AdminCreateOrgForm() {
         </p>
       ) : null}
 
+      {state.inviteLink && !state.emailSent ? (
+        <div className="grid gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+          <p className="text-xs font-medium text-amber-950 dark:text-amber-100">
+            Anmeldelink zum Weitergeben (falls die Mail nicht ankommt):
+          </p>
+          <code className="break-all text-xs text-primary">{state.inviteLink}</code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-fit"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(state.inviteLink!);
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Link kopieren
+          </Button>
+        </div>
+      ) : null}
+
       <Button
         type="submit"
         disabled={pending}

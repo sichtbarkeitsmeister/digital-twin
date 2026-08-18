@@ -193,17 +193,20 @@ function isAlreadyRegistered(message: string) {
  */
 export async function sendSupabaseAuthInviteEmail(input: {
   email: string;
-  organisationId: string;
+  organisationId?: string | null;
   organisationName: string;
   role: string;
   isNewAccount: boolean;
   triggeredByUserId?: string | null;
+  /** Defaults to member_invite_supabase (also used for owner welcome). */
+  logKind?: string;
 }): Promise<SupabaseAuthInviteResult> {
   const to = input.email.trim().toLowerCase();
   if (!to) return { ok: false, reason: "Keine E-Mail-Adresse" };
 
+  const logKind = input.logKind?.trim() || "member_invite_supabase";
   const logContext = {
-    kind: "member_invite_supabase",
+    kind: logKind,
     to: [to],
     subject: `Einladung zu ${input.organisationName} (Supabase-Versand)`,
     metadata: {
@@ -212,7 +215,7 @@ export async function sendSupabaseAuthInviteEmail(input: {
       isNewAccount: input.isNewAccount,
     },
     triggeredByUserId: input.triggeredByUserId ?? null,
-    organisationId: input.organisationId,
+    organisationId: input.organisationId ?? null,
   };
 
   const fail = async (reason: string): Promise<SupabaseAuthInviteResult> => {
