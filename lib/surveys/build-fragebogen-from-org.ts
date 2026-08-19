@@ -65,7 +65,7 @@ async function generateExtrasAndAiPrefills(input: {
   if (!apiKey) return { extras: [], aiPrefills: {} };
 
   const anthropic = new Anthropic({ apiKey });
-  const maxExtras = input.maxExtras ?? 6;
+  const maxExtras = input.maxExtras ?? 8;
   const missing = input.coreItems.filter((c) => !c.hasPrefill);
   const audience =
     input.purpose === "anbieter"
@@ -101,7 +101,7 @@ ${input.crawlSummary.slice(0, 8000)}
 Aufgabe:
 1) Für fehlende Kernfragen: kurze Antwortvorschläge — zuerst aus Meeting, sonst nur wenn Crawl klar hergibt (sonst weglassen).
 2) Mitbewerber/gute Wettbewerber/Inhaber/Seiten-Links aus dem Meeting möglichst wörtlich übernehmen.
-3) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen (nicht die Kernfragen wiederholen).` : "Keine Zusatzfragen (questions=[])."}
+3) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen. Nicht die Kernfragen wiederholen. Nur Dinge, die sich aus Website oder Meeting für DIESES Unternehmen ergeben (konkrete Angebote, Standorte, Besonderheiten). Diese Fragen stehen als letzter Block.` : "Keine Zusatzfragen (questions=[])."}
 
 JSON:
 {
@@ -242,7 +242,10 @@ export async function buildFragebogenReviewDraft(input: {
       included: true,
       required: t.required,
       type: t.type,
-      options: [],
+      options: (t.options ?? []).map((o) => ({ id: o.id, label: o.label })),
+      allowOtherOption: t.allowOtherOption,
+      allowExtraEntries: t.allowExtraEntries,
+      allowCustomEntries: t.allowCustomEntries,
       answer: draft?.value ?? "",
       answerSource: draft?.source ?? "none",
       answerNote: draft?.note ?? "",
@@ -256,7 +259,7 @@ export async function buildFragebogenReviewDraft(input: {
       kind: "extra" as const,
       title,
       description:
-        "Individuelle Zusatzfrage aus Crawl/KI — bei Bedarf entfernen oder umformulieren.",
+        "Individuelle Zusatzfrage aus Crawl/KI — bearbeiten, kopieren oder löschen.",
       included: true,
       required: false,
       type: "text" as const,

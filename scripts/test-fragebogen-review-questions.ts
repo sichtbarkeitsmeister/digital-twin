@@ -97,4 +97,37 @@ assert.ok(ranking.options.length >= 2);
 const rankingField = reviewQuestionToSurveyField(ranking);
 assert.equal(rankingField.type, "ranking");
 
+const anbieterArchetype: ReviewQuestionItem = {
+  id: "core_company_archetype",
+  kind: "core",
+  coreKey: "company_archetype",
+  title: "Welcher Unternehmens-Typ trifft am ehesten zu?",
+  description: "",
+  included: true,
+  required: false,
+  type: "ranking",
+  options: [
+    { id: "a1", label: "Der Experte" },
+    { id: "a2", label: "Der Kümmerer" },
+  ],
+  allowCustomEntries: true,
+  answer: "",
+  answerSource: "none",
+  answerNote: "",
+};
+const anbieterBuilt = buildSurveyAndAnswersFromReview({
+  draft: {
+    ...baseDraft([anbieterArchetype]),
+    purpose: "anbieter",
+    title: "Anbieter: Test",
+  },
+  savePrefills: false,
+});
+const archetypeStep = anbieterBuilt.definition.steps.find((s) =>
+  s.fields.some((f) => f.id === "core_company_archetype"),
+);
+assert.ok(archetypeStep);
+assert.equal(archetypeStep?.title, "Unternehmen & Positionierung");
+assert.equal(archetypeStep?.fields[0]?.type, "ranking");
+
 console.log("fragebogen-review-questions: all ok");
