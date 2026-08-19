@@ -127,7 +127,7 @@ const archetypeStep = anbieterBuilt.definition.steps.find((s) =>
   s.fields.some((f) => f.id === "core_company_archetype"),
 );
 assert.ok(archetypeStep);
-assert.equal(archetypeStep?.title, "Unternehmen & Positionierung");
+assert.equal(archetypeStep?.title, "Das Unternehmen");
 assert.equal(archetypeStep?.fields[0]?.type, "ranking");
 
 const personaAge: ReviewQuestionItem = {
@@ -155,7 +155,7 @@ const ageStep = personaBuilt.definition.steps.find((s) =>
   s.fields.some((f) => f.id === "core_persona_age"),
 );
 assert.ok(ageStep);
-assert.equal(ageStep?.title, "Demografie & Lebenssituation");
+assert.equal(ageStep?.title, "Alter, Beruf & Lebenssituation");
 assert.equal(ageStep?.fields.find((f) => f.id === "core_persona_age")?.type, "radio");
 
 console.log("fragebogen-review-questions: all ok");

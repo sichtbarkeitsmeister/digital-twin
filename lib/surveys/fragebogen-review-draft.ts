@@ -38,6 +38,7 @@ export type ReviewQuestionItem = {
   allowOtherOption?: boolean;
   allowExtraEntries?: boolean;
   allowCustomEntries?: boolean;
+  addEntryLabel?: string;
   scaleMin?: number;
   scaleMax?: number;
   answer: string;
@@ -111,10 +112,22 @@ export function applyReviewQuestionType(
   }
   const options = ensureOptions(question.options, nextType === "ranking" ? 2 : 1);
   if (nextType === "text_list") {
+    const labeled = (question.options ?? []).filter(
+      (o) => o && typeof o.id === "string" && o.label.trim().length > 0,
+    );
+    const listOptions =
+      labeled.length >= 2
+        ? labeled.map((o) => ({ id: o.id || createId(), label: o.label }))
+        : [
+            { id: createId(), label: "" },
+            { id: createId(), label: "" },
+            { id: createId(), label: "" },
+          ];
     return {
       ...next,
-      options,
+      options: listOptions,
       allowExtraEntries: question.allowExtraEntries !== false,
+      addEntryLabel: question.addEntryLabel,
     };
   }
   if (nextType === "radio") {
@@ -163,8 +176,9 @@ export function reviewQuestionToSurveyField(q: ReviewQuestionItem): SurveyField 
     return {
       ...base,
       type: "text_list",
-      options: ensureOptions(q.options, 1),
+      options: ensureOptions(q.options, 3).map((o) => ({ id: o.id, label: o.label })),
       allowExtraEntries: q.allowExtraEntries !== false,
+      addEntryLabel: q.addEntryLabel?.trim() || undefined,
     };
   }
 

@@ -25,6 +25,23 @@ assert.equal(
   ANBIETER_CORE_QUESTIONS.filter((q) => q.key === "website" || q.key === "employee_count").length,
   0,
 );
+assert.ok(
+  ANBIETER_CORE_QUESTIONS.some(
+    (q) => q.key === "typical_process" && q.type === "text_list" && (q.options?.length ?? 0) === 3,
+  ),
+);
+assert.ok(
+  ANBIETER_CORE_QUESTIONS.some(
+    (q) => q.key === "competitors_top" && q.type === "text_list" && q.addEntryLabel === "Mitbewerber hinzufügen",
+  ),
+);
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "keyword_offer" && q.type === "text_list"));
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "keyword_problem" && q.type === "text_list"));
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "keyword_place" && q.type === "text_list"));
+assert.equal(
+  ANBIETER_CORE_QUESTIONS.filter((q) => q.key === "nap_consistency" || q.key === "focus_keywords").length,
+  0,
+);
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_pain"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_confirm_real_experience"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_name" && q.type === "text"));
@@ -35,6 +52,20 @@ assert.ok(
 );
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_hormozi_dream"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_summary"));
+assert.ok(
+  PERSONA_CORE_QUESTIONS.some(
+    (q) =>
+      q.key === "persona_first_contact_phrases" &&
+      q.type === "text_list" &&
+      (q.options?.length ?? 0) === 5,
+  ),
+);
+assert.ok(
+  PERSONA_CORE_QUESTIONS.some(
+    (q) => q.key === "persona_first_meeting_questions" && q.type === "text_list" && (q.options?.length ?? 0) === 3,
+  ),
+);
+assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_jargon_known" && q.type === "text_list"));
 assert.equal(
   PERSONA_CORE_QUESTIONS.filter((q) => q.key === "persona_goal" || q.key === "persona_criteria")
     .length,
@@ -62,7 +93,7 @@ const ranking = fieldFromCoreTemplate(
 assert.equal(ranking.type, "ranking");
 if (ranking.type === "ranking") {
   assert.ok(ranking.options.length >= 2);
-  assert.equal(ranking.allowCustomEntries, true);
+  assert.equal(ranking.allowCustomEntries, false);
 }
 
 const definition = {
@@ -104,14 +135,18 @@ assert.equal(
 assert.ok(
   ANBIETER_CORE_QUESTIONS.some((q) => q.key === "portfolio_links"),
 );
-assert.ok(
-  ANBIETER_CORE_QUESTIONS.some((q) => q.key === "other_locations_yesno" && q.type === "radio"),
-);
-assert.ok(
-  ANBIETER_CORE_QUESTIONS.some((q) => q.key === "locations_planned_yesno" && q.type === "radio"),
-);
 const responseChannels = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "response_channels");
 assert.ok(responseChannels);
-assert.match(responseChannels.title, /geantwortet/);
+assert.match(responseChannels.title, /reagiert/);
+
+const processField = fieldFromCoreTemplate(
+  ANBIETER_CORE_QUESTIONS.find((q) => q.key === "typical_process")!,
+);
+assert.equal(processField.type, "text_list");
+if (processField.type === "text_list") {
+  assert.equal(processField.options.length, 3);
+  assert.equal(processField.allowExtraEntries, true);
+  assert.equal(processField.addEntryLabel, "Schritt hinzufügen");
+}
 
 console.log("core-question-templates: ok");

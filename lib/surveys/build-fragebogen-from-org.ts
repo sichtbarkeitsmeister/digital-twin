@@ -246,6 +246,7 @@ export async function buildFragebogenReviewDraft(input: {
       allowOtherOption: t.allowOtherOption,
       allowExtraEntries: t.allowExtraEntries,
       allowCustomEntries: t.allowCustomEntries,
+      addEntryLabel: t.addEntryLabel,
       answer: draft?.value ?? "",
       answerSource: draft?.source ?? "none",
       answerNote: draft?.note ?? "",

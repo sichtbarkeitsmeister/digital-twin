@@ -58,7 +58,7 @@ export function FragebogenReviewQuestionEditor(props: {
         ...q.options,
         {
           id: `opt_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`,
-          label: `Option ${q.options.length + 1}`,
+          label: q.type === "text_list" ? "" : `Option ${q.options.length + 1}`,
         },
       ],
     });
@@ -201,10 +201,10 @@ export function FragebogenReviewQuestionEditor(props: {
         {needsOptions(q.type) ? (
           <div className="grid gap-2">
             <div className="flex items-center justify-between gap-2">
-              <Label>{q.type === "text_list" ? "Prompts / Eingabefelder" : "Optionen"}</Label>
+              <Label>{q.type === "text_list" ? "Leere Antwortfelder" : "Optionen"}</Label>
               <Button type="button" size="sm" variant="outline" onClick={addOption}>
                 <Plus className="mr-2 size-4" />
-                {q.type === "text_list" ? "Prompt" : "Option"}
+                {q.type === "text_list" ? "Feld" : "Option"}
               </Button>
             </div>
             {q.options.map((opt) => (
@@ -212,7 +212,7 @@ export function FragebogenReviewQuestionEditor(props: {
                 <Input
                   value={opt.label}
                   onChange={(e) => updateOption(opt.id, e.target.value)}
-                  placeholder={q.type === "text_list" ? "Prompt" : "Option"}
+                  placeholder={q.type === "text_list" ? "optionales Label, sonst Nummer" : "Option"}
                 />
                 <Button
                   type="button"

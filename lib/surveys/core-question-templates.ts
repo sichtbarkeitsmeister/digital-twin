@@ -36,6 +36,7 @@ export type CoreQuestionTemplate = {
   allowOtherOption?: boolean;
   allowExtraEntries?: boolean;
   allowCustomEntries?: boolean;
+  addEntryLabel?: string;
   prefillHint?: CoreQuestionPrefillHint;
 };
 
@@ -47,944 +48,168 @@ function opts(prefix: string, labels: string[]): SurveyOption[] {
   return labels.map((label, index) => opt(`${prefix}_${index + 1}`, label));
 }
 
+/** Empty numbered slots for repeatable answers (default: 3, plus “add more”). */
+function emptySlots(prefix: string, count = 3): SurveyOption[] {
+  return Array.from({ length: count }, (_, index) => opt(`${prefix}_${index + 1}`, ""));
+}
+
 const YES_NO: SurveyOption[] = [opt("ja", "Ja"), opt("nein", "Nein")];
 
 const PORTFOLIO_PLACEHOLDERS = [
-  "Angebotsbereich 1 (vor Versand branchenbezogen ersetzen)",
-  "Angebotsbereich 2 (vor Versand branchenbezogen ersetzen)",
-  "Angebotsbereich 3 (vor Versand branchenbezogen ersetzen)",
-  "Angebotsbereich 4 (vor Versand branchenbezogen ersetzen)",
+  "[Leistung 1 – vor Versand passend zur Branche ersetzen]",
+  "[Leistung 2 – vor Versand passend zur Branche ersetzen]",
+  "[Leistung 3 – vor Versand passend zur Branche ersetzen]",
+  "[Leistung 4 – vor Versand passend zur Branche ersetzen]",
 ];
 
 const COMPANY_ARCHETYPES = [
-  "Der Visionär",
-  "Der Experte",
-  "Der Kümmerer",
-  "Der Verlässliche",
-  "Der Innovator",
-  "Der Perfektionist",
+  "Zeigt Kunden Möglichkeiten, an die sie vorher nicht gedacht hätten",
+  "Versteht genau, was der Kunde wirklich will",
+  "Verwandelt Wünsche in ein fertiges Ergebnis",
+  "Bringt alle Beteiligten und Abläufe gut zusammen",
+  "Achtet auf jedes kleine Detail",
+  "Ist bekannt dafür, zuverlässig und pünktlich zu sein",
 ];
 
 const RESPONSE_SPEED = [
-  "Unter 2 Stunden",
-  "Innerhalb 24 Std.",
-  "Innerhalb 48 Std.",
-  "Länger",
+  "innerhalb weniger Stunden",
+  "innerhalb eines Tages",
+  "innerhalb von 2 Tagen",
+  "später",
 ];
 
 const RESPONSE_CHANNELS = [
   "Telefon",
   "E-Mail",
   "WhatsApp",
-  "Kontaktformular",
-  "Persönlich vor Ort",
+  "über das Kontaktformular",
+  "persönlich vor Ort",
 ];
 
 const PRICE_POSITION = [
-  "Premium-Segment",
-  "Mittleres Segment",
-  "Einstiegssegment",
-  "Eigene Kategorie – nicht vergleichbar",
+  "deutlich höher",
+  "im Mittelfeld",
+  "eher günstiger",
+  "nicht vergleichbar, eigene Preisstruktur",
 ];
 
 const PRICE_COMMUNICATION = [
-  "Offen auf der Website",
-  "Erst nach Erstgespräch",
-  "Gestaffelt sichtbar",
+  "offen auf der Website",
+  "erst nach einem Gespräch",
+  "teilweise sichtbar",
 ];
 
 const VOLUME_VS_DEPTH = [
-  "Mehr Kundschaft",
-  "Mehr Tiefe pro Auftrag",
-  "Beides gleichwertig",
+  "viele Kunden",
+  "viel Zeit pro Auftrag",
+  "beides gleich wichtig",
 ];
 
 const CUSTOMER_VALUES = [
-  "Individualität",
-  "Nachhaltigkeit",
-  "Vertrauen",
-  "Ehrlichkeit",
-  "Qualität",
-  "Termintreue",
-  "Innovation",
+  "jeder Kunde bekommt eine individuelle Lösung",
+  "Nachhaltigkeit statt schneller Lösungen",
+  "Ehrlichkeit und offene Kommunikation",
+  "Vertrauen und persönliche Beziehung",
+  "hohe Qualität",
+  "Zuverlässigkeit und Pünktlichkeit",
+  "neue Ideen und moderne Methoden",
 ];
 
 const SPEAKING_STYLES = [
-  "Persönlich und herzlich",
-  "Direkt und lösungsorientiert",
-  "Beruhigend und einfühlsam",
-  "Kompetent und fachlich",
+  "persönlich und herzlich, wie mit einem guten Bekannten",
+  "direkt und auf den Punkt",
+  "motivierend und ermutigend",
+  "ruhig und einfühlsam, besonders bei Unsicherheit",
+  "sachlich und fachlich",
 ];
 
 const COMPANY_VOICE = [
-  "Wir von [Name]",
-  "Markenname direkt",
-  "Ich-Form bei Einzelunternehmer",
+  "Wir von [Firmenname]…",
+  "Firmenname direkt, z. B. „[Firmenname] hilft dabei…“",
+  "Ich-Form, falls Einzelperson",
 ];
 
 const JARGON_LEVEL = [
-  "Keine Fachsprache",
-  "Fachkompetenz zeigen, aber immer erklären",
-  "Hoher Fachanteil",
+  "möglichst keine",
+  "dürfen vorkommen, werden aber immer erklärt",
+  "auch mit vielen Fachbegriffen",
 ];
 
 const TEXT_LENGTH = [
-  "Kurz und prägnant",
-  "Ausführlich und detailliert",
-  "Je nach Kanal unterschiedlich",
+  "kurz und knapp",
+  "ausführlich mit Details",
+  "je nach Textart unterschiedlich",
 ];
 
 const PUBLIC_USE = [
-  "Mit Namensnennung",
-  "Nur anonymisiert",
-  "Je nach Beispiel unterschiedlich",
+  "mit Namen",
+  "nur ohne Namen",
+  "kommt auf das Beispiel an",
 ];
 
 const IMAGE_ASSETS = [
   "Vorher-Nachher-Fotos",
-  "Teamfotos",
-  "Prozessfotos",
+  "Fotos vom Team",
+  "Fotos vom Arbeitsprozess",
   "Videos",
-  "Keines vorhanden",
+  "keines vorhanden",
 ];
 
 const ATTENTION_CHANNELS = [
-  "Empfehlung",
+  "Empfehlung von anderen",
   "Google-Suche",
   "Social Media",
-  "Website direkt",
-  "Print",
-  "Partnerschaften",
-  "Vor Ort",
+  "direkt über die Website",
+  "Zeitung oder Flyer",
+  "Zusammenarbeit mit anderen Firmen",
+  "persönlich vor Ort gesehen",
 ];
 
 const ONLINE_CHANNELS = [
-  "Website",
+  "eigene Website",
   "Instagram",
   "Facebook",
   "LinkedIn",
   "YouTube",
   "TikTok",
   "Newsletter",
-  "Google Ads",
+  "Google-Anzeigen",
 ];
 
-const NAP_CONSISTENCY = [
-  "Ja, konsistent",
-  "Nein, es gibt Abweichungen",
-  "Nicht geprüft",
+const RESPONDENT_IS_CLIENT: SurveyOption[] = [
+  opt("ja_dieselbe", "ja, dieselbe Person"),
+  opt("nein_andere", "nein, es ist jemand anderes"),
 ];
 
-const PROCESS_STEPS = ["Schritt 1", "Schritt 2", "Schritt 3", "Schritt 4"];
+type StepField = Omit<
+  CoreQuestionTemplate,
+  "stepId" | "stepTitle" | "stepDescription" | "description" | "required"
+> & {
+  description?: string;
+  required?: boolean;
+};
 
-const COMPETITOR_SLOTS = [
-  "Mitbewerber 1 (Name, Website, kurze Begründung)",
-  "Mitbewerber 2 (Name, Website, kurze Begründung)",
-  "Mitbewerber 3 (Name, Website, kurze Begründung)",
-  "Mitbewerber 4 (Name, Website, kurze Begründung)",
-  "Mitbewerber 5 (Name, Website, kurze Begründung)",
-];
+function step(
+  stepId: string,
+  stepTitle: string,
+  fields: StepField[],
+  stepDescription?: string,
+): CoreQuestionTemplate[] {
+  return fields.map((field, index) => ({
+    description: "",
+    required: false,
+    ...field,
+    stepId,
+    stepTitle,
+    stepDescription: index === 0 ? stepDescription : undefined,
+  }));
+}
 
-const KEYWORD_SLOTS = [
-  "Marken- und Angebotsbegriffe",
-  "Problembegriffe",
-  "Ortsbegriffe",
-];
-
-/** Fixed basis for Anbieter (SEO-/Firmenwissen) questionnaires. */
-export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
-  {
-    key: "confirm_real_experience",
-    stepId: "core_intro",
-    stepTitle: "Einleitung",
-    stepDescription: "Nur Angaben auf Basis echter Erfahrungen.",
-    title:
-      "Bestätigung, dass alle folgenden Angaben auf Basis echter Erfahrungen erfolgen.",
-    description: "Bitte mit Ja oder Nein antworten. Ohne diese Bestätigung ist der Fragebogen nicht auswertbar.",
-    required: true,
-    type: "radio",
-    options: YES_NO,
-  },
-
-  {
-    key: "company_name",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    stepDescription: "Name, Standort, Angebot und Alleinstellung.",
-    title: "Wie lautet der vollständige Unternehmensname inklusive Rechtsform?",
-    description: "Rechtlicher Name, z. B. GmbH, UG, e. K.",
-    required: true,
-    type: "text",
-    prefillHint: "org_name",
-  },
-  {
-    key: "colloquial_name",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title:
-      "Wie wird das Unternehmen umgangssprachlich genannt – von Kundschaft, Team und Partnern?",
-    description: "Kurzname, Markenname im Alltag, Spitzname.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "location_catchment",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title:
-      "Wo befindet sich der Hauptstandort, und aus welchem Einzugsgebiet stammt der Großteil der Kundschaft?",
-    description:
-      "Region und Kreis/Bezirk nennen, nicht nur die Stadt. Plus typisches Einzugsgebiet der Kundschaft.",
-    required: false,
-    type: "text",
-    prefillHint: "region",
-  },
-  {
-    key: "portfolio",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Welche Angebotsbereiche gehören aktuell zum Portfolio?",
-    description:
-      "Optionen vor Versand für die Branche ersetzen. „Sonstiges“ bleibt als Freitext. Wenn Leistungsseiten auf der Website existieren, Links eintragen. Flyer, PDFs oder andere Dateien ebenfalls verlinken oder kurz benennen.",
-    required: false,
-    type: "checkbox",
-    options: opts("portfolio", PORTFOLIO_PLACEHOLDERS),
-    allowOtherOption: true,
-    prefillHint: "services",
-  },
-  {
-    key: "portfolio_links",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Links zu Leistungsseiten, Flyern oder anderen Unterlagen zum Portfolio",
-    description:
-      "Website-URLs, Drive-/PDF-Links oder Dateinamen. Leer lassen, wenn nichts vorliegt.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "other_locations_yesno",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Gibt es neben dem Hauptstandort weitere Standorte?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: YES_NO,
-  },
-  {
-    key: "other_locations_details",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Falls ja: welche weiteren Standorte, und welche Rolle haben sie?",
-    description: "Bei „Nein“ leer lassen.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "locations_planned_yesno",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Ist geplant, weitere Standorte zu eröffnen?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: YES_NO,
-  },
-  {
-    key: "locations_planned_details",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Falls ja: wo, wann, und in welchem Stadium der Planung?",
-    description: "Bei „Nein“ leer lassen.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "known_for",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Wofür ist das Unternehmen in der Region bekannt?",
-    description: "Der Ruf vor Ort – nicht die interne Selbstbeschreibung.",
-    required: false,
-    type: "text",
-    prefillHint: "focus",
-  },
-  {
-    key: "usp",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title:
-      "Was sind die wichtigsten Alleinstellungsmerkmale (USP) im Vergleich zu anderen Anbietern der Region?",
-    description: "USPs sind individuell – bitte in eigenen Worten, keine Standardfloskeln.",
-    required: false,
-    type: "text",
-    prefillHint: "usp",
-  },
-  {
-    key: "competitor_gap",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title:
-      "Was kann das Unternehmen, das Mitbewerber in der Region nicht können oder nicht anbieten?",
-    description: "Konkrete Lücke im Markt, nicht allgemeines Qualitätsversprechen.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "company_archetype",
-    stepId: "core_company",
-    stepTitle: "Unternehmen & Positionierung",
-    title: "Welcher Unternehmens-Typ trifft am ehesten zu?",
-    description:
-      "Bitte in die Reihenfolge bringen: am meisten zutreffend zuerst. Eigene Typen ergänzen, falls nötig.",
-    required: false,
-    type: "ranking",
-    options: opts("archetype", COMPANY_ARCHETYPES),
-    allowCustomEntries: true,
-  },
-
-  {
-    key: "services_ranked",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    stepDescription: "Buchungen, Ablauf, Reaktion, Preis und Einzugsgebiet.",
-    title:
-      "Welche Leistungen oder Angebote werden am häufigsten gebucht oder nachgefragt?",
-    description:
-      "Vor Versand die Optionen aus den Angebotsbereichen übernehmen und branchenbezogen benennen. Reihenfolge: am häufigsten zuerst.",
-    required: false,
-    type: "ranking",
-    options: opts("svc_rank", PORTFOLIO_PLACEHOLDERS),
-    allowCustomEntries: true,
-  },
-  {
-    key: "typical_process",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title:
-      "Wie läuft ein typischer Ablauf von der ersten Anfrage bis zum Abschluss – bitte einzelne Schritte beschreiben.",
-    description: "Ein Schritt pro Zeile. Weitere Schritte ergänzen.",
-    required: false,
-    type: "text_list",
-    options: opts("process", PROCESS_STEPS),
-    allowExtraEntries: true,
-  },
-  {
-    key: "response_speed",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title: "Wie schnell erfolgt im Durchschnitt eine Reaktion auf eine neue Anfrage?",
-    description: "Typische Erstreaktion, nicht der Bestfall.",
-    required: false,
-    type: "radio",
-    options: opts("resp_speed", RESPONSE_SPEED),
-  },
-  {
-    key: "response_channels",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title: "Über welche Kanäle wird auf neue Anfragen typischerweise geantwortet?",
-    description:
-      "Nicht der Eingangskanal der Kundschaft, sondern der Rückkanal des Unternehmens. Beispiel: Anfrage kommt über das Kontaktformular, die Antwort erfolgt per Telefon oder WhatsApp.",
-    required: false,
-    type: "checkbox",
-    options: opts("resp_ch", RESPONSE_CHANNELS),
-    allowOtherOption: true,
-  },
-  {
-    key: "price_position",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title: "Wie positioniert sich das Unternehmen preislich im Vergleich zu Mitbewerbern?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: opts("price_pos", PRICE_POSITION),
-  },
-  {
-    key: "price_communication",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title: "Wie werden Preise kommuniziert?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: opts("price_com", PRICE_COMMUNICATION),
-  },
-  {
-    key: "price_communication_reason",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title: "Aus welchem Grund wird die Preis-Kommunikation so gehandhabt?",
-    description: "Kurze Begründung zur vorherigen Auswahl.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "min_order_value",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title:
-      "Ab welchem Auftragswert ist ein Projekt oder eine Buchung interessant, und wo liegt die Grenze für eine Ablehnung?",
-    description: "Konkrete Zahl, falls vorhanden.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "service_area",
-    stepId: "core_offer",
-    stepTitle: "Leistungen & Prozess",
-    title:
-      "In welchem Umkreis oder Einzugsgebiet wird gearbeitet, und gibt es Ausnahmen für besondere Projekte?",
-    description: "Regel-Einzugsgebiet plus Ausnahmen.",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "daily_priority",
-    stepId: "core_values",
-    stepTitle: "Werte, Philosophie & Abgrenzung",
-    stepDescription: "Woran sich Alltag, Qualität und Kundenwahl ausrichten.",
-    title: "Was steht bei der täglichen Arbeit im Vordergrund?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "quality_assurance",
-    stepId: "core_values",
-    stepTitle: "Werte, Philosophie & Abgrenzung",
-    title: "Wie wird sichergestellt, dass Zielerreichung und Qualität stimmen?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "unexpected_challenges",
-    stepId: "core_values",
-    stepTitle: "Werte, Philosophie & Abgrenzung",
-    title:
-      "Wie wird mit unerwarteten Herausforderungen oder Änderungen während eines laufenden Projekts umgegangen?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "volume_vs_depth",
-    stepId: "core_values",
-    stepTitle: "Werte, Philosophie & Abgrenzung",
-    title:
-      "Was ist wichtiger: eine hohe Anzahl an Kundschaft oder maximale Tiefe bei jedem einzelnen Auftrag?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: opts("vol_depth", VOLUME_VS_DEPTH),
-  },
-  {
-    key: "no_fit_clients",
-    stepId: "core_values",
-    stepTitle: "Werte, Philosophie & Abgrenzung",
-    title:
-      "Mit welchen Kundentypen oder Projekten wird ungern zusammengearbeitet – bei welchen Erwartungen heißt es klar „Das passt nicht“?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "customer_values",
-    stepId: "core_values",
-    stepTitle: "Werte, Philosophie & Abgrenzung",
-    title: "Welche Werte prägen den Umgang mit Kundschaft im Alltag?",
-    description:
-      "Reihenfolge: am prägendsten zuerst. Weitere Werte können ergänzt werden.",
-    required: false,
-    type: "ranking",
-    options: opts("values", CUSTOMER_VALUES),
-    allowCustomEntries: true,
-  },
-
-  {
-    key: "speaking_style",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    stepDescription: "Wie das Unternehmen spricht – intern wie im Marketing.",
-    title: "Wie wird normalerweise mit Kundschaft gesprochen?",
-    description: "Reihenfolge: am typischsten zuerst.",
-    required: false,
-    type: "ranking",
-    options: opts("tone", SPEAKING_STYLES),
-    allowCustomEntries: true,
-  },
-  {
-    key: "address_form",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title: "Welche Anredeform wird in Marketingtexten verwendet?",
-    description: "Du/Sie als Inhalt der Marketingtexte, nicht als Anrede hier im Fragebogen.",
-    required: false,
-    type: "radio",
-    options: [opt("du", "Du"), opt("sie", "Sie")],
-  },
-  {
-    key: "company_voice",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title: "Wie wird über das Unternehmen selbst gesprochen, wenn ein Text darüber verfasst wird?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: opts("voice", COMPANY_VOICE),
-  },
-  {
-    key: "jargon_level",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title: "Wie viel Fachsprache soll in Texten verwendet werden?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: opts("jargon", JARGON_LEVEL),
-  },
-  {
-    key: "text_length",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title: "Sollen Texte eher kurz und prägnant oder ausführlich und detailliert sein?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: opts("length", TEXT_LENGTH),
-  },
-  {
-    key: "typical_terms",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title:
-      "Welche Begriffe oder Formulierungen sind typisch und sollen konsequent verwendet werden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "forbidden_terms",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title: "Welche Begriffe oder Formulierungen sollen im Marketing niemals verwendet werden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "tone_reference_texts",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title: "Gibt es bereits bestehende Texte, die vom Ton her besonders gut passen?",
-    description: "Links oder Titel von Seiten, PDFs, Posts.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "philosophy_quotes",
-    stepId: "core_tone",
-    stepTitle: "Sprache & Tonalität",
-    title:
-      "Gibt es Aussagen der Geschäftsführung oder des Teams, die die Philosophie auf den Punkt bringen?",
-    description: "Bitte wörtlich, in Anführungszeichen.",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "team_members",
-    stepId: "core_team",
-    stepTitle: "Team & Expertise",
-    stepDescription: "Menschen, Qualifikation, Geschichte und Partner.",
-    title: "Wer gehört zum Team, und welche Rollen und Zuständigkeiten gibt es?",
-    description: "Namen und Aufgaben, inkl. Inhaber / Geschäftsführung.",
-    required: false,
-    type: "text",
-    prefillHint: "owner_name",
-  },
-  {
-    key: "qualifications",
-    stepId: "core_team",
-    stepTitle: "Team & Expertise",
-    title: "Welche Qualifikationen, Zertifikate oder Auszeichnungen liegen vor?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "company_history",
-    stepId: "core_team",
-    stepTitle: "Team & Expertise",
-    title: "Seit wann besteht das Unternehmen, und welche wichtigen Meilensteine gab es seither?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "partners_suppliers",
-    stepId: "core_team",
-    stepTitle: "Team & Expertise",
-    title:
-      "Mit welchen Partnern, Netzwerken oder Lieferanten wird zusammengearbeitet, und aus welchem Grund?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "impressive_results",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    stepDescription: "Nur Belege, die wirklich stimmen und genutzt werden dürfen.",
-    title:
-      "Was sind die eindrucksvollsten Ergebnisse oder Transformationen, die mit Kundschaft erreicht wurden – bitte mit konkreten Zahlen, sofern vorhanden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "testimonials",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title: "Gibt es Kundenzitate oder Bewertungen, die das Unternehmen besonders gut beschreiben?",
-    description: "Bitte wörtlich.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "fan_moment",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title: "Wann wird aus Kundschaft ein echter Fan? Was war jeweils der entscheidende Moment?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "why_stay",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title: "Aus welchem Grund bleibt Kundschaft langfristig?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "years_staff_customers",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title:
-      "Seit wie vielen Jahren besteht das Unternehmen, und wie viele Mitarbeitende bzw. wie viel Kundschaft wurden seither betreut?",
-    description: "Konkrete Zahlen, falls belegt.",
-    required: false,
-    type: "text",
-    prefillHint: "employee_count",
-  },
-  {
-    key: "proven_metrics",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title:
-      "Welche nachweisbaren Erfolgszahlen gibt es – nur Angaben, die tatsächlich belegt oder dokumentiert sind?",
-    description: "Keine Schätzungen oder Wunschzahlen.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "certificates_links",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title:
-      "Welche Zertifikate, Auszeichnungen oder Mitgliedschaften liegen vor, und gibt es dazu einen Nachweis-Link?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "public_use_permission",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title: "Welche Fallbeispiele, Zitate oder Zahlen dürfen öffentlich verwendet werden?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: opts("public_use", PUBLIC_USE),
-  },
-  {
-    key: "public_use_details",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title: "Details oder Ausnahmen zur öffentlichen Nutzung je Beispiel",
-    description: "Welche Beispiele mit Namen, welche nur anonym.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "image_assets",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title: "Gibt es Bildmaterial mit Nutzungsrecht für Marketing und Content?",
-    description:
-      "Dateien können später im Ordner ergänzt werden. Hier Art des Materials markieren.",
-    required: false,
-    type: "checkbox",
-    options: opts("img", IMAGE_ASSETS),
-    allowOtherOption: true,
-  },
-  {
-    key: "image_assets_notes",
-    stepId: "core_proof",
-    stepTitle: "Erfolgsgeschichten, Vertrauenssignale & belegbare Fakten",
-    title: "Links, Speicherort oder Hinweise zum Bildmaterial",
-    description: "Drive-Ordner, Website-Galerie, Dateinamen.",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "competitors_respected",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    stepDescription: "Wettbewerb, Auffindbarkeit und Wahrnehmung.",
-    title: "Welche Mitbewerber werden respektiert, und aus welchem Grund?",
-    description: "",
-    required: false,
-    type: "text",
-    prefillHint: "good_competitors",
-  },
-  {
-    key: "competitors_better",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title: "Was machen Mitbewerber ehrlich gesagt besser?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "competitors_top",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title:
-      "Welche drei bis fünf Mitbewerber gelten als die wichtigsten – bitte jeweils Name, Website und kurze Begründung.",
-    description: "Eine Zeile pro Mitbewerber.",
-    required: false,
-    type: "text_list",
-    options: opts("comp_top", COMPETITOR_SLOTS),
-    allowExtraEntries: false,
-    prefillHint: "competitors",
-  },
-  {
-    key: "attention_channels",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title: "Wie wird Neukundschaft auf das Unternehmen aufmerksam?",
-    description: "Reihenfolge: am häufigsten zuerst. Weitere Kanäle ergänzen.",
-    required: false,
-    type: "ranking",
-    options: opts("attn", ATTENTION_CHANNELS),
-    allowCustomEntries: true,
-  },
-  {
-    key: "focus_keywords",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title:
-      "Unter welchen Wörtern oder Begriffen soll das Unternehmen bei Google gefunden werden (Fokus-Keywords)?",
-    description: "Getrennt nach Marken-/Angebotsbegriffen, Problembegriffen und Ortsbegriffen.",
-    required: false,
-    type: "text_list",
-    options: opts("kw", KEYWORD_SLOTS),
-    allowExtraEntries: true,
-  },
-  {
-    key: "online_channels",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title: "Welche Online-Kanäle werden aktuell aktiv bespielt?",
-    description: "Nur Kanäle, die wirklich gepflegt werden.",
-    required: false,
-    type: "checkbox",
-    options: opts("online", ONLINE_CHANNELS),
-    allowOtherOption: true,
-  },
-  {
-    key: "seasonal_yesno",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title:
-      "Gibt es saisonale Muster, also bestimmte Zeiträume mit deutlich mehr oder weniger Anfragen?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: YES_NO,
-  },
-  {
-    key: "seasonal_details",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title: "Falls ja: welche Zeiträume, und was ist der Grund?",
-    description: "Bei „Nein“ leer lassen.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "ai_search_yesno",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title:
-      "Wurde die Marke schon einmal bewusst in ChatGPT, Perplexity oder einem ähnlichen KI-System gesucht?",
-    description:
-      "Falls nein: kein Problem, das wird im Rahmen der KI-Recherche ohnehin geprüft.",
-    required: false,
-    type: "radio",
-    options: YES_NO,
-  },
-  {
-    key: "ai_search_result",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title: "Falls ja: mit welchem Ergebnis?",
-    description: "Bei „Nein“ leer lassen.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "nap_consistency",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title:
-      "Sind Firmenname, Adresse und Telefonnummer auf allen Plattformen identisch angegeben (Google-Unternehmensprofil, Website, Branchenverzeichnisse)?",
-    description: "Falls unklar: auch das wird eigenständig geprüft.",
-    required: false,
-    type: "radio",
-    options: opts("nap", NAP_CONSISTENCY),
-  },
-  {
-    key: "nap_deviations",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title: "Falls Abweichungen bekannt sind: welche?",
-    description: "Bei konsistenten Angaben leer lassen.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "external_mentions",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title:
-      "Gibt es bekannte externe Erwähnungen der Marke, z. B. in der Presse, auf Fachportalen oder in Branchenverzeichnissen?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "desired_perception",
-    stepId: "core_market",
-    stepTitle: "Marktposition, Wettbewerb & SEO/GEO-Sichtbarkeit",
-    title: "Wie soll das Unternehmen heute und in Zukunft wahrgenommen werden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "three_year_goal",
-    stepId: "core_future",
-    stepTitle: "Zukunft & Strategie",
-    stepDescription: "Richtung der nächsten Jahre, nicht der Tagesgeschäft-Wünsche.",
-    title: "Wo soll das Unternehmen in zwei bis drei Jahren stehen?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "marketing_12_months",
-    stepId: "core_future",
-    stepTitle: "Zukunft & Strategie",
-    title: "Welche Marketingmaßnahmen sind für die nächsten zwölf Monate geplant oder gewünscht?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "automation_goals",
-    stepId: "core_future",
-    stepTitle: "Zukunft & Strategie",
-    title:
-      "Welche Abläufe sollen künftig durch Digitalisierung oder Automatisierung vereinfacht werden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "hormozi_dream",
-    stepId: "core_hormozi",
-    stepTitle: "Hormozi-Layer",
-    stepDescription:
-      "Zielzustand, Hürde, Beweis und Dringlichkeit der Zielgruppe – nicht die Leistungsbeschreibung.",
-    title:
-      "Was ist das eigentliche Traumziel der Zielgruppe – also der Zustand nach der Zusammenarbeit, nicht die Leistung selbst?",
-    description: "",
-    required: false,
-    type: "text",
-    prefillHint: "target_group",
-  },
-  {
-    key: "hormozi_pain",
-    stepId: "core_hormozi",
-    stepTitle: "Hormozi-Layer",
-    title: "Was ist der Hauptschmerz oder die größte Hürde der Zielgruppe vor der Entscheidung?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "hormozi_proof",
-    stepId: "core_hormozi",
-    stepTitle: "Hormozi-Layer",
-    title: "Welcher Beweis räumt diese Hürde erfahrungsgemäß weg?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "hormozi_urgency",
-    stepId: "core_hormozi",
-    stepTitle: "Hormozi-Layer",
-    title:
-      "Aus welchem Grund sollte jetzt und nicht erst in einigen Monaten eine Entscheidung getroffen werden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "anything_else",
-    stepId: "core_closing",
-    stepTitle: "Abschluss",
-    stepDescription: "Was sonst noch wichtig ist, in eigenen Worten.",
-    title: "Gibt es noch etwas Wichtiges über das Unternehmen, das bisher nicht abgefragt wurde?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "elevator_pitch",
-    stepId: "core_closing",
-    stepTitle: "Abschluss",
-    title: "Wie lässt sich das Unternehmen in drei bis fünf Sätzen beschreiben?",
-    description: "",
-    required: false,
-    type: "text",
-  },
+const INDUSTRY_RANKING_PLACEHOLDERS = [
+  "[Option 1 – vor Versand passend zur Branche eintragen]",
+  "[Option 2 – vor Versand passend zur Branche eintragen]",
+  "[Option 3 – vor Versand passend zur Branche eintragen]",
+  "[Option 4 – vor Versand passend zur Branche eintragen]",
 ];
 
 const PERSONA_AGE_CLASSES: SurveyOption[] = [
@@ -993,129 +218,98 @@ const PERSONA_AGE_CLASSES: SurveyOption[] = [
   opt("35_44", "35–44"),
   opt("45_54", "45–54"),
   opt("55_64", "55–64"),
-  opt("65plus", "65+"),
-  opt("gemischt", "gemischt – in der Bemerkung konkretisieren"),
+  opt("65plus", "65 und älter"),
+  opt("gemischt", "sehr gemischt"),
 ];
 
 const PERSONA_JOB_RANKING = [
   "Angestellte",
-  "Selbstständige / Unternehmer",
+  "Selbstständige oder Unternehmer",
   "Freiberufler",
   "Führungskräfte",
-  "Rentner / im Ruhestand",
-  "Haushalt / Care-Arbeit",
-  "Studierende / Auszubildende",
+  "im Ruhestand",
 ];
 
 const PERSONA_FAMILY = [
   "alleinstehend",
-  "in Partnerschaft",
-  "Kinder im Haus",
-  "Kinder ausgezogen",
+  "in einer Partnerschaft oder verheiratet",
+  "mit Kindern im Haushalt",
+  "Kinder sind schon ausgezogen",
   "im Ruhestand",
 ];
 
 const PERSONA_CUSTOMER_GROUP_PLACEHOLDERS = [
-  "[Kundentyp 1 – vor Versand ersetzen, z. B. Erstkäufer]",
-  "[Kundentyp 2 – vor Versand ersetzen, z. B. Stammkundschaft]",
-  "[Kundentyp 3 – vor Versand ersetzen, z. B. Empfehlungskundschaft]",
+  "[Kundentyp 1 – vor Versand ersetzen]",
+  "[Kundentyp 2 – vor Versand ersetzen]",
+  "[Kundentyp 3 – vor Versand ersetzen]",
   "[Kundentyp 4 – vor Versand ersetzen]",
 ];
 
-const PERSONA_BUDGET_PLACEHOLDERS = [
-  "[Preisspanne 1 – vor Versand branchenspezifisch ersetzen]",
-  "[Preisspanne 2 – vor Versand branchenspezifisch ersetzen]",
-  "[Preisspanne 3 – vor Versand branchenspezifisch ersetzen]",
-  "[Preisspanne 4 – vor Versand branchenspezifisch ersetzen]",
-];
-
-const PERSONA_GOAL_PLACEHOLDERS = [
-  "[Ziel 1 – vor Versand ersetzen]",
-  "[Ziel 2 – vor Versand ersetzen]",
-  "[Ziel 3 – vor Versand ersetzen]",
-  "[Ziel 4 – vor Versand ersetzen]",
-];
-
-const PERSONA_DECISION_INFLUENCERS = [
-  "Kundschaft selbst",
-  "Partner/in",
-  "Familie",
-  "Freunde / Bekannte",
-  "Fachperson / Berater",
-];
-
 const PERSONA_COMPARE_QUOTES: SurveyOption[] = [
-  opt("meistens", "meistens"),
-  opt("teilweise", "teilweise"),
+  opt("fast_immer", "fast immer"),
+  opt("manchmal", "manchmal"),
   opt("selten", "selten"),
-  opt("nein", "nein"),
-];
-
-const PERSONA_OBJECTION_PLACEHOLDERS = [
-  "[Einwand 1 – vor Versand ersetzen]",
-  "[Einwand 2 – vor Versand ersetzen]",
-  "[Einwand 3 – vor Versand ersetzen]",
-  "[Einwand 4 – vor Versand ersetzen]",
+  opt("fast_nie", "fast nie"),
 ];
 
 const PERSONA_RESEARCH_ACTIVITY: SurveyOption[] = [
-  opt("sehr_aktiv", "sehr aktiv"),
-  opt("selektiv", "selektiv"),
-  opt("kaum", "kaum"),
+  opt("sehr_aktiv", "ja, sehr aktiv"),
+  opt("etwas", "etwas"),
+  opt("eher_nicht", "eher nicht"),
 ];
 
 const PERSONA_DELAY_REACTION: SurveyOption[] = [
-  opt("ruhig", "ruhig, mit Nachfrage zum neuen Termin"),
-  opt("ungeduldig", "ungeduldig, erwartet sofortige Erklärung"),
-  opt("verstaendnis", "verständnisvoll, solange kommuniziert wird"),
-  opt("abbruch", "bricht eher ab oder sucht Alternativen"),
+  opt("locker", "locker und gelassen, solange gut informiert wird"),
+  opt("enttäuscht", "enttäuscht, aber kooperativ bei guter Kommunikation"),
+  opt("ungeduldig", "ungeduldig, fragt schnell nach"),
+  opt("veraergert", "verärgert, reagiert empfindlich"),
 ];
 
 const PERSONA_FIRST_MEETING_DETAIL: SurveyOption[] = [
-  opt("kurz", "kurz und ergebnisorientiert"),
-  opt("mittel", "mittel, mit den wichtigsten Eckdaten"),
-  opt("ausfuehrlich", "ausführlich, mit vielen Nachfragen"),
-  opt("unterschiedlich", "sehr unterschiedlich je nach Person"),
+  opt("jedes_detail", "möchte jedes Detail genau wissen, z. B. Ablauf, Kosten, Zeitplan"),
+  opt("ueberblick", "möchte vor allem einen groben Überblick, Details später"),
+  opt("gehoert", "erzählt selbst viel von der eigenen Situation, möchte vor allem gehört werden"),
+  opt("vertraut", "stellt wenige Fragen, vertraut der fachlichen Einschätzung"),
 ];
 
 const PERSONA_PERSONAL_LEVEL: SurveyOption[] = [
-  opt("entscheidend", "entscheidend"),
-  opt("wichtig", "wichtig, aber nicht allein ausschlaggebend"),
-  opt("sachlich", "eher sachlich, persönliche Ebene zweitrangig"),
-  opt("kaum", "kaum relevant"),
+  opt("sehr_wichtig", "sehr wichtig, persönliche Verbindung ist kaufentscheidend"),
+  opt("wichtig", "wichtig, braucht Zeit für Vertrauensaufbau, bleibt aber sachlich"),
+  opt("zweitrangig", "eher zweitrangig, Ergebnis und Fachkompetenz zählen mehr"),
+  opt("unwichtig", "unwichtig, rein sachliche Beziehung reicht"),
 ];
 
 const PERSONA_DECISION_STYLE: SurveyOption[] = [
-  opt("empfehlung", "folgt meist einer klaren Empfehlung"),
-  opt("selbst", "entscheidet selbst nach Abwägung"),
-  opt("misch", "erst Empfehlung einholen, dann selbst entscheiden"),
-  opt("aufschieben", "schiebt die Entscheidung eher auf"),
+  opt("empfehlung", "fragt aktiv nach einer Empfehlung und folgt ihr"),
+  opt("optionen", "möchte mehrere Optionen erklärt bekommen, entscheidet dann selbst"),
+  opt("eigene", "hat meist schon eine klare eigene Vorstellung"),
+  opt("preis", "lässt sich stark vom Preis leiten"),
 ];
 
 const PERSONA_COMMUNICATION: SurveyOption[] = [
-  opt("wenig", "wenig Kontakt, nur bei Bedarf"),
-  opt("regelmaessig", "regelmäßige kurze Updates erwartet"),
-  opt("eng", "enger, häufiger Austausch"),
-  opt("asynchron", "vor allem schriftlich / asynchron"),
+  opt("haeufig", "häufig, möchte laufend über den Fortschritt informiert werden"),
+  opt("termine", "regelmäßig bei vereinbarten Terminen, aber nicht zwischendurch"),
+  opt("probleme", "selten, meldet sich nur bei Problemen"),
+  opt("nie", "fast nie, vertraut vollständig"),
 ];
 
 const PERSONA_PROBLEM_REACTION: SurveyOption[] = [
-  opt("loesung", "lösungsorientiert, solange transparent kommuniziert wird"),
-  opt("unruhig", "unruhig, braucht schnelle Rückversicherung"),
-  opt("kritisch", "kritisch, hinterfragt Aufwand und Kosten"),
-  opt("belastung", "erhöhtes Risiko, dass die Zusammenarbeit belastet wird"),
+  opt("kooperativ", "kooperativ, vertraut der fachlichen Einschätzung"),
+  opt("verstehen", "möchte genau verstehen, bevor er zustimmt"),
+  opt("unsicher", "reagiert unsicher oder besorgt, braucht Beruhigung"),
+  opt("kritisch", "reagiert kritisch, hinterfragt viel"),
 ];
 
 const PERSONA_INFO_SOURCES = [
-  "Empfehlung",
+  "Empfehlung von Bekannten",
   "Google-Bewertungen",
-  "Website",
+  "die eigene Website",
   "Social Media",
   "Presse",
 ];
 
 const PERSONA_TRUST_SIGNALS = [
-  "Erfahrung / Jahre",
+  "langjährige Erfahrung",
   "Zertifikate",
   "Bewertungen",
   "Referenzen",
@@ -1123,656 +317,1096 @@ const PERSONA_TRUST_SIGNALS = [
 ];
 
 const PERSONA_HOLD_BACK = [
-  "Preis-Angst",
+  "Angst vor den Kosten",
   "Zeitmangel",
-  "Unsicherheit, ob passend",
+  "Unsicherheit, ob das Angebot passt",
   "schlechte frühere Erfahrung",
-];
-
-const PERSONA_ALTERNATIVE_PLACEHOLDERS = [
-  "[Alternative 1 – vor Versand ersetzen]",
-  "[Alternative 2 – vor Versand ersetzen]",
-  "[Alternative 3 – vor Versand ersetzen]",
-  "[Alternative 4 – vor Versand ersetzen]",
 ];
 
 const PERSONA_PRAISE = [
   "Qualität",
   "Kommunikation",
-  "Preis-Leistung",
-  "Termintreue",
+  "Preis-Leistungs-Verhältnis",
+  "Pünktlichkeit",
   "persönliche Betreuung",
 ];
 
-const PERSONA_FIRST_CONTACT_PHRASES = [
-  "Formulierung 1",
-  "Formulierung 2",
-  "Formulierung 3",
-  "Formulierung 4",
-  "Formulierung 5",
-  "Formulierung 6",
-  "Formulierung 7",
+const PERSONA_DECISION_INFLUENCERS = [
+  "der Kunde selbst",
+  "Partner oder Partnerin",
+  "Familie",
+  "Freunde",
+  "eine Fachperson oder Berater",
 ];
 
-const PERSONA_JOURNEY_STEPS = [
-  "Schritt 1",
-  "Schritt 2",
-  "Schritt 3",
-  "Schritt 4",
-  "Schritt 5",
-  "Schritt 6",
-  "Schritt 7",
+/** TEIL A – Fragebogen zum eigenen Unternehmen (Alltagssprache). */
+export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
+  ...step(
+    "core_intro",
+    "Einleitung & Kontaktperson",
+    [
+      {
+        key: "confirm_real_experience",
+        title:
+          "Bestätigung, dass alle folgenden Angaben auf eigenen, echten Erfahrungen beruhen und nicht geraten sind.",
+        description: "Bitte mit Ja oder Nein antworten. Ohne diese Bestätigung ist der Fragebogen nicht auswertbar.",
+        required: true,
+        type: "radio",
+        options: YES_NO,
+      },
+      {
+        key: "respondent_name",
+        title: "Wer füllt diesen Fragebogen hauptsächlich aus – Name?",
+        description: "Vor- und Nachname der Person, die antwortet.",
+        type: "text",
+        prefillHint: "owner_name",
+      },
+      {
+        key: "respondent_role",
+        title: "Welche Rolle oder Position hat diese Person in der Firma?",
+        description: "z. B. Inhaber, Geschäftsführung, Assistenz, Marketing.",
+        type: "text",
+      },
+      {
+        key: "respondent_is_client",
+        title:
+          "Ist diese Person auch die eigentliche Auftraggeberin bzw. der eigentliche Auftraggeber (z. B. Inhaber oder Geschäftsführung), oder füllt hier jemand anderes aus?",
+        type: "radio",
+        options: RESPONDENT_IS_CLIENT,
+      },
+      {
+        key: "actual_client_visibility",
+        title:
+          "Falls es sich um zwei verschiedene Personen handelt: Wer ist der eigentliche Auftraggeber, und soll diese Person auf der Website im Vordergrund stehen (z. B. als Gesicht der Firma), oder eher das Team allgemein?",
+        type: "text",
+      },
+    ],
+    "Nur Angaben auf Basis eigener, echter Erfahrungen.",
+  ),
+  ...step(
+    "core_company",
+    "Das Unternehmen",
+    [
+      {
+        key: "company_name",
+        title:
+          "Wie lautet der vollständige Name der Firma, so wie er offiziell im Impressum oder Handelsregister steht (inklusive Rechtsform, z. B. GmbH, GbR, e.K.)?",
+        required: true,
+        type: "text",
+        prefillHint: "org_name",
+      },
+      {
+        key: "colloquial_name",
+        title:
+          "Wie wird die Firma im Alltag genannt – von Kunden, im Team oder von Partnern (z. B. eine Kurzform oder ein Spitzname)?",
+        type: "text",
+      },
+      {
+        key: "location_catchment",
+        title:
+          "Wo befindet sich der Firmensitz, und aus welcher Umgebung oder Region kommt der Großteil der Kunden?",
+        description:
+          "Bitte Ort plus Region oder Kreis/Bezirk nennen, nicht nur die Stadt. Weitere Standorte und geplante Standorte können hier mit angegeben werden.",
+        type: "text",
+        prefillHint: "region",
+      },
+      {
+        key: "portfolio",
+        title: "Welche Leistungen oder Produkte werden aktuell angeboten?",
+        description:
+          "Liste vor Versand passend zur Branche ersetzen. „Sonstiges“ bleibt frei. Wenn es Leistungsseiten, Flyer oder PDFs gibt, Links im nächsten Feld eintragen.",
+        type: "checkbox",
+        options: opts("portfolio", PORTFOLIO_PLACEHOLDERS),
+        allowOtherOption: true,
+        prefillHint: "services",
+      },
+      {
+        key: "portfolio_links",
+        title: "Links zu Leistungsseiten, Flyern oder anderen Unterlagen",
+        description: "Website-URLs, PDF-Links oder Dateinamen. Leer lassen, wenn nichts vorliegt.",
+        type: "text",
+      },
+      {
+        key: "known_for",
+        title: "Wofür ist die Firma in der Region bekannt – was sagen Menschen darüber, wenn sie sie erwähnen?",
+        type: "text",
+      },
+      {
+        key: "usp",
+        title: "Was macht das eigene Angebot besonders im Vergleich zu anderen Anbietern in der Region?",
+        type: "text",
+        prefillHint: "usp",
+      },
+      {
+        key: "competitor_gap",
+        title: "Was kann die eigene Firma, das andere Anbieter in der Region nicht können oder nicht anbieten?",
+        type: "text",
+      },
+      {
+        key: "company_archetype",
+        title: "Welche der folgenden Beschreibungen passt am besten – bitte in eine Reihenfolge bringen.",
+        type: "ranking",
+        options: opts("archetype", COMPANY_ARCHETYPES),
+        allowCustomEntries: false,
+      },
+    ],
+    "Name, Standort, Angebot und was die Firma besonders macht.",
+  ),
+  ...step(
+    "core_offer",
+    "Leistungen & Ablauf",
+    [
+      {
+        key: "services_ranked",
+        title: "Welche Leistungen oder Angebote werden am häufigsten gebucht oder nachgefragt?",
+        description:
+          "Vor Versand dieselbe Liste wie bei den Leistungen eintragen. Reihenfolge nach Häufigkeit.",
+        type: "ranking",
+        options: opts("svc_rank", PORTFOLIO_PLACEHOLDERS),
+        allowExtraEntries: true,
+      },
+      {
+        key: "typical_process",
+        title:
+          "Wie läuft es typischerweise ab, von der ersten Anfrage bis zum fertigen Ergebnis oder Abschluss?",
+        description: "Ein Schritt pro Feld. Weitere Schritte können ergänzt werden.",
+        type: "text_list",
+        options: emptySlots("process", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Schritt hinzufügen",
+      },
+      {
+        key: "response_speed",
+        title: "Wie schnell wird auf eine neue Anfrage in der Regel reagiert?",
+        type: "radio",
+        options: opts("resp_speed", RESPONSE_SPEED),
+      },
+      {
+        key: "response_channels",
+        title: "Auf welchem Weg wird meistens reagiert?",
+        description:
+          "Nicht der Weg, über den der Kunde anfragt, sondern der Weg, auf dem die Firma antwortet. Beispiel: Anfrage über das Kontaktformular, Antwort per Telefon oder WhatsApp.",
+        type: "checkbox",
+        options: opts("resp_ch", RESPONSE_CHANNELS),
+        allowOtherOption: true,
+      },
+      {
+        key: "price_position",
+        title: "Sind die eigenen Preise im Vergleich zu anderen Anbietern eher höher, ähnlich oder niedriger?",
+        type: "radio",
+        options: opts("price_pos", PRICE_POSITION),
+      },
+      {
+        key: "price_communication",
+        title:
+          "Werden die Preise offen auf der Website gezeigt, oder werden sie erst nach einem persönlichen Gespräch genannt?",
+        type: "radio",
+        options: opts("price_com", PRICE_COMMUNICATION),
+      },
+      {
+        key: "price_communication_reason",
+        title: "Aus welchem Grund wird das so gehandhabt?",
+        type: "text",
+      },
+      {
+        key: "min_order_value",
+        title:
+          "Ab welchem ungefähren Auftragswert (in Euro) lohnt sich ein Projekt oder eine Buchung wirklich – und ab welcher Größe wird ein Auftrag eher abgelehnt, weil er zu klein ist?",
+        type: "text",
+      },
+      {
+        key: "service_area",
+        title:
+          "Bis zu welcher Entfernung (z. B. in Kilometern) wird gearbeitet, und gibt es Ausnahmen für besondere Projekte?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_values",
+    "Werte & Arbeitsweise",
+    [
+      {
+        key: "daily_priority",
+        title: "Was ist bei der täglichen Arbeit am wichtigsten?",
+        type: "text",
+      },
+      {
+        key: "quality_assurance",
+        title: "Woran wird gemerkt, dass ein Ziel erreicht wurde und die Qualität stimmt?",
+        type: "text",
+      },
+      {
+        key: "unexpected_challenges",
+        title: "Wie wird reagiert, wenn während eines Projekts etwas Unerwartetes passiert oder sich etwas ändert?",
+        type: "text",
+      },
+      {
+        key: "volume_vs_depth",
+        title:
+          "Ist es wichtiger, möglichst viele Kunden zu haben, oder sich bei jedem einzelnen Auftrag besonders viel Zeit zu nehmen?",
+        type: "radio",
+        options: opts("vol_depth", VOLUME_VS_DEPTH),
+      },
+      {
+        key: "no_fit_clients",
+        title:
+          "Mit welchen Kundentypen oder Projekten wird lieber nicht zusammengearbeitet? Wann wird klar gesagt: „Das passt nicht zu uns“?",
+        type: "text",
+      },
+      {
+        key: "customer_values",
+        title:
+          "Welche der folgenden Werte sind im Umgang mit Kunden am wichtigsten – bitte in eine Reihenfolge bringen.",
+        type: "ranking",
+        options: opts("cust_val", CUSTOMER_VALUES),
+        allowCustomEntries: false,
+      },
+    ],
+  ),
+  ...step(
+    "core_language",
+    "Sprache & Wortwahl",
+    [
+      {
+        key: "speaking_style",
+        title: "Wie wird normalerweise mit dem Kunden gesprochen – bitte in eine Reihenfolge bringen.",
+        type: "ranking",
+        options: opts("speak", SPEAKING_STYLES),
+        allowCustomEntries: false,
+      },
+      {
+        key: "address_form",
+        title: "Wird auf der Website und in Texten „Du“ oder „Sie“ verwendet?",
+        description: "Du/Sie als Inhalt der Texte, nicht als Anrede in diesem Fragebogen.",
+        type: "radio",
+        options: [opt("du", "Du"), opt("sie", "Sie")],
+      },
+      {
+        key: "company_voice",
+        title: "Wird in Texten über die eigene Firma eher „Wir“ gesagt, oder wird der Firmenname direkt genannt?",
+        type: "radio",
+        options: opts("voice", COMPANY_VOICE),
+      },
+      {
+        key: "jargon_level",
+        title: "Wie viele Fachbegriffe dürfen in Texten vorkommen?",
+        type: "radio",
+        options: opts("jargon", JARGON_LEVEL),
+      },
+      {
+        key: "text_length",
+        title: "Sollen Texte eher kurz und knapp sein, oder ausführlich mit vielen Details?",
+        type: "radio",
+        options: opts("textlen", TEXT_LENGTH),
+      },
+      {
+        key: "typical_terms",
+        title:
+          "Gibt es bestimmte Wörter oder Formulierungen, die immer wieder verwendet werden sollen, weil sie typisch für die Firma sind?",
+        description: "Ein Wort oder eine Formulierung pro Feld.",
+        type: "text_list",
+        options: emptySlots("typical_term", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Begriff hinzufügen",
+      },
+      {
+        key: "forbidden_terms",
+        title: "Gibt es Wörter oder Formulierungen, die auf keinen Fall verwendet werden sollen?",
+        description: "Ein Begriff pro Feld.",
+        type: "text_list",
+        options: emptySlots("forbidden_term", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Begriff hinzufügen",
+      },
+      {
+        key: "tone_reference_texts",
+        title: "Gibt es bereits vorhandene Texte, deren Tonfall besonders gut passt? Bitte Link oder Beispiel angeben.",
+        type: "text",
+      },
+      {
+        key: "philosophy_quotes",
+        title:
+          "Gibt es einen Satz oder eine Aussage der Geschäftsführung, der oder die die eigene Haltung besonders gut auf den Punkt bringt? Bitte wortwörtlich.",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_team",
+    "Team & Qualifikationen",
+    [
+      {
+        key: "team_members",
+        title: "Wer gehört zum Team, und wer macht was?",
+        description: "Pro Person: Name und Rolle/Zuständigkeit, z. B. Anna Müller, Inhaberin.",
+        type: "text_list",
+        options: emptySlots("team", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Person hinzufügen",
+        prefillHint: "employee_count",
+      },
+      {
+        key: "qualifications",
+        title: "Welche Ausbildungen, Zertifikate oder Auszeichnungen gibt es im Team oder in der Firma?",
+        description: "Ein Eintrag pro Ausbildung oder Zertifikat.",
+        type: "text_list",
+        options: emptySlots("quali", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Eintrag hinzufügen",
+      },
+      {
+        key: "company_history",
+        title: "Seit wann gibt es die Firma, und was waren die wichtigsten Meilensteine seitdem?",
+        description: "Pro Meilenstein: Jahr und Ereignis, z. B. 2018 – Firma gegründet.",
+        type: "text_list",
+        options: emptySlots("milestone", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Meilenstein hinzufügen",
+      },
+      {
+        key: "partners_suppliers",
+        title: "Mit welchen Partnern oder Lieferanten wird zusammengearbeitet, und warum genau mit diesen?",
+        description: "Pro Partner: Name und Grund.",
+        type: "text_list",
+        options: emptySlots("partner", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Partner hinzufügen",
+      },
+    ],
+  ),
+  ...step(
+    "core_proof",
+    "Erfolge, Bewertungen & belegbare Zahlen",
+    [
+      {
+        key: "impressive_results",
+        title:
+          "Was sind die beeindruckendsten Ergebnisse, die mit Kunden erreicht wurden? Bitte mit konkreten Zahlen, falls vorhanden (z. B. „20 kg abgenommen“, „Umsatz um 30 % gesteigert“).",
+        description: "Ein Ergebnis pro Feld.",
+        type: "text_list",
+        options: emptySlots("result", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Ergebnis hinzufügen",
+      },
+      {
+        key: "testimonials",
+        title: "Gibt es Aussagen von Kunden, die die eigene Arbeit besonders gut beschreiben? Bitte wortwörtlich.",
+        description: "Pro Zitat: der Satz und optional Name oder Quelle.",
+        type: "text_list",
+        options: emptySlots("quote", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Zitat hinzufügen",
+      },
+      {
+        key: "fan_moment",
+        title: "Wann genau merkt man, dass ein Kunde zum echten Fan geworden ist? Was war der entscheidende Moment?",
+        type: "text",
+      },
+      {
+        key: "why_stay",
+        title: "Aus welchem Grund bleiben Kunden langfristig, statt nach einem Projekt oder Kauf wegzubleiben?",
+        type: "text",
+      },
+      {
+        key: "years_staff_customers",
+        title:
+          "Seit wie vielen Jahren gibt es die Firma, und wie viele Kunden bzw. Mitarbeitende gab oder gibt es ungefähr? Bitte möglichst konkrete Zahlen.",
+        type: "text",
+      },
+      {
+        key: "proven_metrics",
+        title:
+          "Welche konkreten Erfolgszahlen können genannt werden? Bitte nur Zahlen, die tatsächlich stimmen und belegt werden können.",
+        description: "Pro Kennzahl: Bezeichnung und Wert, z. B. Anzahl abgeschlossener Projekte – über 300.",
+        type: "text_list",
+        options: emptySlots("metric", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Kennzahl hinzufügen",
+      },
+      {
+        key: "certificates_links",
+        title:
+          "Welche Zertifikate, Auszeichnungen oder Mitgliedschaften gibt es, und gibt es dazu einen Link oder ein Dokument als Nachweis?",
+        description: "Pro Zertifikat: Bezeichnung und Link oder Dokumentname.",
+        type: "text_list",
+        options: emptySlots("cert", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Zertifikat hinzufügen",
+      },
+      {
+        key: "public_use_permission",
+        title:
+          "Dürfen Geschichten, Zitate oder Zahlen von echten Kunden öffentlich verwendet werden – zum Beispiel auf der Website? Mit vollem Namen, oder nur ohne Namen?",
+        type: "radio",
+        options: opts("public_use", PUBLIC_USE),
+      },
+      {
+        key: "public_use_details",
+        title: "Details dazu, falls nötig",
+        type: "text",
+      },
+      {
+        key: "image_assets",
+        title:
+          "Gibt es Fotos, die im Marketing verwendet werden dürfen (z. B. Vorher-Nachher-Fotos, Fotos vom Team, Fotos vom Arbeitsprozess)?",
+        type: "checkbox",
+        options: opts("img", IMAGE_ASSETS),
+        allowOtherOption: true,
+      },
+      {
+        key: "image_assets_notes",
+        title: "Links oder Hinweise zu diesen Fotos oder Dateien",
+        description: "Upload im Fragebogen ist nicht möglich – bitte Links oder Dateinamen eintragen.",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_market",
+    "Bekanntheit & Auffindbarkeit im Internet",
+    [
+      {
+        key: "competitors_respected",
+        title: "Welche anderen Anbieter werden respektiert, und warum?",
+        type: "text",
+        prefillHint: "good_competitors",
+      },
+      {
+        key: "competitors_better",
+        title: "Was machen andere Anbieter ehrlich gesagt besser?",
+        type: "text",
+      },
+      {
+        key: "competitors_top",
+        title: "Welche drei bis fünf Anbieter sind die wichtigsten Mitbewerber?",
+        description:
+          "Pro Mitbewerber: Name, Website und kurzer Grund (z. B. gleiche Region, ähnliches Angebot, ähnlicher Preis).",
+        type: "text_list",
+        options: emptySlots("comp_top", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Mitbewerber hinzufügen",
+        prefillHint: "competitors",
+      },
+      {
+        key: "attention_channels",
+        title: "Wie wird ein neuer Kunde meistens zuerst auf die Firma aufmerksam? Bitte in eine Reihenfolge bringen.",
+        type: "ranking",
+        options: opts("attn", ATTENTION_CHANNELS),
+        allowCustomEntries: false,
+      },
+      {
+        key: "keyword_offer",
+        title:
+          "Unter welchen Wörtern soll die Firma bei Google gefunden werden – Angebotsbegriffe? Wonach würde jemand suchen, der genau nach diesem Angebot sucht?",
+        description:
+          "Diese Wörter werden intern „Fokus-Keywords“ genannt. Ein Wort oder eine Wortgruppe pro Feld.",
+        type: "text_list",
+        options: emptySlots("kw_offer", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Wort hinzufügen",
+        prefillHint: "focus",
+      },
+      {
+        key: "keyword_problem",
+        title:
+          "Wie würde jemand sein Problem in eigenen Worten in die Google-Suche eintippen? (Problembegriffe)",
+        description: "Ein Wort oder eine Wortgruppe pro Feld.",
+        type: "text_list",
+        options: emptySlots("kw_problem", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Wort hinzufügen",
+      },
+      {
+        key: "keyword_place",
+        title: "Mit welchem Ort zusammen soll die Firma gefunden werden (z. B. „Zahnarzt Düsseldorf“)?",
+        description: "Ein Ort oder eine Kombination pro Feld.",
+        type: "text_list",
+        options: emptySlots("kw_place", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Wort hinzufügen",
+      },
+      {
+        key: "online_channels",
+        title:
+          "Welche Online-Kanäle werden aktuell aktiv genutzt (z. B. eigene Website, Instagram, Facebook, LinkedIn, YouTube, TikTok, Newsletter, Google-Anzeigen)?",
+        type: "checkbox",
+        options: opts("online", ONLINE_CHANNELS),
+        allowOtherOption: true,
+      },
+      {
+        key: "seasonal_yesno",
+        title: "Gibt es bestimmte Monate oder Zeiträume, in denen deutlich mehr oder weniger Anfragen kommen?",
+        type: "radio",
+        options: YES_NO,
+      },
+      {
+        key: "seasonal_details",
+        title: "Falls ja: welche Zeiträume, und was ist vermutlich der Grund?",
+        type: "text",
+      },
+      {
+        key: "ai_search_yesno",
+        title:
+          "Wurde selbst schon einmal in ChatGPT oder einem ähnlichen Programm (eine Art Suchmaschine zum Chatten) nach der eigenen Firma gefragt, um zu sehen, was dabei herauskommt?",
+        description: "Falls nein: kein Problem, das wird im Rahmen der eigenen Recherche ohnehin geprüft.",
+        type: "radio",
+        options: YES_NO,
+      },
+      {
+        key: "ai_search_result",
+        title: "Falls ja: was kam dabei heraus?",
+        type: "text",
+      },
+      {
+        key: "external_mentions",
+        title:
+          "Wird die Firma irgendwo im Internet erwähnt, ohne dass selbst etwas dafür getan wurde – z. B. in einer Zeitung, auf einer Fachseite oder in einem Verzeichnis?",
+        type: "text",
+      },
+      {
+        key: "desired_perception",
+        title:
+          "Wie soll die Firma heute und in Zukunft wahrgenommen werden – was sollen Menschen über sie denken oder sagen?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_future",
+    "Zukunft & Pläne",
+    [
+      {
+        key: "three_year_goal",
+        title: "Wo soll die Firma in zwei bis drei Jahren stehen?",
+        type: "text",
+      },
+      {
+        key: "marketing_12_months",
+        title: "Welche Marketing-Maßnahmen sind für die nächsten zwölf Monate geplant oder gewünscht?",
+        type: "text",
+      },
+      {
+        key: "automation_goals",
+        title: "Welche Abläufe sollen zukünftig einfacher oder automatisch laufen?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_hormozi",
+    "Wünsche und Hürden des Kunden",
+    [
+      {
+        key: "hormozi_dream",
+        title:
+          "Was ist der eigentliche Wunsch des Kunden – wie soll sich sein Leben oder Alltag anfühlen, nachdem die Zusammenarbeit erfolgreich war? Bitte nicht die eigene Leistung beschreiben, sondern das Ergebnis für den Kunden.",
+        type: "text",
+        prefillHint: "target_group",
+      },
+      {
+        key: "hormozi_pain",
+        title: "Was ist das größte Problem oder die größte Sorge des Kunden, bevor er sich entscheidet?",
+        type: "text",
+      },
+      {
+        key: "hormozi_proof",
+        title:
+          "Was überzeugt den Kunden am Ende, diese Sorge loszulassen (z. B. ein Beweis, eine Erfahrung, ein Ergebnis)?",
+        type: "text",
+      },
+      {
+        key: "hormozi_urgency",
+        title: "Warum sollte sich der Kunde jetzt entscheiden und nicht erst in ein paar Monaten?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_closing",
+    "Abschluss",
+    [
+      {
+        key: "anything_else",
+        title: "Gibt es noch etwas Wichtiges über die Firma, das bisher nicht gefragt wurde?",
+        type: "text",
+      },
+      {
+        key: "elevator_pitch",
+        title: "Wie lässt sich die Firma in drei bis fünf Sätzen beschreiben?",
+        type: "text",
+      },
+    ],
+    "Was sonst noch wichtig ist, in eigenen Worten.",
+  ),
 ];
 
-/** Fixed basis for Kunden-Persona (Wunschkunde) questionnaires — TEIL B. */
+/** TEIL B – Fragebogen zum Wunschkunden (Alltagssprache). */
 export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
-  {
-    key: "persona_confirm_real_experience",
-    stepId: "core_persona_intro",
-    stepTitle: "Einleitung",
-    stepDescription: "Nur Angaben auf Basis echter Erfahrungen und Beobachtungen.",
-    title:
-      "Bestätigung, dass alle folgenden Angaben auf Basis echter Erfahrungen und Beobachtungen erfolgen.",
-    description:
-      "Bitte mit Ja oder Nein antworten. Ohne diese Bestätigung ist der Fragebogen nicht auswertbar.",
-    required: true,
-    type: "radio",
-    options: YES_NO,
-  },
-
-  {
-    key: "persona_name",
-    stepId: "core_persona_avatar",
-    stepTitle: "Avatar-Definition & Profil",
-    stepDescription: "Name, Kurzbeschreibung und Kundentypen.",
-    title: "Wie soll der digitale Kunden-Avatar heißen (Vor- und Nachname)?",
-    description: "Ein konkreter Name macht den Avatar greifbar.",
-    required: true,
-    type: "text",
-    prefillHint: "persona_name",
-  },
-  {
-    key: "persona_description",
-    stepId: "core_persona_avatar",
-    stepTitle: "Avatar-Definition & Profil",
-    title: "Wie lässt sich die ideale Wunschkundschaft in drei bis fünf Sätzen beschreiben?",
-    description: "",
-    required: true,
-    type: "text",
-  },
-  {
-    key: "persona_customer_groups",
-    stepId: "core_persona_avatar",
-    stepTitle: "Avatar-Definition & Profil",
-    title: "Welche unterschiedlichen Kundengruppen oder -typen kommen grundsätzlich vor?",
-    description: "Optionen vor Versand pro Kunde/Branche ersetzen. „Sonstiges“ bleibt als Freitext.",
-    required: false,
-    type: "checkbox",
-    options: opts("persona_group", PERSONA_CUSTOMER_GROUP_PLACEHOLDERS),
-    allowOtherOption: true,
-  },
-
-  {
-    key: "persona_age",
-    stepId: "core_persona_demo",
-    stepTitle: "Demografie & Lebenssituation",
-    stepDescription: "Alter, Beruf, Familie, Herkunft und Budget.",
-    title: "In welchem Altersbereich befindet sich der Großteil der Wunschkundschaft?",
-    description:
-      "Einzelauswahl, weil meist eine Hauptgruppe klar dominiert. Bei „gemischt“ in der Bemerkung konkretisieren.",
-    required: false,
-    type: "radio",
-    options: PERSONA_AGE_CLASSES,
-    prefillHint: "persona_age",
-  },
-  {
-    key: "persona_age_note",
-    stepId: "core_persona_demo",
-    stepTitle: "Demografie & Lebenssituation",
-    title: "Bemerkung zum Altersbereich (falls gemischt oder Abweichungen)",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_job",
-    stepId: "core_persona_demo",
-    stepTitle: "Demografie & Lebenssituation",
-    title:
-      "Welcher berufliche Hintergrund oder welche Einkommenssituation trifft am häufigsten zu?",
-    description: "Reihenfolge nach Häufigkeit. Die Basisliste ist branchenübergreifend.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_job", PERSONA_JOB_RANKING),
-    allowExtraEntries: true,
-    prefillHint: "persona_job",
-  },
-  {
-    key: "persona_family",
-    stepId: "core_persona_demo",
-    stepTitle: "Demografie & Lebenssituation",
-    title: "Welche familiäre bzw. Lebenssituation beschreibt die Wunschkundschaft am häufigsten?",
-    description: "",
-    required: false,
-    type: "checkbox",
-    options: opts("persona_family", PERSONA_FAMILY),
-    allowOtherOption: true,
-  },
-  {
-    key: "persona_regions",
-    stepId: "core_persona_demo",
-    stepTitle: "Demografie & Lebenssituation",
-    title: "Aus welchen Regionen oder Orten stammt die Wunschkundschaft überwiegend?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_budget",
-    stepId: "core_persona_demo",
-    stepTitle: "Demografie & Lebenssituation",
-    title: "In welchem Preis- oder Budgetbereich bewegen sich typische Aufträge oder Buchungen?",
-    description:
-      "Optionen vor Versand neu erstellen. Wochenumsatz und Projektvolumen sind nicht vergleichbar.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_budget", PERSONA_BUDGET_PLACEHOLDERS),
-    allowExtraEntries: true,
-  },
-
-  {
-    key: "persona_trigger",
-    stepId: "core_persona_problems",
-    stepTitle: "Auslöser, Ziele & Probleme",
-    stepDescription: "Warum die Suche startet – und was wirklich zählt.",
-    title: "Was ist der konkrete Auslöser, der zur Suche nach einer Lösung führt?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_goals",
-    stepId: "core_persona_problems",
-    stepTitle: "Auslöser, Ziele & Probleme",
-    title: "Was sind die wichtigsten Ziele beim Start der Zusammenarbeit?",
-    description: "Optionen vor Versand pro Branche neu erstellen. Reihenfolge nach Wichtigkeit.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_goal", PERSONA_GOAL_PLACEHOLDERS),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_pain",
-    stepId: "core_persona_problems",
-    stepTitle: "Auslöser, Ziele & Probleme",
-    title:
-      "Wie wird die eigene Situation oder das eigene Problem im Erstgespräch beschrieben? Bitte wörtlich.",
-    description: "Zitate, keine Umschreibung.",
-    required: true,
-    type: "text",
-    prefillHint: "persona_pain",
-  },
-  {
-    key: "persona_unspoken_drivers",
-    stepId: "core_persona_problems",
-    stepTitle: "Auslöser, Ziele & Probleme",
-    title:
-      "Welche tiefer liegenden Antreiber oder Ängste sind wirksam, auch wenn sie nicht offen ausgesprochen werden?",
-    description: "Bitte wörtlich, soweit bekannt.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_past_frustrations",
-    stepId: "core_persona_problems",
-    stepTitle: "Auslöser, Ziele & Probleme",
-    title:
-      "Welche Frustrationen mit früheren Lösungen, Anbietern oder eigenen Versuchen werden erwähnt?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "persona_first_contact_phrases",
-    stepId: "core_persona_language",
-    stepTitle: "Sprache & Formulierungen",
-    stepDescription: "Wörtliche Sprache, Recherche und Website-Lücken.",
-    title:
-      "Welche fünf bis sieben Formulierungen werden beim allerersten Kontakt am häufigsten verwendet?",
-    description: "Bitte wörtlich. Ein Eintrag pro Formulierung.",
-    required: false,
-    type: "text_list",
-    options: opts("persona_phrase", PERSONA_FIRST_CONTACT_PHRASES),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_first_meeting_questions",
-    stepId: "core_persona_language",
-    stepTitle: "Sprache & Formulierungen",
-    title: "Was sind die drei häufigsten Fragen im Erstgespräch?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_jargon",
-    stepId: "core_persona_language",
-    stepTitle: "Sprache & Formulierungen",
-    title:
-      "Welche Fachbegriffe werden selbst verwendet, und welche sind nicht bekannt oder werden verwechselt?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_research_activity",
-    stepId: "core_persona_language",
-    stepTitle: "Sprache & Formulierungen",
-    title: "Wie aktiv wird das Internet für die Recherche genutzt?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_RESEARCH_ACTIVITY,
-  },
-  {
-    key: "persona_research_how",
-    stepId: "core_persona_language",
-    stepTitle: "Sprache & Formulierungen",
-    title: "Wie genau sieht diese Recherche aus?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_website_missing",
-    stepId: "core_persona_language",
-    stepTitle: "Sprache & Formulierungen",
-    title: "Was wurde auf der Website vermisst oder nicht gefunden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "persona_time_to_order",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    stepDescription: "Dauer, Einfluss, Vergleich und Ausschlag.",
-    title: "Wie lange dauert es typischerweise von der ersten Anfrage bis zur Auftragserteilung?",
-    description: "Konkrete Zeitspanne, keine festen Raster.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_decision_influencers",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    title:
-      "Welche Personen oder Instanzen beeinflussen die Entscheidung (Kundschaft selbst, Partner/in, Familie, Freunde, Fachperson/Berater)?",
-    description: "Reihenfolge nach Einflussstärke.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_influencer", PERSONA_DECISION_INFLUENCERS),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_compare_quotes",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    title: "Werden üblicherweise mehrere Angebote eingeholt und verglichen?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_COMPARE_QUOTES,
-  },
-  {
-    key: "persona_compare_quotes_note",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    title: "Ergänzung dazu, falls relevant",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_tipping_point",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    title: "Was gibt am Ende den Ausschlag für die Entscheidung?",
-    description: "Bitte wörtlich, soweit bekannt.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_objections",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    title: "Welche Einwände oder Bedenken werden vor der Entscheidung am häufigsten geäußert?",
-    description: "Optionen vor Versand pro Branche neu erstellen. Reihenfolge nach Häufigkeit.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_objection", PERSONA_OBJECTION_PLACEHOLDERS),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_objections_verbatim",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    title: "Wörtliche Beispiele für diese Einwände",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_why_no",
-    stepId: "core_persona_buying",
-    stepTitle: "Kaufentscheidungsprozess",
-    title: "Aus welchen Gründen haben sich manche Interessenten am Ende dagegen entschieden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "persona_delay_reaction",
-    stepId: "core_persona_personality",
-    stepTitle: "Persönlichkeit & Entscheidungsverhalten",
-    stepDescription: "Stilfragen mit fester, branchenunabhängiger Optionsliste.",
-    title: "Wie wird auf Verzögerungen bei Terminen oder Zeitplänen reagiert?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_DELAY_REACTION,
-  },
-  {
-    key: "persona_first_meeting_detail",
-    stepId: "core_persona_personality",
-    stepTitle: "Persönlichkeit & Entscheidungsverhalten",
-    title: "Wie detailliert läuft ein typisches Erstgespräch ab?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_FIRST_MEETING_DETAIL,
-  },
-  {
-    key: "persona_personal_level",
-    stepId: "core_persona_personality",
-    stepTitle: "Persönlichkeit & Entscheidungsverhalten",
-    title: "Wie wichtig ist die persönliche Ebene für die Entscheidung?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_PERSONAL_LEVEL,
-  },
-  {
-    key: "persona_decision_style",
-    stepId: "core_persona_personality",
-    stepTitle: "Persönlichkeit & Entscheidungsverhalten",
-    title:
-      "Wie wird bei mehreren Auswahlmöglichkeiten entschieden – wird eher einer Empfehlung gefolgt, oder selbst entschieden?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_DECISION_STYLE,
-  },
-  {
-    key: "persona_communication",
-    stepId: "core_persona_personality",
-    stepTitle: "Persönlichkeit & Entscheidungsverhalten",
-    title:
-      "Wie läuft die Kommunikation während der Zusammenarbeit ab, und wie oft wird Kontakt gesucht?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_COMMUNICATION,
-  },
-  {
-    key: "persona_problem_reaction",
-    stepId: "core_persona_personality",
-    stepTitle: "Persönlichkeit & Entscheidungsverhalten",
-    title: "Wie wird auf unerwartete Probleme oder notwendige Änderungen reagiert?",
-    description: "",
-    required: false,
-    type: "radio",
-    options: PERSONA_PROBLEM_REACTION,
-  },
-
-  {
-    key: "persona_info_sources",
-    stepId: "core_persona_trust",
-    stepTitle: "Informationsquellen & Vertrauensbildung",
-    stepDescription: "Was im Gespräch positiv erwähnt wird – und woran Recherche erkennbar ist.",
-    title:
-      "Welche Informationsquellen werden im Gespräch positiv erwähnt (Empfehlung, Google-Bewertungen, Website, Social Media, Presse)?",
-    description: "Reihenfolge nach Häufigkeit der Erwähnung.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_source", PERSONA_INFO_SOURCES),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_reviews_mentioned",
-    stepId: "core_persona_trust",
-    stepTitle: "Informationsquellen & Vertrauensbildung",
-    title: "Werden Google-Bewertungen oder andere Referenzen erwähnt, und was wird dazu gesagt?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_research_signs",
-    stepId: "core_persona_trust",
-    stepTitle: "Informationsquellen & Vertrauensbildung",
-    title: "Woran erkennt man, dass bereits vorab recherchiert wurde?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_trust_signals",
-    stepId: "core_persona_trust",
-    stepTitle: "Informationsquellen & Vertrauensbildung",
-    title:
-      "Auf welche Qualifikationen oder Vertrauenssignale wird aktiv reagiert (Erfahrung/Jahre, Zertifikate, Bewertungen, Referenzen, persönlicher Eindruck)?",
-    description: "Reihenfolge nach Wirkung.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_trust", PERSONA_TRUST_SIGNALS),
-    allowExtraEntries: true,
-  },
-
-  {
-    key: "persona_pre_contact_fears",
-    stepId: "core_persona_hurdles",
-    stepTitle: "Einwände, Ängste & Hürden",
-    stepDescription: "Was vor dem ersten Kontakt bremst – und was die Hürde wegnimmt.",
-    title: "Welche konkreten Sorgen oder Ängste werden vor dem ersten Kontakt geäußert?",
-    description: "Bitte wörtlich, drei bis vier Beispiele.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_hold_back",
-    stepId: "core_persona_hurdles",
-    stepTitle: "Einwände, Ängste & Hürden",
-    title: "Was hält vor dem ersten Kontakt typischerweise zurück?",
-    description: "Mehrfachauswahl. Freitext über „Sonstiges“.",
-    required: false,
-    type: "checkbox",
-    options: opts("persona_hold", PERSONA_HOLD_BACK),
-    allowOtherOption: true,
-  },
-  {
-    key: "persona_hurdle_remover",
-    stepId: "core_persona_hurdles",
-    stepTitle: "Einwände, Ängste & Hürden",
-    title: "Was räumt diese Hürde erfahrungsgemäß weg?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "persona_journey_steps",
-    stepId: "core_persona_journey",
-    stepTitle: "Kundenreise",
-    stepDescription: "Schritte, Dauer, Abbruch und Alternativen.",
-    title: "Wie sieht die typische Kundenreise in fünf bis sieben Schritten aus?",
-    description: "Schritt für Schritt, ein Eintrag pro Phase.",
-    required: false,
-    type: "text_list",
-    options: opts("persona_step", PERSONA_JOURNEY_STEPS),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_journey_duration",
-    stepId: "core_persona_journey",
-    stepTitle: "Kundenreise",
-    title: "Wie lange dauert jede Phase dieser Reise typischerweise?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_journey_dropoff",
-    stepId: "core_persona_journey",
-    stepTitle: "Kundenreise",
-    title: "In welcher Phase springen die meisten Interessenten ab, und aus welchem Grund?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_alternatives",
-    stepId: "core_persona_journey",
-    stepTitle: "Kundenreise",
-    title: "Welche Alternativen werden ernsthaft in Betracht gezogen?",
-    description: "Optionen vor Versand pro Branche neu erstellen.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_alt", PERSONA_ALTERNATIVE_PLACEHOLDERS),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_compared_with",
-    stepId: "core_persona_journey",
-    stepTitle: "Kundenreise",
-    title: "Womit wird das Angebot konkret verglichen?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "persona_return_behavior",
-    stepId: "core_persona_aftercare",
-    stepTitle: "Nachbetreuung & Weiterempfehlung",
-    stepDescription: "Wiederkommen, Lob, Fan-Moment und Unzufriedenheit.",
-    title:
-      "Kommt die Kundschaft nach einem erfolgreichen Abschluss zurück, und wie verändert sich das Verhalten danach?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_praise",
-    stepId: "core_persona_aftercare",
-    stepTitle: "Nachbetreuung & Weiterempfehlung",
-    title: "Was wird nach erfolgreichen Ergebnissen am häufigsten gelobt?",
-    description: "Basisliste, vor Versand pro Kunde ergänzbar.",
-    required: false,
-    type: "ranking",
-    options: opts("persona_praise", PERSONA_PRAISE),
-    allowExtraEntries: true,
-  },
-  {
-    key: "persona_fan_moment",
-    stepId: "core_persona_aftercare",
-    stepTitle: "Nachbetreuung & Weiterempfehlung",
-    title: "Wann wird aus Kundschaft ein echter Fan? Was war der entscheidende Moment?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_referral_quote",
-    stepId: "core_persona_aftercare",
-    stepTitle: "Nachbetreuung & Weiterempfehlung",
-    title: "Was wird wörtlich gesagt, wenn das Angebot weiterempfohlen wird?",
-    description: "Bitte wörtlich.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_dissatisfaction",
-    stepId: "core_persona_aftercare",
-    stepTitle: "Nachbetreuung & Weiterempfehlung",
-    title: "Falls bekannt: Was waren die Gründe für Unzufriedenheit?",
-    description: "Bitte wörtlich.",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "persona_hormozi_dream",
-    stepId: "core_persona_hormozi",
-    stepTitle: "Hormozi-Layer",
-    stepDescription: "Traumergebnis, Anstoß, Tempo und Dringlichkeit aus Kundensicht.",
-    title:
-      "Was wird als ideales Ergebnis beschrieben, wenn die Zusammenarbeit perfekt gelaufen ist?",
-    description: "Bitte wörtlich.",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_hormozi_trigger",
-    stepId: "core_persona_hormozi",
-    stepTitle: "Hormozi-Layer",
-    title: "Was hat den Anstoß gegeben, überhaupt aktiv zu werden?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_hormozi_speed",
-    stepId: "core_persona_hormozi",
-    stepTitle: "Hormozi-Layer",
-    title: "Wie schnell werden erste sichtbare Ergebnisse erwartet?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_hormozi_urgency",
-    stepId: "core_persona_hormozi",
-    stepTitle: "Hormozi-Layer",
-    title: "Aus welchem Grund sollte jetzt eine Entscheidung getroffen werden und nicht erst später?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-
-  {
-    key: "persona_anything_else",
-    stepId: "core_persona_close",
-    stepTitle: "Abschluss",
-    stepDescription: "Was noch fehlt – und die dichte Kurzbeschreibung.",
-    title: "Gibt es noch etwas Wichtiges über diese Zielgruppe, das bisher nicht abgefragt wurde?",
-    description: "",
-    required: false,
-    type: "text",
-  },
-  {
-    key: "persona_summary",
-    stepId: "core_persona_close",
-    stepTitle: "Abschluss",
-    title:
-      "Wie lässt sich die Wunschkundschaft in drei bis fünf Sätzen so beschreiben, dass sofort klar wird, wer gemeint ist?",
-    description: "",
-    required: false,
-    type: "text",
-  },
+  ...step(
+    "core_persona_intro",
+    "Einleitung",
+    [
+      {
+        key: "persona_confirm_real_experience",
+        title:
+          "Bestätigung, dass alle folgenden Angaben auf eigenen, echten Erfahrungen und Beobachtungen beruhen.",
+        description: "Bitte mit Ja oder Nein antworten. Ohne diese Bestätigung ist der Fragebogen nicht auswertbar.",
+        required: true,
+        type: "radio",
+        options: YES_NO,
+      },
+    ],
+    "Dieser Fragebogen beschreibt den idealen Kunden – die Art von Person oder Firma, mit der die Zusammenarbeit am besten funktioniert.",
+  ),
+  ...step(
+    "core_persona_avatar",
+    "Wer ist der Wunschkunde",
+    [
+      {
+        key: "persona_name",
+        title:
+          "Wie könnte dieser ideale Kunde heißen, wenn es eine echte Person wäre (Vor- und Nachname)? Das dient nur der besseren Vorstellung, es handelt sich nicht um eine echte Person.",
+        required: true,
+        type: "text",
+        prefillHint: "persona_name",
+      },
+      {
+        key: "persona_description",
+        title:
+          "Wie lässt sich dieser ideale Kunde in drei bis fünf Sätzen beschreiben (ungefähres Alter, Lebenssituation, warum die Zusammenarbeit mit ihm besonders gut funktioniert)?",
+        required: true,
+        type: "text",
+      },
+      {
+        key: "persona_customer_groups",
+        title: "Gibt es unterschiedliche Gruppen von Kunden, oder ist es meistens derselbe Typ Mensch?",
+        description: "Liste vor Versand passend zur Branche ersetzen.",
+        type: "checkbox",
+        options: opts("persona_group", PERSONA_CUSTOMER_GROUP_PLACEHOLDERS),
+        allowOtherOption: true,
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_demo",
+    "Alter, Beruf & Lebenssituation",
+    [
+      {
+        key: "persona_age",
+        title: "In welchem Altersbereich ist der Großteil dieser Kunden?",
+        type: "radio",
+        options: PERSONA_AGE_CLASSES,
+        prefillHint: "persona_age",
+      },
+      {
+        key: "persona_job",
+        title:
+          "Welcher Beruf oder welche Lebenssituation kommt bei diesem Kunden am häufigsten vor? Bitte in eine Reihenfolge bringen.",
+        type: "ranking",
+        options: opts("persona_job", PERSONA_JOB_RANKING),
+        allowExtraEntries: true,
+        prefillHint: "persona_job",
+      },
+      {
+        key: "persona_family",
+        title: "Wie sieht die familiäre Situation dieses Kunden meistens aus?",
+        type: "checkbox",
+        options: opts("persona_family", PERSONA_FAMILY),
+        allowOtherOption: true,
+      },
+      {
+        key: "persona_regions",
+        title: "Aus welcher Gegend oder welchen Orten kommt dieser Kunde hauptsächlich?",
+        type: "text",
+      },
+      {
+        key: "persona_budget",
+        title:
+          "In welchem Preisbereich bewegen sich typische Aufträge oder Buchungen mit diesem Kunden? Bitte konkrete Beträge oder Spannen nennen und nach Häufigkeit sortieren.",
+        description: "Optionen vor Versand neu erstellen. Preisbereiche unterscheiden sich stark je Branche.",
+        type: "ranking",
+        options: opts("persona_budget", INDUSTRY_RANKING_PLACEHOLDERS),
+        allowExtraEntries: true,
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_problems",
+    "Warum wird überhaupt gesucht",
+    [
+      {
+        key: "persona_trigger",
+        title: "Was ist der Auslöser, der diesen Kunden dazu bringt, überhaupt nach einer Lösung zu suchen?",
+        type: "text",
+      },
+      {
+        key: "persona_goals",
+        title:
+          "Was will dieser Kunde zu Beginn der Zusammenarbeit am meisten erreichen? Bitte nach Häufigkeit sortieren.",
+        description: "Optionen vor Versand passend zur Branche eintragen.",
+        type: "ranking",
+        options: opts("persona_goal", INDUSTRY_RANKING_PLACEHOLDERS),
+        allowExtraEntries: true,
+      },
+      {
+        key: "persona_pain",
+        title:
+          "Wie beschreibt dieser Kunde sein eigenes Problem im ersten Gespräch – am besten mit den genauen Worten, die tatsächlich verwendet wurden?",
+        required: true,
+        type: "text",
+        prefillHint: "persona_pain",
+      },
+      {
+        key: "persona_unspoken_drivers",
+        title:
+          "Was treibt diesen Kunden innerlich an, oder wovor hat er Angst, auch wenn er es nicht direkt ausspricht?",
+        type: "text",
+      },
+      {
+        key: "persona_past_frustrations",
+        title:
+          "Gab es schlechte Erfahrungen mit früheren Lösungen, anderen Anbietern oder eigenen Versuchen? Was wurde darüber gesagt?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_language",
+    "Wie dieser Kunde spricht",
+    [
+      {
+        key: "persona_first_contact_phrases",
+        title:
+          "Welche Sätze oder Formulierungen verwendet dieser Kunde am häufigsten beim allerersten Kontakt (erster Anruf, erste Nachricht)? Bitte wortwörtlich.",
+        description: "Ein Satz pro Feld.",
+        type: "text_list",
+        options: emptySlots("persona_phrase", 5),
+        allowExtraEntries: true,
+        addEntryLabel: "Formulierung hinzufügen",
+      },
+      {
+        key: "persona_first_meeting_questions",
+        title: "Was sind die häufigsten Fragen im ersten Gespräch?",
+        description: "Eine Frage pro Feld.",
+        type: "text_list",
+        options: emptySlots("persona_q", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Frage hinzufügen",
+      },
+      {
+        key: "persona_jargon_known",
+        title: "Welche Fachbegriffe kennt und benutzt dieser Kunde selbst?",
+        description: "Ein Begriff pro Feld.",
+        type: "text_list",
+        options: emptySlots("jargon_known", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Begriff hinzufügen",
+      },
+      {
+        key: "persona_jargon_unknown",
+        title: "Welche Fachbegriffe kennt dieser Kunde nicht oder verwechselt er?",
+        description: "Ein Begriff pro Feld.",
+        type: "text_list",
+        options: emptySlots("jargon_unknown", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Begriff hinzufügen",
+      },
+      {
+        key: "persona_research_activity",
+        title: "Sucht dieser Kunde aktiv im Internet nach Informationen, bevor er sich meldet?",
+        type: "radio",
+        options: PERSONA_RESEARCH_ACTIVITY,
+      },
+      {
+        key: "persona_research_how",
+        title: "Wie genau sieht diese Suche aus?",
+        type: "text",
+      },
+      {
+        key: "persona_website_missing",
+        title: "Was hat dieser Kunde auf der eigenen Website vermisst oder nicht gefunden?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_buying",
+    "Wie die Entscheidung getroffen wird",
+    [
+      {
+        key: "persona_time_to_order",
+        title: "Wie lange dauert es normalerweise von der ersten Anfrage bis zur endgültigen Zusage?",
+        type: "text",
+      },
+      {
+        key: "persona_decision_influencers",
+        title: "Wer redet bei der Entscheidung mit – nur der Kunde selbst, oder auch andere?",
+        type: "ranking",
+        options: opts("persona_influencer", PERSONA_DECISION_INFLUENCERS),
+        allowExtraEntries: true,
+      },
+      {
+        key: "persona_compare_quotes",
+        title:
+          "Holt dieser Kunde meistens mehrere Angebote von verschiedenen Anbietern ein, bevor er sich entscheidet?",
+        type: "radio",
+        options: PERSONA_COMPARE_QUOTES,
+      },
+      {
+        key: "persona_tipping_point",
+        title: "Was gibt am Ende den Ausschlag für die Entscheidung – was wird dazu gesagt?",
+        type: "text",
+      },
+      {
+        key: "persona_objections",
+        title:
+          "Welche Bedenken oder Zweifel werden vor der Entscheidung am häufigsten geäußert? Bitte nach Häufigkeit sortieren und wenn möglich wortwörtlich ergänzen.",
+        description: "Optionen vor Versand passend zur Branche eintragen.",
+        type: "ranking",
+        options: opts("persona_objection", INDUSTRY_RANKING_PLACEHOLDERS),
+        allowExtraEntries: true,
+      },
+      {
+        key: "persona_why_no",
+        title:
+          "Aus welchen Gründen haben sich manche Interessenten am Ende doch für einen anderen Anbieter entschieden?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_personality",
+    "Verhalten & Persönlichkeit",
+    [
+      {
+        key: "persona_delay_reaction",
+        title: "Wie reagiert dieser Kunde, wenn sich ein Termin verschiebt?",
+        type: "radio",
+        options: PERSONA_DELAY_REACTION,
+      },
+      {
+        key: "persona_first_meeting_detail",
+        title: "Wie viele Details möchte dieser Kunde im ersten Gespräch wissen?",
+        type: "radio",
+        options: PERSONA_FIRST_MEETING_DETAIL,
+      },
+      {
+        key: "persona_personal_level",
+        title: "Wie wichtig ist diesem Kunden eine persönliche, vertraute Beziehung?",
+        type: "radio",
+        options: PERSONA_PERSONAL_LEVEL,
+      },
+      {
+        key: "persona_decision_style",
+        title:
+          "Wenn dieser Kunde zwischen mehreren Möglichkeiten wählen muss – folgt er eher einer Empfehlung, oder entscheidet er lieber selbst?",
+        type: "radio",
+        options: PERSONA_DECISION_STYLE,
+      },
+      {
+        key: "persona_communication",
+        title: "Wie oft meldet sich dieser Kunde während einer laufenden Zusammenarbeit?",
+        type: "radio",
+        options: PERSONA_COMMUNICATION,
+      },
+      {
+        key: "persona_problem_reaction",
+        title: "Wie reagiert dieser Kunde, wenn während der Zusammenarbeit etwas Unerwartetes passiert?",
+        type: "radio",
+        options: PERSONA_PROBLEM_REACTION,
+      },
+    ],
+    "Stilfragen mit fester Optionsliste.",
+  ),
+  ...step(
+    "core_persona_trust",
+    "Was Vertrauen schafft",
+    [
+      {
+        key: "persona_info_sources",
+        title:
+          "Welche Informationsquellen werden im Gespräch positiv erwähnt (z. B. Empfehlung von Bekannten, Google-Bewertungen, die eigene Website, Social Media, Presse)?",
+        type: "ranking",
+        options: opts("persona_source", PERSONA_INFO_SOURCES),
+        allowExtraEntries: true,
+      },
+      {
+        key: "persona_reviews_mentioned",
+        title: "Werden Google-Bewertungen erwähnt? Was wird dazu gesagt?",
+        type: "text",
+      },
+      {
+        key: "persona_research_signs",
+        title:
+          "Woran merkt man, dass dieser Kunde sich vorher schon online informiert hat? Was wird dann gesagt oder gefragt?",
+        type: "text",
+      },
+      {
+        key: "persona_trust_signals",
+        title:
+          "Welche Nachweise oder Signale überzeugen diesen Kunden am meisten (z. B. langjährige Erfahrung, Zertifikate, Bewertungen, Referenzen, persönlicher Eindruck)?",
+        type: "ranking",
+        options: opts("persona_trust", PERSONA_TRUST_SIGNALS),
+        allowExtraEntries: true,
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_hurdles",
+    "Sorgen & Zweifel",
+    [
+      {
+        key: "persona_pre_contact_fears",
+        title: "Welche konkreten Sorgen oder Ängste werden vor dem ersten Kontakt geäußert? Bitte wortwörtlich.",
+        description: "Eine Sorge pro Feld.",
+        type: "text_list",
+        options: emptySlots("persona_fear", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Sorge hinzufügen",
+      },
+      {
+        key: "persona_hold_back",
+        title:
+          "Was hält diesen Kunden davon ab, sich zu melden, obwohl eigentlich Interesse besteht (z. B. Angst vor den Kosten, Zeitmangel, Unsicherheit ob das Angebot passt, schlechte frühere Erfahrung)?",
+        type: "checkbox",
+        options: opts("persona_hold", PERSONA_HOLD_BACK),
+        allowOtherOption: true,
+      },
+      {
+        key: "persona_hold_back_note",
+        title: "Ergänzung dazu in eigenen Worten",
+        type: "text",
+      },
+      {
+        key: "persona_hurdle_remover",
+        title: "Was hilft erfahrungsgemäß, diese Zurückhaltung zu überwinden?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_journey",
+    "Der Weg vom ersten Kontakt zur Stammkundschaft",
+    [
+      {
+        key: "persona_journey_steps",
+        title:
+          "Wie sieht der typische Weg aus, von dem Moment, in dem dieser Kunde zum ersten Mal von dem Angebot erfährt, bis er zum festen Kunden wird?",
+        description: "Ein Schritt pro Feld. Die Felder sind durchnummeriert.",
+        type: "text_list",
+        options: emptySlots("persona_step", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Schritt hinzufügen",
+      },
+      {
+        key: "persona_journey_duration",
+        title: "Wie lange dauert jeder dieser Schritte ungefähr?",
+        type: "text",
+      },
+      {
+        key: "persona_journey_dropoff",
+        title: "An welcher Stelle springen die meisten Interessenten ab, und warum?",
+        type: "text",
+      },
+      {
+        key: "persona_alternatives",
+        title:
+          "Welche anderen Lösungen oder Anbieter werden ernsthaft in Betracht gezogen, bevor sich dieser Kunde entscheidet?",
+        description: "Optionen vor Versand passend zur Branche eintragen.",
+        type: "ranking",
+        options: opts("persona_alt", INDUSTRY_RANKING_PLACEHOLDERS),
+        allowExtraEntries: true,
+      },
+      {
+        key: "persona_compared_with",
+        title: "Womit wird das eigene Angebot konkret verglichen?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_aftercare",
+    "Nach dem Abschluss",
+    [
+      {
+        key: "persona_return_behavior",
+        title: "Kommt dieser Kunde nach einem erfolgreichen Abschluss zurück? Was ändert sich danach im Verhalten?",
+        type: "text",
+      },
+      {
+        key: "persona_praise",
+        title:
+          "Was wird nach einem erfolgreichen Ergebnis am häufigsten gelobt (z. B. die Qualität, die Kommunikation, das Preis-Leistungs-Verhältnis, die Pünktlichkeit, die persönliche Betreuung)?",
+        type: "ranking",
+        options: opts("persona_praise", PERSONA_PRAISE),
+        allowExtraEntries: true,
+      },
+      {
+        key: "persona_fan_moment",
+        title: "Wann genau wird aus diesem Kunden ein echter Fan? Was war der entscheidende Moment?",
+        type: "text",
+      },
+      {
+        key: "persona_referral_quote",
+        title: "Was wird wortwörtlich gesagt, wenn dieser Kunde das Angebot weiterempfiehlt?",
+        description: "Ein Zitat pro Feld.",
+        type: "text_list",
+        options: emptySlots("persona_ref", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Zitat hinzufügen",
+      },
+      {
+        key: "persona_dissatisfaction",
+        title: "Falls es Unzufriedenheit gab: was war der Grund, und was wurde dazu gesagt?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_hormozi",
+    "Der große Wunsch & die größte Hürde",
+    [
+      {
+        key: "persona_hormozi_dream",
+        title:
+          "Wie würde dieser Kunde den perfekten Ausgang beschreiben, wenn alles optimal gelaufen ist? Bitte möglichst wortwörtlich.",
+        type: "text",
+      },
+      {
+        key: "persona_hormozi_trigger",
+        title: "Was war der Auslöser dafür, überhaupt aktiv zu werden?",
+        type: "text",
+      },
+      {
+        key: "persona_hormozi_speed",
+        title: "Wie schnell erwartet dieser Kunde ein erstes sichtbares Ergebnis?",
+        type: "text",
+      },
+      {
+        key: "persona_hormozi_urgency",
+        title: "Warum sollte sich dieser Kunde jetzt entscheiden und nicht erst später?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_persona_close",
+    "Abschluss",
+    [
+      {
+        key: "persona_anything_else",
+        title: "Gibt es noch etwas Wichtiges über diesen Kunden, das bisher nicht gefragt wurde?",
+        type: "text",
+      },
+      {
+        key: "persona_summary",
+        title:
+          "Wie lässt sich dieser Kunde in drei bis fünf Sätzen so beschreiben, dass sofort klar ist, wer gemeint ist?",
+        type: "text",
+      },
+    ],
+  ),
 ];
 
 export function coreQuestionsForPurpose(purpose: SurveyPurpose): CoreQuestionTemplate[] {
@@ -1801,8 +1435,9 @@ export function fieldFromCoreTemplate(
     return {
       ...base,
       type: "text_list",
-      options: options.length ? options : [opt(`${t.key}_1`, "Eintrag 1")],
+      options: options.length ? options : emptySlots(t.key, 3),
       allowExtraEntries: t.allowExtraEntries !== false,
+      addEntryLabel: t.addEntryLabel?.trim() || undefined,
     };
   }
 

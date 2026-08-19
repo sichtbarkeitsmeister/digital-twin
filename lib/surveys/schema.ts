@@ -31,6 +31,7 @@ export const surveyTextListFieldSchema = fieldBaseSchema.extend({
   type: z.literal("text_list"),
   options: z.array(surveyOptionSchema).min(1),
   allowExtraEntries: z.boolean().optional().default(true),
+  addEntryLabel: z.string().optional(),
 });
 
 export const surveyRadioFieldSchema = fieldBaseSchema.extend({

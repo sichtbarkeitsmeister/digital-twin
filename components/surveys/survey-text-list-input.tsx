@@ -22,20 +22,20 @@ export function SurveyTextListInput(props: {
   placeholder?: string;
   allowExtraEntries?: boolean;
   required?: boolean;
+  addEntryLabel?: string;
 }) {
   const optionIds = props.options.map((o) => o.id);
   const state = coerceTextListState(props.value, optionIds);
   const promptById = new Map(props.options.map((o) => [o.id, o.label] as const));
+  const addLabel = props.addEntryLabel?.trim() || "Weitere Eingabe hinzufügen";
 
   return (
     <div className="grid gap-3">
       {state.entries.map((entry, index) => {
         const prompt = promptById.get(entry.id);
         const isPromptSlot = prompt !== undefined;
-        const label =
-          isPromptSlot && prompt.trim()
-            ? prompt.trim()
-            : `Eingabe ${index + 1}`;
+        const customPrompt = isPromptSlot ? prompt.trim() : "";
+        const label = customPrompt || String(index + 1);
         return (
           <div key={entry.id} className="grid gap-1.5">
             <div className="flex items-center justify-between gap-2">
@@ -70,7 +70,7 @@ export function SurveyTextListInput(props: {
               id={`${props.fieldId}_${entry.id}`}
               value={entry.value}
               disabled={props.disabled}
-              placeholder={props.placeholder ?? "Deine Antwort…"}
+              placeholder={props.placeholder ?? "Antwort eingeben"}
               className="h-11 text-base lg:h-10 lg:text-sm"
               onChange={(e) =>
                 props.onChange(
@@ -99,7 +99,7 @@ export function SurveyTextListInput(props: {
           }
         >
           <Plus className="mr-2 h-4 w-4" />
-          Weitere Eingabe hinzufügen
+          {addLabel}
         </Button>
       ) : null}
     </div>
