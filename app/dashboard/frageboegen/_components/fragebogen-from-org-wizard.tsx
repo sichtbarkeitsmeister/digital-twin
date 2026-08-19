@@ -3,14 +3,19 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Loader2, Sparkles, Trash2 } from "lucide-react";
+import { Loader2, Plus, Sparkles } from "lucide-react";
 
 import {
   createFragebogenFromReviewAction,
   loadFragebogenWizardContextAction,
   previewFragebogenFromOrgAction,
 } from "@/app/dashboard/frageboegen/actions";
+import { FragebogenReviewQuestionEditor } from "@/app/dashboard/frageboegen/_components/fragebogen-review-question-editor";
 import type { FragebogenReviewDraft } from "@/lib/surveys/build-fragebogen-from-org";
+import {
+  createEmptyExtraQuestion,
+  type ReviewQuestionItem,
+} from "@/lib/surveys/fragebogen-review-draft";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,15 +34,6 @@ import { cn } from "@/lib/utils";
 type CoreItem = { key: string; title: string; description: string };
 
 const CREATE_ORG_HREF = "/dashboard/admin/organisations#organisation-anlegen";
-
-function sourceBadge(source: string) {
-  if (source === "organisation") return "Organisation";
-  if (source === "website") return "Website";
-  if (source === "crawl") return "Crawl";
-  if (source === "ai") return "KI";
-  if (source === "meeting") return "Kundengespräch";
-  return "Leer";
-}
 
 export function FragebogenFromOrgWizard(props: {
   organisationId: string | null;
@@ -168,7 +164,7 @@ export function FragebogenFromOrgWizard(props: {
 
   function updateQuestion(
     id: string,
-    patch: Partial<FragebogenReviewDraft["questions"][number]>,
+    patch: Partial<ReviewQuestionItem>,
   ) {
     setDraft((prev) => {
       if (!prev) return prev;
@@ -179,15 +175,60 @@ export function FragebogenFromOrgWizard(props: {
     });
   }
 
-  function removeQuestion(id: string) {
-    updateQuestion(id, { included: false });
+  function replaceQuestion(id: string, next: ReviewQuestionItem) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        questions: prev.questions.map((q) => (q.id === id ? next : q)),
+      };
+    });
   }
 
-  function clearAnswer(id: string) {
-    updateQuestion(id, {
-      answer: "",
-      answerSource: "none",
-      answerNote: "Manuell geleert",
+  function removeQuestion(id: string) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const target = prev.questions.find((q) => q.id === id);
+      if (!target) return prev;
+      if (target.kind === "extra") {
+        return {
+          ...prev,
+          questions: prev.questions.filter((q) => q.id !== id),
+        };
+      }
+      return {
+        ...prev,
+        questions: prev.questions.map((q) =>
+          q.id === id ? { ...q, included: false } : q,
+        ),
+      };
+    });
+  }
+
+  function moveQuestion(id: string, delta: -1 | 1) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const visible = prev.questions.filter((q) => q.included);
+      const from = visible.findIndex((q) => q.id === id);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= visible.length) return prev;
+      const a = visible[from]!;
+      const b = visible[to]!;
+      const next = prev.questions.slice();
+      const ia = next.findIndex((q) => q.id === a.id);
+      const ib = next.findIndex((q) => q.id === b.id);
+      [next[ia], next[ib]] = [next[ib]!, next[ia]!];
+      return { ...prev, questions: next };
+    });
+  }
+
+  function addExtraQuestion() {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        questions: [...prev.questions, createEmptyExtraQuestion()],
+      };
     });
   }
 
@@ -207,9 +248,7 @@ export function FragebogenFromOrgWizard(props: {
         setError(res.message);
         return;
       }
-      const target = res.data.responseId
-        ? `/dashboard/surveys/${res.data.surveyId}/responses/${res.data.responseId}`
-        : `/dashboard/surveys/${res.data.surveyId}/edit`;
+      const target = `/dashboard/surveys/${res.data.surveyId}/edit`;
       router.push(target);
       router.refresh();
     });
@@ -225,8 +264,9 @@ export function FragebogenFromOrgWizard(props: {
             Prüfung vor dem Speichern
           </h1>
           <p className="max-w-2xl text-sm text-secondary">
-            Fragen entfernen oder umformulieren, vorausgefüllte Antworten prüfen/löschen.
-            Erst danach wird der Fragebogen angelegt.
+            Fragen umformulieren, Typ und Pflichtfeld setzen, Zusatzfragen ergänzen.
+            Erst danach wird der Fragebogen angelegt — danach bleibt alles im Entwurf
+            weiter editierbar.
           </p>
         </div>
 
@@ -249,77 +289,27 @@ export function FragebogenFromOrgWizard(props: {
         </Card>
 
         <div className="grid gap-3">
-          {draft.questions.map((q) => {
-            if (!q.included) return null;
-            return (
-              <Card key={q.id} className="border-sbkm-navy/10">
-                <CardContent className="grid gap-3 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="grid gap-1 min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={q.kind === "core" ? "default" : "secondary"}>
-                          {q.kind === "core" ? "Kernfrage" : "Zusatzfrage"}
-                        </Badge>
-                        <Badge variant="outline">{sourceBadge(q.answerSource)}</Badge>
-                      </div>
-                      <Input
-                        value={q.title}
-                        onChange={(e) => updateQuestion(q.id, { title: e.target.value })}
-                        className="font-medium"
-                      />
-                      {q.answerNote ? (
-                        <p className="text-xs text-secondary">{q.answerNote}</p>
-                      ) : null}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-red-700"
-                      onClick={() => removeQuestion(q.id)}
-                    >
-                      <Trash2 className="size-3.5" aria-hidden />
-                      Entfernen
-                    </Button>
-                  </div>
-                  <div className="grid gap-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <Label htmlFor={`answer-${q.id}`}>Antwort-Vorschlag</Label>
-                      {q.answer.trim() ? (
-                        <button
-                          type="button"
-                          className="text-xs font-medium text-secondary underline-offset-2 hover:underline"
-                          onClick={() => clearAnswer(q.id)}
-                        >
-                          Antwort leeren (veraltet)
-                        </button>
-                      ) : null}
-                    </div>
-                    <Textarea
-                      id={`answer-${q.id}`}
-                      value={q.answer}
-                      rows={2}
-                      placeholder="Noch keine Vorausfüllung — später im Fragebogen ausfüllen"
-                      onChange={(e) =>
-                        updateQuestion(q.id, {
-                          answer: e.target.value,
-                          answerSource: e.target.value.trim()
-                            ? q.answerSource === "none"
-                              ? "ai"
-                              : q.answerSource
-                            : "none",
-                          answerNote:
-                            e.target.value.trim() && q.answerSource === "none"
-                              ? "Manuell ergänzt"
-                              : q.answerNote,
-                        })
-                      }
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+          {included.map((q, visibleIndex) => (
+            <FragebogenReviewQuestionEditor
+              key={q.id}
+              question={q}
+              index={visibleIndex}
+              total={included.length}
+              onChange={(patch) => updateQuestion(q.id, patch)}
+              onReplace={(next) => replaceQuestion(q.id, next)}
+              onRemove={() => removeQuestion(q.id)}
+              onMove={(delta) => moveQuestion(q.id, delta)}
+            />
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            className="justify-center border-dashed"
+            onClick={addExtraQuestion}
+          >
+            <Plus className="size-4" aria-hidden />
+            Zusatzfrage ergänzen
+          </Button>
         </div>
 
         <label className="flex items-center gap-2 text-sm">
@@ -631,7 +621,8 @@ export function FragebogenFromOrgWizard(props: {
             5. Individuelle Zusatzfragen
           </CardTitle>
           <CardDescription>
-            KI schlägt Sonderfragen aus Meeting/Crawl vor — in der Prüfung noch entfernbar.
+            KI schlägt Sonderfragen aus Meeting/Crawl vor. Im nächsten Schritt kannst du
+            weitere Zusatzfragen mit Typ, Pflichtfeld und Optionen ergänzen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">

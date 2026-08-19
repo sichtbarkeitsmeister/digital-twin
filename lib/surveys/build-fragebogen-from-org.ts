@@ -1,7 +1,6 @@
 import "server-only";
 
 import Anthropic from "@anthropic-ai/sdk";
-import { randomUUID } from "node:crypto";
 
 import {
   callAnthropicFirstAvailable,
@@ -19,7 +18,6 @@ import {
   loadOrgCrawlContext,
   suggestPrefillsFromCrawl,
   type PrefillDraft,
-  type PrefillSource,
 } from "@/lib/surveys/org-crawl-context";
 import {
   buildMeetingExtraQuestions,
@@ -29,35 +27,15 @@ import {
   type MeetingBriefing,
 } from "@/lib/surveys/meeting-briefing";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
-import { surveySchema } from "@/lib/surveys/schema";
-import type { Survey, SurveyField, SurveyStep } from "@/lib/surveys/types";
+import {
+  type ExtraQuestionPlacement,
+  type FragebogenReviewDraft,
+  type ReviewQuestionItem,
+  buildSurveyAndAnswersFromReview,
+} from "@/lib/surveys/fragebogen-review-draft";
 
-export type { MeetingBriefing };
-
-export type ExtraQuestionPlacement = "start" | "end";
-
-export type ReviewQuestionItem = {
-  id: string;
-  kind: "core" | "extra";
-  coreKey?: string;
-  title: string;
-  description: string;
-  included: boolean;
-  answer: string;
-  answerSource: PrefillSource | "none";
-  answerNote: string;
-};
-
-export type FragebogenReviewDraft = {
-  title: string;
-  description: string;
-  purpose: SurveyPurpose;
-  extraPlacement: ExtraQuestionPlacement;
-  crawlPageCount: number;
-  websiteUrl: string | null;
-  organisationName: string;
-  questions: ReviewQuestionItem[];
-};
+export type { MeetingBriefing, ExtraQuestionPlacement, FragebogenReviewDraft, ReviewQuestionItem };
+export { buildSurveyAndAnswersFromReview } from "@/lib/surveys/fragebogen-review-draft";
 
 function slugifyKey(raw: string): string {
   return (
@@ -245,6 +223,9 @@ export async function buildFragebogenReviewDraft(input: {
     title: e.title,
     description: e.description,
     included: true,
+    required: false,
+    type: "text" as const,
+    options: [],
     answer: e.answer,
     answerSource: "meeting" as const,
     answerNote: "Aus Kundengespräch übernommen",
@@ -259,6 +240,9 @@ export async function buildFragebogenReviewDraft(input: {
       title: t.title,
       description: t.description,
       included: true,
+      required: t.required,
+      type: t.type,
+      options: [],
       answer: draft?.value ?? "",
       answerSource: draft?.source ?? "none",
       answerNote: draft?.note ?? "",
@@ -274,6 +258,9 @@ export async function buildFragebogenReviewDraft(input: {
       description:
         "Individuelle Zusatzfrage aus Crawl/KI — bei Bedarf entfernen oder umformulieren.",
       included: true,
+      required: false,
+      type: "text" as const,
+      options: [],
       answer: "",
       answerSource: "none" as const,
       answerNote: "",
@@ -304,110 +291,6 @@ export async function buildFragebogenReviewDraft(input: {
     websiteUrl: crawl.websiteUrl,
     organisationName: crawl.organisationName,
     questions,
-  };
-}
-
-function surveyFromReview(draft: FragebogenReviewDraft): Survey {
-  const included = draft.questions.filter((q) => q.included && q.title.trim());
-  if (included.length === 0) {
-    throw new Error("Mindestens eine Frage muss übernommen werden.");
-  }
-
-  const coreIncluded = included.filter((q) => q.kind === "core");
-  const extraIncluded = included.filter((q) => q.kind === "extra");
-  const original = coreQuestionsForPurpose(draft.purpose);
-  const byKey = new Map(original.map((t) => [t.key, t]));
-
-  const extrasStep: SurveyStep | null =
-    extraIncluded.length > 0
-      ? {
-          id: "extra_individual",
-          title: "Individuelle Fragen",
-          description:
-            "Zusatzfragen aus Website-Kontext. Veraltetes löschen, Neues ergänzen.",
-          fields: extraIncluded.map((q) => ({
-            id: q.id,
-            type: "text" as const,
-            title: q.title.trim(),
-            description: q.description,
-            required: false,
-          })),
-        }
-      : null;
-
-  const coreByStep = new Map<string, SurveyStep>();
-  for (const q of coreIncluded) {
-    const key = q.coreKey || q.id.replace(/^core_/, "");
-    const base = byKey.get(key);
-    const stepId = base?.stepId ?? "core_reviewed";
-    const stepTitle = base?.stepTitle ?? "Kernfragen";
-    const field: SurveyField = {
-      id: q.id,
-      type: "text",
-      title: q.title.trim(),
-      description: q.description,
-      required: base?.required ?? false,
-    };
-    const existing = coreByStep.get(stepId);
-    if (existing) existing.fields.push(field);
-    else {
-      coreByStep.set(stepId, {
-        id: stepId,
-        title: stepTitle,
-        description: "",
-        fields: [field],
-      });
-    }
-  }
-
-  const coreSteps = [...coreByStep.values()];
-  const steps =
-    extrasStep == null
-      ? coreSteps
-      : draft.extraPlacement === "start"
-        ? [extrasStep, ...coreSteps]
-        : [...coreSteps, extrasStep];
-
-  const definitionCandidate: Survey = {
-    version: 1,
-    id: randomUUID(),
-    title: draft.title.trim() || "Fragebogen",
-    description: draft.description,
-    infoTextEnabled: false,
-    infoText: "",
-    answerPlaceholder: "Deine Antwort…",
-    steps,
-  };
-
-  const parsed = surveySchema.safeParse(definitionCandidate);
-  if (!parsed.success) {
-    throw new Error(parsed.error.issues[0]?.message ?? "Fragebogen-Definition ungültig.");
-  }
-  return parsed.data as Survey;
-}
-
-export function answersFromReview(
-  draft: FragebogenReviewDraft,
-  savePrefills: boolean,
-): Record<string, string> {
-  if (!savePrefills) return {};
-  const out: Record<string, string> = {};
-  for (const q of draft.questions) {
-    if (!q.included) continue;
-    const answer = q.answer.trim();
-    if (!answer) continue;
-    out[q.id] = answer;
-  }
-  return out;
-}
-
-export function buildSurveyAndAnswersFromReview(input: {
-  draft: FragebogenReviewDraft;
-  savePrefills: boolean;
-}): { definition: Survey; answers: Record<string, string> } {
-  return {
-    definition: surveyFromReview(input.draft),
-    answers: answersFromReview(input.draft, input.savePrefills),
   };
 }
 
