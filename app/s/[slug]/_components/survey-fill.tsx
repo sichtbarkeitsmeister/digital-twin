@@ -941,6 +941,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                         disabled={!session}
                         allowExtraEntries={field.allowExtraEntries !== false}
                         required={field.required}
+                        addEntryLabel={field.addEntryLabel}
                         placeholder={
                           survey.answerPlaceholder?.trim() || "Deine Antwort…"
                         }

@@ -138,13 +138,14 @@ function createDefaultField(type: SurveyFieldType): SurveyField {
     return {
       ...base,
       type: "text_list",
-      required: true,
+      required: false,
       options: [
-        { id: createId(), label: "Mir ist aufgefallen, dass…" },
-        { id: createId(), label: "Das Kind hat Probleme mit…" },
-        { id: createId(), label: "Der Kinderarzt hat empfohlen…" },
+        { id: createId(), label: "" },
+        { id: createId(), label: "" },
+        { id: createId(), label: "" },
       ],
       allowExtraEntries: true,
+      addEntryLabel: "Weitere Eingabe hinzufügen",
     };
   }
   if (type === "radio")
@@ -216,12 +217,19 @@ function convertFieldType(
   }
 
   if (nextType === "text_list") {
+    const fromList = field.type === "text_list";
     return {
       ...base,
       type: "text_list",
-      options: getOptionsFromField(field, 1),
-      allowExtraEntries:
-        field.type === "text_list" ? field.allowExtraEntries !== false : true,
+      options: fromList
+        ? getOptionsFromField(field, 3)
+        : [
+            { id: createId(), label: "" },
+            { id: createId(), label: "" },
+            { id: createId(), label: "" },
+          ],
+      allowExtraEntries: fromList ? field.allowExtraEntries !== false : true,
+      addEntryLabel: fromList ? field.addEntryLabel : "Weitere Eingabe hinzufügen",
     };
   }
 
@@ -667,10 +675,7 @@ export function SurveyBuilder({
               return f;
             }
             const nextNum = f.options.length + 1;
-            const label =
-              f.type === "text_list"
-                ? `Prompt ${nextNum}`
-                : `Option ${nextNum}`;
+            const label = f.type === "text_list" ? "" : `Option ${nextNum}`;
             return {
               ...f,
               options: [...f.options, { id: createId(), label }],
@@ -1438,7 +1443,7 @@ export function SurveyBuilder({
                           <div className="flex items-center justify-between gap-2">
                             <Label>
                               {field.type === "text_list"
-                                ? "Prompts / Eingabefelder"
+                                ? "Leere Antwortfelder"
                                 : "Optionen"}
                             </Label>
                             <Button
@@ -1450,14 +1455,15 @@ export function SurveyBuilder({
                               }
                             >
                               <Plus className="mr-2 h-4 w-4" />
-                              {field.type === "text_list" ? "Prompt" : "Option"}
+                              {field.type === "text_list" ? "Feld" : "Option"}
                             </Button>
                           </div>
                           {field.type === "text_list" ? (
                             <p className="text-xs text-secondary">
-                              Jeder Prompt wird als Label über einem editierbaren
-                              Textfeld angezeigt. Bei Pflichtfeld muss jedes Feld
-                              ausgefüllt werden.
+                              Standard sind leere, nummerierte Felder. Weitere
+                              lassen sich über den Hinzufügen-Button ergänzen.
+                              Ein optionales Label steht über dem Feld. Bei
+                              Pflichtfeld muss jedes Startfeld ausgefüllt werden.
                             </p>
                           ) : null}
                           {field.options.map((opt) => (
@@ -1516,7 +1522,7 @@ export function SurveyBuilder({
                                 }
                                 placeholder={
                                   field.type === "text_list"
-                                    ? "Prompt (z.B. Mir ist aufgefallen, dass…)"
+                                    ? "optionales Label, sonst Nummer"
                                     : "Option"
                                 }
                               />
@@ -1533,7 +1539,7 @@ export function SurveyBuilder({
                                 }
                                 aria-label={
                                   field.type === "text_list"
-                                    ? "Prompt entfernen"
+                                    ? "Feld entfernen"
                                     : "Option entfernen"
                                 }
                               >
@@ -1950,6 +1956,7 @@ export function SurveyBuilder({
                     }
                     allowExtraEntries={activeResponseField.allowExtraEntries !== false}
                     required={activeResponseField.required}
+                    addEntryLabel={activeResponseField.addEntryLabel}
                     placeholder={
                       survey.answerPlaceholder?.trim() || "Deine Antwort…"
                     }
@@ -2441,6 +2448,7 @@ function SurveyPreview({
                         onChange={(next) => setAnswer(field.id, next)}
                         allowExtraEntries={field.allowExtraEntries !== false}
                         required={field.required}
+                        addEntryLabel={field.addEntryLabel}
                         placeholder={
                           survey.answerPlaceholder?.trim() || "Deine Antwort…"
                         }
@@ -2705,6 +2713,7 @@ function SurveyPreview({
                         onChange={(next) => setAnswer(field.id, next)}
                         allowExtraEntries={field.allowExtraEntries !== false}
                         required={field.required}
+                        addEntryLabel={field.addEntryLabel}
                         placeholder={
                           survey.answerPlaceholder?.trim() || "Deine Antwort…"
                         }

@@ -36,6 +36,8 @@ export type SurveyTextListField = SurveyFieldBase & {
   options: SurveyOption[];
   /** Wenn true, können Teilnehmende zusätzliche leere Eingaben ergänzen. Standard: true. */
   allowExtraEntries?: boolean;
+  /** Label for the add-another-entry button, e.g. "Person hinzufügen". */
+  addEntryLabel?: string;
 };
 
 export type SurveyRadioField = SurveyFieldBase & {
