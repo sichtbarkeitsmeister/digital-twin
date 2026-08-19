@@ -30,6 +30,7 @@
     "test:avatar-global-prompt-anchor": "tsx scripts/test-avatar-global-prompt-anchor.ts",
     "test:dashboard-sticky-survey-ai": "tsx scripts/test-dashboard-sticky-survey-ai.ts",
     "test:fragebogen-review-questions": "tsx scripts/test-fragebogen-review-questions.ts",
+    "test:core-question-templates": "tsx scripts/test-core-question-templates.ts",
     "test:survey-paste-retry": "tsx scripts/test-survey-paste-retry.ts",
     "test:raw-filled-questionnaire": "tsx scripts/test-raw-filled-questionnaire.ts",
     "test:persona-testing": "tsx scripts/test-persona-testing.ts",

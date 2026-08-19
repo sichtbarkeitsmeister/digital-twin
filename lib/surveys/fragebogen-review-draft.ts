@@ -13,10 +13,10 @@ import type { SurveyPurpose } from "@/lib/surveys/purpose";
 export type ExtraQuestionPlacement = "start" | "end";
 
 export const SURVEY_FIELD_TYPE_LABELS: Record<SurveyFieldType, string> = {
-  text: "Text",
-  text_list: "Textliste",
-  radio: "Radio",
-  checkbox: "Checkbox",
+  text: "Freitext",
+  text_list: "Freitext-Liste",
+  radio: "Einzelauswahl",
+  checkbox: "Mehrfachauswahl",
   rating: "Bewertung",
   ranking: "Ranking",
 };
@@ -61,13 +61,6 @@ function createId(): string {
     return crypto.randomUUID();
   }
   return `id_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
-}
-
-function defaultOptions(minCount: number): SurveyOption[] {
-  return Array.from({ length: minCount }, (_, i) => ({
-    id: createId(),
-    label: `Option ${i + 1}`,
-  }));
 }
 
 function ensureOptions(options: SurveyOption[] | undefined, minCount: number): SurveyOption[] {
@@ -216,9 +209,9 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
     extraIncluded.length > 0
       ? {
           id: "extra_individual",
-          title: "Individuelle Fragen",
+          title: "Individuelle Fragen für dieses Unternehmen",
           description:
-            "Zusatzfragen — Typ, Pflichtfeld und Optionen sind individuell einstellbar.",
+            "KI-Vorschläge für die jeweilige Firma — bearbeiten, kopieren oder löschen.",
           fields: extraIncluded.map(reviewQuestionToSurveyField),
         }
       : null;
@@ -229,6 +222,7 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
     const base = byKey.get(key);
     const stepId = base?.stepId ?? "core_reviewed";
     const stepTitle = base?.stepTitle ?? "Kernfragen";
+    const stepDescription = base?.stepDescription ?? "";
     const field = reviewQuestionToSurveyField(q);
     const existing = coreByStep.get(stepId);
     if (existing) existing.fields.push(field);
@@ -236,7 +230,7 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
       coreByStep.set(stepId, {
         id: stepId,
         title: stepTitle,
-        description: "",
+        description: stepDescription,
         fields: [field],
       });
     }

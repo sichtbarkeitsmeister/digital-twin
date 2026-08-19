@@ -31,7 +31,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-type CoreItem = { key: string; title: string; description: string };
+type CoreItem = { key: string; title: string; description: string; stepTitle: string };
 
 const CREATE_ORG_HREF = "/dashboard/admin/organisations#organisation-anlegen";
 
@@ -114,6 +114,16 @@ export function FragebogenFromOrgWizard(props: {
     () => selectedKeys.filter((k) => coreItems.some((c) => c.key === k)).length,
     [selectedKeys, coreItems],
   );
+
+  const coreGroups = useMemo(() => {
+    const groups: Array<{ title: string; items: CoreItem[] }> = [];
+    for (const item of coreItems) {
+      const last = groups[groups.length - 1];
+      if (last && last.title === item.stepTitle) last.items.push(item);
+      else groups.push({ title: item.stepTitle, items: [item] });
+    }
+    return groups;
+  }, [coreItems]);
 
   function toggleKey(key: string) {
     setSelectedKeys((prev) =>
@@ -579,38 +589,47 @@ export function FragebogenFromOrgWizard(props: {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            4. Kernfragen ({selectedCount}/{coreItems.length})
+            4. Standardfragen ({selectedCount}/{coreItems.length})
           </CardTitle>
           <CardDescription>
-            Feste Basis — abwählen, was hier nicht gebraucht wird.
+            Feste Anbieter-Basis in der richtigen Reihenfolge und mit dem richtigen Format.
+            Abwählen, was für diesen Kunden nicht gebraucht wird. Branchenspezifische Optionen
+            (Portfolio, Ranking) vor dem Versand in der Prüfung anpassen.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-2">
-          {coreItems.map((item) => {
-            const checked = selectedKeys.includes(item.key);
-            return (
-              <label
-                key={item.key}
-                className={cn(
-                  "flex cursor-pointer gap-3 rounded-xl border px-3 py-2.5 text-sm transition",
-                  checked
-                    ? "border-sbkm-mint/40 bg-sbkm-mint/10"
-                    : "border-sbkm-navy/10 opacity-70",
-                )}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={checked}
-                  onChange={() => toggleKey(item.key)}
-                />
-                <span className="grid gap-0.5">
-                  <span className="font-medium text-primary">{item.title}</span>
-                  <span className="text-xs text-secondary">{item.description}</span>
-                </span>
-              </label>
-            );
-          })}
+        <CardContent className="grid gap-4">
+          {coreGroups.map((group) => (
+            <div key={group.title} className="grid gap-2">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-secondary">
+                {group.title}
+              </p>
+              {group.items.map((item) => {
+                const checked = selectedKeys.includes(item.key);
+                return (
+                  <label
+                    key={item.key}
+                    className={cn(
+                      "flex cursor-pointer gap-3 rounded-xl border px-3 py-2.5 text-sm transition",
+                      checked
+                        ? "border-sbkm-mint/40 bg-sbkm-mint/10"
+                        : "border-sbkm-navy/10 opacity-70",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={checked}
+                      onChange={() => toggleKey(item.key)}
+                    />
+                    <span className="grid gap-0.5">
+                      <span className="font-medium text-primary">{item.title}</span>
+                      <span className="text-xs text-secondary">{item.description}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ))}
         </CardContent>
       </Card>
 
@@ -618,11 +637,11 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Sparkles className="size-4" aria-hidden />
-            5. Individuelle Zusatzfragen
+            5. Individuelle Fragen (letzter Block)
           </CardTitle>
           <CardDescription>
-            KI schlägt Sonderfragen aus Meeting/Crawl vor. Im nächsten Schritt kannst du
-            weitere Zusatzfragen mit Typ, Pflichtfeld und Optionen ergänzen.
+            Die KI schlägt danach Sonderfragen für das jeweilige Unternehmen vor. In der Prüfung
+            kannst du sie bearbeiten, kopieren oder löschen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -632,7 +651,7 @@ export function FragebogenFromOrgWizard(props: {
               checked={includeAiExtras}
               onChange={(e) => setIncludeAiExtras(e.target.checked)}
             />
-            KI-Zusatzfragen vorschlagen
+            KI-Fragen für dieses Unternehmen vorschlagen
           </label>
           <div className="flex flex-wrap gap-2">
             <button

@@ -49,8 +49,18 @@ export async function loadFragebogenWizardContextAction(input: {
     organisationName: string;
     websiteUrl: string | null;
     pageCount: number;
-    anbieterCore: Array<{ key: string; title: string; description: string }>;
-    personaCore: Array<{ key: string; title: string; description: string }>;
+    anbieterCore: Array<{
+      key: string;
+      title: string;
+      description: string;
+      stepTitle: string;
+    }>;
+    personaCore: Array<{
+      key: string;
+      title: string;
+      description: string;
+      stepTitle: string;
+    }>;
   }>
 > {
   const auth = await requirePlatformAdmin();
@@ -71,11 +81,13 @@ export async function loadFragebogenWizardContextAction(input: {
         key: q.key,
         title: q.title,
         description: q.description,
+        stepTitle: q.stepTitle,
       })),
       personaCore: PERSONA_CORE_QUESTIONS.map((q) => ({
         key: q.key,
         title: q.title,
         description: q.description,
+        stepTitle: q.stepTitle,
       })),
     },
   };
