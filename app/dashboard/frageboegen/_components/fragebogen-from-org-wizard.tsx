@@ -519,9 +519,13 @@ export function FragebogenFromOrgWizard(props: {
               id="meeting-notes"
               value={meetingNotes}
               onChange={(e) => setMeetingNotes(e.target.value)}
-              rows={3}
-              placeholder="Fokus, USP, Region, Zielgruppe, Besonderheiten…"
+              rows={4}
+              placeholder={`Region: Hamm und 50km\nUSP: …\nFokuskeywords: …\nZielgruppe: …`}
             />
+            <p className="text-xs text-secondary">
+              Am besten mit Labels schreiben (Region:, USP:, Fokuskeywords: …) — dann landen die
+              Antworten auf den passenden Fragen statt in einem Haufen.
+            </p>
           </div>
         </CardContent>
       </Card>

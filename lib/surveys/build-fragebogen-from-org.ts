@@ -20,6 +20,7 @@ import {
   type PrefillDraft,
 } from "@/lib/surveys/org-crawl-context";
 import {
+  buildMeetingExtraQuestions,
   meetingBriefingContextText,
   meetingBriefingHasContent,
   suggestPrefillsFromMeeting,
@@ -212,41 +213,23 @@ export async function buildFragebogenReviewDraft(input: {
     prefills[key] = draft;
   }
 
-  // Seiten/Links aus dem Meeting als optionale Extra-Antwort-Notiz anhängen,
-  // wenn noch keine extra-Frage dazu existiert — als eigene „Notiz“-Extrafrage.
-  const pagesOrLinks = (input.meetingBriefing?.pagesOrLinks ?? "").trim();
-  const notes = (input.meetingBriefing?.notes ?? "").trim();
-  const meetingExtras: ReviewQuestionItem[] = [];
-  if (pagesOrLinks) {
-    meetingExtras.push({
-      id: "extra_meeting_pages_links",
-      kind: "extra",
-      title: "Welche Seiten, Landingpages oder Links wurden im Kundengespräch genannt?",
-      description: "Direkt aus dem Meeting — prüfen und bei Bedarf kürzen.",
-      included: true,
-      required: false,
-      type: "text",
-      options: [],
-      answer: pagesOrLinks.slice(0, 2000),
-      answerSource: "meeting",
-      answerNote: "Aus Kundengespräch übernommen",
-    });
-  }
-  if (notes) {
-    meetingExtras.push({
-      id: "extra_meeting_notes",
-      kind: "extra",
-      title: "Weitere relevante Punkte aus dem Kundengespräch",
-      description: "Freie Notizen aus dem Briefing — in Antworten überführen oder entfernen.",
-      included: true,
-      required: false,
-      type: "text",
-      options: [],
-      answer: notes.slice(0, 2000),
-      answerSource: "meeting",
-      answerNote: "Aus Kundengespräch übernommen",
-    });
-  }
+  // Meeting notes → Kernfragen (via suggestPrefillsFromMeeting) + getrennte Zusatzfragen
+  // (Region/USP → Kern; Fokuskeywords/Links → eigene Fragen; kein Notiz-Haufen).
+  const meetingExtras: ReviewQuestionItem[] = buildMeetingExtraQuestions(
+    input.meetingBriefing,
+  ).map((e) => ({
+    id: e.id,
+    kind: "extra" as const,
+    title: e.title,
+    description: e.description,
+    included: true,
+    required: false,
+    type: "text" as const,
+    options: [],
+    answer: e.answer,
+    answerSource: "meeting" as const,
+    answerNote: "Aus Kundengespräch übernommen",
+  }));
 
   const coreQuestions: ReviewQuestionItem[] = selectedTemplates.map((t) => {
     const draft = prefills[t.key];

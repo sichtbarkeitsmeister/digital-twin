@@ -35,6 +35,7 @@
     "test:persona-testing": "tsx scripts/test-persona-testing.ts",
     "test:survey-exam-questions": "tsx scripts/test-survey-exam-questions.ts",
     "test:agent-survey-coverage": "tsx scripts/test-agent-survey-coverage.ts",
+    "test:organisation-survey-open-href": "tsx scripts/test-organisation-survey-open-href.ts",
     "test:grounding-page-schedule": "tsx scripts/test-grounding-page-schedule.ts",
     "test:detect-grounding-page-date": "tsx scripts/test-detect-grounding-page-date.ts",
     "test:discover-grounding-page-url": "tsx scripts/test-discover-grounding-page-url.ts",
