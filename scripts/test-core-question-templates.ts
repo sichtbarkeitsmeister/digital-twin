@@ -26,6 +26,20 @@ assert.equal(
   0,
 );
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_pain"));
+assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_confirm_real_experience"));
+assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_name" && q.type === "text"));
+assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_age" && q.type === "radio"));
+assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_job" && q.type === "ranking"));
+assert.ok(
+  PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_customer_groups" && q.type === "checkbox"),
+);
+assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_hormozi_dream"));
+assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_summary"));
+assert.equal(
+  PERSONA_CORE_QUESTIONS.filter((q) => q.key === "persona_goal" || q.key === "persona_criteria")
+    .length,
+  0,
+);
 
 assert.equal(coreQuestionsForPurpose("anbieter"), ANBIETER_CORE_QUESTIONS);
 assert.equal(coreQuestionsForPurpose("persona"), PERSONA_CORE_QUESTIONS);
@@ -35,6 +49,12 @@ assert.ok(steps.length >= 8);
 assert.equal(steps[0]?.id, "core_intro");
 assert.equal(steps.at(-1)?.id, "core_closing");
 assert.equal(fieldIdsByKey.company_name, fieldIdForCoreKey("company_name"));
+
+const personaBuilt = buildCoreFields(PERSONA_CORE_QUESTIONS);
+assert.ok(personaBuilt.steps.length >= 12);
+assert.equal(personaBuilt.steps[0]?.id, "core_persona_intro");
+assert.equal(personaBuilt.steps.at(-1)?.id, "core_persona_close");
+assert.equal(personaBuilt.fieldIdsByKey.persona_name, fieldIdForCoreKey("persona_name"));
 
 const ranking = fieldFromCoreTemplate(
   ANBIETER_CORE_QUESTIONS.find((q) => q.key === "company_archetype")!,
@@ -60,5 +80,38 @@ assert.equal(parsed.success, true, parsed.success ? "" : parsed.error.issues[0]?
 
 const keys = new Set(ANBIETER_CORE_QUESTIONS.map((q) => q.key));
 assert.equal(keys.size, ANBIETER_CORE_QUESTIONS.length);
+
+const personaKeys = new Set(PERSONA_CORE_QUESTIONS.map((q) => q.key));
+assert.equal(personaKeys.size, PERSONA_CORE_QUESTIONS.length);
+
+const personaDefinition = {
+  version: 1 as const,
+  id: "test-persona-survey",
+  title: "Persona Test",
+  description: "",
+  infoTextEnabled: false,
+  infoText: "",
+  answerPlaceholder: "Deine Antwort…",
+  steps: personaBuilt.steps,
+};
+const personaParsed = surveySchema.safeParse(personaDefinition);
+assert.equal(
+  personaParsed.success,
+  true,
+  personaParsed.success ? "" : personaParsed.error.issues[0]?.message,
+);
+
+assert.ok(
+  ANBIETER_CORE_QUESTIONS.some((q) => q.key === "portfolio_links"),
+);
+assert.ok(
+  ANBIETER_CORE_QUESTIONS.some((q) => q.key === "other_locations_yesno" && q.type === "radio"),
+);
+assert.ok(
+  ANBIETER_CORE_QUESTIONS.some((q) => q.key === "locations_planned_yesno" && q.type === "radio"),
+);
+const responseChannels = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "response_channels");
+assert.ok(responseChannels);
+assert.match(responseChannels.title, /geantwortet/);
 
 console.log("core-question-templates: ok");

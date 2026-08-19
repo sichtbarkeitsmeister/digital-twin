@@ -130,4 +130,32 @@ assert.ok(archetypeStep);
 assert.equal(archetypeStep?.title, "Unternehmen & Positionierung");
 assert.equal(archetypeStep?.fields[0]?.type, "ranking");
 
+const personaAge: ReviewQuestionItem = {
+  id: "core_persona_age",
+  kind: "core",
+  coreKey: "persona_age",
+  title: "In welchem Altersbereich befindet sich der Großteil der Wunschkundschaft?",
+  description: "",
+  included: true,
+  required: false,
+  type: "radio",
+  options: [
+    { id: "35_44", label: "35–44" },
+    { id: "45_54", label: "45–54" },
+  ],
+  answer: "35_44",
+  answerSource: "none",
+  answerNote: "",
+};
+const personaBuilt = buildSurveyAndAnswersFromReview({
+  draft: baseDraft([coreQuestion(), personaAge]),
+  savePrefills: true,
+});
+const ageStep = personaBuilt.definition.steps.find((s) =>
+  s.fields.some((f) => f.id === "core_persona_age"),
+);
+assert.ok(ageStep);
+assert.equal(ageStep?.title, "Demografie & Lebenssituation");
+assert.equal(ageStep?.fields.find((f) => f.id === "core_persona_age")?.type, "radio");
+
 console.log("fragebogen-review-questions: all ok");
