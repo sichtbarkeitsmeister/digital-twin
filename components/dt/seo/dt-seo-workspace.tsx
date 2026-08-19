@@ -7,6 +7,7 @@ import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
 import { useDtSeoWorkspaceUrl } from "@/lib/dt/seo/workspace-url";
 import { DtSeoConfigForm } from "@/components/dt/seo/dt-seo-config-form";
 import { DtSeoGroundingPanel } from "@/components/dt/seo/dt-seo-grounding-panel";
+import { DtSeoPageHealth } from "@/components/dt/seo/dt-seo-page-health";
 import { DtSeoReportsPanel } from "@/components/dt/seo/dt-seo-reports-panel";
 import { DtSeoStatsOverview } from "@/components/dt/seo/dt-seo-stats-overview";
 import { DtSeoTaskBoard } from "@/components/dt/seo/dt-seo-task-board";
@@ -31,6 +32,7 @@ export function DtSeoWorkspace(props: {
   );
   const [enabling, setEnabling] = useState(false);
   const [enableError, setEnableError] = useState<string | null>(null);
+  const [healthRefreshKey, setHealthRefreshKey] = useState(0);
 
   useEffect(() => {
     setOrgFlags(Object.fromEntries(props.organisations.map((o) => [o.id, o.seoEnabled])));
@@ -165,6 +167,21 @@ export function DtSeoWorkspace(props: {
         }}
       />
 
+      <div className="mb-3 shrink-0">
+        <DtSeoPageHealth
+          key={orgId}
+          organisationId={orgId}
+          refreshKey={healthRefreshKey}
+          onFix={(hint) => {
+            if (hint === "settings" || hint === "crawl") {
+              writeUrl({ org: orgId, tab: "settings" });
+            } else if (hint === "reports") {
+              writeUrl({ org: orgId, tab: "reports" });
+            }
+          }}
+        />
+      </div>
+
       {tab === "chat" && seoEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <DtChatShell
@@ -266,6 +283,7 @@ export function DtSeoWorkspace(props: {
             canEdit={props.isPlatformAdmin}
             isPlatformAdmin={props.isPlatformAdmin}
             onSeoEnabledChange={(enabled) => markSeoEnabled(orgId, enabled)}
+            onHealthSignalsChanged={() => setHealthRefreshKey((k) => k + 1)}
           />
         </div>
       ) : null}

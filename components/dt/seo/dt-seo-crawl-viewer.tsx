@@ -54,6 +54,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
     maxPages: number;
     message: string | null;
   } | null>(null);
+  const [lastCrawlError, setLastCrawlError] = useState<string | null>(null);
   const [pages, setPages] = useState<CrawlPageSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -96,6 +97,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
         maxPages: number;
         message: string | null;
       } | null;
+      lastCrawlError?: string | null;
     };
     setLoadingList(false);
     if (!json.ok) return;
@@ -106,6 +108,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
       lastCrawledAt: json.lastCrawledAt ?? null,
     });
     setActiveCrawl(json.crawl ?? null);
+    setLastCrawlError(json.lastCrawlError ?? null);
     setTotal(json.total ?? 0);
     const rows = json.pages ?? [];
     setPages(rows);
@@ -210,6 +213,20 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
             {activeCrawl.message ? ` · ${activeCrawl.message}` : ""}
           </p>
         </DtGlassCard>
+      ) : null}
+
+      {lastCrawlError || activeCrawl?.status === "error" ? (
+        <div
+          className="rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-900 dark:text-red-100"
+          role="alert"
+        >
+          <p className="font-semibold">Crawl-Fehler</p>
+          <p className="mt-1 text-xs">
+            {activeCrawl?.status === "error"
+              ? activeCrawl.message || lastCrawlError || "Crawl fehlgeschlagen."
+              : lastCrawlError}
+          </p>
+        </div>
       ) : null}
 
       {stats && stats.count === 0 ? (
