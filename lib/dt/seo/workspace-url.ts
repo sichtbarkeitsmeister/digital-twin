@@ -10,6 +10,7 @@ export const DT_SEO_TAB_IDS = [
   "stats",
   "tasks",
   "reports",
+  "analyse",
   "grounding",
   "settings",
 ] as const;

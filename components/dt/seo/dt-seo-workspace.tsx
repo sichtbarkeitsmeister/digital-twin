@@ -5,9 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
 import { useDtSeoWorkspaceUrl } from "@/lib/dt/seo/workspace-url";
+import { DtSeoAuditPanel } from "@/components/dt/seo/dt-seo-audit-panel";
 import { DtSeoConfigForm } from "@/components/dt/seo/dt-seo-config-form";
 import { DtSeoGroundingPanel } from "@/components/dt/seo/dt-seo-grounding-panel";
-import { DtSeoPageHealth } from "@/components/dt/seo/dt-seo-page-health";
 import { DtSeoReportsPanel } from "@/components/dt/seo/dt-seo-reports-panel";
 import { DtSeoStatsOverview } from "@/components/dt/seo/dt-seo-stats-overview";
 import { DtSeoTaskBoard } from "@/components/dt/seo/dt-seo-task-board";
@@ -32,7 +32,6 @@ export function DtSeoWorkspace(props: {
   );
   const [enabling, setEnabling] = useState(false);
   const [enableError, setEnableError] = useState<string | null>(null);
-  const [healthRefreshKey, setHealthRefreshKey] = useState(0);
 
   useEffect(() => {
     setOrgFlags(Object.fromEntries(props.organisations.map((o) => [o.id, o.seoEnabled])));
@@ -154,6 +153,7 @@ export function DtSeoWorkspace(props: {
           { id: "stats", label: "Statistik" },
           { id: "tasks", label: "Aufgaben" },
           { id: "reports", label: "Reports" },
+          { id: "analyse", label: "Analyse" },
           { id: "grounding", label: "Grounding" },
           { id: "settings", label: "Einstellungen" },
         ]}
@@ -166,21 +166,6 @@ export function DtSeoWorkspace(props: {
           });
         }}
       />
-
-      <div className="mb-3 shrink-0">
-        <DtSeoPageHealth
-          key={orgId}
-          organisationId={orgId}
-          refreshKey={healthRefreshKey}
-          onFix={(hint) => {
-            if (hint === "settings" || hint === "crawl") {
-              writeUrl({ org: orgId, tab: "settings" });
-            } else if (hint === "reports") {
-              writeUrl({ org: orgId, tab: "reports" });
-            }
-          }}
-        />
-      </div>
 
       {tab === "chat" && seoEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -270,6 +255,12 @@ export function DtSeoWorkspace(props: {
         </div>
       ) : null}
 
+      {tab === "analyse" && seoEnabled ? (
+        <div className="min-h-0 flex-1">
+          <DtSeoAuditPanel organisationId={orgId} />
+        </div>
+      ) : null}
+
       {tab === "grounding" && seoEnabled ? (
         <div className="min-h-0 flex-1">
           <DtSeoGroundingPanel organisationId={orgId} canEdit={canManage} />
@@ -283,7 +274,6 @@ export function DtSeoWorkspace(props: {
             canEdit={props.isPlatformAdmin}
             isPlatformAdmin={props.isPlatformAdmin}
             onSeoEnabledChange={(enabled) => markSeoEnabled(orgId, enabled)}
-            onHealthSignalsChanged={() => setHealthRefreshKey((k) => k + 1)}
           />
         </div>
       ) : null}
