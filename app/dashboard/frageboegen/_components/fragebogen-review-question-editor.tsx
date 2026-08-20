@@ -82,7 +82,11 @@ export function FragebogenReviewQuestionEditor(props: {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={q.kind === "core" ? "default" : "secondary"}>
-              {q.kind === "core" ? "Kernfrage" : "Zusatzfrage"}
+              {q.kind === "core"
+                ? "Kernfrage"
+                : q.answerSource === "ai"
+                  ? "KI-Vorschlag"
+                  : "Zusatzfrage"}
             </Badge>
             <Badge variant="outline">{sourceBadge(q.answerSource)}</Badge>
           </div>
