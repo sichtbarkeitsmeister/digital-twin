@@ -11,6 +11,8 @@ import {
   withNewSurveyDefinitionId,
 } from "@/lib/surveys/duplicate";
 import { createClient } from "@/lib/supabase/server";
+import { canManageDtAgents, isPlatformAdmin } from "@/lib/dt/org-access";
+import { canAccessSurveyForDashboard } from "@/lib/surveys/survey-dashboard-access";
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
 import { renderBrandedEmail } from "@/lib/email/templates";
 import { getFieldMetaFromSurveyDefinition } from "@/lib/surveys/utils";
@@ -1091,7 +1093,7 @@ export async function reopenSurveyResponseAction(
 
 const assignSurveyOrgSchema = z.object({
   surveyId: z.string().uuid(),
-  organisationId: z.string().uuid(),
+  organisationId: z.string().uuid().nullable(),
 });
 
 export async function assignSurveyOrganisationAction(
@@ -1102,8 +1104,32 @@ export async function assignSurveyOrganisationAction(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
   }
 
-  const auth = await requirePlatformAdmin();
-  if (!auth.ok) return { ok: false, message: auth.message };
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  const userId = user?.id;
+  if (authError || !userId) {
+    return { ok: false, message: "Not authenticated." };
+  }
+
+  const platformAdmin = await isPlatformAdmin(supabase, userId);
+  if (!platformAdmin) {
+    if (!parsed.data.organisationId) {
+      return {
+        ok: false,
+        message: "Nur Plattform-Admins können die Organisations-Zuordnung entfernen.",
+      };
+    }
+    const [canManage, canAccess] = await Promise.all([
+      canManageDtAgents(supabase, userId, parsed.data.organisationId),
+      canAccessSurveyForDashboard({ userId, surveyId: parsed.data.surveyId }),
+    ]);
+    if (!canManage || !canAccess) {
+      return { ok: false, message: "Forbidden." };
+    }
+  }
 
   const { assignSurveyOrganisation } = await import("@/lib/dt/survey-to-agent-service");
   const result = await assignSurveyOrganisation(
@@ -1113,6 +1139,8 @@ export async function assignSurveyOrganisationAction(
   if (!result.ok) return { ok: false, message: result.message };
 
   revalidatePath("/dashboard/surveys");
+  revalidatePath("/dashboard/frageboegen");
+  revalidatePath("/dashboard/organisations");
   revalidatePath(`/dashboard/surveys/${parsed.data.surveyId}/edit`);
   revalidatePath(`/dashboard/surveys/${parsed.data.surveyId}/responses`);
   return { ok: true, message: result.message, data: { surveyId: parsed.data.surveyId } };

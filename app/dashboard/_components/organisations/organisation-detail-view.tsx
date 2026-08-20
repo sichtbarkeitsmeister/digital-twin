@@ -289,6 +289,17 @@ export async function OrganisationDetailView({
                 <p className="px-2 py-3 text-sm text-secondary">
                   Sobald Fragebögen über Ordner, Titel oder Agenten verknüpft sind, erscheinen
                   sie hier — auch für Mitglieder.
+                  {platformAdmin ? (
+                    <>
+                      {" "}
+                      <Link
+                        href="/dashboard/frageboegen?unassigned=1"
+                        className="font-medium text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
+                      >
+                        Nicht zugeordnete Fragebögen anzeigen
+                      </Link>
+                    </>
+                  ) : null}
                 </p>
               ) : (
                 <ul className="divide-y divide-sbkm-navy/8 dark:divide-white/8">

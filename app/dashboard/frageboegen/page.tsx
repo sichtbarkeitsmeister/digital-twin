@@ -5,6 +5,7 @@ import { ClipboardPenLine } from "lucide-react";
 
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { EnsureOrgSurveyFolderPrompt } from "@/app/dashboard/frageboegen/_components/ensure-org-survey-folder-prompt";
+import { SurveyOrganisationAssignmentMenu } from "@/app/dashboard/surveys/_components/survey-organisation-assignment-menu";
 import { PersistedOrganisationUrlSync } from "@/components/shared/persisted-organisation-url-sync";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,10 +16,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
+import {
+  countUnassignedSurveys,
+  listSurveysForOrganisation,
+  listUnassignedSurveys,
+} from "@/lib/dt/list-organisation-surveys";
 import { findOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
-import { loadDtFragebogenOrganisations } from "@/lib/dt/load-manage-organisations";
+import {
+  loadDtFragebogenOrganisations,
+  loadDtManageOrganisations,
+} from "@/lib/dt/load-manage-organisations";
 import { organisationOptionLabel } from "@/lib/shared/organisation-option";
 import { createClient } from "@/lib/supabase/server";
 
@@ -51,9 +59,9 @@ function statusLabel(status: string | null) {
 export default async function OrganisationFrageboegenPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string }>;
+  searchParams: Promise<{ org?: string; unassigned?: string }>;
 }) {
-  const { org: orgParam } = await searchParams;
+  const { org: orgParam, unassigned: unassignedParam } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -64,13 +72,21 @@ export default async function OrganisationFrageboegenPage({
     redirect("/auth/login");
   }
 
-  const { organisations, isPlatformAdmin } = await loadDtFragebogenOrganisations(user.id);
+  const [{ organisations, isPlatformAdmin }, manage] = await Promise.all([
+    loadDtFragebogenOrganisations(user.id),
+    loadDtManageOrganisations(user.id),
+  ]);
+  const assignableOrganisations = isPlatformAdmin
+    ? organisations
+    : manage.organisations;
+  const canAssign = assignableOrganisations.length > 0;
+  const showUnassigned = isPlatformAdmin && unassignedParam === "1";
   const selectedOrganisationId =
     orgParam && organisations.some((o) => o.id === orgParam)
       ? orgParam
       : (organisations[0]?.id ?? null);
 
-  if (!selectedOrganisationId) {
+  if (!selectedOrganisationId && !showUnassigned) {
     return (
       <div className="grid gap-6">
         <h1 className="text-2xl font-bold tracking-tight text-primary">Fragebögen</h1>
@@ -89,11 +105,16 @@ export default async function OrganisationFrageboegenPage({
   const selectedOrg =
     organisations.find((o) => o.id === selectedOrganisationId) ?? null;
   const selectedOrgName = organisationOptionLabel(selectedOrg);
-  const [surveys, surveyFolder] = await Promise.all([
-    listSurveysForOrganisation({
-      organisationId: selectedOrganisationId,
-    }),
-    findOrganisationSurveyFolder(selectedOrganisationId),
+  const [surveys, surveyFolder, unassignedCount] = await Promise.all([
+    showUnassigned
+      ? listUnassignedSurveys()
+      : listSurveysForOrganisation({
+          organisationId: selectedOrganisationId!,
+        }),
+    selectedOrganisationId
+      ? findOrganisationSurveyFolder(selectedOrganisationId)
+      : Promise.resolve(null),
+    isPlatformAdmin ? countUnassignedSurveys() : Promise.resolve(0),
   ]);
 
   return (
@@ -109,34 +130,53 @@ export default async function OrganisationFrageboegenPage({
           <div className="grid gap-1">
             <h1 className="text-2xl font-bold tracking-tight text-primary">Fragebögen</h1>
             <p className="text-sm text-secondary">
-              Alle Umfragen und Antworten für {selectedOrgName}.
+              {showUnassigned
+                ? "Umfragen ohne Organisations-Zuordnung — hier zuordnen, damit sie unter der Organisation erscheinen."
+                : `Alle Umfragen und Antworten für ${selectedOrgName}.`}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <OrganisationSwitcher
-              organisations={organisations}
-              selectedOrganisationId={selectedOrganisationId}
-              orgPath="/dashboard/frageboegen"
-            />
-            <Button asChild variant="outline" size="sm">
-              <Link
-                href={`/dashboard/organisations?org=${encodeURIComponent(selectedOrganisationId)}`}
-              >
-                Organisation bearbeiten
-              </Link>
-            </Button>
+            {organisations.length > 0 ? (
+              <OrganisationSwitcher
+                organisations={organisations}
+                selectedOrganisationId={showUnassigned ? null : selectedOrganisationId}
+                orgPath="/dashboard/frageboegen"
+              />
+            ) : null}
+            {isPlatformAdmin ? (
+              <Button asChild variant={showUnassigned ? "default" : "outline"} size="sm">
+                <Link href="/dashboard/frageboegen?unassigned=1">
+                  Ohne Organisation{unassignedCount > 0 ? ` (${unassignedCount})` : ""}
+                </Link>
+              </Button>
+            ) : null}
+            {selectedOrganisationId ? (
+              <Button asChild variant="outline" size="sm">
+                <Link
+                  href={`/dashboard/organisations?org=${encodeURIComponent(selectedOrganisationId)}`}
+                >
+                  Organisation bearbeiten
+                </Link>
+              </Button>
+            ) : null}
             {isPlatformAdmin ? (
               <>
-                <Button asChild variant="outline" size="sm">
-                  <Link
-                    href={`/dashboard/erstgespraech?org=${encodeURIComponent(selectedOrganisationId)}`}
-                  >
-                    Erstgespräch
-                  </Link>
-                </Button>
+                {selectedOrganisationId ? (
+                  <Button asChild variant="outline" size="sm">
+                    <Link
+                      href={`/dashboard/erstgespraech?org=${encodeURIComponent(selectedOrganisationId)}`}
+                    >
+                      Erstgespräch
+                    </Link>
+                  </Button>
+                ) : null}
                 <Button asChild size="sm">
                   <Link
-                    href={`/dashboard/frageboegen/neu?org=${encodeURIComponent(selectedOrganisationId)}`}
+                    href={
+                      selectedOrganisationId
+                        ? `/dashboard/frageboegen/neu?org=${encodeURIComponent(selectedOrganisationId)}`
+                        : "/dashboard/frageboegen/neu"
+                    }
                   >
                     Fragebogen erzeugen
                   </Link>
@@ -156,11 +196,13 @@ export default async function OrganisationFrageboegenPage({
               {surveys.length} {surveys.length === 1 ? "Fragebogen" : "Fragebögen"}
             </CardTitle>
             <CardDescription>
-              Verknüpft über Organisations-ID, Ordnername oder Agenten-Zuordnung.
+              {showUnassigned
+                ? "Diese Umfragen haben noch keine Organisation. Über das Menü zuordnen."
+                : "Zuordnung über Organisations-ID, Ordnername oder Agenten. Organisation pro Fragebogen sichtbar und änderbar."}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2">
-            {isPlatformAdmin && !surveyFolder ? (
+            {isPlatformAdmin && !showUnassigned && selectedOrganisationId && !surveyFolder ? (
               <EnsureOrgSurveyFolderPrompt
                 organisationId={selectedOrganisationId}
                 organisationName={selectedOrgName}
@@ -168,44 +210,69 @@ export default async function OrganisationFrageboegenPage({
             ) : null}
             {surveys.length === 0 ? (
               <p className="rounded-xl border border-dashed border-sbkm-navy/15 px-4 py-8 text-center text-sm text-secondary dark:border-white/15">
-                Noch keine Fragebögen für diese Organisation gefunden.
+                {showUnassigned
+                  ? "Alle Umfragen sind einer Organisation zugeordnet."
+                  : "Noch keine Fragebögen für diese Organisation gefunden."}
+                {isPlatformAdmin && !showUnassigned && unassignedCount > 0 ? (
+                  <>
+                    {" "}
+                    <Link
+                      href="/dashboard/frageboegen?unassigned=1"
+                      className="font-medium text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
+                    >
+                      {unassignedCount} nicht zugeordnete Fragebögen anzeigen
+                    </Link>
+                  </>
+                ) : null}
               </p>
             ) : (
               <ul className="grid gap-2">
                 {surveys.map((survey) => {
                   const href = organisationSurveyOpenHref(survey);
                   return (
-                    <li key={survey.surveyId}>
-                      <Link
-                        href={href}
-                        className="flex flex-col gap-2 rounded-xl border border-sbkm-navy/10 bg-white/70 px-4 py-3 transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0 grid gap-1">
-                          <p className="truncate text-sm font-semibold text-primary">
-                            {survey.title}
-                          </p>
-                          <p className="text-xs text-secondary">
-                            {survey.folderName
-                              ? `Ordner: ${survey.folderName}`
-                              : "Ohne Ordner"}
-                            {" · "}
-                            aktualisiert {formatDate(survey.updatedAt)}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Badge variant="outline">{purposeLabel(survey.purpose)}</Badge>
-                          <Badge
-                            variant={
-                              survey.responseStatus === "completed" ? "default" : "secondary"
-                            }
-                          >
-                            {statusLabel(survey.responseStatus)}
-                          </Badge>
-                          <span className="text-xs font-medium text-sbkm-navy dark:text-sbkm-mint">
-                            {href.startsWith("/s/") ? "Ausfüllen →" : "Öffnen →"}
-                          </span>
-                        </div>
-                      </Link>
+                    <li
+                      key={survey.surveyId}
+                      className="flex flex-col gap-2 rounded-xl border border-sbkm-navy/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-white/5 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0 grid gap-1">
+                        <Link
+                          href={href}
+                          className="truncate text-sm font-semibold text-primary hover:underline"
+                        >
+                          {survey.title}
+                        </Link>
+                        <p className="text-xs text-secondary">
+                          {survey.folderName
+                            ? `Ordner: ${survey.folderName}`
+                            : "Ohne Ordner"}
+                          {" · "}
+                          aktualisiert {formatDate(survey.updatedAt)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <SurveyOrganisationAssignmentMenu
+                          surveyId={survey.surveyId}
+                          currentOrganisationId={survey.organisationId}
+                          organisations={assignableOrganisations}
+                          labelOrganisations={organisations}
+                          canEdit={canAssign}
+                          allowUnassign={isPlatformAdmin}
+                        />
+                        <Badge variant="outline">{purposeLabel(survey.purpose)}</Badge>
+                        <Badge
+                          variant={
+                            survey.responseStatus === "completed" ? "default" : "secondary"
+                          }
+                        >
+                          {statusLabel(survey.responseStatus)}
+                        </Badge>
+                        <Link
+                          href={href}
+                          className="text-xs font-medium text-sbkm-navy dark:text-sbkm-mint"
+                        >
+                          {href.startsWith("/s/") ? "Ausfüllen →" : "Öffnen →"}
+                        </Link>
+                      </div>
                     </li>
                   );
                 })}

@@ -10,6 +10,15 @@ export function organisationOptionLabel(org: OrganisationOption | null | undefin
   return org.displayName?.trim() || org.name;
 }
 
+export function organisationAssignmentLabel(
+  organisationId: string | null | undefined,
+  organisations: OrganisationOption[],
+): string {
+  if (!organisationId) return "Ohne Organisation";
+  const org = organisations.find((item) => item.id === organisationId);
+  return org ? organisationOptionLabel(org) : "Unbekannte Organisation";
+}
+
 export function matchesSearchQuery(haystack: string, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
