@@ -84,6 +84,7 @@ export async function setPlatformAdminRoleAction(
   }
 
   revalidatePath("/dashboard/admin/organisations");
+  revalidatePath("/dashboard/admin/team");
   revalidatePath("/dashboard");
 
   return {

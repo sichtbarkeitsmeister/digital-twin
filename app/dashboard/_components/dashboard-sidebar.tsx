@@ -13,6 +13,7 @@ import {
   Plug,
   Shield,
   Sparkles,
+  Users,
   Workflow,
   Mail,
 } from "lucide-react";
@@ -165,6 +166,12 @@ export function DashboardSidebar({
       match: (pathname: string) =>
         pathname.startsWith("/dashboard/admin/organisations") ||
         pathname.startsWith("/dashboard/admin/digital-twin"),
+    },
+    {
+      label: "Plattform-Team",
+      href: "/dashboard/admin/team",
+      icon: Users,
+      match: (pathname: string) => pathname.startsWith("/dashboard/admin/team"),
     },
     { label: "Jobs", href: "/dashboard/admin/jobs", icon: Workflow },
     {

@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import * as React from "react";
-import { ClipboardPenLine, Workflow } from "lucide-react";
+import { ClipboardPenLine, Users, Workflow } from "lucide-react";
 
 import { AdminCreateOrgForm } from "@/app/dashboard/_components/admin-create-org-form";
 import { PlatformAdminOrgHub } from "@/app/dashboard/_components/organisations/platform-admin-org-hub";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
-import { PlatformAdminTeamCard } from "@/app/dashboard/_components/platform-admin-team-card";
 import { loadPlatformAdminOverview } from "@/lib/dashboard/platform-admin-overview";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
@@ -60,27 +59,7 @@ async function AdminOrganisationsPageContent() {
     redirect("/dashboard/inbox");
   }
 
-  const [{ organisations, stats }, { data: profileRows }] = await Promise.all([
-    loadPlatformAdminOverview(),
-    supabase
-      .from("profiles")
-      .select("id,email,role")
-      .order("role", { ascending: true })
-      .order("email", { ascending: true }),
-  ]);
-
-  const teamMembers = (profileRows ?? [])
-    .map((row) => ({
-      id: row.id,
-      email: row.email,
-      role: row.role,
-    }))
-    .sort((a, b) => {
-      if (a.role === b.role) return a.email.localeCompare(b.email, "de");
-      if (a.role === "admin") return -1;
-      if (b.role === "admin") return 1;
-      return a.email.localeCompare(b.email, "de");
-    });
+  const { organisations, stats } = await loadPlatformAdminOverview();
 
   return (
     <OrganisationPageShell>
@@ -94,6 +73,12 @@ async function AdminOrganisationsPageContent() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button asChild>
+            <Link href="/dashboard/admin/team">
+              <Users className="size-4" aria-hidden />
+              Plattform-Team
+            </Link>
+          </Button>
           <Badge>Plattform-Admin</Badge>
           <Badge variant="outline" className="tabular-nums">
             {stats.totalOrgs} / 100
@@ -118,21 +103,6 @@ async function AdminOrganisationsPageContent() {
             </CardContent>
           </Card>
 
-          <Card
-            id="plattform-team"
-            className="overflow-hidden scroll-mt-6 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
-          >
-            <CardHeader>
-              <CardTitle className="tracking-tight">Plattform-Team</CardTitle>
-              <CardDescription>
-                Wer die Admin-Ansicht (Verwaltung, SEO Modus, Jobs) sieht.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PlatformAdminTeamCard members={teamMembers} currentUserId={userId} />
-            </CardContent>
-          </Card>
-
           <Card className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-base tracking-tight">Weitere Tools</CardTitle>
@@ -141,6 +111,12 @@ async function AdminOrganisationsPageContent() {
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2">
+              <Button asChild size="sm" variant="outline" className="justify-start gap-2">
+                <Link href="/dashboard/admin/team">
+                  <Users className="size-4" aria-hidden />
+                  Plattform-Team
+                </Link>
+              </Button>
               <Button asChild size="sm" variant="outline" className="justify-start gap-2">
                 <Link href="/dashboard/surveys">
                   <ClipboardPenLine className="size-4" aria-hidden />

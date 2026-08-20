@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { sortPlatformTeamMembers } from "../lib/dashboard/platform-admin-team";
 import { isSbkmStaffEmail } from "../lib/dt/sbkm-staff";
 
 assert.equal(isSbkmStaffEmail("vanessa.may@sichtbarkeitsmeister.de"), true);
@@ -12,5 +13,14 @@ assert.equal(isSbkmStaffEmail("sichtbarkeitsmeister.de"), false);
 assert.equal(isSbkmStaffEmail("@sichtbarkeitsmeister.de"), false);
 assert.equal(isSbkmStaffEmail(""), false);
 assert.equal(isSbkmStaffEmail(null), false);
+
+assert.deepEqual(
+  sortPlatformTeamMembers([
+    { id: "2", email: "kunde@praxis.de", role: "customer" },
+    { id: "1", email: "vanessa.may@sichtbarkeitsmeister.de", role: "customer" },
+    { id: "3", email: "mail@sichtbarkeitsmeister.de", role: "admin" },
+  ]).map((m) => m.email),
+  ["mail@sichtbarkeitsmeister.de", "kunde@praxis.de", "vanessa.may@sichtbarkeitsmeister.de"],
+);
 
 console.log("sbkm-staff-email: all ok");
