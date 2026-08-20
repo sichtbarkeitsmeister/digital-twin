@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowRight, Calendar, Crown, Mail, Users } from "lucide-react";
+import { ArrowRight, Calendar, ClipboardPenLine, Crown, Mail, Users } from "lucide-react";
 
 import { loadOrgOverview } from "@/lib/dashboard/org-overview";
 import { canViewDtUsage } from "@/lib/dt/usage/access";
 import { isOrgOwner, isPlatformAdmin } from "@/lib/dt/org-access";
+import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
+import { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
 import { createClient } from "@/lib/supabase/server";
 import {
   formatOrgDate,
@@ -112,6 +114,7 @@ export async function OrganisationDetailView({
   const [
     { data: membersRaw, error: membersError },
     { data: invitesRaw, error: invitesError },
+    surveys,
   ] = await Promise.all([
     supabase
       .from("organisation_members")
@@ -124,6 +127,7 @@ export async function OrganisationDetailView({
       .eq("organisation_id", organisationId)
       .eq("status", "pending")
       .order("created_at", { ascending: false }),
+    listSurveysForOrganisation({ organisationId }),
   ]);
 
   if (membersError || invitesError) {
@@ -248,6 +252,69 @@ export async function OrganisationDetailView({
             </div>
           </OrgDetailSection>
         ) : null}
+
+        <OrgDetailSection
+          title="Fragebögen"
+          description="Umfragen und Antworten dieser Organisation"
+        >
+          <div className={orgDetailCardClass}>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">
+              <div className="flex items-center gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sbkm-mint/15 text-sbkm-navy dark:bg-sbkm-mint/10 dark:text-sbkm-mint">
+                  <ClipboardPenLine className="size-4" aria-hidden />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold tracking-tight">Fragebögen</h3>
+                  <p className="text-xs text-secondary">
+                    {surveys.length === 0
+                      ? "Noch keine Umfragen zugeordnet"
+                      : `${surveys.length} ${surveys.length === 1 ? "Fragebogen" : "Fragebögen"}`}
+                  </p>
+                </div>
+              </div>
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                className="h-8 text-xs font-semibold"
+              >
+                <Link href={`/dashboard/frageboegen?org=${encodeURIComponent(organisationId)}`}>
+                  Alle Fragebögen
+                  <ArrowRight className="size-3.5" />
+                </Link>
+              </Button>
+            </div>
+            <div className="p-2 sm:p-3">
+              {surveys.length === 0 ? (
+                <p className="px-2 py-3 text-sm text-secondary">
+                  Sobald Fragebögen über Ordner, Titel oder Agenten verknüpft sind, erscheinen
+                  sie hier — auch für Mitglieder.
+                </p>
+              ) : (
+                <ul className="divide-y divide-sbkm-navy/8 dark:divide-white/8">
+                  {surveys.slice(0, 8).map((survey) => {
+                    const href = organisationSurveyOpenHref(survey);
+                    return (
+                      <li key={survey.surveyId}>
+                        <Link
+                          href={href}
+                          className="flex flex-wrap items-center justify-between gap-2 px-2 py-2.5 transition-colors duration-150 hover:bg-sbkm-navy/[0.03] dark:hover:bg-white/[0.03]"
+                        >
+                          <span className="min-w-0 truncate text-sm font-medium">
+                            {survey.title}
+                          </span>
+                          <span className="shrink-0 text-xs font-medium text-sbkm-navy dark:text-sbkm-mint">
+                            {href.startsWith("/s/") ? "Ausfüllen →" : "Öffnen →"}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </OrgDetailSection>
 
         <OrgDetailSection
           title="Team"
