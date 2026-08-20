@@ -1058,6 +1058,11 @@ export type Database = {
       }
       is_org_member: { Args: { org_id: string; uid: string }; Returns: boolean }
       is_platform_admin: { Args: { uid: string }; Returns: boolean }
+      is_sbkm_staff_email: { Args: { p_email: string }; Returns: boolean }
+      set_platform_admin_role: {
+        Args: { make_admin: boolean; target_email: string }
+        Returns: undefined
+      }
       jobs_cron_tick: { Args: never; Returns: undefined }
       kick_from_organisation: {
         Args: { org_id: string; target_user_id: string }
