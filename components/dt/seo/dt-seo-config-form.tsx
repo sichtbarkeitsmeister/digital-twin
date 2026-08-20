@@ -10,8 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GOOGLE_ACCOUNT_OPTIONS } from "@/lib/dt/seo/google-accounts";
-import { evaluateSeoPageHealth } from "@/lib/dt/seo/page-health";
-import { DtSeoPageErrorsPanel } from "@/components/dt/seo/dt-seo-page-errors-panel";
+import { evaluateSeoReportReadiness } from "@/lib/dt/seo/report-readiness";
 import { checklistToText, textToChecklist } from "@/lib/dt/seo/seo-checklist";
 import { cn } from "@/lib/utils";
 
@@ -85,8 +84,6 @@ export function DtSeoConfigForm(props: {
   isPlatformAdmin?: boolean;
   /** Called after seo_enabled is saved so parent workspace can unlock tabs without full reload. */
   onSeoEnabledChange?: (enabled: boolean) => void;
-  /** Notify parent that crawl/config signals changed (refresh page health panel). */
-  onHealthSignalsChanged?: () => void;
 }) {
   const [config, setConfig] = useState<Config | null>(null);
   const [anbieterFocus, setAnbieterFocus] = useState<AnbieterFocusKeywordsInfo | null>(null);
@@ -191,7 +188,6 @@ export function DtSeoConfigForm(props: {
       }
     }
     setStatus("Gespeichert.");
-    props.onHealthSignalsChanged?.();
   }
 
   async function runCrawl() {
@@ -216,7 +212,6 @@ export function DtSeoConfigForm(props: {
     }
     setStatus(json.message ?? "Hintergrund-Crawl gestartet.");
     await loadCrawlInfo();
-    props.onHealthSignalsChanged?.();
   }
 
   async function stopCrawl() {
@@ -229,7 +224,6 @@ export function DtSeoConfigForm(props: {
     setBusy(false);
     setStatus(json.ok ? (json.message ?? "Crawl abgebrochen.") : (json.message ?? "Abbruch fehlgeschlagen."));
     await loadCrawlInfo();
-    props.onHealthSignalsChanged?.();
   }
 
   function crawledHint(): string {
@@ -271,18 +265,11 @@ export function DtSeoConfigForm(props: {
     return <p className="text-sm text-sbkm-ink-600">Lade Einstellungen…</p>;
   }
 
-  const pageHealth = evaluateSeoPageHealth({
+  const readiness = evaluateSeoReportReadiness({
     organisationSlug: config.organisation_slug,
     websiteUrl: config.website_url,
-    sitemapUrl: config.sitemap_url,
-    ga4PropertyId: config.ga4_property_id,
     ga4Account: config.ga4_account,
-    gscSiteUrl: config.gsc_site_url,
     gscAccount: config.gsc_account,
-    crawlStatus: crawlInfo?.crawl?.status ?? null,
-    crawlMessage: crawlInfo?.crawl?.message ?? null,
-    lastCrawlError: crawlInfo?.lastCrawlError ?? null,
-    crawledPageCount: crawlInfo?.count ?? 0,
   });
 
   return (
@@ -290,7 +277,28 @@ export function DtSeoConfigForm(props: {
       <h2 className="text-lg font-bold text-sbkm-navy dark:text-white">SEO-Konfiguration</h2>
       {status ? <p className="text-sm text-sbkm-ink-600 dark:text-white/60">{status}</p> : null}
 
-      <DtSeoPageErrorsPanel health={pageHealth} hideWhenClean />
+      {readiness.issues.length > 0 ? (
+        <div
+          className={cn(
+            "rounded-xl border p-3 text-sm",
+            readiness.ok
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+              : "border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-200",
+          )}
+          role={readiness.ok ? "status" : "alert"}
+        >
+          <p className="font-semibold">
+            {readiness.ok
+              ? "Empfohlen vor dem nächsten SEO-Report"
+              : "Noch unvollständig für SEO-Reports"}
+          </p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4">
+            {readiness.issues.map((issue) => (
+              <li key={issue.code}>{issue.message}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {props.isPlatformAdmin ? (
         <label className="flex items-center gap-2 text-sm">
