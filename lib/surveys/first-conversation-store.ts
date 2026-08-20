@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import {
   firstConversationHasContent,
   normalizeFirstConversation,
+  prepareFirstConversationForSave,
   type FirstConversationRecord,
 } from "@/lib/surveys/first-conversation";
 
@@ -34,7 +35,7 @@ export async function saveFirstConversation(input: {
   userId: string;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   const supabase = createServiceClient();
-  const briefing = normalizeFirstConversation(input.record);
+  const briefing = prepareFirstConversationForSave(input.record);
 
   const { error } = await supabase.from("dt_org_first_conversations").upsert(
     {

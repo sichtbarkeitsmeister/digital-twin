@@ -12,6 +12,8 @@ import { DEFAULT_SURVEY_ACTION_MODEL } from "@/lib/ai/survey-model-config";
 import {
   EMPTY_FIRST_CONVERSATION,
   applyDocumentTextToFirstConversation,
+  firstConversationFieldPromptLines,
+  firstConversationKindOf,
   normalizeFirstConversation,
   type FirstConversationFieldKey,
   type FirstConversationRecord,
@@ -32,13 +34,14 @@ export async function fillFirstConversationFromDocuments(input: {
   if (!text) return { record, filledKeys };
 
   const emptyKeys = (Object.keys(EMPTY_FIRST_CONVERSATION) as FirstConversationFieldKey[]).filter(
-    (key) => !record[key].trim(),
+    (key) => key !== "goodCompetitors" && !record[key].trim(),
   );
   if (emptyKeys.length === 0) return { record, filledKeys };
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) return { record, filledKeys };
 
+  const kind = firstConversationKindOf(record);
   const anthropic = new Anthropic({ apiKey });
   const result = await callAnthropicFirstAvailable({
     anthropic,
@@ -51,14 +54,18 @@ export async function fillFirstConversationFromDocuments(input: {
     messages: [
       {
         role: "user",
-        content: `Leere Erstgespräch-Felder:
+        content: `Leere Erstgespräch-Felder (conversationKind nur praxis, kanzlei oder weitere):
+${firstConversationFieldPromptLines(kind)}
+Weitere Keys ohne Fließtext-Frage, nur wenn belegt: ${emptyKeys.filter((key) => key === "conversationKind").join(", ") || "—"}
+
+Nur diese Keys füllen:
 ${emptyKeys.map((k) => `- ${k}`).join("\n")}
 
 Dokument(e):
 ${text.slice(0, 18000)}
 
 JSON: {"fields":[{"key":"legalCompanyName","value":"..."}]}
-Nur keys aus der Liste. value leer lassen, wenn nicht belegt.`,
+Nur keys aus der Liste. value leer lassen, wenn nicht belegt. Wettbewerb und Vorbilder gehören in competitors, nicht in goodCompetitors.`,
       },
     ],
   });

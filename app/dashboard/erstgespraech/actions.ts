@@ -7,6 +7,7 @@ import {
   EMPTY_FIRST_CONVERSATION,
   firstConversationHasContent,
   normalizeFirstConversation,
+  prepareFirstConversationForSave,
   type FirstConversationFileMeta,
   type FirstConversationRecord,
 } from "@/lib/surveys/first-conversation";
@@ -100,7 +101,7 @@ export async function saveErstgespraechAction(input: {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
   }
 
-  const record = normalizeFirstConversation(parsed.data.record);
+  const record = prepareFirstConversationForSave(parsed.data.record);
   const saved = await saveFirstConversation({
     organisationId: parsed.data.organisationId,
     record,
@@ -149,9 +150,10 @@ export async function fillErstgespraechFromFilesAction(input: {
     record: normalizeFirstConversation(parsed.data.record),
     documentText,
   });
+  const record = prepareFirstConversationForSave(filled.record);
   const saved = await saveFirstConversation({
     organisationId: parsed.data.organisationId,
-    record: filled.record,
+    record,
     userId: auth.userId,
   });
   if (!saved.ok) return { ok: false, message: saved.message };
@@ -165,7 +167,7 @@ export async function fillErstgespraechFromFilesAction(input: {
         ? `${filled.filledKeys.length} Felder aus den Dateien vorausgefüllt.`
         : "In den Dateien stand nichts Neues für leere Felder.",
     data: {
-      record: filled.record,
+      record,
       filledKeys: filled.filledKeys,
       updatedAt: new Date().toISOString(),
     },

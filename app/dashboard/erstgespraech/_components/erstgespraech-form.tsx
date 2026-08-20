@@ -26,13 +26,18 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   EMPTY_FIRST_CONVERSATION,
   FIRST_CONVERSATION_FILE_ACCEPT,
+  FIRST_CONVERSATION_KIND_TABS,
   FIRST_CONVERSATION_MAX_FILES,
-  FIRST_CONVERSATION_SECTIONS,
+  applyFirstConversationKind,
   firstConversationFilledCount,
+  firstConversationKindOf,
+  firstConversationSectionsForKind,
   type FirstConversationFieldKey,
   type FirstConversationFileMeta,
+  type FirstConversationKind,
   type FirstConversationRecord,
 } from "@/lib/surveys/first-conversation";
+import { cn } from "@/lib/utils";
 
 const CREATE_ORG_HREF = "/dashboard/admin/organisations#organisation-anlegen";
 
@@ -97,9 +102,15 @@ export function ErstgespraechForm(props: {
   }, [organisationId]);
 
   const counts = useMemo(() => firstConversationFilledCount(record), [record]);
+  const kind = firstConversationKindOf(record);
+  const sections = useMemo(() => firstConversationSectionsForKind(kind), [kind]);
 
   function patch(key: FirstConversationFieldKey, value: string) {
     setRecord((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function setKind(next: FirstConversationKind) {
+    setRecord((prev) => applyFirstConversationKind(prev, next));
   }
 
   function persist(then?: "stay" | "fragebogen") {
@@ -211,11 +222,43 @@ export function ErstgespraechForm(props: {
           Erstgespräch — Kundendefinition
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Hier führt die Agentur das erste Gespräch. Die Fragen sind die Gesprächsleitung —
-          Antworten landen später vorausgefüllt in den Fragebögen. Crawl und
-          Performance-Daten kommen zusätzlich beim Erzeugen der Fragebögen dazu.
+          Gesprächsleitung für das erste Treffen: aktueller Stand, Leistungen und Fokus,
+          Wunschkunden, dann was geplant ist. Oben die Art wählen — die Fragen bleiben dieselben
+          Felder, nur die Worte wechseln (Patient, Mandant, Kunde). Der Kunde füllt das nicht selbst
+          aus.
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Art des Gesprächs</CardTitle>
+          <CardDescription>
+            Arztpraxis und Kanzlei sind die Hauptkunden. Weitere für alle anderen Firmen. Wechsel
+            ändert nur die Worte — eingetragene Antworten bleiben.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <div className="flex flex-wrap gap-2">
+            {FIRST_CONVERSATION_KIND_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setKind(tab.id)}
+                disabled={!organisationId || loading}
+                className={cn(
+                  "rounded-xl border px-3 py-2 text-left text-sm font-medium transition",
+                  kind === tab.id
+                    ? "border-sbkm-mint/50 bg-sbkm-mint/15 text-primary"
+                    : "border-sbkm-navy/10 hover:bg-sbkm-navy/5",
+                )}
+              >
+                {tab.label}
+                <span className="mt-0.5 block text-xs font-normal text-secondary">{tab.hint}</span>
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">
@@ -224,7 +267,7 @@ export function ErstgespraechForm(props: {
             Organisation
           </CardTitle>
           <CardDescription>
-            Eine Kundendefinition pro Organisation. Der Kunde füllt das nicht selbst aus.
+            Eine Kundendefinition pro Organisation. Die Gesprächsleitung füllt die Agentur aus.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -247,7 +290,7 @@ export function ErstgespraechForm(props: {
           </p>
           {!organisationId ? (
             <p className="text-xs text-amber-800 dark:text-amber-200">
-              Bitte oben eine Organisation wählen — danach die Gesprächsleitung.
+              Bitte eine Organisation wählen — danach die Gesprächsleitung.
             </p>
           ) : loading ? (
             <p className="text-xs text-secondary">Lade gespeichertes Erstgespräch…</p>
@@ -339,7 +382,7 @@ export function ErstgespraechForm(props: {
         </CardContent>
       </Card>
 
-      {FIRST_CONVERSATION_SECTIONS.map((section, index) => (
+      {sections.map((section, index) => (
         <Card key={section.id}>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">

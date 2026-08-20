@@ -160,6 +160,36 @@ const LABEL_RULES: LabelRule[] = [
     extraTitle: "Welche Seiten, Landingpages oder Links wurden im Kundengespräch genannt?",
     extraId: "extra_meeting_pages_links",
   },
+  {
+    match: /^(?:aktueller\s+stand|status\s*quo)$/i,
+    extraTitle: "Wie läuft das Geschäft aktuell?",
+    extraId: "extra_meeting_current_status",
+  },
+  {
+    match: /^(?:buchungsweg)$/i,
+    extraTitle: "Wie kommen Anfragen oder Termine zustande?",
+    extraId: "extra_meeting_booking_path",
+  },
+  {
+    match: /^(?:website\s+und\s+auftritt)$/i,
+    extraTitle: "Was an Website oder Auftritt soll noch geändert werden?",
+    extraId: "extra_meeting_website_issues",
+  },
+  {
+    match: /^(?:weniger\s+passende\s+kunden)$/i,
+    extraTitle: "Welche Kunden oder Anfragen sind eher unattraktiv?",
+    extraId: "extra_meeting_unattractive",
+  },
+  {
+    match: /^(?:andere\s+kunden\s+bleiben)$/i,
+    extraTitle: "Bleiben andere Kunden willkommen, wenn der Fokus klarer wird?",
+    extraId: "extra_meeting_keep_others",
+  },
+  {
+    match: /^(?:zukunft\s+und\s+n(?:ä|ae)chste\s+schritte)$/i,
+    extraTitle: "Was ist für die nächsten Monate geplant?",
+    extraId: "extra_meeting_future_plans",
+  },
 ];
 
 function normalizeLabel(raw: string): string {
