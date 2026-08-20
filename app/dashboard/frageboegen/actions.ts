@@ -17,6 +17,17 @@ import {
   PERSONA_CORE_QUESTIONS,
 } from "@/lib/surveys/core-question-templates";
 import { loadOrgCrawlContext } from "@/lib/surveys/org-crawl-context";
+import {
+  firstConversationFilledCount,
+  firstConversationHasContent,
+  firstConversationSummaryLines,
+} from "@/lib/surveys/first-conversation";
+import { loadFirstConversation } from "@/lib/surveys/first-conversation-store";
+import {
+  loadOrgCrawlStatusSnapshot,
+  startOrganisationSiteCrawl,
+  type OrgCrawlProgress,
+} from "@/lib/dt/seo/start-org-crawl";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -51,6 +62,18 @@ export async function loadFragebogenWizardContextAction(input: {
     organisationName: string;
     websiteUrl: string | null;
     pageCount: number;
+    lastCrawledAt: string | null;
+    lastCrawlError: string | null;
+    activeCrawl: OrgCrawlProgress | null;
+    seoSummary: string | null;
+    firstConversation: {
+      hasContent: boolean;
+      filled: number;
+      total: number;
+      summaryLines: string[];
+      wunschkundeLabel: string;
+      updatedAt: string | null;
+    };
     anbieterCore: Array<{
       key: string;
       title: string;
@@ -77,14 +100,34 @@ export async function loadFragebogenWizardContextAction(input: {
   const parsed = z.object({ organisationId: z.string().uuid() }).safeParse(input);
   if (!parsed.success) return { ok: false, message: "Ungültige Organisation." };
 
-  const crawl = await loadOrgCrawlContext(parsed.data.organisationId);
+  const [crawl, status, conversation] = await Promise.all([
+    loadOrgCrawlContext(parsed.data.organisationId),
+    loadOrgCrawlStatusSnapshot(parsed.data.organisationId),
+    loadFirstConversation(parsed.data.organisationId),
+  ]);
+  const counts = firstConversationFilledCount(conversation.record);
+
   return {
     ok: true,
     message: "ok",
     data: {
       organisationName: crawl.organisationName,
-      websiteUrl: crawl.websiteUrl,
+      websiteUrl: crawl.websiteUrl ?? status.websiteUrl,
       pageCount: crawl.pageCount,
+      lastCrawledAt: status.lastCrawledAt,
+      lastCrawlError: status.lastCrawlError,
+      activeCrawl: status.crawl,
+      seoSummary: crawl.seoMetrics
+        ? `Impressionen ${crawl.seoMetrics.impressions} · Klicks ${crawl.seoMetrics.totalClicks} · Top-10 ${crawl.seoMetrics.rankingsTop10}`
+        : null,
+      firstConversation: {
+        hasContent: firstConversationHasContent(conversation.record),
+        filled: counts.filled,
+        total: counts.total,
+        summaryLines: firstConversationSummaryLines(conversation.record),
+        wunschkundeLabel: conversation.record.wunschkundeLabel,
+        updatedAt: conversation.updatedAt,
+      },
       anbieterCore: ANBIETER_CORE_QUESTIONS.map((q) => ({
         key: q.key,
         title: q.title,
@@ -103,6 +146,74 @@ export async function loadFragebogenWizardContextAction(input: {
         description: q.description,
         stepTitle: q.stepTitle,
       })),
+    },
+  };
+}
+
+export async function requestFragebogenCrawlAction(input: {
+  organisationId: string;
+}): Promise<
+  ActionState<{
+    crawlId: string;
+    reused: boolean;
+    status: string;
+    pageCount: number;
+    activeCrawl: OrgCrawlProgress | null;
+  }>
+> {
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
+
+  const parsed = z.object({ organisationId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, message: "Ungültige Organisation." };
+
+  const started = await startOrganisationSiteCrawl({
+    organisationId: parsed.data.organisationId,
+    userId: auth.userId,
+  });
+  if (!started.ok) return { ok: false, message: started.message };
+
+  const status = await loadOrgCrawlStatusSnapshot(parsed.data.organisationId);
+  return {
+    ok: true,
+    message: started.message,
+    data: {
+      crawlId: started.crawlId,
+      reused: started.reused,
+      status: started.status,
+      pageCount: status.pageCount,
+      activeCrawl: status.crawl,
+    },
+  };
+}
+
+export async function loadFragebogenCrawlStatusAction(input: {
+  organisationId: string;
+}): Promise<
+  ActionState<{
+    pageCount: number;
+    websiteUrl: string | null;
+    lastCrawledAt: string | null;
+    lastCrawlError: string | null;
+    activeCrawl: OrgCrawlProgress | null;
+  }>
+> {
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+
+  const parsed = z.object({ organisationId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, message: "Ungültige Organisation." };
+
+  const status = await loadOrgCrawlStatusSnapshot(parsed.data.organisationId);
+  return {
+    ok: true,
+    message: "ok",
+    data: {
+      pageCount: status.pageCount,
+      websiteUrl: status.websiteUrl,
+      lastCrawledAt: status.lastCrawledAt,
+      lastCrawlError: status.lastCrawlError,
+      activeCrawl: status.crawl,
     },
   };
 }
@@ -226,7 +337,7 @@ export async function createFragebogenFromReviewAction(
   }
 
   let definition;
-  let answers: Record<string, string>;
+  let answers: Record<string, unknown>;
   try {
     const built = buildSurveyAndAnswersFromReview({
       draft: parsed.data.draft,

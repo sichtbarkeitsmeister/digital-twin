@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { loadOrgConfig, requireAuthUser } from "@/lib/dt/db";
+import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { startOrganisationSiteCrawl } from "@/lib/dt/seo/start-org-crawl";
 import { syncCrawlJobHealth } from "@/lib/dt/seo/sync-crawl-job-health";
-import { kickJobsWorker } from "@/lib/jobs/kick-worker";
-import { enqueueJob } from "@/lib/jobs/queue";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export const maxDuration = 60;
@@ -243,81 +242,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }
 
-  const config = await loadOrgConfig(parsed.data.organisationId);
-  if (!config) {
-    return NextResponse.json({ ok: false, message: "Organisation nicht gefunden." }, { status: 404 });
-  }
-
-  if (!config.website_url?.trim() && !config.sitemap_url?.trim()) {
-    return NextResponse.json(
-      { ok: false, message: "Bitte Website- oder Sitemap-URL konfigurieren." },
-      { status: 400 },
-    );
-  }
-
-  const service = createServiceClient();
-
-  await syncCrawlJobHealth(parsed.data.organisationId);
-
-  const { data: existing } = await service
-    .from("dt_site_crawls")
-    .select("id,status,pages_crawled,pages_discovered,message")
-    .eq("organisation_id", parsed.data.organisationId)
-    .in("status", ["queued", "running"])
-    .maybeSingle();
-
-  if (existing) {
-    kickJobsWorker();
-    return NextResponse.json({
-      ok: true,
-      crawlId: existing.id,
-      reused: true,
-      message: existing.message ?? "Crawl läuft bereits.",
-      status: existing.status,
-      pagesCrawled: existing.pages_crawled,
-      pagesDiscovered: existing.pages_discovered,
-    });
-  }
-
-  const { data: crawl, error: insertError } = await service
-    .from("dt_site_crawls")
-    .insert({
-      organisation_id: parsed.data.organisationId,
-      status: "queued",
-      created_by_user_id: auth.userId,
-      message: "Crawl in Warteschlange …",
-    })
-    .select("id")
-    .single();
-
-  if (insertError || !crawl) {
-    return NextResponse.json(
-      { ok: false, message: insertError?.message ?? "Crawl konnte nicht gestartet werden." },
-      { status: 500 },
-    );
-  }
-
-  const enqueued = await enqueueJob({
-    kind: "seo.crawl",
+  const started = await startOrganisationSiteCrawl({
     organisationId: parsed.data.organisationId,
-    payload: { crawlId: crawl.id, organisationId: parsed.data.organisationId },
-    runAfter: new Date(),
+    userId: auth.userId,
   });
-
-  if (!enqueued.ok) {
-    await service
-      .from("dt_site_crawls")
-      .update({ status: "error", message: enqueued.error, finished_at: new Date().toISOString() })
-      .eq("id", crawl.id);
-    return NextResponse.json({ ok: false, message: enqueued.error }, { status: 500 });
+  if (!started.ok) {
+    const status = /Website- oder Sitemap/i.test(started.message) ? 400 : 500;
+    return NextResponse.json({ ok: false, message: started.message }, { status });
   }
-
-  kickJobsWorker(5);
 
   return NextResponse.json({
     ok: true,
-    crawlId: crawl.id,
-    message: "Hintergrund-Crawl gestartet.",
-    status: "queued",
+    crawlId: started.crawlId,
+    reused: started.reused,
+    message: started.message,
+    status: started.status,
+    pagesCrawled: started.pagesCrawled,
+    pagesDiscovered: started.pagesDiscovered,
   });
 }

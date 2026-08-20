@@ -126,6 +126,36 @@ const LABEL_RULES: LabelRule[] = [
     hint: "website",
   },
   {
+    match: /^(?:alltagsname|kurzname|spitzname)$/i,
+    extraTitle: "Wie wird die Firma im Alltag genannt?",
+    extraId: "extra_meeting_colloquial",
+  },
+  {
+    match: /^(?:branche|gewerbe)$/i,
+    extraTitle: "In welcher Branche ist die Firma unterwegs?",
+    extraId: "extra_meeting_industry",
+  },
+  {
+    match: /^(?:online[\s_-]?kan(?:ä|ae)le|kan(?:ä|ae)le\s+heute)$/i,
+    extraTitle: "Welche Online-Kanäle werden aktuell genutzt?",
+    extraId: "extra_meeting_online_channels",
+  },
+  {
+    match: /^(?:wunschkunde|avatar)$/i,
+    extraTitle: "Wie heißt oder beschreibt sich der Wunschkunde?",
+    extraId: "extra_meeting_wunschkunde",
+  },
+  {
+    match: /^(?:ziel\s+des\s+mandats|mandat|auftrag)$/i,
+    extraTitle: "Was soll durch die Zusammenarbeit besser werden?",
+    extraId: "extra_meeting_mandate",
+  },
+  {
+    match: /^(?:rolle\s+gespr(?:ä|ae)chspartner|rolle)$/i,
+    extraTitle: "Welche Rolle hat die Person im Erstgespräch?",
+    extraId: "extra_meeting_owner_role",
+  },
+  {
     match: /^(?:seiten|links|landingpages?|urls?|genannte\s+seiten)$/i,
     extraTitle: "Welche Seiten, Landingpages oder Links wurden im Kundengespräch genannt?",
     extraId: "extra_meeting_pages_links",

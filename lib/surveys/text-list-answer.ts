@@ -57,6 +57,28 @@ export function coerceTextListState(
   return { entries };
 }
 
+/** Split a free-text prefill (one item per line) onto text_list slots. */
+export function textListPayloadFromFreeText(
+  text: string,
+  optionIds: string[],
+): TextListAnswerPayload {
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*•]\s+/, "").trim())
+    .filter(Boolean);
+  const entries: TextListEntry[] = optionIds.map((id, index) => ({
+    id,
+    value: lines[index] ?? "",
+  }));
+  for (let i = optionIds.length; i < lines.length; i += 1) {
+    entries.push({
+      id: `prefill_${i + 1}`,
+      value: lines[i] ?? "",
+    });
+  }
+  return { entries };
+}
+
 export function setTextListEntryValue(
   raw: unknown,
   optionIds: string[],

@@ -78,6 +78,9 @@ assert.equal(coreQuestionsForPurpose("persona"), PERSONA_CORE_QUESTIONS);
 assert.equal(coreQuestionsForPurpose("intern"), INTERN_CORE_QUESTIONS);
 assert.ok(INTERN_CORE_QUESTIONS.some((q) => q.key === "nap_consistency" && q.type === "radio"));
 assert.ok(INTERN_CORE_QUESTIONS.some((q) => q.key === "gbp_link" && q.type === "text"));
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "proven_metrics" && q.prefillHint === "seo_metrics"));
+assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "team_members" && q.prefillHint === "team_members"));
+assert.ok(INTERN_CORE_QUESTIONS.some((q) => q.key === "gbp_hours" && q.prefillHint === "opening_hours"));
 assert.ok(
   INTERN_CORE_QUESTIONS.some(
     (q) => q.key === "review_platforms" && q.type === "text_list" && (q.options?.length ?? 0) === 3,

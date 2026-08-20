@@ -21,7 +21,20 @@ export type CoreQuestionPrefillHint =
   | "persona_name"
   | "persona_job"
   | "persona_age"
-  | "persona_pain";
+  | "persona_pain"
+  | "colloquial_name"
+  | "known_for"
+  | "elevator_pitch"
+  | "team_members"
+  | "seo_metrics"
+  | "online_channels"
+  | "gbp_link"
+  | "opening_hours"
+  | "reviews"
+  | "nap_address"
+  | "company_history"
+  | "portfolio_links"
+  | "years_staff";
 
 export type CoreQuestionTemplate = {
   key: string;
@@ -400,6 +413,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wie wird die Firma im Alltag genannt – von Kunden, im Team oder von Partnern (z. B. eine Kurzform oder ein Spitzname)?",
         type: "text",
+        prefillHint: "colloquial_name",
       },
       {
         key: "location_catchment",
@@ -425,11 +439,13 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title: "Links zu Leistungsseiten, Flyern oder anderen Unterlagen",
         description: "Website-URLs, PDF-Links oder Dateinamen. Leer lassen, wenn nichts vorliegt.",
         type: "text",
+        prefillHint: "portfolio_links",
       },
       {
         key: "known_for",
         title: "Wofür ist die Firma in der Region bekannt – was sagen Menschen darüber, wenn sie sie erwähnen?",
         type: "text",
+        prefillHint: "known_for",
       },
       {
         key: "usp",
@@ -644,7 +660,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: emptySlots("team", 3),
         allowExtraEntries: true,
         addEntryLabel: "Person hinzufügen",
-        prefillHint: "employee_count",
+        prefillHint: "team_members",
       },
       {
         key: "qualifications",
@@ -663,6 +679,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: emptySlots("milestone", 3),
         allowExtraEntries: true,
         addEntryLabel: "Meilenstein hinzufügen",
+        prefillHint: "company_history",
       },
       {
         key: "partners_suppliers",
@@ -713,6 +730,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Seit wie vielen Jahren gibt es die Firma, und wie viele Kunden bzw. Mitarbeitende gab oder gibt es ungefähr? Bitte möglichst konkrete Zahlen.",
         type: "text",
+        prefillHint: "years_staff",
       },
       {
         key: "proven_metrics",
@@ -723,6 +741,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: emptySlots("metric", 3),
         allowExtraEntries: true,
         addEntryLabel: "Kennzahl hinzufügen",
+        prefillHint: "seo_metrics",
       },
       {
         key: "certificates_links",
@@ -833,6 +852,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         type: "checkbox",
         options: opts("online", ONLINE_CHANNELS),
         allowOtherOption: true,
+        prefillHint: "online_channels",
       },
       {
         key: "seasonal_yesno",
@@ -935,6 +955,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "elevator_pitch",
         title: "Wie lässt sich die Firma in drei bis fünf Sätzen beschreiben?",
         type: "text",
+        prefillHint: "elevator_pitch",
       },
     ],
     "Was sonst noch wichtig ist, in eigenen Worten.",
@@ -1455,6 +1476,7 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "nap_deviations",
         title: "Welche Abweichungen wurden gefunden?",
         type: "text",
+        prefillHint: "nap_address",
       },
       {
         key: "external_mentions_list",
@@ -1514,6 +1536,7 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: emptySlots("reviews", 3),
         allowExtraEntries: true,
         addEntryLabel: "Plattform hinzufügen",
+        prefillHint: "reviews",
       },
     ],
   ),
@@ -1525,6 +1548,7 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "gbp_link",
         title: "Link zum Google-Unternehmensprofil",
         type: "text",
+        prefillHint: "gbp_link",
       },
       {
         key: "gbp_categories",
@@ -1535,12 +1559,14 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "gbp_service_area",
         title: "Servicegebiet/Einzugsgebiet wie im Google-Unternehmensprofil hinterlegt",
         type: "text",
+        prefillHint: "region",
       },
       {
         key: "gbp_hours",
         title:
           "Öffnungszeiten wie im Google-Unternehmensprofil hinterlegt, und ob diese aktuell sind",
         type: "text",
+        prefillHint: "opening_hours",
       },
     ],
   ),

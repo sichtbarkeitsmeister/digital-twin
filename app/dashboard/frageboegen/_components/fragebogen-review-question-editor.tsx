@@ -264,7 +264,10 @@ export function FragebogenReviewQuestionEditor(props: {
           </div>
         ) : null}
 
-        {q.type === "text" || q.type === "radio" ? (
+        {q.type === "text" ||
+        q.type === "radio" ||
+        q.type === "text_list" ||
+        q.type === "checkbox" ? (
           <div className="grid gap-2">
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor={`answer-${q.id}`}>Antwort-Vorschlag</Label>
@@ -288,7 +291,11 @@ export function FragebogenReviewQuestionEditor(props: {
               id={`answer-${q.id}`}
               value={q.answer}
               rows={2}
-              placeholder="Noch keine Vorausfüllung — später im Fragebogen ausfüllen"
+              placeholder={
+                q.type === "text_list"
+                  ? "Ein Eintrag pro Zeile — wird auf die Liste verteilt"
+                  : "Noch keine Vorausfüllung — später im Fragebogen ausfüllen"
+              }
               onChange={(e) =>
                 props.onChange({
                   answer: e.target.value,

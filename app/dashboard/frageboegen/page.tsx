@@ -128,6 +128,13 @@ export default async function OrganisationFrageboegenPage({
             </Button>
             {isPlatformAdmin ? (
               <>
+                <Button asChild variant="outline" size="sm">
+                  <Link
+                    href={`/dashboard/erstgespraech?org=${encodeURIComponent(selectedOrganisationId)}`}
+                  >
+                    Erstgespräch
+                  </Link>
+                </Button>
                 <Button asChild size="sm">
                   <Link
                     href={`/dashboard/frageboegen/neu?org=${encodeURIComponent(selectedOrganisationId)}`}

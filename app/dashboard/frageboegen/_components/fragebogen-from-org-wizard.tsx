@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Loader2, Plus, Sparkles } from "lucide-react";
+import { Loader2, MessageCircle, Plus, Sparkles } from "lucide-react";
 
 import {
   createFragebogenFromReviewAction,
+  loadFragebogenCrawlStatusAction,
   loadFragebogenWizardContextAction,
   previewFragebogenFromOrgAction,
+  requestFragebogenCrawlAction,
 } from "@/app/dashboard/frageboegen/actions";
 import { FragebogenReviewQuestionEditor } from "@/app/dashboard/frageboegen/_components/fragebogen-review-question-editor";
 import type { FragebogenReviewDraft } from "@/lib/surveys/build-fragebogen-from-org";
@@ -28,13 +30,31 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
 
 type CoreItem = { key: string; title: string; description: string; stepTitle: string };
 
+type ActiveCrawl = {
+  id: string;
+  status: string;
+  pagesCrawled: number;
+  pagesDiscovered: number;
+  maxPages: number;
+  message: string | null;
+};
+
+type FirstConversationSummary = {
+  hasContent: boolean;
+  filled: number;
+  total: number;
+  summaryLines: string[];
+  wunschkundeLabel: string;
+  updatedAt: string | null;
+};
+
 const CREATE_ORG_HREF = "/dashboard/admin/organisations#organisation-anlegen";
+const ACTIVE_CRAWL = new Set(["queued", "running"]);
 
 export function FragebogenFromOrgWizard(props: {
   organisationId: string | null;
@@ -50,15 +70,16 @@ export function FragebogenFromOrgWizard(props: {
   const [extraPlacement, setExtraPlacement] = useState<"start" | "end">("end");
   const [savePrefills, setSavePrefills] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const [legalCompanyName, setLegalCompanyName] = useState("");
-  const [ownerName, setOwnerName] = useState("");
-  const [competitors, setCompetitors] = useState("");
-  const [goodCompetitors, setGoodCompetitors] = useState("");
-  const [pagesOrLinks, setPagesOrLinks] = useState("");
-  const [meetingNotes, setMeetingNotes] = useState("");
   const [orgName, setOrgName] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
+  const [lastCrawledAt, setLastCrawledAt] = useState<string | null>(null);
+  const [lastCrawlError, setLastCrawlError] = useState<string | null>(null);
+  const [activeCrawl, setActiveCrawl] = useState<ActiveCrawl | null>(null);
+  const [seoSummary, setSeoSummary] = useState<string | null>(null);
+  const [firstConv, setFirstConv] = useState<FirstConversationSummary | null>(null);
+  const [skipCrawl, setSkipCrawl] = useState(false);
+  const [crawlBusy, setCrawlBusy] = useState(false);
   const [anbieterCore, setAnbieterCore] = useState<CoreItem[]>([]);
   const [personaCore, setPersonaCore] = useState<CoreItem[]>([]);
   const [internCore, setInternCore] = useState<CoreItem[]>([]);
@@ -79,10 +100,17 @@ export function FragebogenFromOrgWizard(props: {
       setOrgName("");
       setWebsiteUrl(null);
       setPageCount(0);
+      setLastCrawledAt(null);
+      setLastCrawlError(null);
+      setActiveCrawl(null);
+      setSeoSummary(null);
+      setFirstConv(null);
+      setSkipCrawl(false);
       setError(null);
       return;
     }
     setLoadingCtx(true);
+    setSkipCrawl(false);
     setError(null);
     void (async () => {
       const res = await loadFragebogenWizardContextAction({
@@ -97,16 +125,65 @@ export function FragebogenFromOrgWizard(props: {
       setOrgName(res.data.organisationName);
       setWebsiteUrl(res.data.websiteUrl);
       setPageCount(res.data.pageCount);
+      setLastCrawledAt(res.data.lastCrawledAt);
+      setLastCrawlError(res.data.lastCrawlError);
+      setActiveCrawl(res.data.activeCrawl);
+      setSeoSummary(res.data.seoSummary);
+      setFirstConv(res.data.firstConversation);
       setAnbieterCore(res.data.anbieterCore);
       setPersonaCore(res.data.personaCore);
       setInternCore(res.data.internCore);
       setSelectedKeys(res.data.anbieterCore.map((c) => c.key));
+      if (res.data.firstConversation.wunschkundeLabel) {
+        setWunschkundeLabel(res.data.firstConversation.wunschkundeLabel);
+      }
       setLoadingCtx(false);
+
+      const needsCrawl =
+        Boolean(res.data.websiteUrl) &&
+        res.data.pageCount === 0 &&
+        !res.data.activeCrawl;
+      if (needsCrawl) {
+        const started = await requestFragebogenCrawlAction({ organisationId });
+        if (cancelled) return;
+        if (started.ok && started.data) {
+          setPageCount(started.data.pageCount);
+          setActiveCrawl(started.data.activeCrawl);
+          setStatus(started.message);
+        } else if (!started.ok) {
+          setLastCrawlError(started.message);
+        }
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [organisationId]);
+
+  useEffect(() => {
+    if (!organisationId) return;
+    if (!activeCrawl || !ACTIVE_CRAWL.has(activeCrawl.status)) return;
+    let cancelled = false;
+    const tick = async () => {
+      const res = await loadFragebogenCrawlStatusAction({ organisationId });
+      if (cancelled || !res.ok || !res.data) return;
+      setPageCount(res.data.pageCount);
+      setWebsiteUrl(res.data.websiteUrl);
+      setLastCrawledAt(res.data.lastCrawledAt);
+      setLastCrawlError(res.data.lastCrawlError);
+      setActiveCrawl(res.data.activeCrawl);
+      if (res.data.pageCount > 0 && !res.data.activeCrawl) {
+        setStatus("Crawl fertig. Inhalte stehen für die Vorausfüllung bereit.");
+      }
+    };
+    const id = window.setInterval(() => {
+      void tick();
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [organisationId, activeCrawl?.id, activeCrawl?.status]);
 
   useEffect(() => {
     const items =
@@ -137,9 +214,37 @@ export function FragebogenFromOrgWizard(props: {
     );
   }
 
+  function requestCrawl() {
+    if (!organisationId) return;
+    setError(null);
+    setCrawlBusy(true);
+    void (async () => {
+      const res = await requestFragebogenCrawlAction({ organisationId });
+      setCrawlBusy(false);
+      if (!res.ok || !res.data) {
+        setLastCrawlError(res.message);
+        setError(res.message);
+        return;
+      }
+      setPageCount(res.data.pageCount);
+      setActiveCrawl(res.data.activeCrawl);
+      setSkipCrawl(false);
+      setStatus(res.message);
+    })();
+  }
+
   function runPreview() {
     if (!organisationId) {
       setError("Bitte zuerst eine Organisation wählen oder anlegen.");
+      return;
+    }
+    const crawlRunning = Boolean(activeCrawl && ACTIVE_CRAWL.has(activeCrawl.status));
+    if (websiteUrl && pageCount === 0 && !skipCrawl) {
+      setError(
+        crawlRunning
+          ? "Crawl läuft noch. Bitte warten oder unten „Ohne Crawl fortfahren“ wählen."
+          : "Bitte zuerst den Website-Crawl anstoßen — oder unten ohne Crawl fortfahren.",
+      );
       return;
     }
     setError(null);
@@ -159,14 +264,7 @@ export function FragebogenFromOrgWizard(props: {
         ),
         includeAiExtras,
         extraPlacement,
-        meetingBriefing: {
-          legalCompanyName: legalCompanyName || null,
-          ownerName: ownerName || null,
-          competitors: competitors || null,
-          goodCompetitors: goodCompetitors || null,
-          pagesOrLinks: pagesOrLinks || null,
-          notes: meetingNotes || null,
-        },
+        meetingBriefing: null,
       });
       setStatus(null);
       if (!res.ok || !res.data) {
@@ -378,8 +476,8 @@ export function FragebogenFromOrgWizard(props: {
           Fragebogen aus Organisation
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Nach dem Kundengespräch: Mitbewerber, Inhaber und Notizen hier eintragen — Crawl füllt
-          den Rest. Dann Vorschau prüfen und speichern.
+          Vor dem Erzeugen: Website crawlen, Erstgespräch übernehmen, dann prüfen. Alles, was
+          Crawl und SEO-Zahlen hergeben (Team, Impressionen, Rankings), wird vorausgefüllt.
         </p>
       </div>
 
@@ -387,8 +485,8 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">1. Organisation & Crawl</CardTitle>
           <CardDescription>
-            Organisation wählen — oft erst nach dem Kundengespräch angelegt. Crawl optional, aber
-            hilfreich.
+            Der Website-Crawl wird vor dem Erzeugen angestoßen. Daraus kommen Team, Leistungen,
+            Adresse und — soweit vorhanden — Impressionen und Rankings.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -413,8 +511,7 @@ export function FragebogenFromOrgWizard(props: {
 
           {!organisationId ? (
             <p className="text-xs text-amber-800 dark:text-amber-200">
-              Noch keine Organisation gewählt. Bitte oben auswählen oder neu anlegen — danach
-              Briefing und Crawl.
+              Noch keine Organisation gewählt. Bitte oben auswählen oder neu anlegen.
             </p>
           ) : loadingCtx ? (
             <p className="text-xs text-secondary">Lade Crawl-Kontext…</p>
@@ -430,28 +527,69 @@ export function FragebogenFromOrgWizard(props: {
                 <Badge variant={pageCount > 0 ? "default" : "secondary"}>
                   {pageCount} Seiten gecrawlt
                 </Badge>
+                {seoSummary ? <Badge variant="outline">{seoSummary}</Badge> : null}
+                {activeCrawl && ACTIVE_CRAWL.has(activeCrawl.status) ? (
+                  <Badge variant="secondary">
+                    Crawl {activeCrawl.status}: {activeCrawl.pagesCrawled}
+                    {activeCrawl.pagesDiscovered
+                      ? ` / ${activeCrawl.pagesDiscovered}`
+                      : ""}{" "}
+                    Seiten
+                  </Badge>
+                ) : null}
               </div>
-              {pageCount === 0 ? (
+              {!websiteUrl ? (
                 <p className="text-xs text-amber-800 dark:text-amber-200">
-                  Noch kein Crawl — Prefill/KI-Zusatzfragen werden dünn. Bitte zuerst Website setzen
-                  und crawlen (kann auch nach dem Anlegen der Organisation passieren).
+                  Ohne Website-URL kann kein Crawl starten. Bitte unter SEO die Website setzen.
+                </p>
+              ) : activeCrawl && ACTIVE_CRAWL.has(activeCrawl.status) ? (
+                <p className="text-xs text-secondary">
+                  Crawl läuft im Hintergrund
+                  {activeCrawl.message ? ` — ${activeCrawl.message}` : "."} Sobald Seiten da
+                  sind, werden sie vorausgefüllt.
+                </p>
+              ) : pageCount === 0 ? (
+                <p className="text-xs text-amber-800 dark:text-amber-200">
+                  {lastCrawlError
+                    ? lastCrawlError
+                    : "Noch kein Crawl. Bitte starten — sonst bleibt die Vorausfüllung dünn."}
                 </p>
               ) : (
                 <p className="text-xs text-secondary">
-                  Crawl-Inhalte werden für Antwort-Vorschläge und Zusatzfragen genutzt. Alles bleibt
+                  Crawl-Inhalte und SEO-Zahlen werden für Antwort-Vorschläge genutzt. Alles bleibt
                   in der Prüfung editierbar.
+                  {lastCrawledAt
+                    ? ` Zuletzt gecrawlt ${new Date(lastCrawledAt).toLocaleString("de-DE")}.`
+                    : ""}
                 </p>
               )}
             </>
           )}
 
           <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!organisationId || crawlBusy || loadingCtx || !websiteUrl}
+              onClick={requestCrawl}
+            >
+              {crawlBusy || (activeCrawl && ACTIVE_CRAWL.has(activeCrawl.status)) ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  Crawl läuft…
+                </>
+              ) : pageCount > 0 ? (
+                "Crawl aktualisieren"
+              ) : (
+                "Crawl starten"
+              )}
+            </Button>
             {organisationId ? (
               <Button asChild size="sm" variant="outline">
                 <Link
                   href={`/dashboard/verwaltung/seo?org=${encodeURIComponent(organisationId)}`}
                 >
-                  SEO / Website / Crawl
+                  SEO / Website
                 </Link>
               </Button>
             ) : null}
@@ -467,82 +605,64 @@ export function FragebogenFromOrgWizard(props: {
               </Link>
             </Button>
           </div>
+
+          {websiteUrl && pageCount === 0 ? (
+            <label className="flex items-center gap-2 text-xs text-secondary">
+              <input
+                type="checkbox"
+                checked={skipCrawl}
+                onChange={(e) => setSkipCrawl(e.target.checked)}
+              />
+              Ohne Crawl fortfahren (Vorausfüllung dann nur aus Erstgespräch)
+            </label>
+          ) : null}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">2. Kundengespräch / Briefing</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <MessageCircle className="size-4" aria-hidden />
+            2. Erstgespräch / Kundendefinition
+          </CardTitle>
           <CardDescription>
-            Inhalte aus dem Meeting direkt übernehmen — der Kunde soll das später nicht nochmal
-            tippen. Leere Felder bleiben für Crawl/KI.
+            Das erste Gespräch liegt auf einer eigenen Seite. Gespeicherte Angaben werden hier
+            übernommen — der Kunde soll sie nicht nochmal tippen.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="legal-company">Offizieller Firmenname</Label>
-              <Input
-                id="legal-company"
-                value={legalCompanyName}
-                onChange={(e) => setLegalCompanyName(e.target.value)}
-                placeholder={orgName ? `z. B. ${orgName}` : "z. B. Musterdruck GmbH"}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="owner-name">Inhaber / Geschäftsführung</Label>
-              <Input
-                id="owner-name"
-                value={ownerName}
-                onChange={(e) => setOwnerName(e.target.value)}
-                placeholder="z. B. Max Mustermann"
-              />
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="competitors">Mitbewerber</Label>
-            <Textarea
-              id="competitors"
-              value={competitors}
-              onChange={(e) => setCompetitors(e.target.value)}
-              rows={2}
-              placeholder="Namen, Domains, kurze Notizen…"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="good-competitors">Gute Wettbewerber / Vorbilder</Label>
-            <Textarea
-              id="good-competitors"
-              value={goodCompetitors}
-              onChange={(e) => setGoodCompetitors(e.target.value)}
-              rows={2}
-              placeholder="Starke Anbieter, an denen man sich orientiert…"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="pages-links">Genannte Seiten / Links</Label>
-            <Textarea
-              id="pages-links"
-              value={pagesOrLinks}
-              onChange={(e) => setPagesOrLinks(e.target.value)}
-              rows={2}
-              placeholder="Landingpages, URLs, Seitennamen aus dem Gespräch…"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="meeting-notes">Weitere Gesprächsnotizen</Label>
-            <Textarea
-              id="meeting-notes"
-              value={meetingNotes}
-              onChange={(e) => setMeetingNotes(e.target.value)}
-              rows={4}
-              placeholder={`Region: Hamm und 50km\nUSP: …\nFokuskeywords: …\nZielgruppe: …`}
-            />
-            <p className="text-xs text-secondary">
-              Am besten mit Labels schreiben (Region:, USP:, Fokuskeywords: …) — dann landen die
-              Antworten auf den passenden Fragen statt in einem Haufen.
+        <CardContent className="grid gap-3 text-sm">
+          {!organisationId ? (
+            <p className="text-xs text-secondary">Zuerst Organisation wählen.</p>
+          ) : !firstConv?.hasContent ? (
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              Noch kein Erstgespräch für diese Organisation. Bitte zuerst die Kundendefinition
+              führen — oder den Fragebogen nur aus Crawl erzeugen.
             </p>
-          </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="default">
+                  {firstConv.filled}/{firstConv.total} Felder
+                </Badge>
+              </div>
+              <ul className="grid gap-1 text-xs text-secondary">
+                {firstConv.summaryLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {organisationId ? (
+            <div className="flex flex-wrap gap-2">
+              <Button asChild size="sm">
+                <Link
+                  href={`/dashboard/erstgespraech?org=${encodeURIComponent(organisationId)}`}
+                >
+                  Erstgespräch öffnen
+                </Link>
+              </Button>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -722,7 +842,13 @@ export function FragebogenFromOrgWizard(props: {
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          disabled={isPending || loadingCtx || !organisationId || selectedCount === 0}
+          disabled={
+            isPending ||
+            loadingCtx ||
+            !organisationId ||
+            selectedCount === 0 ||
+            Boolean(websiteUrl && pageCount === 0 && !skipCrawl)
+          }
           onClick={runPreview}
         >
           {isPending ? (

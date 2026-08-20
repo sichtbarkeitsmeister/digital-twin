@@ -9,6 +9,7 @@ import {
   coerceTextListState,
   isTextListAnswerValid,
   setTextListEntryValue,
+  textListPayloadFromFreeText,
 } from "../lib/surveys/text-list-answer";
 
 const optionIds = ["p1", "p2", "p3"];
@@ -52,5 +53,13 @@ const parsed = surveySchema.safeParse({
   ],
 });
 assert.equal(parsed.success, true);
+
+const fromLines = textListPayloadFromFreeText(
+  "Anna Müller, Inhaberin\nMax Schmidt, Beratung\nLisa",
+  ["team_1", "team_2", "team_3"],
+);
+assert.equal(fromLines.entries[0]?.value, "Anna Müller, Inhaberin");
+assert.equal(fromLines.entries[1]?.value, "Max Schmidt, Beratung");
+assert.equal(fromLines.entries[2]?.value, "Lisa");
 
 console.log("ok: survey text_list");
