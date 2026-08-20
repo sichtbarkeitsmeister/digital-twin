@@ -158,4 +158,37 @@ assert.ok(ageStep);
 assert.equal(ageStep?.title, "Alter, Beruf & Lebenssituation");
 assert.equal(ageStep?.fields.find((f) => f.id === "core_persona_age")?.type, "radio");
 
+const teamList: ReviewQuestionItem = {
+  id: "core_team_members",
+  kind: "core",
+  coreKey: "team_members",
+  title: "Wer gehört zum Team?",
+  description: "",
+  included: true,
+  required: false,
+  type: "text_list",
+  options: [
+    { id: "team_1", label: "" },
+    { id: "team_2", label: "" },
+    { id: "team_3", label: "" },
+  ],
+  allowExtraEntries: true,
+  answer: "Anna Müller, Inhaberin\nMax Schmidt, Beratung",
+  answerSource: "crawl",
+  answerNote: "Aus Crawl",
+};
+const teamBuilt = buildSurveyAndAnswersFromReview({
+  draft: {
+    ...baseDraft([teamList]),
+    purpose: "anbieter",
+    title: "Anbieter: Team",
+  },
+  savePrefills: true,
+});
+const teamAnswer = teamBuilt.answers.core_team_members as {
+  entries?: Array<{ id: string; value: string }>;
+};
+assert.equal(teamAnswer?.entries?.[0]?.value, "Anna Müller, Inhaberin");
+assert.equal(teamAnswer?.entries?.[1]?.value, "Max Schmidt, Beratung");
+
 console.log("fragebogen-review-questions: all ok");

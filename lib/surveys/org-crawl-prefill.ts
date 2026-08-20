@@ -5,6 +5,17 @@
 
 import type { CoreQuestionPrefillHint } from "@/lib/surveys/core-question-templates";
 
+export type OrgCrawlSeoMetrics = {
+  periodMonth: string;
+  impressions: number;
+  totalClicks: number;
+  aiClicks: number;
+  rankingsTop10: number;
+  rankingsTop3: number;
+  visibilityIndex: number | null;
+  topKeywords: string[];
+};
+
 export type OrgCrawlContext = {
   organisationId: string;
   organisationName: string;
@@ -14,6 +25,8 @@ export type OrgCrawlContext = {
   /** Longer crawl excerpts for extraction (not only short snippets). */
   pageExcerpts: Array<{ url: string; title: string | null; text: string }>;
   summaryText: string;
+  seoStatsText?: string;
+  seoMetrics?: OrgCrawlSeoMetrics | null;
 };
 
 export type PrefillSource = "organisation" | "website" | "crawl" | "ai" | "meeting";
@@ -27,8 +40,9 @@ export type PrefillDraft = {
 function fullCrawlBlob(context: OrgCrawlContext): string {
   return [
     context.summaryText,
-    ...context.pageExcerpts.map((p) => p.text),
-    ...context.snippets.map((s) => s.snippet),
+    context.seoStatsText ?? "",
+    ...context.pageExcerpts.map((p) => `${p.url}\n${p.title ?? ""}\n${p.text}`),
+    ...context.snippets.map((s) => `${s.url}\n${s.snippet}`),
   ].join("\n");
 }
 
@@ -42,7 +56,6 @@ function firstSentenceAround(
     if (!m?.[0]) continue;
     let start = Math.max(0, (m.index ?? 0) - 40);
     let end = Math.min(blob.length, (m.index ?? 0) + m[0].length + 160);
-    // Snap to sentence-ish boundaries.
     const before = blob.slice(Math.max(0, start - 80), start);
     const dot = before.lastIndexOf(".");
     if (dot >= 0) start = start - (before.length - dot - 1);
@@ -55,7 +68,7 @@ function firstSentenceAround(
   return null;
 }
 
-function extractEmployeeCount(blob: string): string | null {
+export function extractEmployeeCount(blob: string): string | null {
   const patterns = [
     /(\d{1,4})\s*(?:[-–]\s*\d{1,4}\s*)?(?:mitarbeiter(?:innen)?|beschäftigte|personen|teammitglieder|angestellte|kolleg(?:en|innen))/i,
     /team\s*(?:von|mit)?\s*(\d{1,4})\s*(?:personen|mitarbeiter|leuten)?/i,
@@ -135,8 +148,158 @@ function extractCompetitors(blob: string): string | null {
   return sentence;
 }
 
+function extractFoundingYear(blob: string): string | null {
+  const patterns = [
+    /(?:gegründet|bestehen\s+seit|seit)\s+(?:dem\s+)?((?:19|20)\d{2})/i,
+    /((?:19|20)\d{2})\s+(?:gegründet|eröffnet)/i,
+    /gründung\s*[:\-]?\s*((?:19|20)\d{2})/i,
+  ];
+  for (const re of patterns) {
+    const m = blob.match(re);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+function extractTeamMembers(blob: string): string | null {
+  const found: string[] = [];
+  const push = (name: string, role?: string) => {
+    const n = name.trim();
+    if (!looksLikePersonName(n)) return;
+    const line = role?.trim() ? `${n}, ${role.trim()}` : n;
+    if (!found.some((x) => x.toLowerCase().includes(n.toLowerCase()))) {
+      found.push(line);
+    }
+  };
+
+  const roleName =
+    /(?:geschäftsführer(?:in)?|inhaber(?:in)?|gründer(?:in)?|founder|teamleitung|praxisinhaber(?:in)?)\s*[:\-]?\s*([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß'-]+){1,3})/gi;
+  let m: RegExpExecArray | null;
+  while ((m = roleName.exec(blob))) {
+    push(m[1] ?? "", m[0]?.split(/[:\-]/)[0]);
+  }
+
+  const nameRole =
+    /([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß'-]+){1,3})\s*[,\-–]\s*(Geschäftsführer(?:in)?|Inhaber(?:in)?|Beratung|Assistenz|Marketing|Zahnarzt|Zahnärztin)/g;
+  while ((m = nameRole.exec(blob))) {
+    push(m[1] ?? "", m[2]);
+  }
+
+  return found.length ? found.slice(0, 8).join("\n") : null;
+}
+
+function extractAddress(blob: string): string | null {
+  const street = blob.match(
+    /((?:[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ.-]+(?:straße|strasse|weg|platz|allee|ring|gasse))\s+\d+[a-zA-Z]?(?:\s*,\s*|\s+)\d{5}\s+[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ-]+)/,
+  );
+  if (street?.[1]) return street[1].replace(/\s+/g, " ").trim();
+
+  const sentence = firstSentenceAround(blob, [
+    /(?:impressum|adresse|anschrift|sitz)[^.!?\n]{8,180}[.!?]?/i,
+  ]);
+  return sentence;
+}
+
+function extractOpeningHours(blob: string): string | null {
+  const sentence = firstSentenceAround(
+    blob,
+    [
+      /(?:öffnungszeiten|geöffnet|mo[\s.–-]*fr|montag\s*[-–]\s*freitag)[^.!?\n]{6,180}[.!?]?/i,
+    ],
+    280,
+  );
+  return sentence;
+}
+
+function extractGbpUrl(blob: string): string | null {
+  const m = blob.match(
+    /https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/maps[^\s<>"')\]]*|maps\.google\.[^\s<>"')\]]*|g\.page\/[^\s<>"')\]]+)/i,
+  );
+  return m?.[0]?.replace(/[.,;:!?)]+$/g, "") ?? null;
+}
+
+function extractReviews(blob: string): string | null {
+  const stars = blob.match(
+    /(\d{1,2}(?:[.,]\d)?)\s*(?:von\s*5\s*)?(?:sterne|sternchen|★)/i,
+  );
+  const count = blob.match(
+    /(\d{1,4})\s*(?:google[\s-]?)?(?:bewertungen|rezensionen|reviews)/i,
+  );
+  if (!stars && !count) {
+    return firstSentenceAround(blob, [
+      /(?:bewertungen|rezensionen|google[\s-]?bewert)[^.!?\n]{8,180}[.!?]?/i,
+    ]);
+  }
+  const parts: string[] = ["Google"];
+  if (count?.[1]) parts.push(`${count[1]} Bewertungen`);
+  if (stars?.[1]) parts.push(`Durchschnitt ${stars[1]}`);
+  return `${parts.join(" · ")} (aus Crawl — bitte prüfen)`;
+}
+
+function extractSocialChannels(blob: string, websiteUrl: string | null): string | null {
+  const hits: string[] = [];
+  const push = (label: string) => {
+    if (!hits.includes(label)) hits.push(label);
+  };
+  if (websiteUrl) push("eigene Website");
+  if (/instagram\.com|instagram/i.test(blob)) push("Instagram");
+  if (/facebook\.com|facebook/i.test(blob)) push("Facebook");
+  if (/linkedin\.com|linkedin/i.test(blob)) push("LinkedIn");
+  if (/youtube\.com|youtu\.be/i.test(blob)) push("YouTube");
+  if (/tiktok\.com|tiktok/i.test(blob)) push("TikTok");
+  if (/newsletter|mailchimp|brevo/i.test(blob)) push("Newsletter");
+  if (/google[\s-]?ads|google[\s-]?anzeigen/i.test(blob)) push("Google-Anzeigen");
+  return hits.length ? hits.join("\n") : null;
+}
+
+function extractPortfolioLinks(context: OrgCrawlContext): string | null {
+  const urls: string[] = [];
+  const push = (url: string | null | undefined) => {
+    const t = (url ?? "").trim();
+    if (!t) return;
+    if (!urls.includes(t)) urls.push(t);
+  };
+  push(context.websiteUrl);
+  for (const p of context.pageExcerpts) {
+    if (/leistung|angebot|service|portfolio|flyer|pdf/i.test(`${p.url} ${p.title ?? ""}`)) {
+      push(p.url);
+    }
+  }
+  return urls.length ? urls.join("\n") : null;
+}
+
+function extractCompanyHistory(blob: string): string | null {
+  const year = extractFoundingYear(blob);
+  if (year) return `${year} – Firma gegründet (aus Crawl — bitte prüfen)`;
+  return firstSentenceAround(blob, [
+    /(?:gegründet|firmengeschichte|meilenstein)[^.!?\n]{8,180}[.!?]?/i,
+  ]);
+}
+
+export function formatSeoMetricsAnswer(metrics: OrgCrawlSeoMetrics): string {
+  const month = metrics.periodMonth;
+  const lines = [
+    `Impressionen (${month}): ${metrics.impressions}`,
+    `Klicks gesamt (${month}): ${metrics.totalClicks}`,
+    `KI-Klicks (${month}): ${metrics.aiClicks}`,
+    `Top-10-Rankings: ${metrics.rankingsTop10}`,
+    `Top-3-Rankings: ${metrics.rankingsTop3}`,
+  ];
+  if (metrics.visibilityIndex != null) {
+    lines.push(`Sistrix-Sichtbarkeit: ${Number(metrics.visibilityIndex).toFixed(1)}`);
+  }
+  if (metrics.topKeywords.length) {
+    lines.push(`Top-Keywords: ${metrics.topKeywords.slice(0, 8).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+function crawlDraft(value: string, note: string): PrefillDraft {
+  return { value: value.slice(0, 2000), source: "crawl", note };
+}
+
 /**
- * Heuristic prefill from org config + crawl text.
+ * Heuristic prefill from org config + crawl text + optional SEO monthly stats.
  * Conservative: only fills when a signal is present; UI can edit/delete.
  */
 export function suggestPrefillsFromCrawl(input: {
@@ -146,6 +309,8 @@ export function suggestPrefillsFromCrawl(input: {
   const out: Record<string, PrefillDraft> = {};
   const blob = fullCrawlBlob(input.context);
   const metaLead = extractMetaLead(input.context);
+  const employeeCount = extractEmployeeCount(blob);
+  const foundingYear = extractFoundingYear(blob);
 
   for (const item of input.hints) {
     if (!item.hint) continue;
@@ -168,14 +333,47 @@ export function suggestPrefillsFromCrawl(input: {
       continue;
     }
 
-    if (item.hint === "employee_count") {
-      const value = extractEmployeeCount(blob);
+    if (item.hint === "portfolio_links") {
+      const value = extractPortfolioLinks(input.context);
       if (value) {
         out[item.key] = {
           value,
-          source: "crawl",
-          note: "Aus Crawl-Text geschätzt — bitte prüfen",
+          source: input.context.websiteUrl ? "website" : "crawl",
+          note: "Links aus Website/Crawl — bitte prüfen",
         };
+      }
+      continue;
+    }
+
+    if (item.hint === "employee_count") {
+      if (employeeCount) {
+        out[item.key] = crawlDraft(employeeCount, "Aus Crawl-Text geschätzt — bitte prüfen");
+      }
+      continue;
+    }
+
+    if (item.hint === "years_staff") {
+      const parts: string[] = [];
+      if (foundingYear) parts.push(`gegründet ${foundingYear}`);
+      if (employeeCount) parts.push(employeeCount.replace(" (aus Website-Crawl, bitte prüfen)", ""));
+      if (parts.length) {
+        out[item.key] = crawlDraft(
+          `${parts.join(", ")} (aus Crawl — bitte prüfen und Kunden-/Mitarbeiterzahlen ergänzen)`,
+          "Jahre/Teamgröße aus Crawl — bitte prüfen",
+        );
+      }
+      continue;
+    }
+
+    if (item.hint === "team_members") {
+      const value = extractTeamMembers(blob);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Namen aus Crawl/Impressum-Signal — bitte prüfen");
+      } else if (employeeCount) {
+        out[item.key] = crawlDraft(
+          employeeCount,
+          "Teamgröße aus Crawl — Namen bitte im Gespräch ergänzen",
+        );
       }
       continue;
     }
@@ -183,11 +381,7 @@ export function suggestPrefillsFromCrawl(input: {
     if (item.hint === "owner_name") {
       const value = extractOwnerName(blob);
       if (value) {
-        out[item.key] = {
-          value,
-          source: "crawl",
-          note: "Name aus Crawl/Impressum-Signal — bitte prüfen",
-        };
+        out[item.key] = crawlDraft(value, "Name aus Crawl/Impressum-Signal — bitte prüfen");
       }
       continue;
     }
@@ -195,11 +389,10 @@ export function suggestPrefillsFromCrawl(input: {
     if (item.hint === "competitors") {
       const value = extractCompetitors(blob);
       if (value) {
-        out[item.key] = {
+        out[item.key] = crawlDraft(
           value,
-          source: "crawl",
-          note: "Mitbewerber-Hinweis aus Crawl — meist besser aus dem Gespräch",
-        };
+          "Mitbewerber-Hinweis aus Crawl — meist besser aus dem Gespräch",
+        );
       }
       continue;
     }
@@ -210,11 +403,7 @@ export function suggestPrefillsFromCrawl(input: {
           /(?:wir\s+(?:sind|stehen|fokussieren|spezialisieren)|unser\s+fokus|schwerpunkt|spezialisiert\s+auf)[^.!?\n]{12,180}[.!?]?/i,
         ]) || metaLead;
       if (value) {
-        out[item.key] = {
-          value,
-          source: "crawl",
-          note: "Aus Website/Crawl abgeleitet — bitte prüfen",
-        };
+        out[item.key] = crawlDraft(value, "Aus Website/Crawl abgeleitet — bitte prüfen");
       }
       continue;
     }
@@ -224,11 +413,7 @@ export function suggestPrefillsFromCrawl(input: {
         /(?:unsere\s+leistungen|wir\s+bieten|angebot(?:e)?|leistungen|services)[^.!?\n]{12,200}[.!?]?/i,
       ]);
       if (value) {
-        out[item.key] = {
-          value,
-          source: "crawl",
-          note: "Leistungs-Hinweis aus Crawl — bitte ergänzen/kürzen",
-        };
+        out[item.key] = crawlDraft(value, "Leistungs-Hinweis aus Crawl — bitte ergänzen/kürzen");
       }
       continue;
     }
@@ -238,11 +423,7 @@ export function suggestPrefillsFromCrawl(input: {
         /(?:was\s+uns\s+unterscheidet|alleinstellung|usp|philosophie|darum\s+wir|warum\s+wir|wettbewerbsvorteil)[^.!?\n]{12,200}[.!?]?/i,
       ]);
       if (value) {
-        out[item.key] = {
-          value,
-          source: "crawl",
-          note: "Differenzierung aus Crawl — bitte prüfen",
-        };
+        out[item.key] = crawlDraft(value, "Differenzierung aus Crawl — bitte prüfen");
       }
       continue;
     }
@@ -250,11 +431,7 @@ export function suggestPrefillsFromCrawl(input: {
     if (item.hint === "region") {
       const value = extractRegion(blob);
       if (value) {
-        out[item.key] = {
-          value,
-          source: "crawl",
-          note: "Region aus Crawl — bitte präzisieren",
-        };
+        out[item.key] = crawlDraft(value, "Region aus Crawl — bitte präzisieren");
       }
       continue;
     }
@@ -264,11 +441,93 @@ export function suggestPrefillsFromCrawl(input: {
         /(?:für\s+(?:unternehmen|kunden|familien|praxen|kanzleien)|zielgruppe|unsere\s+kunden)[^.!?\n]{12,180}[.!?]?/i,
       ]);
       if (value) {
-        out[item.key] = {
-          value,
-          source: "crawl",
-          note: "Zielgruppen-Hinweis aus Crawl — bitte prüfen",
-        };
+        out[item.key] = crawlDraft(value, "Zielgruppen-Hinweis aus Crawl — bitte prüfen");
+      }
+      continue;
+    }
+
+    if (item.hint === "colloquial_name") {
+      const value = firstSentenceAround(blob, [
+        /(?:wir\s+sind\s+die|bekannt\s+als|kurz\s+[A-ZÄÖÜ])[^.!?\n]{6,120}[.!?]?/i,
+      ]);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Alltagsname-Signal aus Crawl — bitte prüfen");
+      }
+      continue;
+    }
+
+    if (item.hint === "known_for") {
+      const value =
+        firstSentenceAround(blob, [
+          /(?:bekannt\s+(?:für|als)|darauf\s+sind\s+wir\s+stolz|unsere\s+kunden\s+schätzen)[^.!?\n]{10,180}[.!?]?/i,
+        ]) || metaLead;
+      if (value) {
+        out[item.key] = crawlDraft(value, "Bekanntheits-Hinweis aus Crawl — bitte prüfen");
+      }
+      continue;
+    }
+
+    if (item.hint === "elevator_pitch") {
+      const value = metaLead;
+      if (value) {
+        out[item.key] = crawlDraft(value, "Kurzbeschreibung aus Website/Meta — bitte prüfen");
+      }
+      continue;
+    }
+
+    if (item.hint === "seo_metrics" && input.context.seoMetrics) {
+      out[item.key] = {
+        value: formatSeoMetricsAnswer(input.context.seoMetrics),
+        source: "organisation",
+        note: "Monatliche SEO-Zahlen — bitte prüfen, keine erfundenen Werte",
+      };
+      continue;
+    }
+
+    if (item.hint === "online_channels") {
+      const value = extractSocialChannels(blob, input.context.websiteUrl);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Kanäle aus Crawl-Links — bitte abhaken");
+      }
+      continue;
+    }
+
+    if (item.hint === "gbp_link") {
+      const value = extractGbpUrl(blob);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Maps-/GBP-Link aus Crawl");
+      }
+      continue;
+    }
+
+    if (item.hint === "opening_hours") {
+      const value = extractOpeningHours(blob);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Öffnungszeiten aus Crawl — bitte mit GBP abgleichen");
+      }
+      continue;
+    }
+
+    if (item.hint === "reviews") {
+      const value = extractReviews(blob);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Bewertungssignal aus Crawl — bitte Zahlen prüfen");
+      }
+      continue;
+    }
+
+    if (item.hint === "nap_address") {
+      const value = extractAddress(blob);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Adress-Signal aus Crawl/Impressum — NAP prüfen");
+      }
+      continue;
+    }
+
+    if (item.hint === "company_history") {
+      const value = extractCompanyHistory(blob);
+      if (value) {
+        out[item.key] = crawlDraft(value, "Meilenstein aus Crawl — bitte ergänzen");
       }
     }
   }

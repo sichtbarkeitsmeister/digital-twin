@@ -10,6 +10,7 @@ import {
   ClipboardPenLine,
   FileSearch,
   Inbox,
+  MessageCircle,
   Plug,
   Shield,
   Sparkles,
@@ -141,6 +142,15 @@ export function DashboardSidebar({
       : []),
   ];
 
+  const erstgespraechItem: NavItem | null = isPlatformAdmin
+    ? {
+        label: "Erstgespräch",
+        href: "/dashboard/erstgespraech",
+        icon: MessageCircle,
+        match: (pathname: string) => pathname.startsWith("/dashboard/erstgespraech"),
+      }
+    : null;
+
   const frageboegenItem: NavItem | null =
     canManageDtAgents || isPlatformAdmin
       ? {
@@ -200,7 +210,7 @@ export function DashboardSidebar({
         ))}
       </nav>
 
-      {verwaltungItems.length > 0 || frageboegenItem || isPlatformAdmin ? (
+      {verwaltungItems.length > 0 || erstgespraechItem || frageboegenItem || isPlatformAdmin ? (
         <div className="grid gap-2 pt-2">
           <div className="border-t border-sbkm-navy/10 pt-3 dark:border-white/10">
             <p className="px-2 text-[11px] font-bold uppercase tracking-[0.14em] text-sbkm-ink-500">
@@ -214,6 +224,9 @@ export function DashboardSidebar({
             {isPlatformAdmin
               ? adminItems.map((item) => <NavLink key={item.href} item={item} />)
               : null}
+            {erstgespraechItem ? (
+              <NavLink key={erstgespraechItem.href} item={erstgespraechItem} />
+            ) : null}
             {frageboegenItem ? <NavLink key={frageboegenItem.href} item={frageboegenItem} /> : null}
             {isPlatformAdmin ? <NavLink key={alleUmfragenItem.href} item={alleUmfragenItem} /> : null}
           </nav>

@@ -9,6 +9,7 @@ import type {
 import { surveySchema } from "@/lib/surveys/schema";
 import { coreQuestionsForPurpose } from "@/lib/surveys/core-question-templates";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
+import { textListPayloadFromFreeText } from "@/lib/surveys/text-list-answer";
 
 export type ExtraQuestionPlacement = "start" | "end";
 
@@ -279,15 +280,26 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
 export function answersFromReview(
   draft: FragebogenReviewDraft,
   savePrefills: boolean,
-): Record<string, string> {
+): Record<string, unknown> {
   if (!savePrefills) return {};
-  const out: Record<string, string> = {};
+  const out: Record<string, unknown> = {};
   for (const q of draft.questions) {
     if (!q.included) continue;
-    if (q.type && q.type !== "text" && q.type !== "radio") continue;
     const answer = q.answer.trim();
     if (!answer) continue;
-    out[q.id] = answer;
+    if (!q.type || q.type === "text" || q.type === "radio") {
+      out[q.id] = answer;
+      continue;
+    }
+    if (q.type === "text_list") {
+      const payload = textListPayloadFromFreeText(
+        answer,
+        q.options.map((opt) => opt.id),
+      );
+      if (payload.entries.some((entry) => entry.value.trim())) {
+        out[q.id] = payload;
+      }
+    }
   }
   return out;
 }
@@ -295,7 +307,7 @@ export function answersFromReview(
 export function buildSurveyAndAnswersFromReview(input: {
   draft: FragebogenReviewDraft;
   savePrefills: boolean;
-}): { definition: Survey; answers: Record<string, string> } {
+}): { definition: Survey; answers: Record<string, unknown> } {
   return {
     definition: surveyFromReview(input.draft),
     answers: answersFromReview(input.draft, input.savePrefills),

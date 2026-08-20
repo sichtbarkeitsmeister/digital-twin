@@ -19,6 +19,11 @@ import {
   suggestPrefillsFromCrawl,
   type PrefillDraft,
 } from "@/lib/surveys/org-crawl-context";
+import { formatSeoMetricsAnswer } from "@/lib/surveys/org-crawl-prefill";
+import {
+  firstConversationToMeetingBriefing,
+} from "@/lib/surveys/first-conversation";
+import { loadFirstConversationIfAny } from "@/lib/surveys/first-conversation-store";
 import {
   buildMeetingExtraQuestions,
   meetingBriefingContextText,
@@ -81,11 +86,11 @@ async function generateExtrasAndAiPrefills(input: {
   const result = await callAnthropicFirstAvailable({
     anthropic,
     models: [DEFAULT_SURVEY_ACTION_MODEL],
-    maxTokens: 1800,
-    timeoutMs: 55_000,
+    maxTokens: 4000,
+    timeoutMs: 70_000,
     stream: false,
     system:
-      "Du hilfst beim Aufbau deutscher Fragebögen. Nutze Meeting-Briefing und Crawl. Meeting-Angaben haben Vorrang. Antworte nur mit JSON.",
+      "Du hilfst beim Aufbau deutscher Fragebögen. Nutze Erstgespräch/Meeting, Website-Crawl und SEO-Zahlen. Meeting hat Vorrang, dann belegbare Crawl-/Performance-Daten. Nichts erfinden. Antworte nur mit JSON.",
     messages: [
       {
         role: "user",
@@ -94,16 +99,17 @@ async function generateExtrasAndAiPrefills(input: {
 Kernfragen:
 ${input.coreItems.map((c) => `- [${c.key}] ${c.title}${c.hasPrefill ? " (schon vorausgefüllt)" : ""}`).join("\n")}
 
-Noch ohne Prefill:
+Noch ohne Prefill — bitte alles ausfüllen, was Crawl, Impressum, Teamseiten oder SEO-Zahlen klar hergeben:
 ${missing.map((c) => `- ${c.key}: ${c.title}`).join("\n") || "(alle Kernfragen haben schon Prefill)"}
 ${meetingBlock}
-Website-/Crawl-Kontext:
-${input.crawlSummary.slice(0, 8000)}
+Website-/Crawl-/SEO-Kontext:
+${input.crawlSummary.slice(0, 14000)}
 
 Aufgabe:
-1) Für fehlende Kernfragen: kurze Antwortvorschläge — zuerst aus Meeting, sonst nur wenn Crawl klar hergibt (sonst weglassen).
-2) Mitbewerber/gute Wettbewerber/Inhaber/Seiten-Links aus dem Meeting möglichst wörtlich übernehmen.
-3) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen. Nicht die Kernfragen wiederholen. Nur Dinge, die sich aus Website oder Meeting für DIESES Unternehmen ergeben (konkrete Angebote, Standorte, Besonderheiten). Diese Fragen stehen als letzter Block.` : "Keine Zusatzfragen (questions=[])."}
+1) Für fehlende Kernfragen: Antwortvorschläge. Zuerst Meeting. Sonst nur belegbare Angaben aus Crawl oder SEO-Zahlen. Besonders: Team/Mitarbeiter, Inhaber, Leistungen, Region/Adresse, USP, Mitbewerber, Öffnungszeiten, Google-Profil, Bewertungen, Impressionen/Klicks/Rankings. Wenn unklar: weglassen.
+2) Zahlen (Impressionen, Klicks, Rankings, Teamgröße) wörtlich aus dem Kontext übernehmen, nicht runden oder schätzen.
+3) Mitbewerber/gute Wettbewerber/Inhaber/Seiten-Links aus dem Meeting möglichst wörtlich übernehmen.
+4) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen. Nicht die Kernfragen wiederholen. Nur Dinge, die sich aus Website, SEO-Daten oder Meeting für DIESES Unternehmen ergeben.` : "Keine Zusatzfragen (questions=[])."}
 
 JSON:
 {
@@ -131,9 +137,9 @@ JSON:
       const value = String(row.value ?? "").trim();
       if (!allowedKeys.has(key) || value.length < 3) continue;
       aiPrefills[key] = {
-        value: value.slice(0, 500),
+        value: value.slice(0, 2000),
         source: "ai",
-        note: String(row.note ?? "KI-Vorschlag — bitte prüfen").slice(0, 160),
+        note: String(row.note ?? "KI-Vorschlag aus Crawl/SEO — bitte prüfen").slice(0, 160),
       };
     }
     const extras = input.includeAiExtras
@@ -178,16 +184,23 @@ export async function buildFragebogenReviewDraft(input: {
 
   const hints = selectedTemplates.map((t) => ({ key: t.key, hint: t.prefillHint }));
   const crawl = await loadOrgCrawlContext(input.organisationId);
+
+  let briefing = input.meetingBriefing ?? null;
+  if (!meetingBriefingHasContent(briefing)) {
+    const saved = await loadFirstConversationIfAny(input.organisationId);
+    if (saved) briefing = firstConversationToMeetingBriefing(saved);
+  }
+
   const heuristic = suggestPrefillsFromCrawl({
     context: crawl,
     hints,
   });
   const meeting = suggestPrefillsFromMeeting({
-    briefing: input.meetingBriefing ?? {},
+    briefing: briefing ?? {},
     hints,
   });
-  const meetingText = meetingBriefingHasContent(input.meetingBriefing)
-    ? meetingBriefingContextText(input.meetingBriefing)
+  const meetingText = meetingBriefingHasContent(briefing)
+    ? meetingBriefingContextText(briefing)
     : "";
 
   // Crawl first, then AI for gaps — Meeting wins over both.
@@ -218,7 +231,7 @@ export async function buildFragebogenReviewDraft(input: {
   // Meeting notes → Kernfragen (via suggestPrefillsFromMeeting) + getrennte Zusatzfragen
   // (Region/USP → Kern; Fokuskeywords/Links → eigene Fragen; kein Notiz-Haufen).
   const meetingExtras: ReviewQuestionItem[] = buildMeetingExtraQuestions(
-    input.meetingBriefing,
+    briefing,
   ).map((e) => ({
     id: e.id,
     kind: "extra" as const,
@@ -255,8 +268,31 @@ export async function buildFragebogenReviewDraft(input: {
     };
   });
 
+  const seoExtra: ReviewQuestionItem[] =
+    crawl.seoMetrics &&
+    !selectedTemplates.some((t) => t.prefillHint === "seo_metrics" && prefills[t.key]?.value)
+      ? [
+          {
+            id: "extra_seo_performance",
+            kind: "extra" as const,
+            title:
+              "Aktuelle Performance-Daten (Impressionen, Klicks, Rankings) — automatisch aus SEO/Crawl",
+            description:
+              "Nicht vom Kunden ausfüllen. Zahlen aus dem Monatsstand; bitte prüfen, nichts ergänzen, was nicht belegt ist.",
+            included: true,
+            required: false,
+            type: "text" as const,
+            options: [],
+            answer: formatSeoMetricsAnswer(crawl.seoMetrics),
+            answerSource: "organisation" as const,
+            answerNote: "Monatliche SEO-Zahlen",
+          },
+        ]
+      : [];
+
   const extraQuestions: ReviewQuestionItem[] = [
     ...meetingExtras,
+    ...seoExtra,
     ...aiBundle.extras.map((title, index) => ({
       id: `extra_${slugifyKey(title)}_${index + 1}`,
       kind: "extra" as const,

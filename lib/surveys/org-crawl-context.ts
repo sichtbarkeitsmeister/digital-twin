@@ -2,7 +2,12 @@ import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { searchDtSitePages } from "@/lib/dt/seo/search-site-pages";
-import type { OrgCrawlContext } from "@/lib/surveys/org-crawl-prefill";
+import {
+  formatDtSeoMonthlyStatsForPrompt,
+  loadDtSeoMonthlyStats,
+  computeSeoStatsSummary,
+} from "@/lib/dt/seo/monthly-stats";
+import type { OrgCrawlContext, OrgCrawlSeoMetrics } from "@/lib/surveys/org-crawl-prefill";
 
 export type { OrgCrawlContext, PrefillDraft, PrefillSource } from "@/lib/surveys/org-crawl-prefill";
 export { suggestPrefillsFromCrawl } from "@/lib/surveys/org-crawl-prefill";
@@ -16,7 +21,7 @@ export async function loadOrgCrawlContext(
 ): Promise<OrgCrawlContext> {
   const supabase = createServiceClient();
 
-  const [{ data: org }, { data: config }, { count }, { data: topPages }] =
+  const [{ data: org }, { data: config }, { count }, { data: topPages }, monthly] =
     await Promise.all([
       supabase.from("organisations").select("id, name").eq("id", organisationId).maybeSingle(),
       supabase
@@ -35,7 +40,8 @@ export async function loadOrgCrawlContext(
         .eq("organisation_id", organisationId)
         .eq("is_excluded", false)
         .order("updated_at", { ascending: false })
-        .limit(12),
+        .limit(24),
+      loadDtSeoMonthlyStats(supabase, organisationId, 12),
     ]);
 
   const organisationName = org?.name?.trim() || "Organisation";
@@ -44,9 +50,10 @@ export async function loadOrgCrawlContext(
 
   const queries = [
     organisationName,
-    "Über uns Leistungen Angebot Team",
-    "Kontakt Standort Region Spezialisierung",
+    "Über uns Leistungen Angebot Team Mitarbeiter",
+    "Kontakt Standort Region Spezialisierung Impressum Adresse",
     "USP Philosophie Unterschied Wettbewerbsvorteil",
+    "Bewertungen Google Öffnungszeiten",
   ];
   const seen = new Set<string>();
   const snippets: OrgCrawlContext["snippets"] = [];
@@ -61,9 +68,9 @@ export async function loadOrgCrawlContext(
         title: hit.title,
         snippet: hit.snippet,
       });
-      if (snippets.length >= 12) break;
+      if (snippets.length >= 16) break;
     }
-    if (snippets.length >= 12) break;
+    if (snippets.length >= 16) break;
   }
 
   const pageExcerpts: OrgCrawlContext["pageExcerpts"] = [];
@@ -74,7 +81,7 @@ export async function loadOrgCrawlContext(
       row.h1?.trim() || "",
       row.text_content?.trim() || "",
     ].filter(Boolean);
-    const text = cleanExcerpt(parts.join(" · "), 1200);
+    const text = cleanExcerpt(parts.join(" · "), 1400);
     if (!text) continue;
     pageExcerpts.push({
       url: row.url,
@@ -83,10 +90,29 @@ export async function loadOrgCrawlContext(
     });
   }
 
+  const seoStatsText = formatDtSeoMonthlyStatsForPrompt(monthly);
+  const summary = computeSeoStatsSummary(monthly);
+  const latest = summary.latest;
+  const seoMetrics: OrgCrawlSeoMetrics | null = latest
+    ? {
+        periodMonth: latest.period_month,
+        impressions: latest.impressions,
+        totalClicks: latest.total_clicks,
+        aiClicks: latest.ai_clicks,
+        rankingsTop10: latest.rankings_top10,
+        rankingsTop3: latest.rankings_top3,
+        visibilityIndex: latest.visibility_index,
+        topKeywords: summary.topKeywords,
+      }
+    : null;
+
   const summaryText = [
     `Organisation: ${organisationName}`,
     websiteUrl ? `Website: ${websiteUrl}` : "Website: (noch nicht hinterlegt)",
     `Crawl-Seiten: ${pageCount}`,
+    "",
+    "### SEO-/Performance-Daten",
+    seoStatsText,
     "",
     "### Suchtreffer",
     ...snippets.map(
@@ -107,5 +133,7 @@ export async function loadOrgCrawlContext(
     snippets,
     pageExcerpts,
     summaryText,
+    seoStatsText,
+    seoMetrics,
   };
 }
