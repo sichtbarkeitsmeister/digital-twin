@@ -28,6 +28,7 @@
     "test:seo-report-readiness": "tsx scripts/test-seo-report-readiness.ts",
     "test:prospect-persona-prompt": "tsx scripts/test-prospect-persona-prompt.ts",
     "test:owner-welcome-email": "tsx scripts/test-owner-welcome-email.ts",
+    "test:platform-admin-grant": "tsx scripts/test-platform-admin-grant.ts",
     "test:avatar-global-prompt-anchor": "tsx scripts/test-avatar-global-prompt-anchor.ts",
     "test:dashboard-sticky-survey-ai": "tsx scripts/test-dashboard-sticky-survey-ai.ts",
     "test:fragebogen-review-questions": "tsx scripts/test-fragebogen-review-questions.ts",
