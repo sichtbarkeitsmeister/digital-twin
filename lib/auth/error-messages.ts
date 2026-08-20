@@ -3,6 +3,8 @@
  * see these strings on the login page, so translate the ones we can recognise
  * and fall back to a neutral German sentence for everything else.
  */
+import { magicLinkHourlyLimitMessage } from "@/lib/auth/magic-link-rate-limit";
+
 const PATTERNS: Array<{ match: RegExp; message: (m: RegExpMatchArray) => string }> = [
   {
     match: /you can only request this after (\d+) seconds?/i,
@@ -12,9 +14,7 @@ const PATTERNS: Array<{ match: RegExp; message: (m: RegExpMatchArray) => string 
   },
   {
     match: /rate limit|too many requests/i,
-    message: () =>
-      "Es wurden zu viele Anmeldelinks in kurzer Zeit angefordert. Bitte in etwa einer Stunde " +
-      "erneut versuchen — ein bereits verschickter Link funktioniert weiterhin.",
+    message: () => magicLinkHourlyLimitMessage(),
   },
   {
     match: /signups? not allowed|signup is disabled|not authorized/i,
