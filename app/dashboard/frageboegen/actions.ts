@@ -169,6 +169,7 @@ const reviewQuestionSchema = z.object({
   allowOtherOption: z.boolean().optional(),
   allowExtraEntries: z.boolean().optional(),
   allowCustomEntries: z.boolean().optional(),
+  addEntryLabel: z.string().optional(),
   scaleMin: z.number().int().optional(),
   scaleMax: z.number().int().optional(),
   answer: z.string().default(""),
