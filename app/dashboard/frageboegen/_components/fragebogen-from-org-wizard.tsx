@@ -82,14 +82,12 @@ export function FragebogenFromOrgWizard(props: {
   const [crawlBusy, setCrawlBusy] = useState(false);
   const [anbieterCore, setAnbieterCore] = useState<CoreItem[]>([]);
   const [personaCore, setPersonaCore] = useState<CoreItem[]>([]);
-  const [internCore, setInternCore] = useState<CoreItem[]>([]);
   const [draft, setDraft] = useState<FragebogenReviewDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loadingCtx, setLoadingCtx] = useState(Boolean(organisationId));
 
-  const coreItems =
-    purpose === "anbieter" ? anbieterCore : purpose === "intern" ? internCore : personaCore;
+  const coreItems = purpose === "anbieter" ? anbieterCore : personaCore;
 
   useEffect(() => {
     let cancelled = false;
@@ -132,7 +130,6 @@ export function FragebogenFromOrgWizard(props: {
       setFirstConv(res.data.firstConversation);
       setAnbieterCore(res.data.anbieterCore);
       setPersonaCore(res.data.personaCore);
-      setInternCore(res.data.internCore);
       setSelectedKeys(res.data.anbieterCore.map((c) => c.key));
       if (res.data.firstConversation.wunschkundeLabel) {
         setWunschkundeLabel(res.data.firstConversation.wunschkundeLabel);
@@ -186,12 +183,11 @@ export function FragebogenFromOrgWizard(props: {
   }, [organisationId, activeCrawl?.id, activeCrawl?.status]);
 
   useEffect(() => {
-    const items =
-      purpose === "anbieter" ? anbieterCore : purpose === "intern" ? internCore : personaCore;
+    const items = purpose === "anbieter" ? anbieterCore : personaCore;
     if (items.length === 0) return;
     setSelectedKeys(items.map((c) => c.key));
-    setIncludeAiExtras(purpose !== "intern");
-  }, [purpose, anbieterCore, personaCore, internCore]);
+    setIncludeAiExtras(true);
+  }, [purpose, anbieterCore, personaCore]);
 
   const selectedCount = useMemo(
     () => selectedKeys.filter((k) => coreItems.some((c) => c.key === k)).length,
@@ -670,7 +666,7 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">3. Zweck</CardTitle>
           <CardDescription>
-            Anbieter und Wunschkunde gehen an den Kunden. Intern bleibt bei der Agentur.
+            Anbieter-Fragebogen und Wunschkunden-Fragebogen gehen an den Kunden.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -699,26 +695,7 @@ export function FragebogenFromOrgWizard(props: {
             >
               Kunden-Persona
             </button>
-            <button
-              type="button"
-              onClick={() => setPurpose("intern")}
-              className={cn(
-                "rounded-xl border px-3 py-2 text-sm font-medium transition",
-                purpose === "intern"
-                  ? "border-sbkm-mint/50 bg-sbkm-mint/15 text-primary"
-                  : "border-sbkm-navy/10 hover:bg-sbkm-navy/5",
-              )}
-            >
-              Intern (Agentur)
-            </button>
           </div>
-          {purpose === "intern" ? (
-            <p className="text-sm text-secondary">
-              TEIL C: NAP, Tracking, Bewertungen, Google-Unternehmensprofil. Wird von
-              Sichtbarkeitsmeister ausgefüllt – nicht an den Kunden senden. Bleibt privat in der
-              Fragebogen-Liste.
-            </p>
-          ) : null}
           {purpose === "persona" ? (
             <div className="grid max-w-md gap-2">
               <Label htmlFor="wunschkunde">Wunschkunde / Avatar-Name</Label>
@@ -740,9 +717,8 @@ export function FragebogenFromOrgWizard(props: {
           </CardTitle>
           <CardDescription>
             Feste Basis in der richtigen Reihenfolge und mit dem richtigen Format.
-            {purpose === "intern"
-              ? " Dieser Block bleibt intern und kommt nicht in den Kunden-Link."
-              : " Abwählen, was für diesen Kunden nicht gebraucht wird. Branchenspezifische Optionen (Portfolio, Ranking) vor dem Versand in der Prüfung anpassen."}
+            Abwählen, was für diesen Kunden nicht gebraucht wird. Branchenspezifische Optionen
+            (Portfolio, Ranking) vor dem Versand in der Prüfung anpassen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">

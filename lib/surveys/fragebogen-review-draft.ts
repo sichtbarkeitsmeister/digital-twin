@@ -7,7 +7,7 @@ import type {
   SurveyStep,
 } from "@/lib/surveys/types";
 import { surveySchema } from "@/lib/surveys/schema";
-import { coreQuestionsForPurpose } from "@/lib/surveys/core-question-templates";
+import { coreQuestionsForPurpose, surveyInfoTextForPurpose } from "@/lib/surveys/core-question-templates";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
 import { textListPayloadFromFreeText } from "@/lib/surveys/text-list-answer";
 
@@ -259,13 +259,14 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
         ? [extrasStep, ...coreSteps]
         : [...coreSteps, extrasStep];
 
+  const info = surveyInfoTextForPurpose(draft.purpose);
   const definitionCandidate: Survey = {
     version: 1,
     id: createId(),
     title: draft.title.trim() || "Fragebogen",
     description: draft.description,
-    infoTextEnabled: false,
-    infoText: "",
+    infoTextEnabled: info.infoTextEnabled,
+    infoText: info.infoText,
     answerPlaceholder: "Deine Antwort…",
     steps,
   };
