@@ -76,7 +76,10 @@ async function rollbackRevertsAscending(revertsAsc: Record<string, unknown>[]) {
   }
 }
 
-async function applyNonBatchSurveyProposal(proposal: NonBatchSurveyProposal): Promise<AppliedResult> {
+async function applyNonBatchSurveyProposal(
+  proposal: NonBatchSurveyProposal,
+  context?: { organisationId?: string | null },
+): Promise<AppliedResult> {
   if (proposal.kind === "patch_survey_definition") {
     const supabase = await createClient();
     const { data: current } = await supabase
@@ -185,6 +188,7 @@ async function applyNonBatchSurveyProposal(proposal: NonBatchSurveyProposal): Pr
           ],
           fieldQuestions: [],
         },
+        organisationId: context?.organisationId ?? null,
       });
       if (!imported.ok || !imported.data?.surveyId) {
         return { ok: false, message: imported.message };
@@ -202,6 +206,7 @@ async function applyNonBatchSurveyProposal(proposal: NonBatchSurveyProposal): Pr
       description: proposal.description ?? "",
       notificationEmails: proposal.notificationEmails ?? [],
       definition: proposal.survey,
+      organisationId: context?.organisationId ?? null,
     });
     if (!res.ok || !res.data?.surveyId) return { ok: false, message: res.message };
     return {
@@ -424,6 +429,7 @@ async function applyNonBatchSurveyProposal(proposal: NonBatchSurveyProposal): Pr
 
 async function applySurveyBatchProposal(
   proposal: Extract<SurveyAiProposal, { kind: "batch" }>,
+  context?: { organisationId?: string | null },
 ): Promise<AppliedResult> {
   const registry = new Map<string, RefRegistryEntry>();
   const revertsAsc: Record<string, unknown>[] = [];
@@ -434,7 +440,7 @@ async function applySurveyBatchProposal(
   }
 
   async function runSub(sub: NonBatchSurveyProposal, meta: string): Promise<AppliedResult> {
-    const r = await applyNonBatchSurveyProposal(sub);
+    const r = await applyNonBatchSurveyProposal(sub, context);
     if (!r.ok) return { ok: false, message: `${meta}: ${r.message}` };
     if (r.revertPayload != null) revertsAsc.push(r.revertPayload);
     return r;
@@ -566,11 +572,14 @@ async function applySurveyBatchProposal(
   };
 }
 
-export async function applySurveyProposal(proposal: SurveyAiProposal): Promise<AppliedResult> {
+export async function applySurveyProposal(
+  proposal: SurveyAiProposal,
+  context?: { organisationId?: string | null },
+): Promise<AppliedResult> {
   if (proposal.kind === "batch") {
-    return applySurveyBatchProposal(proposal);
+    return applySurveyBatchProposal(proposal, context);
   }
-  return applyNonBatchSurveyProposal(proposal);
+  return applyNonBatchSurveyProposal(proposal, context);
 }
 
 export async function revertSurveyProposal(

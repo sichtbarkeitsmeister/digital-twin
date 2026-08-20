@@ -8,7 +8,7 @@ import {
 import { applySurveyProposal } from "@/lib/ai/chat-executor";
 
 export async function POST(
-  _: Request,
+  request: Request,
   context: { params: Promise<{ chatId: string; actionId: string }> },
 ) {
   const auth = await requireAuthUser();
@@ -41,7 +41,22 @@ export async function POST(
     return NextResponse.json({ ok: false, message }, { status: 422 });
   }
 
-  const result = await applySurveyProposal(proposalParsed.data);
+  let organisationId: string | null = null;
+  try {
+    const body = (await request.json()) as { organisationId?: unknown };
+    if (
+      typeof body.organisationId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        body.organisationId,
+      )
+    ) {
+      organisationId = body.organisationId;
+    }
+  } catch {
+    organisationId = null;
+  }
+
+  const result = await applySurveyProposal(proposalParsed.data, { organisationId });
   await auth.supabase
     .from("ai_chat_actions")
     .update({
