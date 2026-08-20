@@ -11,9 +11,12 @@ import { CopyToClipboardButton } from "@/app/dashboard/_components/copy-to-clipb
 import { CreateSurveyFolderButton } from "@/app/dashboard/surveys/_components/create-survey-folder-button";
 import { DeleteSurveyFolderButton } from "@/app/dashboard/surveys/_components/delete-survey-folder-button";
 import { SurveyFolderAssignmentMenu } from "@/app/dashboard/surveys/_components/survey-folder-assignment-menu";
+import { SurveyOrganisationAssignmentMenu } from "@/app/dashboard/surveys/_components/survey-organisation-assignment-menu";
 import { SurveyImportButton } from "@/app/dashboard/surveys/_components/survey-import-button";
+import { SurveysOrganisationFilter } from "@/app/dashboard/surveys/_components/surveys-organisation-filter";
 import { SurveysToolbar } from "@/app/dashboard/surveys/_components/surveys-toolbar";
 import { SurveyRowActions } from "@/app/dashboard/surveys/_components/survey-row-actions";
+import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -131,12 +134,16 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
     visibilityParam === "public" || visibilityParam === "private" ? visibilityParam : "all";
   const folderParam = (firstParam(sp.folder) ?? "").toString().trim();
   const folderFilter = folderParam === "none" || isUuid(folderParam) ? folderParam : "";
+  const orgParam = (firstParam(sp.org) ?? "").toString().trim();
+  const orgFilter = orgParam === "none" || isUuid(orgParam) ? orgParam : "";
 
   const page = Math.max(1, Number.parseInt(firstParam(sp.page) ?? "1", 10) || 1);
   const pageSizeRaw = Number.parseInt(firstParam(sp.pageSize) ?? "10", 10) || 10;
   const pageSize = ([10, 20, 50] as const).includes(pageSizeRaw as 10 | 20 | 50)
     ? (pageSizeRaw as 10 | 20 | 50)
     : 10;
+
+  const { organisations } = await loadDtManageOrganisations(userId);
 
   const { data: folders } = await supabase
     .from("survey_folders")
@@ -158,15 +165,20 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
 
   let surveysQuery = supabase
     .from("surveys")
-    .select("id,title,description,visibility,slug,updated_at,published_at,definition,folder_id", {
-      count: "exact",
-    })
+    .select(
+      "id,title,description,visibility,slug,updated_at,published_at,definition,folder_id,organisation_id",
+      {
+        count: "exact",
+      },
+    )
     .is("deleted_at", null)
     .order("updated_at", { ascending: false });
 
   if (visibility !== "all") surveysQuery = surveysQuery.eq("visibility", visibility);
   if (folderFilter === "none") surveysQuery = surveysQuery.is("folder_id", null);
   else if (folderFilter && isUuid(folderFilter)) surveysQuery = surveysQuery.eq("folder_id", folderFilter);
+  if (orgFilter === "none") surveysQuery = surveysQuery.is("organisation_id", null);
+  else if (orgFilter && isUuid(orgFilter)) surveysQuery = surveysQuery.eq("organisation_id", orgFilter);
 
   if (q) {
     const qSafe = q.replace(/[(),]/g, " ").trim();
@@ -174,6 +186,14 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
       `title.ilike.%${qSafe}%,description.ilike.%${qSafe}%,slug.ilike.%${qSafe}%`,
     );
   }
+
+  const listQuery = {
+    q: q || undefined,
+    visibility: visibility === "all" ? undefined : visibility,
+    folder: folderFilter || undefined,
+    org: orgFilter || undefined,
+    pageSize,
+  };
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
@@ -186,11 +206,8 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
   if (total > 0 && page > totalPages) {
     redirect(
       `/dashboard/surveys${buildQueryString({
-        q: q || undefined,
-        visibility: visibility === "all" ? undefined : visibility,
-        folder: folderFilter || undefined,
+        ...listQuery,
         page: totalPages,
-        pageSize,
       })}`,
     );
   }
@@ -252,12 +269,18 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
           <CardDescription>Erstellen, veröffentlichen und Fortschritt ansehen.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <SurveysToolbar
               initialQuery={q}
               initialVisibility={visibility === "all" ? "" : visibility}
               initialPageSize={pageSize}
             />
+            <SurveysOrganisationFilter
+              organisations={organisations}
+              initialOrganisation={orgFilter}
+            />
+            </div>
 
             <div className="text-sm text-secondary">
               {total > 0 ? (
@@ -281,6 +304,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                   href={`/dashboard/surveys${buildQueryString({
                     q: q || undefined,
                     visibility: visibility === "all" ? undefined : visibility,
+                    org: orgFilter || undefined,
                     pageSize,
                   })}`}
                   className={`rounded-md px-2 py-1.5 text-sm transition-colors ${
@@ -294,6 +318,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                     q: q || undefined,
                     visibility: visibility === "all" ? undefined : visibility,
                     folder: "none",
+                    org: orgFilter || undefined,
                     pageSize,
                   })}`}
                   className={`rounded-md px-2 py-1.5 text-sm transition-colors ${
@@ -314,6 +339,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                         q: q || undefined,
                         visibility: visibility === "all" ? undefined : visibility,
                         folder: folder.id,
+                        org: orgFilter || undefined,
                         pageSize,
                       })}`}
                       className={`flex min-w-0 flex-1 items-center gap-2 text-sm ${
@@ -359,6 +385,13 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                               <Badge variant={s.visibility === "public" ? "default" : "secondary"}>
                                 {visibilityLabel(s.visibility)}
                               </Badge>
+                              <SurveyOrganisationAssignmentMenu
+                                surveyId={s.id}
+                                currentOrganisationId={s.organisation_id ?? null}
+                                organisations={organisations}
+                                canEdit
+                                allowUnassign
+                              />
                               <SurveyFolderAssignmentMenu
                                 surveyId={s.id}
                                 currentFolderId={s.folder_id ?? null}
@@ -422,7 +455,7 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
               </div>
             ) : (
             <div className="text-sm text-secondary">
-              {q || visibility !== "all" || folderFilter
+              {q || visibility !== "all" || folderFilter || orgFilter
                 ? "Keine Umfragen für diese Filter."
                 : "Noch keine Umfragen. Klicke auf „Neue Umfrage“, um über den Wizard den ersten Entwurf zu erstellen."}
             </div>
@@ -439,11 +472,8 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                   <Button asChild size="sm" variant="outline">
                     <Link
                       href={`/dashboard/surveys${buildQueryString({
-                        q: q || undefined,
-                        visibility: visibility === "all" ? undefined : visibility,
-                        folder: folderFilter || undefined,
+                        ...listQuery,
                         page: page - 1,
-                        pageSize,
                       })}`}
                     >
                       Zurück
@@ -468,11 +498,8 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                     <Button key={it} asChild size="sm" variant="outline">
                       <Link
                         href={`/dashboard/surveys${buildQueryString({
-                          q: q || undefined,
-                          visibility: visibility === "all" ? undefined : visibility,
-                          folder: folderFilter || undefined,
+                          ...listQuery,
                           page: it,
-                          pageSize,
                         })}`}
                       >
                         {it}
@@ -485,11 +512,8 @@ export default async function SurveysPage({ searchParams }: { searchParams?: Sea
                   <Button asChild size="sm" variant="outline">
                     <Link
                       href={`/dashboard/surveys${buildQueryString({
-                        q: q || undefined,
-                        visibility: visibility === "all" ? undefined : visibility,
-                        folder: folderFilter || undefined,
+                        ...listQuery,
                         page: page + 1,
-                        pageSize,
                       })}`}
                     >
                       Weiter

@@ -256,6 +256,83 @@ export async function listSurveysForOrganisation(input: {
   return items;
 }
 
+/** Questionnaires that have no `surveys.organisation_id` yet. */
+export async function countUnassignedSurveys(): Promise<number> {
+  const supabase = createServiceClient();
+  const { count } = await supabase
+    .from("surveys")
+    .select("id", { count: "exact", head: true })
+    .is("organisation_id", null)
+    .is("deleted_at", null);
+  return count ?? 0;
+}
+
+export async function listUnassignedSurveys(input?: {
+  limit?: number;
+}): Promise<OrganisationSurveyListItem[]> {
+  const supabase = createServiceClient();
+  const limit = input?.limit ?? 120;
+
+  const { data: surveys } = await supabase
+    .from("surveys")
+    .select(SURVEY_LIST_COLUMNS)
+    .is("organisation_id", null)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  const rows = (surveys ?? []) as SurveyRow[];
+  if (rows.length === 0) return [];
+
+  const { data: folders } = await supabase
+    .from("survey_folders")
+    .select("id, name")
+    .order("name", { ascending: true })
+    .limit(500);
+  const folderNameById = new Map((folders ?? []).map((f) => [f.id, f.name]));
+
+  const surveyIds = rows.map((s) => s.id);
+  const { data: responses } = await supabase
+    .from("survey_responses")
+    .select("id, survey_id, status, updated_at, completed_at")
+    .in("survey_id", surveyIds)
+    .order("updated_at", { ascending: false })
+    .limit(500);
+
+  const bestResponseBySurvey = new Map<
+    string,
+    { id: string; status: string; updatedAt: string | null }
+  >();
+  for (const row of responses ?? []) {
+    if (bestResponseBySurvey.has(row.survey_id)) continue;
+    bestResponseBySurvey.set(row.survey_id, {
+      id: row.id,
+      status: row.status,
+      updatedAt: row.completed_at ?? row.updated_at ?? null,
+    });
+  }
+
+  return rows
+    .filter((s) => !s.deleted_at && s.title)
+    .map((s) => {
+      const response = bestResponseBySurvey.get(s.id) ?? null;
+      return {
+        surveyId: s.id,
+        title: s.title,
+        purpose: normalizeSurveyPurpose(s.purpose),
+        folderId: s.folder_id,
+        folderName: s.folder_id ? folderNameById.get(s.folder_id) ?? null : null,
+        organisationId: s.organisation_id,
+        updatedAt: s.updated_at,
+        slug: typeof s.slug === "string" && s.slug.trim() ? s.slug : null,
+        visibility: s.visibility ?? null,
+        responseId: response?.id ?? null,
+        responseStatus: response?.status ?? null,
+        responseUpdatedAt: response?.updatedAt ?? null,
+      };
+    });
+}
+
 /** True when the survey is among the questionnaires for this organisation. */
 export async function surveyBelongsToOrganisation(input: {
   surveyId: string;

@@ -156,18 +156,20 @@ export async function loadSurveyResponseBundle(surveyId: string, responseId: str
 
 export async function assignSurveyOrganisation(
   surveyId: string,
-  organisationId: string,
+  organisationId: string | null,
 ): Promise<{ ok: boolean; message: string }> {
   const supabase = createServiceClient();
 
-  const { data: org } = await supabase
-    .from("organisations")
-    .select("id, name")
-    .eq("id", organisationId)
-    .maybeSingle();
+  if (organisationId) {
+    const { data: org } = await supabase
+      .from("organisations")
+      .select("id, name")
+      .eq("id", organisationId)
+      .maybeSingle();
 
-  if (!org) {
-    return { ok: false, message: "Organisation nicht gefunden." };
+    if (!org) {
+      return { ok: false, message: "Organisation nicht gefunden." };
+    }
   }
 
   const { error } = await supabase
@@ -180,7 +182,10 @@ export async function assignSurveyOrganisation(
     return { ok: false, message: "Organisation konnte nicht zugewiesen werden." };
   }
 
-  return { ok: true, message: "Organisation zugewiesen." };
+  return {
+    ok: true,
+    message: organisationId ? "Organisation zugewiesen." : "Organisations-Zuordnung entfernt.",
+  };
 }
 
 export async function generateAgentPreviewFromSurvey(input: {

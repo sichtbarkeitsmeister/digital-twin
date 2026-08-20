@@ -8,6 +8,7 @@ import { pickSurveyFolderToRename } from "../lib/dt/organisation-rename";
 import {
   filterOrganisationOptions,
   matchesSearchQuery,
+  organisationAssignmentLabel,
   organisationOptionLabel,
 } from "../lib/shared/organisation-option";
 
@@ -36,6 +37,10 @@ assert.deepEqual(
   filterOrganisationOptions(orgs, "arctic tub").map((o) => o.id),
   ["a"],
 );
+
+assert.equal(organisationAssignmentLabel(null, orgs), "Ohne Organisation");
+assert.equal(organisationAssignmentLabel("a", orgs), "ArcticTub");
+assert.equal(organisationAssignmentLabel("missing", orgs), "Unbekannte Organisation");
 
 const folders = [
   { id: "f1", name: "Arctic Tub" },
