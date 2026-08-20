@@ -8,6 +8,7 @@ import { PlatformAdminOrgHub } from "@/app/dashboard/_components/organisations/p
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 import { PlatformAdminTeamCard } from "@/app/dashboard/_components/platform-admin-team-card";
 import { loadPlatformAdminOverview } from "@/lib/dashboard/platform-admin-overview";
+import { loadPlatformAdminTeam } from "@/lib/dashboard/platform-admin-team";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -60,27 +61,10 @@ async function AdminOrganisationsPageContent() {
     redirect("/dashboard/inbox");
   }
 
-  const [{ organisations, stats }, { data: profileRows }] = await Promise.all([
+  const [{ organisations, stats }, teamMembers] = await Promise.all([
     loadPlatformAdminOverview(),
-    supabase
-      .from("profiles")
-      .select("id,email,role")
-      .order("role", { ascending: true })
-      .order("email", { ascending: true }),
+    loadPlatformAdminTeam(supabase),
   ]);
-
-  const teamMembers = (profileRows ?? [])
-    .map((row) => ({
-      id: row.id,
-      email: row.email,
-      role: row.role,
-    }))
-    .sort((a, b) => {
-      if (a.role === b.role) return a.email.localeCompare(b.email, "de");
-      if (a.role === "admin") return -1;
-      if (b.role === "admin") return 1;
-      return a.email.localeCompare(b.email, "de");
-    });
 
   return (
     <OrganisationPageShell>
@@ -91,6 +75,7 @@ async function AdminOrganisationsPageContent() {
           </h1>
           <p className="max-w-2xl text-sm text-secondary">
             Organisationen, SEO und Teams auf einen Blick — anlegen, filtern und direkt öffnen.
+            Admin-Rechte für Kolleginnen stellst du oben unter Plattform-Team ein.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -100,6 +85,22 @@ async function AdminOrganisationsPageContent() {
           </Badge>
         </div>
       </div>
+
+      <Card
+        id="plattform-team"
+        className="overflow-hidden scroll-mt-6 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
+      >
+        <CardHeader>
+          <CardTitle className="tracking-tight">Plattform-Team</CardTitle>
+          <CardDescription>
+            Wer die Admin-Ansicht (Verwaltung, SEO Modus, Jobs) sieht — hier
+            freischalten oder entfernen.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PlatformAdminTeamCard members={teamMembers} currentUserId={userId} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <div className="grid gap-4 xl:sticky xl:top-4 xl:self-start">
@@ -115,21 +116,6 @@ async function AdminOrganisationsPageContent() {
             </CardHeader>
             <CardContent>
               <AdminCreateOrgForm />
-            </CardContent>
-          </Card>
-
-          <Card
-            id="plattform-team"
-            className="overflow-hidden scroll-mt-6 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
-          >
-            <CardHeader>
-              <CardTitle className="tracking-tight">Plattform-Team</CardTitle>
-              <CardDescription>
-                Wer die Admin-Ansicht (Verwaltung, SEO Modus, Jobs) sieht.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PlatformAdminTeamCard members={teamMembers} currentUserId={userId} />
             </CardContent>
           </Card>
 
