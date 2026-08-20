@@ -69,6 +69,30 @@ export function PlatformAdminTeamCard(props: {
         </p>
       ) : null}
 
+      {state.inviteLink ? (
+        <div className="grid gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+          <p className="text-xs font-medium text-amber-950 dark:text-amber-100">
+            Anmeldelink zum Weitergeben:
+          </p>
+          <code className="break-all text-xs text-primary">{state.inviteLink}</code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-fit"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(state.inviteLink!);
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Link kopieren
+          </Button>
+        </div>
+      ) : null}
+
       <section className="grid max-w-3xl gap-3">
         <h2 className="text-sm font-semibold tracking-tight text-primary">
           Mit Admin-Ansicht
