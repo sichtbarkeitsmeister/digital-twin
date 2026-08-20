@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { isAlreadyRegisteredAuthError } from "../lib/dashboard/auth-user-errors";
 import { sortPlatformTeamMembers } from "../lib/dashboard/platform-admin-team";
 import { isSbkmStaffEmail } from "../lib/dt/sbkm-staff";
 
@@ -26,5 +27,12 @@ assert.deepEqual(
     "vanessa.may@sichtbarkeitsmeister.de",
   ],
 );
+
+assert.equal(isAlreadyRegisteredAuthError("User already registered"), true);
+assert.equal(
+  isAlreadyRegisteredAuthError("A user with this email address has already been registered"),
+  true,
+);
+assert.equal(isAlreadyRegisteredAuthError("invalid redirect"), false);
 
 console.log("sbkm-staff-email: all ok");
