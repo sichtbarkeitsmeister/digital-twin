@@ -13,9 +13,6 @@ import {
 import { createServiceClient } from "@/lib/supabase/service";
 import { checkSafePublicUrl } from "@/lib/shared/safe-fetch-url";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const querySchema = z.object({
   org: z.string().uuid(),
   /** Live-check structured data on a sample of pages (slower). */
