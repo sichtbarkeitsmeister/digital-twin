@@ -9,12 +9,7 @@ export type PlatformTeamMember = {
 export function sortPlatformTeamMembers(
   rows: PlatformTeamMember[],
 ): PlatformTeamMember[] {
-  return [...rows].sort((a, b) => {
-    if (a.role === b.role) return a.email.localeCompare(b.email, "de");
-    if (a.role === "admin") return -1;
-    if (b.role === "admin") return 1;
-    return a.email.localeCompare(b.email, "de");
-  });
+  return [...rows].sort((a, b) => a.email.localeCompare(b.email, "de"));
 }
 
 export async function loadPlatformAdminTeam(
@@ -23,7 +18,7 @@ export async function loadPlatformAdminTeam(
   const { data } = await supabase
     .from("profiles")
     .select("id,email,role")
-    .order("role", { ascending: true })
+    .eq("role", "admin")
     .order("email", { ascending: true });
 
   return sortPlatformTeamMembers(
