@@ -55,7 +55,7 @@ export async function GET() {
     const surveyData = Array.isArray(survey) ? survey[0] : survey;
     if (!surveyData?.title) continue;
     // Persona avatar flow only — Anbieter surveys go to SEO knowledge.
-    if (surveyData.purpose === "anbieter") continue;
+    if (surveyData.purpose === "anbieter" || surveyData.purpose === "intern") continue;
 
     options.push({
       surveyId: row.survey_id,

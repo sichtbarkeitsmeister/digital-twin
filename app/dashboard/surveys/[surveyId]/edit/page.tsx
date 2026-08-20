@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { canAccessSurveyForDashboard } from "@/lib/surveys/survey-dashboard-access";
+import { normalizeSurveyPurpose } from "@/lib/surveys/purpose";
 import type { Survey } from "@/lib/surveys/types";
 
 import { SurveyBuilder } from "@/app/dashboard/_components/surveys/survey-builder";
@@ -70,9 +71,7 @@ export default async function EditSurveyPage({
     <SurveyBuilder
       surveyId={survey.id}
       initialSurvey={survey.definition as unknown as Survey}
-      initialPurpose={
-        (survey as { purpose?: string }).purpose === "anbieter" ? "anbieter" : "persona"
-      }
+      initialPurpose={normalizeSurveyPurpose((survey as { purpose?: unknown }).purpose)}
       initialVisibility={survey.visibility === "public" ? "public" : "private"}
       initialSlug={survey.slug}
       initialNotificationEmails={(survey.notification_emails ?? []) as string[]}

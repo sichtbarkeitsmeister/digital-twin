@@ -109,6 +109,15 @@ export async function loadSurveyResponseBundle(surveyId: string, responseId: str
     };
   }
 
+  if ((survey as { purpose?: string }).purpose === "intern") {
+    return {
+      ok: false as const,
+      status: 400,
+      message:
+        "Interne Recherche-Fragebögen (TEIL C) erzeugen keinen Avatar. Sie bleiben in der Agentur-Ansicht.",
+    };
+  }
+
   const { data: response } = await supabase
     .from("survey_responses")
     .select("id, status, answers, completed_at")

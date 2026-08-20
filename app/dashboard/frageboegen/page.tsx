@@ -38,7 +38,7 @@ function formatDate(value: string | null) {
 }
 
 function purposeLabel(purpose: string) {
-  return purpose === "anbieter" ? "Anbieter" : "Persona";
+  return purpose === "anbieter" ? "Anbieter" : purpose === "intern" ? "Intern" : "Persona";
 }
 
 function statusLabel(status: string | null) {

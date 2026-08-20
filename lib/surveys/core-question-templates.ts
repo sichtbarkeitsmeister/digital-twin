@@ -1409,8 +1409,147 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
   ),
 ];
 
+const NAP_CONSISTENCY: SurveyOption[] = [
+  opt("ueberall_gleich", "ja, überall gleich"),
+  opt("abweichungen", "nein, es gibt Abweichungen"),
+  opt("nicht_geprueft", "noch nicht geprüft"),
+];
+
+const GA4_GTM: SurveyOption[] = [
+  opt("ja", "ja"),
+  opt("nein", "nein"),
+  opt("teilweise", "teilweise"),
+];
+
+/** TEIL C – interner Agentur-Block (nicht an den Kunden). */
+export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
+  ...step(
+    "core_intern_intro",
+    "Interner Hinweis",
+    [
+      {
+        key: "intern_notice",
+        title:
+          "Diesen Abschnitt bitte nicht vom Kunden ausfüllen lassen – wird von Sichtbarkeitsmeister recherchiert und ergänzt.",
+        description:
+          "Interner Recherche-Block. Nicht in den Kunden-Link legen. Bestätigung, dass hier Agentur-Angaben folgen.",
+        required: true,
+        type: "radio",
+        options: YES_NO,
+      },
+    ],
+    "Nur für Sichtbarkeitsmeister. Technischer Status, den der Kunde in der Regel nicht kennt.",
+  ),
+  ...step(
+    "core_intern_nap",
+    "Auffindbarkeit & Konsistenz",
+    [
+      {
+        key: "nap_consistency",
+        title:
+          "Stehen Firmenname, Adresse und Telefonnummer überall im Internet exakt gleich (eigene Website, Google-Unternehmensprofil, Branchenverzeichnisse)?",
+        type: "radio",
+        options: NAP_CONSISTENCY,
+      },
+      {
+        key: "nap_deviations",
+        title: "Welche Abweichungen wurden gefunden?",
+        type: "text",
+      },
+      {
+        key: "external_mentions_list",
+        title:
+          "Gibt es bekannte externe Erwähnungen der Firma, z. B. in der Presse, auf Fachportalen oder in Branchenverzeichnissen?",
+        description: "Pro Erwähnung: Quelle und Link.",
+        type: "text_list",
+        options: emptySlots("mention", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Erwähnung hinzufügen",
+      },
+    ],
+  ),
+  ...step(
+    "core_intern_tracking",
+    "Tracking & Conversion",
+    [
+      {
+        key: "ga4_gtm",
+        title: "Sind Google Analytics (GA4) und der Google Tag Manager eingerichtet?",
+        type: "radio",
+        options: GA4_GTM,
+      },
+      {
+        key: "conversion_goals",
+        title:
+          "Welche Handlungen werden aktuell als Conversion-Ziel (Key Event) gemessen, z. B. Kontaktformular, Anruf-Klick, Terminbuchung?",
+        description: "Ein Ziel pro Feld.",
+        type: "text_list",
+        options: emptySlots("conv", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Ziel hinzufügen",
+      },
+      {
+        key: "call_tracking_yesno",
+        title: "Gibt es Call-Tracking oder eine Anbindung an ein CRM-System?",
+        type: "radio",
+        options: YES_NO,
+      },
+      {
+        key: "call_tracking_system",
+        title: "Welches System?",
+        type: "text",
+      },
+    ],
+  ),
+  ...step(
+    "core_intern_reviews",
+    "Bewertungen",
+    [
+      {
+        key: "review_platforms",
+        title:
+          "Wie viele Bewertungen liegen aktuell vor, mit welchem Durchschnitt, auf welchen Plattformen?",
+        description: "Pro Plattform: Plattform, Anzahl, Durchschnitt und Link.",
+        type: "text_list",
+        options: emptySlots("reviews", 3),
+        allowExtraEntries: true,
+        addEntryLabel: "Plattform hinzufügen",
+      },
+    ],
+  ),
+  ...step(
+    "core_intern_gbp",
+    "Local-SEO-Basisdaten",
+    [
+      {
+        key: "gbp_link",
+        title: "Link zum Google-Unternehmensprofil",
+        type: "text",
+      },
+      {
+        key: "gbp_categories",
+        title: "Hinterlegte Kategorien im Google-Unternehmensprofil",
+        type: "text",
+      },
+      {
+        key: "gbp_service_area",
+        title: "Servicegebiet/Einzugsgebiet wie im Google-Unternehmensprofil hinterlegt",
+        type: "text",
+      },
+      {
+        key: "gbp_hours",
+        title:
+          "Öffnungszeiten wie im Google-Unternehmensprofil hinterlegt, und ob diese aktuell sind",
+        type: "text",
+      },
+    ],
+  ),
+];
+
 export function coreQuestionsForPurpose(purpose: SurveyPurpose): CoreQuestionTemplate[] {
-  return purpose === "anbieter" ? ANBIETER_CORE_QUESTIONS : PERSONA_CORE_QUESTIONS;
+  if (purpose === "anbieter") return ANBIETER_CORE_QUESTIONS;
+  if (purpose === "intern") return INTERN_CORE_QUESTIONS;
+  return PERSONA_CORE_QUESTIONS;
 }
 
 export function fieldIdForCoreKey(key: string): string {

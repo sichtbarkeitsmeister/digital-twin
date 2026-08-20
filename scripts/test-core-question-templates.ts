@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   ANBIETER_CORE_QUESTIONS,
+  INTERN_CORE_QUESTIONS,
   PERSONA_CORE_QUESTIONS,
   buildCoreFields,
   coreQuestionsForPurpose,
@@ -74,6 +75,14 @@ assert.equal(
 
 assert.equal(coreQuestionsForPurpose("anbieter"), ANBIETER_CORE_QUESTIONS);
 assert.equal(coreQuestionsForPurpose("persona"), PERSONA_CORE_QUESTIONS);
+assert.equal(coreQuestionsForPurpose("intern"), INTERN_CORE_QUESTIONS);
+assert.ok(INTERN_CORE_QUESTIONS.some((q) => q.key === "nap_consistency" && q.type === "radio"));
+assert.ok(INTERN_CORE_QUESTIONS.some((q) => q.key === "gbp_link" && q.type === "text"));
+assert.ok(
+  INTERN_CORE_QUESTIONS.some(
+    (q) => q.key === "review_platforms" && q.type === "text_list" && (q.options?.length ?? 0) === 3,
+  ),
+);
 
 const { steps, fieldIdsByKey } = buildCoreFields(ANBIETER_CORE_QUESTIONS);
 assert.ok(steps.length >= 8);
@@ -148,5 +157,27 @@ if (processField.type === "text_list") {
   assert.equal(processField.allowExtraEntries, true);
   assert.equal(processField.addEntryLabel, "Schritt hinzufügen");
 }
+
+const internBuilt = buildCoreFields(INTERN_CORE_QUESTIONS);
+assert.equal(internBuilt.steps[0]?.id, "core_intern_intro");
+assert.equal(internBuilt.steps.at(-1)?.id, "core_intern_gbp");
+const internDefinition = {
+  version: 1 as const,
+  id: "test-intern-survey",
+  title: "Intern Test",
+  description: "",
+  infoTextEnabled: true,
+  infoText: "Intern",
+  answerPlaceholder: "Deine Antwort…",
+  steps: internBuilt.steps,
+};
+const internParsed = surveySchema.safeParse(internDefinition);
+assert.equal(
+  internParsed.success,
+  true,
+  internParsed.success ? "" : internParsed.error.issues[0]?.message,
+);
+const internKeys = new Set(INTERN_CORE_QUESTIONS.map((q) => q.key));
+assert.equal(internKeys.size, INTERN_CORE_QUESTIONS.length);
 
 console.log("core-question-templates: ok");

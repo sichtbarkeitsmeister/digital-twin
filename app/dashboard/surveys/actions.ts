@@ -111,7 +111,7 @@ const upsertDraftSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
   description: z.string().trim().default(""),
   notificationEmails: z.array(z.string().trim()).default([]),
-  purpose: z.enum(["persona", "anbieter"]).default("persona"),
+  purpose: z.enum(["persona", "anbieter", "intern"]).default("persona"),
   definition: z.unknown(),
   organisationId: z.string().uuid().optional().nullable(),
 });
@@ -956,7 +956,7 @@ export async function duplicateSurveyAction(
   }
 
   const purpose =
-    source.purpose === "anbieter" || source.purpose === "persona"
+    source.purpose === "anbieter" || source.purpose === "persona" || source.purpose === "intern"
       ? source.purpose
       : "persona";
   const notificationEmails = normalizeEmails(

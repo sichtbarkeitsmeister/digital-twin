@@ -237,7 +237,8 @@ export function DtAgentSurveyCoverageCheck(props: {
   const selectOptions = options.map((o) => ({
     value: o.responseId,
     label: formatCoverageOptionLabel(o),
-    description: o.purpose === "anbieter" ? "Anbieter" : "Persona",
+    description:
+      o.purpose === "anbieter" ? "Anbieter" : o.purpose === "intern" ? "Intern" : "Persona",
   }));
 
   return (

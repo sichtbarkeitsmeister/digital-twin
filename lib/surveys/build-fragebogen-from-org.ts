@@ -70,7 +70,9 @@ async function generateExtrasAndAiPrefills(input: {
   const audience =
     input.purpose === "anbieter"
       ? `Anbieter-Fragebogen für „${input.organisationName}“ (Firmenwissen).`
-      : `Kunden-Persona-Fragebogen für Wunschkunde „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“.`;
+      : input.purpose === "intern"
+        ? `Interner Recherche-Fragebogen (TEIL C) für „${input.organisationName}“. Nicht an den Kunden.`
+        : `Kunden-Persona-Fragebogen für Wunschkunde „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“.`;
 
   const meetingBlock = input.meetingContext?.trim()
     ? `\nKundengespräch / Meeting-Briefing (PRIORITÄT — direkt übernehmen, nicht erfinden):\n${input.meetingContext.slice(0, 6000)}\n`
@@ -279,12 +281,16 @@ export async function buildFragebogenReviewDraft(input: {
   const title =
     purpose === "anbieter"
       ? `Anbieter: ${crawl.organisationName}`
-      : `Persona: ${input.wunschkundeLabel?.trim() || "Wunschkunde"} (${crawl.organisationName})`;
+      : purpose === "intern"
+        ? `Intern: ${crawl.organisationName}`
+        : `Persona: ${input.wunschkundeLabel?.trim() || "Wunschkunde"} (${crawl.organisationName})`;
 
   const description =
     purpose === "anbieter"
       ? `Firmenfragebogen für ${crawl.organisationName}. Kernfragen + Meeting/Crawl-Vorlagen.`
-      : `Wunschkunden-Fragebogen für ${crawl.organisationName}. Kernfragen + optionale Zusatzfragen.`;
+      : purpose === "intern"
+        ? `Interner Recherche-Block für ${crawl.organisationName}. Nicht an den Kunden senden.`
+        : `Wunschkunden-Fragebogen für ${crawl.organisationName}. Kernfragen + optionale Zusatzfragen.`;
 
   return {
     title,
