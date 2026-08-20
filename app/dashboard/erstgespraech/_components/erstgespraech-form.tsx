@@ -219,46 +219,41 @@ export function ErstgespraechForm(props: {
     <div className="grid gap-6">
       <div className="grid gap-1">
         <h1 className="text-2xl font-bold tracking-tight text-primary">
-          Erstgespräch — Kundendefinition
+          Erstgespräch
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Gesprächsleitung für das erste Treffen: aktueller Stand, Leistungen und Fokus,
-          Wunschkunden, dann was geplant ist. Oben die Art wählen — die Fragen bleiben dieselben
-          Felder, nur die Worte wechseln (Patient, Mandant, Kunde). Der Kunde füllt das nicht selbst
-          aus.
+          Drei getrennte Gesprächsleitungen: Arztpraxis, Kanzlei, weitere Unternehmen.
+          Die Agentur füllt das im Termin aus. „Was unterscheidet euch?“ gehört in den
+          Anbieter-Fragebogen, nicht hierher.
         </p>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Art des Gesprächs</CardTitle>
-          <CardDescription>
-            Arztpraxis und Kanzlei sind die Hauptkunden. Weitere für alle anderen Firmen. Wechsel
-            ändert nur die Worte — eingetragene Antworten bleiben.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <div className="flex flex-wrap gap-2">
-            {FIRST_CONVERSATION_KIND_TABS.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setKind(tab.id)}
-                disabled={!organisationId || loading}
-                className={cn(
-                  "rounded-xl border px-3 py-2 text-left text-sm font-medium transition",
-                  kind === tab.id
-                    ? "border-sbkm-mint/50 bg-sbkm-mint/15 text-primary"
-                    : "border-sbkm-navy/10 hover:bg-sbkm-navy/5",
-                )}
-              >
-                {tab.label}
-                <span className="mt-0.5 block text-xs font-normal text-secondary">{tab.hint}</span>
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="border-b border-sbkm-navy/10">
+        <div className="-mb-px flex flex-wrap gap-1" role="tablist" aria-label="Art des Erstgesprächs">
+          {FIRST_CONVERSATION_KIND_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={kind === tab.id}
+              onClick={() => setKind(tab.id)}
+              disabled={!organisationId || loading}
+              className={cn(
+                "rounded-t-xl border border-b-0 px-4 py-2.5 text-sm font-medium transition",
+                kind === tab.id
+                  ? "border-sbkm-navy/15 bg-background text-primary"
+                  : "border-transparent text-secondary hover:bg-sbkm-navy/5",
+              )}
+            >
+              {tab.id === "praxis"
+                ? "Arztpraxis"
+                : tab.id === "kanzlei"
+                  ? "Kanzlei"
+                  : "Weitere Unternehmen"}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <Card>
         <CardHeader className="pb-3">

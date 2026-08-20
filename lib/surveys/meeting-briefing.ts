@@ -190,6 +190,16 @@ const LABEL_RULES: LabelRule[] = [
     extraTitle: "Was ist für die nächsten Monate geplant?",
     extraId: "extra_meeting_future_plans",
   },
+  {
+    match: /^(?:kontaktperson\s+kunden)$/i,
+    extraTitle: "Wer ist die Kontaktperson — und wer bucht oder entscheidet am Ende?",
+    extraId: "extra_meeting_customer_contact",
+  },
+  {
+    match: /^(?:wunschkunden\s+und\s+finanzen)$/i,
+    extraTitle: "Deckt sich die Wunschkunden-Gruppe mit den finanziellen Zielen?",
+    extraId: "extra_meeting_wish_finance",
+  },
 ];
 
 function normalizeLabel(raw: string): string {

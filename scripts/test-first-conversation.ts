@@ -46,17 +46,32 @@ const weitereAsks = weitereSections.flatMap((section) =>
 );
 assert.ok(praxisAsks.some((text) => /Patienten/.test(text)));
 assert.ok(praxisAsks.some((text) => /Wunschpatient/.test(text)));
+assert.ok(praxisAsks.some((text) => /Behandlung bucht/.test(text)));
+assert.ok(praxisAsks.some((text) => /finanziellen Zielen der Praxis/.test(text)));
+assert.ok(!praxisAsks.some((text) => /unterscheidet/.test(text)));
+assert.ok(!praxisAsks.some((text) => /Unterlagen kommen/.test(text)));
+assert.ok(!praxisAsks.some((text) => /Website oder Inhalten/.test(text)));
 assert.ok(kanzleiAsks.some((text) => /Mandanten/.test(text)));
 assert.ok(kanzleiAsks.some((text) => /Wunschmandant/.test(text)));
+assert.ok(kanzleiAsks.some((text) => /Mandat beauftragt/.test(text)));
+assert.ok(kanzleiAsks.some((text) => /finanziellen Zielen der Kanzlei/.test(text)));
+assert.ok(kanzleiAsks.some((text) => /Rechtsgebiete/.test(text)));
 assert.ok(weitereAsks.some((text) => /Kunden/.test(text)));
 assert.ok(weitereAsks.some((text) => /Wunschkunde/.test(text)));
+assert.ok(weitereAsks.some((text) => /kauft oder entscheidet/.test(text)));
 
 const praxisKeys = firstConversationVisibleKeys("praxis");
 const kanzleiKeys = firstConversationVisibleKeys("kanzlei");
 const weitereKeys = firstConversationVisibleKeys("weitere");
 assert.ok(praxisKeys.includes("competitors"));
+assert.ok(praxisKeys.includes("customerContact"));
+assert.ok(praxisKeys.includes("wishMatchesFinance"));
 assert.ok(!praxisKeys.includes("goodCompetitors"));
+assert.ok(!praxisKeys.includes("usp"));
+assert.ok(!praxisKeys.includes("websiteIssues"));
+assert.ok(!praxisKeys.includes("pagesOrLinks"));
 assert.ok(!kanzleiKeys.includes("goodCompetitors"));
+assert.ok(!kanzleiKeys.includes("usp"));
 assert.ok(!praxisKeys.includes("industry"));
 assert.ok(!kanzleiKeys.includes("industry"));
 assert.ok(weitereKeys.includes("industry"));
@@ -83,6 +98,8 @@ const record = normalizeFirstConversation({
   website: "https://musterdruck.de",
   currentStatus: "Auftragslage gut, Sichtbarkeit hakt",
   futurePlans: "Neue Landingpage, Newsletter",
+  customerContact: "Inhaberin bucht selbst",
+  wishMatchesFinance: "Ja, höherer Auftragswert",
 });
 
 assert.equal(record.legalCompanyName, "Musterdruck GmbH");
@@ -102,6 +119,8 @@ assert.match(briefing.notes ?? "", /Branche/);
 assert.match(briefing.notes ?? "", /Wunschkunde/);
 assert.match(briefing.notes ?? "", /Aktueller Stand/);
 assert.match(briefing.notes ?? "", /Zukunft/);
+assert.match(briefing.notes ?? "", /Kontaktperson/);
+assert.match(briefing.notes ?? "", /Finanzen/);
 
 const parsed = parseMeetingBriefingContent(briefing);
 assert.equal(parsed.byHint.org_name, "Musterdruck GmbH");
@@ -110,6 +129,8 @@ assert.ok(parsed.extras.some((e) => e.id === "extra_meeting_industry"));
 assert.ok(parsed.extras.some((e) => e.id === "extra_meeting_wunschkunde"));
 assert.ok(parsed.extras.some((e) => e.id === "extra_meeting_current_status"));
 assert.ok(parsed.extras.some((e) => e.id === "extra_meeting_future_plans"));
+assert.ok(parsed.extras.some((e) => e.id === "extra_meeting_customer_contact"));
+assert.ok(parsed.extras.some((e) => e.id === "extra_meeting_wish_finance"));
 
 const prefills = suggestPrefillsFromMeeting({
   briefing,

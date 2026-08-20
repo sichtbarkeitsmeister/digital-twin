@@ -3,8 +3,8 @@
  * Agency-led first conversation, persisted per organisation, then reused
  * when generating Fragebögen (Meeting-Briefing).
  *
- * Three conversation kinds (Arztpraxis, Kanzlei, Weitere) share the same
- * stored keys; only spoken asks and labels change.
+ * Three conversation kinds (Arztpraxis, Kanzlei, Weitere Unternehmen)
+ * share stored keys but have separate spoken scripts.
  */
 
 import {
@@ -28,6 +28,7 @@ export type FirstConversationFieldKey =
   | "industry"
   | "currentStatus"
   | "bookingPath"
+  | "customerContact"
   | "services"
   | "usp"
   | "focus"
@@ -41,6 +42,7 @@ export type FirstConversationFieldKey =
   | "websiteIssues"
   | "mandateGoals"
   | "futurePlans"
+  | "wishMatchesFinance"
   | "pagesOrLinks"
   | "notes";
 
@@ -77,6 +79,7 @@ export const EMPTY_FIRST_CONVERSATION: FirstConversationRecord = {
   industry: "",
   currentStatus: "",
   bookingPath: "",
+  customerContact: "",
   services: "",
   usp: "",
   focus: "",
@@ -90,13 +93,24 @@ export const EMPTY_FIRST_CONVERSATION: FirstConversationRecord = {
   websiteIssues: "",
   mandateGoals: "",
   futurePlans: "",
+  wishMatchesFinance: "",
   pagesOrLinks: "",
   notes: "",
 };
 
-/** Hidden in the form: kind is chosen via tabs; goodCompetitors kept for old records. */
+/** Hidden in the form: kind via tabs; USP lives in the Anbieter-Fragebogen. */
 export const FIRST_CONVERSATION_HIDDEN_KEYS: ReadonlySet<FirstConversationFieldKey> =
-  new Set(["conversationKind", "goodCompetitors"]);
+  new Set([
+    "conversationKind",
+    "goodCompetitors",
+    "usp",
+    "websiteIssues",
+    "pagesOrLinks",
+    "onlineChannels",
+    "mandateGoals",
+    "colloquialName",
+    "employeeCount",
+  ]);
 
 export const FIRST_CONVERSATION_KIND_TABS: ReadonlyArray<{
   id: FirstConversationKind;
@@ -115,7 +129,7 @@ export const FIRST_CONVERSATION_KIND_TABS: ReadonlyArray<{
   },
   {
     id: "weitere",
-    label: "Weitere",
+    label: "Weitere Unternehmen",
     hint: "Kunden, Firma, Wunschkunde",
   },
 ];
@@ -189,15 +203,12 @@ function field(
 }
 
 /**
- * Spoken conversation flow:
- * 1. Rahmen  2. Aktueller Stand  3. Leistungen und Fokus
- * 4. Wunschkunden  5. Sichtbarkeit  6. Zukunft
+ * Three separate conversation scripts. Shared storage keys; distinct asks.
+ * USP / "Was unterscheidet euch?" is not asked here — that is the Anbieter-Fragebogen.
  */
-export function firstConversationSectionsForKind(
-  kind: FirstConversationKind,
-): FirstConversationSection[] {
+function frameSection(kind: FirstConversationKind): FirstConversationSection {
   const v = vocabFor(kind);
-  const industryField =
+  const extra =
     kind === "weitere"
       ? [
           field(
@@ -211,140 +222,98 @@ export function firstConversationSectionsForKind(
           ),
         ]
       : [];
+  return {
+    id: "frame",
+    title: "Rahmen",
+    description: "Nur notieren — dann ins Gespräch.",
+    fields: [
+      field("conversationDate", "Datum", "Wann findet das Gespräch statt?", {
+        placeholder: "z. B. 20.08.2026",
+        kind: "input",
+      }),
+      field(
+        "agencyLead",
+        "Gesprächsführung (Agentur)",
+        "Wer führt das Gespräch von Sichtbarkeitsmeister?",
+        { placeholder: "z. B. Vanessa", kind: "input" },
+      ),
+      field(
+        "ownerName",
+        "Gegenüber — Name",
+        "Wie heißt die Person, mit der wir sprechen?",
+        { placeholder: "Vor- und Nachname", kind: "input" },
+      ),
+      field(
+        "ownerRole",
+        "Gegenüber — Rolle",
+        `Welche Rolle hat diese Person in ${v.orgGen}?`,
+        {
+          placeholder:
+            kind === "praxis"
+              ? "Ärztin, Inhaber, Praxisleitung…"
+              : kind === "kanzlei"
+                ? "Partnerin, Anwalt, Kanzleileitung…"
+                : "Inhaber, Geschäftsführung, Marketing…",
+          kind: "input",
+        },
+      ),
+      field(
+        "legalCompanyName",
+        v.legalNameLabel,
+        kind === "praxis"
+          ? "Wie lautet der Praxisname — so wie er nach außen stehen soll?"
+          : kind === "kanzlei"
+            ? "Wie lautet der Kanzleiname — so wie auf dem Briefbogen?"
+            : "Wie lautet der Firmenname — so wie im Impressum?",
+        { placeholder: v.legalNamePlaceholder, kind: "input" },
+      ),
+      field("website", "Website", "Unter welcher Adresse ist die Website erreichbar?", {
+        placeholder: "https://…",
+        kind: "input",
+      }),
+      ...extra,
+    ],
+  };
+}
 
+function praxisSections(): FirstConversationSection[] {
   return [
-    {
-      id: "frame",
-      title: "Rahmen",
-      description: `Kurz notieren, wer mit wem spricht — dann ins Gespräch über die ${v.org}.`,
-      fields: [
-        field("conversationDate", "Datum", "Wann findet das Gespräch statt?", {
-          placeholder: "z. B. 20.08.2026",
-          kind: "input",
-        }),
-        field(
-          "agencyLead",
-          "Gesprächsführung (Agentur)",
-          "Wer führt das Gespräch von Sichtbarkeitsmeister?",
-          { placeholder: "z. B. Vanessa", kind: "input" },
-        ),
-        field(
-          "ownerName",
-          "Gegenüber — Name",
-          "Wie heißt die Person, mit der wir sprechen?",
-          { placeholder: "Vor- und Nachname", kind: "input" },
-        ),
-        field(
-          "ownerRole",
-          "Gegenüber — Rolle",
-          `Welche Rolle hat diese Person in ${v.orgGen}?`,
-          {
-            placeholder:
-              kind === "praxis"
-                ? "Ärztin, Inhaber, Praxisleitung…"
-                : kind === "kanzlei"
-                  ? "Partnerin, Anwalt, Kanzleileitung…"
-                  : "Inhaber, Geschäftsführung, Marketing…",
-            kind: "input",
-          },
-        ),
-        field(
-          "legalCompanyName",
-          v.legalNameLabel,
-          kind === "praxis"
-            ? "Wie lautet der Name — so wie er auf der Website und im Alltag stehen soll?"
-            : kind === "kanzlei"
-              ? "Wie lautet der Kanzleiname — so wie im Impressum oder auf dem Briefbogen?"
-              : "Wie lautet der vollständige Name — so wie im Impressum oder Handelsregister?",
-          { placeholder: v.legalNamePlaceholder, kind: "input" },
-        ),
-        field(
-          "colloquialName",
-          "Alltagsname",
-          `Wie wird die ${v.org} im Alltag genannt — und stimmt das mit der Website überein?`,
-          { placeholder: "Kurzform, alter Name, Spitzname…", kind: "input" },
-        ),
-        field("website", "Website", "Unter welcher Adresse ist die Website erreichbar?", {
-          placeholder: "https://…",
-          kind: "input",
-        }),
-        ...industryField,
-        field(
-          "region",
-          "Standort und Einzugsgebiet",
-          `Wo sitzt die ${v.org}, und aus welcher Region kommen die meisten ${v.customerPlural}? Weitere Standorte geplant?`,
-          {
-            placeholder: "Ort, Umkreis, ein Standort oder mehrere…",
-            rows: 2,
-          },
-        ),
-        field(
-          "employeeCount",
-          "Team",
-          "Wer gehört zum Team — grob reicht. Gibt es zusätzliche Angebote im Haus, die auf der Website fehlen?",
-          {
-            placeholder:
-              kind === "praxis"
-                ? "z. B. Ärztin, Rezeption, Kosmetikerin"
-                : kind === "kanzlei"
-                  ? "z. B. 4 Anwälte, 2 Fachangestellte"
-                  : "z. B. 8 Personen, 3 in der Beratung",
-            kind: "input",
-          },
-        ),
-      ],
-    },
+    frameSection("praxis"),
     {
       id: "status",
       title: "Aktueller Stand",
-      description: `Wie es gerade läuft — bevor es um Wunsch${v.customerPlural.toLowerCase()} und Pläne geht.`,
+      description: "Wie die Praxis gerade läuft, bevor es um Wunschpatienten geht.",
       fields: [
         field(
           "currentStatus",
-          "Wie läuft es gerade?",
-          `Wie läuft die ${v.org} aktuell? Mix, was gut läuft, wo es hakt.`,
+          "Wie läuft die Praxis aktuell?",
+          "Wie läuft die Praxis aktuell? Mix, was gut läuft, wo es hakt.",
           {
-            placeholder:
-              kind === "praxis"
-                ? "z. B. läuft gut, Mix Privat/Selbstzahler, Wunsch mehr Stamm-Patienten"
-                : kind === "kanzlei"
-                  ? "z. B. Mandate voll, Engpass bei Sichtbarkeit, Wunsch klarere Positionierung"
-                  : "z. B. Auftragslage, was gut läuft, wo es hakt",
+            placeholder: "z. B. läuft gut, Mix Privat/Selbstzahler, Wunsch mehr Stamm-Patienten",
             rows: 4,
           },
         ),
         field(
+          "region",
+          "Standort",
+          "Ein Standort oder mehrere — weitere geplant?",
+          { placeholder: "Ort, Umkreis, ein Standort oder mehrere…", rows: 2 },
+        ),
+        field(
           "bookingPath",
-          kind === "praxis"
-            ? "Wie kommen Patienten rein?"
-            : kind === "kanzlei"
-              ? "Wie kommen Mandate rein?"
-              : "Wie kommen Anfragen rein?",
-          kind === "praxis"
-            ? "Wie kommen Patienten zu einem Termin — Telefon, Doctolib, Website, Empfehlung? Was ist an der Rezeption noch offen?"
-            : kind === "kanzlei"
-              ? "Wie kommen Mandate zustande — Empfehlung, Website, Anruf, Portal? Was ist am Empfang noch offen?"
-              : "Wie kommen Anfragen zustande — Anruf, Website, Empfehlung, Anzeige?",
+          "Wie kommen Patienten zu einem Termin?",
+          "Telefon, Doctolib, Website, Empfehlung? Was ist an der Rezeption noch offen?",
           {
-            placeholder:
-              kind === "praxis"
-                ? "z. B. Doctolib und Telefon, Rezeption noch in Arbeit"
-                : "Nur der Weg, der wirklich genutzt wird",
+            placeholder: "z. B. Doctolib und Telefon, Rezeption noch in Arbeit",
             rows: 3,
           },
         ),
         field(
-          "onlineChannels",
-          "Kanäle heute",
-          "Welche Kanäle werden aktuell wirklich genutzt — Website, Google, Social, Newsletter?",
-          { placeholder: "Nur das, was aktiv betrieben wird", rows: 2 },
-        ),
-        field(
-          "websiteIssues",
-          "Was am Auftritt hakt",
-          "Was an Website, Name oder Inhalten stimmt noch nicht — oder soll als Nächstes geändert werden?",
+          "customerContact",
+          "Kontaktperson der Patienten",
+          "Wer ist die Kontaktperson der Patienten? Deckt sich das mit dem, der am Ende die Behandlung bucht?",
           {
-            placeholder: "z. B. alter Name auf der Website, fehlende Leistungen, unklare Menüpunkte",
+            placeholder: "z. B. Patient selbst / Partner bucht / Eltern bei Kindern",
             rows: 3,
           },
         ),
@@ -358,94 +327,59 @@ export function firstConversationSectionsForKind(
         field(
           "services",
           "Leistungen heute",
-          `Welche Leistungen stehen aktuell auf der Karte — die wichtigsten, nicht die komplette Liste.`,
-          {
-            placeholder: "Die Angebote, die wirklich nachgefragt werden",
-            rows: 4,
-          },
+          "Welche Leistungen stehen heute im Mittelpunkt — nicht die komplette Liste?",
+          { placeholder: "Die Angebote, die wirklich nachgefragt werden", rows: 4 },
         ),
         field(
           "focus",
           "Worauf spezialisieren?",
-          `Worauf soll der Schwerpunkt liegen — welche Leistungen sollen wachsen, welche eher nicht in den Vordergrund?`,
+          "Worauf soll der Schwerpunkt liegen, wo soll die Praxis wachsen?",
           {
-            placeholder:
-              kind === "praxis"
-                ? "z. B. Laser und größere Eingriffe, nicht die kleine Einzelleistung"
-                : kind === "kanzlei"
-                  ? "z. B. Arbeitsrecht und Gesellschaftsrecht, nicht jedes Mandat gleich"
-                  : "Schwerpunkt, Fokus-Themen…",
+            placeholder: "z. B. Laser und größere Eingriffe, nicht die kleine Einzelleistung",
             rows: 3,
           },
-        ),
-        field(
-          "usp",
-          "Was unterscheidet",
-          `Was macht die ${v.org} besonders — der Satz, der im Gespräch selbst fällt, keine Marketing-Floskel.`,
-          {
-            placeholder: `Expertise, Art der Arbeit, was ${v.customerPlural} schätzen`,
-            rows: 3,
-          },
-        ),
-        field(
-          "mandateGoals",
-          "Was soll besser werden?",
-          "Was soll in den nächsten Monaten besser werden — Anfragen, Auffindbarkeit, Wahrnehmung, die richtigen Anfragen?",
-          { placeholder: "In den Worten aus dem Gespräch", rows: 3 },
         ),
       ],
     },
     {
       id: "customers",
-      title: v.wishPlural,
-      description: `Für wen die Fragebögen und der Avatar später gebaut werden. Fokus heißt nicht Ablehnung.`,
+      title: "Wunschpatienten",
+      description: "Für wen Website und Avatar später gebaut werden. Fokus heißt nicht Ablehnung.",
       fields: [
         field(
           "targetGroup",
-          `Welche ${v.customerPlural} sind am liebsten?`,
-          `Welche ${v.customerPlural} laufen gut — regelmäßig, passend, wenig Reibung?`,
+          "Welche Patienten sind am liebsten?",
+          "Welche Patienten laufen gut — regelmäßig, passend, wenig Reibung?",
           {
             placeholder:
-              kind === "praxis"
-                ? "z. B. Privatpatienten, die regelmäßig zur Vorsorge kommen und etwas dazubuchen"
-                : kind === "kanzlei"
-                  ? "z. B. Unternehmer mit laufendem Beratungsbedarf, nicht das einmalige Kleinstmandat"
-                  : "Branche, Situation, typisches Anliegen…",
+              "z. B. Privatpatienten, die regelmäßig zur Vorsorge kommen und etwas dazubuchen",
             rows: 4,
           },
         ),
         field(
           "unattractiveCustomers",
-          `Welche ${v.customerPlural} sind eher unattraktiv?`,
-          `Wer kostet viel und bringt wenig — und soll deshalb nicht die Werbung bestimmen?`,
+          "Welche Patienten sind eher unattraktiv?",
+          "Wer kostet viel und bringt wenig — und soll deshalb nicht die Werbung bestimmen?",
           {
-            placeholder:
-              kind === "praxis"
-                ? "z. B. Selbstzahler mit einmaliger kleiner Leistung, ohne Wiederkehr"
-                : "Kurz, ohne Wertung im Gespräch — nur für die Ausrichtung",
+            placeholder: "z. B. Selbstzahler mit einmaliger kleiner Leistung, ohne Wiederkehr",
             rows: 3,
           },
         ),
         field(
           "keepOthers",
           "Andere bleiben willkommen?",
-          `Heißt der Fokus auf ${v.wishPlural}, dass andere ${v.customerPlural} abgelehnt werden — oder bleibt die Entscheidung im Einzelfall?`,
+          "Heißt der Fokus auf Wunschpatienten, dass andere Patienten abgelehnt werden — oder bleibt die Entscheidung im Einzelfall?",
           {
-            placeholder: `Meist: Fokus nur für Website und Werbung — Einzelfall bleibt bei der ${v.org}`,
+            placeholder: "Meist: Fokus nur für Website und Werbung — Einzelfall bleibt bei der Praxis",
             rows: 2,
           },
         ),
         field(
           "wunschkundeLabel",
-          `Ein bis zwei ${v.wish}-Typen`,
-          `Wie heißen die ein oder zwei ${v.wish}-Typen intern — Kurzname reicht, Details kommen im Fragebogen.`,
+          "Ein bis zwei Wunschpatient-Typen",
+          "Wie heißen die ein oder zwei Wunschpatient-Typen intern — Kurzname reicht, Details kommen im Fragebogen.",
           {
-            placeholder:
-              kind === "praxis"
-                ? "z. B. Privatpatient mit Vorsorge-Anker / Laser-Interessent"
-                : kind === "kanzlei"
-                  ? "z. B. Mittelstands-Geschäftsführer / Erbrecht-Familie"
-                  : "z. B. Julia Schröder, Praxisinhaberin",
+            placeholder: "z. B. Privatpatient mit Vorsorge-Anker / Laser-Interessent",
             kind: "input",
           },
         ),
@@ -453,15 +387,15 @@ export function firstConversationSectionsForKind(
     },
     {
       id: "visibility",
-      title: "Sichtbarkeit",
-      description: "Wo die Firma heute auftaucht, und wen sie als Wettbewerb kennt.",
+      title: "Wettbewerb",
+      description: "Wen die Praxis als Markt kennt.",
       fields: [
         field(
           "competitors",
           "Wettbewerb",
-          `Welche Anbieter kennt die ${v.org} als Mitbewerber — und wen als Orientierung oder Vorbild, auch außerhalb der Region? Name, warum, reicht.`,
+          "Welche Anbieter kennt die Praxis als Wettbewerb oder als Orientierung?",
           {
-            placeholder: "Name, Website, kurzer Grund — Wettbewerb und Vorbilder in einem",
+            placeholder: "Name, kurzer Grund — Wettbewerb und Vorbilder in einem",
             rows: 4,
           },
         ),
@@ -470,35 +404,329 @@ export function firstConversationSectionsForKind(
     {
       id: "future",
       title: "Zukunft",
-      description: "Was als Nächstes geplant ist, und was noch nachgeliefert wird.",
+      description: "Was geplant ist, und ob die Wunschpatienten zu den Zahlen passen.",
       fields: [
         field(
           "futurePlans",
           "Was ist geplant?",
-          `Was ist für die nächsten Monate geplant — neue Leistungen, Standort, Team, Inhalte? Welche Unterlagen kommen noch?`,
-          {
-            placeholder: "Pläne, Material das nachkommt, offene Punkte für uns",
-            rows: 4,
-          },
+          "Was ist für die nächsten Monate geplant?",
+          { placeholder: "Neue Leistungen, Standort, Team, Inhalte…", rows: 3 },
         ),
         field(
-          "pagesOrLinks",
-          "Genannte Seiten und Unterlagen",
-          "Welche Seiten, Flyer, PDFs oder Beispiele wurden genannt?",
-          { placeholder: "https://… oder Dateiname", rows: 2 },
+          "wishMatchesFinance",
+          "Wunschpatienten und Finanzen",
+          "Deckt sich die Wunschkunden-Gruppe mit den finanziellen Zielen der Praxis?",
+          {
+            placeholder: "Ja / nein, und woran das hängt — Umsatzmix, Frequenz, Honorar",
+            rows: 3,
+          },
         ),
         field(
           "notes",
           "Weitere Notizen",
           "Gibt es noch etwas Wichtiges, das in keine Schublade passt?",
+          { placeholder: "Ton im Gespräch, offene Punkte", rows: 3 },
+        ),
+      ],
+    },
+  ];
+}
+
+function kanzleiSections(): FirstConversationSection[] {
+  return [
+    frameSection("kanzlei"),
+    {
+      id: "status",
+      title: "Aktueller Stand",
+      description: "Wie die Kanzlei gerade läuft, bevor es um Wunschmandanten geht.",
+      fields: [
+        field(
+          "currentStatus",
+          "Wie läuft die Kanzlei aktuell?",
+          "Wie läuft die Kanzlei aktuell? Mandate, was gut läuft, wo es hakt.",
           {
-            placeholder: "Ton im Gespräch, offene Zugänge, sonstige Hinweise",
+            placeholder: "z. B. Mandate voll, Engpass bei Sichtbarkeit, Wunsch klarere Positionierung",
+            rows: 4,
+          },
+        ),
+        field(
+          "region",
+          "Standort",
+          "Ein Sitz oder mehrere — weitere geplant?",
+          { placeholder: "Ort, Umkreis, ein Standort oder mehrere…", rows: 2 },
+        ),
+        field(
+          "bookingPath",
+          "Wie kommen Mandate zustande?",
+          "Empfehlung, Website, Anruf, Portal?",
+          { placeholder: "Nur der Weg, der wirklich genutzt wird", rows: 3 },
+        ),
+        field(
+          "customerContact",
+          "Kontaktperson der Mandanten",
+          "Wer ist die Kontaktperson der Mandanten? Deckt sich das mit dem, der am Ende das Mandat beauftragt oder unterschreibt?",
+          {
+            placeholder: "z. B. Geschäftsführer selbst / Assistentin / Ehepartner",
+            rows: 3,
+          },
+        ),
+      ],
+    },
+    {
+      id: "offer",
+      title: "Leistungen und Fokus",
+      description: "Rechtsgebiete heute, und worauf die Kanzlei sichtbar spezialisieren will.",
+      fields: [
+        field(
+          "services",
+          "Rechtsgebiete heute",
+          "Welche Rechtsgebiete stehen heute im Mittelpunkt?",
+          { placeholder: "Die Mandate, die wirklich angenommen werden", rows: 4 },
+        ),
+        field(
+          "focus",
+          "Worauf spezialisieren?",
+          "Worauf soll die Kanzlei sich sichtbar spezialisieren — welche Mandate sollen wachsen?",
+          {
+            placeholder: "z. B. Arbeitsrecht und Gesellschaftsrecht, nicht jedes Mandat gleich",
+            rows: 3,
+          },
+        ),
+      ],
+    },
+    {
+      id: "customers",
+      title: "Wunschmandanten",
+      description: "Für wen Website und Avatar später gebaut werden. Fokus heißt nicht Ablehnung.",
+      fields: [
+        field(
+          "targetGroup",
+          "Welche Mandanten sind am liebsten?",
+          "Welche Mandanten laufen gut — passend, wiederkehrend, wenig Reibung?",
+          {
+            placeholder: "z. B. Unternehmer mit laufendem Beratungsbedarf, nicht das einmalige Kleinstmandat",
+            rows: 4,
+          },
+        ),
+        field(
+          "unattractiveCustomers",
+          "Welche Mandate sind eher unattraktiv?",
+          "Welche Mandate kosten viel und bringen wenig — und sollen deshalb nicht die Werbung bestimmen?",
+          {
+            placeholder: "Kurz, ohne Wertung im Gespräch — nur für die Ausrichtung",
+            rows: 3,
+          },
+        ),
+        field(
+          "keepOthers",
+          "Andere bleiben willkommen?",
+          "Heißt der Fokus auf Wunschmandanten, dass andere Mandanten abgelehnt werden — oder bleibt die Entscheidung im Einzelfall?",
+          {
+            placeholder: "Meist: Fokus nur für Website und Werbung — Einzelfall bleibt bei der Kanzlei",
+            rows: 2,
+          },
+        ),
+        field(
+          "wunschkundeLabel",
+          "Ein bis zwei Wunschmandant-Typen",
+          "Wie heißen die ein oder zwei Wunschmandant-Typen intern — Kurzname reicht, Details kommen im Fragebogen.",
+          {
+            placeholder: "z. B. Mittelstands-Geschäftsführer / Erbrecht-Familie",
+            kind: "input",
+          },
+        ),
+      ],
+    },
+    {
+      id: "visibility",
+      title: "Wettbewerb",
+      description: "Wen die Kanzlei als Markt kennt.",
+      fields: [
+        field(
+          "competitors",
+          "Wettbewerb",
+          "Welche Kanzleien kennt die Kanzlei als Wettbewerb oder als Orientierung?",
+          {
+            placeholder: "Name, kurzer Grund — Wettbewerb und Vorbilder in einem",
             rows: 4,
           },
         ),
       ],
     },
+    {
+      id: "future",
+      title: "Zukunft",
+      description: "Was geplant ist, und ob die Wunschmandanten zu den Zahlen passen.",
+      fields: [
+        field(
+          "futurePlans",
+          "Was ist geplant?",
+          "Was ist für die nächsten Monate geplant?",
+          { placeholder: "Neue Rechtsgebiete, Standort, Team, Inhalte…", rows: 3 },
+        ),
+        field(
+          "wishMatchesFinance",
+          "Wunschmandanten und Finanzen",
+          "Deckt sich die Wunschkunden-Gruppe mit den finanziellen Zielen der Kanzlei?",
+          {
+            placeholder: "Ja / nein, und woran das hängt — Honorare, Mandatsmix, Frequenz",
+            rows: 3,
+          },
+        ),
+        field(
+          "notes",
+          "Weitere Notizen",
+          "Gibt es noch etwas Wichtiges, das in keine Schublade passt?",
+          { placeholder: "Ton im Gespräch, offene Punkte", rows: 3 },
+        ),
+      ],
+    },
   ];
+}
+
+function weitereSections(): FirstConversationSection[] {
+  return [
+    frameSection("weitere"),
+    {
+      id: "status",
+      title: "Aktueller Stand",
+      description: "Wie das Geschäft gerade läuft, bevor es um Wunschkunden geht.",
+      fields: [
+        field(
+          "currentStatus",
+          "Wie läuft das Geschäft aktuell?",
+          "Wie läuft das Geschäft aktuell? Auftragslage, was gut läuft, wo es hakt.",
+          { placeholder: "Auftragslage, was gut läuft, wo es hakt", rows: 4 },
+        ),
+        field(
+          "region",
+          "Standort und Einzugsgebiet",
+          "Wo sitzt die Firma, aus welcher Region kommen die Kunden — weitere Standorte geplant?",
+          { placeholder: "Ort, Umkreis, ein Standort oder mehrere…", rows: 2 },
+        ),
+        field(
+          "bookingPath",
+          "Wie kommen Anfragen zustande?",
+          "Anruf, Website, Empfehlung, Anzeige?",
+          { placeholder: "Nur der Weg, der wirklich genutzt wird", rows: 3 },
+        ),
+        field(
+          "customerContact",
+          "Kontaktperson der Kunden",
+          "Wer ist die Kontaktperson der Kunden? Deckt sich das mit dem, der am Ende kauft oder entscheidet?",
+          {
+            placeholder: "z. B. Inhaber selbst / Einkauf / Assistenz bucht nur den Termin",
+            rows: 3,
+          },
+        ),
+      ],
+    },
+    {
+      id: "offer",
+      title: "Leistungen und Fokus",
+      description: "Was heute angeboten wird, und worauf die Sichtbarkeit liegen soll.",
+      fields: [
+        field(
+          "services",
+          "Leistungen heute",
+          "Welche Leistungen oder Produkte stehen heute im Mittelpunkt?",
+          { placeholder: "Die Angebote, die wirklich nachgefragt werden", rows: 4 },
+        ),
+        field(
+          "focus",
+          "Worauf spezialisieren?",
+          "Worauf soll die Sichtbarkeit liegen — welches Angebot soll wachsen?",
+          { placeholder: "Schwerpunkt, Fokus-Themen…", rows: 3 },
+        ),
+      ],
+    },
+    {
+      id: "customers",
+      title: "Wunschkunden",
+      description: "Für wen Website und Avatar später gebaut werden. Fokus heißt nicht Ablehnung.",
+      fields: [
+        field(
+          "targetGroup",
+          "Welche Kunden sind am liebsten?",
+          "Welche Kunden laufen gut — passend, wiederkehrend, wenig Reibung?",
+          { placeholder: "Branche, Situation, typisches Anliegen…", rows: 4 },
+        ),
+        field(
+          "unattractiveCustomers",
+          "Welche Anfragen sind eher unattraktiv?",
+          "Welche Anfragen kosten viel und bringen wenig — und sollen deshalb nicht die Werbung bestimmen?",
+          { placeholder: "Kurz, ohne Wertung im Gespräch — nur für die Ausrichtung", rows: 3 },
+        ),
+        field(
+          "keepOthers",
+          "Andere bleiben willkommen?",
+          "Heißt der Fokus auf Wunschkunden, dass andere Kunden abgelehnt werden — oder bleibt die Entscheidung im Einzelfall?",
+          {
+            placeholder: "Meist: Fokus nur für Website und Werbung — Einzelfall bleibt bei der Firma",
+            rows: 2,
+          },
+        ),
+        field(
+          "wunschkundeLabel",
+          "Ein bis zwei Wunschkunden-Typen",
+          "Wie heißen die ein oder zwei Wunschkunden-Typen intern — Kurzname reicht, Details kommen im Fragebogen.",
+          { placeholder: "z. B. Julia Schröder, Praxisinhaberin", kind: "input" },
+        ),
+      ],
+    },
+    {
+      id: "visibility",
+      title: "Wettbewerb",
+      description: "Wen die Firma als Markt kennt.",
+      fields: [
+        field(
+          "competitors",
+          "Wettbewerb",
+          "Welche Anbieter kennt die Firma als Wettbewerb oder als Orientierung?",
+          {
+            placeholder: "Name, kurzer Grund — Wettbewerb und Vorbilder in einem",
+            rows: 4,
+          },
+        ),
+      ],
+    },
+    {
+      id: "future",
+      title: "Zukunft",
+      description: "Was geplant ist, und ob die Wunschkunden zu den Zahlen passen.",
+      fields: [
+        field(
+          "futurePlans",
+          "Was ist geplant?",
+          "Was ist für die nächsten Monate geplant?",
+          { placeholder: "Neue Leistungen, Standort, Team, Inhalte…", rows: 3 },
+        ),
+        field(
+          "wishMatchesFinance",
+          "Wunschkunden und Finanzen",
+          "Deckt sich die Wunschkunden-Gruppe mit den finanziellen Zielen der Firma?",
+          {
+            placeholder: "Ja / nein, und woran das hängt — Marge, Auftragswert, Wiederkehr",
+            rows: 3,
+          },
+        ),
+        field(
+          "notes",
+          "Weitere Notizen",
+          "Gibt es noch etwas Wichtiges, das in keine Schublade passt?",
+          { placeholder: "Ton im Gespräch, offene Punkte", rows: 3 },
+        ),
+      ],
+    },
+  ];
+}
+
+export function firstConversationSectionsForKind(
+  kind: FirstConversationKind,
+): FirstConversationSection[] {
+  if (kind === "kanzlei") return kanzleiSections();
+  if (kind === "weitere") return weitereSections();
+  return praxisSections();
 }
 
 /** Default sections (Arztpraxis) — tests and callers without a kind. */
@@ -642,6 +870,7 @@ function leftoverLabeledNotes(record: FirstConversationRecord): string {
   push("Branche", record.industry);
   push("Aktueller Stand", record.currentStatus);
   push("Buchungsweg", record.bookingPath);
+  push("Kontaktperson Kunden", record.customerContact);
   push("Online-Kanäle", record.onlineChannels);
   push("Website und Auftritt", record.websiteIssues);
   push("Weniger passende Kunden", record.unattractiveCustomers);
@@ -649,6 +878,7 @@ function leftoverLabeledNotes(record: FirstConversationRecord): string {
   push("Wunschkunde", record.wunschkundeLabel);
   push("Ziel des Mandats", record.mandateGoals);
   push("Zukunft und nächste Schritte", record.futurePlans);
+  push("Wunschkunden und Finanzen", record.wishMatchesFinance);
   push("Gesprächsführung", record.agencyLead);
   push("Gesprächsdatum", record.conversationDate);
   if (record.notes.trim()) parts.push(record.notes.trim());
@@ -699,6 +929,8 @@ export function firstConversationSummaryLines(
   push("Stand", record.currentStatus);
   push("Fokus", record.focus);
   push("Wunschkunde", record.wunschkundeLabel || record.targetGroup);
+  push("Kontaktperson", record.customerContact);
+  push("Finanzen", record.wishMatchesFinance);
   push("Zukunft", record.futurePlans);
   return lines;
 }
@@ -729,6 +961,7 @@ const DOCUMENT_LABEL_TO_KEY: Array<[RegExp, FirstConversationFieldKey]> = [
   [/^(?:branche|gewerbe)$/i, "industry"],
   [/^(?:aktueller\s+stand|status\s*quo|wie\s+l(?:ä|ae)uft)$/i, "currentStatus"],
   [/^(?:buchungsweg|wie\s+kommen|termine|doctolib)$/i, "bookingPath"],
+  [/^(?:kontaktperson|wer\s+bucht|entscheider)$/i, "customerContact"],
   [/^(?:leistungen|services|angebot|angebote|produkte)$/i, "services"],
   [/^(?:usp|alleinstellung|differenzierung)$/i, "usp"],
   [/^(?:fokus|schwerpunkt|fokuskeywords?|keywords?|spezialisierung)$/i, "focus"],
@@ -742,6 +975,7 @@ const DOCUMENT_LABEL_TO_KEY: Array<[RegExp, FirstConversationFieldKey]> = [
   [/^(?:website\s+und\s+auftritt|website[\s_-]?issues?|men(?:ü|ue))$/i, "websiteIssues"],
   [/^(?:ziel\s+des\s+mandats|mandat|auftrag)$/i, "mandateGoals"],
   [/^(?:zukunft|n(?:ä|ae)chste\s+schritte|geplant)$/i, "futurePlans"],
+  [/^(?:wunschkunden\s+und\s+finanzen|finanzielle\s+ziele)$/i, "wishMatchesFinance"],
   [/^(?:seiten|links|landingpages?|urls?)$/i, "pagesOrLinks"],
 ];
 
