@@ -11,7 +11,7 @@ import {
   suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "../lib/dt/agent-survey-coverage-option-helpers";
-import { pickBestSurveyResponseForCoverage, matchSurveyFoldersToOrganisationName, organisationLabelMatches, pickPreferredSurveyFolder } from "../lib/dt/agent-survey-coverage-options";
+import { pickBestSurveyResponseForCoverage, matchSurveyFoldersToOrganisationName, organisationLabelMatches, organisationMatchAliases, organisationIlikeNeedles, pickPreferredSurveyFolder } from "../lib/dt/agent-survey-coverage-options";
 import type { SurveyFact } from "../lib/dt/survey-facts";
 
 const facts: SurveyFact[] = [
@@ -194,6 +194,28 @@ assert.equal(
 assert.equal(
   pickPreferredSurveyFolder(arcticFolders, ["ArcticTub", "arctictub"])?.id,
   "at-camel",
+);
+
+assert.equal(
+  organisationLabelMatches("Anbieterfragebogen Arctic-Tub", "arctictub", [
+    "arctic-tub.de",
+    "arctic-tub",
+  ]),
+  true,
+);
+
+const hostAliases = organisationMatchAliases({
+  name: "arctictub",
+  slug: "arctictub",
+  displayName: "ArcticTub",
+  websiteUrl: "https://www.arctic-tub.de",
+});
+assert.ok(hostAliases.some((a) => a.toLowerCase().includes("arctic-tub")));
+assert.ok(
+  organisationIlikeNeedles(hostAliases).some((n) => n.toLowerCase() === "arctictub"),
+);
+assert.ok(
+  organisationIlikeNeedles(hostAliases).some((n) => n.toLowerCase() === "arctic-tub"),
 );
 
 console.log("agent-survey-coverage tests: ok");

@@ -85,3 +85,27 @@ export async function loadDtManageOrganisations(userId: string): Promise<{
     isPlatformAdmin: false,
   };
 }
+
+/**
+ * Organisations whose questionnaires a user may see: every membership
+ * (including employees), plus all orgs for platform admins.
+ */
+export async function loadDtFragebogenOrganisations(userId: string): Promise<{
+  organisations: DtManageOrganisation[];
+  isPlatformAdmin: boolean;
+}> {
+  const supabase = await createClient();
+  const platformAdmin = await isPlatformAdmin(supabase, userId);
+  if (platformAdmin) {
+    return loadDtManageOrganisations(userId);
+  }
+
+  const { organisations } = await loadDtUserOrganisations(userId);
+  return {
+    organisations: await withDisplayNames(
+      organisations.map((o) => ({ id: o.id, name: o.name, slug: o.slug })),
+      supabase,
+    ),
+    isPlatformAdmin: false,
+  };
+}

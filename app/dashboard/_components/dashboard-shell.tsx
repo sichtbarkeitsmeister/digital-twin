@@ -17,6 +17,7 @@ export function DashboardShell({
   canManageDtAgents,
   canViewDtUsage,
   showLeads,
+  showFrageboegen,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
 }: {
@@ -26,6 +27,7 @@ export function DashboardShell({
   canManageDtAgents?: boolean;
   canViewDtUsage?: boolean;
   showLeads?: boolean;
+  showFrageboegen?: boolean;
   pendingSurveyQuestionsCount?: number;
   pendingAgentEditRequestsCount?: number;
 }) {
@@ -44,6 +46,7 @@ export function DashboardShell({
                 canManageDtAgents={canManageDtAgents ?? false}
                 canViewDtUsage={canViewDtUsage ?? false}
                 showLeads={showLeads ?? false}
+                showFrageboegen={showFrageboegen ?? false}
                 pendingSurveyQuestionsCount={pendingSurveyQuestionsCount ?? 0}
                 pendingAgentEditRequestsCount={pendingAgentEditRequestsCount ?? 0}
               />

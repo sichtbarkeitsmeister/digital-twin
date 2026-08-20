@@ -18,7 +18,7 @@ import {
 import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
 import { findOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
-import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
+import { loadDtFragebogenOrganisations } from "@/lib/dt/load-manage-organisations";
 import { organisationOptionLabel } from "@/lib/shared/organisation-option";
 import { createClient } from "@/lib/supabase/server";
 
@@ -64,7 +64,7 @@ export default async function OrganisationFrageboegenPage({
     redirect("/auth/login");
   }
 
-  const { organisations, isPlatformAdmin } = await loadDtManageOrganisations(user.id);
+  const { organisations, isPlatformAdmin } = await loadDtFragebogenOrganisations(user.id);
   const selectedOrganisationId =
     orgParam && organisations.some((o) => o.id === orgParam)
       ? orgParam
@@ -78,8 +78,7 @@ export default async function OrganisationFrageboegenPage({
           <CardHeader>
             <CardTitle>Keine Organisation</CardTitle>
             <CardDescription>
-              Du brauchst Admin- oder Inhaber-Rechte in einer Organisation, um Fragebögen zu
-              sehen.
+              Du musst Mitglied einer Organisation sein, um Fragebögen zu sehen.
             </CardDescription>
           </CardHeader>
         </Card>

@@ -1,6 +1,9 @@
 import {
+  escapeIlikePattern,
   matchSurveyFoldersToOrganisationName,
+  organisationIlikeNeedles,
   organisationLabelMatches,
+  organisationMatchAliases,
 } from "@/lib/dt/agent-survey-coverage-options";
 import { normalizeSurveyPurpose, type SurveyPurpose } from "@/lib/surveys/purpose";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -62,15 +65,19 @@ export async function listSurveysForOrganisation(input: {
 
   const { data: orgConfig } = await supabase
     .from("dt_org_config")
-    .select("display_name")
+    .select("display_name, website_url")
     .eq("organisation_id", input.organisationId)
     .maybeSingle();
 
-  const orgName =
-    organisation?.name ?? organisation?.slug ?? orgConfig?.display_name ?? "";
-  const orgAliases = [organisation?.slug, orgConfig?.display_name].filter(
-    (v): v is string => Boolean(v?.trim()),
-  );
+  const aliases = organisationMatchAliases({
+    name: organisation?.name,
+    slug: organisation?.slug,
+    displayName: orgConfig?.display_name,
+    websiteUrl: orgConfig?.website_url,
+  });
+  const orgName = aliases[0] ?? organisation?.name ?? organisation?.slug ?? "";
+  const orgAliases = aliases.slice(1);
+  const needles = organisationIlikeNeedles(aliases);
 
   const surveyById = new Map<string, SurveyRow>();
 
@@ -99,6 +106,20 @@ export async function listSurveysForOrganisation(input: {
     orgAliases,
   );
   const folderIds = new Set(matchedFolders.map((f) => f.id));
+
+  for (const needle of needles) {
+    const { data: namedFolders } = await supabase
+      .from("survey_folders")
+      .select("id, name")
+      .ilike("name", `%${escapeIlikePattern(needle)}%`)
+      .limit(80);
+    for (const folder of namedFolders ?? []) {
+      folderNameById.set(folder.id, folder.name);
+      if (organisationLabelMatches(folder.name, orgName, orgAliases)) {
+        folderIds.add(folder.id);
+      }
+    }
+  }
   for (const s of surveyById.values()) {
     if (s.folder_id) folderIds.add(s.folder_id);
   }
@@ -152,6 +173,21 @@ export async function listSurveysForOrganisation(input: {
     if (row.organisation_id && row.organisation_id !== input.organisationId) continue;
     if (!organisationLabelMatches(row.title, orgName, orgAliases)) continue;
     surveyById.set(row.id, row);
+  }
+
+  for (const needle of needles) {
+    const { data: namedSurveys } = await supabase
+      .from("surveys")
+      .select(SURVEY_LIST_COLUMNS)
+      .is("deleted_at", null)
+      .ilike("title", `%${escapeIlikePattern(needle)}%`)
+      .limit(80);
+    for (const s of namedSurveys ?? []) {
+      const row = s as SurveyRow;
+      if (surveyById.has(row.id)) continue;
+      if (!organisationLabelMatches(row.title, orgName, orgAliases)) continue;
+      surveyById.set(row.id, row);
+    }
   }
 
   const unassignedIds = [...surveyById.values()]

@@ -63,6 +63,62 @@ function collectAliases(organisationName: string, extraAliases: string[] = []): 
   return aliases;
 }
 
+function websiteHostAliases(websiteUrl: string | null | undefined): string[] {
+  const raw = String(websiteUrl ?? "").trim();
+  if (!raw) return [];
+  let hostname = "";
+  try {
+    hostname = new URL(raw.includes("://") ? raw : `https://${raw}`).hostname.toLowerCase();
+  } catch {
+    return [];
+  }
+  hostname = hostname.replace(/^www\./, "");
+  if (!hostname) return [];
+  const aliases = [hostname];
+  const labels = hostname.split(".").filter(Boolean);
+  if (labels.length >= 2) {
+    const sld = labels[0]!;
+    aliases.push(sld);
+    aliases.push(sld.replace(/-/g, " "));
+    aliases.push(sld.replace(/-/g, ""));
+  }
+  return aliases;
+}
+
+/** Name, slug, display name and website host variants used to match folders/titles. */
+export function organisationMatchAliases(input: {
+  name?: string | null;
+  slug?: string | null;
+  displayName?: string | null;
+  websiteUrl?: string | null;
+}): string[] {
+  return collectAliases(input.name ?? "", [
+    input.slug ?? "",
+    input.displayName ?? "",
+    ...websiteHostAliases(input.websiteUrl),
+  ]);
+}
+
+export function escapeIlikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/** Distinct strings to use with SQL ILIKE for this organisation. */
+export function organisationIlikeNeedles(aliases: string[]): string[] {
+  const needles = new Set<string>();
+  for (const alias of aliases) {
+    const trimmed = alias.trim();
+    if (trimmed.length >= 4) needles.add(trimmed);
+    const compact = compactAlnum(trimmed);
+    if (compact.length >= 6) needles.add(compact);
+    const slug = slugifyOrganisationName(trimmed);
+    if (slug.length >= 4) needles.add(slug);
+    const spaced = slug.replace(/-/g, " ");
+    if (spaced.length >= 4) needles.add(spaced);
+  }
+  return [...needles];
+}
+
 /**
  * True when a folder name or survey title belongs to the organisation.
  * Treats slug, spaced brand names and camelCase as the same identity
@@ -244,13 +300,19 @@ export async function listSurveyResponsesForAgentCoverage(input: {
 
   const { data: orgConfig } = await supabase
     .from("dt_org_config")
-    .select("display_name")
+    .select("display_name, website_url")
     .eq("organisation_id", input.organisationId)
     .maybeSingle();
 
-  const orgAliases = [organisation?.slug, orgConfig?.display_name].filter(
-    (v): v is string => Boolean(v?.trim()),
-  );
+  const aliases = organisationMatchAliases({
+    name: organisation?.name,
+    slug: organisation?.slug,
+    displayName: orgConfig?.display_name,
+    websiteUrl: orgConfig?.website_url,
+  });
+  const orgName = aliases[0] ?? organisation?.name ?? organisation?.slug ?? "";
+  const orgAliases = aliases.slice(1);
+  const needles = organisationIlikeNeedles(aliases);
 
   const surveyById = new Map<string, SurveyListRow>();
 
@@ -279,10 +341,23 @@ export async function listSurveyResponsesForAgentCoverage(input: {
 
   const matchedFolders = matchSurveyFoldersToOrganisationName(
     folders ?? [],
-    organisation?.name ?? organisation?.slug ?? orgConfig?.display_name ?? "",
+    orgName,
     orgAliases,
   );
   const folderIds = new Set(matchedFolders.map((f) => f.id));
+
+  for (const needle of needles) {
+    const { data: namedFolders } = await supabase
+      .from("survey_folders")
+      .select("id, name")
+      .ilike("name", `%${escapeIlikePattern(needle)}%`)
+      .limit(80);
+    for (const folder of namedFolders ?? []) {
+      if (organisationLabelMatches(folder.name, orgName, orgAliases)) {
+        folderIds.add(folder.id);
+      }
+    }
+  }
 
   // Also keep folders already referenced by org-linked surveys.
   for (const s of surveyById.values()) {
@@ -302,8 +377,6 @@ export async function listSurveyResponsesForAgentCoverage(input: {
     }
   }
 
-  const orgName =
-    organisation?.name ?? organisation?.slug ?? orgConfig?.display_name ?? "";
   const { data: titleCandidates } = await supabase
     .from("surveys")
     .select("id, title, purpose, organisation_id, folder_id, deleted_at, updated_at")
@@ -316,6 +389,21 @@ export async function listSurveyResponsesForAgentCoverage(input: {
     if (row.organisation_id && row.organisation_id !== input.organisationId) continue;
     if (!organisationLabelMatches(row.title, orgName, orgAliases)) continue;
     surveyById.set(row.id, row);
+  }
+
+  for (const needle of needles) {
+    const { data: namedSurveys } = await supabase
+      .from("surveys")
+      .select("id, title, purpose, organisation_id, folder_id, deleted_at, updated_at")
+      .is("deleted_at", null)
+      .ilike("title", `%${escapeIlikePattern(needle)}%`)
+      .limit(80);
+    for (const s of namedSurveys ?? []) {
+      const row = s as SurveyListRow;
+      if (surveyById.has(row.id)) continue;
+      if (!organisationLabelMatches(row.title, orgName, orgAliases)) continue;
+      surveyById.set(row.id, row);
+    }
   }
 
   // 3) Surveys already used as source by agents in this org.

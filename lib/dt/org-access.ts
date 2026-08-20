@@ -65,6 +65,26 @@ export async function canViewDtAgentContext(
   return isPlatformAdmin(supabase, userId);
 }
 
+export async function userHasAnyOrganisation(userId: string): Promise<boolean> {
+  const supabase = await import("@/lib/supabase/server").then((m) => m.createClient());
+  if (await isPlatformAdmin(supabase, userId)) return true;
+
+  const { count } = await supabase
+    .from("organisation_members")
+    .select("organisation_id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  if ((count ?? 0) > 0) return true;
+
+  const { count: ownedCount } = await supabase
+    .from("organisations")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_user_id", userId)
+    .is("archived_at", null);
+
+  return (ownedCount ?? 0) > 0;
+}
+
 export async function userCanManageAnyDtAgents(userId: string): Promise<boolean> {
   const supabase = await import("@/lib/supabase/server").then((m) => m.createClient());
   if (await isPlatformAdmin(supabase, userId)) return true;
