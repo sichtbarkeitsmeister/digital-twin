@@ -31,6 +31,9 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
+/** Preview can crawl + call Haiku; keep under the platform limit even if AI is slow. */
+export const maxDuration = 120;
+
 export type ActionState<T = undefined> =
   | { ok: true; message: string; data?: T }
   | { ok: false; message: string };
@@ -331,6 +334,7 @@ const createFromReviewSchema = z.object({
     websiteUrl: z.string().nullable(),
     organisationName: z.string(),
     questions: z.array(reviewQuestionSchema).min(1),
+    aiWarning: z.string().nullable().optional(),
   }),
 });
 

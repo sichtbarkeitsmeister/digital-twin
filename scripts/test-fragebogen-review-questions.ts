@@ -19,6 +19,7 @@ function baseDraft(questions: ReviewQuestionItem[]): FragebogenReviewDraft {
     websiteUrl: null,
     organisationName: "Test GmbH",
     questions,
+    aiWarning: null,
   };
 }
 
@@ -192,5 +193,15 @@ const teamAnswer = teamBuilt.answers.core_team_members as {
 };
 assert.equal(teamAnswer?.entries?.[0]?.value, "Anna Müller, Inhaberin");
 assert.equal(teamAnswer?.entries?.[1]?.value, "Max Schmidt, Beratung");
+
+const withAiWarning = buildSurveyAndAnswersFromReview({
+  draft: {
+    ...baseDraft([coreQuestion()]),
+    aiWarning:
+      "KI-Vorausfüllung hat zu lange gedauert. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen.",
+  },
+  savePrefills: true,
+});
+assert.equal(withAiWarning.answers.core_persona_name, "Max Mustermann");
 
 console.log("fragebogen-review-questions: all ok");

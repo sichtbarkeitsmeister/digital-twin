@@ -8,7 +8,7 @@ import {
   extractFirstJsonObject,
   escapeControlCharsInJsonStrings,
 } from "@/lib/ai/anthropic-helpers";
-import { DEFAULT_SURVEY_ACTION_MODEL } from "@/lib/ai/survey-model-config";
+import { resolveSurveyChatModels } from "@/lib/ai/survey-model-config";
 import {
   coreQuestionsForPurpose,
   fieldIdForCoreKey,
@@ -71,12 +71,12 @@ async function generateExtrasAndAiPrefills(input: {
   coreItems: Array<{ key: string; title: string; hasPrefill: boolean }>;
   includeAiExtras: boolean;
   maxExtras?: number;
-}): Promise<{ extras: string[]; aiPrefills: Record<string, PrefillDraft> }> {
+}): Promise<{ extras: string[]; aiPrefills: Record<string, PrefillDraft>; warning: string | null }> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) return { extras: [], aiPrefills: {} };
+  if (!apiKey) return { extras: [], aiPrefills: {}, warning: null };
 
   const anthropic = new Anthropic({ apiKey });
-  const maxExtras = input.maxExtras ?? 8;
+  const maxExtras = input.maxExtras ?? 4;
   const missing = input.coreItems.filter((c) => !c.hasPrefill);
   const audience =
     input.purpose === "anbieter"
@@ -86,57 +86,54 @@ async function generateExtrasAndAiPrefills(input: {
         : `Kunden-Persona-Fragebogen für Wunschkunde „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“.`;
 
   const documentBlock = input.documentText?.trim()
-    ? `\nHochgeladene Gesprächsnotizen / Meeting-Protokolle / vorhandene Antworten (HÖCHSTE PRIORITÄT — wörtlich übernehmen, nicht erfinden):\n${input.documentText.slice(0, 24000)}\n`
+    ? `\nHochgeladene Dateien (HÖCHSTE PRIORITÄT):\n${input.documentText.slice(0, 8000)}\n`
     : "";
   const meetingBlock = input.meetingContext?.trim()
-    ? `\nKundengespräch / Meeting-Briefing (PRIORITÄT — direkt übernehmen, nicht erfinden):\n${input.meetingContext.slice(0, 6000)}\n`
+    ? `\nMeeting-Briefing:\n${input.meetingContext.slice(0, 3500)}\n`
     : "";
 
-  const result = await callAnthropicFirstAvailable({
-    anthropic,
-    models: [DEFAULT_SURVEY_ACTION_MODEL],
-    maxTokens: 6000,
-    timeoutMs: 90_000,
-    stream: false,
-    system:
-      "Du hilfst beim Aufbau deutscher Fragebögen. Nutze zuerst hochgeladene Dateien und Meeting-Notizen, dann den Website-Crawl (Presse, Über uns, Team, Leistungen) und SEO-Zahlen. Nichts erfinden. Antworte nur mit JSON.",
-    messages: [
-      {
-        role: "user",
-        content: `${audience}
-
-Kernfragen:
-${input.coreItems.map((c) => `- [${c.key}] ${c.title}${c.hasPrefill ? " (schon vorausgefüllt)" : ""}`).join("\n")}
-
-Noch ohne Prefill:
-${missing.map((c) => `- ${c.key}: ${c.title}`).join("\n") || "(alle Kernfragen haben schon Prefill)"}
-${documentBlock}${meetingBlock}
-Website-/Crawl-/SEO-Kontext (Presse, Über uns, Team, Leistungsseiten zuerst):
-${input.crawlSummary.slice(0, 22000)}
-
-Aufgabe:
-1) Jede Kernfrage, die in den hochgeladenen Dateien klar beantwortet ist, vorausfüllen. source=upload. Formuliere die Antwort so, dass sie ins Feld passt (Stichpunkte oder Sätze, keine Meta-Kommentare).
-2) Danach Meeting-Briefing. source=upload, wenn es aus den Dateien stammt, sonst source=ai.
-3) Danach Website-Crawl: besonders Pressemitteilungen, Über-uns-/About-Seiten, Teamseiten und Leistungs-/Performance-Seiten. Typische Felder: Team (Namen + Rollen, Anzahl), Leistungen/Produkte, USP, Standort, Meilensteine, Partner, Tonalität. source=ai.
-4) Zahlen (Impressionen, Klicks, Rankings, Teamgröße) wörtlich übernehmen, nicht runden oder schätzen.
-5) Wenn unklar oder nur geraten: weglassen. Lieber weniger, aber belegt.
-6) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen. Nicht die Kernfragen wiederholen.` : "Keine Zusatzfragen (questions=[])."}
-
-JSON:
-{
-  "prefills":[{"key":"team_members","value":"...","note":"kurz warum","source":"upload"}],
-  "questions":["Zusatzfrage 1?"]
-}`,
-      },
-    ],
-  });
-
-  if (!result) return { extras: [], aiPrefills: {} };
-  const raw = extractAnthropicText(result.response);
-  const jsonText = extractFirstJsonObject(escapeControlCharsInJsonStrings(raw));
-  if (!jsonText) return { extras: [], aiPrefills: {} };
+  const targets = missing.length > 0 ? missing : input.coreItems.slice(0, 12);
 
   try {
+    const result = await callAnthropicFirstAvailable({
+      anthropic,
+      models: resolveSurveyChatModels(),
+      maxTokens: 2500,
+      timeoutMs: 35_000,
+      stream: true,
+      system:
+        "Du füllst deutsche Fragebogen-Felder aus belegtem Kontext. Nichts erfinden. Nur JSON.",
+      messages: [
+        {
+          role: "user",
+          content: `${audience}
+
+Offene Kernfragen:
+${targets.map((c) => `- [${c.key}] ${c.title}`).join("\n")}
+${documentBlock}${meetingBlock}
+Crawl (Presse, Über uns, Team, Leistungen zuerst):
+${input.crawlSummary.slice(0, 9000)}
+
+Fülle nur Felder, die der Kontext klar hergibt. Team, Leistungen, USP, Standort, Presse besonders. source=upload bei Dateien, sonst source=ai.
+${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].` : "questions=[]."}
+
+{"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"upload"}],"questions":[]}`,
+        },
+      ],
+    });
+
+    if (!result) {
+      return {
+        extras: [],
+        aiPrefills: {},
+        warning:
+          "KI-Vorausfüllung war nicht verfügbar. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen.",
+      };
+    }
+    const raw = extractAnthropicText(result.response);
+    const jsonText = extractFirstJsonObject(escapeControlCharsInJsonStrings(raw));
+    if (!jsonText) return { extras: [], aiPrefills: {}, warning: null };
+
     const parsed = JSON.parse(jsonText) as {
       prefills?: Array<{
         key?: unknown;
@@ -174,9 +171,17 @@ JSON:
           .filter((q) => q.length >= 8)
           .slice(0, maxExtras)
       : [];
-    return { extras, aiPrefills };
-  } catch {
-    return { extras: [], aiPrefills: {} };
+    return { extras, aiPrefills, warning: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    const timedOut = /Zeitlimit|timeout|aborted/i.test(message);
+    return {
+      extras: [],
+      aiPrefills: {},
+      warning: timedOut
+        ? "KI-Vorausfüllung hat zu lange gedauert. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen."
+        : "KI-Vorausfüllung ist ausgefallen. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen.",
+    };
   }
 }
 
@@ -368,6 +373,7 @@ export async function buildFragebogenReviewDraft(input: {
     websiteUrl: crawl.websiteUrl,
     organisationName: crawl.organisationName,
     questions,
+    aiWarning: aiBundle.warning,
   };
 }
 
