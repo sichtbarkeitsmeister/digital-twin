@@ -110,6 +110,8 @@ export const FIRST_CONVERSATION_HIDDEN_KEYS: ReadonlySet<FirstConversationFieldK
     "mandateGoals",
     "colloquialName",
     "employeeCount",
+    "keepOthers",
+    "services",
   ]);
 
 export const FIRST_CONVERSATION_KIND_TABS: ReadonlyArray<{
@@ -322,21 +324,15 @@ function praxisSections(): FirstConversationSection[] {
     {
       id: "offer",
       title: "Leistungen und Fokus",
-      description: "Was heute angeboten wird, und worauf die Sichtbarkeit liegen soll.",
+      description: "Worauf die Praxis die Sichtbarkeit legen will.",
       fields: [
         field(
-          "services",
-          "Leistungen heute",
-          "Welche Leistungen stehen heute im Mittelpunkt — nicht die komplette Liste?",
-          { placeholder: "Die Angebote, die wirklich nachgefragt werden", rows: 4 },
-        ),
-        field(
           "focus",
-          "Worauf spezialisieren?",
-          "Worauf soll der Schwerpunkt liegen, wo soll die Praxis wachsen?",
+          "Fokus der Leistungen",
+          "Auf welche Leistungen setzt die Praxis den Fokus?",
           {
             placeholder: "z. B. Laser und größere Eingriffe, nicht die kleine Einzelleistung",
-            rows: 3,
+            rows: 4,
           },
         ),
       ],
@@ -344,7 +340,7 @@ function praxisSections(): FirstConversationSection[] {
     {
       id: "customers",
       title: "Wunschpatienten",
-      description: "Für wen Website und Avatar später gebaut werden. Fokus heißt nicht Ablehnung.",
+      description: "Für wen Website und Avatar später gebaut werden.",
       fields: [
         field(
           "targetGroup",
@@ -363,15 +359,6 @@ function praxisSections(): FirstConversationSection[] {
           {
             placeholder: "z. B. Selbstzahler mit einmaliger kleiner Leistung, ohne Wiederkehr",
             rows: 3,
-          },
-        ),
-        field(
-          "keepOthers",
-          "Andere bleiben willkommen?",
-          "Heißt der Fokus auf Wunschpatienten, dass andere Patienten abgelehnt werden — oder bleibt die Entscheidung im Einzelfall?",
-          {
-            placeholder: "Meist: Fokus nur für Website und Werbung — Einzelfall bleibt bei der Praxis",
-            rows: 2,
           },
         ),
         field(
@@ -475,21 +462,15 @@ function kanzleiSections(): FirstConversationSection[] {
     {
       id: "offer",
       title: "Leistungen und Fokus",
-      description: "Rechtsgebiete heute, und worauf die Kanzlei sichtbar spezialisieren will.",
+      description: "Worauf die Kanzlei die Sichtbarkeit legen will.",
       fields: [
         field(
-          "services",
-          "Rechtsgebiete heute",
-          "Welche Rechtsgebiete stehen heute im Mittelpunkt?",
-          { placeholder: "Die Mandate, die wirklich angenommen werden", rows: 4 },
-        ),
-        field(
           "focus",
-          "Worauf spezialisieren?",
-          "Worauf soll die Kanzlei sich sichtbar spezialisieren — welche Mandate sollen wachsen?",
+          "Fokus der Leistungen",
+          "Auf welche Leistungen setzt die Kanzlei den Fokus?",
           {
             placeholder: "z. B. Arbeitsrecht und Gesellschaftsrecht, nicht jedes Mandat gleich",
-            rows: 3,
+            rows: 4,
           },
         ),
       ],
@@ -497,7 +478,7 @@ function kanzleiSections(): FirstConversationSection[] {
     {
       id: "customers",
       title: "Wunschmandanten",
-      description: "Für wen Website und Avatar später gebaut werden. Fokus heißt nicht Ablehnung.",
+      description: "Für wen Website und Avatar später gebaut werden.",
       fields: [
         field(
           "targetGroup",
@@ -515,15 +496,6 @@ function kanzleiSections(): FirstConversationSection[] {
           {
             placeholder: "Kurz, ohne Wertung im Gespräch — nur für die Ausrichtung",
             rows: 3,
-          },
-        ),
-        field(
-          "keepOthers",
-          "Andere bleiben willkommen?",
-          "Heißt der Fokus auf Wunschmandanten, dass andere Mandanten abgelehnt werden — oder bleibt die Entscheidung im Einzelfall?",
-          {
-            placeholder: "Meist: Fokus nur für Website und Werbung — Einzelfall bleibt bei der Kanzlei",
-            rows: 2,
           },
         ),
         field(
@@ -624,26 +596,20 @@ function weitereSections(): FirstConversationSection[] {
     {
       id: "offer",
       title: "Leistungen und Fokus",
-      description: "Was heute angeboten wird, und worauf die Sichtbarkeit liegen soll.",
+      description: "Worauf die Firma die Sichtbarkeit legen will.",
       fields: [
         field(
-          "services",
-          "Leistungen heute",
-          "Welche Leistungen oder Produkte stehen heute im Mittelpunkt?",
-          { placeholder: "Die Angebote, die wirklich nachgefragt werden", rows: 4 },
-        ),
-        field(
           "focus",
-          "Worauf spezialisieren?",
-          "Worauf soll die Sichtbarkeit liegen — welches Angebot soll wachsen?",
-          { placeholder: "Schwerpunkt, Fokus-Themen…", rows: 3 },
+          "Fokus der Leistungen",
+          "Auf welche Leistungen setzt die Firma den Fokus?",
+          { placeholder: "Schwerpunkt, Fokus-Themen…", rows: 4 },
         ),
       ],
     },
     {
       id: "customers",
       title: "Wunschkunden",
-      description: "Für wen Website und Avatar später gebaut werden. Fokus heißt nicht Ablehnung.",
+      description: "Für wen Website und Avatar später gebaut werden.",
       fields: [
         field(
           "targetGroup",
@@ -656,15 +622,6 @@ function weitereSections(): FirstConversationSection[] {
           "Welche Anfragen sind eher unattraktiv?",
           "Welche Anfragen kosten viel und bringen wenig — und sollen deshalb nicht die Werbung bestimmen?",
           { placeholder: "Kurz, ohne Wertung im Gespräch — nur für die Ausrichtung", rows: 3 },
-        ),
-        field(
-          "keepOthers",
-          "Andere bleiben willkommen?",
-          "Heißt der Fokus auf Wunschkunden, dass andere Kunden abgelehnt werden — oder bleibt die Entscheidung im Einzelfall?",
-          {
-            placeholder: "Meist: Fokus nur für Website und Werbung — Einzelfall bleibt bei der Firma",
-            rows: 2,
-          },
         ),
         field(
           "wunschkundeLabel",
@@ -902,7 +859,7 @@ export function firstConversationToMeetingBriefing(
     pagesOrLinks: record.pagesOrLinks || null,
     notes: notes || null,
     focus: record.focus || null,
-    services: record.services || null,
+    services: record.services || record.focus || null,
     usp: record.usp || null,
     region: record.region || null,
     targetGroup: record.targetGroup || null,

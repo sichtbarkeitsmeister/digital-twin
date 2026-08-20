@@ -55,7 +55,13 @@ assert.ok(kanzleiAsks.some((text) => /Mandanten/.test(text)));
 assert.ok(kanzleiAsks.some((text) => /Wunschmandant/.test(text)));
 assert.ok(kanzleiAsks.some((text) => /Mandat beauftragt/.test(text)));
 assert.ok(kanzleiAsks.some((text) => /finanziellen Zielen der Kanzlei/.test(text)));
-assert.ok(kanzleiAsks.some((text) => /Rechtsgebiete/.test(text)));
+assert.ok(praxisAsks.some((text) => /Auf welche Leistungen setzt die Praxis den Fokus/.test(text)));
+assert.ok(!praxisAsks.some((text) => /Mittelpunkt/.test(text)));
+assert.ok(!praxisAsks.some((text) => /abgelehnt werden/.test(text)));
+assert.ok(!kanzleiAsks.some((text) => /abgelehnt werden/.test(text)));
+assert.ok(!weitereAsks.some((text) => /abgelehnt werden/.test(text)));
+assert.ok(kanzleiAsks.some((text) => /Auf welche Leistungen setzt die Kanzlei den Fokus/.test(text)));
+assert.ok(weitereAsks.some((text) => /Auf welche Leistungen setzt die Firma den Fokus/.test(text)));
 assert.ok(weitereAsks.some((text) => /Kunden/.test(text)));
 assert.ok(weitereAsks.some((text) => /Wunschkunde/.test(text)));
 assert.ok(weitereAsks.some((text) => /kauft oder entscheidet/.test(text)));
@@ -77,7 +83,9 @@ assert.ok(!kanzleiKeys.includes("industry"));
 assert.ok(weitereKeys.includes("industry"));
 assert.ok(praxisKeys.includes("currentStatus"));
 assert.ok(praxisKeys.includes("futurePlans"));
-assert.ok(praxisKeys.includes("wunschkundeLabel"));
+assert.ok(praxisKeys.includes("focus"));
+assert.ok(!praxisKeys.includes("keepOthers"));
+assert.ok(!praxisKeys.includes("services"));
 assert.equal(praxisSections.filter((section) => section.id === "visibility").length, 1);
 assert.equal(
   praxisSections.find((section) => section.id === "visibility")?.fields.length,
