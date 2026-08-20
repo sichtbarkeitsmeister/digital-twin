@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeSurveyPurpose, surveyPurposeLabel } from "@/lib/surveys/purpose";
+import type { SurveyPurpose } from "@/lib/surveys/purpose";
 import type { SurveyField } from "@/lib/surveys/types";
 
 import {
@@ -40,7 +41,7 @@ export type SurveyClarificationSource = {
   responseId: string;
   surveyId: string;
   surveyTitle: string;
-  purpose: "anbieter" | "persona";
+  purpose: SurveyPurpose;
   purposeLabel: string;
   completedAt: string | null;
 };

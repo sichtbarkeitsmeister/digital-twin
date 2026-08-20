@@ -8,6 +8,7 @@ import {
 } from "@/lib/dt/survey-to-agent-context";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
 import { canAccessSurveyForDashboard } from "@/lib/surveys/survey-dashboard-access";
+import { normalizeSurveyPurpose } from "@/lib/surveys/purpose";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -87,8 +88,9 @@ export default async function SurveyResponseDetailPage({
     .maybeSingle();
   if (!survey) return notFound();
 
-  const surveyPurpose =
-    (survey as { purpose?: string }).purpose === "anbieter" ? "anbieter" : "persona";
+  const surveyPurpose = normalizeSurveyPurpose(
+    (survey as { purpose?: unknown }).purpose,
+  );
 
   const { data: response } = await db
     .from("survey_responses")
@@ -184,6 +186,7 @@ export default async function SurveyResponseDetailPage({
               </Button>
             ) : null}
             {response.status === "completed" &&
+            surveyPurpose !== "intern" &&
             (surveyPurpose === "anbieter" || !existingAgent) ? (
               <Button asChild size="sm">
                 <Link

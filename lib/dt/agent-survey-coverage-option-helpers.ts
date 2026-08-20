@@ -2,7 +2,7 @@ export type AgentCoverageSurveyOption = {
   surveyId: string;
   responseId: string;
   surveyTitle: string;
-  purpose: "persona" | "anbieter";
+  purpose: "persona" | "anbieter" | "intern";
   completedAt: string | null;
   /** True when this is the agent's stored source lineage. */
   isSource: boolean;

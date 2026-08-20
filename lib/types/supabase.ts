@@ -1106,7 +1106,7 @@ export type Database = {
       org_role: "owner" | "admin" | "employee"
       survey_response_status: "in_progress" | "completed"
       survey_visibility: "private" | "public"
-      survey_purpose: "persona" | "anbieter"
+      survey_purpose: "persona" | "anbieter" | "intern"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1238,7 +1238,7 @@ export const Constants = {
       org_role: ["owner", "admin", "employee"],
       survey_response_status: ["in_progress", "completed"],
       survey_visibility: ["private", "public"],
-      survey_purpose: ["persona", "anbieter"],
+      survey_purpose: ["persona", "anbieter", "intern"],
     },
   },
 } as const

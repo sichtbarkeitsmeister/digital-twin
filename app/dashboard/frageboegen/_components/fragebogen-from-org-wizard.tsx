@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import type { SurveyPurpose } from "@/lib/surveys/purpose";
 
 type CoreItem = { key: string; title: string; description: string; stepTitle: string };
 
@@ -43,7 +44,7 @@ export function FragebogenFromOrgWizard(props: {
   const organisationId = props.organisationId;
   const [isPending, startTransition] = useTransition();
   const [step, setStep] = useState<"configure" | "review">("configure");
-  const [purpose, setPurpose] = useState<"anbieter" | "persona">("anbieter");
+  const [purpose, setPurpose] = useState<SurveyPurpose>("anbieter");
   const [wunschkundeLabel, setWunschkundeLabel] = useState("");
   const [includeAiExtras, setIncludeAiExtras] = useState(true);
   const [extraPlacement, setExtraPlacement] = useState<"start" | "end">("end");
@@ -60,12 +61,14 @@ export function FragebogenFromOrgWizard(props: {
   const [pageCount, setPageCount] = useState(0);
   const [anbieterCore, setAnbieterCore] = useState<CoreItem[]>([]);
   const [personaCore, setPersonaCore] = useState<CoreItem[]>([]);
+  const [internCore, setInternCore] = useState<CoreItem[]>([]);
   const [draft, setDraft] = useState<FragebogenReviewDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loadingCtx, setLoadingCtx] = useState(Boolean(organisationId));
 
-  const coreItems = purpose === "anbieter" ? anbieterCore : personaCore;
+  const coreItems =
+    purpose === "anbieter" ? anbieterCore : purpose === "intern" ? internCore : personaCore;
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +99,7 @@ export function FragebogenFromOrgWizard(props: {
       setPageCount(res.data.pageCount);
       setAnbieterCore(res.data.anbieterCore);
       setPersonaCore(res.data.personaCore);
+      setInternCore(res.data.internCore);
       setSelectedKeys(res.data.anbieterCore.map((c) => c.key));
       setLoadingCtx(false);
     })();
@@ -105,10 +109,12 @@ export function FragebogenFromOrgWizard(props: {
   }, [organisationId]);
 
   useEffect(() => {
-    const items = purpose === "anbieter" ? anbieterCore : personaCore;
+    const items =
+      purpose === "anbieter" ? anbieterCore : purpose === "intern" ? internCore : personaCore;
     if (items.length === 0) return;
     setSelectedKeys(items.map((c) => c.key));
-  }, [purpose, anbieterCore, personaCore]);
+    setIncludeAiExtras(purpose !== "intern");
+  }, [purpose, anbieterCore, personaCore, internCore]);
 
   const selectedCount = useMemo(
     () => selectedKeys.filter((k) => coreItems.some((c) => c.key === k)).length,
@@ -543,7 +549,9 @@ export function FragebogenFromOrgWizard(props: {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">3. Zweck</CardTitle>
-          <CardDescription>Anbieter-Firmenwissen oder Wunschkunden-Persona.</CardDescription>
+          <CardDescription>
+            Anbieter und Wunschkunde gehen an den Kunden. Intern bleibt bei der Agentur.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           <div className="flex flex-wrap gap-2">
@@ -571,7 +579,26 @@ export function FragebogenFromOrgWizard(props: {
             >
               Kunden-Persona
             </button>
+            <button
+              type="button"
+              onClick={() => setPurpose("intern")}
+              className={cn(
+                "rounded-xl border px-3 py-2 text-sm font-medium transition",
+                purpose === "intern"
+                  ? "border-sbkm-mint/50 bg-sbkm-mint/15 text-primary"
+                  : "border-sbkm-navy/10 hover:bg-sbkm-navy/5",
+              )}
+            >
+              Intern (Agentur)
+            </button>
           </div>
+          {purpose === "intern" ? (
+            <p className="text-sm text-secondary">
+              TEIL C: NAP, Tracking, Bewertungen, Google-Unternehmensprofil. Wird von
+              Sichtbarkeitsmeister ausgefüllt – nicht an den Kunden senden. Bleibt privat in der
+              Fragebogen-Liste.
+            </p>
+          ) : null}
           {purpose === "persona" ? (
             <div className="grid max-w-md gap-2">
               <Label htmlFor="wunschkunde">Wunschkunde / Avatar-Name</Label>
@@ -592,9 +619,10 @@ export function FragebogenFromOrgWizard(props: {
             4. Standardfragen ({selectedCount}/{coreItems.length})
           </CardTitle>
           <CardDescription>
-            Feste Anbieter-Basis in der richtigen Reihenfolge und mit dem richtigen Format.
-            Abwählen, was für diesen Kunden nicht gebraucht wird. Branchenspezifische Optionen
-            (Portfolio, Ranking) vor dem Versand in der Prüfung anpassen.
+            Feste Basis in der richtigen Reihenfolge und mit dem richtigen Format.
+            {purpose === "intern"
+              ? " Dieser Block bleibt intern und kommt nicht in den Kunden-Link."
+              : " Abwählen, was für diesen Kunden nicht gebraucht wird. Branchenspezifische Optionen (Portfolio, Ranking) vor dem Versand in der Prüfung anpassen."}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">

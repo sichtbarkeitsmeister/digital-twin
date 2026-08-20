@@ -71,6 +71,22 @@ export default async function SurveyCreateAgentPage({
     );
   }
 
+  if (purpose === "intern") {
+    return (
+      <div className="grid gap-4">
+        <p className="text-sm text-secondary">
+          <Link href={`/dashboard/surveys/${surveyId}/responses/${responseId}`}>
+            ← Zurück
+          </Link>
+        </p>
+        <p className="text-sm text-secondary">
+          Das ist der interne Recherche-Fragebogen (TEIL C). Er wird nicht in einen Avatar oder
+          SEO-Berater umgewandelt.
+        </p>
+      </div>
+    );
+  }
+
   if (purpose === "anbieter") {
     return (
       <SurveyAnbieterToSeoWizard

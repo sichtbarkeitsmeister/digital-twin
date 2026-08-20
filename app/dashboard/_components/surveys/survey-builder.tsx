@@ -1049,12 +1049,19 @@ export function SurveyBuilder({
                             label: surveyPurposeLabel("anbieter"),
                             description: "Antworten → SEO-Berater Wissen (1:1)",
                           },
+                          {
+                            value: "intern",
+                            label: surveyPurposeLabel("intern"),
+                            description: "TEIL C – nur Agentur, nicht an den Kunden",
+                          },
                         ]}
                       />
                       <p className="text-xs text-secondary">
                         {purpose === "anbieter"
                           ? "Antworten landen 1:1 beim SEO-Berater (Unternehmenswissen) — kein Avatar."
-                          : "Antworten können in einen Kunden-Persona-Avatar umgewandelt werden."}
+                          : purpose === "intern"
+                            ? "Interner Recherche-Block. Nicht an den Kunden senden, kein Avatar."
+                            : "Antworten können in einen Kunden-Persona-Avatar umgewandelt werden."}
                       </p>
                     </div>
                     <Textarea

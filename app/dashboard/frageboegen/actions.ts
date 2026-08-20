@@ -13,6 +13,7 @@ import {
 } from "@/lib/surveys/build-fragebogen-from-org";
 import {
   ANBIETER_CORE_QUESTIONS,
+  INTERN_CORE_QUESTIONS,
   PERSONA_CORE_QUESTIONS,
 } from "@/lib/surveys/core-question-templates";
 import { loadOrgCrawlContext } from "@/lib/surveys/org-crawl-context";
@@ -62,6 +63,12 @@ export async function loadFragebogenWizardContextAction(input: {
       description: string;
       stepTitle: string;
     }>;
+    internCore: Array<{
+      key: string;
+      title: string;
+      description: string;
+      stepTitle: string;
+    }>;
   }>
 > {
   const auth = await requirePlatformAdmin();
@@ -85,6 +92,12 @@ export async function loadFragebogenWizardContextAction(input: {
         stepTitle: q.stepTitle,
       })),
       personaCore: PERSONA_CORE_QUESTIONS.map((q) => ({
+        key: q.key,
+        title: q.title,
+        description: q.description,
+        stepTitle: q.stepTitle,
+      })),
+      internCore: INTERN_CORE_QUESTIONS.map((q) => ({
         key: q.key,
         title: q.title,
         description: q.description,
@@ -115,7 +128,7 @@ const meetingBriefingSchema = z
 
 const previewSchema = z.object({
   organisationId: z.string().uuid(),
-  purpose: z.enum(["persona", "anbieter"]),
+  purpose: z.enum(["persona", "anbieter", "intern"]),
   wunschkundeLabel: z.string().trim().max(120).optional().nullable(),
   selectedCoreKeys: z.array(z.string().min(1)).min(1),
   includeAiExtras: z.boolean().default(true),
@@ -184,7 +197,7 @@ const createFromReviewSchema = z.object({
   draft: z.object({
     title: z.string().trim().min(1),
     description: z.string().default(""),
-    purpose: z.enum(["persona", "anbieter"]),
+    purpose: z.enum(["persona", "anbieter", "intern"]),
     extraPlacement: z.enum(["start", "end"]),
     crawlPageCount: z.number().int().nonnegative(),
     websiteUrl: z.string().nullable(),
@@ -221,6 +234,14 @@ export async function createFragebogenFromReviewAction(
     });
     definition = built.definition;
     answers = built.answers;
+    if (parsed.data.draft.purpose === "intern") {
+      definition = {
+        ...definition,
+        infoTextEnabled: true,
+        infoText:
+          "Interner Block von Sichtbarkeitsmeister. Nicht an den Kunden senden. Wird intern recherchiert und ergänzt.",
+      };
+    }
   } catch (err) {
     return {
       ok: false,
