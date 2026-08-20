@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 import { DashboardShell } from "@/app/dashboard/_components/dashboard-shell";
-import { userCanManageAnyIntegrations, userHasAnyLeads } from "@/lib/dashboard/org-context";
+import { userCanManageAnyIntegrations } from "@/lib/dashboard/org-context";
 import { userCanManageAnyDtAgents, userHasAnyOrganisation } from "@/lib/dt/org-access";
 import { userCanViewAnyDtUsage } from "@/lib/dt/usage/access";
 import { countPendingDtAgentEditRequests } from "@/lib/dt/agent-edit-requests";
@@ -52,7 +52,6 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     canManageIntegrations,
     canManageDtAgents,
     canViewDtUsage,
-    showLeads,
     showFrageboegen,
     pendingSurveyQuestionsCount,
     pendingAgentEditRequestsCount,
@@ -60,7 +59,6 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     isPlatformAdmin ? Promise.resolve(true) : userCanManageAnyIntegrations(user.id),
     isPlatformAdmin ? Promise.resolve(true) : userCanManageAnyDtAgents(user.id),
     isPlatformAdmin ? Promise.resolve(true) : userCanViewAnyDtUsage(user.id),
-    isPlatformAdmin ? Promise.resolve(true) : userHasAnyLeads(user.id),
     isPlatformAdmin ? Promise.resolve(true) : userHasAnyOrganisation(user.id),
     isPlatformAdmin
       ? supabase
@@ -80,7 +78,7 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
       canManageIntegrations={canManageIntegrations}
       canManageDtAgents={canManageDtAgents}
       canViewDtUsage={canViewDtUsage}
-      showLeads={showLeads}
+      showLeads={isPlatformAdmin}
       showFrageboegen={showFrageboegen}
       pendingSurveyQuestionsCount={pendingSurveyQuestionsCount}
       pendingAgentEditRequestsCount={pendingAgentEditRequestsCount}

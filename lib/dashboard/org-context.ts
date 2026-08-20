@@ -118,25 +118,6 @@ export async function userCanManageAnyIntegrations(userId: string) {
   return profile?.role === "admin";
 }
 
-/** Hide the Leads nav entry while an organisation has no lead data at all. */
-export async function userHasAnyLeads(userId: string) {
-  const supabase = await createClient();
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (profile?.role === "admin") return true;
-
-  const { count } = await supabase
-    .from("companies")
-    .select("id", { count: "exact", head: true });
-
-  return (count ?? 0) > 0;
-}
-
 export async function isMemberOfOrganisation(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,

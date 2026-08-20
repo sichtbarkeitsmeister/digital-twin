@@ -93,6 +93,7 @@ export function DashboardSidebar({
 }) {
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
+    // Leadinfo company lists stay internal — customers never see this tab.
     ...(showLeads ? [{ label: "Leads", href: "/dashboard/leads", icon: Sparkles }] : []),
     { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },
     ...(canManageIntegrations
