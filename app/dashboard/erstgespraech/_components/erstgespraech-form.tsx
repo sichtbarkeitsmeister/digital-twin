@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { ClipboardPenLine, Loader2, MessageCircle } from "lucide-react";
+import { ClipboardPenLine, Loader2, MessageCircle, Trash2, Upload } from "lucide-react";
 
 import {
   loadErstgespraechAction,
+  fillErstgespraechFromFilesAction,
   saveErstgespraechAction,
 } from "@/app/dashboard/erstgespraech/actions";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
@@ -24,9 +25,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   EMPTY_FIRST_CONVERSATION,
+  FIRST_CONVERSATION_FILE_ACCEPT,
+  FIRST_CONVERSATION_MAX_FILES,
   FIRST_CONVERSATION_SECTIONS,
   firstConversationFilledCount,
   type FirstConversationFieldKey,
+  type FirstConversationFileMeta,
   type FirstConversationRecord,
 } from "@/lib/surveys/first-conversation";
 
@@ -55,6 +59,7 @@ export function ErstgespraechForm(props: {
   const organisationId = props.organisationId;
   const [isPending, startTransition] = useTransition();
   const [record, setRecord] = useState<FirstConversationRecord>(EMPTY_FIRST_CONVERSATION);
+  const [files, setFiles] = useState<FirstConversationFileMeta[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(organisationId));
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +69,7 @@ export function ErstgespraechForm(props: {
     let cancelled = false;
     if (!organisationId) {
       setRecord(EMPTY_FIRST_CONVERSATION);
+      setFiles([]);
       setUpdatedAt(null);
       setLoading(false);
       setError(null);
@@ -81,6 +87,7 @@ export function ErstgespraechForm(props: {
         return;
       }
       setRecord(res.data.record);
+      setFiles(res.data.files);
       setUpdatedAt(res.data.updatedAt);
       setLoading(false);
     })();
@@ -119,6 +126,81 @@ export function ErstgespraechForm(props: {
         return;
       }
       setStatus("Gespeichert. Wird beim Erzeugen der Fragebögen übernommen.");
+    });
+  }
+
+  async function uploadFiles(fileList: FileList | null) {
+    if (!organisationId || !fileList?.length) return;
+    setError(null);
+    setStatus("Datei wird gelesen und leere Felder vorausgefüllt…");
+    for (const file of Array.from(fileList)) {
+      const form = new FormData();
+      form.append("organisationId", organisationId);
+      form.append("file", file);
+      const res = await fetch("/api/dt/erstgespraech/files", {
+        method: "POST",
+        body: form,
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        extractWarning?: string | null;
+        filledKeys?: string[];
+        record?: FirstConversationRecord;
+        files?: FirstConversationFileMeta[];
+      };
+      if (!json.ok) {
+        setStatus(null);
+        setError(json.message ?? "Upload fehlgeschlagen.");
+        return;
+      }
+      if (json.record) setRecord(json.record);
+      if (json.files) setFiles(json.files);
+      const extra = json.extractWarning ? ` ${json.extractWarning}` : "";
+      const filled =
+        json.filledKeys?.length
+          ? ` ${json.filledKeys.length} Felder aus der Datei übernommen.`
+          : " Keine neuen Felder — Inhalt wird beim Fragebogen trotzdem genutzt.";
+      setStatus(`„${file.name}“ gespeichert.${filled}${extra}`);
+    }
+  }
+
+  async function removeFile(fileId: string) {
+    if (!organisationId) return;
+    setError(null);
+    const res = await fetch(
+      `/api/dt/erstgespraech/files?org=${encodeURIComponent(organisationId)}&fileId=${encodeURIComponent(fileId)}`,
+      { method: "DELETE" },
+    );
+    const json = (await res.json()) as {
+      ok?: boolean;
+      message?: string;
+      files?: FirstConversationFileMeta[];
+    };
+    if (!json.ok) {
+      setError(json.message ?? "Löschen fehlgeschlagen.");
+      return;
+    }
+    setFiles(json.files ?? []);
+  }
+
+  function fillFromFiles() {
+    if (!organisationId) return;
+    setError(null);
+    startTransition(async () => {
+      setStatus("KI liest die Dateien…");
+      const res = await fillErstgespraechFromFilesAction({
+        organisationId,
+        record,
+      });
+      setStatus(null);
+      if (!res.ok || !res.data) {
+        setError(res.message);
+        return;
+      }
+      setRecord(res.data.record);
+      setUpdatedAt(res.data.updatedAt);
+      setStatus(res.message);
     });
   }
 
@@ -180,6 +262,79 @@ export function ErstgespraechForm(props: {
                 <Badge variant="outline">Noch nicht gespeichert</Badge>
               )}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Upload className="size-4" aria-hidden />
+            Meeting-Zusammenfassungen & Unterlagen
+          </CardTitle>
+          <CardDescription>
+            PDF, Word (.docx) oder Text mit Infos zur Firma und Ausrichtung. Die KI füllt leere
+            Felder und später den Fragebogen — nur wo der Text eine klare Antwort hergibt.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          <input
+            id="erstgespraech-files"
+            type="file"
+            className="hidden"
+            accept={FIRST_CONVERSATION_FILE_ACCEPT}
+            multiple
+            disabled={!organisationId || loading || isPending}
+            onChange={(e) => {
+              void uploadFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button asChild type="button" size="sm" variant="outline" disabled={!organisationId || loading}>
+              <label htmlFor="erstgespraech-files" className="cursor-pointer">
+                Datei hochladen
+              </label>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={!organisationId || loading || isPending || files.length === 0}
+              onClick={fillFromFiles}
+            >
+              Leere Felder aus Dateien füllen
+            </Button>
+          </div>
+          {files.length === 0 ? (
+            <p className="text-xs text-secondary">
+              Noch keine Dateien. Bis zu {FIRST_CONVERSATION_MAX_FILES} Dateien, je 10 MB.
+            </p>
+          ) : (
+            <ul className="grid gap-2">
+              {files.map((file) => (
+                <li
+                  key={file.id}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-sbkm-navy/10 px-3 py-2"
+                >
+                  <span className="min-w-0 truncate">
+                    {file.fileName}
+                    <span className="ml-2 text-xs text-secondary">
+                      {file.hasText ? "Text gelesen" : "ohne extrahierten Text"}
+                    </span>
+                  </span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`${file.fileName} entfernen`}
+                    onClick={() => void removeFile(file.id)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>

@@ -4,7 +4,10 @@
  * when generating Fragebögen (Meeting-Briefing).
  */
 
-import type { MeetingBriefing } from "@/lib/surveys/meeting-briefing";
+import {
+  extractLabeledSections,
+  type MeetingBriefing,
+} from "@/lib/surveys/meeting-briefing";
 
 export type FirstConversationFieldKey =
   | "conversationDate"
@@ -368,4 +371,78 @@ export function firstConversationSummaryLines(
   push("Wunschkunde", record.wunschkundeLabel || record.targetGroup);
   push("Fokus", record.focus);
   return lines;
+}
+
+export const FIRST_CONVERSATION_FILE_ACCEPT =
+  ".pdf,.docx,.txt,.md,.markdown,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export const FIRST_CONVERSATION_MAX_FILES = 8;
+export const FIRST_CONVERSATION_MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+export type FirstConversationFileMeta = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  hasText: boolean;
+  createdAt: string;
+};
+
+const DOCUMENT_LABEL_TO_KEY: Array<[RegExp, FirstConversationFieldKey]> = [
+  [/^(?:firmenname|unternehmensname|offizieller\s+name|name\s+der\s+firma)$/i, "legalCompanyName"],
+  [/^(?:alltagsname|kurzname|spitzname)$/i, "colloquialName"],
+  [/^(?:website|webseite|homepage|domain)$/i, "website"],
+  [/^(?:inhaber(?:in)?|geschäftsführer(?:in)?|ansprechpartner(?:in)?|gründer(?:in)?)$/i, "ownerName"],
+  [/^(?:rolle(?:\s+gespr(?:ä|ae)chspartner)?)$/i, "ownerRole"],
+  [/^(?:mitarbeiter(?:zahl|innen)?|teamgr(?:ö|oe)sse|beschäftigte|personen)$/i, "employeeCount"],
+  [/^(?:region|regionen|einzugsgebiet|standort|marktgebiet)$/i, "region"],
+  [/^(?:branche|gewerbe)$/i, "industry"],
+  [/^(?:leistungen|services|angebot|angebote|produkte)$/i, "services"],
+  [/^(?:usp|alleinstellung|differenzierung)$/i, "usp"],
+  [/^(?:fokus|schwerpunkt|fokuskeywords?|keywords?)$/i, "focus"],
+  [/^(?:zielgruppe|kundengruppe)$/i, "targetGroup"],
+  [/^(?:wunschkunde|avatar)$/i, "wunschkundeLabel"],
+  [/^(?:mitbewerber|wettbewerber|konkurrenz)$/i, "competitors"],
+  [/^(?:gute\s+wettbewerber|vorbilder)$/i, "goodCompetitors"],
+  [/^(?:online[\s_-]?kan(?:ä|ae)le|kan(?:ä|ae)le)$/i, "onlineChannels"],
+  [/^(?:ziel\s+des\s+mandats|mandat|auftrag)$/i, "mandateGoals"],
+  [/^(?:seiten|links|landingpages?|urls?)$/i, "pagesOrLinks"],
+];
+
+/**
+ * Fill empty Erstgespräch fields from labeled document text.
+ * Existing values win — documents only fill gaps.
+ */
+export function applyDocumentTextToFirstConversation(
+  record: FirstConversationRecord,
+  documentText: string,
+): { record: FirstConversationRecord; filledKeys: FirstConversationFieldKey[] } {
+  const next = { ...record };
+  const filledKeys: FirstConversationFieldKey[] = [];
+  const leftover: string[] = [];
+
+  for (const section of extractLabeledSections(documentText)) {
+    if (section.label === "_raw") {
+      if (section.value.trim().length >= 8) leftover.push(section.value.trim());
+      continue;
+    }
+    const key = DOCUMENT_LABEL_TO_KEY.find(([re]) => re.test(section.label.trim()))?.[1];
+    if (!key) {
+      leftover.push(`${section.label}: ${section.value}`.trim());
+      continue;
+    }
+    if (!next[key].trim() && section.value.trim()) {
+      next[key] = section.value.trim().slice(0, 8000);
+      filledKeys.push(key);
+    }
+  }
+
+  if (!next.notes.trim() && leftover.length) {
+    next.notes = leftover.join("\n\n").slice(0, 8000);
+    filledKeys.push("notes");
+  } else if (leftover.length && leftover.some((p) => !next.notes.includes(p.slice(0, 40)))) {
+    next.notes = `${next.notes}\n\n${leftover.join("\n\n")}`.trim().slice(0, 8000);
+  }
+
+  return { record: next, filledKeys: [...new Set(filledKeys)] };
 }

@@ -29,7 +29,7 @@ export type OrgCrawlContext = {
   seoMetrics?: OrgCrawlSeoMetrics | null;
 };
 
-export type PrefillSource = "organisation" | "website" | "crawl" | "ai" | "meeting";
+export type PrefillSource = "organisation" | "website" | "crawl" | "ai" | "meeting" | "document";
 
 export type PrefillDraft = {
   value: string;

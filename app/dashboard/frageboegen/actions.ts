@@ -298,7 +298,7 @@ const reviewQuestionSchema = z.object({
   scaleMin: z.number().int().optional(),
   scaleMax: z.number().int().optional(),
   answer: z.string().default(""),
-  answerSource: z.enum(["organisation", "website", "crawl", "ai", "meeting", "none"]),
+  answerSource: z.enum(["organisation", "website", "crawl", "ai", "meeting", "document", "none"]),
   answerNote: z.string().default(""),
 });
 

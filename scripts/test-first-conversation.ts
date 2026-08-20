@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   EMPTY_FIRST_CONVERSATION,
   FIRST_CONVERSATION_SECTIONS,
+  applyDocumentTextToFirstConversation,
   firstConversationHasContent,
   firstConversationToMeetingBriefing,
   normalizeFirstConversation,
@@ -61,5 +62,18 @@ const prefills = suggestPrefillsFromMeeting({
 assert.equal(prefills.company_name?.source, "meeting");
 assert.match(prefills.usp?.value ?? "", /Zwilling/);
 assert.match(prefills.competitors_top?.value ?? "", /Druckhaus Nord/);
+
+const fromDoc = applyDocumentTextToFirstConversation(EMPTY_FIRST_CONVERSATION, `Firmenname: Musterdruck GmbH
+Region: Hamm
+USP: Digitaler Zwilling`);
+assert.equal(fromDoc.record.legalCompanyName, "Musterdruck GmbH");
+assert.equal(fromDoc.record.region, "Hamm");
+assert.ok(fromDoc.filledKeys.includes("legalCompanyName"));
+
+const kept = applyDocumentTextToFirstConversation(
+  { ...EMPTY_FIRST_CONVERSATION, legalCompanyName: "Bleibt" },
+  "Firmenname: Neu GmbH",
+);
+assert.equal(kept.record.legalCompanyName, "Bleibt");
 
 console.log("first-conversation: ok");

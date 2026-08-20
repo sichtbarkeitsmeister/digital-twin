@@ -24,6 +24,7 @@ import {
   firstConversationToMeetingBriefing,
 } from "@/lib/surveys/first-conversation";
 import { loadFirstConversationIfAny } from "@/lib/surveys/first-conversation-store";
+import { loadFirstConversationDocumentText } from "@/lib/surveys/first-conversation-files";
 import {
   buildMeetingExtraQuestions,
   meetingBriefingContextText,
@@ -62,6 +63,7 @@ async function generateExtrasAndAiPrefills(input: {
   wunschkundeLabel?: string | null;
   crawlSummary: string;
   meetingContext?: string;
+  documentContext?: string;
   coreItems: Array<{ key: string; title: string; hasPrefill: boolean }>;
   includeAiExtras: boolean;
   maxExtras?: number;
@@ -82,6 +84,9 @@ async function generateExtrasAndAiPrefills(input: {
   const meetingBlock = input.meetingContext?.trim()
     ? `\nKundengespräch / Meeting-Briefing (PRIORITÄT — direkt übernehmen, nicht erfinden):\n${input.meetingContext.slice(0, 6000)}\n`
     : "";
+  const documentBlock = input.documentContext?.trim()
+    ? `\nHochgeladene Meeting-Zusammenfassungen / Unternehmensunterlagen (nur übernehmen, was klar im Text steht):\n${input.documentContext.slice(0, 12000)}\n`
+    : "";
 
   const result = await callAnthropicFirstAvailable({
     anthropic,
@@ -90,7 +95,7 @@ async function generateExtrasAndAiPrefills(input: {
     timeoutMs: 70_000,
     stream: false,
     system:
-      "Du hilfst beim Aufbau deutscher Fragebögen. Nutze Erstgespräch/Meeting, Website-Crawl und SEO-Zahlen. Meeting hat Vorrang, dann belegbare Crawl-/Performance-Daten. Nichts erfinden. Antworte nur mit JSON.",
+      "Du hilfst beim Aufbau deutscher Fragebögen. Nutze Erstgespräch, hochgeladene Meeting-Dokumente, Website-Crawl und SEO-Zahlen. Meeting hat Vorrang, dann Dokumente, dann belegbare Crawl-/Performance-Daten. Nichts erfinden. Antworte nur mit JSON.",
     messages: [
       {
         role: "user",
@@ -99,17 +104,17 @@ async function generateExtrasAndAiPrefills(input: {
 Kernfragen:
 ${input.coreItems.map((c) => `- [${c.key}] ${c.title}${c.hasPrefill ? " (schon vorausgefüllt)" : ""}`).join("\n")}
 
-Noch ohne Prefill — bitte alles ausfüllen, was Crawl, Impressum, Teamseiten oder SEO-Zahlen klar hergeben:
+Noch ohne Prefill — bitte alles ausfüllen, was Meeting, Dokumente, Crawl oder SEO-Zahlen klar hergeben:
 ${missing.map((c) => `- ${c.key}: ${c.title}`).join("\n") || "(alle Kernfragen haben schon Prefill)"}
-${meetingBlock}
+${meetingBlock}${documentBlock}
 Website-/Crawl-/SEO-Kontext:
 ${input.crawlSummary.slice(0, 14000)}
 
 Aufgabe:
-1) Für fehlende Kernfragen: Antwortvorschläge. Zuerst Meeting. Sonst nur belegbare Angaben aus Crawl oder SEO-Zahlen. Besonders: Team/Mitarbeiter, Inhaber, Leistungen, Region/Adresse, USP, Mitbewerber, Öffnungszeiten, Google-Profil, Bewertungen, Impressionen/Klicks/Rankings. Wenn unklar: weglassen.
+1) Für fehlende Kernfragen: Antwortvorschläge. Reihenfolge: Meeting, dann hochgeladene Dokumente, dann Crawl/SEO. Wenn unklar: weglassen.
 2) Zahlen (Impressionen, Klicks, Rankings, Teamgröße) wörtlich aus dem Kontext übernehmen, nicht runden oder schätzen.
-3) Mitbewerber/gute Wettbewerber/Inhaber/Seiten-Links aus dem Meeting möglichst wörtlich übernehmen.
-4) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen. Nicht die Kernfragen wiederholen. Nur Dinge, die sich aus Website, SEO-Daten oder Meeting für DIESES Unternehmen ergeben.` : "Keine Zusatzfragen (questions=[])."}
+3) Mitbewerber/gute Wettbewerber/Inhaber/Seiten-Links aus Meeting oder Dokumenten möglichst wörtlich übernehmen.
+4) ${input.includeAiExtras ? `Bis zu ${maxExtras} zusätzliche unternehmensspezifische Fragen vorschlagen. Nicht die Kernfragen wiederholen.` : "Keine Zusatzfragen (questions=[])."}
 
 JSON:
 {
@@ -139,7 +144,7 @@ JSON:
       aiPrefills[key] = {
         value: value.slice(0, 2000),
         source: "ai",
-        note: String(row.note ?? "KI-Vorschlag aus Crawl/SEO — bitte prüfen").slice(0, 160),
+        note: String(row.note ?? "KI-Vorschlag aus Dokument/Crawl — bitte prüfen").slice(0, 160),
       };
     }
     const extras = input.includeAiExtras
@@ -203,8 +208,25 @@ export async function buildFragebogenReviewDraft(input: {
     ? meetingBriefingContextText(briefing)
     : "";
 
-  // Crawl first, then AI for gaps — Meeting wins over both.
+  const documentText = await loadFirstConversationDocumentText(input.organisationId);
+  const fromDocuments = suggestPrefillsFromMeeting({
+    briefing: documentText ? { notes: documentText } : {},
+    hints,
+  });
+  const documentPrefills: Record<string, PrefillDraft> = {};
+  for (const [key, draft] of Object.entries(fromDocuments)) {
+    documentPrefills[key] = {
+      ...draft,
+      source: "document",
+      note: "Aus hochgeladenem Meeting-Dokument übernommen",
+    };
+  }
+
+  // Crawl first, documents, AI gaps — Meeting/Erstgespräch wins.
   const basePrefills: Record<string, PrefillDraft> = { ...heuristic };
+  for (const [key, draft] of Object.entries(documentPrefills)) {
+    if (!basePrefills[key]) basePrefills[key] = draft;
+  }
 
   const aiBundle = await generateExtrasAndAiPrefills({
     purpose,
@@ -212,6 +234,7 @@ export async function buildFragebogenReviewDraft(input: {
     wunschkundeLabel: input.wunschkundeLabel,
     crawlSummary: crawl.summaryText,
     meetingContext: meetingText,
+    documentContext: documentText,
     includeAiExtras: Boolean(input.includeAiExtras),
     coreItems: selectedTemplates.map((t) => ({
       key: t.key,
@@ -230,6 +253,8 @@ export async function buildFragebogenReviewDraft(input: {
 
   // Meeting notes → Kernfragen (via suggestPrefillsFromMeeting) + getrennte Zusatzfragen
   // (Region/USP → Kern; Fokuskeywords/Links → eigene Fragen; kein Notiz-Haufen).
+  const customerRequired = purpose !== "intern";
+
   const meetingExtras: ReviewQuestionItem[] = buildMeetingExtraQuestions(
     briefing,
   ).map((e) => ({
@@ -238,7 +263,7 @@ export async function buildFragebogenReviewDraft(input: {
     title: e.title,
     description: e.description,
     included: true,
-    required: false,
+    required: customerRequired,
     type: "text" as const,
     options: [],
     answer: e.answer,
@@ -300,7 +325,7 @@ export async function buildFragebogenReviewDraft(input: {
       description:
         "Individuelle Zusatzfrage aus Crawl/KI — bearbeiten, kopieren oder löschen.",
       included: true,
-      required: false,
+      required: customerRequired,
       type: "text" as const,
       options: [],
       answer: "",

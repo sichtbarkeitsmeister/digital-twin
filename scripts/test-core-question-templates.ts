@@ -73,6 +73,9 @@ assert.equal(
   0,
 );
 
+assert.ok(ANBIETER_CORE_QUESTIONS.every((q) => q.required === true));
+assert.ok(PERSONA_CORE_QUESTIONS.every((q) => q.required === true));
+assert.ok(INTERN_CORE_QUESTIONS.every((q) => q.required === false));
 assert.equal(coreQuestionsForPurpose("anbieter"), ANBIETER_CORE_QUESTIONS);
 assert.equal(coreQuestionsForPurpose("persona"), PERSONA_CORE_QUESTIONS);
 assert.equal(coreQuestionsForPurpose("intern"), INTERN_CORE_QUESTIONS);

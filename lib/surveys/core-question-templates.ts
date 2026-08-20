@@ -210,11 +210,24 @@ function step(
 ): CoreQuestionTemplate[] {
   return fields.map((field, index) => ({
     description: "",
-    required: false,
+    required: true,
     ...field,
     stepId,
     stepTitle,
     stepDescription: index === 0 ? stepDescription : undefined,
+  }));
+}
+
+/** Interner Agentur-Block: keine Kunden-Pflichtfelder. */
+function agencyStep(
+  stepId: string,
+  stepTitle: string,
+  fields: StepField[],
+  stepDescription?: string,
+): CoreQuestionTemplate[] {
+  return step(stepId, stepTitle, fields, stepDescription).map((field) => ({
+    ...field,
+    required: false,
   }));
 }
 
@@ -363,7 +376,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Bestätigung, dass alle folgenden Angaben auf eigenen, echten Erfahrungen beruhen und nicht geraten sind.",
         description: "Bitte mit Ja oder Nein antworten. Ohne diese Bestätigung ist der Fragebogen nicht auswertbar.",
-        required: true,
         type: "radio",
         options: YES_NO,
       },
@@ -404,7 +416,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "company_name",
         title:
           "Wie lautet der vollständige Name der Firma, so wie er offiziell im Impressum oder Handelsregister steht (inklusive Rechtsform, z. B. GmbH, GbR, e.K.)?",
-        required: true,
         type: "text",
         prefillHint: "org_name",
       },
@@ -1444,7 +1455,7 @@ const GA4_GTM: SurveyOption[] = [
 
 /** TEIL C – interner Agentur-Block (nicht an den Kunden). */
 export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
-  ...step(
+  ...agencyStep(
     "core_intern_intro",
     "Interner Hinweis",
     [
@@ -1454,14 +1465,13 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
           "Diesen Abschnitt bitte nicht vom Kunden ausfüllen lassen – wird von Sichtbarkeitsmeister recherchiert und ergänzt.",
         description:
           "Interner Recherche-Block. Nicht in den Kunden-Link legen. Bestätigung, dass hier Agentur-Angaben folgen.",
-        required: true,
         type: "radio",
         options: YES_NO,
       },
     ],
     "Nur für Sichtbarkeitsmeister. Technischer Status, den der Kunde in der Regel nicht kennt.",
   ),
-  ...step(
+  ...agencyStep(
     "core_intern_nap",
     "Auffindbarkeit & Konsistenz",
     [
@@ -1490,7 +1500,7 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
     ],
   ),
-  ...step(
+  ...agencyStep(
     "core_intern_tracking",
     "Tracking & Conversion",
     [
@@ -1523,7 +1533,7 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
     ],
   ),
-  ...step(
+  ...agencyStep(
     "core_intern_reviews",
     "Bewertungen",
     [
@@ -1540,7 +1550,7 @@ export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
     ],
   ),
-  ...step(
+  ...agencyStep(
     "core_intern_gbp",
     "Local-SEO-Basisdaten",
     [
