@@ -10,6 +10,7 @@ import {
   loadUserOrganisations,
   resolveSelectedOrganisationId,
 } from "@/lib/dashboard/org-context";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,6 +56,10 @@ export default async function LeadsPage({
   const to = from + PAGE_SIZE - 1;
 
   const { supabase, userId } = await getAuthenticatedUserId();
+  if (!(await isPlatformAdmin(supabase, userId))) {
+    redirect("/dashboard");
+  }
+
   const { organisations } = await loadUserOrganisations(userId);
   const selectedOrganisationId = resolveSelectedOrganisationId(
     organisations,

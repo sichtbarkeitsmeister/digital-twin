@@ -71,6 +71,11 @@ export default async function CompanyDetailPage({
   const { org: orgParam } = await searchParams;
 
   const { supabase, userId } = await getAuthenticatedUserId();
+  const platformAdmin = await isPlatformAdmin(supabase, userId);
+  if (!platformAdmin) {
+    redirect("/dashboard");
+  }
+
   const { organisations } = await loadUserOrganisations(userId);
   const selectedOrganisationId = resolveSelectedOrganisationId(
     organisations,
@@ -90,7 +95,7 @@ export default async function CompanyDetailPage({
     redirect("/dashboard");
   }
 
-  const showTechnicalDetails = await isPlatformAdmin(supabase, userId);
+  const showTechnicalDetails = platformAdmin;
   const orgQuery = `org=${selectedOrganisationId}`;
 
   const { data: company, error } = await supabase
