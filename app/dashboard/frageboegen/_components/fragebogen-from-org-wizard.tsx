@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Loader2, MessageCircle, Plus, Sparkles } from "lucide-react";
+import { Loader2, MessageCircle, Plus, Sparkles, Upload } from "lucide-react";
 
 import {
   createFragebogenFromReviewAction,
@@ -32,6 +32,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
+import {
+  QUESTIONNAIRE_FILE_ACCEPT,
+  readQuestionnaireFileText,
+} from "@/lib/surveys/read-questionnaire-file-text";
 
 type CoreItem = { key: string; title: string; description: string; stepTitle: string };
 
@@ -82,6 +86,10 @@ export function FragebogenFromOrgWizard(props: {
   const [crawlBusy, setCrawlBusy] = useState(false);
   const [anbieterCore, setAnbieterCore] = useState<CoreItem[]>([]);
   const [personaCore, setPersonaCore] = useState<CoreItem[]>([]);
+  const [sourceDocuments, setSourceDocuments] = useState<
+    Array<{ name: string; text: string }>
+  >([]);
+  const [uploadBusy, setUploadBusy] = useState(false);
   const [draft, setDraft] = useState<FragebogenReviewDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -104,6 +112,7 @@ export function FragebogenFromOrgWizard(props: {
       setSeoSummary(null);
       setFirstConv(null);
       setSkipCrawl(false);
+      setSourceDocuments([]);
       setError(null);
       return;
     }
@@ -204,10 +213,34 @@ export function FragebogenFromOrgWizard(props: {
     return groups;
   }, [coreItems]);
 
-  function toggleKey(key: string) {
-    setSelectedKeys((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-    );
+  async function onUploadFiles(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    setError(null);
+    setUploadBusy(true);
+    const next: Array<{ name: string; text: string }> = [];
+    const failures: string[] = [];
+    try {
+      for (const file of Array.from(fileList)) {
+        try {
+          const text = await readQuestionnaireFileText(file);
+          next.push({ name: file.name, text });
+        } catch (err) {
+          failures.push(err instanceof Error ? err.message : `„${file.name}“ nicht lesbar.`);
+        }
+      }
+      setSourceDocuments((prev) => {
+        const merged = [...prev];
+        for (const doc of next) {
+          const i = merged.findIndex((d) => d.name === doc.name);
+          if (i >= 0) merged[i] = doc;
+          else merged.push(doc);
+        }
+        return merged.slice(0, 8);
+      });
+      if (failures.length) setError(failures.join(" "));
+    } finally {
+      setUploadBusy(false);
+    }
   }
 
   function requestCrawl() {
@@ -261,6 +294,7 @@ export function FragebogenFromOrgWizard(props: {
         includeAiExtras,
         extraPlacement,
         meetingBriefing: null,
+        sourceDocuments,
       });
       setStatus(null);
       if (!res.ok || !res.data) {
@@ -375,8 +409,8 @@ export function FragebogenFromOrgWizard(props: {
           </h1>
           <p className="max-w-2xl text-sm text-secondary">
             Fragen umformulieren, Typ und Pflichtfeld setzen, Zusatzfragen ergänzen.
-            Erst danach wird der Fragebogen angelegt — danach bleibt alles im Entwurf
-            weiter editierbar.
+            Vorausgefüllte Antworten aus Dateien und Crawl bitte prüfen — passen sie, oder
+            muss etwas angepasst werden? Erst danach wird der Fragebogen angelegt.
           </p>
         </div>
 
@@ -472,8 +506,8 @@ export function FragebogenFromOrgWizard(props: {
           Fragebogen aus Organisation
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Vor dem Erzeugen: Website crawlen, Erstgespräch übernehmen, dann prüfen. Alles, was
-          Crawl und SEO-Zahlen hergeben (Team, Impressionen, Rankings), wird vorausgefüllt.
+          Vor dem Erzeugen: Website crawlen, Gesprächsnotizen hochladen, dann prüfen. Alles, was
+          Dateien, Crawl und SEO-Zahlen hergeben (Team, Leistungen, Presse), wird vorausgefüllt.
         </p>
       </div>
 
@@ -482,7 +516,7 @@ export function FragebogenFromOrgWizard(props: {
           <CardTitle className="text-base">1. Organisation & Crawl</CardTitle>
           <CardDescription>
             Der Website-Crawl wird vor dem Erzeugen angestoßen. Daraus kommen Team, Leistungen,
-            Adresse und — soweit vorhanden — Impressionen und Rankings.
+            Über-uns- und Presseseiten — und soweit vorhanden Impressionen und Rankings.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -664,6 +698,67 @@ export function FragebogenFromOrgWizard(props: {
 
       <Card>
         <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Upload className="size-4" aria-hidden />
+            2b. Gesprächsnotizen und Unterlagen
+          </CardTitle>
+          <CardDescription>
+            Meeting-Protokolle, vorhandene Gespräche oder Zusammenfassungen hochladen. Die KI
+            prüft, welche Fragen darin schon beantwortet sind, und füllt die Antworten vor —
+            danach nur noch gegenlesen.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          <div className="grid max-w-md gap-2">
+            <Label htmlFor="source-docs">Dateien (.docx, .txt, .md)</Label>
+            <Input
+              id="source-docs"
+              type="file"
+              multiple
+              accept={QUESTIONNAIRE_FILE_ACCEPT}
+              disabled={!organisationId || uploadBusy}
+              onChange={(e) => {
+                void onUploadFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          {uploadBusy ? (
+            <p className="text-xs text-secondary">Dateien werden gelesen…</p>
+          ) : null}
+          {sourceDocuments.length > 0 ? (
+            <ul className="grid gap-1">
+              {sourceDocuments.map((doc) => (
+                <li
+                  key={doc.name}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-sbkm-navy/10 px-3 py-2 text-xs"
+                >
+                  <span>
+                    {doc.name} · {doc.text.length.toLocaleString("de-DE")} Zeichen
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      setSourceDocuments((prev) => prev.filter((d) => d.name !== doc.name))
+                    }
+                  >
+                    Entfernen
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-secondary">
+              Optional. Ohne Dateien kommt die Vorausfüllung aus Crawl und Erstgespräch.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
           <CardTitle className="text-base">3. Zweck</CardTitle>
           <CardDescription>
             Anbieter-Fragebogen und Wunschkunden-Fragebogen gehen an den Kunden.
@@ -713,12 +808,11 @@ export function FragebogenFromOrgWizard(props: {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            4. Standardfragen ({selectedCount}/{coreItems.length})
+            4. Standardfragen ({coreItems.length}, alle Pflichtfelder)
           </CardTitle>
           <CardDescription>
-            Feste Basis in der richtigen Reihenfolge und mit dem richtigen Format.
-            Abwählen, was für diesen Kunden nicht gebraucht wird. Branchenspezifische Optionen
-            (Portfolio, Ranking) vor dem Versand in der Prüfung anpassen.
+            Alle Kernfragen sind vorausgewählt und Pflichtfelder. In der Prüfung können Antworten
+            aus Dateien und Crawl angepasst werden.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -727,31 +821,19 @@ export function FragebogenFromOrgWizard(props: {
               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-secondary">
                 {group.title}
               </p>
-              {group.items.map((item) => {
-                const checked = selectedKeys.includes(item.key);
-                return (
-                  <label
+              {group.items.map((item) => (
+                  <div
                     key={item.key}
-                    className={cn(
-                      "flex cursor-pointer gap-3 rounded-xl border px-3 py-2.5 text-sm transition",
-                      checked
-                        ? "border-sbkm-mint/40 bg-sbkm-mint/10"
-                        : "border-sbkm-navy/10 opacity-70",
-                    )}
+                    className="flex gap-3 rounded-xl border border-sbkm-mint/40 bg-sbkm-mint/10 px-3 py-2.5 text-sm"
                   >
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={checked}
-                      onChange={() => toggleKey(item.key)}
-                    />
                     <span className="grid gap-0.5">
                       <span className="font-medium text-primary">{item.title}</span>
-                      <span className="text-xs text-secondary">{item.description}</span>
+                      {item.description ? (
+                        <span className="text-xs text-secondary">{item.description}</span>
+                      ) : null}
                     </span>
-                  </label>
-                );
-              })}
+                  </div>
+              ))}
             </div>
           ))}
         </CardContent>

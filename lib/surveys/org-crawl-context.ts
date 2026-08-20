@@ -1,20 +1,34 @@
 import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/service";
-import { searchDtSitePages } from "@/lib/dt/seo/search-site-pages";
+import { getDtSitePageContent, searchDtSitePages } from "@/lib/dt/seo/search-site-pages";
 import {
   formatDtSeoMonthlyStatsForPrompt,
   loadDtSeoMonthlyStats,
   computeSeoStatsSummary,
 } from "@/lib/dt/seo/monthly-stats";
 import type { OrgCrawlContext, OrgCrawlSeoMetrics } from "@/lib/surveys/org-crawl-prefill";
+import {
+  classifyCrawlPage,
+  crawlPageKindLabel,
+  crawlPagePriority,
+} from "@/lib/surveys/org-crawl-prefill";
 
 export type { OrgCrawlContext, PrefillDraft, PrefillSource } from "@/lib/surveys/org-crawl-prefill";
 export { suggestPrefillsFromCrawl } from "@/lib/surveys/org-crawl-prefill";
 
-function cleanExcerpt(text: string, max = 900): string {
+function cleanExcerpt(text: string, max: number): string {
   return text.replace(/\s+/g, " ").trim().slice(0, max);
 }
+
+const SEARCH_QUERIES = [
+  "Über uns About Team Mitarbeiter Inhaber Geschäftsführung",
+  "Leistungen Angebot Services Portfolio Performance",
+  "Presse Pressemitteilung News Aktuelles Blog",
+  "Kontakt Standort Region Spezialisierung Impressum Adresse",
+  "USP Philosophie Unterschied Wettbewerbsvorteil",
+  "Bewertungen Google Öffnungszeiten",
+];
 
 export async function loadOrgCrawlContext(
   organisationId: string,
@@ -40,7 +54,7 @@ export async function loadOrgCrawlContext(
         .eq("organisation_id", organisationId)
         .eq("is_excluded", false)
         .order("updated_at", { ascending: false })
-        .limit(24),
+        .limit(60),
       loadDtSeoMonthlyStats(supabase, organisationId, 12),
     ]);
 
@@ -48,18 +62,11 @@ export async function loadOrgCrawlContext(
   const websiteUrl = config?.website_url?.trim() || null;
   const pageCount = count ?? 0;
 
-  const queries = [
-    organisationName,
-    "Über uns Leistungen Angebot Team Mitarbeiter",
-    "Kontakt Standort Region Spezialisierung Impressum Adresse",
-    "USP Philosophie Unterschied Wettbewerbsvorteil",
-    "Bewertungen Google Öffnungszeiten",
-  ];
   const seen = new Set<string>();
   const snippets: OrgCrawlContext["snippets"] = [];
 
-  for (const q of queries) {
-    const hits = await searchDtSitePages(organisationId, q, 4);
+  for (const q of SEARCH_QUERIES) {
+    const hits = await searchDtSitePages(organisationId, q, 6);
     for (const hit of hits) {
       if (seen.has(hit.url)) continue;
       seen.add(hit.url);
@@ -68,24 +75,39 @@ export async function loadOrgCrawlContext(
         title: hit.title,
         snippet: hit.snippet,
       });
-      if (snippets.length >= 16) break;
+      if (snippets.length >= 24) break;
     }
-    if (snippets.length >= 16) break;
+    if (snippets.length >= 24) break;
   }
 
+  const ranked = [...(topPages ?? [])].sort((a, b) => {
+    const pa = crawlPagePriority(classifyCrawlPage(a.url, a.title || a.h1));
+    const pb = crawlPagePriority(classifyCrawlPage(b.url, b.title || b.h1));
+    return pb - pa;
+  });
+
   const pageExcerpts: OrgCrawlContext["pageExcerpts"] = [];
-  for (const row of topPages ?? []) {
+  for (const row of ranked) {
+    if (pageExcerpts.length >= 28) break;
     const title = (row.title || row.h1 || "").trim() || null;
-    const parts = [
-      row.meta_description?.trim() || "",
-      row.h1?.trim() || "",
-      row.text_content?.trim() || "",
-    ].filter(Boolean);
-    const text = cleanExcerpt(parts.join(" · "), 1400);
+    const kind = classifyCrawlPage(row.url, title);
+    const max = kind === "other" ? 1200 : 2400;
+    let text = cleanExcerpt(
+      [row.meta_description?.trim() || "", row.h1?.trim() || "", row.text_content?.trim() || ""]
+        .filter(Boolean)
+        .join(" · "),
+      max,
+    );
+    if (kind !== "other" && (row.text_content?.trim().length ?? 0) < 400) {
+      const full = await getDtSitePageContent(organisationId, row.url, 4000);
+      if (full?.content) {
+        text = cleanExcerpt(`${title ?? ""} · ${full.content}`, 2800);
+      }
+    }
     if (!text) continue;
     pageExcerpts.push({
       url: row.url,
-      title,
+      title: title ? `${crawlPageKindLabel(kind)}: ${title}` : crawlPageKindLabel(kind),
       text,
     });
   }
@@ -106,6 +128,33 @@ export async function loadOrgCrawlContext(
       }
     : null;
 
+  const grouped = {
+    press: pageExcerpts.filter((p) => p.title?.startsWith("Presse:")),
+    about: pageExcerpts.filter((p) => p.title?.startsWith("Über uns:")),
+    team: pageExcerpts.filter((p) => p.title?.startsWith("Team:")),
+    services: pageExcerpts.filter((p) => p.title?.startsWith("Leistungen:")),
+    other: pageExcerpts.filter(
+      (p) =>
+        !p.title?.startsWith("Presse:") &&
+        !p.title?.startsWith("Über uns:") &&
+        !p.title?.startsWith("Team:") &&
+        !p.title?.startsWith("Leistungen:"),
+    ),
+  };
+
+  const block = (
+    heading: string,
+    pages: OrgCrawlContext["pageExcerpts"],
+  ): string[] =>
+    pages.length === 0
+      ? []
+      : [
+          `### ${heading}`,
+          ...pages.map(
+            (p, i) => `[${heading.slice(0, 1)}${i + 1}] ${p.title || p.url}\nURL: ${p.url}\n${p.text}`,
+          ),
+        ];
+
   const summaryText = [
     `Organisation: ${organisationName}`,
     websiteUrl ? `Website: ${websiteUrl}` : "Website: (noch nicht hinterlegt)",
@@ -119,10 +168,11 @@ export async function loadOrgCrawlContext(
       (s, i) => `[S${i + 1}] ${s.title || s.url}\nURL: ${s.url}\n${s.snippet}`,
     ),
     "",
-    "### Seitenauszüge",
-    ...pageExcerpts.map(
-      (p, i) => `[P${i + 1}] ${p.title || p.url}\nURL: ${p.url}\n${p.text}`,
-    ),
+    ...block("Presse / Pressemitteilungen", grouped.press),
+    ...block("Über uns", grouped.about),
+    ...block("Team", grouped.team),
+    ...block("Leistungen / Performance", grouped.services),
+    ...block("Weitere Seiten", grouped.other),
   ].join("\n");
 
   return {

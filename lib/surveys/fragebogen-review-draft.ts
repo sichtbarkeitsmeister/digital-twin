@@ -85,7 +85,7 @@ export function createEmptyExtraQuestion(): ReviewQuestionItem {
     title: "",
     description: "",
     included: true,
-    required: false,
+    required: true,
     type: "text",
     options: [],
     answer: "",

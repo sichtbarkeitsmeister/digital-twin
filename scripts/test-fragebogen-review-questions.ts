@@ -43,7 +43,7 @@ function coreQuestion(patch: Partial<ReviewQuestionItem> = {}): ReviewQuestionIt
 const extraText = createEmptyExtraQuestion();
 assert.equal(extraText.kind, "extra");
 assert.equal(extraText.type, "text");
-assert.equal(extraText.required, false);
+assert.equal(extraText.required, true);
 assert.equal(extraText.title, "");
 
 const extraRadio = applyReviewQuestionType(
