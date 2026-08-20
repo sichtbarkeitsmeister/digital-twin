@@ -24,6 +24,7 @@ function sourceBadge(source: string) {
   if (source === "crawl") return "Crawl";
   if (source === "ai") return "KI";
   if (source === "meeting") return "Kundengespräch";
+  if (source === "upload") return "Datei";
   return "Leer";
 }
 

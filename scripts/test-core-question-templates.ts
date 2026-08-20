@@ -21,7 +21,12 @@ import { surveySchema } from "../lib/surveys/schema";
 
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "company_name"));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "respondent_name"));
-assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "respondent_is_client"));
+assert.equal(
+  ANBIETER_CORE_QUESTIONS.filter((q) => q.key === "respondent_is_client").length,
+  0,
+);
+assert.ok(ANBIETER_CORE_QUESTIONS.every((q) => q.required));
+assert.ok(PERSONA_CORE_QUESTIONS.every((q) => q.required));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "elevator_pitch"));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "portfolio" && q.type === "checkbox"));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "company_archetype" && q.type === "ranking"));
@@ -55,6 +60,7 @@ assert.equal(
       q.key === "text_length" ||
       q.key === "portfolio_links" ||
       q.key === "actual_client_visibility" ||
+      q.key === "respondent_is_client" ||
       q.key === "external_mentions" ||
       q.key === "automation_goals" ||
       q.key === "public_use_permission" ||
@@ -65,16 +71,6 @@ assert.equal(
 assert.match(
   ANBIETER_CORE_QUESTIONS.find((q) => q.key === "usp")?.title ?? "",
   /andere nicht können/,
-);
-assert.match(
-  ANBIETER_CORE_QUESTIONS.find((q) => q.key === "respondent_is_client")?.title ?? "",
-  /Auftraggeber/,
-);
-assert.equal(
-  /Auftraggeberin/.test(
-    ANBIETER_CORE_QUESTIONS.find((q) => q.key === "respondent_is_client")?.title ?? "",
-  ),
-  false,
 );
 
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_pain"));

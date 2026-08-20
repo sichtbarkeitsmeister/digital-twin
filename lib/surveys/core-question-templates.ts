@@ -157,11 +157,6 @@ const ONLINE_CHANNELS = [
   "Google-Anzeigen",
 ];
 
-const RESPONDENT_IS_CLIENT: SurveyOption[] = [
-  opt("ja_dieselbe", "ja, dieselbe Person"),
-  opt("nein_andere", "nein, es ist jemand anderes"),
-];
-
 type StepField = Omit<
   CoreQuestionTemplate,
   "stepId" | "stepTitle" | "stepDescription" | "description" | "required"
@@ -178,7 +173,7 @@ function step(
 ): CoreQuestionTemplate[] {
   return fields.map((field, index) => ({
     description: "",
-    required: false,
+    required: true,
     ...field,
     stepId,
     stepTitle,
@@ -355,13 +350,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         description: "z. B. Inhaber, Geschäftsführung, Assistenz, Marketing.",
         type: "text",
       },
-      {
-        key: "respondent_is_client",
-        title:
-          "Ist diese Person auch der eigentliche Auftraggeber (z. B. Inhaber oder Geschäftsführung), oder füllt hier jemand anderes aus?",
-        type: "radio",
-        options: RESPONDENT_IS_CLIENT,
-      },
     ],
     "Wer den Fragebogen ausfüllt.",
   ),
@@ -373,7 +361,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "company_name",
         title:
           "Wie lautet der vollständige Name der Firma, so wie er offiziell im Impressum oder Handelsregister steht (inklusive Rechtsform, z. B. GmbH, GbR, e.K.)?",
-        required: true,
         type: "text",
         prefillHint: "org_name",
       },
@@ -813,7 +800,6 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "persona_name",
         title:
           "Wie könnte dieser ideale Kunde heißen, wenn es eine echte Person wäre (Vor- und Nachname)? Das dient nur der besseren Vorstellung, es handelt sich nicht um eine echte Person.",
-        required: true,
         type: "text",
         prefillHint: "persona_name",
       },
@@ -821,7 +807,6 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "persona_description",
         title:
           "Wie lässt sich dieser ideale Kunde in drei bis fünf Sätzen beschreiben (ungefähres Alter, Lebenssituation, warum die Zusammenarbeit mit ihm besonders gut funktioniert)?",
-        required: true,
         type: "text",
         prefillHint: "target_group",
       },
@@ -893,7 +878,6 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "persona_pain",
         title:
           "Wie beschreibt dieser Kunde sein eigenes Problem im ersten Gespräch – am besten mit den genauen Worten, die tatsächlich verwendet wurden?",
-        required: true,
         type: "text",
         prefillHint: "persona_pain",
       },
