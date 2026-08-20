@@ -7,6 +7,9 @@ import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { createClient } from "@/lib/supabase/server";
 
+/** Preview crawls + fills via Haiku; allow enough time without failing the page. */
+export const maxDuration = 120;
+
 export default async function NeueFragebogenPage({
   searchParams,
 }: {

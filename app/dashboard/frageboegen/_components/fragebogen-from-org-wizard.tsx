@@ -414,6 +414,15 @@ export function FragebogenFromOrgWizard(props: {
           </p>
         </div>
 
+        {draft.aiWarning ? (
+          <p
+            className="rounded-xl border border-amber-300/80 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
+            role="status"
+          >
+            {draft.aiWarning}
+          </p>
+        ) : null}
+
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">{draft.title}</CardTitle>

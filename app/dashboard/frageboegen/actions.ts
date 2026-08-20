@@ -331,6 +331,7 @@ const createFromReviewSchema = z.object({
     websiteUrl: z.string().nullable(),
     organisationName: z.string(),
     questions: z.array(reviewQuestionSchema).min(1),
+    aiWarning: z.string().nullable().optional(),
   }),
 });
 

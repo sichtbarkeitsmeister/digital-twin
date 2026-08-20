@@ -54,7 +54,7 @@ export async function loadOrgCrawlContext(
         .eq("organisation_id", organisationId)
         .eq("is_excluded", false)
         .order("updated_at", { ascending: false })
-        .limit(60),
+        .limit(40),
       loadDtSeoMonthlyStats(supabase, organisationId, 12),
     ]);
 
@@ -65,8 +65,10 @@ export async function loadOrgCrawlContext(
   const seen = new Set<string>();
   const snippets: OrgCrawlContext["snippets"] = [];
 
-  for (const q of SEARCH_QUERIES) {
-    const hits = await searchDtSitePages(organisationId, q, 6);
+  const searchHits = await Promise.all(
+    SEARCH_QUERIES.map((q) => searchDtSitePages(organisationId, q, 5)),
+  );
+  for (const hits of searchHits) {
     for (const hit of hits) {
       if (seen.has(hit.url)) continue;
       seen.add(hit.url);
@@ -75,9 +77,9 @@ export async function loadOrgCrawlContext(
         title: hit.title,
         snippet: hit.snippet,
       });
-      if (snippets.length >= 24) break;
+      if (snippets.length >= 16) break;
     }
-    if (snippets.length >= 24) break;
+    if (snippets.length >= 16) break;
   }
 
   const ranked = [...(topPages ?? [])].sort((a, b) => {
@@ -86,24 +88,37 @@ export async function loadOrgCrawlContext(
     return pb - pa;
   });
 
+  const needFull = ranked
+    .filter((row) => {
+      const kind = classifyCrawlPage(row.url, row.title || row.h1);
+      return kind !== "other" && (row.text_content?.trim().length ?? 0) < 400;
+    })
+    .slice(0, 4);
+  const fullByUrl = new Map<string, string>();
+  await Promise.all(
+    needFull.map(async (row) => {
+      const full = await getDtSitePageContent(organisationId, row.url, 3500);
+      if (full?.content) fullByUrl.set(row.url, full.content);
+    }),
+  );
+
   const pageExcerpts: OrgCrawlContext["pageExcerpts"] = [];
   for (const row of ranked) {
-    if (pageExcerpts.length >= 28) break;
+    if (pageExcerpts.length >= 16) break;
     const title = (row.title || row.h1 || "").trim() || null;
     const kind = classifyCrawlPage(row.url, title);
-    const max = kind === "other" ? 1200 : 2400;
-    let text = cleanExcerpt(
-      [row.meta_description?.trim() || "", row.h1?.trim() || "", row.text_content?.trim() || ""]
+    const max = kind === "other" ? 900 : 1800;
+    const extra = fullByUrl.get(row.url);
+    const text = cleanExcerpt(
+      [
+        row.meta_description?.trim() || "",
+        row.h1?.trim() || "",
+        extra || row.text_content?.trim() || "",
+      ]
         .filter(Boolean)
         .join(" · "),
       max,
     );
-    if (kind !== "other" && (row.text_content?.trim().length ?? 0) < 400) {
-      const full = await getDtSitePageContent(organisationId, row.url, 4000);
-      if (full?.content) {
-        text = cleanExcerpt(`${title ?? ""} · ${full.content}`, 2800);
-      }
-    }
     if (!text) continue;
     pageExcerpts.push({
       url: row.url,

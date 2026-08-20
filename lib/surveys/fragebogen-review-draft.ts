@@ -56,6 +56,8 @@ export type FragebogenReviewDraft = {
   websiteUrl: string | null;
   organisationName: string;
   questions: ReviewQuestionItem[];
+  /** Set when crawl/upload prefills succeeded but the AI gap-fill timed out or failed. */
+  aiWarning?: string | null;
 };
 
 function createId(): string {
