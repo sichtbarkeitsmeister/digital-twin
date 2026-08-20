@@ -1,11 +1,14 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import * as React from "react";
+import { ArrowLeft } from "lucide-react";
 
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 import { PlatformAdminTeamCard } from "@/app/dashboard/_components/platform-admin-team-card";
 import { loadPlatformAdminTeam } from "@/lib/dashboard/platform-admin-team";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -58,20 +61,22 @@ async function AdminPlatformTeamPageContent() {
   return (
     <OrganisationPageShell>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="grid gap-1">
+        <div className="grid gap-2">
+          <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit text-secondary">
+            <Link href="/dashboard/admin/organisations">
+              <ArrowLeft className="size-4" aria-hidden />
+              Zur Plattform-Übersicht
+            </Link>
+          </Button>
           <h1 className="text-2xl font-bold tracking-tight text-primary">Plattform-Team</h1>
           <p className="max-w-2xl text-sm text-secondary">
-            Hier stellst du ein, wer die Admin-Ansicht sieht: Verwaltung, SEO Modus, Jobs und
-            E-Mails.
+            Wer die Admin-Ansicht sieht: Verwaltung, SEO Modus, Jobs und E-Mails.
           </p>
         </div>
         <Badge>Plattform-Admin</Badge>
       </div>
 
-      <Card
-        id="plattform-team"
-        className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
-      >
+      <Card className="overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]">
         <CardHeader>
           <CardTitle className="tracking-tight">Admin-Ansicht vergeben</CardTitle>
           <CardDescription>

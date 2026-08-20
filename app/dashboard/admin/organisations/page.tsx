@@ -1,14 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import * as React from "react";
-import { ClipboardPenLine, Workflow } from "lucide-react";
+import { ClipboardPenLine, Users, Workflow } from "lucide-react";
 
 import { AdminCreateOrgForm } from "@/app/dashboard/_components/admin-create-org-form";
 import { PlatformAdminOrgHub } from "@/app/dashboard/_components/organisations/platform-admin-org-hub";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
-import { PlatformAdminTeamCard } from "@/app/dashboard/_components/platform-admin-team-card";
 import { loadPlatformAdminOverview } from "@/lib/dashboard/platform-admin-overview";
-import { loadPlatformAdminTeam } from "@/lib/dashboard/platform-admin-team";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -61,10 +59,7 @@ async function AdminOrganisationsPageContent() {
     redirect("/dashboard/inbox");
   }
 
-  const [{ organisations, stats }, teamMembers] = await Promise.all([
-    loadPlatformAdminOverview(),
-    loadPlatformAdminTeam(supabase),
-  ]);
+  const { organisations, stats } = await loadPlatformAdminOverview();
 
   return (
     <OrganisationPageShell>
@@ -75,32 +70,21 @@ async function AdminOrganisationsPageContent() {
           </h1>
           <p className="max-w-2xl text-sm text-secondary">
             Organisationen, SEO und Teams auf einen Blick — anlegen, filtern und direkt öffnen.
-            Admin-Rechte für Kolleginnen stellst du oben unter Plattform-Team ein.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button asChild>
+            <Link href="/dashboard/admin/team">
+              <Users className="size-4" aria-hidden />
+              Plattform-Team
+            </Link>
+          </Button>
           <Badge>Plattform-Admin</Badge>
           <Badge variant="outline" className="tabular-nums">
             {stats.totalOrgs} / 100
           </Badge>
         </div>
       </div>
-
-      <Card
-        id="plattform-team"
-        className="overflow-hidden scroll-mt-6 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]"
-      >
-        <CardHeader>
-          <CardTitle className="tracking-tight">Plattform-Team</CardTitle>
-          <CardDescription>
-            Wer die Admin-Ansicht (Verwaltung, SEO Modus, Jobs) sieht — hier
-            freischalten oder entfernen.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <PlatformAdminTeamCard members={teamMembers} currentUserId={userId} />
-        </CardContent>
-      </Card>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <div className="grid gap-4 xl:sticky xl:top-4 xl:self-start">
@@ -127,6 +111,12 @@ async function AdminOrganisationsPageContent() {
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2">
+              <Button asChild size="sm" variant="outline" className="justify-start gap-2">
+                <Link href="/dashboard/admin/team">
+                  <Users className="size-4" aria-hidden />
+                  Plattform-Team
+                </Link>
+              </Button>
               <Button asChild size="sm" variant="outline" className="justify-start gap-2">
                 <Link href="/dashboard/surveys">
                   <ClipboardPenLine className="size-4" aria-hidden />
