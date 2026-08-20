@@ -95,7 +95,7 @@ async function AdminOrganisationsPageContent() {
             <CardHeader>
               <CardTitle className="tracking-tight">Organisation anlegen</CardTitle>
               <CardDescription>
-                Neue Organisation mit initialem Inhaber per E-Mail erstellen.
+                Neue Organisation mit Inhaber und Fragebogen-Ordner anlegen.
               </CardDescription>
             </CardHeader>
             <CardContent>

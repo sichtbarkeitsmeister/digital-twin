@@ -4,10 +4,7 @@ import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
-import {
-  matchSurveyFoldersToOrganisationName,
-  pickPreferredSurveyFolder,
-} from "@/lib/dt/agent-survey-coverage-options";
+import { ensureOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { assignSurveyOrganisation } from "@/lib/dt/survey-to-agent-service";
 import {
   buildFragebogenReviewDraft,
@@ -234,62 +231,16 @@ export async function createFragebogenFromReviewAction(
   const service = createServiceClient();
   const { data: org } = await service
     .from("organisations")
-    .select("id, name, slug")
+    .select("id")
     .eq("id", parsed.data.organisationId)
     .maybeSingle();
   if (!org) return { ok: false, message: "Organisation nicht gefunden." };
 
-  const { data: orgConfig } = await service
-    .from("dt_org_config")
-    .select("display_name")
-    .eq("organisation_id", parsed.data.organisationId)
-    .maybeSingle();
-
-  const orgAliases = [org.slug, orgConfig?.display_name].filter(
-    (v): v is string => Boolean(v?.trim()),
-  );
-  const preferredFolderNames = [
-    org.name,
-    orgConfig?.display_name,
-    org.slug,
-  ].filter((v): v is string => Boolean(v?.trim()));
-
-  let folderId: string | null = null;
-  const { data: folders } = await service
-    .from("survey_folders")
-    .select("id, name")
-    .order("name", { ascending: true })
-    .limit(500);
-  const matchedFolders = matchSurveyFoldersToOrganisationName(
-    folders ?? [],
-    org.name,
-    orgAliases,
-  );
-  const existingFolder = pickPreferredSurveyFolder(matchedFolders, preferredFolderNames);
-  if (existingFolder?.id) {
-    folderId = existingFolder.id;
-  } else {
-    const folderName = orgConfig?.display_name?.trim() || org.name;
-    const { data: createdFolder, error: folderError } = await service
-      .from("survey_folders")
-      .insert({ name: folderName, created_by_user_id: auth.userId })
-      .select("id")
-      .single();
-    if (createdFolder?.id) {
-      folderId = createdFolder.id;
-    } else if (folderError) {
-      const { data: retryFolders } = await service
-        .from("survey_folders")
-        .select("id, name")
-        .order("name", { ascending: true })
-        .limit(500);
-      folderId =
-        pickPreferredSurveyFolder(
-          matchSurveyFoldersToOrganisationName(retryFolders ?? [], org.name, orgAliases),
-          preferredFolderNames,
-        )?.id ?? null;
-    }
-  }
+  const folder = await ensureOrganisationSurveyFolder({
+    organisationId: parsed.data.organisationId,
+    createdByUserId: auth.userId,
+  });
+  const folderId = folder.ok ? folder.folderId : null;
 
   const { data: survey, error: surveyError } = await service
     .from("surveys")
@@ -347,6 +298,36 @@ export async function createFragebogenFromReviewAction(
       extraCount,
       prefillCount: Object.keys(answers).length,
       crawlPageCount: parsed.data.draft.crawlPageCount,
+    },
+  };
+}
+
+export async function ensureOrganisationSurveyFolderAction(input: {
+  organisationId: string;
+}): Promise<ActionState<{ folderId: string; folderName: string; created: boolean }>> {
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
+
+  const parsed = z.object({ organisationId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, message: "Ungültige Organisation." };
+
+  const folder = await ensureOrganisationSurveyFolder({
+    organisationId: parsed.data.organisationId,
+    createdByUserId: auth.userId,
+  });
+  if (!folder.ok) return { ok: false, message: folder.message };
+
+  revalidatePath("/dashboard/frageboegen");
+  revalidatePath("/dashboard/surveys");
+  return {
+    ok: true,
+    message: folder.created
+      ? `Fragebogen-Ordner „${folder.folderName}“ wurde angelegt.`
+      : `Fragebogen-Ordner „${folder.folderName}“ war bereits vorhanden.`,
+    data: {
+      folderId: folder.folderId,
+      folderName: folder.folderName,
+      created: folder.created,
     },
   };
 }

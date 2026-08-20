@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { ClipboardPenLine } from "lucide-react";
 
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
+import { EnsureOrgSurveyFolderPrompt } from "@/app/dashboard/frageboegen/_components/ensure-org-survey-folder-prompt";
 import { PersistedOrganisationUrlSync } from "@/components/shared/persisted-organisation-url-sync";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
+import { findOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { createClient } from "@/lib/supabase/server";
@@ -86,9 +88,12 @@ export default async function OrganisationFrageboegenPage({
 
   const selectedOrgName =
     organisations.find((o) => o.id === selectedOrganisationId)?.name ?? "Organisation";
-  const surveys = await listSurveysForOrganisation({
-    organisationId: selectedOrganisationId,
-  });
+  const [surveys, surveyFolder] = await Promise.all([
+    listSurveysForOrganisation({
+      organisationId: selectedOrganisationId,
+    }),
+    findOrganisationSurveyFolder(selectedOrganisationId),
+  ]);
 
   return (
     <>
@@ -140,6 +145,12 @@ export default async function OrganisationFrageboegenPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2">
+            {isPlatformAdmin && !surveyFolder ? (
+              <EnsureOrgSurveyFolderPrompt
+                organisationId={selectedOrganisationId}
+                organisationName={selectedOrgName}
+              />
+            ) : null}
             {surveys.length === 0 ? (
               <p className="rounded-xl border border-dashed border-sbkm-navy/15 px-4 py-8 text-center text-sm text-secondary dark:border-white/15">
                 Noch keine Fragebögen für diese Organisation gefunden.
