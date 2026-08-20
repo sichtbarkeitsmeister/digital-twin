@@ -77,6 +77,7 @@ export function DashboardSidebar({
   canManageDtAgents,
   canViewDtUsage,
   showLeads,
+  showFrageboegen,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
 }: {
@@ -85,6 +86,7 @@ export function DashboardSidebar({
   canManageDtAgents: boolean;
   canViewDtUsage: boolean;
   showLeads: boolean;
+  showFrageboegen: boolean;
   pendingSurveyQuestionsCount: number;
   pendingAgentEditRequestsCount: number;
 }) {
@@ -142,7 +144,7 @@ export function DashboardSidebar({
   ];
 
   const frageboegenItem: NavItem | null =
-    canManageDtAgents || isPlatformAdmin
+    showFrageboegen || canManageDtAgents || isPlatformAdmin
       ? {
           label: "Fragebögen",
           href: "/dashboard/frageboegen",
