@@ -19,6 +19,7 @@ import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
 import { findOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
+import { organisationOptionLabel } from "@/lib/shared/organisation-option";
 import { createClient } from "@/lib/supabase/server";
 
 function formatDate(value: string | null) {
@@ -86,8 +87,9 @@ export default async function OrganisationFrageboegenPage({
     );
   }
 
-  const selectedOrgName =
-    organisations.find((o) => o.id === selectedOrganisationId)?.name ?? "Organisation";
+  const selectedOrg =
+    organisations.find((o) => o.id === selectedOrganisationId) ?? null;
+  const selectedOrgName = organisationOptionLabel(selectedOrg);
   const [surveys, surveyFolder] = await Promise.all([
     listSurveysForOrganisation({
       organisationId: selectedOrganisationId,
@@ -117,6 +119,13 @@ export default async function OrganisationFrageboegenPage({
               selectedOrganisationId={selectedOrganisationId}
               orgPath="/dashboard/frageboegen"
             />
+            <Button asChild variant="outline" size="sm">
+              <Link
+                href={`/dashboard/organisations?org=${encodeURIComponent(selectedOrganisationId)}`}
+              >
+                Organisation bearbeiten
+              </Link>
+            </Button>
             {isPlatformAdmin ? (
               <>
                 <Button asChild size="sm">

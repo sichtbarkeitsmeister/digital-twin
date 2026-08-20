@@ -29,6 +29,7 @@ import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
 import { isProtectedSeoAdvisorAgent } from "@/lib/dt/delete-agent-policy";
 import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
+import { organisationOptionLabel, type OrganisationOption } from "@/lib/shared/organisation-option";
 import { cn } from "@/components/dt/cn";
 
 type AgentRow = DtAgentListItemRow;
@@ -102,7 +103,7 @@ function isValidOrgId(
 }
 
 export function DtAgentsManager(props: {
-  organisations: Array<{ id: string; name: string }>;
+  organisations: OrganisationOption[];
   initialOrgId: string;
   initialCanDirectlyEdit?: boolean;
   /** Server-fetched agents for initialOrgId — skips first-paint skeleton. */
@@ -206,7 +207,7 @@ export function DtAgentsManager(props: {
   const [globalChecklistDraft, setGlobalChecklistDraft] = useState("");
 
   const orgName =
-    props.organisations.find((o) => o.id === orgId)?.name ?? "Organisation";
+    organisationOptionLabel(props.organisations.find((o) => o.id === orgId));
 
   const pendingByAgentId = useMemo(() => {
     const map = new Map<string, DtAgentEditRequestRow>();

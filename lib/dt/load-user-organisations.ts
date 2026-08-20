@@ -12,8 +12,20 @@ type MembershipRow = {
   organisation_id: string;
   org_role: string;
   organisations?:
-    | { id: string; name: string; slug: string | null; owner_user_id?: string | null }
-    | Array<{ id: string; name: string; slug: string | null; owner_user_id?: string | null }>
+    | {
+        id: string;
+        name: string;
+        slug: string | null;
+        owner_user_id?: string | null;
+        archived_at?: string | null;
+      }
+    | Array<{
+        id: string;
+        name: string;
+        slug: string | null;
+        owner_user_id?: string | null;
+        archived_at?: string | null;
+      }>
     | null;
 };
 
@@ -26,7 +38,7 @@ export async function loadDtUserOrganisations(userId: string): Promise<{
   const { data: membershipsRaw, error } = await supabase
     .from("organisation_members")
     .select(
-      "organisation_id, org_role, organisations ( id, name, slug, owner_user_id )",
+      "organisation_id, org_role, organisations ( id, name, slug, owner_user_id, archived_at )",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
@@ -42,7 +54,7 @@ export async function loadDtUserOrganisations(userId: string): Promise<{
     const org = Array.isArray(row.organisations)
       ? (row.organisations[0] ?? null)
       : (row.organisations ?? null);
-    if (!org) continue;
+    if (!org || org.archived_at) continue;
     const orgRole = row.org_role;
     byId.set(org.id, {
       id: org.id,
@@ -60,6 +72,7 @@ export async function loadDtUserOrganisations(userId: string): Promise<{
     .from("organisations")
     .select("id, name, slug, owner_user_id")
     .eq("owner_user_id", userId)
+    .is("archived_at", null)
     .order("name", { ascending: true });
 
   for (const org of ownedOrgs ?? []) {

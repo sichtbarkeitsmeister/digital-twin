@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
+import { matchesSearchQuery } from "@/lib/shared/organisation-option";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +28,14 @@ const menuContentBase =
 const menuItemBase =
   "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold outline-none transition-colors focus:bg-sbkm-mint/15 data-[highlighted]:bg-sbkm-mint/15 dark:focus:bg-white/10 dark:data-[highlighted]:bg-white/10";
 
+function filterSelectOptions(options: DtSelectOption[], query: string): DtSelectOption[] {
+  const q = query.trim();
+  if (!q) return options;
+  return options.filter((opt) =>
+    matchesSearchQuery([opt.label, opt.description ?? "", opt.value].join("\n"), q),
+  );
+}
+
 export function DtSelect(props: {
   value: string;
   onValueChange: (value: string) => void;
@@ -47,9 +57,22 @@ export function DtSelect(props: {
   sideOffset?: number;
   collisionPadding?: number;
   size?: "default" | "sm";
+  /** Search field. Defaults to on when there are 8+ options. */
+  searchable?: boolean;
 }) {
   const selected = props.options.find((o) => o.value === props.value);
   const sm = props.size === "sm";
+  const searchable = props.searchable ?? props.options.length >= 8;
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(
+    () => filterSelectOptions(props.options, query),
+    [props.options, query],
+  );
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
 
   return (
     <div className={cn("grid min-w-0", sm ? "gap-0" : "gap-1", props.fullWidth && "w-full max-w-full", props.className)}>
@@ -63,7 +86,7 @@ export function DtSelect(props: {
           {props.label}
         </span>
       ) : null}
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild disabled={props.disabled}>
           <button
             type="button"
@@ -94,43 +117,72 @@ export function DtSelect(props: {
           side={props.side ?? "bottom"}
           sideOffset={props.sideOffset ?? 6}
           collisionPadding={props.collisionPadding ?? 12}
+          onCloseAutoFocus={(event) => event.preventDefault()}
           className={cn(
             menuContentBase,
+            searchable && "max-h-none overflow-hidden p-0",
             props.elevated && "z-[110]",
-            props.menuMaxHeight,
+            !searchable && props.menuMaxHeight,
             props.fullWidth && "w-[var(--radix-dropdown-menu-trigger-width)]",
             props.contentClassName,
           )}
         >
-          {props.options.map((opt) => {
-            const isSelected = opt.value === props.value;
-            return (
-              <DropdownMenuItem
-                key={opt.value}
-                disabled={opt.disabled}
-                onSelect={() => props.onValueChange(opt.value)}
-                className={cn(
-                  menuItemBase,
-                  isSelected && "bg-sbkm-mint/20 dark:bg-sbkm-mint/25",
-                  opt.disabled && "opacity-50",
-                )}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{opt.label}</span>
-                  {opt.description ? (
-                    <span className="mt-0.5 block truncate text-xs font-normal text-sbkm-ink-600 dark:text-white/50">
-                      {opt.description}
+          {searchable ? (
+            <div className="border-b border-sbkm-navy/10 p-1.5 dark:border-white/10">
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+                placeholder="Suchen…"
+                className="h-8 w-full rounded-lg border border-sbkm-navy/15 bg-white/90 px-2.5 text-xs outline-none placeholder:text-sbkm-ink-500 focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:border-white/15 dark:bg-white/10 dark:placeholder:text-white/40"
+                aria-label="Optionen suchen"
+                autoFocus
+              />
+            </div>
+          ) : null}
+          <div
+            className={cn(
+              searchable && "max-h-72 overflow-y-auto p-1.5",
+              searchable && props.menuMaxHeight,
+            )}
+          >
+            {filtered.length === 0 ? (
+              <p className="px-2 py-2 text-xs font-normal text-sbkm-ink-600 dark:text-white/50">
+                Keine Treffer.
+              </p>
+            ) : (
+              filtered.map((opt) => {
+                const isSelected = opt.value === props.value;
+                return (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    disabled={opt.disabled}
+                    onSelect={() => props.onValueChange(opt.value)}
+                    className={cn(
+                      menuItemBase,
+                      isSelected && "bg-sbkm-mint/20 dark:bg-sbkm-mint/25",
+                      opt.disabled && "opacity-50",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{opt.label}</span>
+                      {opt.description ? (
+                        <span className="mt-0.5 block truncate text-xs font-normal text-sbkm-ink-600 dark:text-white/50">
+                          {opt.description}
+                        </span>
+                      ) : null}
                     </span>
-                  ) : null}
-                </span>
-                {isSelected ? (
-                  <Check className="h-4 w-4 shrink-0 text-sbkm-mint" aria-hidden />
-                ) : (
-                  <span className="h-4 w-4 shrink-0" aria-hidden />
-                )}
-              </DropdownMenuItem>
-            );
-          })}
+                    {isSelected ? (
+                      <Check className="h-4 w-4 shrink-0 text-sbkm-mint" aria-hidden />
+                    ) : (
+                      <span className="h-4 w-4 shrink-0" aria-hidden />
+                    )}
+                  </DropdownMenuItem>
+                );
+              })
+            )}
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

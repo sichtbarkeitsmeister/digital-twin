@@ -13,9 +13,10 @@ import {
   deliverOwnerWelcomeWithFallback,
   ensureOwnerLoginLink,
 } from "@/lib/email/owner-welcome";
-import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { isOrgOwner, isPlatformAdmin } from "@/lib/dt/org-access";
 import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 import { ensureOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
+import { pickSurveyFolderToRename } from "@/lib/dt/organisation-rename";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -811,4 +812,160 @@ export async function adminArchiveOrganisationAction(
   revalidatePath(`/dashboard/organisations/${parsed.data.organisationId}`);
   return { ok: true, message: "Organisation wurde gelöscht." };
 }
+
+const updateOrganisationProfileSchema = z.object({
+  organisation_id: z.string().uuid(),
+  org_name: z.string().trim().min(2, "Organisationsname ist erforderlich").max(120),
+  rename_survey_folder: checkboxOnSchema.default(true),
+});
+
+/**
+ * Rename an organisation (display name). Slug stays the n8n/SEO key.
+ * Owner or platform admin. Optionally renames a matching Fragebogen-Ordner.
+ */
+export async function updateOrganisationProfileAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = updateOrganisationProfileSchema.safeParse({
+    organisation_id: formData.get("organisation_id"),
+    org_name: formData.get("org_name"),
+    rename_survey_folder: formData.get("rename_survey_folder"),
+  });
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) return { ok: false, message: "Nicht angemeldet." };
+
+  const organisationId = parsed.data.organisation_id;
+  const nextName = parsed.data.org_name;
+  const canRename =
+    (await isPlatformAdmin(supabase, user.id)) ||
+    (await isOrgOwner(supabase, user.id, organisationId));
+  if (!canRename) {
+    return {
+      ok: false,
+      message: "Nur Inhaber oder Plattform-Admins können den Organisationsnamen ändern.",
+    };
+  }
+
+  const { data: organisation } = await supabase
+    .from("organisations")
+    .select("id, name, slug, archived_at")
+    .eq("id", organisationId)
+    .maybeSingle();
+  if (!organisation || organisation.archived_at) {
+    return { ok: false, message: "Organisation nicht gefunden." };
+  }
+
+  const { data: orgConfig } = await supabase
+    .from("dt_org_config")
+    .select("display_name")
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+
+  const previousLabels = [
+    organisation.name,
+    orgConfig?.display_name ?? "",
+    organisation.slug ?? "",
+  ].filter((value) => value.trim());
+
+  const nameChanged = organisation.name.trim() !== nextName;
+  const displayChanged = (orgConfig?.display_name ?? "").trim() !== nextName;
+
+  if (nameChanged) {
+    const { error } = await supabase
+      .from("organisations")
+      .update({ name: nextName })
+      .eq("id", organisationId);
+    if (error) {
+      console.warn("[org] rename organisation failed:", error.message);
+      return { ok: false, message: "Organisationsname konnte nicht gespeichert werden." };
+    }
+  }
+
+  if (displayChanged || !orgConfig) {
+    try {
+      const service = createServiceClient();
+      const { error } = await service.from("dt_org_config").upsert(
+        { organisation_id: organisationId, display_name: nextName },
+        { onConflict: "organisation_id" },
+      );
+      if (error) {
+        console.warn("[org] display_name sync failed:", error.message);
+        if (!nameChanged) {
+          return { ok: false, message: "Anzeigename konnte nicht gespeichert werden." };
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[org] display_name sync crashed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  let folderNote: string | null = null;
+  if (parsed.data.rename_survey_folder) {
+    try {
+      const service = createServiceClient();
+      const { data: folders } = await service
+        .from("survey_folders")
+        .select("id, name")
+        .order("name", { ascending: true })
+        .limit(500);
+      const rename = pickSurveyFolderToRename({
+        folders: folders ?? [],
+        previousLabels,
+        nextName,
+      });
+      if (rename) {
+        const { error: folderError } = await service
+          .from("survey_folders")
+          .update({ name: rename.to })
+          .eq("id", rename.id);
+        if (folderError) {
+          folderNote =
+            "Fragebogen-Ordner konnte nicht umbenannt werden (Name evtl. schon vergeben).";
+        } else {
+          folderNote = `Fragebogen-Ordner von „${rename.from}“ in „${rename.to}“ umbenannt.`;
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[org] survey folder rename failed:",
+        err instanceof Error ? err.message : err,
+      );
+      folderNote = "Fragebogen-Ordner konnte nicht umbenannt werden.";
+    }
+  }
+
+  if (!nameChanged && !displayChanged && !folderNote) {
+    return { ok: true, message: "Keine Änderung." };
+  }
+
+  revalidatePath("/dashboard/organisations");
+  revalidatePath(`/dashboard/organisations/${organisationId}`);
+  revalidatePath("/dashboard/frageboegen");
+  revalidatePath("/dashboard/admin/organisations");
+  revalidatePath("/dashboard/verwaltung/agents");
+
+  const extras = [folderNote].filter(Boolean).join(" ");
+  const baseMessage = nameChanged || displayChanged
+    ? `Organisation heißt jetzt „${nextName}“. Der Slug bleibt unverändert.`
+    : "Gespeichert.";
+  return {
+    ok: true,
+    message: extras ? `${baseMessage} ${extras}` : baseMessage,
+  };
+}
+
 
