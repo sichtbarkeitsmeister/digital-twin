@@ -1,5 +1,6 @@
 import {
   matchSurveyFoldersToOrganisationName,
+  organisationMatchAliases,
   pickPreferredSurveyFolder,
 } from "@/lib/dt/agent-survey-coverage-options";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -32,7 +33,7 @@ async function loadOrganisationFolderContext(organisationId: string) {
 
   const { data: orgConfig } = await supabase
     .from("dt_org_config")
-    .select("display_name")
+    .select("display_name, website_url")
     .eq("organisation_id", organisationId)
     .maybeSingle();
 
@@ -42,18 +43,23 @@ async function loadOrganisationFolderContext(organisationId: string) {
     .order("name", { ascending: true })
     .limit(500);
 
-  const aliases = [organisation.slug, orgConfig?.display_name].filter(
-    (v): v is string => Boolean(v?.trim()),
-  );
+  const aliases = organisationMatchAliases({
+    name: organisation.name,
+    slug: organisation.slug,
+    displayName: orgConfig?.display_name,
+    websiteUrl: orgConfig?.website_url,
+  });
+  const extraAliases = aliases.slice(1);
   const preferredNames = [
     organisation.name,
     orgConfig?.display_name,
     organisation.slug,
+    ...extraAliases,
   ].filter((v): v is string => Boolean(v?.trim()));
   const matched = matchSurveyFoldersToOrganisationName(
     folders ?? [],
     organisation.name,
-    aliases,
+    extraAliases,
   );
   const existing = pickPreferredSurveyFolder(matched, preferredNames);
 
