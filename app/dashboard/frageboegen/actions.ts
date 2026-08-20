@@ -257,6 +257,12 @@ export async function previewFragebogenFromOrgAction(
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
   }
+  if (parsed.data.purpose === "intern") {
+    return {
+      ok: false,
+      message: "Interne Recherche-Fragebögen (TEIL C) werden derzeit nicht angelegt.",
+    };
+  }
 
   try {
     const draft = await buildFragebogenReviewDraft({
@@ -335,6 +341,12 @@ export async function createFragebogenFromReviewAction(
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
   }
+  if (parsed.data.draft.purpose === "intern") {
+    return {
+      ok: false,
+      message: "Interne Recherche-Fragebögen (TEIL C) werden derzeit nicht angelegt.",
+    };
+  }
 
   let definition;
   let answers: Record<string, unknown>;
@@ -345,14 +357,6 @@ export async function createFragebogenFromReviewAction(
     });
     definition = built.definition;
     answers = built.answers;
-    if (parsed.data.draft.purpose === "intern") {
-      definition = {
-        ...definition,
-        infoTextEnabled: true,
-        infoText:
-          "Interner Block von Sichtbarkeitsmeister. Nicht an den Kunden senden. Wird intern recherchiert und ergänzt.",
-      };
-    }
   } catch (err) {
     return {
       ok: false,

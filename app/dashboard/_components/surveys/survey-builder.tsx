@@ -1049,11 +1049,15 @@ export function SurveyBuilder({
                             label: surveyPurposeLabel("anbieter"),
                             description: "Antworten → SEO-Berater Wissen (1:1)",
                           },
-                          {
-                            value: "intern",
-                            label: surveyPurposeLabel("intern"),
-                            description: "TEIL C – nur Agentur, nicht an den Kunden",
-                          },
+                          ...(purpose === "intern"
+                            ? [
+                                {
+                                  value: "intern",
+                                  label: surveyPurposeLabel("intern"),
+                                  description: "TEIL C – nur Agentur, nicht an den Kunden",
+                                },
+                              ]
+                            : []),
                         ]}
                       />
                       <p className="text-xs text-secondary">

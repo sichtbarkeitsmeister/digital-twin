@@ -129,6 +129,8 @@ const archetypeStep = anbieterBuilt.definition.steps.find((s) =>
 assert.ok(archetypeStep);
 assert.equal(archetypeStep?.title, "Das Unternehmen");
 assert.equal(archetypeStep?.fields[0]?.type, "ranking");
+assert.equal(anbieterBuilt.definition.infoTextEnabled, true);
+assert.match(anbieterBuilt.definition.infoText ?? "", /echten Erfahrungen/);
 
 const personaAge: ReviewQuestionItem = {
   id: "core_persona_age",

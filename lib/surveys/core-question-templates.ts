@@ -136,38 +136,6 @@ const SPEAKING_STYLES = [
   "sachlich und fachlich",
 ];
 
-const COMPANY_VOICE = [
-  "Wir von [Firmenname]…",
-  "Firmenname direkt, z. B. „[Firmenname] hilft dabei…“",
-  "Ich-Form, falls Einzelperson",
-];
-
-const JARGON_LEVEL = [
-  "möglichst keine",
-  "dürfen vorkommen, werden aber immer erklärt",
-  "auch mit vielen Fachbegriffen",
-];
-
-const TEXT_LENGTH = [
-  "kurz und knapp",
-  "ausführlich mit Details",
-  "je nach Textart unterschiedlich",
-];
-
-const PUBLIC_USE = [
-  "mit Namen",
-  "nur ohne Namen",
-  "kommt auf das Beispiel an",
-];
-
-const IMAGE_ASSETS = [
-  "Vorher-Nachher-Fotos",
-  "Fotos vom Team",
-  "Fotos vom Arbeitsprozess",
-  "Videos",
-  "keines vorhanden",
-];
-
 const ATTENTION_CHANNELS = [
   "Empfehlung von anderen",
   "Google-Suche",
@@ -248,14 +216,6 @@ const PERSONA_FAMILY = [
   "in einer Partnerschaft oder verheiratet",
   "mit Kindern im Haushalt",
   "Kinder sind schon ausgezogen",
-  "im Ruhestand",
-];
-
-const PERSONA_CUSTOMER_GROUP_PLACEHOLDERS = [
-  "[Kundentyp 1 – vor Versand ersetzen]",
-  "[Kundentyp 2 – vor Versand ersetzen]",
-  "[Kundentyp 3 – vor Versand ersetzen]",
-  "[Kundentyp 4 – vor Versand ersetzen]",
 ];
 
 const PERSONA_COMPARE_QUOTES: SurveyOption[] = [
@@ -346,27 +306,42 @@ const PERSONA_PRAISE = [
 
 const PERSONA_DECISION_INFLUENCERS = [
   "der Kunde selbst",
-  "Partner oder Partnerin",
+  "Partner",
   "Familie",
   "Freunde",
-  "eine Fachperson oder Berater",
+  "ein Berater",
 ];
+
+const PERSONA_CONTACT_IS_CLIENT: SurveyOption[] = [
+  opt("dieselbe", "meistens dieselbe Person"),
+  opt("andere", "oft eine andere Person"),
+];
+
+export const ANBIETER_INFO_TEXT =
+  "Mit dem Ausfüllen bestätigt die antwortende Person automatisch, dass alle Angaben auf eigenen, echten Erfahrungen beruhen.";
+
+export const PERSONA_INFO_TEXT =
+  "Dieser Fragebogen beschreibt den idealen Kunden – also die Art von Person oder Firma, mit der die Zusammenarbeit am besten funktioniert. Die Antworten helfen dabei, Texte und Werbung so zu gestalten, dass genau dieser Kunde sich angesprochen fühlt. Wünsche, Ängste und Hürden dieses Kunden werden ausführlich in den Abschnitten „Warum wird überhaupt gesucht“, „Sorgen & Zweifel“ und „Der große Wunsch & die größte Hürde“ abgefragt.\n\nMit dem Ausfüllen bestätigt die antwortende Person automatisch, dass alle Angaben auf eigenen, echten Erfahrungen beruhen.";
+
+export function surveyInfoTextForPurpose(purpose: SurveyPurpose): {
+  infoTextEnabled: boolean;
+  infoText: string;
+} {
+  if (purpose === "intern") {
+    return { infoTextEnabled: false, infoText: "" };
+  }
+  if (purpose === "anbieter") {
+    return { infoTextEnabled: true, infoText: ANBIETER_INFO_TEXT };
+  }
+  return { infoTextEnabled: true, infoText: PERSONA_INFO_TEXT };
+}
 
 /** TEIL A – Fragebogen zum eigenen Unternehmen (Alltagssprache). */
 export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
   ...step(
     "core_intro",
-    "Einleitung & Kontaktperson",
+    "Kontaktperson",
     [
-      {
-        key: "confirm_real_experience",
-        title:
-          "Bestätigung, dass alle folgenden Angaben auf eigenen, echten Erfahrungen beruhen und nicht geraten sind.",
-        description: "Bitte mit Ja oder Nein antworten. Ohne diese Bestätigung ist der Fragebogen nicht auswertbar.",
-        required: true,
-        type: "radio",
-        options: YES_NO,
-      },
       {
         key: "respondent_name",
         title: "Wer füllt diesen Fragebogen hauptsächlich aus – Name?",
@@ -383,18 +358,12 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "respondent_is_client",
         title:
-          "Ist diese Person auch die eigentliche Auftraggeberin bzw. der eigentliche Auftraggeber (z. B. Inhaber oder Geschäftsführung), oder füllt hier jemand anderes aus?",
+          "Ist diese Person auch der eigentliche Auftraggeber (z. B. Inhaber oder Geschäftsführung), oder füllt hier jemand anderes aus?",
         type: "radio",
         options: RESPONDENT_IS_CLIENT,
       },
-      {
-        key: "actual_client_visibility",
-        title:
-          "Falls es sich um zwei verschiedene Personen handelt: Wer ist der eigentliche Auftraggeber, und soll diese Person auf der Website im Vordergrund stehen (z. B. als Gesicht der Firma), oder eher das Team allgemein?",
-        type: "text",
-      },
     ],
-    "Nur Angaben auf Basis eigener, echter Erfahrungen.",
+    "Wer den Fragebogen ausfüllt.",
   ),
   ...step(
     "core_company",
@@ -419,8 +388,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "location_catchment",
         title:
           "Wo befindet sich der Firmensitz, und aus welcher Umgebung oder Region kommt der Großteil der Kunden?",
-        description:
-          "Bitte Ort plus Region oder Kreis/Bezirk nennen, nicht nur die Stadt. Weitere Standorte und geplante Standorte können hier mit angegeben werden.",
         type: "text",
         prefillHint: "region",
       },
@@ -428,18 +395,11 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "portfolio",
         title: "Welche Leistungen oder Produkte werden aktuell angeboten?",
         description:
-          "Liste vor Versand passend zur Branche ersetzen. „Sonstiges“ bleibt frei. Wenn es Leistungsseiten, Flyer oder PDFs gibt, Links im nächsten Feld eintragen.",
+          "Liste vor Versand passend zur Branche ersetzen. „Sonstiges“ bleibt frei.",
         type: "checkbox",
         options: opts("portfolio", PORTFOLIO_PLACEHOLDERS),
         allowOtherOption: true,
         prefillHint: "services",
-      },
-      {
-        key: "portfolio_links",
-        title: "Links zu Leistungsseiten, Flyern oder anderen Unterlagen",
-        description: "Website-URLs, PDF-Links oder Dateinamen. Leer lassen, wenn nichts vorliegt.",
-        type: "text",
-        prefillHint: "portfolio_links",
       },
       {
         key: "known_for",
@@ -449,18 +409,15 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
       {
         key: "usp",
-        title: "Was macht das eigene Angebot besonders im Vergleich zu anderen Anbietern in der Region?",
+        title:
+          "Was macht das eigene Angebot besonders im Vergleich zu anderen Anbietern in der Region – was kann die eigene Firma, das andere nicht können oder nicht anbieten?",
         type: "text",
         prefillHint: "usp",
       },
       {
-        key: "competitor_gap",
-        title: "Was kann die eigene Firma, das andere Anbieter in der Region nicht können oder nicht anbieten?",
-        type: "text",
-      },
-      {
         key: "company_archetype",
-        title: "Welche der folgenden Beschreibungen passt am besten – bitte in eine Reihenfolge bringen.",
+        title:
+          "Welche der folgenden Beschreibungen passt am besten zum Unternehmen – bitte in eine Reihenfolge bringen.",
         type: "ranking",
         options: opts("archetype", COMPANY_ARCHETYPES),
         allowCustomEntries: false,
@@ -500,8 +457,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "response_channels",
         title: "Auf welchem Weg wird meistens reagiert?",
-        description:
-          "Nicht der Weg, über den der Kunde anfragt, sondern der Weg, auf dem die Firma antwortet. Beispiel: Anfrage über das Kontaktformular, Antwort per Telefon oder WhatsApp.",
         type: "checkbox",
         options: opts("resp_ch", RESPONSE_CHANNELS),
         allowOtherOption: true,
@@ -599,24 +554,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: [opt("du", "Du"), opt("sie", "Sie")],
       },
       {
-        key: "company_voice",
-        title: "Wird in Texten über die eigene Firma eher „Wir“ gesagt, oder wird der Firmenname direkt genannt?",
-        type: "radio",
-        options: opts("voice", COMPANY_VOICE),
-      },
-      {
-        key: "jargon_level",
-        title: "Wie viele Fachbegriffe dürfen in Texten vorkommen?",
-        type: "radio",
-        options: opts("jargon", JARGON_LEVEL),
-      },
-      {
-        key: "text_length",
-        title: "Sollen Texte eher kurz und knapp sein, oder ausführlich mit vielen Details?",
-        type: "radio",
-        options: opts("textlen", TEXT_LENGTH),
-      },
-      {
         key: "typical_terms",
         title:
           "Gibt es bestimmte Wörter oder Formulierungen, die immer wieder verwendet werden sollen, weil sie typisch für die Firma sind?",
@@ -634,11 +571,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: emptySlots("forbidden_term", 3),
         allowExtraEntries: true,
         addEntryLabel: "Begriff hinzufügen",
-      },
-      {
-        key: "tone_reference_texts",
-        title: "Gibt es bereits vorhandene Texte, deren Tonfall besonders gut passt? Bitte Link oder Beispiel angeben.",
-        type: "text",
       },
       {
         key: "philosophy_quotes",
@@ -664,8 +596,9 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
       {
         key: "qualifications",
-        title: "Welche Ausbildungen, Zertifikate oder Auszeichnungen gibt es im Team oder in der Firma?",
-        description: "Ein Eintrag pro Ausbildung oder Zertifikat.",
+        title:
+          "Welche Ausbildungen, Zertifikate, Auszeichnungen oder Mitgliedschaften gibt es im Team oder in der Firma – und gibt es dazu jeweils einen Link oder ein Dokument als Nachweis?",
+        description: "Pro Eintrag: Bezeichnung und Link oder Dokumentname.",
         type: "text_list",
         options: emptySlots("quali", 3),
         allowExtraEntries: true,
@@ -694,12 +627,12 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
   ),
   ...step(
     "core_proof",
-    "Erfolge, Bewertungen & belegbare Zahlen",
+    "Erfolge & belegbare Zahlen",
     [
       {
         key: "impressive_results",
         title:
-          "Was sind die beeindruckendsten Ergebnisse, die mit Kunden erreicht wurden? Bitte mit konkreten Zahlen, falls vorhanden (z. B. „20 kg abgenommen“, „Umsatz um 30 % gesteigert“).",
+          "Was sind die beeindruckendsten Ergebnisse, die mit Kunden erreicht wurden? Bitte mit konkreten Zahlen, falls vorhanden (z. B. „über 300 erfolgreich abgeschlossene Fälle“, „Umsatz um 30 % gesteigert“).",
         description: "Ein Ergebnis pro Feld.",
         type: "text_list",
         options: emptySlots("result", 3),
@@ -716,68 +649,20 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         addEntryLabel: "Zitat hinzufügen",
       },
       {
-        key: "fan_moment",
-        title: "Wann genau merkt man, dass ein Kunde zum echten Fan geworden ist? Was war der entscheidende Moment?",
-        type: "text",
-      },
-      {
         key: "why_stay",
         title: "Aus welchem Grund bleiben Kunden langfristig, statt nach einem Projekt oder Kauf wegzubleiben?",
         type: "text",
       },
       {
-        key: "years_staff_customers",
-        title:
-          "Seit wie vielen Jahren gibt es die Firma, und wie viele Kunden bzw. Mitarbeitende gab oder gibt es ungefähr? Bitte möglichst konkrete Zahlen.",
-        type: "text",
-        prefillHint: "years_staff",
-      },
-      {
         key: "proven_metrics",
         title:
-          "Welche konkreten Erfolgszahlen können genannt werden? Bitte nur Zahlen, die tatsächlich stimmen und belegt werden können.",
+          "Welche konkreten Kennzahlen zum Unternehmenserfolg können genannt werden (z. B. Anzahl betreuter Kunden, Anzahl Mitarbeitende, abgeschlossene Projekte, durchschnittliches Ergebnis)? Bitte nur Zahlen, die tatsächlich stimmen und belegt werden können.",
         description: "Pro Kennzahl: Bezeichnung und Wert, z. B. Anzahl abgeschlossener Projekte – über 300.",
         type: "text_list",
         options: emptySlots("metric", 3),
         allowExtraEntries: true,
         addEntryLabel: "Kennzahl hinzufügen",
         prefillHint: "seo_metrics",
-      },
-      {
-        key: "certificates_links",
-        title:
-          "Welche Zertifikate, Auszeichnungen oder Mitgliedschaften gibt es, und gibt es dazu einen Link oder ein Dokument als Nachweis?",
-        description: "Pro Zertifikat: Bezeichnung und Link oder Dokumentname.",
-        type: "text_list",
-        options: emptySlots("cert", 3),
-        allowExtraEntries: true,
-        addEntryLabel: "Zertifikat hinzufügen",
-      },
-      {
-        key: "public_use_permission",
-        title:
-          "Dürfen Geschichten, Zitate oder Zahlen von echten Kunden öffentlich verwendet werden – zum Beispiel auf der Website? Mit vollem Namen, oder nur ohne Namen?",
-        type: "radio",
-        options: opts("public_use", PUBLIC_USE),
-      },
-      {
-        key: "public_use_details",
-        title: "Details dazu, falls nötig",
-        type: "text",
-      },
-      {
-        key: "image_assets",
-        title:
-          "Gibt es Fotos, die im Marketing verwendet werden dürfen (z. B. Vorher-Nachher-Fotos, Fotos vom Team, Fotos vom Arbeitsprozess)?",
-        type: "checkbox",
-        options: opts("img", IMAGE_ASSETS),
-        allowOtherOption: true,
-      },
-      {
-        key: "image_assets_notes",
-        title: "Links oder Hinweise zu diesen Fotos oder Dateien",
-        description: "Upload im Fragebogen ist nicht möglich – bitte Links oder Dateinamen eintragen.",
-        type: "text",
       },
     ],
   ),
@@ -787,14 +672,10 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
     [
       {
         key: "competitors_respected",
-        title: "Welche anderen Anbieter werden respektiert, und warum?",
+        title:
+          "Welche anderen Anbieter werden respektiert – und was machen sie ehrlich gesagt besser?",
         type: "text",
         prefillHint: "good_competitors",
-      },
-      {
-        key: "competitors_better",
-        title: "Was machen andere Anbieter ehrlich gesagt besser?",
-        type: "text",
       },
       {
         key: "competitors_top",
@@ -879,12 +760,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         type: "text",
       },
       {
-        key: "external_mentions",
-        title:
-          "Wird die Firma irgendwo im Internet erwähnt, ohne dass selbst etwas dafür getan wurde – z. B. in einer Zeitung, auf einer Fachseite oder in einem Verzeichnis?",
-        type: "text",
-      },
-      {
         key: "desired_perception",
         title:
           "Wie soll die Firma heute und in Zukunft wahrgenommen werden – was sollen Menschen über sie denken oder sagen?",
@@ -906,40 +781,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title: "Welche Marketing-Maßnahmen sind für die nächsten zwölf Monate geplant oder gewünscht?",
         type: "text",
       },
-      {
-        key: "automation_goals",
-        title: "Welche Abläufe sollen zukünftig einfacher oder automatisch laufen?",
-        type: "text",
-      },
-    ],
-  ),
-  ...step(
-    "core_hormozi",
-    "Wünsche und Hürden des Kunden",
-    [
-      {
-        key: "hormozi_dream",
-        title:
-          "Was ist der eigentliche Wunsch des Kunden – wie soll sich sein Leben oder Alltag anfühlen, nachdem die Zusammenarbeit erfolgreich war? Bitte nicht die eigene Leistung beschreiben, sondern das Ergebnis für den Kunden.",
-        type: "text",
-        prefillHint: "target_group",
-      },
-      {
-        key: "hormozi_pain",
-        title: "Was ist das größte Problem oder die größte Sorge des Kunden, bevor er sich entscheidet?",
-        type: "text",
-      },
-      {
-        key: "hormozi_proof",
-        title:
-          "Was überzeugt den Kunden am Ende, diese Sorge loszulassen (z. B. ein Beweis, eine Erfahrung, ein Ergebnis)?",
-        type: "text",
-      },
-      {
-        key: "hormozi_urgency",
-        title: "Warum sollte sich der Kunde jetzt entscheiden und nicht erst in ein paar Monaten?",
-        type: "text",
-      },
     ],
   ),
   ...step(
@@ -953,7 +794,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
       {
         key: "elevator_pitch",
-        title: "Wie lässt sich die Firma in drei bis fünf Sätzen beschreiben?",
+        title: "Wie beschreibt sich die Firma selbst in drei bis fünf Sätzen?",
         type: "text",
         prefillHint: "elevator_pitch",
       },
@@ -964,22 +805,6 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
 
 /** TEIL B – Fragebogen zum Wunschkunden (Alltagssprache). */
 export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
-  ...step(
-    "core_persona_intro",
-    "Einleitung",
-    [
-      {
-        key: "persona_confirm_real_experience",
-        title:
-          "Bestätigung, dass alle folgenden Angaben auf eigenen, echten Erfahrungen und Beobachtungen beruhen.",
-        description: "Bitte mit Ja oder Nein antworten. Ohne diese Bestätigung ist der Fragebogen nicht auswertbar.",
-        required: true,
-        type: "radio",
-        options: YES_NO,
-      },
-    ],
-    "Dieser Fragebogen beschreibt den idealen Kunden – die Art von Person oder Firma, mit der die Zusammenarbeit am besten funktioniert.",
-  ),
   ...step(
     "core_persona_avatar",
     "Wer ist der Wunschkunde",
@@ -998,16 +823,10 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
           "Wie lässt sich dieser ideale Kunde in drei bis fünf Sätzen beschreiben (ungefähres Alter, Lebenssituation, warum die Zusammenarbeit mit ihm besonders gut funktioniert)?",
         required: true,
         type: "text",
-      },
-      {
-        key: "persona_customer_groups",
-        title: "Gibt es unterschiedliche Gruppen von Kunden, oder ist es meistens derselbe Typ Mensch?",
-        description: "Liste vor Versand passend zur Branche ersetzen.",
-        type: "checkbox",
-        options: opts("persona_group", PERSONA_CUSTOMER_GROUP_PLACEHOLDERS),
-        allowOtherOption: true,
+        prefillHint: "target_group",
       },
     ],
+    "Der ideale Kunde – die Art von Person oder Firma, mit der die Zusammenarbeit am besten funktioniert.",
   ),
   ...step(
     "core_persona_demo",
@@ -1161,6 +980,18 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         type: "text",
       },
       {
+        key: "persona_contact_is_client",
+        title:
+          "Ist die Person, die den Erstkontakt aufnimmt, meistens auch der eigentliche Auftraggeber (also die Person, die am Ende entscheidet und bezahlt), oder ist das oft jemand anderes (z. B. ein Familienmitglied, eine Assistenz, ein Angestellter)?",
+        type: "radio",
+        options: PERSONA_CONTACT_IS_CLIENT,
+      },
+      {
+        key: "persona_contact_other",
+        title: "Falls oft eine andere Person: wer ist das typischerweise?",
+        type: "text",
+      },
+      {
         key: "persona_decision_influencers",
         title: "Wer redet bei der Entscheidung mit – nur der Kunde selbst, oder auch andere?",
         type: "ranking",
@@ -1308,22 +1139,17 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
   ),
   ...step(
     "core_persona_journey",
-    "Der Weg vom ersten Kontakt zur Stammkundschaft",
+    "Der Weg vom ersten Kontakt zum Stammkunden",
     [
       {
         key: "persona_journey_steps",
         title:
-          "Wie sieht der typische Weg aus, von dem Moment, in dem dieser Kunde zum ersten Mal von dem Angebot erfährt, bis er zum festen Kunden wird?",
-        description: "Ein Schritt pro Feld. Die Felder sind durchnummeriert.",
+          "Wie sieht der typische Weg aus, von dem Moment, in dem dieser Kunde zum ersten Mal von dem Angebot erfährt, bis er zum festen Kunden wird? Bitte zu jedem Schritt direkt auch die ungefähre Dauer angeben.",
+        description: "Pro Schritt: Beschreibung und ungefähre Dauer. Die Felder sind durchnummeriert.",
         type: "text_list",
         options: emptySlots("persona_step", 3),
         allowExtraEntries: true,
         addEntryLabel: "Schritt hinzufügen",
-      },
-      {
-        key: "persona_journey_duration",
-        title: "Wie lange dauert jeder dieser Schritte ungefähr?",
-        type: "text",
       },
       {
         key: "persona_journey_dropoff",
@@ -1395,11 +1221,6 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         type: "text",
       },
       {
-        key: "persona_hormozi_trigger",
-        title: "Was war der Auslöser dafür, überhaupt aktiv zu werden?",
-        type: "text",
-      },
-      {
         key: "persona_hormozi_speed",
         title: "Wie schnell erwartet dieser Kunde ein erstes sichtbares Ergebnis?",
         type: "text",
@@ -1442,7 +1263,7 @@ const GA4_GTM: SurveyOption[] = [
   opt("teilweise", "teilweise"),
 ];
 
-/** TEIL C – interner Agentur-Block (nicht an den Kunden). */
+/** TEIL C – interner Agentur-Block (aktuell nicht in neuen Fragebögen angeboten). */
 export const INTERN_CORE_QUESTIONS: CoreQuestionTemplate[] = [
   ...step(
     "core_intern_intro",
