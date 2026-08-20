@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
+import {
+  matchSurveyFoldersToOrganisationName,
+  pickPreferredSurveyFolder,
+} from "@/lib/dt/agent-survey-coverage-options";
 import { assignSurveyOrganisation } from "@/lib/dt/survey-to-agent-service";
 import {
   buildFragebogenReviewDraft,
@@ -230,26 +234,61 @@ export async function createFragebogenFromReviewAction(
   const service = createServiceClient();
   const { data: org } = await service
     .from("organisations")
-    .select("id, name")
+    .select("id, name, slug")
     .eq("id", parsed.data.organisationId)
     .maybeSingle();
   if (!org) return { ok: false, message: "Organisation nicht gefunden." };
 
+  const { data: orgConfig } = await service
+    .from("dt_org_config")
+    .select("display_name")
+    .eq("organisation_id", parsed.data.organisationId)
+    .maybeSingle();
+
+  const orgAliases = [org.slug, orgConfig?.display_name].filter(
+    (v): v is string => Boolean(v?.trim()),
+  );
+  const preferredFolderNames = [
+    org.name,
+    orgConfig?.display_name,
+    org.slug,
+  ].filter((v): v is string => Boolean(v?.trim()));
+
   let folderId: string | null = null;
-  const { data: existingFolder } = await service
+  const { data: folders } = await service
     .from("survey_folders")
     .select("id, name")
-    .ilike("name", org.name)
-    .maybeSingle();
+    .order("name", { ascending: true })
+    .limit(500);
+  const matchedFolders = matchSurveyFoldersToOrganisationName(
+    folders ?? [],
+    org.name,
+    orgAliases,
+  );
+  const existingFolder = pickPreferredSurveyFolder(matchedFolders, preferredFolderNames);
   if (existingFolder?.id) {
     folderId = existingFolder.id;
   } else {
-    const { data: createdFolder } = await service
+    const folderName = orgConfig?.display_name?.trim() || org.name;
+    const { data: createdFolder, error: folderError } = await service
       .from("survey_folders")
-      .insert({ name: org.name, created_by_user_id: auth.userId })
+      .insert({ name: folderName, created_by_user_id: auth.userId })
       .select("id")
       .single();
-    folderId = createdFolder?.id ?? null;
+    if (createdFolder?.id) {
+      folderId = createdFolder.id;
+    } else if (folderError) {
+      const { data: retryFolders } = await service
+        .from("survey_folders")
+        .select("id, name")
+        .order("name", { ascending: true })
+        .limit(500);
+      folderId =
+        pickPreferredSurveyFolder(
+          matchSurveyFoldersToOrganisationName(retryFolders ?? [], org.name, orgAliases),
+          preferredFolderNames,
+        )?.id ?? null;
+    }
   }
 
   const { data: survey, error: surveyError } = await service

@@ -793,6 +793,10 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       `/api/ai/chats/${selectedChatId}/actions/${actionId}/apply`,
       {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organisationId: props.pageContext.organisationId ?? null,
+        }),
       },
     );
     const data = (await res.json()) as {

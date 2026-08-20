@@ -1,5 +1,6 @@
 import {
   matchSurveyFoldersToOrganisationName,
+  organisationLabelMatches,
 } from "@/lib/dt/agent-survey-coverage-options";
 import { normalizeSurveyPurpose, type SurveyPurpose } from "@/lib/surveys/purpose";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -39,8 +40,12 @@ const SURVEY_LIST_COLUMNS =
 /**
  * All questionnaires belonging to an organisation:
  * - `surveys.organisation_id`
- * - folders named like the organisation
+ * - folders named like the organisation (name, slug or display name)
+ * - survey titles that match those identifiers
  * - surveys used as agent source in this org
+ *
+ * Surveys found via folder/title with a missing `organisation_id` are linked
+ * so they stay assigned after folder renames.
  */
 export async function listSurveysForOrganisation(input: {
   organisationId: string;
@@ -51,9 +56,21 @@ export async function listSurveysForOrganisation(input: {
 
   const { data: organisation } = await supabase
     .from("organisations")
-    .select("id, name")
+    .select("id, name, slug")
     .eq("id", input.organisationId)
     .maybeSingle();
+
+  const { data: orgConfig } = await supabase
+    .from("dt_org_config")
+    .select("display_name")
+    .eq("organisation_id", input.organisationId)
+    .maybeSingle();
+
+  const orgName =
+    organisation?.name ?? organisation?.slug ?? orgConfig?.display_name ?? "";
+  const orgAliases = [organisation?.slug, orgConfig?.display_name].filter(
+    (v): v is string => Boolean(v?.trim()),
+  );
 
   const surveyById = new Map<string, SurveyRow>();
 
@@ -78,7 +95,8 @@ export async function listSurveysForOrganisation(input: {
   const folderNameById = new Map((folders ?? []).map((f) => [f.id, f.name]));
   const matchedFolders = matchSurveyFoldersToOrganisationName(
     folders ?? [],
-    organisation?.name ?? "",
+    orgName,
+    orgAliases,
   );
   const folderIds = new Set(matchedFolders.map((f) => f.id));
   for (const s of surveyById.values()) {
@@ -119,6 +137,38 @@ export async function listSurveysForOrganisation(input: {
       .is("deleted_at", null);
     for (const s of linked ?? []) {
       surveyById.set(s.id, s as SurveyRow);
+    }
+  }
+
+  const { data: titleCandidates } = await supabase
+    .from("surveys")
+    .select(SURVEY_LIST_COLUMNS)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(500);
+  for (const s of titleCandidates ?? []) {
+    const row = s as SurveyRow;
+    if (surveyById.has(row.id)) continue;
+    if (row.organisation_id && row.organisation_id !== input.organisationId) continue;
+    if (!organisationLabelMatches(row.title, orgName, orgAliases)) continue;
+    surveyById.set(row.id, row);
+  }
+
+  const unassignedIds = [...surveyById.values()]
+    .filter((s) => !s.organisation_id)
+    .map((s) => s.id);
+  if (unassignedIds.length > 0) {
+    const { error: linkError } = await supabase
+      .from("surveys")
+      .update({ organisation_id: input.organisationId })
+      .in("id", unassignedIds)
+      .is("organisation_id", null)
+      .is("deleted_at", null);
+    if (!linkError) {
+      for (const id of unassignedIds) {
+        const row = surveyById.get(id);
+        if (row) row.organisation_id = input.organisationId;
+      }
     }
   }
 

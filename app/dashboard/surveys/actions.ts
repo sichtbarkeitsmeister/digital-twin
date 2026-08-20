@@ -113,6 +113,7 @@ const upsertDraftSchema = z.object({
   notificationEmails: z.array(z.string().trim()).default([]),
   purpose: z.enum(["persona", "anbieter"]).default("persona"),
   definition: z.unknown(),
+  organisationId: z.string().uuid().optional().nullable(),
 });
 
 function normalizeEmails(input: string[]) {
@@ -181,6 +182,9 @@ export async function upsertSurveyDraftAction(
       purpose: parsed.data.purpose,
       definition: definitionParsed.data,
       created_by_user_id: userId,
+      ...(parsed.data.organisationId
+        ? { organisation_id: parsed.data.organisationId }
+        : {}),
     })
     .select("id")
     .single();
@@ -188,6 +192,9 @@ export async function upsertSurveyDraftAction(
   if (error || !data?.id) return { ok: false, message: "Entwurf konnte nicht erstellt werden." };
 
   revalidatePath("/dashboard/surveys");
+  if (parsed.data.organisationId) {
+    revalidatePath("/dashboard/frageboegen");
+  }
   return { ok: true, message: "Entwurf erstellt.", data: { surveyId: data.id } };
 }
 
@@ -681,7 +688,7 @@ const importBundleSchema = z.object({
 });
 
 export async function importSurveyBundleAction(
-  input: { payload: unknown },
+  input: { payload: unknown; organisationId?: string | null },
 ): Promise<ActionState<{ surveyId: string; responseId?: string }>> {
   const parsed = importBundleSchema.safeParse(input.payload);
   if (!parsed.success) {
@@ -713,6 +720,7 @@ export async function importSurveyBundleAction(
       notification_emails: notificationEmails,
       definition: definitionParsed.data,
       created_by_user_id: userId,
+      ...(input.organisationId ? { organisation_id: input.organisationId } : {}),
     })
     .select("id")
     .single();
@@ -768,6 +776,9 @@ export async function importSurveyBundleAction(
 
   revalidatePath("/dashboard/surveys");
   revalidatePath(`/dashboard/surveys/${createdSurvey.id}/edit`);
+  if (input.organisationId) {
+    revalidatePath("/dashboard/frageboegen");
+  }
   if (createdResponseId) {
     revalidatePath(`/dashboard/surveys/${createdSurvey.id}/responses/${createdResponseId}`);
   }

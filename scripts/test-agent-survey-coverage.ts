@@ -11,7 +11,7 @@ import {
   suggestCoverageOptionForAgent,
   type AgentCoverageSurveyOption,
 } from "../lib/dt/agent-survey-coverage-option-helpers";
-import { pickBestSurveyResponseForCoverage, matchSurveyFoldersToOrganisationName } from "../lib/dt/agent-survey-coverage-options";
+import { pickBestSurveyResponseForCoverage, matchSurveyFoldersToOrganisationName, organisationLabelMatches, pickPreferredSurveyFolder } from "../lib/dt/agent-survey-coverage-options";
 import type { SurveyFact } from "../lib/dt/survey-facts";
 
 const facts: SurveyFact[] = [
@@ -156,6 +156,44 @@ assert.ok(
     [{ id: "f3", name: "Zahnarztpraxis Hennes" }],
     "Zahnarztpraxis Ruth Hennes",
   ).some((f) => f.id === "f3"),
+);
+
+const arcticFolders = [
+  { id: "at-spaced", name: "Arctic Tub" },
+  { id: "at-camel", name: "ArcticTub" },
+  { id: "unrelated", name: "Kolb & Sartor" },
+];
+assert.deepEqual(
+  matchSurveyFoldersToOrganisationName(arcticFolders, "arctictub").map((f) => f.id).sort(),
+  ["at-camel", "at-spaced"],
+  "slug-style org name must match spaced and camelCase folders",
+);
+assert.deepEqual(
+  matchSurveyFoldersToOrganisationName(arcticFolders, "Arctic Tub", ["arctictub"]).map(
+    (f) => f.id,
+  ).sort(),
+  ["at-camel", "at-spaced"],
+);
+assert.deepEqual(
+  matchSurveyFoldersToOrganisationName(
+    [{ id: "gmbh", name: "ArcticTub GmbH" }, { id: "other", name: "Allround" }],
+    "arctictub",
+    ["ArcticTub"],
+  ).map((f) => f.id),
+  ["gmbh"],
+);
+
+assert.equal(
+  organisationLabelMatches("Anbieterfragebogen Arctic Tub", "arctictub"),
+  true,
+);
+assert.equal(
+  organisationLabelMatches("Persona Markus Ohlig", "arctictub", ["ArcticTub"]),
+  false,
+);
+assert.equal(
+  pickPreferredSurveyFolder(arcticFolders, ["ArcticTub", "arctictub"])?.id,
+  "at-camel",
 );
 
 console.log("agent-survey-coverage tests: ok");
