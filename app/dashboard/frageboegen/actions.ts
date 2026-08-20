@@ -245,6 +245,16 @@ const previewSchema = z.object({
   includeAiExtras: z.boolean().default(true),
   extraPlacement: z.enum(["start", "end"]).default("end"),
   meetingBriefing: meetingBriefingSchema,
+  sourceDocuments: z
+    .array(
+      z.object({
+        name: z.string().trim().max(200),
+        text: z.string().trim().min(20).max(40_000),
+      }),
+    )
+    .max(8)
+    .optional()
+    .default([]),
 });
 
 export async function previewFragebogenFromOrgAction(
@@ -273,6 +283,7 @@ export async function previewFragebogenFromOrgAction(
       includeAiExtras: parsed.data.includeAiExtras,
       extraPlacement: parsed.data.extraPlacement,
       meetingBriefing: parsed.data.meetingBriefing,
+      sourceDocuments: parsed.data.sourceDocuments,
     });
     return { ok: true, message: "Entwurf zur Prüfung bereit.", data: { draft } };
   } catch (err) {
@@ -290,7 +301,7 @@ const reviewQuestionSchema = z.object({
   title: z.string(),
   description: z.string().default(""),
   included: z.boolean(),
-  required: z.boolean().default(false),
+  required: z.boolean().default(true),
   type: z
     .enum(["text", "text_list", "radio", "checkbox", "rating", "ranking"])
     .default("text"),
@@ -304,7 +315,7 @@ const reviewQuestionSchema = z.object({
   scaleMin: z.number().int().optional(),
   scaleMax: z.number().int().optional(),
   answer: z.string().default(""),
-  answerSource: z.enum(["organisation", "website", "crawl", "ai", "meeting", "none"]),
+  answerSource: z.enum(["organisation", "website", "crawl", "ai", "meeting", "upload", "none"]),
   answerNote: z.string().default(""),
 });
 

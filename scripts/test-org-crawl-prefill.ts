@@ -6,6 +6,9 @@ import assert from "node:assert/strict";
 
 import {
   suggestPrefillsFromCrawl,
+  classifyCrawlPage,
+  crawlPageKindLabel,
+  crawlPagePriority,
   type OrgCrawlContext,
 } from "../lib/surveys/org-crawl-prefill";
 
@@ -82,5 +85,13 @@ assert.match(prefills.reviews?.value ?? "", /37/);
 assert.match(prefills.hours?.value ?? "", /Öffnungszeiten|Mo/i);
 assert.match(prefills.nap?.value ?? "", /Musterstraße|Dortmund/);
 assert.match(prefills.online?.value ?? "", /Instagram/);
+
+assert.equal(classifyCrawlPage("https://example.de/presse/mitteilung", "Presse"), "press");
+assert.equal(classifyCrawlPage("https://example.de/ueber-uns", "Über uns"), "about");
+assert.equal(classifyCrawlPage("https://example.de/team", "Unser Team"), "team");
+assert.equal(classifyCrawlPage("https://example.de/leistungen", "Leistungen"), "services");
+assert.equal(classifyCrawlPage("https://example.de/kontakt", "Kontakt"), "other");
+assert.ok(crawlPagePriority("press") > crawlPagePriority("other"));
+assert.equal(crawlPageKindLabel("services"), "Leistungen");
 
 console.log("org-crawl-prefill: ok");

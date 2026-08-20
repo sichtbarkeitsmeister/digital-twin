@@ -29,13 +29,46 @@ export type OrgCrawlContext = {
   seoMetrics?: OrgCrawlSeoMetrics | null;
 };
 
-export type PrefillSource = "organisation" | "website" | "crawl" | "ai" | "meeting";
+export type PrefillSource = "organisation" | "website" | "crawl" | "ai" | "meeting" | "upload";
 
 export type PrefillDraft = {
   value: string;
   source: PrefillSource;
   note: string;
 };
+
+export type CrawlPageKind = "press" | "about" | "team" | "services" | "other";
+
+/** Rank crawled pages so press, about, team and services are used first. */
+export function classifyCrawlPage(url: string, title: string | null): CrawlPageKind {
+  const hay = `${url} ${title ?? ""}`.toLowerCase();
+  if (
+    /presse|pressemitteilung|press[-_]?release|newsroom|aktuelles|medien|blog/.test(hay)
+  ) {
+    return "press";
+  }
+  if (/\/team\b|mitarbeiter|unser[-_]?team|kolleg/.test(hay)) return "team";
+  if (/ueber[-_]?uns|uber[-_]?uns|about|philosophie|geschichte|impressum/.test(hay)) {
+    return "about";
+  }
+  if (/leistung|angebot|service|portfolio|leistungen/.test(hay)) return "services";
+  return "other";
+}
+
+export function crawlPagePriority(kind: CrawlPageKind): number {
+  if (kind === "press") return 5;
+  if (kind === "about" || kind === "team") return 4;
+  if (kind === "services") return 4;
+  return 1;
+}
+
+export function crawlPageKindLabel(kind: CrawlPageKind): string {
+  if (kind === "press") return "Presse";
+  if (kind === "about") return "Über uns";
+  if (kind === "team") return "Team";
+  if (kind === "services") return "Leistungen";
+  return "Weitere Seite";
+}
 
 function fullCrawlBlob(context: OrgCrawlContext): string {
   return [
