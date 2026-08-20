@@ -7,6 +7,7 @@ import {
   setPlatformAdminRoleAction,
   type PlatformAdminRoleActionState,
 } from "@/app/dashboard/admin/organisations/actions";
+import type { PlatformTeamMember } from "@/lib/dashboard/platform-admin-team";
 import { isSbkmStaffEmail } from "@/lib/dt/sbkm-staff";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,11 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-export type PlatformTeamMember = {
-  id: string;
-  email: string;
-  role: string;
-};
+export type { PlatformTeamMember };
 
 const initialState: PlatformAdminRoleActionState = { ok: true, message: "" };
 
@@ -48,9 +45,9 @@ export function PlatformAdminTeamCard(props: {
             required
           />
           <p className="text-xs text-secondary">
-            Die Admin-Ansicht (Verwaltung, SEO Modus) hängt an der Plattformrolle,
-            nicht an der Organisationsrolle. Adressen @sichtbarkeitsmeister.de
-            werden beim ersten Login automatisch Admins.
+            E-Mail eintragen und freischalten — danach neu laden. Die Admin-Ansicht
+            (Verwaltung, SEO Modus) hängt an dieser Plattformrolle, nicht an der
+            Organisationsrolle.
           </p>
         </div>
         <Button
@@ -75,7 +72,7 @@ export function PlatformAdminTeamCard(props: {
       {props.members.length === 0 ? (
         <p className="text-sm text-secondary">Noch keine Konten sichtbar.</p>
       ) : (
-        <ul className="grid gap-2">
+        <ul className="grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
           {props.members.map((member) => {
             const isAdmin = member.role === "admin";
             const isSelf = member.id === props.currentUserId;
