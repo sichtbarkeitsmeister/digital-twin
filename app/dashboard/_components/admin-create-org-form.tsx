@@ -63,6 +63,24 @@ export function AdminCreateOrgForm() {
       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
         <input
           type="checkbox"
+          name="create_survey_folder"
+          value="on"
+          defaultChecked
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border border-primary accent-primary"
+        />
+        <span className="grid gap-1">
+          <span className="text-sm font-medium">Fragebogen-Ordner anlegen</span>
+          <span className="text-xs text-secondary">
+            Legt unter Umfragen einen Ordner mit dem Organisationsnamen an, damit
+            Fragebögen dieser Firma zugeordnet werden. Kann später unter Fragebögen
+            nachgeholt werden.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+        <input
+          type="checkbox"
           name="send_welcome"
           value="on"
           defaultChecked

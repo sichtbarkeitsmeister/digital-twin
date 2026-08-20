@@ -15,6 +15,7 @@ import {
 } from "@/lib/email/owner-welcome";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
+import { ensureOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -60,6 +61,7 @@ const adminCreateOrganisationSchema = z.object({
     ]),
   ),
   send_welcome: checkboxOnSchema.default(true),
+  create_survey_folder: checkboxOnSchema.default(true),
 });
 
 function mapAdminCreateOrganisationError(error: {
@@ -116,13 +118,15 @@ export async function adminCreateOrganisationAction(
       owner_email: formData.get("owner_email"),
       org_slug: formData.get("org_slug"),
       send_welcome: formData.get("send_welcome"),
+      create_survey_folder: formData.get("create_survey_folder"),
     });
 
     if (!parsed.success) {
       return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
     }
 
-    const { org_name, owner_email, org_slug, send_welcome } = parsed.data;
+    const { org_name, owner_email, org_slug, send_welcome, create_survey_folder } =
+      parsed.data;
 
     // Slug is required for SEO/n8n client routing — auto-fill from name when omitted.
     const resolvedSlug = resolveOrganisationSlug({ slug: org_slug, name: org_name });
@@ -141,7 +145,7 @@ export async function adminCreateOrganisationAction(
 
     // Create the organisation first. Welcome-mail setup must never block creation
     // (service-role / Auth-link failures previously aborted the whole action).
-    const { error } = await supabase.rpc("admin_create_organisation", {
+    const { data: createdOrgId, error } = await supabase.rpc("admin_create_organisation", {
       org_name,
       owner_email,
       org_slug: resolvedSlug,
@@ -150,6 +154,45 @@ export async function adminCreateOrganisationAction(
     if (error) {
       console.warn("[admin] admin_create_organisation failed:", error.message, error.details);
       return { ok: false, message: mapAdminCreateOrganisationError(error) };
+    }
+
+    let organisationId: string | null =
+      typeof createdOrgId === "string" && createdOrgId.trim() ? createdOrgId : null;
+
+    let folderStatus: string | null = null;
+    if (create_survey_folder && user?.id) {
+      try {
+        const service = createServiceClient();
+        if (!organisationId) {
+          const { data: orgRow } = await service
+            .from("organisations")
+            .select("id")
+            .eq("slug", resolvedSlug)
+            .maybeSingle();
+          organisationId = orgRow?.id ?? null;
+        }
+        if (organisationId) {
+          const folder = await ensureOrganisationSurveyFolder({
+            organisationId,
+            createdByUserId: user.id,
+          });
+          if (folder.ok) {
+            folderStatus = folder.created
+              ? `Fragebogen-Ordner „${folder.folderName}“ wurde angelegt.`
+              : `Fragebogen-Ordner „${folder.folderName}“ war bereits vorhanden.`;
+          } else {
+            folderStatus =
+              "Fragebogen-Ordner konnte nicht angelegt werden — bitte später unter Fragebögen nachholen.";
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[admin] survey folder after org create failed:",
+          err instanceof Error ? err.message : err,
+        );
+        folderStatus =
+          "Fragebogen-Ordner konnte nicht angelegt werden — bitte später unter Fragebögen nachholen.";
+      }
     }
 
     let emailStatus: string | null = null;
@@ -168,20 +211,21 @@ export async function adminCreateOrganisationAction(
 
       inviteLink = loginLink?.link ?? null;
 
-      let organisationId: string | null = null;
-      try {
-        const service = createServiceClient();
-        const { data: orgRow } = await service
-          .from("organisations")
-          .select("id")
-          .eq("slug", resolvedSlug)
-          .maybeSingle();
-        organisationId = orgRow?.id ?? null;
-      } catch (err) {
-        console.warn(
-          "[admin] org id lookup after create failed:",
-          err instanceof Error ? err.message : err,
-        );
+      if (!organisationId) {
+        try {
+          const service = createServiceClient();
+          const { data: orgRow } = await service
+            .from("organisations")
+            .select("id")
+            .eq("slug", resolvedSlug)
+            .maybeSingle();
+          organisationId = orgRow?.id ?? null;
+        } catch (err) {
+          console.warn(
+            "[admin] org id lookup after create failed:",
+            err instanceof Error ? err.message : err,
+          );
+        }
       }
 
       const delivery = await deliverOwnerWelcomeWithFallback({
@@ -199,12 +243,15 @@ export async function adminCreateOrganisationAction(
     revalidatePath("/dashboard/admin/organisations");
     revalidatePath("/dashboard/admin/mails");
     revalidatePath("/dashboard/organisations");
+    revalidatePath("/dashboard/frageboegen");
+    revalidatePath("/dashboard/surveys");
+    const extras = [folderStatus, emailStatus].filter(Boolean).join(" ");
     const baseMessage = "Organisation wurde angelegt.";
     return {
       ok: true,
       emailSent,
       inviteLink,
-      message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
+      message: extras ? `${baseMessage} ${extras}` : baseMessage,
     };
   } catch (err) {
     console.warn(
