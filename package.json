@@ -24,6 +24,7 @@
     "test:safe-fetch-url": "tsx scripts/test-safe-fetch-url.ts",
     "test:auth-error-messages": "tsx scripts/test-auth-error-messages.ts",
     "test:org-slug": "tsx scripts/test-org-slug.ts",
+    "test:organisation-option": "tsx scripts/test-organisation-option.ts",
     "test:sbkm-staff-email": "tsx scripts/test-sbkm-staff-email.ts",
     "test:seo-report-readiness": "tsx scripts/test-seo-report-readiness.ts",
     "test:prospect-persona-prompt": "tsx scripts/test-prospect-persona-prompt.ts",

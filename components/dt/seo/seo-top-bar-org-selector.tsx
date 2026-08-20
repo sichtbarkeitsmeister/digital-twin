@@ -132,6 +132,7 @@ export function SeoTopBarOrgSelector() {
         value={orgId}
         onValueChange={handleOrgChange}
         disabled={organisations.length <= 1}
+        searchable
         options={organisations.map((organisation) => ({
           value: organisation.id,
           label: organisation.name,

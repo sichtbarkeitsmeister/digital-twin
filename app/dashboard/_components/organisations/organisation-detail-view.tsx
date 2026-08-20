@@ -23,6 +23,7 @@ import {
 } from "@/app/dashboard/_components/organisations/org-overview-panel";
 import { TeamActions } from "@/app/dashboard/_components/organisations/team-actions";
 import { DeleteOrganisationButton } from "@/app/dashboard/_components/organisations/delete-organisation-button";
+import { OrganisationEditNameForm } from "@/app/dashboard/_components/organisations/organisation-edit-name-form";
 import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button";
 import { ResendInviteButton } from "@/app/dashboard/_components/resend-invite-button";
 import { RevokeInviteButton } from "@/app/dashboard/_components/revoke-invite-button";
@@ -96,6 +97,7 @@ export async function OrganisationDetailView({
 
   const canManage =
     platformAdmin || myOrgRole === "owner" || myOrgRole === "admin";
+  const canRenameOrganisation = platformAdmin || myOrgRole === "owner";
   const canTransferOwnership = myOrgRole === "owner" || platformAdmin;
   const canViewUsage = await canViewDtUsage(supabase, userId);
   const canViewSeoReports =
@@ -230,6 +232,22 @@ export async function OrganisationDetailView({
           canViewSeoAdvisor={platformAdmin}
           hideSeoCta
         />
+
+        {canRenameOrganisation ? (
+          <OrgDetailSection
+            title="Name"
+            description="Anzeigename ändern — der technische Slug bleibt der Schlüssel für SEO/n8n"
+          >
+            <div className={cn(orgDetailCardClass, "p-4 sm:p-5")}>
+              <OrganisationEditNameForm
+                organisationId={organisationId}
+                name={organisation.name}
+                displayName={overview.config.displayName}
+                slug={organisation.slug}
+              />
+            </div>
+          </OrgDetailSection>
+        ) : null}
 
         <OrgDetailSection
           title="Team"

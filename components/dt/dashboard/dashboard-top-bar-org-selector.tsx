@@ -11,11 +11,15 @@ import {
   isSeoDashboardPath,
 } from "@/lib/dt/seo/dashboard-path";
 import {
+  organisationOptionLabel,
+  type OrganisationOption,
+} from "@/lib/shared/organisation-option";
+import {
   readSelectedOrganisationId,
   writeSelectedOrganisationId,
 } from "@/lib/shared/selected-organisation-storage";
 
-type ManageOrganisation = { id: string; name: string };
+type ManageOrganisation = OrganisationOption;
 
 function MembershipTopBarOrgSelector() {
   const pathname = usePathname();
@@ -111,9 +115,14 @@ function MembershipTopBarOrgSelector() {
       value={orgId}
       onValueChange={syncOrgToUrl}
       disabled={organisations.length <= 1}
+      searchable
       options={organisations.map((organisation) => ({
         value: organisation.id,
-        label: organisation.name,
+        label: organisationOptionLabel(organisation),
+        description:
+          organisation.slug && organisation.slug !== organisationOptionLabel(organisation)
+            ? organisation.slug
+            : undefined,
       }))}
     />
   );
@@ -213,9 +222,14 @@ function ManageTopBarOrgSelector() {
       value={orgId}
       onValueChange={syncOrgToUrl}
       disabled={organisations.length <= 1}
+      searchable
       options={organisations.map((organisation) => ({
         value: organisation.id,
-        label: organisation.name,
+        label: organisationOptionLabel(organisation),
+        description:
+          organisation.slug && organisation.slug !== organisationOptionLabel(organisation)
+            ? organisation.slug
+            : undefined,
       }))}
     />
   );
