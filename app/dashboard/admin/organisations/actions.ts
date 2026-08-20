@@ -3,11 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { grantPlatformAdminRole } from "@/lib/dashboard/grant-platform-admin";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { createClient } from "@/lib/supabase/server";
 
 export type PlatformAdminRoleActionState = {
   ok: boolean;
   message: string;
+  inviteLink?: string | null;
 };
 
 const setRoleSchema = z.object({
@@ -21,43 +24,6 @@ const setRoleSchema = z.object({
     z.boolean(),
   ),
 });
-
-function mapSetPlatformAdminRoleError(error: {
-  message?: string;
-  details?: string;
-  hint?: string;
-}): string {
-  const raw = `${error.message ?? ""} ${error.details ?? ""} ${error.hint ?? ""}`.toLowerCase();
-
-  if (raw.includes("not_authenticated")) {
-    return "Bitte erneut anmelden.";
-  }
-  if (raw.includes("forbidden")) {
-    return "Keine Berechtigung: Plattform-Rollen dürfen nur Admins ändern.";
-  }
-  if (raw.includes("invalid_email")) {
-    return "Bitte eine gültige E-Mail-Adresse eingeben.";
-  }
-  if (raw.includes("user_not_found")) {
-    return "Kein Konto mit dieser E-Mail gefunden. Die Person muss sich zuerst anmelden.";
-  }
-  if (raw.includes("last_admin")) {
-    return "Der letzte Plattform-Admin kann nicht entfernt werden.";
-  }
-  if (
-    raw.includes("could not find the function") ||
-    raw.includes("schema cache") ||
-    (raw.includes("function") && raw.includes("does not exist"))
-  ) {
-    return "Datenbank-Funktion fehlt. Bitte Migration 20260820_sbkm_staff_platform_admin.sql in Supabase ausführen.";
-  }
-
-  const short = (error.message ?? "").trim();
-  if (short && short.length < 180 && !short.includes("\n")) {
-    return `Rolle konnte nicht geändert werden: ${short}`;
-  }
-  return "Rolle konnte nicht geändert werden. Bitte später erneut versuchen.";
-}
 
 export async function setPlatformAdminRoleAction(
   _prev: PlatformAdminRoleActionState,
@@ -73,24 +39,42 @@ export async function setPlatformAdminRoleAction(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("set_platform_admin_role", {
-    target_email: parsed.data.email,
-    make_admin: parsed.data.make_admin,
-  });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (error) {
-    console.warn("[admin] set_platform_admin_role failed:", error.message, error.details);
-    return { ok: false, message: mapSetPlatformAdminRoleError(error) };
+  if (!user?.id) {
+    return { ok: false, message: "Bitte erneut anmelden." };
+  }
+  if (!(await isPlatformAdmin(supabase, user.id))) {
+    return { ok: false, message: "Keine Berechtigung: Plattform-Rollen dürfen nur Admins ändern." };
   }
 
-  revalidatePath("/dashboard/admin/organisations");
-  revalidatePath("/dashboard/admin/team");
-  revalidatePath("/dashboard");
+  try {
+    const result = await grantPlatformAdminRole({
+      email: parsed.data.email,
+      makeAdmin: parsed.data.make_admin,
+    });
 
-  return {
-    ok: true,
-    message: parsed.data.make_admin
-      ? `${parsed.data.email} hat jetzt die Admin-Ansicht (Verwaltung, SEO Modus). Nach einem Reload ist sie sichtbar.`
-      : `${parsed.data.email} ist wieder ein normales Konto.`,
-  };
+    if (result.ok) {
+      revalidatePath("/dashboard/admin/organisations");
+      revalidatePath("/dashboard/admin/team");
+      revalidatePath("/dashboard");
+    }
+
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    console.warn("[admin] grantPlatformAdminRole failed:", msg || err);
+    if (msg.includes("SUPABASE_SERVICE_ROLE_KEY") || msg.includes("NEXT_PUBLIC_SUPABASE_URL")) {
+      return {
+        ok: false,
+        message: "Server-Konfiguration unvollständig (Supabase Service Role).",
+      };
+    }
+    if (msg && msg.length < 180 && !msg.includes("\n")) {
+      return { ok: false, message: msg };
+    }
+    return { ok: false, message: "Rolle konnte nicht geändert werden. Bitte später erneut versuchen." };
+  }
 }
