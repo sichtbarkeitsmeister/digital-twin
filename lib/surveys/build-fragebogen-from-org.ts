@@ -341,8 +341,8 @@ export async function buildFragebogenReviewDraft(input: {
 
   const optionSets: Record<string, string[]> = { ...aiBundle.optionSets };
   if (serviceLabels.length > 0) {
-    if (!optionSets.portfolio) optionSets.portfolio = serviceLabels;
-    if (!optionSets.services_ranked) optionSets.services_ranked = serviceLabels;
+    optionSets.portfolio = serviceLabels;
+    optionSets.services_ranked = serviceLabels;
   }
 
   const customized = customizeCoreQuestions({
