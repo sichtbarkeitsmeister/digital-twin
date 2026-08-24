@@ -442,11 +442,13 @@ export function FragebogenFromOrgWizard(props: {
         </Card>
 
         <div className="grid gap-3">
-          {included.map((q, visibleIndex) => (
+          {included
+            .filter((q) => q.kind === "core")
+            .map((q) => (
             <FragebogenReviewQuestionEditor
               key={q.id}
               question={q}
-              index={visibleIndex}
+              index={included.findIndex((row) => row.id === q.id)}
               total={included.length}
               onChange={(patch) => updateQuestion(q.id, patch)}
               onReplace={(next) => replaceQuestion(q.id, next)}
@@ -454,6 +456,35 @@ export function FragebogenFromOrgWizard(props: {
               onMove={(delta) => moveQuestion(q.id, delta)}
             />
           ))}
+          <div className="grid gap-2 pt-2">
+            <h2 className="text-base font-semibold text-primary">
+              KI-Vorschläge und Zusatzfragen
+            </h2>
+            <p className="text-sm text-secondary">
+              Eigener letzter Block im Fragebogen — nicht Teil der Standardvorlage.
+            </p>
+          </div>
+          {included.filter((q) => q.kind === "extra").length === 0 ? (
+            <p className="rounded-xl border border-dashed border-sbkm-navy/20 px-3 py-2 text-sm text-secondary">
+              In diesem Entwurf sind keine KI-Zusatzfragen. Unten kannst du welche ergänzen
+              oder die Prüfung erneut erzeugen.
+            </p>
+          ) : (
+            included
+              .filter((q) => q.kind === "extra")
+              .map((q) => (
+                <FragebogenReviewQuestionEditor
+                  key={q.id}
+                  question={q}
+                  index={included.findIndex((row) => row.id === q.id)}
+                  total={included.length}
+                  onChange={(patch) => updateQuestion(q.id, patch)}
+                  onReplace={(next) => replaceQuestion(q.id, next)}
+                  onRemove={() => removeQuestion(q.id)}
+                  onMove={(delta) => moveQuestion(q.id, delta)}
+                />
+              ))
+          )}
           <Button
             type="button"
             variant="outline"

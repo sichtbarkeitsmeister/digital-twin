@@ -84,6 +84,7 @@ const built = buildSurveyAndAnswersFromReview({
 assert.equal(built.definition.steps.length >= 2, true);
 const extraStep = built.definition.steps.find((s) => s.id === "extra_individual");
 assert.ok(extraStep);
+assert.equal(extraStep!.title, "KI-Vorschläge für dieses Unternehmen");
 assert.equal(extraStep!.fields.length, 2);
 assert.equal(extraStep!.fields[0]?.type, "radio");
 assert.equal(extraStep!.fields[0]?.required, true);

@@ -226,9 +226,9 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
     extraIncluded.length > 0
       ? {
           id: "extra_individual",
-          title: "Individuelle Fragen für dieses Unternehmen",
+          title: "KI-Vorschläge für dieses Unternehmen",
           description:
-            "KI-Vorschläge für die jeweilige Firma — bearbeiten, kopieren oder löschen.",
+            "Zusatzfragen der KI für die jeweilige Firma — bearbeiten, kopieren oder löschen.",
           fields: extraIncluded.map(reviewQuestionToSurveyField),
         }
       : null;
