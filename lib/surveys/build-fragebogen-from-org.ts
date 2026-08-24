@@ -22,6 +22,7 @@ import {
 import {
   extractServiceLabels,
   formatSeoMetricsAnswer,
+  isPlausiblePrefill,
   parseServiceLabelList,
 } from "@/lib/surveys/org-crawl-prefill";
 import {
@@ -79,7 +80,12 @@ async function generateExtrasAndAiPrefills(input: {
   crawlSummary: string;
   meetingContext?: string;
   documentText?: string;
-  coreItems: Array<{ key: string; title: string; hasPrefill: boolean }>;
+  coreItems: Array<{
+    key: string;
+    title: string;
+    hasPrefill: boolean;
+    hint?: CoreQuestionTemplate["prefillHint"];
+  }>;
   includeAiExtras: boolean;
   audience: ClientAudienceKind;
   serviceLabels: string[];
@@ -137,7 +143,11 @@ Crawl (Presse, Über uns, Team, Leistungen, Impressum zuerst):
 ${input.crawlSummary.slice(0, 9000)}
 
 Fülle nur Felder, die der Kontext klar hergibt. Team, Leistungen, USP, Standort, Impressum, Presse besonders. source=upload bei Dateien, sonst source=ai.
-Leistungsnamen in optionSets.portfolio und optionSets.services_ranked (3–8 kurze Labels, keine Sätze).
+Strikt zuordnen — lieber weglassen als falsch:
+- company_name: nur offizieller Praxis-/Firmenname, nie Behandlungs- oder Preistext.
+- location_catchment: nur Sitz/Ort/Einzugsgebiet (z. B. Meerbusch), nie Preisliste. „pro Region“ bei Botox ist KEINE Region.
+- portfolio / Leistungen: nur Angebotsnamen (Laser, Botox, …), nie Impressum-, Datenschutz- oder Menü-Seitentitel.
+Leistungsnamen in optionSets.portfolio und optionSets.services_ranked (3–8 kurze Labels, keine Sätze, keine €-Preise).
 Für Persona außerdem optionSets.persona_goals, persona_objections, persona_alternatives, persona_budget (je 3–6 branchentypische Optionen).
 ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[]. Zusatzfragen mit ${vocab.singular}/${vocab.plural}.` : "questions=[]."}
 
@@ -170,6 +180,7 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
       questions?: unknown;
     };
     const allowedKeys = new Set(input.coreItems.map((m) => m.key));
+    const hintByKey = new Map(input.coreItems.map((m) => [m.key, m.hint]));
     const alreadyFilled = new Set(
       input.coreItems.filter((c) => c.hasPrefill).map((c) => c.key),
     );
@@ -180,6 +191,7 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
       if (!allowedKeys.has(key) || value.length < 3) continue;
       const fromUpload = String(row.source ?? "").trim() === "upload";
       if (!fromUpload && alreadyFilled.has(key)) continue;
+      if (!fromUpload && !isPlausiblePrefill(hintByKey.get(key), value)) continue;
       aiPrefills[key] = {
         value: value.slice(0, 2000),
         source: fromUpload ? "upload" : "ai",
@@ -197,9 +209,12 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
         if (!Array.isArray(rawLabels)) continue;
         const labels = rawLabels
           .map((item) => String(item ?? "").trim())
-          .filter((item) => item.length >= 2 && item.length <= 80)
-          .slice(0, 10);
-        if (labels.length >= 2) optionSets[key] = labels;
+          .filter((item) => item.length >= 2 && item.length <= 80);
+        const cleaned =
+          key === "portfolio" || key === "services_ranked"
+            ? parseServiceLabelList(labels.join("\n"))
+            : labels.slice(0, 10);
+        if (cleaned.length >= 2) optionSets[key] = cleaned.slice(0, 10);
       }
     }
     const extras = input.includeAiExtras
@@ -310,6 +325,7 @@ export async function buildFragebogenReviewDraft(input: {
     coreItems: titledForAi.map((t) => ({
       key: t.key,
       title: t.title,
+      hint: t.prefillHint,
       hasPrefill: Boolean(basePrefills[t.key]?.value || meeting[t.key]?.value),
     })),
   });
