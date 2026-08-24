@@ -31,6 +31,7 @@
     "test:owner-welcome-email": "tsx scripts/test-owner-welcome-email.ts",
     "test:avatar-global-prompt-anchor": "tsx scripts/test-avatar-global-prompt-anchor.ts",
     "test:dashboard-sticky-survey-ai": "tsx scripts/test-dashboard-sticky-survey-ai.ts",
+    "test:survey-assistant-workspace": "tsx scripts/test-survey-assistant-workspace.ts",
     "test:fragebogen-review-questions": "tsx scripts/test-fragebogen-review-questions.ts",
     "test:core-question-templates": "tsx scripts/test-core-question-templates.ts",
     "test:first-conversation": "tsx scripts/test-first-conversation.ts",

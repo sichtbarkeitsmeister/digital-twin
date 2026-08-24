@@ -191,9 +191,12 @@ export async function callAnthropicFirstAvailable(input: {
   stream?: boolean;
   /** Abort the request after this many ms (prevents hung UI when platform kills the route). */
   timeoutMs?: number;
+  /** Optional Anthropic tools (Survey KI workspace retrieval). */
+  tools?: Anthropic.Tool[];
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const useStream = input.stream ?? input.maxTokens >= STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
+  const toolParams = input.tools && input.tools.length > 0 ? { tools: input.tools } : {};
 
   for (const model of input.models) {
     const controller = input.timeoutMs ? new AbortController() : null;
@@ -218,6 +221,7 @@ export async function callAnthropicFirstAvailable(input: {
             max_tokens: input.maxTokens,
             system: input.system,
             messages: input.messages,
+            ...toolParams,
           },
           controller ? { signal: controller.signal } : undefined,
         );
@@ -232,6 +236,7 @@ export async function callAnthropicFirstAvailable(input: {
           max_tokens: input.maxTokens,
           system: input.system,
           messages: input.messages,
+          ...toolParams,
         },
         controller ? { signal: controller.signal } : undefined,
       );
