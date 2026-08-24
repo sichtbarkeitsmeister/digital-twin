@@ -42,8 +42,12 @@ export async function POST(
   }
 
   let organisationId: string | null = null;
+  let liveDraft = false;
   try {
-    const body = (await request.json()) as { organisationId?: unknown };
+    const body = (await request.json()) as {
+      organisationId?: unknown;
+      liveDraft?: unknown;
+    };
     if (
       typeof body.organisationId === "string" &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -52,8 +56,45 @@ export async function POST(
     ) {
       organisationId = body.organisationId;
     }
+    liveDraft = body.liveDraft === true;
   } catch {
     organisationId = null;
+  }
+
+  if (liveDraft) {
+    const kind = proposalParsed.data.kind;
+    if (
+      kind !== "patch_survey_definition" &&
+      kind !== "edit_survey_definition" &&
+      kind !== "update_survey_metadata" &&
+      kind !== "batch"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "Diese Aktion lässt sich im offenen Fragebogen-Entwurf nicht anwenden.",
+        },
+        { status: 422 },
+      );
+    }
+    const result = {
+      ok: true as const,
+      liveDraft: true,
+      message: "Im offenen Fragebogen-Entwurf übernommen.",
+    };
+    await auth.supabase
+      .from("ai_chat_actions")
+      .update({
+        execution_status: "applied",
+        execution_result: result,
+        revert_payload: null,
+      })
+      .eq("id", actionId);
+    return NextResponse.json({
+      ok: true,
+      message: result.message,
+      navigateTo: null,
+    });
   }
 
   const result = await applySurveyProposal(proposalParsed.data, { organisationId });

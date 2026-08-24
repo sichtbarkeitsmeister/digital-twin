@@ -62,6 +62,8 @@ export type FragebogenReviewDraft = {
   websiteUrl: string | null;
   organisationName: string;
   questions: ReviewQuestionItem[];
+  /** Stable id for the live wizard definition (Survey KI patches this draft). */
+  definitionId?: string;
   /** Kanzlei / Praxis / Unternehmen — steuert Mandant, Patient oder Kunde. */
   clientAudience?: ClientAudienceKind;
   /** Set when crawl/upload prefills succeeded but the AI gap-fill timed out or failed. */
@@ -97,6 +99,18 @@ function createId(): string {
     return crypto.randomUUID();
   }
   return `id_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+}
+
+/** Survey-level id must be a UUID so the Survey KI can patch the live wizard draft. */
+export function createSurveyDefinitionId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  const bytes = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function ensureOptions(options: SurveyOption[] | undefined, minCount: number): SurveyOption[] {
@@ -300,7 +314,7 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
   const info = surveyInfoTextForPurpose(draft.purpose, audience);
   const definitionCandidate: Survey = {
     version: 1,
-    id: createId(),
+    id: draft.definitionId?.trim() || createSurveyDefinitionId(),
     title: draft.title.trim() || "Fragebogen",
     description: draft.description,
     infoTextEnabled: info.infoTextEnabled,
@@ -314,6 +328,17 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
     throw new Error(parsed.error.issues[0]?.message ?? "Fragebogen-Definition ungültig.");
   }
   return parsed.data as Survey;
+}
+
+export function surveyFromReviewOrNull(
+  draft: FragebogenReviewDraft | null | undefined,
+): Survey | null {
+  if (!draft) return null;
+  try {
+    return surveyFromReview(draft);
+  } catch {
+    return null;
+  }
 }
 
 export function answersFromReview(
@@ -368,5 +393,85 @@ export function buildSurveyAndAnswersFromReview(input: {
   return {
     definition: surveyFromReview(input.draft),
     answers: answersFromReview(input.draft, input.savePrefills),
+  };
+}
+
+function optionsFromField(field: SurveyField): SurveyOption[] {
+  if (field.type === "text" || field.type === "rating") return [];
+  return field.options.map((opt) => ({ id: opt.id, label: opt.label }));
+}
+
+function extraFromField(field: SurveyField): ReviewQuestionItem {
+  const options = optionsFromField(field);
+  return {
+    id: field.id,
+    kind: "extra",
+    title: field.title,
+    description: field.description,
+    included: true,
+    required: field.required,
+    type: field.type,
+    options,
+    allowOtherOption:
+      field.type === "radio" || field.type === "checkbox" ? field.allowOtherOption : undefined,
+    allowExtraEntries: field.type === "text_list" ? field.allowExtraEntries : undefined,
+    addEntryLabel: field.type === "text_list" ? field.addEntryLabel : undefined,
+    allowCustomEntries: field.type === "ranking" ? field.allowCustomEntries : undefined,
+    scaleMin: field.type === "rating" ? field.scale.min : undefined,
+    scaleMax: field.type === "rating" ? field.scale.max : undefined,
+    answer: "",
+    answerSource: "none",
+    answerNote: "",
+  };
+}
+
+/** Merge a patched Survey back into the wizard review draft (keep answers/core keys). */
+export function mergeSurveyIntoReviewDraft(
+  draft: FragebogenReviewDraft,
+  survey: Survey,
+): FragebogenReviewDraft {
+  const prevById = new Map(draft.questions.map((question) => [question.id, question]));
+  const next: ReviewQuestionItem[] = [];
+  const seen = new Set<string>();
+
+  for (const step of survey.steps) {
+    for (const field of step.fields) {
+      seen.add(field.id);
+      const prev = prevById.get(field.id);
+      const options = optionsFromField(field);
+      const base = prev ? { ...prev, included: true } : extraFromField(field);
+      next.push({
+        ...base,
+        title: field.title,
+        description: field.description,
+        required: field.required,
+        type: field.type,
+        options,
+        allowOtherOption:
+          field.type === "radio" || field.type === "checkbox"
+            ? field.allowOtherOption
+            : base.allowOtherOption,
+        allowExtraEntries:
+          field.type === "text_list" ? field.allowExtraEntries : base.allowExtraEntries,
+        addEntryLabel: field.type === "text_list" ? field.addEntryLabel : base.addEntryLabel,
+        allowCustomEntries:
+          field.type === "ranking" ? field.allowCustomEntries : base.allowCustomEntries,
+        scaleMin: field.type === "rating" ? field.scale.min : base.scaleMin,
+        scaleMax: field.type === "rating" ? field.scale.max : base.scaleMax,
+      });
+    }
+  }
+
+  for (const question of draft.questions) {
+    if (seen.has(question.id)) continue;
+    next.push({ ...question, included: false });
+  }
+
+  return {
+    ...draft,
+    title: survey.title.trim() || draft.title,
+    description: survey.description,
+    definitionId: survey.id || draft.definitionId,
+    questions: next,
   };
 }

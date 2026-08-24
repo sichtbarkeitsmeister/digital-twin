@@ -4,7 +4,10 @@ import {
   applyReviewQuestionType,
   buildSurveyAndAnswersFromReview,
   createEmptyExtraQuestion,
+  createSurveyDefinitionId,
+  mergeSurveyIntoReviewDraft,
   reviewQuestionToSurveyField,
+  surveyFromReview,
   type FragebogenReviewDraft,
   type ReviewQuestionItem,
 } from "../lib/surveys/fragebogen-review-draft";
@@ -259,5 +262,22 @@ const withAiWarning = buildSurveyAndAnswersFromReview({
   savePrefills: true,
 });
 assert.equal(withAiWarning.answers.core_persona_name, "Max Mustermann");
+
+const definitionId = "11111111-1111-4111-8111-111111111111";
+assert.match(createSurveyDefinitionId(), /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+const stableDraft = {
+  ...baseDraft([coreQuestion()]),
+  definitionId,
+};
+const fromStable = surveyFromReview(stableDraft);
+assert.equal(fromStable.id, definitionId);
+const merged = mergeSurveyIntoReviewDraft(stableDraft, {
+  ...fromStable,
+  title: "Persona: Gepatcht",
+});
+assert.equal(merged.title, "Persona: Gepatcht");
+assert.equal(merged.definitionId, definitionId);
+assert.equal(merged.questions[0]?.answer, "Max Mustermann");
+assert.equal(merged.questions[0]?.coreKey, "persona_name");
 
 console.log("fragebogen-review-questions: all ok");

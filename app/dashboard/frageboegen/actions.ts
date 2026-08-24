@@ -350,6 +350,7 @@ const createFromReviewSchema = z.object({
     websiteUrl: z.string().nullable(),
     organisationName: z.string(),
     clientAudience: z.enum(["kanzlei", "praxis", "unternehmen"]).optional(),
+    definitionId: z.string().uuid().optional(),
     questions: z.array(reviewQuestionSchema).min(1),
     aiWarning: z.string().nullable().optional(),
   }),

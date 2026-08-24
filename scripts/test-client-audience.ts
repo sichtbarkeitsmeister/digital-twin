@@ -58,10 +58,8 @@ assert.equal(
   applyClientAudienceToText("Das Unternehmen", "praxis", { replaceBusiness: true }),
   "Die Praxis",
 );
-assert.equal(
-  applyClientAudienceToText("Dieser Kunde braucht Hilfe.", "unternehmen"),
-  "Dieser Kunde braucht Hilfe.",
-);
+assert.equal(applyClientAudienceToText("Mandant und Mandat", "kanzlei"), "Mandant und Mandat");
+assert.match(applyClientAudienceToText("Auftrag vom Kunden", "kanzlei"), /Mandat vom Mandanten/);
 
 const infoKanzlei = surveyInfoTextForPurpose("persona", "kanzlei");
 assert.match(infoKanzlei.infoText, /Mandant/);

@@ -2,6 +2,9 @@
  * Wer wird im Fragebogen angesprochen: Mandant, Patient oder Kunde.
  * Vorlagen bleiben bei „Kunde“/„Firma“; diese Schicht ersetzt die Wörter
  * passend zur gewählten Unternehmensart.
+ *
+ * Kanzlei: die Person heißt Mandant (wie Kunde/Patient).
+ * Das Mandat ist der Auftrag / das Mandatsverhältnis — nicht die Person.
  */
 
 export const CLIENT_AUDIENCE_KINDS = ["kanzlei", "praxis", "unternehmen"] as const;
@@ -27,7 +30,7 @@ export const CLIENT_AUDIENCE_OPTIONS: ClientAudienceVocab[] = [
   {
     kind: "kanzlei",
     label: "Kanzlei",
-    hint: "Rechtsanwälte, Steuerberater, Notare — im Fragebogen steht Mandant.",
+    hint: "Rechtsanwälte, Steuerberater, Notare — Person: Mandant. Auftrag: Mandat.",
     singular: "Mandant",
     plural: "Mandanten",
     business: "Kanzlei",

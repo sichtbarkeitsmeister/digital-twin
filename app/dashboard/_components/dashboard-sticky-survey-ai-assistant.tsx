@@ -4,6 +4,8 @@ import { useCallback, useMemo } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { SurveyAiAssistant } from "@/components/surveys/survey-ai-assistant";
+import { surveyFromReviewOrNull } from "@/lib/surveys/fragebogen-review-draft";
+import { useFragebogenWizardDraft } from "@/lib/surveys/fragebogen-wizard-draft-store";
 
 export type DashboardSurveyAiPageContext = {
   page:
@@ -84,6 +86,17 @@ export function resolveDashboardSurveyAiPageContext(
     };
   }
 
+  if (
+    pathname === "/dashboard/frageboegen" ||
+    pathname.startsWith("/dashboard/frageboegen/")
+  ) {
+    return {
+      page: "survey_list",
+      surveyId: null,
+      organisationId: org,
+    };
+  }
+
   // Anywhere else in the dashboard: still available for agent-prompt edits etc.
   return {
     page: "survey_list",
@@ -99,21 +112,31 @@ export function resolveDashboardSurveyAiPageContext(
 export function DashboardStickySurveyAiAssistant() {
   const pathname = usePathname() || "/dashboard";
   const searchParams = useSearchParams();
+  const liveDraft = useFragebogenWizardDraft();
 
   const resolved = useMemo(
     () => resolveDashboardSurveyAiPageContext(pathname, searchParams),
     [pathname, searchParams],
   );
 
-  const buildContext = useCallback(
-    () => ({
+  const liveSurvey = useMemo(
+    () => surveyFromReviewOrNull(liveDraft.draft),
+    [liveDraft.draft],
+  );
+
+  const buildContext = useCallback(() => {
+    const liveSurveyId = uuidOrNull(liveSurvey?.id);
+    const onWizard =
+      resolved.page === "survey_builder_new" && Boolean(liveSurvey && liveSurveyId);
+    return {
       page: resolved.page,
-      surveyId: resolved.surveyId,
+      surveyId: liveSurveyId ?? resolved.surveyId,
       organisationId: resolved.organisationId ?? null,
       agentId: resolved.agentId ?? null,
-    }),
-    [resolved],
-  );
+      liveWizardDraft: onWizard,
+      currentSurvey: onWizard ? liveSurvey ?? undefined : undefined,
+    };
+  }, [resolved, liveSurvey]);
 
   return (
     <SurveyAiAssistant title="KI Survey Assistant" buildContext={buildContext} />

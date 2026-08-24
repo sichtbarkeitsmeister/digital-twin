@@ -6,6 +6,7 @@ import { Bot, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SurveyAiChatShell } from "@/components/surveys/survey-ai-chat-shell";
+import type { Survey } from "@/lib/surveys/types";
 
 type PageContext = {
   page:
@@ -20,6 +21,8 @@ type PageContext = {
   notificationEmails?: string[];
   organisationId?: string | null;
   agentId?: string | null;
+  liveWizardDraft?: boolean;
+  currentSurvey?: Survey;
 };
 
 type Props<TContext extends PageContext> = {

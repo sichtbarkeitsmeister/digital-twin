@@ -18,6 +18,11 @@ import {
   createEmptyExtraQuestion,
   type ReviewQuestionItem,
 } from "@/lib/surveys/fragebogen-review-draft";
+import {
+  getFragebogenWizardDraftSnapshot,
+  setFragebogenWizardDraft,
+  useFragebogenWizardDraft,
+} from "@/lib/surveys/fragebogen-wizard-draft-store";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -106,6 +111,7 @@ export function FragebogenFromOrgWizard(props: {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loadingCtx, setLoadingCtx] = useState(Boolean(organisationId));
+  const liveFromAi = useFragebogenWizardDraft();
 
   const coreItems = useMemo(() => {
     const raw = purpose === "anbieter" ? anbieterCore : personaCore;
@@ -223,6 +229,33 @@ export function FragebogenFromOrgWizard(props: {
       window.clearInterval(id);
     };
   }, [organisationId, activeCrawl?.id, activeCrawl?.status]);
+
+  useEffect(() => {
+    return () => {
+      setFragebogenWizardDraft(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (step !== "review" || !draft) {
+      if (getFragebogenWizardDraftSnapshot().draft) {
+        setFragebogenWizardDraft(null);
+      }
+      return;
+    }
+    const current = getFragebogenWizardDraftSnapshot();
+    if (current.source === "ai" && current.draft && current.draft !== draft) {
+      return;
+    }
+    if (current.draft === draft && current.source === "wizard") return;
+    setFragebogenWizardDraft(draft, "wizard");
+  }, [step, draft]);
+
+  useEffect(() => {
+    if (liveFromAi.source !== "ai" || !liveFromAi.draft) return;
+    setDraft(liveFromAi.draft);
+    setStatus("KI-Änderung im Entwurf übernommen. Bitte prüfen.");
+  }, [liveFromAi]);
 
   useEffect(() => {
     const items = purpose === "anbieter" ? anbieterCore : personaCore;
@@ -447,8 +480,9 @@ export function FragebogenFromOrgWizard(props: {
           </h1>
           <p className="max-w-2xl text-sm text-secondary">
             Fragen umformulieren, Typ und Pflichtfeld setzen, Zusatzfragen ergänzen.
-            Vorausgefüllte Antworten aus Dateien und Crawl bitte prüfen — passen sie, oder
-            muss etwas angepasst werden? Erst danach wird der Fragebogen angelegt.
+            Vorausgefüllte Antworten aus Dateien und Crawl bitte prüfen. Der KI-Assistent
+            unten rechts sieht diesen Entwurf — zum Beispiel „Frage 3 kürzer“ oder „Checkboxen
+            zu Leistungen ergänzen“, danach den Vorschlag übernehmen.
           </p>
         </div>
 
@@ -564,7 +598,8 @@ export function FragebogenFromOrgWizard(props: {
         <p className="max-w-2xl text-sm text-secondary">
           Zuerst Website crawlen und die Art des Unternehmens wählen (Kanzlei, Praxis oder
           anderes). Leistungen und Impressum werden übernommen, die Texte nutzen Mandant,
-          Patient oder Kunde. Danach Gesprächsnotizen hochladen und prüfen.
+          Patient oder Kunde. Der KI-Assistent bleibt unten rechts und kann den Entwurf
+          direkt anpassen, sobald die Vorschau da ist.
         </p>
       </div>
 
@@ -766,6 +801,11 @@ export function FragebogenFromOrgWizard(props: {
           {!clientAudience ? (
             <p className="text-xs text-amber-800 dark:text-amber-200">
               Bitte eine Art wählen, bevor der Fragebogen erzeugt wird.
+            </p>
+          ) : clientAudience === "kanzlei" ? (
+            <p className="text-xs text-secondary">
+              Im Fragebogen steht für die Person durchgängig „Mandant“. Der Auftrag
+              heißt „Mandat“ — das ist das Mandatsverhältnis, nicht die Person.
             </p>
           ) : (
             <p className="text-xs text-secondary">

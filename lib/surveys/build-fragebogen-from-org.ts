@@ -46,6 +46,7 @@ import {
   type FragebogenReviewDraft,
   type ReviewQuestionItem,
   buildSurveyAndAnswersFromReview,
+  createSurveyDefinitionId,
 } from "@/lib/surveys/fragebogen-review-draft";
 import {
   clientAudienceVocab,
@@ -452,6 +453,7 @@ export async function buildFragebogenReviewDraft(input: {
     websiteUrl: crawl.websiteUrl,
     organisationName: crawl.organisationName,
     clientAudience: audience,
+    definitionId: createSurveyDefinitionId(),
     questions,
     aiWarning: aiBundle.warning,
   };
