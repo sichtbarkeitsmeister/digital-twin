@@ -28,6 +28,16 @@ assert.equal(
 assert.ok(ANBIETER_CORE_QUESTIONS.every((q) => q.required));
 assert.ok(PERSONA_CORE_QUESTIONS.every((q) => q.required));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "elevator_pitch"));
+assert.equal(
+  ANBIETER_CORE_QUESTIONS.filter(
+    (q) => q.key === "known_for" || q.key === "daily_priority" || q.key === "impressive_results",
+  ).length,
+  0,
+);
+assert.match(
+  ANBIETER_CORE_QUESTIONS.find((q) => q.key === "company_history")?.description ?? "",
+  /Wendepunkte|Meilenstein|2012/,
+);
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "portfolio" && q.type === "checkbox"));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "company_archetype" && q.type === "ranking"));
 assert.ok(ANBIETER_CORE_QUESTIONS.some((q) => q.key === "address_form" && q.type === "radio"));
@@ -78,7 +88,22 @@ assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_name" && q.type 
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_age" && q.type === "radio"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_job" && q.type === "ranking"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_hormozi_dream"));
-assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_summary"));
+assert.equal(
+  PERSONA_CORE_QUESTIONS.filter(
+    (q) =>
+      q.key === "persona_summary" ||
+      q.key === "persona_unspoken_drivers" ||
+      q.key === "persona_pre_contact_fears" ||
+      q.key === "persona_research_how" ||
+      q.key === "persona_research_signs" ||
+      q.key === "persona_reviews_mentioned" ||
+      q.key === "persona_delay_reaction" ||
+      q.key === "persona_compared_with" ||
+      q.key === "persona_return_behavior" ||
+      q.key === "persona_hormozi_speed",
+  ).length,
+  0,
+);
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_contact_is_client" && q.type === "radio"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_contact_other" && q.type === "text"));
 assert.ok(
@@ -110,7 +135,8 @@ assert.equal(
       q.key === "persona_confirm_real_experience" ||
       q.key === "persona_customer_groups" ||
       q.key === "persona_journey_duration" ||
-      q.key === "persona_hormozi_trigger",
+      q.key === "persona_hormozi_trigger" ||
+      q.key === "persona_summary",
   ).length,
   0,
 );
@@ -138,6 +164,7 @@ const personaInfo = surveyInfoTextForPurpose("persona");
 assert.equal(personaInfo.infoTextEnabled, true);
 assert.match(personaInfo.infoText, /idealen Kunden/);
 assert.equal(personaInfo.infoText, PERSONA_INFO_TEXT);
+assert.match(surveyInfoTextForPurpose("persona", "kanzlei").infoText, /Mandant/);
 assert.equal(surveyInfoTextForPurpose("intern").infoTextEnabled, false);
 
 const { steps, fieldIdsByKey } = buildCoreFields(ANBIETER_CORE_QUESTIONS);

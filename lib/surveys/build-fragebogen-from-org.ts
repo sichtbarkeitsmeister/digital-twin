@@ -19,7 +19,11 @@ import {
   suggestPrefillsFromCrawl,
   type PrefillDraft,
 } from "@/lib/surveys/org-crawl-context";
-import { formatSeoMetricsAnswer } from "@/lib/surveys/org-crawl-prefill";
+import {
+  extractServiceLabels,
+  formatSeoMetricsAnswer,
+  parseServiceLabelList,
+} from "@/lib/surveys/org-crawl-prefill";
 import {
   firstConversationToMeetingBriefing,
 } from "@/lib/surveys/first-conversation";
@@ -43,6 +47,12 @@ import {
   type ReviewQuestionItem,
   buildSurveyAndAnswersFromReview,
 } from "@/lib/surveys/fragebogen-review-draft";
+import {
+  clientAudienceVocab,
+  isClientAudienceKind,
+  type ClientAudienceKind,
+} from "@/lib/surveys/client-audience";
+import { customizeCoreQuestions } from "@/lib/surveys/customize-fragebogen";
 
 export type { MeetingBriefing, ExtraQuestionPlacement, FragebogenReviewDraft, ReviewQuestionItem };
 export { buildSurveyAndAnswersFromReview } from "@/lib/surveys/fragebogen-review-draft";
@@ -70,26 +80,37 @@ async function generateExtrasAndAiPrefills(input: {
   documentText?: string;
   coreItems: Array<{ key: string; title: string; hasPrefill: boolean }>;
   includeAiExtras: boolean;
+  audience: ClientAudienceKind;
+  serviceLabels: string[];
   maxExtras?: number;
-}): Promise<{ extras: string[]; aiPrefills: Record<string, PrefillDraft>; warning: string | null }> {
+}): Promise<{
+  extras: string[];
+  aiPrefills: Record<string, PrefillDraft>;
+  optionSets: Record<string, string[]>;
+  warning: string | null;
+}> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) return { extras: [], aiPrefills: {}, warning: null };
+  if (!apiKey) return { extras: [], aiPrefills: {}, optionSets: {}, warning: null };
 
   const anthropic = new Anthropic({ apiKey });
   const maxExtras = input.maxExtras ?? 4;
   const missing = input.coreItems.filter((c) => !c.hasPrefill);
+  const vocab = clientAudienceVocab(input.audience);
   const audience =
     input.purpose === "anbieter"
-      ? `Anbieter-Fragebogen für „${input.organisationName}“ (Firmenwissen).`
+      ? `Anbieter-Fragebogen für „${input.organisationName}“ (${vocab.label}). In allen Texten „${vocab.singular}“ / „${vocab.plural}“ verwenden, nicht Kunde/Patient/Mandant vermischen.`
       : input.purpose === "intern"
         ? `Interner Recherche-Fragebogen (TEIL C) für „${input.organisationName}“. Nicht an den Kunden.`
-        : `Kunden-Persona-Fragebogen für Wunschkunde „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“.`;
+        : `Persona-Fragebogen für Wunschkunde „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“ (${vocab.label}). Person heißt durchgängig ${vocab.singular}.`;
 
   const documentBlock = input.documentText?.trim()
     ? `\nHochgeladene Dateien (HÖCHSTE PRIORITÄT):\n${input.documentText.slice(0, 8000)}\n`
     : "";
   const meetingBlock = input.meetingContext?.trim()
     ? `\nMeeting-Briefing:\n${input.meetingContext.slice(0, 3500)}\n`
+    : "";
+  const servicesBlock = input.serviceLabels.length
+    ? `\nBereits erkannte Leistungen:\n${input.serviceLabels.map((s) => `- ${s}`).join("\n")}\n`
     : "";
 
   const targets = missing.length > 0 ? missing : input.coreItems.slice(0, 12);
@@ -98,7 +119,7 @@ async function generateExtrasAndAiPrefills(input: {
     const result = await callAnthropicFirstAvailable({
       anthropic,
       models: resolveSurveyChatModels(),
-      maxTokens: 2500,
+      maxTokens: 3200,
       timeoutMs: 35_000,
       stream: true,
       system:
@@ -110,14 +131,16 @@ async function generateExtrasAndAiPrefills(input: {
 
 Offene Kernfragen:
 ${targets.map((c) => `- [${c.key}] ${c.title}`).join("\n")}
-${documentBlock}${meetingBlock}
-Crawl (Presse, Über uns, Team, Leistungen zuerst):
+${documentBlock}${meetingBlock}${servicesBlock}
+Crawl (Presse, Über uns, Team, Leistungen, Impressum zuerst):
 ${input.crawlSummary.slice(0, 9000)}
 
-Fülle nur Felder, die der Kontext klar hergibt. Team, Leistungen, USP, Standort, Presse besonders. source=upload bei Dateien, sonst source=ai.
-${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].` : "questions=[]."}
+Fülle nur Felder, die der Kontext klar hergibt. Team, Leistungen, USP, Standort, Impressum, Presse besonders. source=upload bei Dateien, sonst source=ai.
+Leistungsnamen in optionSets.portfolio und optionSets.services_ranked (3–8 kurze Labels, keine Sätze).
+Für Persona außerdem optionSets.persona_goals, persona_objections, persona_alternatives, persona_budget (je 3–6 branchentypische Optionen).
+${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[]. Zusatzfragen mit ${vocab.singular}/${vocab.plural}.` : "questions=[]."}
 
-{"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"upload"}],"questions":[]}`,
+{"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"upload"}],"optionSets":{"portfolio":["Leistung A"]},"questions":[]}`,
         },
       ],
     });
@@ -126,13 +149,14 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
       return {
         extras: [],
         aiPrefills: {},
+        optionSets: {},
         warning:
           "KI-Vorausfüllung war nicht verfügbar. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen.",
       };
     }
     const raw = extractAnthropicText(result.response);
     const jsonText = extractFirstJsonObject(escapeControlCharsInJsonStrings(raw));
-    if (!jsonText) return { extras: [], aiPrefills: {}, warning: null };
+    if (!jsonText) return { extras: [], aiPrefills: {}, optionSets: {}, warning: null };
 
     const parsed = JSON.parse(jsonText) as {
       prefills?: Array<{
@@ -141,6 +165,7 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
         note?: unknown;
         source?: unknown;
       }>;
+      optionSets?: Record<string, unknown>;
       questions?: unknown;
     };
     const allowedKeys = new Set(input.coreItems.map((m) => m.key));
@@ -165,19 +190,31 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
         ).slice(0, 160),
       };
     }
+    const optionSets: Record<string, string[]> = {};
+    if (parsed.optionSets && typeof parsed.optionSets === "object") {
+      for (const [key, rawLabels] of Object.entries(parsed.optionSets)) {
+        if (!Array.isArray(rawLabels)) continue;
+        const labels = rawLabels
+          .map((item) => String(item ?? "").trim())
+          .filter((item) => item.length >= 2 && item.length <= 80)
+          .slice(0, 10);
+        if (labels.length >= 2) optionSets[key] = labels;
+      }
+    }
     const extras = input.includeAiExtras
       ? (Array.isArray(parsed.questions) ? parsed.questions : [])
           .map((q) => String(q ?? "").trim())
           .filter((q) => q.length >= 8)
           .slice(0, maxExtras)
       : [];
-    return { extras, aiPrefills, warning: null };
+    return { extras, aiPrefills, optionSets, warning: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     const timedOut = /Zeitlimit|timeout|aborted/i.test(message);
     return {
       extras: [],
       aiPrefills: {},
+      optionSets: {},
       warning: timedOut
         ? "KI-Vorausfüllung hat zu lange gedauert. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen."
         : "KI-Vorausfüllung ist ausgefallen. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen.",
@@ -197,9 +234,14 @@ export async function buildFragebogenReviewDraft(input: {
   extraPlacement?: ExtraQuestionPlacement;
   meetingBriefing?: MeetingBriefing | null;
   sourceDocuments?: SourceDocument[] | null;
+  clientAudience?: ClientAudienceKind | null;
 }): Promise<FragebogenReviewDraft> {
   const purpose = input.purpose;
   const extraPlacement = input.extraPlacement ?? "end";
+  const audience: ClientAudienceKind = isClientAudienceKind(input.clientAudience)
+    ? input.clientAudience
+    : "unternehmen";
+  const vocab = clientAudienceVocab(audience);
   const allCore = coreQuestionsForPurpose(purpose);
   const selectedKeys = new Set(
     (input.selectedCoreKeys?.length
@@ -237,8 +279,22 @@ export async function buildFragebogenReviewDraft(input: {
     ? meetingBriefingContextText(briefing)
     : "";
 
+  const meetingServices = parseServiceLabelList(briefing?.services ?? "");
+  const crawlServices = extractServiceLabels(crawl);
+  const serviceLabels =
+    meetingServices.length >= 2
+      ? meetingServices
+      : crawlServices.length > 0
+        ? crawlServices
+        : meetingServices;
+
   // Crawl first, then AI for gaps — Meeting, then uploaded files win.
   const basePrefills: Record<string, PrefillDraft> = { ...heuristic };
+  const titledForAi = customizeCoreQuestions({
+    templates: selectedTemplates,
+    audience,
+    serviceLabels,
+  });
 
   const aiBundle = await generateExtrasAndAiPrefills({
     purpose,
@@ -248,7 +304,9 @@ export async function buildFragebogenReviewDraft(input: {
     meetingContext: meetingText,
     documentText,
     includeAiExtras: Boolean(input.includeAiExtras),
-    coreItems: selectedTemplates.map((t) => ({
+    audience,
+    serviceLabels,
+    coreItems: titledForAi.map((t) => ({
       key: t.key,
       title: t.title,
       hasPrefill: Boolean(basePrefills[t.key]?.value || meeting[t.key]?.value),
@@ -262,6 +320,27 @@ export async function buildFragebogenReviewDraft(input: {
   for (const [key, draft] of Object.entries(meeting)) {
     if (prefills[key]?.source === "upload") continue;
     prefills[key] = draft;
+  }
+
+  const optionSets: Record<string, string[]> = { ...aiBundle.optionSets };
+  if (serviceLabels.length > 0) {
+    if (!optionSets.portfolio) optionSets.portfolio = serviceLabels;
+    if (!optionSets.services_ranked) optionSets.services_ranked = serviceLabels;
+  }
+
+  const customized = customizeCoreQuestions({
+    templates: selectedTemplates,
+    audience,
+    serviceLabels,
+    optionSets,
+  });
+
+  if (serviceLabels.length > 0 && !prefills.portfolio?.value) {
+    prefills.portfolio = {
+      value: serviceLabels.join("\n"),
+      source: meetingServices.length >= 2 ? "meeting" : "crawl",
+      note: "Leistungen aus Website/Gespräch — bitte Checkboxen prüfen",
+    };
   }
 
   // Meeting notes → Kernfragen (via suggestPrefillsFromMeeting) + getrennte Zusatzfragen
@@ -282,7 +361,7 @@ export async function buildFragebogenReviewDraft(input: {
     answerNote: "Aus Kundengespräch übernommen",
   }));
 
-  const coreQuestions: ReviewQuestionItem[] = selectedTemplates.map((t) => {
+  const coreQuestions: ReviewQuestionItem[] = customized.map((t) => {
     const draft = prefills[t.key];
     return {
       id: fieldIdForCoreKey(t.key),
@@ -306,7 +385,7 @@ export async function buildFragebogenReviewDraft(input: {
 
   const seoExtra: ReviewQuestionItem[] =
     crawl.seoMetrics &&
-    !selectedTemplates.some((t) => t.prefillHint === "seo_metrics" && prefills[t.key]?.value)
+    !customized.some((t) => t.prefillHint === "seo_metrics" && prefills[t.key]?.value)
       ? [
           {
             id: "extra_seo_performance",
@@ -355,14 +434,14 @@ export async function buildFragebogenReviewDraft(input: {
       ? `Anbieter: ${crawl.organisationName}`
       : purpose === "intern"
         ? `Intern: ${crawl.organisationName}`
-        : `Persona: ${input.wunschkundeLabel?.trim() || "Wunschkunde"} (${crawl.organisationName})`;
+        : `Persona: ${input.wunschkundeLabel?.trim() || `Wunsch${vocab.singular}`} (${crawl.organisationName})`;
 
   const description =
     purpose === "anbieter"
-      ? `Firmenfragebogen für ${crawl.organisationName}. Kernfragen + Meeting/Crawl-Vorlagen.`
+      ? `Firmenfragebogen für ${crawl.organisationName} (${vocab.label}). Kernfragen + Meeting/Crawl-Vorlagen.`
       : purpose === "intern"
         ? `Interner Recherche-Block für ${crawl.organisationName}. Nicht an den Kunden senden.`
-        : `Wunschkunden-Fragebogen für ${crawl.organisationName}. Kernfragen + optionale Zusatzfragen.`;
+        : `${vocab.plural}-Fragebogen für ${crawl.organisationName}. Kernfragen + optionale Zusatzfragen.`;
 
   return {
     title,
@@ -372,6 +451,7 @@ export async function buildFragebogenReviewDraft(input: {
     crawlPageCount: crawl.pageCount,
     websiteUrl: crawl.websiteUrl,
     organisationName: crawl.organisationName,
+    clientAudience: audience,
     questions,
     aiWarning: aiBundle.warning,
   };

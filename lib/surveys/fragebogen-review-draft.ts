@@ -10,6 +10,12 @@ import { surveySchema } from "@/lib/surveys/schema";
 import { coreQuestionsForPurpose, surveyInfoTextForPurpose } from "@/lib/surveys/core-question-templates";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
 import { textListPayloadFromFreeText } from "@/lib/surveys/text-list-answer";
+import {
+  isClientAudienceKind,
+  type ClientAudienceKind,
+} from "@/lib/surveys/client-audience";
+import { customizeCoreQuestions } from "@/lib/surveys/customize-fragebogen";
+import { isIndustryPlaceholderLabel } from "@/lib/surveys/core-question-templates";
 
 export type ExtraQuestionPlacement = "start" | "end";
 
@@ -56,9 +62,35 @@ export type FragebogenReviewDraft = {
   websiteUrl: string | null;
   organisationName: string;
   questions: ReviewQuestionItem[];
+  /** Kanzlei / Praxis / Unternehmen — steuert Mandant, Patient oder Kunde. */
+  clientAudience?: ClientAudienceKind;
   /** Set when crawl/upload prefills succeeded but the AI gap-fill timed out or failed. */
   aiWarning?: string | null;
 };
+
+function resolveDraftAudience(draft: FragebogenReviewDraft): ClientAudienceKind {
+  return isClientAudienceKind(draft.clientAudience) ? draft.clientAudience : "unternehmen";
+}
+
+function checkboxAnswerFromFreeText(answer: string, optionLabels: string[]): string[] {
+  const lines = answer
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*•]\s+/, "").trim())
+    .filter(Boolean);
+  const hay = answer.toLowerCase();
+  const selected: string[] = [];
+  for (const label of optionLabels) {
+    const trimmed = label.trim();
+    if (!trimmed || isIndustryPlaceholderLabel(trimmed)) continue;
+    const lower = trimmed.toLowerCase();
+    if (lines.some((line) => line.toLowerCase() === lower)) {
+      selected.push(trimmed);
+      continue;
+    }
+    if (trimmed.length >= 4 && hay.includes(lower)) selected.push(trimmed);
+  }
+  return selected;
+}
 
 function createId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -219,7 +251,11 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
 
   const coreIncluded = included.filter((q) => q.kind === "core");
   const extraIncluded = included.filter((q) => q.kind === "extra");
-  const original = coreQuestionsForPurpose(draft.purpose);
+  const audience = resolveDraftAudience(draft);
+  const original = customizeCoreQuestions({
+    templates: coreQuestionsForPurpose(draft.purpose),
+    audience,
+  });
   const byKey = new Map(original.map((t) => [t.key, t]));
 
   const extrasStep: SurveyStep | null =
@@ -261,7 +297,7 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
         ? [extrasStep, ...coreSteps]
         : [...coreSteps, extrasStep];
 
-  const info = surveyInfoTextForPurpose(draft.purpose);
+  const info = surveyInfoTextForPurpose(draft.purpose, audience);
   const definitionCandidate: Survey = {
     version: 1,
     id: createId(),
@@ -292,6 +328,24 @@ export function answersFromReview(
     if (!answer) continue;
     if (!q.type || q.type === "text" || q.type === "radio") {
       out[q.id] = answer;
+      continue;
+    }
+    if (q.type === "checkbox") {
+      const selected = checkboxAnswerFromFreeText(
+        answer,
+        q.options.map((opt) => opt.label),
+      );
+      if (selected.length > 0) out[q.id] = selected;
+      continue;
+    }
+    if (q.type === "ranking") {
+      const lines = answer
+        .split(/\n+/)
+        .map((line) => line.replace(/^[-*•\d.)\s]+/, "").trim())
+        .filter(Boolean);
+      const presets = q.options.map((opt) => opt.label).filter(Boolean);
+      const ranked = lines.filter((line) => presets.includes(line));
+      if (ranked.length >= 2) out[q.id] = ranked;
       continue;
     }
     if (q.type === "text_list") {

@@ -9,6 +9,9 @@ import {
   classifyCrawlPage,
   crawlPageKindLabel,
   crawlPagePriority,
+  extractImpressumFacts,
+  extractServiceLabels,
+  parseServiceLabelList,
   type OrgCrawlContext,
 } from "../lib/surveys/org-crawl-prefill";
 
@@ -29,7 +32,12 @@ const context: OrgCrawlContext = {
     {
       url: "https://onlinemediaatelier.de/",
       title: "Home",
-      text: "Online Media Atelier · Strategische Social-Media-Beratung für den Mittelstand. Unser Fokus liegt auf nachhaltiger Befähigung der Kunden. Wir sind 12 Mitarbeiter in NRW. Gegründet 2014. Was uns unterscheidet: praxisnahe Workshops statt Agentur-Blackbox. Geschäftsführerin: Julia Schröder. Mitbewerber sind oft klassische Social-Media-Agenturen ohne Wissensvermittlung. 4,8 Sterne bei 37 Google Bewertungen. Instagram.com/oma und facebook.com/oma. Adresse: Musterstraße 12, 44135 Dortmund. Öffnungszeiten: Mo–Fr 9–17 Uhr.",
+      text: "Online Media Atelier · Strategische Social-Media-Beratung für den Mittelstand. Unser Fokus liegt auf nachhaltiger Befähigung der Kunden. Wir sind 12 Mitarbeiter in NRW. Gegründet 2014. Was uns unterscheidet: praxisnahe Workshops statt Agentur-Blackbox. Geschäftsführerin: Julia Schröder. Mitbewerber sind oft klassische Social-Media-Agenturen ohne Wissensvermittlung. 4,8 Sterne bei 37 Google Bewertungen. Instagram.com/oma und facebook.com/oma. Adresse: Musterstraße 12, 44135 Dortmund. Öffnungszeiten: Mo–Fr 9–17 Uhr. Impressum: Online Media Atelier GmbH",
+    },
+    {
+      url: "https://onlinemediaatelier.de/leistungen",
+      title: "Leistungen",
+      text: "Unsere Leistungen\n- Strategische Social-Media-Beratung\n- Workshops für Teams\n- Redaktionsplanung\n- Community Management",
     },
   ],
   summaryText: "",
@@ -68,7 +76,7 @@ const prefills = suggestPrefillsFromCrawl({
   ],
 });
 
-assert.equal(prefills.company_name?.value, "Online Media Atelier");
+assert.match(prefills.company_name?.value ?? "", /Online Media Atelier GmbH/);
 assert.equal(prefills.website?.value, "https://onlinemediaatelier.de");
 assert.match(prefills.employee_count?.value ?? "", /12/);
 assert.equal(prefills.owner_name?.value, "Julia Schröder");
@@ -85,6 +93,20 @@ assert.match(prefills.reviews?.value ?? "", /37/);
 assert.match(prefills.hours?.value ?? "", /Öffnungszeiten|Mo/i);
 assert.match(prefills.nap?.value ?? "", /Musterstraße|Dortmund/);
 assert.match(prefills.online?.value ?? "", /Instagram/);
+
+const services = extractServiceLabels(context);
+assert.ok(services.includes("Workshops für Teams"));
+assert.ok(services.includes("Community Management"));
+assert.match(prefills.services?.value ?? "", /Workshops für Teams/);
+
+const impressum = extractImpressumFacts(context.pageExcerpts[0]!.text);
+assert.match(impressum.legalName ?? "", /GmbH/);
+assert.equal(impressum.ownerName, "Julia Schröder");
+
+assert.deepEqual(
+  parseServiceLabelList("Arbeitsrecht, Familienrecht und Mietrecht"),
+  ["Arbeitsrecht", "Familienrecht", "Mietrecht"],
+);
 
 assert.equal(classifyCrawlPage("https://example.de/presse/mitteilung", "Presse"), "press");
 assert.equal(classifyCrawlPage("https://example.de/ueber-uns", "Über uns"), "about");

@@ -18,6 +18,10 @@ import {
 } from "@/lib/surveys/core-question-templates";
 import { loadOrgCrawlContext } from "@/lib/surveys/org-crawl-context";
 import {
+  extractImpressumFacts,
+  extractServiceLabels,
+} from "@/lib/surveys/org-crawl-prefill";
+import {
   firstConversationFilledCount,
   firstConversationHasContent,
   firstConversationSummaryLines,
@@ -92,6 +96,12 @@ export async function loadFragebogenWizardContextAction(input: {
       description: string;
       stepTitle: string;
     }>;
+    extractedServices: string[];
+    impressum: {
+      legalName: string | null;
+      address: string | null;
+      ownerName: string | null;
+    };
   }>
 > {
   const auth = await requirePlatformAdmin();
@@ -146,6 +156,13 @@ export async function loadFragebogenWizardContextAction(input: {
         description: q.description,
         stepTitle: q.stepTitle,
       })),
+      extractedServices: extractServiceLabels(crawl),
+      impressum: extractImpressumFacts(
+        [
+          crawl.summaryText,
+          ...crawl.pageExcerpts.map((page) => `${page.title ?? ""}\n${page.text}`),
+        ].join("\n"),
+      ),
     },
   };
 }
@@ -240,6 +257,7 @@ const meetingBriefingSchema = z
 const previewSchema = z.object({
   organisationId: z.string().uuid(),
   purpose: z.enum(["persona", "anbieter", "intern"]),
+  clientAudience: z.enum(["kanzlei", "praxis", "unternehmen"]),
   wunschkundeLabel: z.string().trim().max(120).optional().nullable(),
   selectedCoreKeys: z.array(z.string().min(1)).min(1),
   includeAiExtras: z.boolean().default(true),
@@ -278,6 +296,7 @@ export async function previewFragebogenFromOrgAction(
     const draft = await buildFragebogenReviewDraft({
       organisationId: parsed.data.organisationId,
       purpose: parsed.data.purpose,
+      clientAudience: parsed.data.clientAudience,
       wunschkundeLabel: parsed.data.wunschkundeLabel,
       selectedCoreKeys: parsed.data.selectedCoreKeys,
       includeAiExtras: parsed.data.includeAiExtras,
@@ -330,6 +349,7 @@ const createFromReviewSchema = z.object({
     crawlPageCount: z.number().int().nonnegative(),
     websiteUrl: z.string().nullable(),
     organisationName: z.string(),
+    clientAudience: z.enum(["kanzlei", "praxis", "unternehmen"]).optional(),
     questions: z.array(reviewQuestionSchema).min(1),
     aiWarning: z.string().nullable().optional(),
   }),

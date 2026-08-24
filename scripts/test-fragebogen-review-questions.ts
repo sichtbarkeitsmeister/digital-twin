@@ -90,6 +90,62 @@ assert.equal(extraStep!.fields[0]?.required, true);
 assert.equal(extraStep!.fields[1]?.type, "checkbox");
 assert.equal(built.answers.core_persona_name, "Max Mustermann");
 
+const portfolioPrefill: ReviewQuestionItem = {
+  id: "core_portfolio",
+  kind: "core",
+  coreKey: "portfolio",
+  title: "Welche Leistungen?",
+  description: "",
+  included: true,
+  required: true,
+  type: "checkbox",
+  options: [
+    { id: "portfolio_1", label: "Arbeitsrecht" },
+    { id: "portfolio_2", label: "Familienrecht" },
+    { id: "portfolio_3", label: "Mietrecht" },
+  ],
+  allowOtherOption: true,
+  answer: "Arbeitsrecht\nFamilienrecht",
+  answerSource: "crawl",
+  answerNote: "Aus Crawl",
+};
+const portfolioBuilt = buildSurveyAndAnswersFromReview({
+  draft: {
+    ...baseDraft([portfolioPrefill]),
+    purpose: "anbieter",
+    title: "Anbieter: Leistungen",
+  },
+  savePrefills: true,
+});
+assert.deepEqual(portfolioBuilt.answers.core_portfolio, ["Arbeitsrecht", "Familienrecht"]);
+assert.equal(portfolioBuilt.definition.steps[0]?.title, "Das Unternehmen");
+
+const kanzleiName: ReviewQuestionItem = {
+  id: "core_company_name",
+  kind: "core",
+  coreKey: "company_name",
+  title: "Wie lautet der vollständige Name der Kanzlei?",
+  description: "",
+  included: true,
+  required: true,
+  type: "text",
+  options: [],
+  answer: "",
+  answerSource: "none",
+  answerNote: "",
+};
+const kanzleiBuilt = buildSurveyAndAnswersFromReview({
+  draft: {
+    ...baseDraft([kanzleiName]),
+    purpose: "anbieter",
+    title: "Anbieter: Kanzlei",
+    clientAudience: "kanzlei",
+  },
+  savePrefills: false,
+});
+assert.equal(kanzleiBuilt.definition.steps[0]?.title, "Die Kanzlei");
+assert.match(kanzleiBuilt.definition.infoText ?? "", /Mandant|echten Erfahrungen/);
+
 const ranking = applyReviewQuestionType(
   { ...createEmptyExtraQuestion(), title: "Bitte priorisieren" },
   "ranking",
