@@ -10,7 +10,9 @@ import {
   crawlPageKindLabel,
   crawlPagePriority,
   extractImpressumFacts,
+  extractLegalCompanyName,
   extractServiceLabels,
+  isPlausiblePrefill,
   parseServiceLabelList,
   type OrgCrawlContext,
 } from "../lib/surveys/org-crawl-prefill";
@@ -113,7 +115,79 @@ assert.equal(classifyCrawlPage("https://example.de/ueber-uns", "Über uns"), "ab
 assert.equal(classifyCrawlPage("https://example.de/team", "Unser Team"), "team");
 assert.equal(classifyCrawlPage("https://example.de/leistungen", "Leistungen"), "services");
 assert.equal(classifyCrawlPage("https://example.de/kontakt", "Kontakt"), "other");
+assert.equal(classifyCrawlPage("https://example.de/impressum", "Impressum"), "legal");
+assert.equal(classifyCrawlPage("https://example.de/datenschutz", "Datenschutz"), "legal");
 assert.ok(crawlPagePriority("press") > crawlPagePriority("other"));
 assert.equal(crawlPageKindLabel("services"), "Leistungen");
+assert.equal(crawlPageKindLabel("legal"), "Impressum");
+
+const meerbusch: OrgCrawlContext = {
+  organisationId: "00000000-0000-0000-0000-000000000002",
+  organisationName: "Praxis Meerbusch | Dr. Schürings",
+  websiteUrl: "https://www.dermatologie-schuerings.de",
+  pageCount: 4,
+  snippets: [],
+  pageExcerpts: [
+    {
+      url: "https://www.dermatologie-schuerings.de/impressum",
+      title: "Über uns: Impressum - Dermatologie Schürings",
+      text: "Impressum. Praxis Dr. Schürings, Hauptstraße 12, 40667 Meerbusch. Inhaber: Dr. med. Thomas Schürings.",
+    },
+    {
+      url: "https://www.dermatologie-schuerings.de/datenschutz",
+      title: "Über uns: Datenschutz - Dermatologie Schürings",
+      text: "Datenschutzerklärung der Praxis. Verantwortlicher: Dr. Schürings.",
+    },
+    {
+      url: "https://www.dermatologie-schuerings.de/fotona-4d-laser",
+      title: "Weitere Seite: Fotona 4D Laser in Meerbusch - Gesichtsstraffung ohne OP",
+      text: "Kälte- oder Wärmeanwendungen: Eine K Botox-Injektionen: ab ca. 200 € pro Region Hyaluronsäure-Filler: ab ca. 350 € pro Ampulle Laserbehandlungen: ab ca. 250 € pro Sitzung",
+    },
+  ],
+  summaryText: "",
+};
+meerbusch.summaryText = `${meerbusch.organisationName}\n${meerbusch.pageExcerpts.map((p) => p.text).join("\n")}`;
+
+const meerbuschPrefills = suggestPrefillsFromCrawl({
+  context: meerbusch,
+  hints: [
+    { key: "company_name", hint: "org_name" },
+    { key: "location_catchment", hint: "region" },
+    { key: "portfolio", hint: "services" },
+  ],
+});
+
+assert.equal(
+  meerbuschPrefills.company_name?.value,
+  "Praxis Meerbusch | Dr. Schürings",
+);
+assert.equal(/Kälte|Wärmeanwendung|Eine K/.test(meerbuschPrefills.company_name?.value ?? ""), false);
+assert.match(meerbuschPrefills.location_catchment?.value ?? "", /Meerbusch/);
+assert.equal(/Botox|€|pro Region/.test(meerbuschPrefills.location_catchment?.value ?? ""), false);
+
+const meerbuschServices = extractServiceLabels(meerbusch);
+assert.equal(meerbuschServices.some((s) => /impressum|datenschutz/i.test(s)), false);
+assert.ok(
+  meerbuschServices.some((s) => /Fotona/i.test(s)),
+  `expected a laser/treatment label, got ${JSON.stringify(meerbuschServices)}`,
+);
+
+assert.equal(
+  extractLegalCompanyName(
+    "Kälte- oder Wärmeanwendungen: Eine K Botox-Injektionen: ab ca. 200 € pro Region",
+  ),
+  null,
+);
+assert.equal(
+  isPlausiblePrefill("org_name", "Kälte- oder Wärmeanwendungen: Eine K"),
+  false,
+);
+assert.equal(
+  isPlausiblePrefill(
+    "region",
+    "ab:Botox-Injektionen: ab ca. 200 € pro Region Hyaluronsäure-Filler: ab ca. 350 €",
+  ),
+  false,
+);
 
 console.log("org-crawl-prefill: ok");

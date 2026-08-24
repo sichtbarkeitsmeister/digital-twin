@@ -37,27 +37,46 @@ export type PrefillDraft = {
   note: string;
 };
 
-export type CrawlPageKind = "press" | "about" | "team" | "services" | "other";
+export type CrawlPageKind = "press" | "about" | "team" | "services" | "legal" | "other";
+
+const LEGAL_PAGE_RE =
+  /impressum|datenschutz|datenschutzerkl|agb\b|\/agb|cookie(?:s|richtlinie|policy)|widerruf|haftungsausschluss|legal[-_]?notice/;
+
+const NAV_OR_LEGAL_LABEL_RE =
+  /^(?:unsere\s+)?(?:leistungen|angebot|angebote|services|portfolio|startseite|home|kontakt|impressum|datenschutz|agb|cookies?|mehr\s+erfahren|jetzt\s+anfragen|über\s+uns|ueber\s+uns|team|aktuelles|news|blog|karriere|login|menü|menu)$/i;
+
+const PAGE_KIND_TITLE_PREFIX_RE =
+  /^(?:Presse|Über uns|Team|Leistungen|Impressum|Weitere Seite):\s*/i;
+
+const PRICE_OR_TREATMENT_LIST_RE =
+  /€|eur\b|ab\s*ca\.|ab\s+\d|pro\s+(?:sitzung|ampulle|region|behandlung|zone)|injektionen?\s*:/i;
+
+const LEGAL_FORM_RE =
+  /\b(?:GmbH|mbH|UG(?:\s*\(haftungsbeschränkt\))?|AG|SE|GbR|OHG|KG|e\.\s*K\.|PartG(?:\s*mbB)?|Partnerschaftsgesellschaft|Rechtsanwaltsgesellschaft(?:\s*mbH)?|Unternehmergesellschaft|Aktiengesellschaft)\b/i;
+
+const KNOWN_REGIONS =
+  /(?:NRW|Nordrhein-Westfalen|Bayern|Baden-Württemberg|Berlin|Hamburg|Hessen|Sachsen|Niedersachsen|Rheinland-Pfalz|Schleswig-Holstein|Brandenburg|Thüringen|Sachsen-Anhalt|Mecklenburg-Vorpommern|Saarland|Bremen|Österreich|Schweiz|DACH|Deutschland|Europaweit|Bundesweit)/i;
 
 /** Rank crawled pages so press, about, team and services are used first. */
 export function classifyCrawlPage(url: string, title: string | null): CrawlPageKind {
   const hay = `${url} ${title ?? ""}`.toLowerCase();
+  if (LEGAL_PAGE_RE.test(hay)) return "legal";
   if (
     /presse|pressemitteilung|press[-_]?release|newsroom|aktuelles|medien|blog/.test(hay)
   ) {
     return "press";
   }
   if (/\/team\b|mitarbeiter|unser[-_]?team|kolleg/.test(hay)) return "team";
-  if (/ueber[-_]?uns|uber[-_]?uns|about|philosophie|geschichte|impressum/.test(hay)) {
+  if (/ueber[-_]?uns|uber[-_]?uns|about|philosophie|geschichte/.test(hay)) {
     return "about";
   }
-  if (/leistung|angebot|service|portfolio|leistungen/.test(hay)) return "services";
+  if (/leistung|angebot|service|portfolio|leistungen|behandlung/.test(hay)) return "services";
   return "other";
 }
 
 export function crawlPagePriority(kind: CrawlPageKind): number {
   if (kind === "press") return 5;
-  if (kind === "about" || kind === "team") return 4;
+  if (kind === "about" || kind === "team" || kind === "legal") return 4;
   if (kind === "services") return 4;
   return 1;
 }
@@ -67,6 +86,7 @@ export function crawlPageKindLabel(kind: CrawlPageKind): string {
   if (kind === "about") return "Über uns";
   if (kind === "team") return "Team";
   if (kind === "services") return "Leistungen";
+  if (kind === "legal") return "Impressum";
   return "Weitere Seite";
 }
 
@@ -101,6 +121,88 @@ function firstSentenceAround(
   return null;
 }
 
+export function looksLikePriceOrTreatmentList(value: string): boolean {
+  return PRICE_OR_TREATMENT_LIST_RE.test(value);
+}
+
+export function looksLikeTruncatedSnippet(value: string): boolean {
+  const t = value.trim();
+  if (t.length < 8) return true;
+  if (/\s+[A-Za-zÄÖÜäöüß]$/.test(t)) return true;
+  if (/:\s*[A-ZÄÖÜa-zäöüß]{1,4}$/.test(t) && t.length < 80) return true;
+  return false;
+}
+
+function stripPageKindPrefix(value: string): string {
+  return value.replace(PAGE_KIND_TITLE_PREFIX_RE, "").trim();
+}
+
+function looksLikeSiteChromeTitle(value: string): boolean {
+  const t = stripPageKindPrefix(value);
+  const left = t.split(/\s+[-–|]\s+/)[0]?.trim() ?? t;
+  if (NAV_OR_LEGAL_LABEL_RE.test(t) || NAV_OR_LEGAL_LABEL_RE.test(left)) return true;
+  if (LEGAL_PAGE_RE.test(t)) return true;
+  return false;
+}
+
+function hasPlaceSignal(value: string): boolean {
+  if (/\d{5}\s+[A-ZÄÖÜ]/.test(value)) return true;
+  if (KNOWN_REGIONS.test(value)) return true;
+  if (/\b(?:sitz\s+in|ansässig\s+in|standort|einzugsgebiet|aus\s+der\s+region)\b/i.test(value)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Drop crawl/AI snippets that do not match the question.
+ * Company name must not be a treatment line; location must not be a price list.
+ */
+export function isPlausiblePrefill(
+  hint: CoreQuestionPrefillHint | undefined,
+  value: string,
+): boolean {
+  if (hint === "services") {
+    return parseServiceLabelList(value).length > 0;
+  }
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t || t.length < 3) return false;
+  if (!hint) return !looksLikeTruncatedSnippet(t);
+
+  if (hint === "org_name") {
+    if (looksLikePriceOrTreatmentList(t) || looksLikeTruncatedSnippet(t)) return false;
+    if (looksLikeSiteChromeTitle(t)) return false;
+    if (LEGAL_FORM_RE.test(t)) return t.length >= 5 && t.length <= 140;
+    if (/^(?:dr\.|praxis|kanzlei|institut|klinik)\b/i.test(t) && t.length <= 120) return true;
+    if (t.length <= 80 && !/[:;]/.test(t) && !NAV_OR_LEGAL_LABEL_RE.test(t)) return true;
+    return false;
+  }
+
+  if (hint === "region" || hint === "nap_address") {
+    if (looksLikePriceOrTreatmentList(t) || looksLikeTruncatedSnippet(t)) return false;
+    if (looksLikeSiteChromeTitle(t)) return false;
+    return hasPlaceSignal(t) || (hint === "nap_address" && /\d/.test(t));
+  }
+
+  if (
+    hint === "usp" ||
+    hint === "focus" ||
+    hint === "elevator_pitch" ||
+    hint === "colloquial_name" ||
+    hint === "known_for" ||
+    hint === "target_group"
+  ) {
+    if (looksLikePriceOrTreatmentList(t) || looksLikeTruncatedSnippet(t)) return false;
+    if (looksLikeSiteChromeTitle(t)) return false;
+    return t.length >= 8 && t.length <= 500;
+  }
+
+  if (hint === "owner_name") return looksLikePersonName(t);
+  if (hint === "team_members") return t.split("\n").some((line) => looksLikePersonName(line.split(",")[0] ?? line));
+
+  return !looksLikeTruncatedSnippet(t);
+}
+
 export function extractEmployeeCount(blob: string): string | null {
   const patterns = [
     /(\d{1,4})\s*(?:[-–]\s*\d{1,4}\s*)?(?:mitarbeiter(?:innen)?|beschäftigte|personen|teammitglieder|angestellte|kolleg(?:en|innen))/i,
@@ -116,35 +218,55 @@ export function extractEmployeeCount(blob: string): string | null {
 
 function extractMetaLead(context: OrgCrawlContext): string | null {
   for (const p of context.pageExcerpts) {
+    const kind = classifyCrawlPage(p.url, p.title);
+    if (kind === "legal") continue;
     const lead = p.text.split(" · ")[0]?.trim() || "";
-    if (lead.length >= 40 && lead.length <= 240) return lead;
+    if (lead.length < 40 || lead.length > 240) continue;
+    if (looksLikePriceOrTreatmentList(lead) || looksLikeTruncatedSnippet(lead)) continue;
+    if (looksLikeSiteChromeTitle(lead)) continue;
+    return lead;
   }
   return null;
 }
 
-const KNOWN_REGIONS =
-  /(?:NRW|Nordrhein-Westfalen|Bayern|Baden-Württemberg|Berlin|Hamburg|Hessen|Sachsen|Niedersachsen|Rheinland-Pfalz|Schleswig-Holstein|Brandenburg|Thüringen|Sachsen-Anhalt|Mecklenburg-Vorpommern|Saarland|Bremen|Österreich|Schweiz|DACH|Deutschland|Europaweit|Bundesweit)/i;
+function cityFromAddress(address: string | null | undefined): string | null {
+  if (!address) return null;
+  const m = address.match(/\d{5}\s+([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ-]+(?:\s+[A-ZÄÖÜ][a-zäöüß-]+)?)/);
+  const city = m?.[1]?.trim();
+  return city && city.length >= 3 ? city : null;
+}
 
-function extractRegion(blob: string): string | null {
+function extractRegion(blob: string, address?: string | null): string | null {
+  const city = cityFromAddress(address);
+  if (city) {
+    const catchment = blob.match(
+      /\b(?:die\s+meisten\s+(?:kunden|patienten|mandanten)|einzugsgebiet|aus\s+der\s+(?:region|umgebung))\s+[^.\n]{4,80}/i,
+    );
+    const extra = catchment?.[0]?.replace(/\s+/g, " ").trim();
+    if (extra && !looksLikePriceOrTreatmentList(extra)) {
+      return `Sitz in ${city}, ${extra}`;
+    }
+    return `Sitz in ${city}`;
+  }
+
   const sentence = firstSentenceAround(blob, [
-    /(?:standort|region|einzugsgebiet|bundesweit|deutschlandweit|mit\s+sitz\s+in|ansässig\s+in|tätig\s+in)[^.!?\n]{4,160}[.!?]?/i,
+    /(?:mit\s+sitz\s+in|ansässig\s+in|standort(?:e)?\s+in|einzugsgebiet|aus\s+der\s+region)[^.!?\n]{4,120}[.!?]?/i,
   ]);
-  if (sentence) return sentence;
+  if (sentence && isPlausiblePrefill("region", sentence)) return sentence;
 
   const known = blob.match(
     new RegExp(
-      `(?:in|aus|für)\\s+(${KNOWN_REGIONS.source})\\b|\\b(${KNOWN_REGIONS.source})\\b`,
+      `(?:in|aus|für)\\s+(${KNOWN_REGIONS.source})\\b`,
       "i",
     ),
   );
-  if (known?.[1] || known?.[2]) {
-    const name = (known[1] || known[2] || "").trim();
-    if (name) return `${name} (Signal aus Crawl — bitte präzisieren)`;
+  if (known?.[1]) {
+    const name = known[1].trim();
+    if (name && !looksLikePriceOrTreatmentList(name)) {
+      return `${name} (Signal aus Crawl — bitte präzisieren)`;
+    }
   }
 
-  if (/deutschland|bundesweit|europaweit/i.test(blob)) {
-    return "Deutschland (Signal aus Crawl — bitte präzisieren)";
-  }
   return null;
 }
 
@@ -309,8 +431,7 @@ function extractCompanyHistory(blob: string): string | null {
   ]);
 }
 
-const SERVICE_STOPWORDS =
-  /^(?:unsere\s+)?(?:leistungen|angebot|angebote|services|portfolio|startseite|home|kontakt|impressum|datenschutz|mehr\s+erfahren|jetzt\s+anfragen|über\s+uns|ueber\s+uns|team|aktuelles|news|blog)$/i;
+const SERVICE_STOPWORDS = NAV_OR_LEGAL_LABEL_RE;
 
 export function splitListItems(text: string): string[] {
   return text
@@ -327,10 +448,12 @@ export function splitListItems(text: string): string[] {
 }
 
 function looksLikeServiceLabel(value: string): boolean {
-  const t = value.trim();
+  const t = stripPageKindPrefix(value.replace(/\s+/g, " ").trim());
   if (t.length < 3 || t.length > 70) return false;
-  if (SERVICE_STOPWORDS.test(t)) return false;
+  if (NAV_OR_LEGAL_LABEL_RE.test(t)) return false;
+  if (looksLikeSiteChromeTitle(t)) return false;
   if (/https?:|www\.|@/.test(t)) return false;
+  if (looksLikePriceOrTreatmentList(t)) return false;
   if (/[.!?]{2,}/.test(t)) return false;
   const sentenceEndings = (t.match(/[.!?]/g) || []).length;
   if (sentenceEndings >= 2) return false;
@@ -386,31 +509,49 @@ export function extractServiceLabels(context: OrgCrawlContext): string[] {
       title: snippet.title,
       text: snippet.snippet,
     })),
-  ].sort((a, b) => {
-    const ka = classifyCrawlPage(a.url, a.title);
-    const kb = classifyCrawlPage(b.url, b.title);
-    if (ka === "services" && kb !== "services") return -1;
-    if (kb === "services" && ka !== "services") return 1;
-    return crawlPagePriority(kb) - crawlPagePriority(ka);
-  });
+  ]
+    .filter((page) => classifyCrawlPage(page.url, page.title) !== "legal")
+    .sort((a, b) => {
+      const ka = classifyCrawlPage(a.url, a.title);
+      const kb = classifyCrawlPage(b.url, b.title);
+      if (ka === "services" && kb !== "services") return -1;
+      if (kb === "services" && ka !== "services") return 1;
+      return crawlPagePriority(kb) - crawlPagePriority(ka);
+    });
 
   const servicePages = pages.filter(
     (page) => classifyCrawlPage(page.url, page.title) === "services",
   );
   const preferred = servicePages.length > 0 ? servicePages : pages;
 
-  for (const page of preferred) {
-    const blob = `${page.title ?? ""}\n${page.text}`;
-    for (const line of splitListItems(blob)) {
+  const collectFromPage = (page: { url: string; title: string | null; text: string }, useTitle: boolean) => {
+    if (useTitle) {
+      const title = stripPageKindPrefix(page.title ?? "");
+      if (title && !looksLikeSiteChromeTitle(title)) pushUniqueLabel(labels, title);
+    }
+    for (const line of splitListItems(page.text)) {
       pushUniqueLabel(labels, line);
     }
-    const offer = blob.match(
+    const offer = page.text.match(
       /(?:wir\s+bieten(?:\s+ihnen)?|unsere\s+leistungen(?:\s+sind)?|angebot(?:e)?)\s*[:–-]?\s+([^.\n]{8,220})/i,
     );
     if (offer?.[1]) {
       for (const item of splitOfferedServices(offer[1])) pushUniqueLabel(labels, item);
     }
+  };
+
+  for (const page of preferred) {
+    const kind = classifyCrawlPage(page.url, page.title);
+    const titleLooksLikeService = looksLikeServiceLabel(stripPageKindPrefix(page.title ?? ""));
+    collectFromPage(page, kind === "services" || (kind === "other" && titleLooksLikeService));
     if (labels.length >= 8) break;
+  }
+
+  if (labels.length < 2) {
+    for (const page of pages) {
+      collectFromPage(page, false);
+      if (labels.length >= 8) break;
+    }
   }
 
   if (labels.length < 2) {
@@ -428,13 +569,16 @@ export function extractServiceLabels(context: OrgCrawlContext): string[] {
 
 export function extractLegalCompanyName(blob: string): string | null {
   const patterns = [
-    /(?:impressum|handelsregisterangaben|firma)\s*[:\n]\s*([A-ZÄÖÜ][^\n]{2,90}(?:GmbH|UG\b|AG\b|GbR|e\.?\s*K\.?|PartG(?:\s*mbB)?|Partnerschaft)[^\n]{0,30})/i,
-    /\b([A-ZÄÖÜ][^.\n]{2,80}(?:GmbH|Unternehmergesellschaft|Aktiengesellschaft|GbR|e\.?\s*K\.?|PartG(?:\s*mbB)?))\b/,
+    /(?:impressum|handelsregisterangaben|firmenname|firma)\s*[:\n]\s*([^\n]{5,120})/i,
+    new RegExp(
+      `\\b([A-ZÄÖÜ][^\\n]{2,80}${LEGAL_FORM_RE.source})\\b`,
+    ),
   ];
   for (const re of patterns) {
     const match = blob.match(re);
-    const raw = (match?.[1] || "").replace(/\s+/g, " ").trim();
-    if (raw.length >= 5 && raw.length <= 120) return raw;
+    const raw = (match?.[1] || "").replace(/\s+/g, " ").trim().replace(/[.,;:]+$/, "");
+    if (!isPlausiblePrefill("org_name", raw)) continue;
+    if (LEGAL_FORM_RE.test(raw) || /^(?:dr\.|praxis|kanzlei)\b/i.test(raw)) return raw;
   }
   return null;
 }
@@ -475,6 +619,19 @@ function crawlDraft(value: string, note: string): PrefillDraft {
   return { value: value.slice(0, 2000), source: "crawl", note };
 }
 
+function assignCrawlPrefill(
+  out: Record<string, PrefillDraft>,
+  key: string,
+  hint: CoreQuestionPrefillHint,
+  value: string | null | undefined,
+  note: string,
+) {
+  const trimmed = value?.trim();
+  if (!trimmed) return;
+  if (!isPlausiblePrefill(hint, trimmed)) return;
+  out[key] = crawlDraft(trimmed, note);
+}
+
 /**
  * Heuristic prefill from org config + crawl text + optional SEO monthly stats.
  * Conservative: only fills when a signal is present; UI can edit/delete.
@@ -485,6 +642,7 @@ export function suggestPrefillsFromCrawl(input: {
 }): Record<string, PrefillDraft> {
   const out: Record<string, PrefillDraft> = {};
   const blob = fullCrawlBlob(input.context);
+  const address = extractAddress(blob);
   const metaLead = extractMetaLead(input.context);
   const employeeCount = extractEmployeeCount(blob);
   const foundingYear = extractFoundingYear(blob);
@@ -494,9 +652,12 @@ export function suggestPrefillsFromCrawl(input: {
 
     if (item.hint === "org_name") {
       const legal = extractLegalCompanyName(blob);
-      if (legal) {
+      if (legal && isPlausiblePrefill("org_name", legal)) {
         out[item.key] = crawlDraft(legal, "Aus Impressum/Crawl — bitte prüfen");
-      } else if (input.context.organisationName) {
+      } else if (
+        input.context.organisationName &&
+        isPlausiblePrefill("org_name", input.context.organisationName)
+      ) {
         out[item.key] = {
           value: input.context.organisationName,
           source: "organisation",
@@ -584,65 +745,71 @@ export function suggestPrefillsFromCrawl(input: {
         firstSentenceAround(blob, [
           /(?:wir\s+(?:sind|stehen|fokussieren|spezialisieren)|unser\s+fokus|schwerpunkt|spezialisiert\s+auf)[^.!?\n]{12,180}[.!?]?/i,
         ]) || metaLead;
-      if (value) {
-        out[item.key] = crawlDraft(value, "Aus Website/Crawl abgeleitet — bitte prüfen");
-      }
+      assignCrawlPrefill(out, item.key, "focus", value, "Aus Website/Crawl abgeleitet — bitte prüfen");
       continue;
     }
 
     if (item.hint === "services") {
       const labels = extractServiceLabels(input.context);
       if (labels.length > 0) {
-        out[item.key] = crawlDraft(
+        assignCrawlPrefill(
+          out,
+          item.key,
+          "services",
           labels.join("\n"),
           "Leistungen aus Website/Crawl — bitte in den Checkboxen prüfen",
         );
-      } else {
-        const value = firstSentenceAround(blob, [
-          /(?:unsere\s+leistungen|wir\s+bieten|angebot(?:e)?|leistungen|services)[^.!?\n]{12,200}[.!?]?/i,
-        ]);
-        if (value) {
-          out[item.key] = crawlDraft(value, "Leistungs-Hinweis aus Crawl — bitte ergänzen/kürzen");
-        }
       }
       continue;
     }
 
     if (item.hint === "usp") {
-      const value = firstSentenceAround(blob, [
-        /(?:was\s+uns\s+unterscheidet|alleinstellung|usp|philosophie|darum\s+wir|warum\s+wir|wettbewerbsvorteil)[^.!?\n]{12,200}[.!?]?/i,
-      ]);
-      if (value) {
-        out[item.key] = crawlDraft(value, "Differenzierung aus Crawl — bitte prüfen");
-      }
+      assignCrawlPrefill(
+        out,
+        item.key,
+        "usp",
+        firstSentenceAround(blob, [
+          /(?:was\s+uns\s+unterscheidet|alleinstellung|usp|philosophie|darum\s+wir|warum\s+wir|wettbewerbsvorteil)[^.!?\n]{12,200}[.!?]?/i,
+        ]),
+        "Differenzierung aus Crawl — bitte prüfen",
+      );
       continue;
     }
 
     if (item.hint === "region") {
-      const value = extractRegion(blob);
-      if (value) {
-        out[item.key] = crawlDraft(value, "Region aus Crawl — bitte präzisieren");
-      }
+      assignCrawlPrefill(
+        out,
+        item.key,
+        "region",
+        extractRegion(blob, address),
+        "Region aus Crawl — bitte präzisieren",
+      );
       continue;
     }
 
     if (item.hint === "target_group") {
-      const value = firstSentenceAround(blob, [
-        /(?:für\s+(?:unternehmen|kunden|familien|praxen|kanzleien)|zielgruppe|unsere\s+kunden)[^.!?\n]{12,180}[.!?]?/i,
-      ]);
-      if (value) {
-        out[item.key] = crawlDraft(value, "Zielgruppen-Hinweis aus Crawl — bitte prüfen");
-      }
+      assignCrawlPrefill(
+        out,
+        item.key,
+        "target_group",
+        firstSentenceAround(blob, [
+          /(?:für\s+(?:unternehmen|kunden|familien|praxen|kanzleien)|zielgruppe|unsere\s+kunden)[^.!?\n]{12,180}[.!?]?/i,
+        ]),
+        "Zielgruppen-Hinweis aus Crawl — bitte prüfen",
+      );
       continue;
     }
 
     if (item.hint === "colloquial_name") {
-      const value = firstSentenceAround(blob, [
-        /(?:wir\s+sind\s+die|bekannt\s+als|kurz\s+[A-ZÄÖÜ])[^.!?\n]{6,120}[.!?]?/i,
-      ]);
-      if (value) {
-        out[item.key] = crawlDraft(value, "Alltagsname-Signal aus Crawl — bitte prüfen");
-      }
+      assignCrawlPrefill(
+        out,
+        item.key,
+        "colloquial_name",
+        firstSentenceAround(blob, [
+          /(?:wir\s+sind\s+die|bekannt\s+als|kurz\s+[A-ZÄÖÜ])[^.!?\n]{6,120}[.!?]?/i,
+        ]),
+        "Alltagsname-Signal aus Crawl — bitte prüfen",
+      );
       continue;
     }
 
@@ -651,17 +818,18 @@ export function suggestPrefillsFromCrawl(input: {
         firstSentenceAround(blob, [
           /(?:bekannt\s+(?:für|als)|darauf\s+sind\s+wir\s+stolz|unsere\s+kunden\s+schätzen)[^.!?\n]{10,180}[.!?]?/i,
         ]) || metaLead;
-      if (value) {
-        out[item.key] = crawlDraft(value, "Bekanntheits-Hinweis aus Crawl — bitte prüfen");
-      }
+      assignCrawlPrefill(out, item.key, "known_for", value, "Bekanntheits-Hinweis aus Crawl — bitte prüfen");
       continue;
     }
 
     if (item.hint === "elevator_pitch") {
-      const value = metaLead;
-      if (value) {
-        out[item.key] = crawlDraft(value, "Kurzbeschreibung aus Website/Meta — bitte prüfen");
-      }
+      assignCrawlPrefill(
+        out,
+        item.key,
+        "elevator_pitch",
+        metaLead,
+        "Kurzbeschreibung aus Website/Meta — bitte prüfen",
+      );
       continue;
     }
 
@@ -707,10 +875,13 @@ export function suggestPrefillsFromCrawl(input: {
     }
 
     if (item.hint === "nap_address") {
-      const value = extractAddress(blob);
-      if (value) {
-        out[item.key] = crawlDraft(value, "Adress-Signal aus Crawl/Impressum — NAP prüfen");
-      }
+      assignCrawlPrefill(
+        out,
+        item.key,
+        "nap_address",
+        address,
+        "Adress-Signal aus Crawl/Impressum — NAP prüfen",
+      );
       continue;
     }
 
