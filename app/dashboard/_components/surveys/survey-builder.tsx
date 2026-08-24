@@ -41,6 +41,7 @@ import {
   removeCheckboxOtherEntry,
   setCheckboxOtherEntryText,
 } from "@/lib/surveys/other-option";
+import { SurveyOpenAnswerField } from "@/components/surveys/survey-open-answer-field";
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
 import { SurveyTextListInput } from "@/components/surveys/survey-text-list-input";
 import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
@@ -1410,7 +1411,7 @@ export function SurveyBuilder({
                           <Label htmlFor={`answer_preview_${field.id}`}>
                             Antwort
                           </Label>
-                          <Input
+                          <SurveyOpenAnswerField
                             id={`answer_preview_${field.id}`}
                             value={(previewAnswers[field.id] as string) ?? ""}
                             onChange={(e) =>
@@ -2442,7 +2443,7 @@ function SurveyPreview({
                     </div>
 
                     {field.type === "text" ? (
-                      <Input
+                      <SurveyOpenAnswerField
                         value={(answers[field.id] as string) ?? ""}
                         onChange={(e) => setAnswer(field.id, e.target.value)}
                         placeholder={
