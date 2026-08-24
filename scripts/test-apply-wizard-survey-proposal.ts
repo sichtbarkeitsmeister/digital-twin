@@ -8,6 +8,7 @@ import {
   applySurveyProposalToWizardDraft,
   isLiveWizardSurveyProposal,
 } from "../lib/surveys/apply-wizard-survey-proposal";
+import type { SurveyAiProposal } from "../lib/ai/survey-assistant-types";
 import {
   surveyFromReview,
   type FragebogenReviewDraft,
@@ -99,7 +100,7 @@ assert.equal(
       kind: "edit_survey_definition",
       summary: "Ohne ID",
       survey,
-    },
+    } as Extract<SurveyAiProposal, { kind: "edit_survey_definition" }>,
     DRAFT_ID,
   ),
   true,
@@ -118,7 +119,6 @@ const patched = applySurveyProposalToWizardDraft(base, {
     },
   ],
 });
-assert.equal(patched.ok, true);
 if (!patched.ok) throw new Error(patched.message);
 assert.equal(patched.draft.questions[0]?.title, "Wie heißt der Avatar?");
 assert.equal(patched.draft.questions[0]?.answer, "Max Mustermann");
@@ -130,7 +130,6 @@ const meta = applySurveyProposalToWizardDraft(base, {
   surveyId: DRAFT_ID,
   title: "Persona: Mandant Anna",
 });
-assert.equal(meta.ok, true);
 if (!meta.ok) throw new Error(meta.message);
 assert.equal(meta.draft.title, "Persona: Mandant Anna");
 assert.equal(meta.draft.questions[0]?.answer, "Max Mustermann");
