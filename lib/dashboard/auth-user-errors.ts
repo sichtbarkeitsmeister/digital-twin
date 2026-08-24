@@ -7,3 +7,13 @@ export function isAlreadyRegisteredAuthError(message: string | null | undefined)
     m.includes("email_exists")
   );
 }
+
+export function isForeignKeyRestrictError(message: string | null | undefined): boolean {
+  const m = (message ?? "").toLowerCase();
+  return (
+    m.includes("foreign key") ||
+    m.includes("violates foreign key") ||
+    m.includes("restrict") ||
+    m.includes("still referenced")
+  );
+}
