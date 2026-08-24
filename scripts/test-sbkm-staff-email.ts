@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { isAlreadyRegisteredAuthError } from "../lib/dashboard/auth-user-errors";
+import { isAlreadyRegisteredAuthError, isForeignKeyRestrictError } from "../lib/dashboard/auth-user-errors";
 import { sortPlatformTeamMembers } from "../lib/dashboard/platform-admin-team";
 import { isSbkmStaffEmail } from "../lib/dt/sbkm-staff";
 
@@ -34,5 +34,7 @@ assert.equal(
   true,
 );
 assert.equal(isAlreadyRegisteredAuthError("invalid redirect"), false);
+assert.equal(isForeignKeyRestrictError("violates foreign key constraint"), true);
+assert.equal(isForeignKeyRestrictError("User already registered"), false);
 
 console.log("sbkm-staff-email: all ok");

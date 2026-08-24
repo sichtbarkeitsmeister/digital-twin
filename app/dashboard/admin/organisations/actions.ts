@@ -23,6 +23,7 @@ const setRoleSchema = z.object({
     (v) => v === "true" || v === "on" || v === true,
     z.boolean(),
   ),
+  intent: z.enum(["grant", "reinvite", "revoke"]).default("grant"),
 });
 
 export async function setPlatformAdminRoleAction(
@@ -32,6 +33,7 @@ export async function setPlatformAdminRoleAction(
   const parsed = setRoleSchema.safeParse({
     email: formData.get("email"),
     make_admin: formData.get("make_admin"),
+    intent: formData.get("intent") || "grant",
   });
 
   if (!parsed.success) {
@@ -53,7 +55,9 @@ export async function setPlatformAdminRoleAction(
   try {
     const result = await grantPlatformAdminRole({
       email: parsed.data.email,
-      makeAdmin: parsed.data.make_admin,
+      makeAdmin: parsed.data.intent === "revoke" ? false : parsed.data.make_admin,
+      actorUserId: user.id,
+      reinvite: parsed.data.intent === "reinvite",
     });
 
     if (result.ok) {

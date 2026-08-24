@@ -36,28 +36,56 @@ export function PlatformAdminTeamCard(props: {
     <div className="grid gap-8">
       <form
         action={formAction}
-        className="grid gap-3 rounded-xl border border-border/80 bg-muted/20 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+        className="grid gap-3 rounded-xl border border-border/80 bg-muted/20 p-4"
       >
-        <input type="hidden" name="make_admin" value="true" />
         <div className="grid gap-2">
           <Label htmlFor="platform_admin_email">Kollegin / Kollegen freischalten</Label>
           <Input
             id="platform_admin_email"
             name="email"
             type="email"
-            placeholder="name@sichtbarkeitsmeister.de"
+            placeholder="vanessa.may@sichtbarkeitsmeister.de"
             autoComplete="email"
             required
             className="h-10"
           />
+          <p className="text-xs text-secondary">
+            Nach dem Freischalten erscheint ein Anmeldelink — den muss sie einmal anklicken.
+            Steckt das Konto fest: <strong>Konto löschen und neu einladen</strong>. Danach den
+            Anmeldelink an sie weitergeben.
+          </p>
         </div>
-        <Button
-          type="submit"
-          disabled={pending}
-          className="h-10 transition-transform duration-150 active:scale-[0.98]"
-        >
-          {pending ? "Speichere…" : "Admin-Ansicht geben"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="submit"
+            name="intent"
+            value="grant"
+            disabled={pending}
+            className="h-10 transition-transform duration-150 active:scale-[0.98]"
+          >
+            {pending ? "Speichere…" : "Admin-Ansicht geben"}
+          </Button>
+          <input type="hidden" name="make_admin" value="true" />
+          <Button
+            type="submit"
+            name="intent"
+            value="reinvite"
+            variant="outline"
+            disabled={pending}
+            className="h-10"
+            onClick={(event) => {
+              if (
+                !confirm(
+                  "Konto wirklich löschen und neu einladen? Offene Sitzungen dieser Adresse werden beendet.",
+                )
+              ) {
+                event.preventDefault();
+              }
+            }}
+          >
+            Konto löschen und neu einladen
+          </Button>
+        </div>
       </form>
 
       {state.message ? (
@@ -134,6 +162,7 @@ export function PlatformAdminTeamCard(props: {
                   <form action={formAction}>
                     <input type="hidden" name="email" value={member.email} />
                     <input type="hidden" name="make_admin" value="false" />
+                    <input type="hidden" name="intent" value="revoke" />
                     <Button
                       type="submit"
                       size="sm"
