@@ -72,7 +72,7 @@ export const SurveyOpenAnswerField = React.forwardRef<
         requestAnimationFrame(resize);
       }}
       className={cn(
-        "flex min-h-11 w-full min-w-0 resize-none overflow-x-hidden whitespace-pre-wrap break-all rounded-md border border-input bg-transparent px-3 py-2 text-base leading-snug shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 lg:min-h-9 lg:py-1.5 lg:text-sm",
+        "flex min-h-11 w-full min-w-0 resize-none overflow-x-hidden whitespace-pre-wrap break-all rounded-md border border-input bg-transparent px-3 py-2 text-base leading-snug shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 lg:min-h-9 lg:py-1.5 lg:text-sm max-h-[calc(3lh+1rem)] lg:max-h-[calc(3lh+0.75rem)]",
         className,
       )}
     />

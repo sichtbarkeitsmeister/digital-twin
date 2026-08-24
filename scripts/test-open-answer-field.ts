@@ -53,4 +53,13 @@ const withCssMin = measureOpenAnswerHeight({
 assert.equal(withCssMin.height, 44);
 assert.equal(withCssMin.overflowY, "hidden");
 
+const cssCapped = measureOpenAnswerHeight({
+  scrollHeight: line * 5 + pad,
+  lineHeight: line,
+  paddingY: pad,
+  cssMaxHeight: line * 3 + pad - 4,
+});
+assert.equal(cssCapped.height, line * 3 + pad - 4);
+assert.equal(cssCapped.overflowY, "auto");
+
 console.log("ok");
