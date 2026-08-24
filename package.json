@@ -33,6 +33,8 @@
     "test:dashboard-sticky-survey-ai": "tsx scripts/test-dashboard-sticky-survey-ai.ts",
     "test:fragebogen-review-questions": "tsx scripts/test-fragebogen-review-questions.ts",
     "test:core-question-templates": "tsx scripts/test-core-question-templates.ts",
+    "test:client-audience": "tsx scripts/test-client-audience.ts",
+    "test:apply-wizard-survey-proposal": "tsx scripts/test-apply-wizard-survey-proposal.ts",
     "test:first-conversation": "tsx scripts/test-first-conversation.ts",
     "test:org-crawl-prefill": "tsx scripts/test-org-crawl-prefill.ts",
     "test:meeting-briefing": "tsx scripts/test-meeting-briefing.ts",

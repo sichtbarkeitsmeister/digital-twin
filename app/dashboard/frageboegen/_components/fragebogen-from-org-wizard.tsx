@@ -18,6 +18,11 @@ import {
   createEmptyExtraQuestion,
   type ReviewQuestionItem,
 } from "@/lib/surveys/fragebogen-review-draft";
+import {
+  getFragebogenWizardDraftSnapshot,
+  setFragebogenWizardDraft,
+  useFragebogenWizardDraft,
+} from "@/lib/surveys/fragebogen-wizard-draft-store";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +37,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
+import {
+  CLIENT_AUDIENCE_OPTIONS,
+  applyClientAudienceToText,
+  type ClientAudienceKind,
+} from "@/lib/surveys/client-audience";
 import {
   QUESTIONNAIRE_FILE_ACCEPT,
   readQuestionnaireFileText,
@@ -69,6 +79,7 @@ export function FragebogenFromOrgWizard(props: {
   const [isPending, startTransition] = useTransition();
   const [step, setStep] = useState<"configure" | "review">("configure");
   const [purpose, setPurpose] = useState<SurveyPurpose>("anbieter");
+  const [clientAudience, setClientAudience] = useState<ClientAudienceKind | null>(null);
   const [wunschkundeLabel, setWunschkundeLabel] = useState("");
   const [includeAiExtras, setIncludeAiExtras] = useState(true);
   const [extraPlacement, setExtraPlacement] = useState<"start" | "end">("end");
@@ -79,6 +90,12 @@ export function FragebogenFromOrgWizard(props: {
   const [pageCount, setPageCount] = useState(0);
   const [lastCrawledAt, setLastCrawledAt] = useState<string | null>(null);
   const [lastCrawlError, setLastCrawlError] = useState<string | null>(null);
+  const [extractedServices, setExtractedServices] = useState<string[]>([]);
+  const [impressum, setImpressum] = useState<{
+    legalName: string | null;
+    address: string | null;
+    ownerName: string | null;
+  }>({ legalName: null, address: null, ownerName: null });
   const [activeCrawl, setActiveCrawl] = useState<ActiveCrawl | null>(null);
   const [seoSummary, setSeoSummary] = useState<string | null>(null);
   const [firstConv, setFirstConv] = useState<FirstConversationSummary | null>(null);
@@ -94,13 +111,25 @@ export function FragebogenFromOrgWizard(props: {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loadingCtx, setLoadingCtx] = useState(Boolean(organisationId));
+  const liveFromAi = useFragebogenWizardDraft();
 
-  const coreItems = purpose === "anbieter" ? anbieterCore : personaCore;
+  const coreItems = useMemo(() => {
+    const raw = purpose === "anbieter" ? anbieterCore : personaCore;
+    const audience = clientAudience ?? "unternehmen";
+    const replaceBusiness = purpose === "anbieter";
+    return raw.map((item) => ({
+      ...item,
+      title: applyClientAudienceToText(item.title, audience, { replaceBusiness }),
+      description: applyClientAudienceToText(item.description, audience, { replaceBusiness }),
+      stepTitle: applyClientAudienceToText(item.stepTitle, audience, { replaceBusiness }),
+    }));
+  }, [purpose, anbieterCore, personaCore, clientAudience]);
 
   useEffect(() => {
     let cancelled = false;
     setDraft(null);
     setStep("configure");
+    setClientAudience(null);
     if (!organisationId) {
       setLoadingCtx(false);
       setOrgName("");
@@ -108,7 +137,10 @@ export function FragebogenFromOrgWizard(props: {
       setPageCount(0);
       setLastCrawledAt(null);
       setLastCrawlError(null);
+      setExtractedServices([]);
+      setImpressum({ legalName: null, address: null, ownerName: null });
       setActiveCrawl(null);
+      setClientAudience(null);
       setSeoSummary(null);
       setFirstConv(null);
       setSkipCrawl(false);
@@ -135,6 +167,8 @@ export function FragebogenFromOrgWizard(props: {
       setLastCrawledAt(res.data.lastCrawledAt);
       setLastCrawlError(res.data.lastCrawlError);
       setActiveCrawl(res.data.activeCrawl);
+      setExtractedServices(res.data.extractedServices);
+      setImpressum(res.data.impressum);
       setSeoSummary(res.data.seoSummary);
       setFirstConv(res.data.firstConversation);
       setAnbieterCore(res.data.anbieterCore);
@@ -180,6 +214,11 @@ export function FragebogenFromOrgWizard(props: {
       setActiveCrawl(res.data.activeCrawl);
       if (res.data.pageCount > 0 && !res.data.activeCrawl) {
         setStatus("Crawl fertig. Inhalte stehen für die Vorausfüllung bereit.");
+        const ctx = await loadFragebogenWizardContextAction({ organisationId });
+        if (cancelled || !ctx.ok || !ctx.data) return;
+        setExtractedServices(ctx.data.extractedServices);
+        setImpressum(ctx.data.impressum);
+        setSeoSummary(ctx.data.seoSummary);
       }
     };
     const id = window.setInterval(() => {
@@ -190,6 +229,33 @@ export function FragebogenFromOrgWizard(props: {
       window.clearInterval(id);
     };
   }, [organisationId, activeCrawl?.id, activeCrawl?.status]);
+
+  useEffect(() => {
+    return () => {
+      setFragebogenWizardDraft(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (step !== "review" || !draft) {
+      if (getFragebogenWizardDraftSnapshot().draft) {
+        setFragebogenWizardDraft(null);
+      }
+      return;
+    }
+    const current = getFragebogenWizardDraftSnapshot();
+    if (current.source === "ai" && current.draft && current.draft !== draft) {
+      return;
+    }
+    if (current.draft === draft && current.source === "wizard") return;
+    setFragebogenWizardDraft(draft, "wizard");
+  }, [step, draft]);
+
+  useEffect(() => {
+    if (liveFromAi.source !== "ai" || !liveFromAi.draft) return;
+    setDraft(liveFromAi.draft);
+    setStatus("KI-Änderung im Entwurf übernommen. Bitte prüfen.");
+  }, [liveFromAi]);
 
   useEffect(() => {
     const items = purpose === "anbieter" ? anbieterCore : personaCore;
@@ -267,6 +333,10 @@ export function FragebogenFromOrgWizard(props: {
       setError("Bitte zuerst eine Organisation wählen oder anlegen.");
       return;
     }
+    if (!clientAudience) {
+      setError("Bitte zuerst wählen, ob es eine Kanzlei, eine Praxis oder ein anderes Unternehmen ist.");
+      return;
+    }
     const crawlRunning = Boolean(activeCrawl && ACTIVE_CRAWL.has(activeCrawl.status));
     if (websiteUrl && pageCount === 0 && !skipCrawl) {
       setError(
@@ -287,6 +357,7 @@ export function FragebogenFromOrgWizard(props: {
       const res = await previewFragebogenFromOrgAction({
         organisationId,
         purpose,
+        clientAudience,
         wunschkundeLabel: purpose === "persona" ? wunschkundeLabel : null,
         selectedCoreKeys: selectedKeys.filter((k) =>
           coreItems.some((c) => c.key === k),
@@ -409,8 +480,9 @@ export function FragebogenFromOrgWizard(props: {
           </h1>
           <p className="max-w-2xl text-sm text-secondary">
             Fragen umformulieren, Typ und Pflichtfeld setzen, Zusatzfragen ergänzen.
-            Vorausgefüllte Antworten aus Dateien und Crawl bitte prüfen — passen sie, oder
-            muss etwas angepasst werden? Erst danach wird der Fragebogen angelegt.
+            Vorausgefüllte Antworten aus Dateien und Crawl bitte prüfen. Der KI-Assistent
+            unten rechts sieht diesen Entwurf — zum Beispiel „Frage 3 kürzer“ oder „Checkboxen
+            zu Leistungen ergänzen“, danach den Vorschlag übernehmen.
           </p>
         </div>
 
@@ -429,6 +501,15 @@ export function FragebogenFromOrgWizard(props: {
             <CardDescription>
               {draft.organisationName} · {draft.crawlPageCount} Crawl-Seiten ·{" "}
               {included.length} Fragen · {prefilled} vorausgefüllt
+              {draft.clientAudience
+                ? ` · ${
+                    draft.clientAudience === "kanzlei"
+                      ? "Kanzlei / Mandant"
+                      : draft.clientAudience === "praxis"
+                        ? "Praxis / Patient"
+                        : "Unternehmen / Kunde"
+                  }`
+                : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2">
@@ -515,8 +596,10 @@ export function FragebogenFromOrgWizard(props: {
           Fragebogen aus Organisation
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Vor dem Erzeugen: Website crawlen, Gesprächsnotizen hochladen, dann prüfen. Alles, was
-          Dateien, Crawl und SEO-Zahlen hergeben (Team, Leistungen, Presse), wird vorausgefüllt.
+          Zuerst Website crawlen und die Art des Unternehmens wählen (Kanzlei, Praxis oder
+          anderes). Leistungen und Impressum werden übernommen, die Texte nutzen Mandant,
+          Patient oder Kunde. Der KI-Assistent bleibt unten rechts und kann den Entwurf
+          direkt anpassen, sobald die Vorschau da ist.
         </p>
       </div>
 
@@ -525,7 +608,8 @@ export function FragebogenFromOrgWizard(props: {
           <CardTitle className="text-base">1. Organisation & Crawl</CardTitle>
           <CardDescription>
             Der Website-Crawl wird vor dem Erzeugen angestoßen. Daraus kommen Team, Leistungen,
-            Über-uns- und Presseseiten — und soweit vorhanden Impressionen und Rankings.
+            Impressum, Über-uns- und Presseseiten — und soweit vorhanden Impressionen und Rankings.
+            Leistungen landen direkt in den Checkboxen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -602,6 +686,35 @@ export function FragebogenFromOrgWizard(props: {
                     : ""}
                 </p>
               )}
+              {extractedServices.length > 0 ? (
+                <div className="grid gap-1">
+                  <p className="text-xs font-medium text-primary">Leistungen aus der Website</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {extractedServices.map((service) => (
+                      <Badge key={service} variant="secondary">
+                        {service}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-xs text-secondary">
+                    Diese Namen werden in die Leistungs-Checkboxen übernommen.
+                  </p>
+                </div>
+              ) : pageCount > 0 ? (
+                <p className="text-xs text-secondary">
+                  Noch keine klaren Leistungsnamen erkannt — die Checkboxen bleiben zunächst
+                  allgemein und können in der Prüfung angepasst werden.
+                </p>
+              ) : null}
+              {impressum.legalName || impressum.address || impressum.ownerName ? (
+                <ul className="grid gap-0.5 text-xs text-secondary">
+                  {impressum.legalName ? (
+                    <li>Impressum / Name: {impressum.legalName}</li>
+                  ) : null}
+                  {impressum.ownerName ? <li>Inhaber / GF: {impressum.ownerName}</li> : null}
+                  {impressum.address ? <li>Adresse: {impressum.address}</li> : null}
+                </ul>
+              ) : null}
             </>
           )}
 
@@ -652,7 +765,7 @@ export function FragebogenFromOrgWizard(props: {
                 checked={skipCrawl}
                 onChange={(e) => setSkipCrawl(e.target.checked)}
               />
-              Ohne Crawl fortfahren (Vorausfüllung dann nur aus Erstgespräch)
+              Ohne Crawl fortfahren (Vorausfüllung dann nur aus Erstgespräch, ohne Website-Leistungen)
             </label>
           ) : null}
         </CardContent>
@@ -660,9 +773,54 @@ export function FragebogenFromOrgWizard(props: {
 
       <Card>
         <CardHeader className="pb-3">
+          <CardTitle className="text-base">2. Art des Unternehmens</CardTitle>
+          <CardDescription>
+            Pflichtfeld vor jedem Fragebogen. Davon hängt ab, ob im Text Mandant, Patient oder
+            Kunde steht — durchgängig in Fragen, Erklärungen und Checkboxen.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {CLIENT_AUDIENCE_OPTIONS.map((option) => (
+              <button
+                key={option.kind}
+                type="button"
+                onClick={() => setClientAudience(option.kind)}
+                className={cn(
+                  "rounded-xl border px-3 py-3 text-left text-sm transition",
+                  clientAudience === option.kind
+                    ? "border-sbkm-mint/50 bg-sbkm-mint/15 text-primary"
+                    : "border-sbkm-navy/10 hover:bg-sbkm-navy/5",
+                )}
+              >
+                <span className="block font-semibold">{option.label}</span>
+                <span className="mt-1 block text-xs text-secondary">{option.hint}</span>
+              </button>
+            ))}
+          </div>
+          {!clientAudience ? (
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              Bitte eine Art wählen, bevor der Fragebogen erzeugt wird.
+            </p>
+          ) : clientAudience === "kanzlei" ? (
+            <p className="text-xs text-secondary">
+              Im Fragebogen steht für die Person durchgängig „Mandant“. Der Auftrag
+              heißt „Mandat“ — das ist das Mandatsverhältnis, nicht die Person.
+            </p>
+          ) : (
+            <p className="text-xs text-secondary">
+              Im Fragebogen steht durchgängig „
+              {CLIENT_AUDIENCE_OPTIONS.find((item) => item.kind === clientAudience)?.singular}“.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <MessageCircle className="size-4" aria-hidden />
-            2. Erstgespräch / Kundendefinition
+            3. Erstgespräch / Kundendefinition
           </CardTitle>
           <CardDescription>
             Das erste Gespräch liegt auf einer eigenen Seite. Gespeicherte Angaben werden hier
@@ -709,7 +867,7 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Upload className="size-4" aria-hidden />
-            2b. Gesprächsnotizen und Unterlagen
+            3b. Gesprächsnotizen und Unterlagen
           </CardTitle>
           <CardDescription>
             Meeting-Protokolle, vorhandene Gespräche oder Zusammenfassungen hochladen. Die KI
@@ -768,7 +926,7 @@ export function FragebogenFromOrgWizard(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">3. Zweck</CardTitle>
+          <CardTitle className="text-base">4. Zweck</CardTitle>
           <CardDescription>
             Anbieter-Fragebogen und Wunschkunden-Fragebogen gehen an den Kunden.
           </CardDescription>
@@ -798,6 +956,9 @@ export function FragebogenFromOrgWizard(props: {
               )}
             >
               Kunden-Persona
+              {clientAudience && clientAudience !== "unternehmen"
+                ? ` (${clientAudience === "kanzlei" ? "Mandant" : "Patient"})`
+                : ""}
             </button>
           </div>
           {purpose === "persona" ? (
@@ -817,11 +978,12 @@ export function FragebogenFromOrgWizard(props: {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            4. Standardfragen ({coreItems.length}, alle Pflichtfelder)
+            5. Standardfragen ({coreItems.length}, alle Pflichtfelder)
           </CardTitle>
           <CardDescription>
-            Alle Kernfragen sind vorausgewählt und Pflichtfelder. In der Prüfung können Antworten
-            aus Dateien und Crawl angepasst werden.
+            Alle Kernfragen sind vorausgewählt und Pflichtfelder. Formulierungen richten sich nach
+            der gewählten Unternehmensart. In der Prüfung können Antworten aus Dateien und Crawl
+            angepasst werden.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -852,7 +1014,7 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Sparkles className="size-4" aria-hidden />
-            5. Individuelle Fragen (letzter Block)
+            6. Individuelle Fragen (letzter Block)
           </CardTitle>
           <CardDescription>
             Die KI schlägt danach Sonderfragen für das jeweilige Unternehmen vor. In der Prüfung
@@ -913,6 +1075,7 @@ export function FragebogenFromOrgWizard(props: {
             isPending ||
             loadingCtx ||
             !organisationId ||
+            !clientAudience ||
             selectedCount === 0 ||
             Boolean(websiteUrl && pageCount === 0 && !skipCrawl)
           }

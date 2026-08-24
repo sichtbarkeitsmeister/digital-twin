@@ -54,6 +54,7 @@ import {
   parseSurveyAiProposal,
 } from "@/lib/ai/survey-assistant-types";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
+import { surveySchema } from "@/lib/surveys/schema";
 
 export const maxDuration = 300;
 
@@ -106,6 +107,8 @@ const requestSchema = z
       notificationEmails: z.array(z.string()).optional(),
       organisationId: z.string().uuid().nullable().optional(),
       agentId: z.string().uuid().nullable().optional(),
+      liveWizardDraft: z.boolean().optional(),
+      currentSurvey: surveySchema.optional(),
     }),
     attachments: z.array(attachmentInboundSchema).optional().default([]),
   })
@@ -154,6 +157,16 @@ const requestSchema = z
   });
 
 type InboundAttachment = z.infer<typeof attachmentInboundSchema>;
+type RequestPageContext = z.infer<typeof requestSchema>["pageContext"];
+
+function persistablePageContext(pageContext: RequestPageContext) {
+  const { currentSurvey: _currentSurvey, ...rest } = pageContext;
+  return {
+    ...rest,
+    surveyId: pageContext.currentSurvey?.id ?? rest.surveyId ?? null,
+    liveWizardDraft: Boolean(pageContext.currentSurvey) || Boolean(pageContext.liveWizardDraft),
+  };
+}
 
 type PersistAttachmentsResult =
   | { ok: true }
@@ -736,7 +749,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       role: "user",
       content: parsed.data.content,
       metadata: {
-        pageContext: parsed.data.pageContext,
+        pageContext: persistablePageContext(parsed.data.pageContext),
         attachments: attachmentSummaries,
       },
     })
@@ -916,7 +929,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
               stepCount: earlyPaste.stepCount,
               fieldCount: earlyPaste.fieldCount,
             },
-            pageContext: parsed.data.pageContext,
+            pageContext: persistablePageContext(parsed.data.pageContext),
           },
         })
         .select("id,chat_id,role,content,metadata,created_at")
@@ -972,7 +985,9 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       return;
     }
 
-    const activeSurveyId = parsed.data.pageContext.surveyId ?? null;
+    const liveSurvey = parsed.data.pageContext.currentSurvey ?? null;
+    const activeSurveyId = liveSurvey?.id ?? parsed.data.pageContext.surveyId ?? null;
+    const pageOrganisationId = parsed.data.pageContext.organisationId ?? null;
     const terms = toPromptTerms(parsed.data.content);
 
     type SurveyRankRow = {
@@ -990,7 +1005,9 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         const hay = `${s.title} ${s.description ?? ""}`.toLowerCase();
         const score = terms.reduce((acc, term) => (hay.includes(term) ? acc + 1 : acc), 0);
         const currentBoost = activeSurveyId && activeSurveyId === s.id ? 3 : 0;
-        return { ...s, score: score + currentBoost };
+        const orgBoost =
+          pageOrganisationId && s.organisation_id === pageOrganisationId ? 2 : 0;
+        return { ...s, score: score + currentBoost + orgBoost };
       })
       .sort(
         (a: SurveyRankRow & { score: number }, b: SurveyRankRow & { score: number }) =>
@@ -1064,46 +1081,83 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       pageContext: {
         page: parsed.data.pageContext.page,
         surveyId: activeSurveyId,
+        liveWizardDraft: Boolean(liveSurvey),
         visibility: parsed.data.pageContext.visibility,
         slug: parsed.data.pageContext.slug,
         notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
         organisationId: parsed.data.pageContext.organisationId ?? null,
         agentId: parsed.data.pageContext.agentId ?? null,
       },
-      surveys: rankedSurveys
-        .filter((s: SurveyRankRow & { score: number }) => knownSurveyIds.has(s.id))
-        .map((s: SurveyRankRow) => ({
-          id: s.id,
-          title: s.title,
-          visibility: s.visibility,
-          folderId: s.folder_id ?? null,
-        })),
-      folders: folderSnapshots,
-      candidateSurveyContexts: (candidateSurveyContexts ?? []).map(
-        (s: {
-          id: string;
-          title: string;
-          description: string | null;
-          visibility: "private" | "public";
-          folder_id: string | null;
-          notification_emails: string[] | null;
-          definition: unknown;
-        }) => {
-          const base = {
+      surveys: [
+        ...(liveSurvey
+          ? [
+              {
+                id: liveSurvey.id,
+                title: liveSurvey.title,
+                visibility: "private" as const,
+                folderId: null,
+              },
+            ]
+          : []),
+        ...rankedSurveys
+          .filter(
+            (s: SurveyRankRow & { score: number }) =>
+              knownSurveyIds.has(s.id) && s.id !== liveSurvey?.id,
+          )
+          .map((s: SurveyRankRow) => ({
             id: s.id,
             title: s.title,
             visibility: s.visibility,
             folderId: s.folder_id ?? null,
-            notificationEmails: s.notification_emails ?? [],
-            stepOutline: buildStepOutline(s.definition),
-            duplicateIdReport: buildDuplicateIdReport(s.definition),
-          };
-          if (activeSurveyId && s.id === activeSurveyId) {
-            return { ...base, definition: s.definition };
-          }
-          return base;
-        },
-      ),
+          })),
+      ],
+      folders: folderSnapshots,
+      candidateSurveyContexts: [
+        ...(liveSurvey
+          ? [
+              {
+                id: liveSurvey.id,
+                title: liveSurvey.title,
+                visibility: "private" as const,
+                folderId: null,
+                notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
+                definition: liveSurvey,
+                stepOutline: buildStepOutline(liveSurvey),
+                duplicateIdReport: buildDuplicateIdReport(liveSurvey),
+              },
+            ]
+          : []),
+        ...(candidateSurveyContexts ?? [])
+          .filter(
+            (s: { id: string }) => s.id !== liveSurvey?.id,
+          )
+          .slice(0, liveSurvey ? Math.max(0, MAX_CANDIDATE_SURVEY_CONTEXTS - 1) : undefined)
+          .map(
+            (s: {
+              id: string;
+              title: string;
+              description: string | null;
+              visibility: "private" | "public";
+              folder_id: string | null;
+              notification_emails: string[] | null;
+              definition: unknown;
+            }) => {
+              const base = {
+                id: s.id,
+                title: s.title,
+                visibility: s.visibility,
+                folderId: s.folder_id ?? null,
+                notificationEmails: s.notification_emails ?? [],
+                stepOutline: buildStepOutline(s.definition),
+                duplicateIdReport: buildDuplicateIdReport(s.definition),
+              };
+              if (activeSurveyId && s.id === activeSurveyId) {
+                return { ...base, definition: s.definition };
+              }
+              return base;
+            },
+          ),
+      ],
       knownAgents,
       focusedAgentPrompts,
       focusedAgentSurveyFacts,
@@ -1122,7 +1176,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       isLargeSurveyCreationIntent(parsed.data.content);
 
     emit("meta", {
-      pageContext: parsed.data.pageContext,
+      pageContext: persistablePageContext(parsed.data.pageContext),
       modelTier: modelSelection.tier,
       modelCandidates: modelSelection.modelsToTry,
       promptCacheEnabled: isPromptCachingEnabled(),
@@ -1231,7 +1285,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           modelTier: modelSelection.tier,
           promptCacheEnabled: isPromptCachingEnabled(),
           multiPhase: multiPhaseMeta,
-          pageContext: parsed.data.pageContext,
+          pageContext: persistablePageContext(parsed.data.pageContext),
         },
       })
       .select("id,chat_id,role,content,metadata,created_at")

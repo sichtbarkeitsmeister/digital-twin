@@ -43,6 +43,25 @@ function testCreateAgent() {
   console.log("create-agent: ok");
 }
 
+function testFrageboegenList() {
+  const list = resolveDashboardSurveyAiPageContext(
+    "/dashboard/frageboegen",
+    params("org=31ddfdea-401b-4744-95d4-05b789adede0"),
+  );
+  assert.equal(list.page, "survey_list");
+  assert.equal(list.surveyId, null);
+  assert.equal(list.organisationId, "31ddfdea-401b-4744-95d4-05b789adede0");
+
+  const neu = resolveDashboardSurveyAiPageContext(
+    "/dashboard/frageboegen/neu",
+    params("org=31ddfdea-401b-4744-95d4-05b789adede0"),
+  );
+  assert.equal(neu.page, "survey_builder_new");
+  assert.equal(neu.surveyId, null);
+  assert.equal(neu.organisationId, "31ddfdea-401b-4744-95d4-05b789adede0");
+  console.log("frageboegen list/neu: ok");
+}
+
 function testFallbackAnywhere() {
   const ctx = resolveDashboardSurveyAiPageContext(
     "/dashboard/verwaltung/seo",
@@ -56,5 +75,6 @@ function testFallbackAnywhere() {
 testAgentsPage();
 testSurveyBuilder();
 testCreateAgent();
+testFrageboegenList();
 testFallbackAnywhere();
 console.log("all sticky survey ai context tests passed");
