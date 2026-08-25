@@ -3,7 +3,11 @@
  * und Optionslisten aus Crawl/Impressum/KI.
  */
 
-import { applyClientAudienceToText, type ClientAudienceKind } from "@/lib/surveys/client-audience";
+import {
+  applyClientAudienceToText,
+  resolveAudienceVocab,
+  type AudienceRef,
+} from "@/lib/surveys/client-audience";
 import type { CoreQuestionTemplate } from "@/lib/surveys/core-question-templates";
 import { isIndustryPlaceholderLabel } from "@/lib/surveys/core-question-templates";
 import type { SurveyOption } from "@/lib/surveys/types";
@@ -81,13 +85,13 @@ export function mergeSuggestedCheckboxOptions(
   return extra.length > 0 || base.length > 0 ? [...base, ...extra] : existing;
 }
 
-function mapText(text: string, audience: ClientAudienceKind, replaceBusiness: boolean): string {
+function mapText(text: string, audience: AudienceRef, replaceBusiness: boolean): string {
   return applyClientAudienceToText(text, audience, { replaceBusiness });
 }
 
 export function customizeCoreQuestion(input: {
   template: CoreQuestionTemplate;
-  audience: ClientAudienceKind;
+  audience: AudienceRef;
   serviceLabels?: string[];
   optionSets?: Record<string, string[]>;
 }): CoreQuestionTemplate {
@@ -122,14 +126,15 @@ export function customizeCoreQuestion(input: {
 
 export function customizeCoreQuestions(input: {
   templates: CoreQuestionTemplate[];
-  audience: ClientAudienceKind;
+  audience: AudienceRef;
   serviceLabels?: string[];
   optionSets?: Record<string, string[]>;
 }): CoreQuestionTemplate[] {
+  const audience = resolveAudienceVocab(input.audience);
   return input.templates.map((template) =>
     customizeCoreQuestion({
       template,
-      audience: input.audience,
+      audience,
       serviceLabels: input.serviceLabels,
       optionSets: input.optionSets,
     }),

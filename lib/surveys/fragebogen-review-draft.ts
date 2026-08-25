@@ -11,8 +11,11 @@ import { coreQuestionsForPurpose, surveyInfoTextForPurpose } from "@/lib/surveys
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
 import { textListPayloadFromFreeText } from "@/lib/surveys/text-list-answer";
 import {
+  applyClientAudienceToText,
   isClientAudienceKind,
+  resolveAudienceVocab,
   type ClientAudienceKind,
+  type ClientAudienceVocab,
 } from "@/lib/surveys/client-audience";
 import { customizeCoreQuestions } from "@/lib/surveys/customize-fragebogen";
 import { isIndustryPlaceholderLabel } from "@/lib/surveys/core-question-templates";
@@ -65,14 +68,22 @@ export type FragebogenReviewDraft = {
   questions: ReviewQuestionItem[];
   /** Stable id for the live wizard definition (Survey KI patches this draft). */
   definitionId?: string;
-  /** Kanzlei / Praxis / Unternehmen — steuert Mandant, Patient oder Kunde. */
+  /** Kanzlei / Praxis / Handwerk / Unternehmen — steuert Mandant, Patient oder Kunde. */
   clientAudience?: ClientAudienceKind;
+  /** Editable wording (Anbieter, Kunde, Auftrag/Mandat/Behandlung). */
+  audienceVocab?: ClientAudienceVocab;
   /** Set when crawl/upload prefills succeeded but the AI gap-fill timed out or failed. */
   aiWarning?: string | null;
 };
 
-function resolveDraftAudience(draft: FragebogenReviewDraft): ClientAudienceKind {
-  return isClientAudienceKind(draft.clientAudience) ? draft.clientAudience : "unternehmen";
+export function resolveDraftAudienceVocab(draft: {
+  clientAudience?: ClientAudienceKind | null;
+  audienceVocab?: ClientAudienceVocab | null;
+}): ClientAudienceVocab {
+  if (draft.audienceVocab && isClientAudienceKind(draft.audienceVocab.kind)) {
+    return resolveAudienceVocab(draft.audienceVocab);
+  }
+  return resolveAudienceVocab(draft.clientAudience);
 }
 
 function checkboxAnswerFromFreeText(answer: string, optionLabels: string[]): string[] {
@@ -275,10 +286,10 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
 
   const coreIncluded = included.filter((q) => q.kind === "core");
   const extraIncluded = included.filter((q) => q.kind === "extra");
-  const audience = resolveDraftAudience(draft);
+  const vocab = resolveDraftAudienceVocab(draft);
   const original = customizeCoreQuestions({
     templates: coreQuestionsForPurpose(draft.purpose),
-    audience,
+    audience: vocab,
   });
   const byKey = new Map(original.map((t) => [t.key, t]));
 
@@ -286,9 +297,16 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
     extraIncluded.length > 0
       ? {
           id: "extra_individual",
-          title: "Individuelle Fragen für dieses Unternehmen",
-          description:
+          title: applyClientAudienceToText(
+            "Individuelle Fragen für dieses Unternehmen",
+            vocab,
+            { replaceBusiness: true },
+          ),
+          description: applyClientAudienceToText(
             "KI-Vorschläge für die jeweilige Firma — bearbeiten, kopieren oder löschen.",
+            vocab,
+            { replaceBusiness: true },
+          ),
           fields: extraIncluded.map(reviewQuestionToSurveyField),
         }
       : null;
@@ -321,7 +339,7 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
         ? [extrasStep, ...coreSteps]
         : [...coreSteps, extrasStep];
 
-  const info = surveyInfoTextForPurpose(draft.purpose, audience);
+  const info = surveyInfoTextForPurpose(draft.purpose, vocab);
   const definitionCandidate: Survey = {
     version: 1,
     id: draft.definitionId?.trim() || createSurveyDefinitionId(),

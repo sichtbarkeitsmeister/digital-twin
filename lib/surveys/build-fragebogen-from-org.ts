@@ -50,9 +50,9 @@ import {
   createSurveyDefinitionId,
 } from "@/lib/surveys/fragebogen-review-draft";
 import {
-  clientAudienceVocab,
-  isClientAudienceKind,
+  resolveAudienceVocab,
   type ClientAudienceKind,
+  type ClientAudienceVocab,
 } from "@/lib/surveys/client-audience";
 import { customizeCoreQuestions, mergeSuggestedCheckboxOptions } from "@/lib/surveys/customize-fragebogen";
 import { generatedChoiceCustomOptionFlags } from "@/lib/surveys/choice-custom-options";
@@ -88,7 +88,7 @@ async function generateExtrasAndAiPrefills(input: {
     hint?: CoreQuestionTemplate["prefillHint"];
   }>;
   includeAiExtras: boolean;
-  audience: ClientAudienceKind;
+  vocab: ClientAudienceVocab;
   serviceLabels: string[];
   maxExtras?: number;
 }): Promise<{
@@ -103,13 +103,13 @@ async function generateExtrasAndAiPrefills(input: {
   const anthropic = new Anthropic({ apiKey });
   const maxExtras = input.maxExtras ?? 4;
   const missing = input.coreItems.filter((c) => !c.hasPrefill);
-  const vocab = clientAudienceVocab(input.audience);
+  const vocab = input.vocab;
   const audience =
     input.purpose === "anbieter"
-      ? `Anbieter-Fragebogen für „${input.organisationName}“ (${vocab.label}). In allen Texten „${vocab.singular}“ / „${vocab.plural}“ verwenden, nicht Kunde/Patient/Mandant vermischen.`
+      ? `Anbieter-Fragebogen für „${input.organisationName}“ (${vocab.label}). Wortwahl strikt: Anbieter = „${vocab.business}“, Person = „${vocab.singular}“ / „${vocab.plural}“, Arbeit = „${vocab.engagement}“. Nicht Mandat/Patient/Kunde vermischen.`
       : input.purpose === "intern"
         ? `Interner Recherche-Fragebogen (TEIL C) für „${input.organisationName}“. Nicht an den Kunden.`
-        : `Persona-Fragebogen für Wunschkunde „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“ (${vocab.label}). Person heißt durchgängig ${vocab.singular}.`;
+        : `Persona-Fragebogen für Wunsch${vocab.singular.toLowerCase()} „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“ (${vocab.label}). Person heißt durchgängig ${vocab.singular}. Arbeit heißt ${vocab.engagement}.`;
 
   const documentBlock = input.documentText?.trim()
     ? `\nHochgeladene Dateien (HÖCHSTE PRIORITÄT):\n${input.documentText.slice(0, 8000)}\n`
@@ -150,7 +150,7 @@ Strikt zuordnen — lieber weglassen als falsch:
 - portfolio / Leistungen: nur Angebotsnamen (Laser, Botox, …), nie Impressum-, Datenschutz- oder Menü-Seitentitel.
 Leistungsnamen in optionSets.portfolio und optionSets.services_ranked (3–8 kurze Labels, keine Sätze, keine €-Preise).
 Für Persona außerdem optionSets.persona_goals, persona_objections, persona_alternatives, persona_budget (je 3–6 branchentypische Optionen).
-${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[]. Zusatzfragen mit ${vocab.singular}/${vocab.plural}.` : "questions=[]."}
+${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[]. Zusatzfragen mit ${vocab.singular}/${vocab.plural} und ${vocab.engagement}.` : "questions=[]."}
 
 {"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"upload"}],"optionSets":{"portfolio":["Leistung A"]},"questions":[]}`,
         },
@@ -252,13 +252,12 @@ export async function buildFragebogenReviewDraft(input: {
   meetingBriefing?: MeetingBriefing | null;
   sourceDocuments?: SourceDocument[] | null;
   clientAudience?: ClientAudienceKind | null;
+  audienceVocab?: ClientAudienceVocab | null;
 }): Promise<FragebogenReviewDraft> {
   const purpose = input.purpose;
   const extraPlacement = input.extraPlacement ?? "end";
-  const audience: ClientAudienceKind = isClientAudienceKind(input.clientAudience)
-    ? input.clientAudience
-    : "unternehmen";
-  const vocab = clientAudienceVocab(audience);
+  const vocab = resolveAudienceVocab(input.audienceVocab ?? input.clientAudience);
+  const audience = vocab.kind;
   const allCore = coreQuestionsForPurpose(purpose);
   const selectedKeys = new Set(
     (input.selectedCoreKeys?.length
@@ -309,7 +308,7 @@ export async function buildFragebogenReviewDraft(input: {
   const basePrefills: Record<string, PrefillDraft> = { ...heuristic };
   const titledForAi = customizeCoreQuestions({
     templates: selectedTemplates,
-    audience,
+    audience: vocab,
     serviceLabels,
   });
 
@@ -321,7 +320,7 @@ export async function buildFragebogenReviewDraft(input: {
     meetingContext: meetingText,
     documentText,
     includeAiExtras: Boolean(input.includeAiExtras),
-    audience,
+    vocab,
     serviceLabels,
     coreItems: titledForAi.map((t) => ({
       key: t.key,
@@ -348,7 +347,7 @@ export async function buildFragebogenReviewDraft(input: {
 
   const customized = customizeCoreQuestions({
     templates: selectedTemplates,
-    audience,
+    audience: vocab,
     serviceLabels,
     optionSets,
   });
@@ -475,6 +474,7 @@ export async function buildFragebogenReviewDraft(input: {
     websiteUrl: crawl.websiteUrl,
     organisationName: crawl.organisationName,
     clientAudience: audience,
+    audienceVocab: vocab,
     definitionId: createSurveyDefinitionId(),
     questions,
     aiWarning: aiBundle.warning,
