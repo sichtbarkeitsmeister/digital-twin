@@ -312,4 +312,18 @@ const reviewSurvey = surveyFromReview({
 assert.equal(reviewSurvey.infoTextEnabled, true);
 assert.match(reviewSurvey.infoText ?? "", /echten Erfahrungen/);
 
+const servicesRanked = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "services_ranked");
+assert.match(servicesRanked?.description ?? "", /bereits gehabt/);
+assert.equal(/wie oben/.test(servicesRanked?.description ?? ""), false);
+
+const crossStepPositional = /wie oben|von oben|weiter unten|Standort oben|USP oben/;
+for (const q of [
+  ...ANBIETER_CORE_QUESTIONS,
+  ...PERSONA_CORE_QUESTIONS,
+  ...INTERN_CORE_QUESTIONS,
+]) {
+  const text = `${q.title} ${q.description ?? ""}`;
+  assert.equal(crossStepPositional.test(text), false, q.key);
+}
+
 console.log("core-question-templates: ok");

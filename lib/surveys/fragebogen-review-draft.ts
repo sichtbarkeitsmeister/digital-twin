@@ -23,6 +23,22 @@ import { buildCheckboxAnswer } from "@/lib/surveys/other-option";
 
 export type ExtraQuestionPlacement = "start" | "end";
 
+/** Last core steps that must stay after individual extras when placement is "end". */
+const CLOSING_STEP_IDS = new Set(["core_closing", "core_persona_close"]);
+
+/** "end" puts extras immediately before Abschluss, not after it. */
+export function insertExtraStep(
+  coreSteps: SurveyStep[],
+  extrasStep: SurveyStep | null,
+  placement: ExtraQuestionPlacement,
+): SurveyStep[] {
+  if (extrasStep == null) return coreSteps;
+  if (placement === "start") return [extrasStep, ...coreSteps];
+  const closingIndex = coreSteps.findIndex((step) => CLOSING_STEP_IDS.has(step.id));
+  if (closingIndex === -1) return [...coreSteps, extrasStep];
+  return [...coreSteps.slice(0, closingIndex), extrasStep, ...coreSteps.slice(closingIndex)];
+}
+
 export const SURVEY_FIELD_TYPE_LABELS: Record<SurveyFieldType, string> = {
   text: "Freitext",
   text_list: "Freitext-Liste",
@@ -332,12 +348,7 @@ export function surveyFromReview(draft: FragebogenReviewDraft): Survey {
   }
 
   const coreSteps = [...coreByStep.values()];
-  const steps =
-    extrasStep == null
-      ? coreSteps
-      : draft.extraPlacement === "start"
-        ? [extrasStep, ...coreSteps]
-        : [...coreSteps, extrasStep];
+  const steps = insertExtraStep(coreSteps, extrasStep, draft.extraPlacement);
 
   const info = surveyInfoTextForPurpose(draft.purpose, vocab);
   const definitionCandidate: Survey = {
