@@ -237,18 +237,60 @@ function channelLabelsFromText(value: string): string {
 export function cleanMeetingValue(raw: string): string {
   let t = raw
     .replace(/[✅💬🔍]/g, " ")
-    .replace(/\bBlock\s+\d+\s*[–—-].*$/gim, "")
+    .replace(/\bBlock\s+\d+\b[\s\S]*$/gim, "")
     .replace(
       /\b(?:Nächste Schritte|Wunschkunden-Definition|Ergebnis aus dem Meeting|Menüstruktur-Feedback|Konkrete Änderungen)\b[\s\S]*$/i,
       "",
     )
     .replace(/\bggf\.\s+im Fragebogen[\s\S]*$/i, "")
+    .replace(/^Kurzer Kontext zur Praxis\s*(?:\([^)]*\))?\s*/i, "")
+    .replace(/^(?:Wie|Was|Wo|Wer|Welche|Welcher|Welches|Wann|Warum)\b[^?]{0,80}\?\s*/i, "")
     .replace(/\s+/g, " ")
     .trim();
   t = t.replace(/^[^A-ZÄÖÜa-zäöüß0-9„"]+/, "");
   t = t.replace(/^[a-zäöüß]{4,}\b\s+/, "");
   t = t.replace(/^[a-zäöüß]{3,}\)\s*/, "");
   return t.trim();
+}
+
+function isAbbreviationDot(blob: string, dotIndex: number): boolean {
+  const before = blob.slice(Math.max(0, dotIndex - 16), dotIndex + 1);
+  return /\b(?:Dr|ca|inkl|bzw|ggf|Nr|Abs|usw|etc|bzw)\.$/i.test(before) || /\b(?:z\.\s*B|u\.\s*a)\.$/i.test(before);
+}
+
+function lastBoundary(before: string): number {
+  const marks = [before.lastIndexOf("•"), before.lastIndexOf("\n"), before.lastIndexOf("? ")];
+  let lastDot = before.lastIndexOf(". ");
+  while (lastDot >= 0 && isAbbreviationDot(before, lastDot)) {
+    lastDot = before.lastIndexOf(". ", lastDot - 1);
+  }
+  marks.push(lastDot);
+  return Math.max(...marks);
+}
+
+function sliceAround(blob: string, pattern: RegExp, radius = 220): string | null {
+  const m = blob.match(pattern);
+  if (!m || m.index == null) return null;
+  const before = blob.slice(0, m.index);
+  const bullet = lastBoundary(before);
+  const start =
+    bullet >= 0 ? bullet + (before.slice(bullet).startsWith(". ") || before.slice(bullet).startsWith("? ") ? 2 : 1) : Math.max(0, m.index);
+  let end = m.index + m[0].length;
+  const limit = Math.min(blob.length, end + radius + 160);
+  while (end < limit) {
+    const ch = blob[end];
+    if ((ch === "." || ch === "!" || ch === "?") && (end + 1 >= blob.length || /\s/.test(blob[end + 1] ?? " "))) {
+      if (ch === "." && isAbbreviationDot(blob, end)) {
+        end += 1;
+        continue;
+      }
+      end += 1;
+      break;
+    }
+    if (ch === "•" || ch === "\n") break;
+    end += 1;
+  }
+  return cleanMeetingValue(blob.slice(start, end).replace(/\s+/g, " "));
 }
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
@@ -328,29 +370,6 @@ export function extractLabeledSections(
     .filter((s) => s.value.length > 0);
 }
 
-function sliceAround(blob: string, pattern: RegExp, radius = 220): string | null {
-  const m = blob.match(pattern);
-  if (!m || m.index == null) return null;
-  const before = blob.slice(0, m.index);
-  const bullet = Math.max(
-    before.lastIndexOf("•"),
-    before.lastIndexOf("\n"),
-    before.lastIndexOf(". "),
-  );
-  const start =
-    bullet >= 0 ? bullet + (before.slice(bullet).startsWith(". ") ? 2 : 1) : Math.max(0, m.index);
-  let end = m.index + m[0].length;
-  const after = blob.slice(end, Math.min(blob.length, end + radius + 120));
-  const stop = after.search(/[.!?]\s|[•\n]/);
-  if (stop >= 0) {
-    const ch = after[stop];
-    end = end + stop + (ch === "." || ch === "!" || ch === "?" ? 1 : 0);
-  } else {
-    end = Math.min(blob.length, end + radius);
-  }
-  return cleanMeetingValue(blob.slice(start, end).replace(/\s+/g, " "));
-}
-
 /** High-confidence facts from Kickoff-style prose, only filling empty hints. */
 function applyNarrativeFacts(
   blob: string,
@@ -384,21 +403,21 @@ function applyNarrativeFacts(
   }
 
   if (!byHint.typical_process && /doctolib|telefonisch gebucht/i.test(text)) {
-    const slice = sliceAround(text, /termine werden online über doctolib|doctolib oder telefonisch/i, 240);
+    const slice = sliceAround(blob, /termine werden online über doctolib|doctolib oder telefonisch/i, 240);
     if (slice) mergeHint(byHint, "typical_process", slice);
   }
 
   if (!byHint.usp) {
     const slice = sliceAround(
-      text,
+      blob,
       /schulungszentrum|internationale expertin|bildet selbst fort/i,
-      160,
+      200,
     );
     if (slice) mergeHint(byHint, "usp", slice);
   }
 
   if (!byHint.qualifications && /schulungszentrum|fotona/i.test(text)) {
-    const slice = sliceAround(text, /fotona|schulungszentrum/i, 140);
+    const slice = sliceAround(blob, /fotona|schulungszentrum/i, 180);
     if (slice) mergeHint(byHint, "qualifications", slice);
   }
 
@@ -420,12 +439,12 @@ function applyNarrativeFacts(
   }
 
   if (!byHint.three_year_goal) {
-    const slice = sliceAround(text, /laser-behandlungen und ["„]?größere["“]? eingriffe|wo möchte sie wachsen/i, 200);
+    const slice = sliceAround(blob, /laser-behandlungen und ["„]?größere["“]? eingriffe|wo möchte sie wachsen/i, 200);
     if (slice) mergeHint(byHint, "three_year_goal", slice);
   }
 
   if (!byHint.why_stay) {
-    const slice = sliceAround(text, /privatpatienten, die regelmäßig|hautkrebsvorsorge als anlass/i, 200);
+    const slice = sliceAround(blob, /privatpatienten, die regelmäßig|hautkrebsvorsorge als anlass/i, 220);
     if (slice) mergeHint(byHint, "why_stay", slice);
   }
 
@@ -466,12 +485,12 @@ function applyNarrativeFacts(
   }
 
   if (!byHint.marketing_plan) {
-    const slice = sliceAround(text, /website-korrekturen einplanen|nächste schritte/i, 280);
+    const slice = sliceAround(blob, /website-korrekturen einplanen|nächste schritte/i, 280);
     if (slice) mergeHint(byHint, "marketing_plan", slice);
   }
 
   if (!byHint.company_history) {
-    const slice = sliceAround(text, /umbenannt in/i, 120);
+    const slice = sliceAround(blob, /umbenannt in/i, 280);
     if (slice) mergeHint(byHint, "company_history", slice);
   }
 }

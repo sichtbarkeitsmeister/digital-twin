@@ -16,6 +16,8 @@ import {
   extractPricedServiceNames,
   extractServiceLabels,
   isPlausiblePrefill,
+  isEmptyPlaceholderPrefill,
+  looksLikeTruncatedSnippet,
   parseServiceLabelList,
   type OrgCrawlContext,
 } from "../lib/surveys/org-crawl-prefill";
@@ -221,5 +223,11 @@ assert.deepEqual(
   parseServiceLabelList("Botox-Injektionen, RegionHyaluronsäure-Filler, AmpulleLaserbehandlungen"),
   ["Botox-Injektionen", "Hyaluronsäure-Filler", "Laserbehandlungen"],
 );
+
+assert.equal(isEmptyPlaceholderPrefill("Keine Information"), true);
+assert.equal(isEmptyPlaceholderPrefill("Keine Information (benutzererstellt)"), true);
+assert.equal(isEmptyPlaceholderPrefill("Meerbusch"), false);
+assert.equal(looksLikeTruncatedSnippet('steht dort weiterhin "Dr.'), true);
+assert.equal(isPlausiblePrefill(undefined, "Keine Information (benutzererstellt)"), false);
 
 console.log("org-crawl-prefill: ok");

@@ -130,6 +130,21 @@ export function looksLikeTruncatedSnippet(value: string): boolean {
   if (t.length < 8) return true;
   if (/\s+[A-Za-zÄÖÜäöüß]$/.test(t)) return true;
   if (/:\s*[A-ZÄÖÜa-zäöüß]{1,4}$/.test(t) && t.length < 80) return true;
+  if (/["„]\s*Dr\.?\s*$/i.test(t)) return true;
+  return false;
+}
+
+export function isEmptyPlaceholderPrefill(value: string): boolean {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t) return true;
+  if (
+    /^(?:keine\s+(?:information|angabe|aussage|daten)|nicht\s+(?:bekannt|genannt|ermittelt)|n\/?a|k\.\s*a\.|—|-|\/)$/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/keine information/i.test(t) && t.length < 80) return true;
   return false;
 }
 
@@ -167,6 +182,7 @@ export function isPlausiblePrefill(
   }
   const t = value.replace(/\s+/g, " ").trim();
   if (!t || t.length < 3) return false;
+  if (isEmptyPlaceholderPrefill(t)) return false;
   if (!hint) return !looksLikeTruncatedSnippet(t);
 
   if (hint === "org_name") {
