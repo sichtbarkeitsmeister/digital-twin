@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   buildMeetingExtraQuestions,
   extractLabeledSections,
+  isGenericPersonaLabel,
   meetingBriefingHasContent,
   oneIdealPersonDescription,
   parseMeetingBriefingContent,
@@ -199,6 +200,16 @@ assert.equal(
   ),
   false,
 );
+
+const twoTypes =
+  "Privatpatienten, die regelmäßig kommen – Hautkrebsvorsorge als Anlass. Privatpatient mit Hautkrebsvorsorge als Anker – kommt regelmäßig zur Vorsorge. Laser-Interessent – jemand, der gezielt eine Laserbehandlung möchte.";
+assert.match(oneIdealPersonDescription(twoTypes, "Laser-Interessent"), /Laserbehandlung/);
+assert.equal(/Privatpatienten, die regelmäßig/.test(oneIdealPersonDescription(twoTypes, "Laser-Interessent")), false);
+assert.match(oneIdealPersonDescription(twoTypes, "Privatpatient mit Hautkrebsvorsorge"), /Hautkrebsvorsorge|regelm/);
+assert.equal(/Laser-Interessent/.test(oneIdealPersonDescription(twoTypes, "Privatpatient mit Hautkrebsvorsorge")), false);
+assert.equal(oneIdealPersonDescription(twoTypes, "Laser-Interessent") === oneIdealPersonDescription(twoTypes, "Privatpatient"), false);
+assert.equal(isGenericPersonaLabel("WunschPatient"), true);
+assert.equal(isGenericPersonaLabel("Laser-Interessent"), false);
 assert.match(kickoffParsed.byHint.org_name ?? "", /Haut- und Laserpraxis/);
 assert.match(kickoffParsed.byHint.colloquial_name ?? "", /Dermatologie/);
 assert.match(kickoffParsed.byHint.usp ?? "", /Schulungszentrum|Fotona/i);

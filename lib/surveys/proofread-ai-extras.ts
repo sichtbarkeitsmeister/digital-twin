@@ -20,6 +20,7 @@ export async function generateAiExtraQuestions(input: {
   vocab: ClientAudienceVocab;
   organisationName: string;
   purpose: "persona" | "anbieter" | "intern";
+  wunschkundeLabel?: string | null;
   services: string[];
   coreTitles: string[];
   crawlSummary?: string | null;
@@ -61,6 +62,11 @@ export async function generateAiExtraQuestions(input: {
 Zweck: ${input.purpose}
 Art: ${vocab.label} — ${vocab.business} / ${vocab.singular} / ${vocab.engagement}
 ${extraGapHints(vocab.kind, input.purpose)}
+${
+            input.purpose === "persona" && input.wunschkundeLabel?.trim()
+              ? `Dieser Fragebogen gilt NUR für „${input.wunschkundeLabel.trim()}“. Andere Wunsch${vocab.plural.toLowerCase()}-Typen aus dem Meeting nicht vermischen.`
+              : ""
+          }
 
 Leistungen:
 ${services}
@@ -73,7 +79,7 @@ ${input.coreTitles.map((t) => `- ${t}`).join("\n")}
 
 ${
             input.purpose === "persona"
-              ? `Liefere genau ${max} konkrete Fragen über diesen Wunsch${vocab.singular}, die in den Kernfragen noch fehlen. Nicht über Website, Geräte, Nachsorge, Preise oder den Betrieb. Nie ein leeres questions-Array.`
+              ? `Liefere genau ${max} konkrete Fragen über diesen Wunsch${vocab.singular}${input.wunschkundeLabel?.trim() ? ` „${input.wunschkundeLabel.trim()}“` : ""}, die in den Kernfragen noch fehlen. Nicht über Website, Geräte, Nachsorge, Preise oder den Betrieb. Nie ein leeres questions-Array.`
               : `Liefere genau ${max} konkrete Fragen zu Lücken DIESES Anbieters. Nie ein leeres questions-Array. Wenn die Website wenig hergibt, typische Lücken dieser Art von ${vocab.business} trotzdem stellen — mit Antwort-Beispiel.`
           } title = die Frage, description = warum + ein Antwort-Beispiel mit ${vocab.singular}/${vocab.engagement}. Korrektes Deutsch.
 
@@ -106,6 +112,7 @@ export async function proofreadAiExtraQuestions(input: {
   services: string[];
   coreTitles: string[];
   purpose?: "persona" | "anbieter" | "intern";
+  wunschkundeLabel?: string | null;
   max?: number;
 }): Promise<AiExtraQuestion[]> {
   const draft = input.extras.filter((row) => row.title.trim().length >= 12);
@@ -137,6 +144,11 @@ export async function proofreadAiExtraQuestions(input: {
           content: `Firma: ${input.organisationName}
 Art: ${input.vocab.label} (${input.vocab.business} / ${input.vocab.singular} / ${input.vocab.engagement})
 ${extraGapHints(input.vocab.kind, input.purpose)}
+${
+            input.purpose === "persona" && input.wunschkundeLabel?.trim()
+              ? `Dieser Fragebogen gilt NUR für „${input.wunschkundeLabel.trim()}“. Fragen zu anderen Typen streichen.`
+              : ""
+          }
 
 Leistungen:
 ${services}

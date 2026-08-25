@@ -133,7 +133,7 @@ async function generateExtrasAndAiPrefills(input: {
       ? `Anbieter-Fragebogen für „${input.organisationName}“ (${vocab.label}). Wortwahl strikt: Anbieter = „${vocab.business}“, Person = „${vocab.singular}“ / „${vocab.plural}“, Arbeit = „${vocab.engagement}“. Nicht Mandat/Patient/Kunde vermischen.`
       : input.purpose === "intern"
         ? `Interner Recherche-Fragebogen (TEIL C) für „${input.organisationName}“. Nicht an den Kunden.`
-        : `Persona-Fragebogen für Wunsch${vocab.singular.toLowerCase()} „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“ (${vocab.label}). Person heißt durchgängig ${vocab.singular}. Arbeit heißt ${vocab.engagement}.`;
+        : `Persona-Fragebogen für Wunsch${vocab.singular.toLowerCase()} „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“ (${vocab.label}). Person heißt durchgängig ${vocab.singular}. Arbeit heißt ${vocab.engagement}. Dieser Fragebogen gilt NUR für genau diesen einen Typ. Andere im Meeting genannte Wunsch${vocab.plural.toLowerCase()}-Typen nicht vermischen, nicht vorausfüllen, nicht in Zusatzfragen verwenden.`;
 
   const meetingBlock = input.meetingContext?.trim()
     ? `\nMeeting-Briefing:\n${input.meetingContext.slice(0, 3500)}\n`
@@ -262,6 +262,7 @@ questions=[].
       vocab,
       organisationName: input.organisationName,
       purpose: input.purpose,
+      wunschkundeLabel: input.wunschkundeLabel,
       services: input.serviceLabels,
       coreTitles,
       crawlSummary: input.crawlSummary,
@@ -279,6 +280,7 @@ questions=[].
         services: input.serviceLabels,
         coreTitles,
         purpose: input.purpose,
+        wunschkundeLabel: input.wunschkundeLabel,
         max: maxExtras,
       });
     }
@@ -350,6 +352,14 @@ export async function buildFragebogenReviewDraft(input: {
     briefing: briefing ?? {},
     hints,
   });
+  if (purpose === "persona") {
+    const desc = meeting.persona_description;
+    if (desc?.value) {
+      const picked = oneIdealPersonDescription(desc.value, input.wunschkundeLabel);
+      if (picked) meeting.persona_description = { ...desc, value: picked };
+      else delete meeting.persona_description;
+    }
+  }
 
   const meetingServices = parseServiceLabelList(
     [briefing?.services ?? "", meeting.portfolio?.value ?? ""].join("\n"),
@@ -441,7 +451,7 @@ export async function buildFragebogenReviewDraft(input: {
     const flags = generatedChoiceCustomOptionFlags(t.type);
     const answer =
       t.key === "persona_description" && draft?.value
-        ? oneIdealPersonDescription(draft.value)
+        ? oneIdealPersonDescription(draft.value, input.wunschkundeLabel)
         : (draft?.value ?? "");
     const options =
       t.type === "checkbox"
