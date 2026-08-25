@@ -52,6 +52,35 @@ export function applyOptionLabels(
   };
 }
 
+function suggestionLinesFromAnswer(answer: string): string[] {
+  return answer
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*•]\s+/, "").trim())
+    .filter((line) => line.length > 0 && !isIndustryPlaceholderLabel(line));
+}
+
+/** Turn crawl/AI answer lines into editable checkbox options when the template still has placeholders. */
+export function mergeSuggestedCheckboxOptions(
+  options: SurveyOption[],
+  answer: string,
+): SurveyOption[] {
+  const lines = suggestionLinesFromAnswer(answer);
+  if (lines.length === 0) return options.map((opt) => ({ id: opt.id, label: opt.label }));
+
+  const existing = options.map((opt) => ({ id: opt.id, label: opt.label }));
+  const nonPlaceholder = existing.filter((opt) => !isIndustryPlaceholderLabel(opt.label));
+  const base = nonPlaceholder.length > 0 ? nonPlaceholder : [];
+  const seen = new Set(base.map((opt) => opt.label.trim().toLowerCase()));
+  const extra: SurveyOption[] = [];
+  for (const [index, line] of lines.entries()) {
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extra.push({ id: `suggested_${index + 1}`, label: line });
+  }
+  return extra.length > 0 || base.length > 0 ? [...base, ...extra] : existing;
+}
+
 function mapText(text: string, audience: ClientAudienceKind, replaceBusiness: boolean): string {
   return applyClientAudienceToText(text, audience, { replaceBusiness });
 }

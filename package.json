@@ -36,6 +36,7 @@
     "test:dashboard-survey-url": "tsx scripts/test-dashboard-survey-url.ts",
     "test:survey-assistant-workspace": "tsx scripts/test-survey-assistant-workspace.ts",
     "test:fragebogen-review-questions": "tsx scripts/test-fragebogen-review-questions.ts",
+    "test:choice-custom-options": "tsx scripts/test-choice-custom-options.ts",
     "test:core-question-templates": "tsx scripts/test-core-question-templates.ts",
     "test:client-audience": "tsx scripts/test-client-audience.ts",
     "test:apply-wizard-survey-proposal": "tsx scripts/test-apply-wizard-survey-proposal.ts",

@@ -43,7 +43,7 @@ export type SurveyTextListField = SurveyFieldBase & {
 export type SurveyRadioField = SurveyFieldBase & {
   type: "radio";
   options: SurveyOption[];
-  /** Wenn true, können Teilnehmende eine freie "Andere"-Option eingeben. Standard: false. */
+  /** Wenn true, können Teilnehmende eine freie "Andere"-Option eingeben. Standard: true. */
   allowOtherOption?: boolean;
 };
 

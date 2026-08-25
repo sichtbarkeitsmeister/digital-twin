@@ -250,11 +250,7 @@ export function FragebogenReviewQuestionEditor(props: {
             ) : (
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox
-                  checked={
-                    q.type === "radio"
-                      ? q.allowOtherOption === true
-                      : q.allowOtherOption !== false
-                  }
+                                  checked={q.allowOtherOption !== false}
                   onCheckedChange={(checked) =>
                     props.onChange({ allowOtherOption: Boolean(checked) })
                   }

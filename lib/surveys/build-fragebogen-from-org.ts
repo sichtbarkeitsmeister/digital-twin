@@ -54,7 +54,8 @@ import {
   isClientAudienceKind,
   type ClientAudienceKind,
 } from "@/lib/surveys/client-audience";
-import { customizeCoreQuestions } from "@/lib/surveys/customize-fragebogen";
+import { customizeCoreQuestions, mergeSuggestedCheckboxOptions } from "@/lib/surveys/customize-fragebogen";
+import { generatedChoiceCustomOptionFlags } from "@/lib/surveys/choice-custom-options";
 
 export type { MeetingBriefing, ExtraQuestionPlacement, FragebogenReviewDraft, ReviewQuestionItem };
 export { buildSurveyAndAnswersFromReview } from "@/lib/surveys/fragebogen-review-draft";
@@ -380,6 +381,11 @@ export async function buildFragebogenReviewDraft(input: {
 
   const coreQuestions: ReviewQuestionItem[] = customized.map((t) => {
     const draft = prefills[t.key];
+    const flags = generatedChoiceCustomOptionFlags(t.type);
+    const options =
+      t.type === "checkbox"
+        ? mergeSuggestedCheckboxOptions(t.options ?? [], draft?.value ?? "")
+        : (t.options ?? []).map((o) => ({ id: o.id, label: o.label }));
     return {
       id: fieldIdForCoreKey(t.key),
       kind: "core",
@@ -389,10 +395,10 @@ export async function buildFragebogenReviewDraft(input: {
       included: true,
       required: t.required,
       type: t.type,
-      options: (t.options ?? []).map((o) => ({ id: o.id, label: o.label })),
-      allowOtherOption: t.allowOtherOption,
-      allowExtraEntries: t.allowExtraEntries,
-      allowCustomEntries: t.allowCustomEntries,
+      options,
+      allowOtherOption: flags.allowOtherOption ?? t.allowOtherOption,
+      allowExtraEntries: flags.allowExtraEntries ?? t.allowExtraEntries,
+      allowCustomEntries: flags.allowCustomEntries ?? t.allowCustomEntries,
       addEntryLabel: t.addEntryLabel,
       answer: draft?.value ?? "",
       answerSource: draft?.source ?? "none",
