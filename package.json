@@ -39,6 +39,7 @@
     "test:choice-custom-options": "tsx scripts/test-choice-custom-options.ts",
     "test:core-question-templates": "tsx scripts/test-core-question-templates.ts",
     "test:client-audience": "tsx scripts/test-client-audience.ts",
+    "test:suggest-audience-vocab": "tsx scripts/test-suggest-audience-vocab.ts",
     "test:apply-wizard-survey-proposal": "tsx scripts/test-apply-wizard-survey-proposal.ts",
     "test:first-conversation": "tsx scripts/test-first-conversation.ts",
     "test:org-crawl-prefill": "tsx scripts/test-org-crawl-prefill.ts",

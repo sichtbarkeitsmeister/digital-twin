@@ -787,14 +787,16 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">2. Wie soll gesprochen werden?</CardTitle>
           <CardDescription>
-            Vor jedem Fragebogen. Steuert, ob im Text Praxis oder Kanzlei, Patient oder Mandant,
-            Behandlung oder Auftrag steht — durchgängig in Fragen, Beispielen und Checkboxen.
+            Kanzlei und Praxis direkt wählen — oder eine Branche eintippen (Entrümpler, Umzug,
+            …). Die KI füllt die Wörter für Fragen, Beispiele und Checkboxen.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <FragebogenAudienceVocabEditor
             kind={clientAudience}
             vocab={audienceVocab}
+            organisationName={orgName}
+            services={extractedServices}
             onSelectKind={(kind) => {
               setClientAudience(kind);
               setAudienceVocab(clientAudienceVocab(kind));
@@ -802,6 +804,10 @@ export function FragebogenFromOrgWizard(props: {
             onChangeVocab={(patch) =>
               setAudienceVocab((prev) => (prev ? { ...prev, ...patch } : prev))
             }
+            onApplyVocab={(vocab) => {
+              setClientAudience(vocab.kind);
+              setAudienceVocab(vocab);
+            }}
           />
         </CardContent>
       </Card>
