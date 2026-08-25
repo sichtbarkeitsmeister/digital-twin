@@ -81,7 +81,7 @@ function buildField(input: {
         id: slugId("opt", i + 1),
         label,
       })),
-      allowCustomEntries: false,
+      allowCustomEntries: true,
     };
   }
   if (type === "text_list") {
@@ -103,7 +103,7 @@ function buildField(input: {
         id: slugId("opt", i + 1),
         label,
       })),
-      allowOtherOption: false,
+      allowOtherOption: true,
     };
   }
   if (type === "radio") {
@@ -114,7 +114,7 @@ function buildField(input: {
         id: slugId("opt", i + 1),
         label,
       })),
-      allowOtherOption: false,
+      allowOtherOption: true,
     };
   }
   if (type === "rating") {

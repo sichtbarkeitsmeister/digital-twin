@@ -16,6 +16,7 @@ import {
 } from "@/lib/surveys/client-audience";
 import { customizeCoreQuestions } from "@/lib/surveys/customize-fragebogen";
 import { isIndustryPlaceholderLabel } from "@/lib/surveys/core-question-templates";
+import { buildCheckboxAnswer } from "@/lib/surveys/other-option";
 
 export type ExtraQuestionPlacement = "start" | "end";
 
@@ -80,18 +81,27 @@ function checkboxAnswerFromFreeText(answer: string, optionLabels: string[]): str
     .map((line) => line.replace(/^[-*•]\s+/, "").trim())
     .filter(Boolean);
   const hay = answer.toLowerCase();
-  const selected: string[] = [];
+  const selected = new Set<string>();
+  const used = new Set<number>();
   for (const label of optionLabels) {
     const trimmed = label.trim();
     if (!trimmed || isIndustryPlaceholderLabel(trimmed)) continue;
     const lower = trimmed.toLowerCase();
-    if (lines.some((line) => line.toLowerCase() === lower)) {
-      selected.push(trimmed);
+    const exactIdx = lines.findIndex((line, idx) => !used.has(idx) && line.toLowerCase() === lower);
+    if (exactIdx >= 0) {
+      selected.add(trimmed);
+      used.add(exactIdx);
       continue;
     }
-    if (trimmed.length >= 4 && hay.includes(lower)) selected.push(trimmed);
+    if (trimmed.length >= 4 && hay.includes(lower)) selected.add(trimmed);
   }
-  return selected;
+  const otherEntries = lines
+    .map((text, idx) => ({ idx, text }))
+    .filter((row) => !used.has(row.idx) && !isIndustryPlaceholderLabel(row.text))
+    .filter((row) => !optionLabels.some((label) => label.trim().toLowerCase() === row.text.toLowerCase()))
+    .map((row, index) => ({ id: `prefill_${index + 1}`, text: row.text }));
+  if (selected.size === 0 && otherEntries.length === 0) return [];
+  return buildCheckboxAnswer(optionLabels, selected, otherEntries);
 }
 
 function createId(): string {
@@ -183,7 +193,7 @@ export function applyReviewQuestionType(
     return {
       ...next,
       options,
-      allowOtherOption: question.allowOtherOption === true,
+      allowOtherOption: question.allowOtherOption !== false,
     };
   }
   if (nextType === "checkbox") {
@@ -236,7 +246,7 @@ export function reviewQuestionToSurveyField(q: ReviewQuestionItem): SurveyField 
       ...base,
       type: "radio",
       options: ensureOptions(q.options, 1),
-      allowOtherOption: q.allowOtherOption === true,
+      allowOtherOption: q.allowOtherOption !== false,
     };
   }
 

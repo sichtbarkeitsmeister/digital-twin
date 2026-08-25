@@ -1,4 +1,5 @@
 import {
+  CHECKBOX_EDIT_PREFIX,
   CHECKBOX_OTHER_PREFIX,
   CHECKBOX_OTHER_TOKEN,
   decodeOtherValueForDisplay,
@@ -91,6 +92,9 @@ export function normalizeSurveyAnswer(v: unknown, field?: SurveyField): string {
         if (typeof x !== "string") return JSON.stringify(x);
         const presetLabels = new Set(field.options.map((o) => o.label));
         if (presetLabels.has(x)) return x;
+        if (x.startsWith(CHECKBOX_EDIT_PREFIX)) {
+          return decodeOtherValueForDisplay(x).trim();
+        }
         const isOtherToken = x === CHECKBOX_OTHER_TOKEN || x === RADIO_OTHER_TOKEN;
         const isPrefixedOther = x.startsWith(CHECKBOX_OTHER_PREFIX);
         const decoded = decodeOtherValueForDisplay(x).trim();

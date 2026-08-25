@@ -55,6 +55,7 @@ const extraRadio = applyReviewQuestionType(
   "radio",
 );
 assert.equal(extraRadio.type, "radio");
+assert.equal(extraRadio.allowOtherOption, true);
 assert.ok(extraRadio.options.length >= 1);
 extraRadio.options[0]!.label = "unter 1.000 €";
 extraRadio.options.push({ id: "opt_b", label: "über 1.000 €" });
@@ -66,6 +67,7 @@ const extraCheckbox = applyReviewQuestionType(
   "checkbox",
 );
 assert.equal(extraCheckbox.type, "checkbox");
+assert.equal(extraCheckbox.allowOtherOption, true);
 extraCheckbox.options = [
   { id: "c1", label: "Instagram" },
   { id: "c2", label: "LinkedIn" },

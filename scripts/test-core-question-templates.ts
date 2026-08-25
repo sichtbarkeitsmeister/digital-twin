@@ -193,7 +193,7 @@ const ranking = fieldFromCoreTemplate(
 assert.equal(ranking.type, "ranking");
 if (ranking.type === "ranking") {
   assert.ok(ranking.options.length >= 2);
-  assert.equal(ranking.allowCustomEntries, false);
+  assert.equal(ranking.allowCustomEntries, true);
 }
 
 const definition = {
@@ -267,6 +267,22 @@ assert.equal(
 );
 const internKeys = new Set(INTERN_CORE_QUESTIONS.map((q) => q.key));
 assert.equal(internKeys.size, INTERN_CORE_QUESTIONS.length);
+
+for (const built of [ { steps }, personaBuilt, internBuilt ]) {
+  for (const step of built.steps) {
+    for (const field of step.fields) {
+      if (field.type === "radio" || field.type === "checkbox") {
+        assert.equal(field.allowOtherOption, true, field.id);
+      }
+      if (field.type === "ranking") {
+        assert.equal(field.allowCustomEntries, true, field.id);
+      }
+      if (field.type === "text_list") {
+        assert.equal(field.allowExtraEntries, true, field.id);
+      }
+    }
+  }
+}
 
 const reviewSurvey = surveyFromReview({
   title: "Anbieter: Test",

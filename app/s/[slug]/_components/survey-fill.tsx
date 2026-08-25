@@ -1,24 +1,21 @@
 "use client";
 
 import * as React from "react";
-import { HelpCircle, Plus, X } from "lucide-react";
+import { HelpCircle, X } from "lucide-react";
 
 import { SurveyOpenAnswerField } from "@/components/surveys/survey-open-answer-field";
+import { SurveyCheckboxInput } from "@/components/surveys/survey-checkbox-input";
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
 import { SurveyTextListInput } from "@/components/surveys/survey-text-list-input";
 import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
 import {
-  addCheckboxOtherEntry,
-  buildCheckboxAnswer,
   buildRadioAnswer,
+  CHECKBOX_EDIT_PREFIX,
   CHECKBOX_OTHER_PREFIX,
   CHECKBOX_OTHER_TOKEN,
   decodeOtherValueForDisplay,
   getRadioOtherState,
-  parseCheckboxOtherEntries,
   RADIO_OTHER_TOKEN,
-  removeCheckboxOtherEntry,
-  setCheckboxOtherEntryText,
 } from "@/lib/surveys/other-option";
 import { isRankingAnswerValid } from "@/lib/surveys/ranking-answer";
 import { isTextListAnswerValid } from "@/lib/surveys/text-list-answer";
@@ -28,7 +25,6 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -365,7 +361,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
       if (raw === RADIO_OTHER_TOKEN) return false;
       const presetSet = new Set(field.options.map((o) => o.label));
       if (presetSet.has(value)) return true;
-      return field.allowOtherOption === true;
+      return field.allowOtherOption !== false;
     }
     if (field.type === "checkbox") {
       if (!Array.isArray(value)) return false;
@@ -374,7 +370,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
         if (typeof entry !== "string") return false;
         if (presetSet.has(entry)) return true;
         if (entry === CHECKBOX_OTHER_TOKEN) return false;
-        if (entry.startsWith(CHECKBOX_OTHER_PREFIX)) {
+        if (entry.startsWith(CHECKBOX_OTHER_PREFIX) || entry.startsWith(CHECKBOX_EDIT_PREFIX)) {
           return decodeOtherValueForDisplay(entry).trim().length > 0;
         }
         return field.allowOtherOption !== false && entry.trim().length > 0;
@@ -743,7 +739,7 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                             </label>
                           );
                         })}
-                        {field.allowOtherOption === true ? (
+                        {field.allowOtherOption !== false ? (
                           (() => {
                             const presetLabels = field.options.map((opt) => opt.label);
                             const otherState = getRadioOtherState(answers[field.id], presetLabels);
@@ -801,113 +797,14 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                     ) : null}
 
                     {field.type === "checkbox" ? (
-                      <div className="grid gap-2">
-                        {(() => {
-                          const presetLabels = field.options.map((o) => o.label);
-                          const otherState = parseCheckboxOtherEntries(answers[field.id], presetLabels);
-                          return (
-                            <>
-                              {field.options.map((opt) => {
-                                const checked = otherState.selectedPresets.has(opt.label);
-                                return (
-                                  <label
-                                    key={opt.id}
-                                    className={cn(
-                                      "flex cursor-pointer items-center gap-3 rounded-md border px-2.5 py-2.5 text-base shadow-sm transition-colors hover:bg-accent lg:px-3 lg:py-2 lg:text-sm",
-                                      checked ? "border-primary bg-primary/5" : "border-input bg-background",
-                                      !session && "cursor-not-allowed opacity-70",
-                                    )}
-                                  >
-                                    <Checkbox
-                                      checked={checked}
-                                      disabled={!session}
-                                      onCheckedChange={(next) => {
-                                        const nextSet = new Set(otherState.selectedPresets);
-                                        if (next) nextSet.add(opt.label);
-                                        else nextSet.delete(opt.label);
-                                        setAnswer(
-                                          field.id,
-                                          buildCheckboxAnswer(
-                                            presetLabels,
-                                            nextSet,
-                                            otherState.otherEntries,
-                                          ),
-                                        );
-                                      }}
-                                    />
-                                    <span className="min-w-0">{opt.label}</span>
-                                  </label>
-                                );
-                              })}
-
-                              {field.allowOtherOption !== false
-                                ? otherState.otherEntries.map((entry, entryIdx) => (
-                                    <div
-                                      key={entry.id}
-                                      className={cn(
-                                        "flex items-center gap-3 rounded-md border px-3 py-2 text-sm shadow-sm transition-colors hover:bg-accent",
-                                        "border-primary bg-primary/5",
-                                        !session && "cursor-not-allowed opacity-70",
-                                      )}
-                                    >
-                                      <Checkbox
-                                        checked
-                                        disabled={!session}
-                                        onCheckedChange={(next) => {
-                                          if (next !== false) return;
-                                          setAnswer(
-                                            field.id,
-                                            removeCheckboxOtherEntry(
-                                              answers[field.id],
-                                              presetLabels,
-                                              entry.id,
-                                            ),
-                                          );
-                                        }}
-                                      />
-                                      <Input
-                                        value={entry.text}
-                                        disabled={!session}
-                                        placeholder={`Eigene Option ${entryIdx + 1}…`}
-                                        className="h-11 min-w-0 flex-1 text-base lg:h-9 lg:text-sm"
-                                        onChange={(e) =>
-                                          setAnswer(
-                                            field.id,
-                                            setCheckboxOtherEntryText(
-                                              answers[field.id],
-                                              presetLabels,
-                                              entry.id,
-                                              e.target.value,
-                                            ),
-                                          )
-                                        }
-                                      />
-                                    </div>
-                                  ))
-                                : null}
-
-                              {field.allowOtherOption !== false ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={!session}
-                                  className="h-11 w-full justify-center text-base lg:h-9 lg:w-auto lg:text-sm"
-                                  onClick={() =>
-                                    setAnswer(
-                                      field.id,
-                                      addCheckboxOtherEntry(answers[field.id], presetLabels),
-                                    )
-                                  }
-                                >
-                                  <Plus className="mr-2 h-4 w-4" />
-                                  Andere / eigene Option hinzufügen
-                                </Button>
-                              ) : null}
-                            </>
-                          );
-                        })()}
-                      </div>
+                      <SurveyCheckboxInput
+                        fieldId={field.id}
+                        options={field.options}
+                        value={answers[field.id]}
+                        onChange={(next) => setAnswer(field.id, next)}
+                        disabled={!session}
+                        allowOtherOption={field.allowOtherOption !== false}
+                      />
                     ) : null}
 
                     {field.type === "rating" ? (

@@ -1,3 +1,4 @@
+import { withGeneratedChoiceCustomOptions } from "@/lib/surveys/choice-custom-options";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
 import type {
   SurveyField,
@@ -399,7 +400,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "portfolio",
         title: "Welche Leistungen oder Produkte werden aktuell angeboten?",
         description:
-          "Bitte nur ankreuzen, was wirklich angeboten wird. Die Liste kommt soweit möglich von der Website — fehlende Punkte über „Sonstiges“ ergänzen.",
+          "Bitte nur ankreuzen, was wirklich angeboten wird. Die Liste kommt soweit möglich von der Website — Bezeichnungen kannst du anpassen, fehlende Punkte über „Andere“ ergänzen.",
         type: "checkbox",
         options: opts("portfolio", PORTFOLIO_PLACEHOLDERS),
         allowOtherOption: true,
@@ -421,7 +422,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         description: "Oben steht, was Kunden als Erstes merken sollen — nicht alles kann Platz 1 sein.",
         type: "ranking",
         options: opts("archetype", COMPANY_ARCHETYPES),
-        allowCustomEntries: false,
+        allowCustomEntries: true,
       },
     ],
     "Name, Standort, Angebot und was die Firma besonders macht.",
@@ -541,7 +542,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         description: "Was im Alltag wirklich zählt, wenn es eng wird — nicht die Website-Floskeln.",
         type: "ranking",
         options: opts("cust_val", CUSTOMER_VALUES),
-        allowCustomEntries: false,
+        allowCustomEntries: true,
       },
     ],
   ),
@@ -554,7 +555,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title: "Wie wird normalerweise mit dem Kunden gesprochen – bitte in eine Reihenfolge bringen.",
         type: "ranking",
         options: opts("speak", SPEAKING_STYLES),
-        allowCustomEntries: false,
+        allowCustomEntries: true,
       },
       {
         key: "address_form",
@@ -696,7 +697,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title: "Wie wird ein neuer Kunde meistens zuerst auf die Firma aufmerksam? Bitte in eine Reihenfolge bringen.",
         type: "ranking",
         options: opts("attn", ATTENTION_CHANNELS),
-        allowCustomEntries: false,
+        allowCustomEntries: true,
       },
       {
         key: "keyword_offer",
@@ -1403,21 +1404,21 @@ export function fieldFromCoreTemplate(
   }
 
   if (t.type === "radio") {
-    return {
+    return withGeneratedChoiceCustomOptions({
       ...base,
       type: "radio",
       options: options.length ? options : YES_NO.map((o) => ({ ...o })),
-      allowOtherOption: t.allowOtherOption === true,
-    };
+      allowOtherOption: true,
+    });
   }
 
   if (t.type === "checkbox") {
-    return {
+    return withGeneratedChoiceCustomOptions({
       ...base,
       type: "checkbox",
       options: options.length ? options : [opt(`${t.key}_1`, "Option 1")],
-      allowOtherOption: t.allowOtherOption !== false,
-    };
+      allowOtherOption: true,
+    });
   }
 
   if (t.type === "ranking") {
@@ -1425,12 +1426,12 @@ export function fieldFromCoreTemplate(
       options.length >= 2
         ? options
         : [opt(`${t.key}_1`, "Option 1"), opt(`${t.key}_2`, "Option 2")];
-    return {
+    return withGeneratedChoiceCustomOptions({
       ...base,
       type: "ranking",
       options: rankingOptions,
-      allowCustomEntries: (t.allowCustomEntries ?? t.allowExtraEntries) !== false,
-    };
+      allowCustomEntries: true,
+    });
   }
 
   return { ...base, type: "rating", scale: { min: 1, max: 5 } };
