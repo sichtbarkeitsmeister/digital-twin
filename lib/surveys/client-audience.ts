@@ -242,6 +242,13 @@ function nounGenitive(spec: NounSpec): string {
   return `${spec.singular}s`;
 }
 
+/** den Aufträgen, den Projekten — n-ending already has dative. */
+function dativePlural(plural: string): string {
+  if (!plural) return plural;
+  if (/n$/i.test(plural)) return plural;
+  return `${plural}n`;
+}
+
 function replaceNoun(text: string, from: NounSpec, to: NounSpec): string {
   if (
     from.singular === to.singular &&
@@ -274,6 +281,9 @@ function replaceNoun(text: string, from: NounSpec, to: NounSpec): string {
   pairs.push([`${fromArt.des} ${fromGen}`, `${toArt.des} ${toGen}`]);
   pairs.push([`${capitalize(fromArt.des)} ${fromGen}`, `${capitalize(toArt.des)} ${toGen}`]);
   if (fromGen !== from.singular) pairs.push([fromGen, toGen]);
+  const fromDativePlural = dativePlural(from.plural);
+  const toDativePlural = dativePlural(to.plural);
+  if (fromDativePlural !== from.plural) pairs.push([fromDativePlural, toDativePlural]);
   pairs.push([from.plural, to.plural]);
   pairs.push([from.singular, to.singular]);
 

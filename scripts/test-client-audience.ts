@@ -164,6 +164,17 @@ assert.equal(
   applyClientAudienceToText("während eines Behandlungs", "praxis"),
   "während einer Behandlung",
 );
+assert.equal(
+  applyClientAudienceToText(
+    "Mit welchen Kundentypen oder Aufträgen wird lieber nicht zusammengearbeitet?",
+    "praxis",
+  ),
+  "Mit welchen Patiententypen oder Behandlungen wird lieber nicht zusammengearbeitet?",
+);
+assert.equal(
+  applyClientAudienceToText("bei neuen Projekten", "praxis"),
+  "bei neuen Behandlungen",
+);
 assert.match(
   applyClientAudienceToText("Individuelle Fragen für dieses Unternehmen", "praxis", {
     replaceBusiness: true,
@@ -205,6 +216,12 @@ assert.equal(
   /Arbeitnehmer|Spatenstich|Rechtsanwalt/.test(`${praxisUsp.title} ${praxisUsp.description}`),
   false,
 );
+
+const noFit = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "no_fit_clients");
+assert.ok(noFit);
+const praxisNoFit = customizeCoreQuestion({ template: noFit, audience: "praxis" });
+assert.match(praxisNoFit.title, /Patiententypen oder Behandlungen/);
+assert.equal(/Auftrag/.test(praxisNoFit.title), false);
 
 const volume = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "volume_vs_depth");
 assert.ok(volume);

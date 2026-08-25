@@ -3,7 +3,7 @@
  * Models often return objects ({ title, description }) — String(obj) is "[object Object]".
  */
 
-import type { ClientAudienceKind } from "@/lib/surveys/client-audience";
+import type { ClientAudienceKind, ClientAudienceVocab } from "@/lib/surveys/client-audience";
 
 export type AiExtraQuestion = {
   title: string;
@@ -12,15 +12,15 @@ export type AiExtraQuestion = {
 
 export function extraGapHints(kind: ClientAudienceKind): string {
   if (kind === "kanzlei") {
-    return "Nur Lücken, die zu DIESER Kanzlei passen, z. B. Spezialisierung, Gericht vs. außergerichtlich, Rechtsschutzversicherung, typische Mandatsdauer — nichts aus Medizin oder Handwerk.";
+    return "Nur Lücken, die zu DIESER Kanzlei passen, z. B. Spezialisierung, Gericht vs. außergerichtlich, Rechtsschutzversicherung, typische Mandatsdauer — nichts aus Medizin oder Handwerk. Lieber typische Kanzlei-Fragen mit Beispiel als ein leeres Array.";
   }
   if (kind === "praxis") {
-    return "Nur Lücken, die zu DIESER Praxis passen, z. B. Geräte, privat/gesetzlich, Nachsorge, Vorher-Nachher — nichts aus Recht oder Bau, und nur was die Website hergibt.";
+    return "Nur Lücken, die zu DIESER Praxis passen, z. B. Geräte, privat/gesetzlich, Nachsorge, Vorher-Nachher — nichts aus Recht oder Bau. Lieber typische Praxis-Fragen mit Beispiel als ein leeres Array.";
   }
   if (kind === "handwerk") {
-    return "Nur Lücken, die zu DIESEM Betrieb passen, z. B. Material, Gewährleistung, Notdienst, Vor-Ort vs. Werkstatt — nichts aus Medizin oder Kanzlei.";
+    return "Nur Lücken, die zu DIESEM Betrieb passen, z. B. Material, Gewährleistung, Notdienst, Vor-Ort vs. Werkstatt — nichts aus Medizin oder Kanzlei. Lieber typische Handwerk-Fragen mit Beispiel als ein leeres Array.";
   }
-  return "Nur Lücken aus den tatsächlichen Leistungen und der Website, nicht aus einer anderen Branche.";
+  return "Nur Lücken aus den tatsächlichen Leistungen und der Website, nicht aus einer anderen Branche. Lieber typische Fragen mit Beispiel als ein leeres Array.";
 }
 
 const TITLE_KEYS = ["title", "question", "frage", "text", "prompt", "label"] as const;
@@ -110,4 +110,92 @@ export function parseAiExtraQuestions(
     if (out.length >= max) break;
   }
   return out;
+}
+
+/** Last resort if the extras model call is empty — still company-typed, not blank. */
+export function fallbackExtraQuestions(input: {
+  kind: ClientAudienceKind;
+  vocab: ClientAudienceVocab;
+  services?: string[] | null;
+}): AiExtraQuestion[] {
+  const v = input.vocab;
+  const service = (input.services ?? []).map((s) => s.trim()).find((s) => s.length >= 3) || v.engagement;
+  if (input.kind === "kanzlei") {
+    return [
+      {
+        title: `Welche Spezialisierungen übernimmt die ${v.business} selbst, und was wird abgegeben?`,
+        description: `Beispiel: „Arbeitsrecht intern, Strafrecht nur über Kooperationskanzlei.“`,
+      },
+      {
+        title: `Wie oft geht ein ${v.engagement} vor Gericht, und wann bleibt es außergerichtlich?`,
+        description: `Beispiel: „Die meisten Mandate enden mit Vergleich, Klage nur wenn die Gegenseite nicht reagiert.“`,
+      },
+      {
+        title: `Spielt eine Rechtsschutzversicherung bei neuen ${v.plural} eine Rolle?`,
+        description: `Beispiel: „Oft ja — wir klären Deckung vor dem ersten ausführlichen Termin.“`,
+      },
+      {
+        title: `Wie lange dauert ein typisches ${v.engagement} von der ersten Anfrage bis zum Abschluss?`,
+        description: `Beispiel: „Einfache Fälle 4–8 Wochen, komplexe oft mehrere Monate.“`,
+      },
+    ];
+  }
+  if (input.kind === "praxis") {
+    return [
+      {
+        title: `Welche Geräte oder Methoden setzt die ${v.business} bei ${service} konkret ein?`,
+        description: `Fachbegriffe für Texte. Beispiel: „Gerät/Methode plus wofür, in einem Satz.“`,
+      },
+      {
+        title: `Behandelt die ${v.business} gesetzlich Versicherte, oder nur privat zahlende ${v.plural}?`,
+        description: `Beispiel: „Privat und Selbstzahler; gesetzlich nur bei ausgewählten Leistungen.“`,
+      },
+      {
+        title: `Wie läuft die Nachsorge nach einer ${v.engagement} — was sollen ${v.plural} tun oder lassen?`,
+        description: `Beispiel: „24 Stunden Sportpause, Sonnenschutz, Kontrolltermin nach zwei Wochen.“`,
+      },
+      {
+        title: `Dürfen Vorher-Nachher-Fotos veröffentlicht werden, und unter welchen Bedingungen?`,
+        description: `Beispiel: „Nur mit schriftlicher Einwilligung, Gesicht nicht erkennbar, keine ungefragten Social-Media-Posts.“`,
+      },
+    ];
+  }
+  if (input.kind === "handwerk") {
+    return [
+      {
+        title: `Welche Materialien oder Systeme setzt der ${v.business} bevorzugt ein, und warum genau diese?`,
+        description: `Beispiel: „Marke/System plus ein praktischer Grund, kein Werbesatz.“`,
+      },
+      {
+        title: `Gibt es einen Notdienst, und wann rückt der ${v.business} außer der Reihe an?`,
+        description: `Beispiel: „Wasserschaden ja, reine Schönheitsreparaturen nur in der Normalzeit.“`,
+      },
+      {
+        title: `Wie lange gilt die Gewährleistung über das Gesetzliche hinaus?`,
+        description: `Beispiel: „Gesetzlich 5 Jahre am Bau, Materialhersteller oft 10 Jahre.“`,
+      },
+      {
+        title: `Was passiert vor Ort, und was in der Werkstatt?`,
+        description: `Beispiel: „Aufmaß und Einbau vor Ort, Zuschnitt in der Werkstatt.“`,
+      },
+    ];
+  }
+  return [
+    {
+      title: `Welche Tools, Plattformen oder Methoden sind für die Arbeit der ${v.business} typisch?`,
+      description: `Beispiel: ein konkretes Werkzeug plus wofür es genutzt wird.`,
+    },
+    {
+      title: `Wie wird ein ${v.engagement} intern übergeben — eine feste Ansprechperson oder mehrere Rollen?`,
+      description: `Beispiel: „Vertrieb übergibt an Projektleitung, eine Person bleibt bis zum Schluss sichtbar.“`,
+    },
+    {
+      title: `Was soll in Texten über ${service} unbedingt vorkommen, und was eher nicht?`,
+      description: `Beispiel: „Klar die Leistung und die Region, keine Superlative ohne Beleg.“`,
+    },
+    {
+      title: `Welche Nachweise oder Fallbeispiele dürfen öffentlich genannt werden?`,
+      description: `Beispiel: „Referenzen nur mit Freigabe, Zahlen nur wenn sie stimmen.“`,
+    },
+  ];
 }
