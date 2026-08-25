@@ -27,7 +27,8 @@ import {
   firstConversationSummaryLines,
 } from "@/lib/surveys/first-conversation";
 import { loadFirstConversation } from "@/lib/surveys/first-conversation-store";
-import { mergeAudienceVocab } from "@/lib/surveys/client-audience";
+import { mergeAudienceVocab, type ClientAudienceVocab } from "@/lib/surveys/client-audience";
+import { resolveAudienceVocabSuggestion } from "@/lib/surveys/suggest-audience-vocab-ai";
 import {
   loadOrgCrawlStatusSnapshot,
   startOrganisationSiteCrawl,
@@ -505,6 +506,51 @@ export async function createFragebogenFromReviewAction(
       extraCount,
       prefillCount: Object.keys(answers).length,
       crawlPageCount: parsed.data.draft.crawlPageCount,
+    },
+  };
+}
+
+const suggestAudienceSchema = z.object({
+  industry: z.string().trim().max(120).optional().nullable(),
+  organisationName: z.string().trim().max(200).optional().nullable(),
+  services: z.array(z.string().trim().max(80)).max(20).optional(),
+});
+
+export async function suggestFragebogenAudienceVocabAction(
+  input: z.input<typeof suggestAudienceSchema>,
+): Promise<
+  ActionState<{ vocab: ClientAudienceVocab; source: "heuristic" | "ai"; note: string }>
+> {
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok) return { ok: false, message: auth.message };
+
+  const parsed = suggestAudienceSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const industry = parsed.data.industry?.trim() || "";
+  const organisationName = parsed.data.organisationName?.trim() || "";
+  const services = parsed.data.services ?? [];
+  if (!industry && !organisationName && services.length === 0) {
+    return {
+      ok: false,
+      message: "Bitte Branche eintippen — oder Organisation mit Namen/Leistungen wählen.",
+    };
+  }
+
+  const suggestion = await resolveAudienceVocabSuggestion({
+    industry,
+    organisationName,
+    services,
+  });
+  return {
+    ok: true,
+    message: suggestion.note,
+    data: {
+      vocab: suggestion.vocab,
+      source: suggestion.source,
+      note: suggestion.note,
     },
   };
 }
