@@ -111,8 +111,10 @@ assert.match(clipWorkspaceText("x".repeat(50), 30), /gekürzt/);
 const staticPrompt = buildSurveyChatStaticSystemText();
 assert.match(staticPrompt, /NEVER claim you have no access/i);
 assert.match(staticPrompt, /lookup_organisation_workspace/);
+assert.match(staticPrompt, /lookup_survey/);
 assert.match(staticPrompt, /search_website_content/);
 assert.match(staticPrompt, /read_website_page/);
+assert.match(staticPrompt, /NEVER claim you have no function to load a survey/i);
 
 const dynamic = buildSurveyChatDynamicSystemText({
   pageContext: { page: "survey_builder_edit", surveyId: null },
@@ -136,7 +138,7 @@ const dynamic = buildSurveyChatDynamicSystemText({
     ],
   },
 });
-assert.match(dynamic, /Known organisations/);
+assert.match(dynamic, /OPEN QUESTIONNAIRE/);
 assert.match(dynamic, /Focused organisation workspace/);
 assert.match(dynamic, /Kanzlei für Wirtschaftsprüfung/);
 assert.match(dynamic, /Title kürzen/);

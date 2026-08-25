@@ -19,6 +19,21 @@ const MAX_TOOL_ROUNDS = 6;
 
 export const SURVEY_ASSISTANT_WORKSPACE_TOOLS: Anthropic.Tool[] = [
   {
+    name: "lookup_survey",
+    description:
+      "Lädt die aktuelle gespeicherte Definition einer Umfrage (Titel, Schritte, Fragen, Optionen). Nutze dies, wenn der Nutzer einen Fragebogen meint, der nicht vollständig im Kontext steht, eine Dashboard-URL / Survey-ID nennt, oder du den aktuellen Stand nach einem Rollback prüfen sollst. Behaupte niemals, du könntest Umfragen nicht laden.",
+    input_schema: {
+      type: "object",
+      properties: {
+        surveyId: {
+          type: "string",
+          description: "UUID der Umfrage (aus pageContext.surveyId, Known surveys, oder einer Dashboard-URL).",
+        },
+      },
+      required: ["surveyId"],
+    },
+  },
+  {
     name: "lookup_organisation_workspace",
     description:
       "Lädt Crawl-Zusammenfassung, Seitenindex und offene SEO-Aufgaben einer Organisation. Nutze dies, wenn die gewünschte Organisation nicht bereits im fokussierten Workspace steht oder der Nutzer nach Crawl/Aufgaben einer anderen Org fragt.",
@@ -129,6 +144,7 @@ export async function runSurveyAssistantWorkspaceTool(input: {
   args: unknown;
   organisations: SurveyAssistantOrgDirectoryEntry[];
   defaultOrganisationId: string | null;
+  loadSurveyById?: (surveyId: string) => Promise<string>;
 }): Promise<string> {
   const args = asRecord(input.args);
   const requestedId =
@@ -138,6 +154,15 @@ export async function runSurveyAssistantWorkspaceTool(input: {
   const nameArg = typeof args.name === "string" ? args.name : null;
 
   try {
+    if (input.name === "lookup_survey") {
+      const surveyId =
+        typeof args.surveyId === "string" ? args.surveyId.trim() : "";
+      if (!surveyId) return "Keine surveyId angegeben.";
+      if (!input.loadSurveyById) {
+        return "lookup_survey ist in diesem Request nicht verfügbar.";
+      }
+      return await input.loadSurveyById(surveyId);
+    }
     if (input.name === "lookup_organisation_workspace") {
       const resolved = resolveOrganisationId({
         requestedId,
@@ -214,6 +239,12 @@ function toolStatusMessage(name: string, args: unknown): string {
     const url = String(rec.url ?? "").trim();
     return url ? `Ich lade die gecrawlte Seite ${url.slice(0, 80)}…` : "Ich lade eine gecrawlte Seite…";
   }
+  if (name === "lookup_survey") {
+    const id = String(rec.surveyId ?? "").trim();
+    return id
+      ? `Ich lade den Fragebogen ${id.slice(0, 36)}…`
+      : "Ich lade den Fragebogen…";
+  }
   if (name === "lookup_organisation_workspace") {
     const label = String(rec.name ?? rec.organisationId ?? "").trim();
     return label
@@ -232,6 +263,7 @@ export async function callAnthropicWithSurveyWorkspaceTools(input: {
   timeoutMs?: number;
   organisations: SurveyAssistantOrgDirectoryEntry[];
   defaultOrganisationId: string | null;
+  loadSurveyById?: (surveyId: string) => Promise<string>;
   onStatus?: (message: string) => void;
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const messages: Anthropic.MessageParam[] = [...input.messages];
@@ -269,6 +301,7 @@ export async function callAnthropicWithSurveyWorkspaceTools(input: {
         args: tu.input,
         organisations: input.organisations,
         defaultOrganisationId: input.defaultOrganisationId,
+        loadSurveyById: input.loadSurveyById,
       });
       toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: output });
     }

@@ -148,7 +148,11 @@ export function buildSurveyChatStaticSystemText(): string {
     "When user asks to check/fix duplicate IDs in an existing survey, prefer kind=patch_survey_definition and only rename duplicate ids (do not rewrite unrelated content).",
     "For duplicate-id fixes: keep the first occurrence unchanged, update only subsequent duplicates to unique stable ids.",
     "When user asks to edit existing survey, use surveyId from known surveys.",
-    "Candidate survey contexts without `definition` only include stepOutline (step/field ids + titles) — use patch_survey_definition with those ids. Full `definition` is present only for the survey currently open in the builder.",
+    "Candidate survey contexts without `definition` only include stepOutline (step/field ids + titles). Full `definition` is present for the survey currently open in the builder AND for surveys whose dashboard URL the user pasted.",
+    "pageContext.surveyId is the questionnaire the user currently has open. That is the DEFAULT target for patches. Never say you cannot load or see it — it is in Candidate survey contexts, and you can call lookup_survey with that UUID.",
+    "If the user pastes a URL like https://…/dashboard/surveys/<uuid>/edit, that is a dashboard app route, not a public website. Extract the UUID and load the survey (candidate context / lookup_survey). Ignore login/marketing HTML from a public fetch.",
+    "If a referenced survey is missing from candidate contexts, call tool lookup_survey with the UUID instead of asking the user to paste the whole definition.",
+    "NEVER use create_survey while pageContext.page is survey_builder_edit unless the user explicitly asks to create a separate NEW survey.",
     "If pageContext.liveWizardDraft is true, the candidate with pageContext.surveyId is the UNSAVED questionnaire currently open in „Fragebögen erzeugen“. When the user asks to change questions, wording, options, order or title, patch THAT survey with patch_survey_definition (surveyId = pageContext.surveyId). Do NOT use create_survey unless they explicitly want a separate new survey. Do NOT publish, unpublish, delete, or assign_folder this live draft — it is not saved yet.",
     "Use duplicateIdReport from candidate survey contexts when user asks to check duplicate IDs in existing surveys.",
     "If there are multiple plausible matching surveys (e.g. two cafe surveys), ask a clarifying question first and DO NOT emit action JSON yet.",
@@ -173,6 +177,7 @@ export function buildSurveyChatStaticSystemText(): string {
     "\"Focused organisation workspace\" contains crawl excerpts, a URL index and open/in-progress tasks for the currently relevant org(s).",
     "Use crawl content to fill survey placeholders (company name, services, team, NAP, hours, USP, competitors, reviews). Cite the source URL. Do not invent facts that are not in crawl/tasks.",
     "If the needed organisation is not focused, or you need a full page / extra search: use tools lookup_organisation_workspace, search_website_content, read_website_page (pass organisationId from Known organisations).",
+    "To inspect a questionnaire that is not fully in context: use tool lookup_survey with the survey UUID from pageContext, Known surveys, or a pasted dashboard URL. NEVER claim you have no function to load a survey.",
     "If crawlPageCount is 0: tell the user no crawl exists yet and they can run „Jetzt crawlen“ in SEO-Einstellungen — do not ask them to paste the whole website unless they want a live one-off fetch.",
     "Prefer the stored crawl over a pasted live URL when the same site is already crawled.",
     "Open tasks are read-only here (do not invent SEO-board mutations). Mention existing open tasks when they are relevant to the survey work.",
@@ -211,6 +216,7 @@ export function buildSurveyChatStaticSystemText(): string {
     "- WRONG update_field (never do this): {\"op\":\"update_field\",\"stepId\":\"...\",\"fieldId\":\"...\",\"required\":true}",
     "- update_step MUST use patch object: {\"op\":\"update_step\",\"stepId\":\"...\",\"patch\":{\"description\":\"...\"}}",
     "- WRONG update_step: {\"op\":\"update_step\",\"stepId\":\"...\",\"description\":\"...\"}",
+    "- WRONG update_step.patch.fields (never do this): to change questions inside a step, emit one update_field per field. update_step.patch may only set title and/or description.",
     "- update_survey_root MUST use patch object: {\"op\":\"update_survey_root\",\"patch\":{\"infoText\":\"...\"}}",
     "- add_field MUST include a full field object: {\"op\":\"add_field\",\"stepId\":\"...\",\"field\":{\"id\":\"field_new_1\",\"type\":\"text\",\"title\":\"...\",\"description\":\"\",\"required\":false,\"placeholder\":\"\"}}",
     "- WRONG add_field (never do this): {\"op\":\"add_field\",\"stepId\":\"...\"} — field is required",
@@ -266,11 +272,23 @@ export function buildSurveyChatDynamicSystemText(input: {
   pastedWebsiteContent?: string | null;
   workspace?: SurveyAssistantWorkspace | null;
 }): string {
+  const openId = input.pageContext.surveyId;
+  const openCtx = openId
+    ? input.candidateSurveyContexts.find((c) => c.id === openId)
+    : undefined;
+  const openLabel = openId
+    ? `OPEN QUESTIONNAIRE (user is currently on this survey — default patch target): id=${openId}` +
+      (openCtx
+        ? ` title=${JSON.stringify(openCtx.title)} steps=${openCtx.stepOutline.length} fields=${openCtx.stepOutline.reduce((n, s) => n + s.fieldCount, 0)} definition=${openCtx.definition ? "included" : "outline-only"}`
+        : " (not in candidate list this turn — call lookup_survey)")
+    : "OPEN QUESTIONNAIRE: none (user is not on a survey editor page)";
+
   const blocks = [
+    openLabel,
     `Current page context: ${JSON.stringify(input.pageContext)}`,
     `Conversation summary (older messages, compressed): ${input.conversationSummary}`,
     `Known surveys: ${JSON.stringify(input.surveys)}`,
-    `Candidate survey contexts for edits (definition included only when open in builder): ${JSON.stringify(input.candidateSurveyContexts)}`,
+    `Candidate survey contexts for edits (full definition included for the open survey and for dashboard-URL targets): ${JSON.stringify(input.candidateSurveyContexts)}`,
     `Known folders: ${JSON.stringify(input.folders)}`,
     `Known DigitalTwin agents (for edit_dt_agent_prompt): ${JSON.stringify(input.knownAgents ?? [])}`,
     `Focused agent prompts (full text when relevant): ${JSON.stringify(input.focusedAgentPrompts ?? [])}`,

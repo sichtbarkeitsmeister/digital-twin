@@ -4,8 +4,11 @@ import { useCallback, useMemo } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { SurveyAiAssistant } from "@/components/surveys/survey-ai-assistant";
+import { surveySchema } from "@/lib/surveys/schema";
 import { surveyFromReviewOrNull } from "@/lib/surveys/fragebogen-review-draft";
 import { useFragebogenWizardDraft } from "@/lib/surveys/fragebogen-wizard-draft-store";
+import { useSurveyBuilderLiveSurvey } from "@/lib/surveys/survey-builder-live-store";
+import type { Survey } from "@/lib/surveys/types";
 
 export type DashboardSurveyAiPageContext = {
   page:
@@ -106,6 +109,35 @@ export function resolveDashboardSurveyAiPageContext(
   };
 }
 
+export function buildStickySurveyAiAssistantContext(input: {
+  resolved: DashboardSurveyAiPageContext;
+  wizardSurvey: Survey | null;
+  builderSurvey: Survey | null;
+}) {
+  const wizardId = uuidOrNull(input.wizardSurvey?.id);
+  const onWizard =
+    input.resolved.page === "survey_builder_new" &&
+    Boolean(input.wizardSurvey && wizardId);
+  const parsedBuilder = input.builderSurvey
+    ? surveySchema.safeParse(input.builderSurvey)
+    : null;
+  const builderOk = parsedBuilder?.success ? parsedBuilder.data : null;
+  const onBuilderEdit = input.resolved.page === "survey_builder_edit" && Boolean(builderOk);
+
+  return {
+    page: input.resolved.page,
+    surveyId: onWizard ? wizardId : input.resolved.surveyId,
+    organisationId: input.resolved.organisationId ?? null,
+    agentId: input.resolved.agentId ?? null,
+    liveWizardDraft: onWizard,
+    currentSurvey: onWizard
+      ? input.wizardSurvey ?? undefined
+      : onBuilderEdit
+        ? builderOk ?? undefined
+        : undefined,
+  };
+}
+
 /**
  * Platform-admin floating Survey KI — one instance for the whole dashboard.
  */
@@ -113,6 +145,7 @@ export function DashboardStickySurveyAiAssistant() {
   const pathname = usePathname() || "/dashboard";
   const searchParams = useSearchParams();
   const liveDraft = useFragebogenWizardDraft();
+  const builderSurvey = useSurveyBuilderLiveSurvey();
 
   const resolved = useMemo(
     () => resolveDashboardSurveyAiPageContext(pathname, searchParams),
@@ -124,19 +157,15 @@ export function DashboardStickySurveyAiAssistant() {
     [liveDraft.draft],
   );
 
-  const buildContext = useCallback(() => {
-    const liveSurveyId = uuidOrNull(liveSurvey?.id);
-    const onWizard =
-      resolved.page === "survey_builder_new" && Boolean(liveSurvey && liveSurveyId);
-    return {
-      page: resolved.page,
-      surveyId: liveSurveyId ?? resolved.surveyId,
-      organisationId: resolved.organisationId ?? null,
-      agentId: resolved.agentId ?? null,
-      liveWizardDraft: onWizard,
-      currentSurvey: onWizard ? liveSurvey ?? undefined : undefined,
-    };
-  }, [resolved, liveSurvey]);
+  const buildContext = useCallback(
+    () =>
+      buildStickySurveyAiAssistantContext({
+        resolved,
+        wizardSurvey: liveSurvey,
+        builderSurvey,
+      }),
+    [resolved, liveSurvey, builderSurvey],
+  );
 
   return (
     <SurveyAiAssistant title="KI Survey Assistant" buildContext={buildContext} />
