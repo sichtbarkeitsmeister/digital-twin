@@ -48,6 +48,8 @@ export function buildDtSystemPrompt(input: {
   seoTasksText?: string;
   /** Digest of other SEO chats in the same organisation (cross-chat memory). */
   otherSeoChatsText?: string;
+  /** Auto-injected Wunschkunden profiles (org avatars + persona surveys). */
+  wunschkundenKnowledgeText?: string;
   pastedUrlsText?: string;
   textMode?: boolean;
 }): string {
@@ -88,6 +90,10 @@ export function buildDtSystemPrompt(input: {
       prospect ? "## Avatar-spezifisch" : "## Zusätzliche Anweisungen",
       input.agent.prompt_append.trim(),
     );
+  }
+
+  if (input.wunschkundenKnowledgeText?.trim()) {
+    blocks.push("", input.wunschkundenKnowledgeText.trim());
   }
 
   // After persona text so a mis-generated "brand ambassador" prompt cannot win.

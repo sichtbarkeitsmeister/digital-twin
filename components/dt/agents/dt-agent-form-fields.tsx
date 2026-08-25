@@ -4,6 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { DtAgentQuickActionsField } from "@/components/dt/agents/dt-agent-quick-actions-field";
 import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
+import { isSurveyPersonaAgent } from "@/lib/dt/agents/seo-advisor";
 import { parseQuickActions } from "@/lib/dt/types";
 
 export type DtAgentFormValues = {
@@ -226,13 +227,15 @@ export function agentFormValuesFromRow(agent: {
   prompt_append?: string | null;
   uses_global_prompt?: boolean;
   source_survey_id?: string | null;
+  kind?: string | null;
+  slug?: string | null;
   quick_actions: unknown;
   is_enabled: boolean;
   position: number;
 }): DtAgentFormValues {
   const append = (agent.prompt_append ?? "").trim();
   const template = agent.prompt_template ?? "";
-  const surveyPersona = Boolean(agent.source_survey_id);
+  const surveyPersona = isSurveyPersonaAgent(agent);
 
   // Legacy / broken create: long persona text still in System-Prompt, append empty.
   // Surface it in the single Avatar field so the form is not split across two boxes.

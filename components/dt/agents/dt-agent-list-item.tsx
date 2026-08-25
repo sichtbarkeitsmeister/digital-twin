@@ -19,11 +19,13 @@ import {
   type DtAgentFormValues,
 } from "@/components/dt/agents/dt-agent-form-fields";
 import { DtAgentSurveyCoverageCheck } from "@/components/dt/agents/dt-agent-survey-coverage-check";
+import { DtSeoWunschkundenPanel } from "@/components/dt/agents/dt-seo-wunschkunden-panel";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/dt/cn";
 import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
+import { isSeoAdvisorAgent, isSurveyPersonaAgent } from "@/lib/dt/agents/seo-advisor";
 
 export type DtAgentListItemRow = {
   id: string;
@@ -219,6 +221,14 @@ export function DtAgentListItem(props: {
   canDisable: boolean;
   alwaysOn?: boolean;
   globalPromptPreview?: string;
+  /** Wunschkunden of this org — shown when editing the SEO advisor. */
+  organisationId?: string;
+  orgWunschkunden?: Array<{
+    id: string;
+    name: string;
+    role: string | null;
+    is_enabled: boolean;
+  }>;
   /** Render as a row inside a divided list (no outer card). */
   compact?: boolean;
   /** Hide bottom border on last row in a divided list. */
@@ -226,6 +236,8 @@ export function DtAgentListItem(props: {
 }) {
   const { agent } = props;
   const Icon = agentIcon(agent.kind, agent.slug);
+  const isSeoAdvisor = isSeoAdvisorAgent(agent);
+  const isSurveyPersona = isSurveyPersonaAgent(agent);
 
   if (props.isEditing) {
     return (
@@ -250,34 +262,42 @@ export function DtAgentListItem(props: {
             agent.is_default ||
             agent.uses_global_prompt ||
             Boolean(agent.prompt_append?.trim()) ||
-            Boolean(agent.source_survey_id)
+            isSurveyPersona ||
+            isSeoAdvisor
           }
           // Survey personas: only one editable prompt field (below).
           // Shared rules live under „Globale Prompts“ — not a second textarea.
           hidePrompt={
             !agent.is_default &&
-            (agent.uses_global_prompt || Boolean(agent.source_survey_id))
+            (agent.uses_global_prompt || isSurveyPersona)
           }
           promptNote={
             !agent.is_default &&
-            (agent.uses_global_prompt || Boolean(agent.source_survey_id))
+            (agent.uses_global_prompt || isSurveyPersona) &&
+            !isSeoAdvisor
               ? "Gemeinsame Regeln stehen unter „Globale Prompts“. Unten bearbeitest du nur den Prompt für diesen Avatar."
-              : undefined
+              : !agent.is_default && isSeoAdvisor
+                ? "Gemeinsame SEO-Regeln stehen unter „Globale Prompts“. Unten liegt das Anbieter-Wissen dieser Organisation."
+                : undefined
           }
           appendLabel={
-            agent.source_survey_id || (agent.uses_global_prompt && !agent.is_default)
-              ? "Prompt"
-              : undefined
+            isSeoAdvisor
+              ? "Anbieter-Wissen / Zusätzliche Anweisungen"
+              : isSurveyPersona || (agent.uses_global_prompt && !agent.is_default)
+                ? "Prompt"
+                : undefined
           }
           appendHint={
-            agent.source_survey_id || (agent.uses_global_prompt && !agent.is_default)
-              ? "Persona-Text aus der Umfrage. Im Chat wird er auf den globalen DigitalTwin-Prompt gelegt."
-              : undefined
+            isSeoAdvisor
+              ? "Unternehmensfakten aus dem Anbieter-Fragebogen (1:1) plus optionale Ergänzungen. Wunschkunden kommen automatisch aus den Avataren dieser Organisation — nicht hier einfügen."
+              : isSurveyPersona || (agent.uses_global_prompt && !agent.is_default)
+                ? "Persona-Text aus der Umfrage. Im Chat wird er auf den globalen DigitalTwin-Prompt gelegt."
+                : undefined
           }
           globalPromptPreview={props.globalPromptPreview}
           hideEnabled={props.alwaysOn}
         />
-        {agent.source_survey_id && !props.editValues.promptAppend.trim() ? (
+        {agent.source_survey_id && !isSeoAdvisor && !props.editValues.promptAppend.trim() ? (
           <p className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
             Kein Prompt gespeichert. Bitte die Umfrage-Antwort erneut umwandeln
             (bestehenden Agenten vorher löschen) oder den Text manuell einfügen.
@@ -291,6 +311,11 @@ export function DtAgentListItem(props: {
               disabled={props.busy}
               promptTemplate={props.editValues.prompt}
               promptAppend={props.editValues.promptAppend}
+              sourceHint={
+                isSeoAdvisor
+                  ? "Für den SEO-Berater ist das der Anbieter-Fragebogen. Wunschkunden-Fragebögen fließen automatisch über die Avatare ein."
+                  : undefined
+              }
               onSourceSaved={props.onSourceSaved}
               onInsertIntoPrompt={(insertion) => {
                 const target = props.editValues.usesGlobalPrompt
@@ -304,6 +329,14 @@ export function DtAgentListItem(props: {
                   [target]: `${current.trimEnd()}${insertion}`,
                 });
               }}
+            />
+          ) : null}
+          {isSeoAdvisor &&
+          agent.kind !== "geo_advisor" &&
+          props.organisationId ? (
+            <DtSeoWunschkundenPanel
+              organisationId={props.organisationId}
+              personas={props.orgWunschkunden ?? []}
             />
           ) : null}
           <div className="flex flex-wrap gap-2">

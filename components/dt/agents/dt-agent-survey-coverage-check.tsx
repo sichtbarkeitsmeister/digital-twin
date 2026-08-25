@@ -30,6 +30,8 @@ export function DtAgentSurveyCoverageCheck(props: {
   }) => void;
   disabled?: boolean;
   className?: string;
+  /** Extra helper under the questionnaire picker. */
+  sourceHint?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -276,8 +278,9 @@ export function DtAgentSurveyCoverageCheck(props: {
           placeholder="Fragebogen wählen"
         />
                 <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-                  Alle Fragebögen aus dem Umfragen-Ordner dieser Organisation. Speichere die
-                  Zuordnung, damit Abgleich und Testing denselben Fragebogen nutzen.
+                  {props.sourceHint?.trim()
+                    ? props.sourceHint
+                    : "Alle Fragebögen aus dem Umfragen-Ordner dieser Organisation. Speichere die Zuordnung, damit Abgleich und Testing denselben Fragebogen nutzen."}
                 </p>
 
         {loadingOptions ? (

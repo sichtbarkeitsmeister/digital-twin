@@ -24,6 +24,7 @@ import {
   loadDtSeoTasksForPrompt,
 } from "@/lib/dt/seo/task-context";
 import { loadOtherSeoChatsForPrompt } from "@/lib/dt/seo/org-chat-memory";
+import { loadWunschkundenKnowledgeForSeo } from "@/lib/dt/seo/wunschkunden-knowledge";
 import {
   formatSeoChecklist,
   loadGlobalSeoChecklist,
@@ -139,6 +140,8 @@ export async function loadDtAgentContextBundle(input: {
     input.mode === "team" ? "team" : input.mode === "seo" ? "seo" : "default";
   const isSeoOrGeo =
     promptMode === "seo" || agent.kind === "geo_advisor";
+  const includeWunschkunden =
+    isSeoOrGeo || agent.kind === "seo_advisor";
 
   const sitePages = isSeoOrGeo
     ? await loadDtSitePagesForPrompt(supabase, input.organisationId)
@@ -159,6 +162,9 @@ export async function loadDtAgentContextBundle(input: {
     promptMode === "seo"
       ? await loadOtherSeoChatsForPrompt(supabase, input.organisationId)
       : "";
+  const wunschkundenKnowledgeText = includeWunschkunden
+    ? await loadWunschkundenKnowledgeForSeo(supabase, input.organisationId)
+    : "";
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
   const globalSeoChecklist = isSeoOrGeo
@@ -273,6 +279,25 @@ export async function loadDtAgentContextBundle(input: {
           : "Organisationsspezifische Ergänzungen — aktuell leer.",
         content: "",
         isEmpty: true,
+        editHref: agentsEditHref,
+      }),
+    );
+  }
+
+  if (includeWunschkunden) {
+    const wunschkundenContent = wunschkundenKnowledgeText.trim();
+    sections.push(
+      section({
+        id: "wunschkunden_knowledge",
+        title: "Wunschkunden-Wissen",
+        sourceLabel: "Wunschkunden",
+        sourceType: "agent",
+        description:
+          "Wird automatisch aus den Wunschkunden-Avataren und Persona-Fragebögen dieser Organisation geladen — nicht per Hand in den SEO-Berater kopiert.",
+        content: wunschkundenContent,
+        isEmpty:
+          wunschkundenContent.length === 0 ||
+          wunschkundenContent.includes("Noch keine Wunschkunden hinterlegt"),
         editHref: agentsEditHref,
       }),
     );
@@ -515,6 +540,9 @@ export async function loadDtAgentContextBundle(input: {
     monthlyStatsText: promptMode === "seo" ? monthlyStatsText : undefined,
     seoTasksText: promptMode === "seo" ? seoTasksText : undefined,
     otherSeoChatsText: promptMode === "seo" ? otherSeoChatsText : undefined,
+    wunschkundenKnowledgeText: includeWunschkunden
+      ? wunschkundenKnowledgeText
+      : undefined,
   });
 
   return {
