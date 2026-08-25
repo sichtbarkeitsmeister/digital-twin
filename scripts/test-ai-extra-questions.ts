@@ -4,7 +4,12 @@
  */
 import assert from "node:assert/strict";
 
-import { extraGapHints, parseAiExtraQuestions } from "../lib/surveys/ai-extra-questions";
+import { clientAudienceVocab } from "../lib/surveys/client-audience";
+import {
+  extraGapHints,
+  fallbackExtraQuestions,
+  parseAiExtraQuestions,
+} from "../lib/surveys/ai-extra-questions";
 
 assert.deepEqual(parseAiExtraQuestions(null), []);
 assert.deepEqual(parseAiExtraQuestions("[object Object]"), []);
@@ -65,5 +70,26 @@ assert.match(extraGapHints("praxis"), /Geräte|Nachsorge/);
 assert.equal(/Hyaluron|Arbeitsrecht|Spatenstich/.test(extraGapHints("praxis")), false);
 assert.match(extraGapHints("kanzlei"), /Mandat|Rechtsschutz/);
 assert.equal(/Hyaluron|Laser|Botox/.test(extraGapHints("kanzlei")), false);
+
+const praxisExtras = fallbackExtraQuestions({
+  kind: "praxis",
+  vocab: clientAudienceVocab("praxis"),
+  services: ["Botox-Injektionen", "Hyaluronsäure-Filler"],
+});
+assert.equal(praxisExtras.length, 4);
+assert.match(praxisExtras[0]!.title, /Botox-Injektionen/);
+assert.match(praxisExtras.map((q) => q.title).join(" "), /gesetzlich|Nachsorge|Vorher-Nachher/);
+assert.ok(praxisExtras.every((q) => /Beispiel/.test(q.description)));
+assert.equal(/Mandat|Arbeitsrecht|Rechtsschutz/.test(praxisExtras.map((q) => q.title).join(" ")), false);
+
+const kanzleiExtras = fallbackExtraQuestions({
+  kind: "kanzlei",
+  vocab: clientAudienceVocab("kanzlei"),
+});
+assert.equal(kanzleiExtras.length, 4);
+assert.match(kanzleiExtras.map((q) => q.title).join(" "), /Gericht|Rechtsschutz|Mandat/);
+assert.equal(/Hyaluron|Laser|Botox|Nachsorge/.test(kanzleiExtras.map((q) => q.title).join(" ")), false);
+assert.match(kanzleiExtras[2]!.title, /Mandanten/);
+assert.equal(/mandantenn/i.test(kanzleiExtras[2]!.title), false);
 
 console.log("test-ai-extra-questions: ok");

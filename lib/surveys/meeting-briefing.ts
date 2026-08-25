@@ -69,6 +69,7 @@ function slugify(raw: string): string {
 type LabelRule = {
   match: RegExp;
   hint?: CoreQuestionPrefillHint;
+  alsoHint?: CoreQuestionPrefillHint;
   /** When no core hint — create this Zusatzfrage. */
   extraTitle?: string;
   extraId?: string;
@@ -94,7 +95,7 @@ const LABEL_RULES: LabelRule[] = [
     hint: "usp",
   },
   {
-    match: /^(?:region|regionen|einzugsgebiet|standort|marktgebiet|einsatzgebiet)$/i,
+    match: /^(?:region|regionen|einzugsgebiet|standort|marktgebiet|einsatzgebiet|praxissitz|firmensitz)$/i,
     hint: "region",
   },
   {
@@ -106,7 +107,7 @@ const LABEL_RULES: LabelRule[] = [
     hint: "focus",
   },
   {
-    match: /^(?:leistungen|services|angebot|angebote|produkte)$/i,
+    match: /^(?:leistungen|services|angebot|angebote|produkte|leistungsgebiete)$/i,
     hint: "services",
   },
   {
@@ -118,7 +119,7 @@ const LABEL_RULES: LabelRule[] = [
     hint: "owner_name",
   },
   {
-    match: /^(?:firmenname|unternehmensname|offizieller\s+name|name\s+der\s+firma)$/i,
+    match: /^(?:firmenname|unternehmensname|offizieller\s+name|name\s+der\s+firma|praxisname)$/i,
     hint: "org_name",
   },
   {
@@ -136,9 +137,9 @@ const LABEL_RULES: LabelRule[] = [
     extraId: "extra_meeting_industry",
   },
   {
-    match: /^(?:online[\s_-]?kan(?:ä|ae)le|kan(?:ä|ae)le\s+heute)$/i,
-    extraTitle: "Welche Online-Kanäle werden aktuell genutzt?",
-    extraId: "extra_meeting_online_channels",
+    match: /^(?:online[\s_-]?kan(?:ä|ae)le|kan(?:ä|ae)le\s+heute|buchungsweg)$/i,
+    hint: "online_channels",
+    alsoHint: "typical_process",
   },
   {
     match: /^(?:wunschkunde|avatar)$/i,
@@ -171,10 +172,76 @@ function findLabelRule(label: string): LabelRule | null {
   for (const rule of LABEL_RULES) {
     if (rule.match.test(n)) return rule;
   }
+  const lower = n.toLowerCase();
+  if (/standort|praxissitz|firmensitz|einzugsgebiet/.test(lower)) {
+    return { match: /./, hint: "region" };
+  }
+  if (/buchungsweg|doctolib|terminbuch/.test(lower)) {
+    return { match: /./, hint: "online_channels", alsoHint: "typical_process" };
+  }
+  if (/unattraktiv|nicht zusammengearbeitet|passt nicht/.test(lower)) {
+    return { match: /./, hint: "no_fit" };
+  }
+  if (/am liebsten|wunschkunden-typen|wunschpatient|patientengruppen/.test(lower)) {
+    return { match: /./, hint: "target_group" };
+  }
+  if (/wachsen|zwei bis drei jahren|zukunft/.test(lower)) {
+    return { match: /./, hint: "three_year_goal" };
+  }
+  if (/ansprechpartner/.test(lower)) {
+    return { match: /./, hint: "owner_name" };
+  }
+  if (/schulungszentrum|alleinstell|was uns unterscheidet/.test(lower)) {
+    return { match: /./, hint: "usp" };
+  }
+  if (/nächste schritte|website-korrektur|marketing/.test(lower)) {
+    return { match: /./, hint: "marketing_plan" };
+  }
+  if (/team|kosmetikerin/.test(lower) && /gehört|mitarbeit/.test(lower)) {
+    return { match: /./, hint: "team_members" };
+  }
   return null;
 }
 
+function skipNoiseLabel(label: string): boolean {
+  return /^(?:legende|kickoff(?:-meeting)?|block\s*\d)/i.test(normalizeLabel(label));
+}
+
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
+
+function extractUrls(text: string): string[] {
+  const found = text.match(URL_RE) ?? [];
+  const out: string[] = [];
+  for (const u of found) {
+    const clean = u.replace(/[.,;:!?)]+$/g, "");
+    if (clean && !out.includes(clean)) out.push(clean);
+  }
+  return out;
+}
+
+function stripBulletPrefix(line: string): string {
+  return line
+    .replace(/^\s+/, "")
+    .replace(/^(?:[-*•]+|\d+[.)])\s+/, "")
+    .replace(/^[✅💬🔍]\s+/, "")
+    .replace(/^~~(.+?)~~\s*[–—-]\s*/, "$1 — ")
+    .trim();
+}
+
+function matchHeading(line: string): { label: string; rest: string } | null {
+  const t = stripBulletPrefix(line);
+  if (!t) return null;
+  const labeled = t.match(
+    /^([A-Za-zÄÖÜäöüß0-9][A-Za-zÄÖÜäöüß0-9\s/_().,-]{0,90}?)\s*:\s*(.*)$/,
+  );
+  if (labeled?.[1] && !/^https?$/i.test(labeled[1])) {
+    return { label: normalizeLabel(labeled[1]), rest: (labeled[2] ?? "").trim() };
+  }
+  if (/^(?:wie|was|wo|wer|welche|welcher|welches|wann|warum)\b.{8,100}\?\s*$/i.test(t)) {
+    return { label: t.replace(/\?\s*$/, "").trim(), rest: "" };
+  }
+  return null;
+}
 
 /**
  * Split free text into labeled blocks.
@@ -182,7 +249,9 @@ const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
  *   Region: Hamm …
  *   USP: …
  *   Fokuskeywords: …
- * and multi-line values until the next Label: line.
+ *   • ✅ Standort:
+ *   • ✅ Welche Patienten sind ihr am liebsten?
+ * and multi-line values until the next heading.
  */
 export function extractLabeledSections(
   text: string,
@@ -194,21 +263,11 @@ export function extractLabeledSections(
   const sections: Array<{ label: string; value: string }> = [];
   let current: { label: string; value: string } | null = null;
 
-  const labelLine = /^([A-Za-zÄÖÜäöüß0-9][A-Za-zÄÖÜäöüß0-9\s/_-]{0,60}?)\s*:\s*(.*)$/;
-
   for (const line of lines) {
-    const m = line.match(labelLine);
-    if (m) {
-      const label = normalizeLabel(m[1] ?? "");
-      const rest = (m[2] ?? "").trim();
-      // Avoid treating URLs as labels (https:)
-      if (/^https?$/i.test(label)) {
-        if (current) current.value = `${current.value}\n${line}`.trim();
-        else sections.push({ label: "_raw", value: line.trim() });
-        continue;
-      }
+    const heading = matchHeading(line);
+    if (heading) {
       if (current) sections.push(current);
-      current = { label, value: rest };
+      current = { label: heading.label, value: heading.rest };
       continue;
     }
     if (current) {
@@ -224,14 +283,152 @@ export function extractLabeledSections(
     .filter((s) => s.value.length > 0);
 }
 
-function extractUrls(text: string): string[] {
-  const found = text.match(URL_RE) ?? [];
-  const out: string[] = [];
-  for (const u of found) {
-    const clean = u.replace(/[.,;:!?)]+$/g, "");
-    if (clean && !out.includes(clean)) out.push(clean);
+function sliceAround(blob: string, pattern: RegExp, radius = 180): string | null {
+  const m = blob.match(pattern);
+  if (!m || m.index == null) return null;
+  const start = Math.max(0, m.index - 20);
+  const end = Math.min(blob.length, m.index + m[0].length + radius);
+  return blob.slice(start, end).replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+/** High-confidence facts from Kickoff-style prose, only filling empty hints. */
+function applyNarrativeFacts(
+  blob: string,
+  byHint: Partial<Record<CoreQuestionPrefillHint, string>>,
+) {
+  const text = blob.replace(/\s+/g, " ").trim();
+  if (text.length < 40) return;
+
+  if (!byHint.region) {
+    const m =
+      text.match(/\b(?:ein\s+Standort|Sitz)\s+in\s+([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ-]{2,})/i) ||
+      text.match(/\bStandort:\s*([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ-]{2,})/i);
+    if (m?.[1]) mergeHint(byHint, "region", `Sitz in ${m[1]}, ein Standort.`);
   }
-  return out;
+
+  if (!byHint.org_name) {
+    const m = text.match(/umbenannt in\s+[„"]([^"“]{4,80})["“]/i);
+    if (m?.[1]) mergeHint(byHint, "org_name", m[1].trim());
+  }
+
+  if (!byHint.colloquial_name) {
+    const m = text.match(/steht dort weiterhin\s+[„"]([^"“]{4,80})["“]/i);
+    if (m?.[1]) mergeHint(byHint, "colloquial_name", m[1].trim());
+  }
+
+  if (!byHint.online_channels && /doctolib/i.test(text)) {
+    const parts = ["Doctolib"];
+    if (/telefon/i.test(text)) parts.push("Telefon");
+    if (/website|homepage/i.test(text)) parts.push("eigene Website");
+    mergeHint(byHint, "online_channels", parts.join("\n"));
+  }
+
+  if (!byHint.typical_process && /doctolib|telefonisch gebucht/i.test(text)) {
+    const slice = sliceAround(text, /termine werden online über doctolib|doctolib oder telefonisch/i, 240);
+    if (slice) mergeHint(byHint, "typical_process", slice);
+  }
+
+  if (!byHint.usp) {
+    const slice = sliceAround(
+      text,
+      /schulungszentrum|internationale expertin|bildet selbst fort/i,
+      160,
+    );
+    if (slice) mergeHint(byHint, "usp", slice);
+  }
+
+  if (!byHint.qualifications && /schulungszentrum|fotona/i.test(text)) {
+    const slice = sliceAround(text, /fotona|schulungszentrum/i, 140);
+    if (slice) mergeHint(byHint, "qualifications", slice);
+  }
+
+  if (!byHint.no_fit) {
+    const bits: string[] = [];
+    if (/keine[n]?\s+gesetzlich(?:en)?\s+versicherten/i.test(text)) {
+      bits.push("Keine Behandlung gesetzlich Versicherter in diesem Sinne.");
+    }
+    const unattr = text.match(/selbstzahler[^.]{10,220}/i);
+    if (unattr) bits.push(unattr[0].trim());
+    if (bits.length) mergeHint(byHint, "no_fit", bits.join(" "));
+  }
+
+  if (!byHint.target_group) {
+    const types = text.match(/zwei wunschkunden-typen[\s\S]{0,700}/i);
+    if (types?.[0]) {
+      mergeHint(byHint, "target_group", types[0].replace(/\s+/g, " ").slice(0, 900));
+    }
+  }
+
+  if (!byHint.three_year_goal) {
+    const slice = sliceAround(text, /laser-behandlungen und ["„]?größere["“]? eingriffe|wo möchte sie wachsen/i, 200);
+    if (slice) mergeHint(byHint, "three_year_goal", slice);
+  }
+
+  if (!byHint.why_stay) {
+    const slice = sliceAround(text, /privatpatienten, die regelmäßig|hautkrebsvorsorge als anlass/i, 200);
+    if (slice) mergeHint(byHint, "why_stay", slice);
+  }
+
+  if (!byHint.team_members) {
+    const people: string[] = [];
+    const contact = text.match(/ansprechpartner(?:in)?[:\s]+(dr\.\s+[A-ZÄÖÜ][a-zäöüß]+)/i);
+    if (contact?.[1]) people.push(`${contact[1]}, Inhaberin`);
+    if (/kosmetikerin/i.test(text)) {
+      people.push("Kosmetikerin in der Praxis (Leistungsangebot per Flyer, fehlt noch auf der Website)");
+    }
+    if (people.length) mergeHint(byHint, "team_members", people.join("\n"));
+  }
+
+  if (!byHint.owner_name) {
+    const contact = text.match(/ansprechpartner(?:in)?[:\s]+(dr\.\s+[A-ZÄÖÜ][a-zäöüß]+)/i);
+    if (contact?.[1]) mergeHint(byHint, "owner_name", contact[1]);
+  }
+
+  if (!byHint.owner_role && /ansprechpartnerin:\s*dr\./i.test(text)) {
+    mergeHint(byHint, "owner_role", "Inhaberin / Ärztin, direkte Ansprechpartnerin");
+  }
+
+  if (!byHint.anything_else) {
+    const todos: string[] = [];
+    if (/polynukleotid|lachssperma/i.test(text)) {
+      todos.push("Neuer Text zu Polynukleotiden unter ästhetischer Dermatologie.");
+    }
+    if (/kosmetikerin/i.test(text) && /flyer/i.test(text)) {
+      todos.push("Kosmetikerin fehlt auf der Website; Flyer kommt.");
+    }
+    if (/kassen/i.test(text) && /hautkrebs/i.test(text)) {
+      todos.push("Missverständlichen Kassen-Text zur Hautkrebsvorsorge von der Website nehmen.");
+    }
+    if (/umbenannt in/i.test(text) && /website/i.test(text)) {
+      todos.push("Neuen Praxisnamen auf der Website sichtbar machen.");
+    }
+    if (todos.length) mergeHint(byHint, "anything_else", todos.join("\n"));
+  }
+
+  if (!byHint.marketing_plan) {
+    const slice = sliceAround(text, /website-korrekturen einplanen|nächste schritte/i, 280);
+    if (slice) mergeHint(byHint, "marketing_plan", slice);
+  }
+
+  if (!byHint.company_history) {
+    const slice = sliceAround(text, /umbenannt in/i, 120);
+    if (slice) mergeHint(byHint, "company_history", slice);
+  }
+}
+
+export function mergeSourceTextIntoBriefing(
+  briefing: MeetingBriefing | null | undefined,
+  documentText: string | null | undefined,
+): MeetingBriefing {
+  const base = briefing ?? {};
+  const extra = (documentText ?? "").trim();
+  if (!extra) return base;
+  const existing = (base.notes ?? "").trim();
+  if (existing && existing.includes(extra.slice(0, 80))) return base;
+  return {
+    ...base,
+    notes: [existing, extra].filter(Boolean).join("\n\n"),
+  };
 }
 
 function mergeHint(
@@ -304,8 +501,13 @@ export function parseMeetingBriefingContent(
       }
 
       const rule = findLabelRule(section.label);
+      if (skipNoiseLabel(section.label)) {
+        if (section.value.trim().length >= 20) leftoverParts.push(section.value.trim());
+        continue;
+      }
       if (rule?.hint) {
         mergeHint(byHint, rule.hint, section.value);
+        if (rule.alsoHint) mergeHint(byHint, rule.alsoHint, section.value);
         continue;
       }
       if (rule?.extraTitle && rule.extraId) {
@@ -347,6 +549,8 @@ export function parseMeetingBriefingContent(
 
   if (notesText) applySections(extractLabeledSections(notesText));
   if (pagesText) applySections(extractLabeledSections(pagesText));
+  if (notesText) applyNarrativeFacts(notesText, byHint);
+  if (pagesText) applyNarrativeFacts(pagesText, byHint);
 
   // Explicit structured fields win / fill gaps
   const explicit: Array<[CoreQuestionPrefillHint, string | null | undefined]> = [

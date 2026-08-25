@@ -190,7 +190,15 @@ export function isPlausiblePrefill(
     hint === "elevator_pitch" ||
     hint === "colloquial_name" ||
     hint === "known_for" ||
-    hint === "target_group"
+    hint === "target_group" ||
+    hint === "no_fit" ||
+    hint === "typical_process" ||
+    hint === "owner_role" ||
+    hint === "three_year_goal" ||
+    hint === "qualifications" ||
+    hint === "why_stay" ||
+    hint === "anything_else" ||
+    hint === "marketing_plan"
   ) {
     if (looksLikePriceOrTreatmentList(t) || looksLikeTruncatedSnippet(t)) return false;
     if (looksLikeSiteChromeTitle(t)) return false;
