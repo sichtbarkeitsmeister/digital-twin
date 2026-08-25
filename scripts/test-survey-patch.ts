@@ -46,6 +46,12 @@ function fieldById(survey: Survey, fieldId: string) {
   return null;
 }
 
+function rankingOptionLabel(survey: Survey, fieldId: string, index: number): string | null {
+  const found = fieldById(survey, fieldId);
+  if (!found || found.field.type !== "ranking") return null;
+  return found.field.options[index]?.label ?? null;
+}
+
 const westpruefungProposal = {
   kind: "patch_survey_definition" as const,
   summary:
@@ -188,15 +194,11 @@ assert.match(
   /wortwörtliche Formulierungen/,
 );
 assert.equal(
-  fieldById(applied.survey, "core_persona_goals")?.field.type === "ranking"
-    ? fieldById(applied.survey, "core_persona_goals")!.field.options[0]?.label
-    : null,
+  rankingOptionLabel(applied.survey, "core_persona_goals", 0),
   "Testament / Erbvertrag rechtssicher gestalten",
 );
 assert.equal(
-  fieldById(applied.survey, "core_persona_trust_signals")?.field.type === "ranking"
-    ? fieldById(applied.survey, "core_persona_trust_signals")!.field.options[0]?.label
-    : null,
+  rankingOptionLabel(applied.survey, "core_persona_trust_signals", 0),
   "Langjährige Erfahrung und Spezialisierung im Erbrecht",
 );
 
