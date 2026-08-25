@@ -181,7 +181,10 @@ export function FragebogenFromOrgWizard(props: {
       setPersonaCore(res.data.personaCore);
       setSelectedKeys(res.data.anbieterCore.map((c) => c.key));
       if (res.data.firstConversation.wunschkundeLabel) {
-        setWunschkundeLabel(res.data.firstConversation.wunschkundeLabel);
+        const saved = res.data.firstConversation.wunschkundeLabel.trim();
+        if (saved && !/^(wunsch)?(kunde|patient|mandant|avatar)s?$/i.test(saved.replace(/\s+/g, ""))) {
+          setWunschkundeLabel(saved);
+        }
       }
       setLoadingCtx(false);
 
@@ -341,6 +344,12 @@ export function FragebogenFromOrgWizard(props: {
     }
     if (!clientAudience || !audienceVocab) {
       setError("Bitte zuerst wählen, wie über Anbieter, Kunden und die Arbeit gesprochen wird.");
+      return;
+    }
+    if (purpose === "persona" && wunschkundeLabel.trim().length < 3) {
+      setError(
+        "Bitte angeben, welche Zielgruppe dieser Persona-Fragebogen beschreibt — z. B. Privatpatient mit Vorsorge oder Laser-Interessent. Pro Typ einen eigenen Fragebogen erzeugen.",
+      );
       return;
     }
     const crawlRunning = Boolean(activeCrawl && ACTIVE_CRAWL.has(activeCrawl.status));
@@ -957,14 +966,21 @@ export function FragebogenFromOrgWizard(props: {
             </button>
           </div>
           {purpose === "persona" ? (
-            <div className="grid max-w-md gap-2">
-              <Label htmlFor="wunschkunde">Wunschkunde / Avatar-Name</Label>
+            <div className="grid max-w-lg gap-2">
+              <Label htmlFor="wunschkunde">
+                Welche Zielgruppe ist das? ({audienceVocab?.singular ?? "Wunschkunde"})
+              </Label>
               <Input
                 id="wunschkunde"
                 value={wunschkundeLabel}
                 onChange={(e) => setWunschkundeLabel(e.target.value)}
-                placeholder="z. B. Julia Schröder"
+                placeholder="z. B. Privatpatient mit Vorsorge oder Laser-Interessent"
               />
+              <p className="text-xs text-secondary">
+                Ein Fragebogen = eine Zielgruppe. Den Wizard für den zweiten Typ noch einmal
+                starten und hier den anderen Namen eintragen — sonst entstehen zwei gleiche
+                Entwürfe.
+              </p>
             </div>
           ) : null}
         </CardContent>

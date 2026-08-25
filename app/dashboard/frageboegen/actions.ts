@@ -317,6 +317,16 @@ export async function previewFragebogenFromOrgAction(
       message: "Interne Recherche-Fragebögen (TEIL C) werden derzeit nicht angelegt.",
     };
   }
+  if (parsed.data.purpose === "persona") {
+    const label = parsed.data.wunschkundeLabel?.trim() ?? "";
+    if (label.length < 3) {
+      return {
+        ok: false,
+        message:
+          "Bitte angeben, welche Zielgruppe dieser Persona-Fragebogen beschreibt — z. B. Privatpatient mit Vorsorge oder Laser-Interessent.",
+      };
+    }
+  }
 
   try {
     const draft = await buildFragebogenReviewDraft({

@@ -759,9 +759,61 @@ export function meetingExtraFitsPurpose(
   return true;
 }
 
-/** Keep a 3–5-sentence portrait of ONE person, not a list of Wunschkunden-Typen. */
-export function oneIdealPersonDescription(value: string): string {
+export function isGenericPersonaLabel(label: string | null | undefined): boolean {
+  const compact = (label ?? "").replace(/\s+/g, "");
+  return compact.length < 3 || /^(wunsch)?(kunde|patient|mandant|avatar)s?$/i.test(compact);
+}
+
+function normalizePersonaTypeKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function typeChunkMatchesLabel(chunk: string, label: string): boolean {
+  const a = normalizePersonaTypeKey(label);
+  const b = normalizePersonaTypeKey(chunk);
+  if (a.length < 3) return false;
+  if (b.includes(a) || a.includes(b.slice(0, Math.min(80, b.length)))) return true;
+  const tokens = a.split(" ").filter((token) => token.length >= 4);
+  if (tokens.length === 0) return b.includes(a);
+  return tokens.every((token) => b.includes(token));
+}
+
+function splitPersonaTypeChunks(text: string): string[] {
+  const numbered = [...text.matchAll(/(?:^|\s)(\d+)\.\s+([\s\S]*?)(?=(?:\s\d+\.\s+)|$)/g)]
+    .map((match) => match[2]!.trim())
+    .filter((chunk) => chunk.length > 15);
+  if (numbered.length >= 2) return numbered;
+
+  const titled = text.split(
+    /(?=\b[A-ZÄÖÜ][\wÄÖÜäöüß-]{2,40}(?:\s+[\wÄÖÜäöüß-]{2,24}){0,6}\s+[–-]\s+)/,
+  );
+  const cleaned = titled.map((chunk) => chunk.trim()).filter((chunk) => chunk.length > 15);
+  return cleaned.length >= 2 ? cleaned : [text];
+}
+
+/**
+ * Keep a 3–5-sentence portrait of ONE person.
+ * If `label` names a type from the meeting (e.g. Laser-Interessent), pick that chunk;
+ * if the label does not match, return "" so the KI can fill the other type.
+ */
+export function oneIdealPersonDescription(
+  value: string,
+  label?: string | null,
+): string {
   const text = value.replace(/\s+/g, " ").trim();
+  const chunks = splitPersonaTypeChunks(text);
+  if (!isGenericPersonaLabel(label) && chunks.length > 0) {
+    const match = chunks.find((chunk) => typeChunkMatchesLabel(chunk, label ?? ""));
+    if (match) return match.trim();
+    if (!typeChunkMatchesLabel(text, label ?? "")) return "";
+  }
   const inventory = text.search(
     /(?:zwei\s+wunschkunden-typen|\blaser-interessent\s+[–-]\s+jemand|\b\d+\.\s+[A-ZÄÖÜ])/i,
   );
