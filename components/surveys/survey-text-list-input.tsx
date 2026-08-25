@@ -2,8 +2,8 @@
 
 import { Plus, X } from "lucide-react";
 
+import { SurveyOpenAnswerField } from "@/components/surveys/survey-open-answer-field";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SurveyOption } from "@/lib/surveys/types";
 import {
@@ -66,12 +66,11 @@ export function SurveyTextListInput(props: {
                 </Button>
               ) : null}
             </div>
-            <Input
+            <SurveyOpenAnswerField
               id={`${props.fieldId}_${entry.id}`}
               value={entry.value}
               disabled={props.disabled}
               placeholder={props.placeholder ?? "Antwort eingeben"}
-              className="h-11 text-base lg:h-10 lg:text-sm"
               onChange={(e) =>
                 props.onChange(
                   setTextListEntryValue(

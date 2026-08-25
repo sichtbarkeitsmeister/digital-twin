@@ -3,6 +3,7 @@
 import * as React from "react";
 import { HelpCircle, Plus, X } from "lucide-react";
 
+import { SurveyOpenAnswerField } from "@/components/surveys/survey-open-answer-field";
 import { SurveyRankingInput } from "@/components/surveys/survey-ranking-input";
 import { SurveyTextListInput } from "@/components/surveys/survey-text-list-input";
 import { FormattedInfoText } from "@/components/surveys/formatted-info-text";
@@ -696,11 +697,10 @@ export function SurveyFill({ slug, survey }: { slug: string; survey: Survey }) {
                     </div>
 
                     {field.type === "text" ? (
-                      <Input
+                      <SurveyOpenAnswerField
                         value={(answers[field.id] as string) ?? ""}
                         onChange={(e) => setAnswer(field.id, e.target.value)}
                         placeholder={survey.answerPlaceholder?.trim() || "Deine Antwort…"}
-                        className="h-11 text-base lg:h-9 lg:text-sm"
                       />
                     ) : null}
 

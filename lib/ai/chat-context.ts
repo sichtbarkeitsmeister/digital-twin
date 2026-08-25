@@ -56,6 +56,8 @@ type PageContext = {
   notificationEmails?: string[];
   organisationId?: string | null;
   agentId?: string | null;
+  /** Unsaved Fragebogen-wizard draft currently open for review. */
+  liveWizardDraft?: boolean;
 };
 
 export type KnownDtAgentSnapshot = {
@@ -147,6 +149,7 @@ export function buildSurveyChatStaticSystemText(): string {
     "For duplicate-id fixes: keep the first occurrence unchanged, update only subsequent duplicates to unique stable ids.",
     "When user asks to edit existing survey, use surveyId from known surveys.",
     "Candidate survey contexts without `definition` only include stepOutline (step/field ids + titles) — use patch_survey_definition with those ids. Full `definition` is present only for the survey currently open in the builder.",
+    "If pageContext.liveWizardDraft is true, the candidate with pageContext.surveyId is the UNSAVED questionnaire currently open in „Fragebögen erzeugen“. When the user asks to change questions, wording, options, order or title, patch THAT survey with patch_survey_definition (surveyId = pageContext.surveyId). Do NOT use create_survey unless they explicitly want a separate new survey. Do NOT publish, unpublish, delete, or assign_folder this live draft — it is not saved yet.",
     "Use duplicateIdReport from candidate survey contexts when user asks to check duplicate IDs in existing surveys.",
     "If there are multiple plausible matching surveys (e.g. two cafe surveys), ask a clarifying question first and DO NOT emit action JSON yet.",
     "When user asks to create survey, return full survey JSON with exact version 1 schema.",

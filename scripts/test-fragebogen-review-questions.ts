@@ -4,7 +4,10 @@ import {
   applyReviewQuestionType,
   buildSurveyAndAnswersFromReview,
   createEmptyExtraQuestion,
+  createSurveyDefinitionId,
+  mergeSurveyIntoReviewDraft,
   reviewQuestionToSurveyField,
+  surveyFromReview,
   type FragebogenReviewDraft,
   type ReviewQuestionItem,
 } from "../lib/surveys/fragebogen-review-draft";
@@ -89,6 +92,62 @@ assert.equal(extraStep!.fields[0]?.type, "radio");
 assert.equal(extraStep!.fields[0]?.required, true);
 assert.equal(extraStep!.fields[1]?.type, "checkbox");
 assert.equal(built.answers.core_persona_name, "Max Mustermann");
+
+const portfolioPrefill: ReviewQuestionItem = {
+  id: "core_portfolio",
+  kind: "core",
+  coreKey: "portfolio",
+  title: "Welche Leistungen?",
+  description: "",
+  included: true,
+  required: true,
+  type: "checkbox",
+  options: [
+    { id: "portfolio_1", label: "Arbeitsrecht" },
+    { id: "portfolio_2", label: "Familienrecht" },
+    { id: "portfolio_3", label: "Mietrecht" },
+  ],
+  allowOtherOption: true,
+  answer: "Arbeitsrecht\nFamilienrecht",
+  answerSource: "crawl",
+  answerNote: "Aus Crawl",
+};
+const portfolioBuilt = buildSurveyAndAnswersFromReview({
+  draft: {
+    ...baseDraft([portfolioPrefill]),
+    purpose: "anbieter",
+    title: "Anbieter: Leistungen",
+  },
+  savePrefills: true,
+});
+assert.deepEqual(portfolioBuilt.answers.core_portfolio, ["Arbeitsrecht", "Familienrecht"]);
+assert.equal(portfolioBuilt.definition.steps[0]?.title, "Das Unternehmen");
+
+const kanzleiName: ReviewQuestionItem = {
+  id: "core_company_name",
+  kind: "core",
+  coreKey: "company_name",
+  title: "Wie lautet der vollständige Name der Kanzlei?",
+  description: "",
+  included: true,
+  required: true,
+  type: "text",
+  options: [],
+  answer: "",
+  answerSource: "none",
+  answerNote: "",
+};
+const kanzleiBuilt = buildSurveyAndAnswersFromReview({
+  draft: {
+    ...baseDraft([kanzleiName]),
+    purpose: "anbieter",
+    title: "Anbieter: Kanzlei",
+    clientAudience: "kanzlei",
+  },
+  savePrefills: false,
+});
+assert.equal(kanzleiBuilt.definition.steps[0]?.title, "Die Kanzlei");
+assert.match(kanzleiBuilt.definition.infoText ?? "", /Mandant|echten Erfahrungen/);
 
 const ranking = applyReviewQuestionType(
   { ...createEmptyExtraQuestion(), title: "Bitte priorisieren" },
@@ -203,5 +262,22 @@ const withAiWarning = buildSurveyAndAnswersFromReview({
   savePrefills: true,
 });
 assert.equal(withAiWarning.answers.core_persona_name, "Max Mustermann");
+
+const definitionId = "11111111-1111-4111-8111-111111111111";
+assert.match(createSurveyDefinitionId(), /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+const stableDraft = {
+  ...baseDraft([coreQuestion()]),
+  definitionId,
+};
+const fromStable = surveyFromReview(stableDraft);
+assert.equal(fromStable.id, definitionId);
+const merged = mergeSurveyIntoReviewDraft(stableDraft, {
+  ...fromStable,
+  title: "Persona: Gepatcht",
+});
+assert.equal(merged.title, "Persona: Gepatcht");
+assert.equal(merged.definitionId, definitionId);
+assert.equal(merged.questions[0]?.answer, "Max Mustermann");
+assert.equal(merged.questions[0]?.coreKey, "persona_name");
 
 console.log("fragebogen-review-questions: all ok");

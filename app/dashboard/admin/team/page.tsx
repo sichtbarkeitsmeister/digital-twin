@@ -80,7 +80,7 @@ async function AdminPlatformTeamPageContent() {
         <CardHeader>
           <CardTitle className="tracking-tight">Admin-Ansicht vergeben</CardTitle>
           <CardDescription>
-            Kolleginnen per E-Mail freischalten. Die Liste zeigt nur aktuelle Plattform-Admins.
+            Kolleginnen per E-Mail freischalten. Wenn ein Konto hängt: löschen und neu einladen.
           </CardDescription>
         </CardHeader>
         <CardContent>

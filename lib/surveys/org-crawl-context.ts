@@ -148,12 +148,14 @@ export async function loadOrgCrawlContext(
     about: pageExcerpts.filter((p) => p.title?.startsWith("Über uns:")),
     team: pageExcerpts.filter((p) => p.title?.startsWith("Team:")),
     services: pageExcerpts.filter((p) => p.title?.startsWith("Leistungen:")),
+    legal: pageExcerpts.filter((p) => p.title?.startsWith("Impressum:")),
     other: pageExcerpts.filter(
       (p) =>
         !p.title?.startsWith("Presse:") &&
         !p.title?.startsWith("Über uns:") &&
         !p.title?.startsWith("Team:") &&
-        !p.title?.startsWith("Leistungen:"),
+        !p.title?.startsWith("Leistungen:") &&
+        !p.title?.startsWith("Impressum:"),
     ),
   };
 
@@ -187,6 +189,7 @@ export async function loadOrgCrawlContext(
     ...block("Über uns", grouped.about),
     ...block("Team", grouped.team),
     ...block("Leistungen / Performance", grouped.services),
+    ...block("Impressum / Rechtliches", grouped.legal),
     ...block("Weitere Seiten", grouped.other),
   ].join("\n");
 

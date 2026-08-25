@@ -30,7 +30,19 @@ import {
   type AiChatStoredAttachment,
 } from "@/components/surveys/survey-ai-chat-thread";
 import type { AiChatAction } from "@/components/surveys/survey-ai-action-trace";
-import { countSurveyDeletesInProposal } from "@/lib/ai/survey-assistant-types";
+import {
+  countSurveyDeletesInProposal,
+  parseSurveyAiProposal,
+} from "@/lib/ai/survey-assistant-types";
+import {
+  applySurveyProposalToWizardDraft,
+  isLiveWizardSurveyProposal,
+} from "@/lib/surveys/apply-wizard-survey-proposal";
+import {
+  getFragebogenWizardDraft,
+  setFragebogenWizardDraft,
+} from "@/lib/surveys/fragebogen-wizard-draft-store";
+import type { Survey } from "@/lib/surveys/types";
 import {
   isSurveyAiMultimodalMime,
   isSurveyAiMultimodalImageMime,
@@ -54,6 +66,8 @@ type PageContext = {
   notificationEmails?: string[];
   organisationId?: string | null;
   agentId?: string | null;
+  liveWizardDraft?: boolean;
+  currentSurvey?: Survey;
 };
 
 type AttachmentDraft = {
@@ -211,7 +225,9 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       props.pageContext.page === "survey_list"
         ? "Du bist gerade in der Umfrage-Liste."
         : props.pageContext.page === "survey_builder_new"
-          ? "Du erstellst gerade eine neue Umfrage."
+          ? props.pageContext.currentSurvey
+            ? "Du prüfst gerade einen neuen Fragebogen-Entwurf. Änderungen gelten direkt in der Prüfung."
+            : "Du erstellst gerade eine neue Umfrage."
           : props.pageContext.page === "dt_agents"
             ? "Du bist in der Agenten-Verwaltung (DigitalTwin)."
             : props.pageContext.page === "survey_to_agent"
@@ -229,6 +245,9 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         ? `Sichtbarkeit: ${props.pageContext.visibility}`
         : null,
       props.pageContext.slug ? `Slug: ${props.pageContext.slug}` : null,
+      props.pageContext.currentSurvey
+        ? "Offener Entwurf (noch nicht gespeichert)"
+        : null,
     ]
       .filter(Boolean)
       .join(" | ");
@@ -789,6 +808,32 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       if (!confirmed) return;
     }
     setPendingActionId(actionId);
+    const liveSurveyId = props.pageContext.currentSurvey?.id ?? null;
+    const parsedProposal =
+      proposalSource?.proposal_json != null
+        ? parseSurveyAiProposal(proposalSource.proposal_json)
+        : null;
+    let liveDraft = false;
+    let nextLiveDraft = null as ReturnType<typeof getFragebogenWizardDraft>;
+    if (
+      parsedProposal?.success &&
+      isLiveWizardSurveyProposal(parsedProposal.data, liveSurveyId)
+    ) {
+      const draft = getFragebogenWizardDraft();
+      if (!draft) {
+        setStatus("Kein offener Fragebogen-Entwurf zum Übernehmen.");
+        setPendingActionId(null);
+        return;
+      }
+      const applied = applySurveyProposalToWizardDraft(draft, parsedProposal.data);
+      if (!applied.ok) {
+        setStatus(applied.message);
+        setPendingActionId(null);
+        return;
+      }
+      liveDraft = true;
+      nextLiveDraft = applied.draft;
+    }
     const res = await fetch(
       `/api/ai/chats/${selectedChatId}/actions/${actionId}/apply`,
       {
@@ -796,6 +841,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           organisationId: props.pageContext.organisationId ?? null,
+          liveDraft,
         }),
       },
     );
@@ -804,13 +850,16 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       message: string;
       navigateTo?: string | null;
     };
+    if (data.ok && liveDraft && nextLiveDraft) {
+      setFragebogenWizardDraft(nextLiveDraft, "ai");
+    }
     setStatus(data.message, data.ok ? "success" : "error");
     if (!data.ok) {
       await maybeTriggerAutoFixForFailedAction(actionId, data.message);
     }
-    if (data.ok && autoNavigate && data.navigateTo)
+    if (data.ok && !liveDraft && autoNavigate && data.navigateTo)
       router.push(data.navigateTo);
-    if (data.ok) router.refresh();
+    if (data.ok && !liveDraft) router.refresh();
     await loadChat(selectedChatId);
     await loadChats();
     setPendingActionId(null);
