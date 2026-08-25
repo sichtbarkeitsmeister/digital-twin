@@ -468,6 +468,13 @@ function looksLikePricedServiceName(name: string): boolean {
   return looksLikeServiceLabel(name);
 }
 
+/** “pro Region” + next heading glued: RegionHyaluronsäure-Filler → Hyaluronsäure-Filler */
+const GLUED_PRICE_UNIT_PREFIX = /^(?:Region|Ampulle|Sitzung|Zone|Bereich|Fläche|Einheit)(?=[A-ZÄÖÜ])/;
+
+function stripGluedPriceUnit(name: string): string {
+  return name.replace(GLUED_PRICE_UNIT_PREFIX, "").trim();
+}
+
 function serviceLabelFromTitle(title: string | null): string | null {
   const stripped = stripPageKindPrefix(title ?? "");
   if (!stripped) return null;
@@ -495,7 +502,7 @@ export function extractPricedServiceNames(text: string): string[] {
   );
   let match: RegExpExecArray | null;
   while ((match = re.exec(prepared))) {
-    const name = (match[1] ?? "").replace(/\s+/g, " ").trim();
+    const name = stripGluedPriceUnit((match[1] ?? "").replace(/\s+/g, " ").trim());
     if (!looksLikePricedServiceName(name)) continue;
     if (names.some((item) => item.toLowerCase() === name.toLowerCase())) continue;
     names.push(name);
@@ -504,7 +511,7 @@ export function extractPricedServiceNames(text: string): string[] {
 }
 
 function pushUniqueLabel(target: string[], value: string) {
-  const cleaned = value.replace(/\s+/g, " ").trim();
+    const cleaned = stripGluedPriceUnit(value.replace(/\s+/g, " ").trim());
   if (!looksLikeServiceLabel(cleaned)) return;
   if (target.some((item) => item.toLowerCase() === cleaned.toLowerCase())) return;
   target.push(cleaned);
@@ -523,7 +530,7 @@ function splitOfferedServices(sentence: string): string[] {
 export function parseServiceLabelList(text: string): string[] {
   const labels: string[] = [];
   const push = (value: string) => {
-    const cleaned = value.replace(/\s+/g, " ").trim().replace(/[.,;:]+$/, "");
+    const cleaned = stripGluedPriceUnit(value.replace(/\s+/g, " ").trim().replace(/[.,;:]+$/, ""));
     if (!looksLikeServiceLabel(cleaned)) return;
     if (labels.some((item) => item.toLowerCase() === cleaned.toLowerCase())) return;
     labels.push(cleaned);

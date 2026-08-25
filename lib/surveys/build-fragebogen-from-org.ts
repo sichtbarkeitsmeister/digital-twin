@@ -50,12 +50,14 @@ import {
   createSurveyDefinitionId,
 } from "@/lib/surveys/fragebogen-review-draft";
 import {
+  applyClientAudienceToText,
   resolveAudienceVocab,
   type ClientAudienceKind,
   type ClientAudienceVocab,
 } from "@/lib/surveys/client-audience";
 import { customizeCoreQuestions, mergeSuggestedCheckboxOptions } from "@/lib/surveys/customize-fragebogen";
 import { generatedChoiceCustomOptionFlags } from "@/lib/surveys/choice-custom-options";
+import { parseAiExtraQuestions } from "@/lib/surveys/ai-extra-questions";
 
 export type { MeetingBriefing, ExtraQuestionPlacement, FragebogenReviewDraft, ReviewQuestionItem };
 export { buildSurveyAndAnswersFromReview } from "@/lib/surveys/fragebogen-review-draft";
@@ -92,7 +94,7 @@ async function generateExtrasAndAiPrefills(input: {
   serviceLabels: string[];
   maxExtras?: number;
 }): Promise<{
-  extras: string[];
+  extras: Array<{ title: string; description: string }>;
   aiPrefills: Record<string, PrefillDraft>;
   optionSets: Record<string, string[]>;
   warning: string | null;
@@ -131,14 +133,17 @@ async function generateExtrasAndAiPrefills(input: {
       timeoutMs: 35_000,
       stream: true,
       system:
-        "Du füllst deutsche Fragebogen-Felder aus belegtem Kontext. Nichts erfinden. Nur JSON.",
+        "Du lieferst nur JSON. Prefills und optionSets nur aus belegtem Kontext — dort nichts erfinden. questions sind neue Fragen zu Lücken (keine Antworten erfinden).",
       messages: [
         {
           role: "user",
           content: `${audience}
 
-Offene Kernfragen:
+Offene Kernfragen (nur diese prefills füllen, wenn der Kontext es hergibt):
 ${targets.map((c) => `- [${c.key}] ${c.title}`).join("\n")}
+
+Bereits im Fragebogen — NICHT als Zusatzfrage wiederholen:
+${input.coreItems.map((c) => `- ${c.title}`).join("\n")}
 ${documentBlock}${meetingBlock}${servicesBlock}
 Crawl (Presse, Über uns, Team, Leistungen, Impressum zuerst):
 ${input.crawlSummary.slice(0, 9000)}
@@ -147,12 +152,16 @@ Fülle nur Felder, die der Kontext klar hergibt. Team, Leistungen, USP, Standort
 Strikt zuordnen — lieber weglassen als falsch:
 - company_name: nur offizieller Praxis-/Firmenname, nie Behandlungs- oder Preistext.
 - location_catchment: nur Sitz/Ort/Einzugsgebiet (z. B. Meerbusch), nie Preisliste. „pro Region“ bei Botox ist KEINE Region.
-- portfolio / Leistungen: nur Angebotsnamen (Laser, Botox, …), nie Impressum-, Datenschutz- oder Menü-Seitentitel.
+- portfolio / Leistungen: nur Angebotsnamen (Laser, Botox, …), nie Impressum-, Datenschutz- oder Menü-Seitentitel. Keine zusammengeklebten Wörter wie „RegionHyaluronsäure“.
 Leistungsnamen in optionSets.portfolio und optionSets.services_ranked (3–8 kurze Labels, keine Sätze, keine €-Preise).
 Für Persona außerdem optionSets.persona_goals, persona_objections, persona_alternatives, persona_budget (je 3–6 branchentypische Optionen).
-${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[]. Zusatzfragen mit ${vocab.singular}/${vocab.plural} und ${vocab.engagement}.` : "questions=[]."}
+${
+  input.includeAiExtras
+    ? `questions: genau ${maxExtras} Zusatzfragen, die oben NICHT vorkommen, aber für DIESE ${vocab.business} sinnvoll sind. Denk an Lücken aus Website/Leistungen/Branche (Geräte, Vorher-Nachher, gesetzlich/privat, Hyaluron-Marken, Abrechnung, Zielgruppe 40+, …). Jede Frage: title = die Frage, description = kurz warum + ein konkretes Antwort-Beispiel mit ${vocab.singular}/${vocab.engagement}. titles müssen Strings sein, keine Objekte.`
+    : "questions=[]."
+}
 
-{"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"upload"}],"optionSets":{"portfolio":["Leistung A"]},"questions":[]}`,
+{"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"upload"}],"optionSets":{"portfolio":["Leistung A"]},"questions":[{"title":"Welche Geräte setzt die ${vocab.business} ein, und wofür?","description":"Fachbegriffe für Texte. Beispiel: „Candela-Laser für Haarentfernung und Pigmente.“"}]}`,
         },
       ],
     });
@@ -209,8 +218,8 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
       for (const [key, rawLabels] of Object.entries(parsed.optionSets)) {
         if (!Array.isArray(rawLabels)) continue;
         const labels = rawLabels
-          .map((item) => String(item ?? "").trim())
-          .filter((item) => item.length >= 2 && item.length <= 80);
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter((item) => item.length >= 2 && item.length <= 80 && !/^\[object object\]$/i.test(item));
         const cleaned =
           key === "portfolio" || key === "services_ranked"
             ? parseServiceLabelList(labels.join("\n"))
@@ -219,10 +228,10 @@ ${input.includeAiExtras ? `Bis zu ${maxExtras} Zusatzfragen, sonst questions=[].
       }
     }
     const extras = input.includeAiExtras
-      ? (Array.isArray(parsed.questions) ? parsed.questions : [])
-          .map((q) => String(q ?? "").trim())
-          .filter((q) => q.length >= 8)
-          .slice(0, maxExtras)
+      ? parseAiExtraQuestions(parsed.questions, {
+          max: maxExtras,
+          existingTitles: input.coreItems.map((c) => c.title),
+        })
       : [];
     return { extras, aiPrefills, optionSets, warning: null };
   } catch (err) {
@@ -430,12 +439,16 @@ export async function buildFragebogenReviewDraft(input: {
   const extraQuestions: ReviewQuestionItem[] = [
     ...meetingExtras,
     ...seoExtra,
-    ...aiBundle.extras.map((title, index) => ({
-      id: `extra_${slugifyKey(title)}_${index + 1}`,
+    ...aiBundle.extras.map((extra, index) => ({
+      id: `extra_${slugifyKey(extra.title)}_${index + 1}`,
       kind: "extra" as const,
-      title,
-      description:
-        "Individuelle Zusatzfrage aus Crawl/KI — bearbeiten, kopieren oder löschen.",
+      title: applyClientAudienceToText(extra.title, vocab, { replaceBusiness: true }),
+      description: applyClientAudienceToText(
+        extra.description ||
+          "Individuelle Zusatzfrage aus Crawl/KI — bearbeiten, kopieren oder löschen.",
+        vocab,
+        { replaceBusiness: true },
+      ),
       included: true,
       required: true,
       type: "text" as const,
