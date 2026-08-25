@@ -84,11 +84,7 @@ export function customizeCoreQuestion(input: {
   const fromSet = input.optionSets?.[next.key];
   if (fromSet && fromSet.length > 0 && INDUSTRY_OPTION_KEYS.has(next.key)) {
     next = applyOptionLabels(next, fromSet);
-  } else if (
-    SERVICE_OPTION_KEYS.has(next.key) &&
-    (input.serviceLabels?.length ?? 0) > 0 &&
-    (templateHasPlaceholderOptions(input.template) || (input.serviceLabels?.length ?? 0) >= 2)
-  ) {
+  } else if (SERVICE_OPTION_KEYS.has(next.key) && (input.serviceLabels?.length ?? 0) > 0) {
     next = applyOptionLabels(next, input.serviceLabels ?? []);
   }
 

@@ -4,6 +4,8 @@
  */
 import assert from "node:assert/strict";
 
+import { customizeCoreQuestion } from "../lib/surveys/customize-fragebogen";
+import { ANBIETER_CORE_QUESTIONS } from "../lib/surveys/core-question-templates";
 import {
   suggestPrefillsFromCrawl,
   classifyCrawlPage,
@@ -11,6 +13,7 @@ import {
   crawlPagePriority,
   extractImpressumFacts,
   extractLegalCompanyName,
+  extractPricedServiceNames,
   extractServiceLabels,
   isPlausiblePrefill,
   parseServiceLabelList,
@@ -165,12 +168,36 @@ assert.equal(/Kälte|Wärmeanwendung|Eine K/.test(meerbuschPrefills.company_name
 assert.match(meerbuschPrefills.location_catchment?.value ?? "", /Meerbusch/);
 assert.equal(/Botox|€|pro Region/.test(meerbuschPrefills.location_catchment?.value ?? ""), false);
 
+assert.deepEqual(
+  extractPricedServiceNames(meerbusch.pageExcerpts[2]!.text),
+  ["Botox-Injektionen", "Hyaluronsäure-Filler", "Laserbehandlungen"],
+);
+
 const meerbuschServices = extractServiceLabels(meerbusch);
-assert.equal(meerbuschServices.some((s) => /impressum|datenschutz/i.test(s)), false);
+assert.equal(meerbuschServices.some((s) => /impressum|datenschutz|Eine K/i.test(s)), false);
+assert.ok(meerbuschServices.includes("Botox-Injektionen"), JSON.stringify(meerbuschServices));
+assert.ok(meerbuschServices.includes("Hyaluronsäure-Filler"), JSON.stringify(meerbuschServices));
+assert.ok(meerbuschServices.includes("Laserbehandlungen"), JSON.stringify(meerbuschServices));
 assert.ok(
   meerbuschServices.some((s) => /Fotona/i.test(s)),
   `expected a laser/treatment label, got ${JSON.stringify(meerbuschServices)}`,
 );
+assert.match(meerbuschPrefills.portfolio?.value ?? "", /Botox-Injektionen/);
+
+const tailored = customizeCoreQuestion({
+  template: ANBIETER_CORE_QUESTIONS.find((q) => q.key === "portfolio")!,
+  audience: "praxis",
+  serviceLabels: meerbuschServices,
+});
+assert.equal(tailored.options?.some((o) => /vor Versand/.test(o.label)) ?? true, false);
+assert.ok(tailored.options?.some((o) => o.label === "Botox-Injektionen"));
+
+const ranked = customizeCoreQuestion({
+  template: ANBIETER_CORE_QUESTIONS.find((q) => q.key === "services_ranked")!,
+  audience: "praxis",
+  serviceLabels: meerbuschServices,
+});
+assert.equal(ranked.options?.some((o) => /vor Versand/.test(o.label)) ?? true, false);
 
 assert.equal(
   extractLegalCompanyName(

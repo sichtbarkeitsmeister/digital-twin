@@ -461,6 +461,48 @@ function looksLikeServiceLabel(value: string): boolean {
   return true;
 }
 
+function looksLikePricedServiceName(name: string): boolean {
+  if (name.length > 48) return false;
+  if (/\s[A-ZÄÖÜa-zäöüß]\s/.test(` ${name} `)) return false;
+  if (/^(?:pro|ab|ca\.?|eine|ein|und|oder|weitere)\b/i.test(name)) return false;
+  return looksLikeServiceLabel(name);
+}
+
+function serviceLabelFromTitle(title: string | null): string | null {
+  const stripped = stripPageKindPrefix(title ?? "");
+  if (!stripped) return null;
+  const left = stripped.split(/\s+[-–|]\s+/)[0]?.trim() ?? stripped;
+  const candidate = left.length >= 3 && left.length <= 55 ? left : stripped;
+  return looksLikeServiceLabel(candidate) ? candidate : null;
+}
+
+const PRICED_SERVICE_NAME =
+  "[A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9+/&-]*(?:[ -][A-Za-zÄÖÜäöüß0-9+/&-]{2,}){0,5}";
+
+/**
+ * Turn “Botox-Injektionen: ab ca. 200 € pro Region” into “Botox-Injektionen”.
+ * Dermatology and similar sites often only list offers this way, concatenated.
+ */
+export function extractPricedServiceNames(text: string): string[] {
+  const names: string[] = [];
+  const prepared = text.replace(
+    new RegExp(`\\s+(?=${PRICED_SERVICE_NAME}:\\s*(?:ab\\s*)?(?:ca\\.?\\s*)?\\d)`, "g"),
+    "\n",
+  );
+  const re = new RegExp(
+    `(${PRICED_SERVICE_NAME})\\s*:\\s*(?:ab\\s*)?(?:ca\\.?\\s*)?\\d{1,5}(?:[.,]\\d+)?\\s*(?:€|EUR)`,
+    "g",
+  );
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(prepared))) {
+    const name = (match[1] ?? "").replace(/\s+/g, " ").trim();
+    if (!looksLikePricedServiceName(name)) continue;
+    if (names.some((item) => item.toLowerCase() === name.toLowerCase())) continue;
+    names.push(name);
+  }
+  return names;
+}
+
 function pushUniqueLabel(target: string[], value: string) {
   const cleaned = value.replace(/\s+/g, " ").trim();
   if (!looksLikeServiceLabel(cleaned)) return;
@@ -486,6 +528,7 @@ export function parseServiceLabelList(text: string): string[] {
     if (labels.some((item) => item.toLowerCase() === cleaned.toLowerCase())) return;
     labels.push(cleaned);
   };
+  for (const name of extractPricedServiceNames(text)) push(name);
   for (const line of splitListItems(text)) {
     if (/,/.test(line) && line.length > 36) {
       for (const part of splitOfferedServices(line)) push(part);
@@ -526,8 +569,11 @@ export function extractServiceLabels(context: OrgCrawlContext): string[] {
 
   const collectFromPage = (page: { url: string; title: string | null; text: string }, useTitle: boolean) => {
     if (useTitle) {
-      const title = stripPageKindPrefix(page.title ?? "");
-      if (title && !looksLikeSiteChromeTitle(title)) pushUniqueLabel(labels, title);
+      const title = serviceLabelFromTitle(page.title);
+      if (title) pushUniqueLabel(labels, title);
+    }
+    for (const name of extractPricedServiceNames(page.text)) {
+      pushUniqueLabel(labels, name);
     }
     for (const line of splitListItems(page.text)) {
       pushUniqueLabel(labels, line);
@@ -539,6 +585,12 @@ export function extractServiceLabels(context: OrgCrawlContext): string[] {
       for (const item of splitOfferedServices(offer[1])) pushUniqueLabel(labels, item);
     }
   };
+
+  for (const page of pages) {
+    for (const name of extractPricedServiceNames(page.text)) {
+      pushUniqueLabel(labels, name);
+    }
+  }
 
   for (const page of preferred) {
     const kind = classifyCrawlPage(page.url, page.title);
