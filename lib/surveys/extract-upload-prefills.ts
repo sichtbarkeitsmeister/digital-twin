@@ -9,7 +9,7 @@ import {
   escapeControlCharsInJsonStrings,
 } from "@/lib/ai/anthropic-helpers";
 import { resolveSurveyUtilityModels } from "@/lib/ai/survey-model-config";
-import { parseServiceLabelList } from "@/lib/surveys/org-crawl-prefill";
+import { parseServiceLabelList, isEmptyPlaceholderPrefill } from "@/lib/surveys/org-crawl-prefill";
 import type { PrefillDraft } from "@/lib/surveys/org-crawl-prefill";
 
 /**
@@ -57,7 +57,11 @@ Regeln:
 - no_fit_clients: unattraktive Anfragen oder was die Praxis nicht macht.
 - usp / qualifications: echte Unterschiede aus dem Gespräch (z. B. Schulungszentrum).
 - team_members: genannte Personen und Rollen.
-- optionSets.portfolio: Leistungsnamen aus dem Meeting, kurz, keine Sätze.
+- company_history: Jahr und Ereignis, vollständiger Satz, nicht mitten bei „Dr.“ abschneiden, keine Meeting-Überschrift.
+- why_stay: nur der Grund, nicht die Meeting-Frage wiederholen.
+- min_order_value: nur wenn ein Euro-Betrag genannt ist — nicht dieselben Fälle wie no_fit_clients.
+- Ja/Nein-Fragen (seasonal_yesno, ai_search_yesno): nur „ja“ oder „nein“, wenn es im Text steht. Nie „Keine Information“.
+- Unbekannte Felder leer lassen.
 questions=[].
 
 {"prefills":[{"key":"location_catchment","value":"...","note":"aus Meeting","source":"upload"}],"optionSets":{"portfolio":["Leistung A"]},"questions":[]}`,
@@ -78,6 +82,14 @@ questions=[].
       const key = String(row.key ?? "").trim();
       const value = String(row.value ?? "").trim();
       if (!allowedKeys.has(key) || value.length < 3) continue;
+      if (isEmptyPlaceholderPrefill(value)) continue;
+      if (key === "min_order_value" && !/\d/.test(value)) continue;
+      if (
+        (key === "seasonal_yesno" || key === "ai_search_yesno") &&
+        !/^(?:ja|nein)\b/i.test(value.trim())
+      ) {
+        continue;
+      }
       prefills[key] = {
         value: value.slice(0, 2000),
         source: "upload",

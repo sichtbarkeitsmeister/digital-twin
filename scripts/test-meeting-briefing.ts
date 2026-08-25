@@ -174,7 +174,11 @@ assert.equal(
 assert.match(kickoffParsed.byHint.org_name ?? "", /Haut- und Laserpraxis/);
 assert.match(kickoffParsed.byHint.colloquial_name ?? "", /Dermatologie/);
 assert.match(kickoffParsed.byHint.usp ?? "", /Schulungszentrum|Fotona/i);
-assert.match(kickoffParsed.byHint.team_members ?? "", /Kosmetikerin/);
+assert.equal(/Kurzer Kontext|Welche Patienten sind ihr am liebsten/.test(kickoffParsed.byHint.company_history ?? ""), false);
+assert.match(kickoffParsed.byHint.company_history ?? "", /Haut- und Laserpraxis/);
+assert.match(kickoffParsed.byHint.company_history ?? "", /Schürings Dermatologie/);
+assert.equal(/Welche Patienten sind ihr am liebsten/.test(kickoffParsed.byHint.why_stay ?? ""), false);
+assert.match(kickoffParsed.byHint.why_stay ?? "", /Privatpatienten, die regelmäßig/);
 
 const kickoffPrefills = suggestPrefillsFromMeeting({
   briefing: { notes: kickoff },
