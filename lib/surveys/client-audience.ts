@@ -174,6 +174,12 @@ function replaceWhole(text: string, from: string, to: string) {
   return text.replace(re, to);
 }
 
+function nounGenitive(spec: NounSpec): string {
+  if (spec.genitive) return spec.genitive;
+  if (spec.gender === "f") return spec.singular;
+  return `${spec.singular}s`;
+}
+
 function replaceNoun(text: string, from: NounSpec, to: NounSpec): string {
   if (
     from.singular === to.singular &&
@@ -185,6 +191,8 @@ function replaceNoun(text: string, from: NounSpec, to: NounSpec): string {
 
   const fromArt = ARTICLES[from.gender];
   const toArt = ARTICLES[to.gender];
+  const fromGen = nounGenitive(from);
+  const toGen = nounGenitive(to);
   const pairs: Array<[string, string]> = [];
 
   for (const key of ARTICLE_KEYS) {
@@ -195,8 +203,14 @@ function replaceNoun(text: string, from: NounSpec, to: NounSpec): string {
     ]);
   }
 
-  const fromGen = from.genitive ?? `${from.singular}s`;
-  const toGen = to.genitive ?? `${to.singular}s`;
+  // Genitive noun often has -s (eines Projekts, des Auftrags) — article must switch too.
+  pairs.push([`${fromArt.eines} ${fromGen}`, `${toArt.eines} ${toGen}`]);
+  pairs.push([
+    `${capitalize(fromArt.eines)} ${fromGen}`,
+    `${capitalize(toArt.eines)} ${toGen}`,
+  ]);
+  pairs.push([`${fromArt.des} ${fromGen}`, `${toArt.des} ${toGen}`]);
+  pairs.push([`${capitalize(fromArt.des)} ${fromGen}`, `${capitalize(toArt.des)} ${toGen}`]);
   if (fromGen !== from.singular) pairs.push([fromGen, toGen]);
   pairs.push([from.plural, to.plural]);
   pairs.push([from.singular, to.singular]);
@@ -222,7 +236,18 @@ function nounFromVocab(
   plural: string,
   gender: NounGender,
 ): NounSpec {
-  return { singular, plural, gender };
+  return {
+    singular,
+    plural,
+    gender,
+    genitive: gender === "f" ? singular : `${singular}s`,
+  };
+}
+
+function zuPlusBusiness(vocab: ClientAudienceVocab): string {
+  const dative = ARTICLES[vocab.businessGender].dem;
+  const contraction = dative === "der" ? "zur" : "zum";
+  return `${contraction} ${vocab.business}`;
 }
 
 export const CLIENT_AUDIENCE_OPTIONS: ClientAudienceVocab[] = [
@@ -381,7 +406,10 @@ function applyBusinessAudienceToVocab(text: string, vocab: ClientAudienceVocab):
   );
   if (vocab.business !== "Firma") {
     const businessArticle = capitalize(ARTICLES[vocab.businessGender].der);
+    const zuBusiness = zuPlusBusiness(vocab);
     out = out.replace(/\bDas Unternehmen\b/g, `${businessArticle} ${vocab.business}`);
+    out = out.replace(/\bzum Unternehmen\b/g, zuBusiness);
+    out = out.replace(/\bZum Unternehmen\b/g, capitalize(zuBusiness));
   }
   return out;
 }

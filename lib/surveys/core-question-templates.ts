@@ -375,7 +375,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wie lautet der vollständige Name der Firma, so wie er offiziell im Impressum oder Handelsregister steht (inklusive Rechtsform, z. B. GmbH, GbR, e.K.)?",
         description:
-          "Genau wie im Impressum, z. B. „Müller & Partner Rechtsanwaltsgesellschaft mbH“. Nicht die Kurzform aus der Werbung.",
+          "Genau wie im Impressum, inklusive Rechtsform. Nicht die Kurzform aus der Werbung.",
         type: "text",
         prefillHint: "org_name",
       },
@@ -383,7 +383,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "colloquial_name",
         title:
           "Wie wird die Firma im Alltag genannt – von Kunden, im Team oder von Partnern (z. B. eine Kurzform oder ein Spitzname)?",
-        description: "z. B. „Müller Kanzlei“, „Praxis am Park“ oder nur der Nachname.",
+        description: "z. B. eine Kurzform, ein Ortszusatz oder nur der Nachname.",
         type: "text",
         prefillHint: "colloquial_name",
       },
@@ -392,7 +392,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wo befindet sich der Firmensitz, und aus welcher Umgebung oder Region kommt der Großteil der Kunden?",
         description:
-          "z. B. „Sitz in Dortmund, die meisten Kunden aus dem Ruhrgebiet; bundesweit nur in Spezialfällen.“",
+          "Wo der Sitz ist und woher die meisten Kunden tatsächlich kommen — nicht die gewünschte Reichweite. z. B. „Sitz in Dortmund, die meisten Kunden aus dem Ruhrgebiet.“",
         type: "text",
         prefillHint: "region",
       },
@@ -411,7 +411,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Was macht das eigene Angebot besonders im Vergleich zu anderen Anbietern in der Region – was kann die eigene Firma, das andere nicht können oder nicht anbieten?",
         description:
-          "Nicht der Werbeslogan, sondern der praktische Unterschied. z. B. „Wir vertreten nur Arbeitnehmer, nie Arbeitgeber“ oder „Festpreis vor dem ersten Spatenstich“.",
+          "Nicht der Werbeslogan und nicht der Satz, den Menschen später über euch sagen sollen. Der praktische Unterschied für den Kunden: was die eigene Firma kann, das vergleichbare Anbieter in der Region nicht können oder nicht anbieten.",
         type: "text",
         prefillHint: "usp",
       },
@@ -435,7 +435,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "services_ranked",
         title: "Welche Leistungen oder Angebote werden am häufigsten gebucht oder nachgefragt?",
         description:
-          "Dieselbe Liste wie oben. Nach oben, was am häufigsten nachgefragt wird — nicht, was am liebsten angeboten wird.",
+          "Nicht nochmal das Angebot aufzählen. Dieselbe Liste wie oben: nach oben, was am häufigsten nachgefragt wird — nicht, was am liebsten angeboten wird.",
         type: "ranking",
         options: opts("svc_rank", PORTFOLIO_PLACEHOLDERS),
         allowExtraEntries: true,
@@ -445,7 +445,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wie läuft es typischerweise ab, von der ersten Anfrage bis zum fertigen Ergebnis oder Abschluss?",
         description:
-          "Ein Schritt pro Feld. Beispiel: 1. Anruf oder Formular 2. Erstgespräch 3. Angebot 4. Zusage 5. Umsetzung 6. Abschlussgespräch.",
+          "Ein Schritt pro Feld, so wie es meistens läuft. Beispiel: 1. Anfrage 2. Erstgespräch 3. Termin oder Angebot 4. Durchführung 5. Abschluss oder Kontrolle.",
         type: "text_list",
         options: emptySlots("process", 3),
         allowExtraEntries: true,
@@ -461,7 +461,8 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "response_channels",
         title: "Auf welchem Weg wird meistens reagiert?",
-        description: "Mehrfach möglich. z. B. erst per Telefon, Bestätigung danach per E-Mail.",
+        description:
+          "Auf die neue Anfrage, nicht die Marketing-Kanäle weiter unten. Mehrfach möglich. z. B. erst per Telefon, Bestätigung danach per E-Mail.",
         type: "checkbox",
         options: opts("resp_ch", RESPONSE_CHANNELS),
         allowOtherOption: true,
@@ -489,15 +490,17 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "min_order_value",
         title:
-          "Ab welchem ungefähren Auftragswert (in Euro) lohnt sich ein Auftrag wirklich – und ab welcher Größe wird ein Auftrag abgelehnt, weil der Auftrag zu klein ist?",
-        description: "z. B. „Unter 1.500 € nehmen wir in der Regel nicht an, außer Bestandskunden.“",
+          "Ab welchem ungefähren Auftragswert (in Euro) lohnt sich ein Auftrag – und welche Anfragen werden abgelehnt, weil sie sich nicht rechnen?",
+        description:
+          "Die wirtschaftliche Untergrenze, ungefähr. z. B. „Unter 1.500 € nehmen wir in der Regel nicht an, außer Bestandskunden.“ Nicht dieselben Fälle wie bei „Das passt nicht zu uns“.",
         type: "text",
       },
       {
         key: "service_area",
         title:
-          "Bis zu welcher Entfernung (z. B. in Kilometern) wird gearbeitet, und gibt es Ausnahmen für besondere Projekte?",
-        description: "z. B. „50 km um Dortmund, bundesweit nur bei Großprojekten.“ Bei reiner Online-Arbeit bitte „bundesweit / online“ eintragen.",
+          "Welches Einzugsgebiet gilt – lokal, mit Anfahrt oder bundesweit – und gibt es Ausnahmen?",
+        description:
+          "Die Regel, wen ihr annehmt oder wohin ihr fahrt — nicht der Standort oben. z. B. „überwiegend Stadt und Umland; weiter nur nach Absprache.“ Bei reiner Online-Arbeit bitte „bundesweit / online“ eintragen.",
         type: "text",
       },
     ],
@@ -510,12 +513,12 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "quality_assurance",
         title: "Woran wird gemerkt, dass ein Ziel erreicht wurde und die Qualität stimmt?",
         description:
-          "z. B. Checkliste vor Abgabe, Vier-Augen-Prinzip, Nachbesprechung mit dem Kunden, messbares Ergebnis.",
+          "z. B. Nachbesprechung mit dem Kunden, Vier-Augen-Prinzip, klare Kontrolle vor dem Abschluss, messbares Ergebnis.",
         type: "text",
       },
       {
         key: "unexpected_challenges",
-        title: "Wie wird reagiert, wenn während eines Projekts etwas Unerwartetes passiert oder sich etwas ändert?",
+        title: "Wie wird reagiert, wenn während eines Auftrags etwas Unerwartetes passiert oder sich etwas ändert?",
         description:
           "Der übliche Ablauf, z. B. „sofort anrufen, Optionen nennen, schriftlich festhalten“ — nicht der Ausnahmefall.",
         type: "text",
@@ -523,16 +526,18 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "volume_vs_depth",
         title:
-          "Ist es wichtiger, möglichst viele Kunden zu haben, oder sich bei jedem einzelnen Auftrag besonders viel Zeit zu nehmen?",
+          "Ist es wichtiger, möglichst viele Kunden zu haben, oder sich bei jedem Auftrag besonders viel Zeit zu nehmen?",
+        description:
+          "Was im Alltag Vorrang hat, wenn beides nicht geht. Nicht die Wunsch-Haltung von der Website.",
         type: "radio",
         options: opts("vol_depth", VOLUME_VS_DEPTH),
       },
       {
         key: "no_fit_clients",
         title:
-          "Mit welchen Kundentypen oder Projekten wird lieber nicht zusammengearbeitet? Wann wird klar gesagt: „Das passt nicht zu uns“?",
+          "Mit welchen Kundentypen oder Aufträgen wird lieber nicht zusammengearbeitet? Wann wird klar gesagt: „Das passt nicht zu uns“?",
         description:
-          "z. B. „Keine Verkehrsunfälle“, „keine Dumping-Anfragen“, „keine reinen Online-Beratungen ohne Termin“.",
+          "Fachlich oder menschlich nicht passend — nicht die Preisuntergrenze bei den Leistungen. z. B. bestimmte Anliegen, die ihr nicht übernehmt, oder Kunden, die nur den günstigsten Preis wollen.",
         type: "text",
       },
       {
@@ -553,6 +558,8 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "speaking_style",
         title: "Wie wird normalerweise mit dem Kunden gesprochen – bitte in eine Reihenfolge bringen.",
+        description:
+          "Der Ton im Gespräch mit dem Kunden. Oben = wie ihr am häufigsten klingen sollt. Du oder Sie kommt als nächstes extra.",
         type: "ranking",
         options: opts("speak", SPEAKING_STYLES),
         allowCustomEntries: true,
@@ -587,6 +594,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "philosophy_quotes",
         title:
           "Gibt es einen Satz oder eine Aussage der Geschäftsführung, der oder die die eigene Haltung besonders gut auf den Punkt bringt? Bitte wortwörtlich.",
+        description: "Ein Satz, den man in Texten wiederverwenden darf — nicht der USP von oben.",
         type: "text",
       },
     ],
@@ -653,15 +661,17 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
       {
         key: "why_stay",
-        title: "Aus welchem Grund bleiben Kunden langfristig, statt nach einem Projekt oder Kauf wegzubleiben?",
+        title: "Aus welchem Grund bleiben Kunden langfristig, statt nach einem Auftrag nicht wiederzukommen?",
+        description:
+          "Warum jemand wiederkommt oder weiterempfiehlt — nicht der USP und nicht die Wahrnehmung weiter unten.",
         type: "text",
       },
       {
         key: "proven_metrics",
         title:
-          "Welche konkreten Kennzahlen zum Unternehmenserfolg können genannt werden — inklusive der stärksten Ergebnisse mit Kunden?",
+          "Welche konkreten Kennzahlen zum Erfolg der Firma können genannt werden — inklusive der stärksten Ergebnisse mit Kunden?",
         description:
-          "Nur Zahlen, die stimmen. Pro Zeile eine Kennzahl, z. B. „über 300 abgeschlossene Fälle“, „12 Mitarbeitende“, „Umsatz plus 30 % in 2024“, „4,9 Sterne bei 80 Google-Bewertungen“.",
+          "Nur Zahlen, die stimmen. Pro Zeile eine Kennzahl, z. B. „über 300 abgeschlossene Aufträge“, „12 Mitarbeitende“, „Umsatz plus 30 % in 2024“, „4,9 Sterne bei 80 Google-Bewertungen“.",
         type: "text_list",
         options: emptySlots("metric", 3),
         allowExtraEntries: true,
@@ -678,6 +688,8 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "competitors_respected",
         title:
           "Welche anderen Anbieter werden respektiert – und was machen sie ehrlich gesagt besser?",
+        description:
+          "Anbieter, von denen ihr etwas lernen könnt — nicht die direkten Mitbewerber in der nächsten Frage.",
         type: "text",
         prefillHint: "good_competitors",
       },
@@ -685,7 +697,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "competitors_top",
         title: "Welche drei bis fünf Anbieter sind die wichtigsten Mitbewerber?",
         description:
-          "Pro Mitbewerber: Name, Website und kurzer Grund (z. B. gleiche Region, ähnliches Angebot, ähnlicher Preis).",
+          "Wer um dieselben Kunden in der Region mitbietet — unabhängig davon, ob ihr sie schätzt. Pro Mitbewerber: Name, Website und kurzer Grund (z. B. gleiche Region, ähnliches Angebot, ähnlicher Preis).",
         type: "text_list",
         options: emptySlots("comp_top", 3),
         allowExtraEntries: true,
@@ -695,6 +707,8 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "attention_channels",
         title: "Wie wird ein neuer Kunde meistens zuerst auf die Firma aufmerksam? Bitte in eine Reihenfolge bringen.",
+        description:
+          "Der erste Kontaktweg. Nicht die Kanäle, auf denen ihr aktiv seid — die kommen weiter unten.",
         type: "ranking",
         options: opts("attn", ATTENTION_CHANNELS),
         allowCustomEntries: true,
@@ -704,7 +718,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Unter welchen Wörtern soll die Firma bei Google gefunden werden – Angebotsbegriffe? Wonach würde jemand suchen, der genau nach diesem Angebot sucht?",
         description:
-          "Ein Begriff pro Feld. Beispiele: „Arbeitsrecht Dortmund“, „Heilpraktiker Rückenschmerzen“, „Schlüsselfertig bauen Unna“. Intern heißen sie Fokus-Keywords.",
+          "Ein Suchbegriff pro Feld: Angebot plus Ort, so wie jemand bei Google tippt. Intern heißen sie Fokus-Keywords. Den Ort allein bitte in der nächsten Frage extra.",
         type: "text_list",
         options: emptySlots("kw_offer", 3),
         allowExtraEntries: true,
@@ -716,7 +730,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wie würde jemand sein Problem in eigenen Worten in die Google-Suche eintippen? (Problembegriffe)",
         description:
-          "Die Worte des Kunden, nicht die Fachbegriffe. z. B. „Chef zahlt Überstunden nicht“, „Zahnschmerzen über Nacht“, „Anbau genehmigen lassen“.",
+          "Die Worte des Kunden, nicht die Fachbegriffe von oben. So, wie jemand das Problem einem Freund oder nachts in die Suche schreiben würde.",
         type: "text_list",
         options: emptySlots("kw_problem", 3),
         allowExtraEntries: true,
@@ -724,9 +738,9 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       },
       {
         key: "keyword_place",
-        title: "Mit welchem Ort zusammen soll die Firma gefunden werden (z. B. „Zahnarzt Düsseldorf“)?",
+        title: "Mit welchem Ort oder welcher Region soll die Firma bei Google gefunden werden?",
         description:
-          "Ort oder Region, den Kunden wirklich eingeben. z. B. Stadtteil, Stadt, „Ruhrgebiet“, „NRW“.",
+          "Nur der Ort, den Kunden wirklich eingeben — ohne das Angebot von oben. z. B. Stadtteil, Stadt, „Ruhrgebiet“, „NRW“.",
         type: "text_list",
         options: emptySlots("kw_place", 3),
         allowExtraEntries: true,
@@ -769,6 +783,8 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "desired_perception",
         title:
           "Wie soll die Firma heute und in Zukunft wahrgenommen werden – was sollen Menschen über sie denken oder sagen?",
+        description:
+          "Der Satz, den Menschen über euch sagen sollen. Nicht der praktische USP oben und nicht die Selbstbeschreibung am Ende.",
         type: "text",
       },
     ],
@@ -780,6 +796,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "three_year_goal",
         title: "Wo soll die Firma in zwei bis drei Jahren stehen?",
+        description: "Konkret: Standort, Team, neues Angebot oder Größe — kein Slogan.",
         type: "text",
       },
       {
@@ -802,7 +819,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "elevator_pitch",
         title: "Wie beschreibt sich die Firma selbst in drei bis fünf Sätzen?",
         description:
-          "So, als würde man es einem Bekannten in 30 Sekunden erzählen: wer, für wen, was anders ist. Keine Werbesprache.",
+          "So, als würde man es einem Bekannten in 30 Sekunden erzählen: wer, für wen, was anders ist. Keine Werbesprache. Nicht dieselben Sätze wie USP oder gewünschte Wahrnehmung.",
         type: "text",
         prefillHint: "elevator_pitch",
       },

@@ -130,13 +130,58 @@ const praxisReason = customizeCoreQuestion({ template: reason, audience: "praxis
 assert.match(praxisReason.description, /Jede Behandlung ist anders/);
 assert.equal(/Mandat/.test(praxisReason.description), false);
 
+assert.equal(
+  applyClientAudienceToText("während eines Projekts", "praxis"),
+  "während einer Behandlung",
+);
+assert.equal(
+  applyClientAudienceToText("während eines Auftrags", "praxis"),
+  "während einer Behandlung",
+);
+assert.match(
+  applyClientAudienceToText("passt am besten zum Unternehmen", "praxis", { replaceBusiness: true }),
+  /zur Praxis/,
+);
+assert.match(
+  applyClientAudienceToText("passt am besten zum Unternehmen", "handwerk", { replaceBusiness: true }),
+  /zum Betrieb/,
+);
+assert.equal(
+  applyClientAudienceToText("passt am besten zum Unternehmen", "unternehmen", {
+    replaceBusiness: true,
+  }),
+  "passt am besten zum Unternehmen",
+);
+
 const minOrder = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "min_order_value");
 assert.ok(minOrder);
 const praxisMin = customizeCoreQuestion({ template: minOrder, audience: "praxis" });
 assert.match(praxisMin.title, /Behandlungswert/);
 assert.match(praxisMin.title, /eine Behandlung/);
-assert.match(praxisMin.title, /die Behandlung zu klein/);
+assert.match(praxisMin.title, /nicht rechnen/);
+assert.equal(/zu klein/.test(praxisMin.title), false);
 assert.equal(/Mandat|Auftrag(?!geber)/.test(praxisMin.title), false);
+
+const unexpected = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "unexpected_challenges");
+assert.ok(unexpected);
+const praxisUnexpected = customizeCoreQuestion({ template: unexpected, audience: "praxis" });
+assert.match(praxisUnexpected.title, /einer Behandlung/);
+assert.equal(/eines Behandlung/.test(praxisUnexpected.title), false);
+assert.equal(/Behandlungs/.test(praxisUnexpected.title), false);
+
+const archetype = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "company_archetype");
+assert.ok(archetype);
+const praxisArch = customizeCoreQuestion({ template: archetype, audience: "praxis" });
+assert.match(praxisArch.title, /zur Praxis/);
+assert.equal(/Unternehmen/.test(praxisArch.title), false);
+
+const usp = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "usp");
+assert.ok(usp);
+const praxisUsp = customizeCoreQuestion({ template: usp, audience: "praxis" });
+assert.equal(
+  /Arbeitnehmer|Spatenstich|Rechtsanwalt/.test(`${praxisUsp.title} ${praxisUsp.description}`),
+  false,
+);
 
 const personaHold = PERSONA_CORE_QUESTIONS.find((q) => q.key === "persona_hold_back");
 assert.ok(personaHold);
