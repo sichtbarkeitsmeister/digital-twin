@@ -204,7 +204,51 @@ function findLabelRule(label: string): LabelRule | null {
 }
 
 function skipNoiseLabel(label: string): boolean {
-  return /^(?:legende|kickoff(?:-meeting)?|block\s*\d)/i.test(normalizeLabel(label));
+  const n = normalizeLabel(label);
+  return /(?:legende|kickoff|zusammenfassung|diezusammenfassung|block\s*\d|nächste schritte|sonstige offene|menüstruktur|ergebnis aus dem meeting|material wird nachgeliefert|ausschlussfrage|kurzer kontext)/i.test(
+    n,
+  );
+}
+
+const SERVICE_CATEGORY_LABEL =
+  /^(?:medizinische\s+dermatologie|ästhetische\s+(?:medizin|dermatologie)|laserbehandlungen?|kinderdermatologie)$/i;
+
+function personNameFromText(value: string): string | null {
+  const m = value.match(/\b(Dr\.\s+[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\b/);
+  return m?.[1] ?? null;
+}
+
+function channelLabelsFromText(value: string): string {
+  const parts: string[] = [];
+  const add = (label: string) => {
+    if (!parts.some((p) => p.toLowerCase() === label.toLowerCase())) parts.push(label);
+  };
+  if (/doctolib/i.test(value)) add("Doctolib");
+  if (/telefon/i.test(value)) add("Telefon");
+  if (/e-?mail/i.test(value)) add("E-Mail");
+  if (/whatsapp/i.test(value)) add("WhatsApp");
+  if (/instagram/i.test(value)) add("Instagram");
+  if (/facebook/i.test(value)) add("Facebook");
+  if (/website|homepage/i.test(value)) add("eigene Website");
+  return parts.join("\n");
+}
+
+/** Drop meeting chrome, mid-word leftovers and leaked next-section titles. */
+export function cleanMeetingValue(raw: string): string {
+  let t = raw
+    .replace(/[✅💬🔍]/g, " ")
+    .replace(/\bBlock\s+\d+\s*[–—-].*$/gim, "")
+    .replace(
+      /\b(?:Nächste Schritte|Wunschkunden-Definition|Ergebnis aus dem Meeting|Menüstruktur-Feedback|Konkrete Änderungen)\b[\s\S]*$/i,
+      "",
+    )
+    .replace(/\bggf\.\s+im Fragebogen[\s\S]*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  t = t.replace(/^[^A-ZÄÖÜa-zäöüß0-9„"]+/, "");
+  t = t.replace(/^[a-zäöüß]{4,}\b\s+/, "");
+  t = t.replace(/^[a-zäöüß]{3,}\)\s*/, "");
+  return t.trim();
 }
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
@@ -232,12 +276,13 @@ function matchHeading(line: string): { label: string; rest: string } | null {
   const t = stripBulletPrefix(line);
   if (!t) return null;
   const labeled = t.match(
-    /^([A-Za-zÄÖÜäöüß0-9][A-Za-zÄÖÜäöüß0-9\s/_().,-]{0,90}?)\s*:\s*(.*)$/,
+    /^([A-Za-zÄÖÜäöüß0-9][A-Za-zÄÖÜäöüß0-9\s/_()-]{0,70}?)\s*:\s*(.*)$/,
   );
-  if (labeled?.[1] && !/^https?$/i.test(labeled[1])) {
-    return { label: normalizeLabel(labeled[1]), rest: (labeled[2] ?? "").trim() };
+  const label = labeled?.[1] ? normalizeLabel(labeled[1]) : "";
+  if (label && !/^https?$/i.test(label) && !/[.?!]/.test(label) && label.length <= 70) {
+    return { label, rest: (labeled?.[2] ?? "").trim() };
   }
-  if (/^(?:wie|was|wo|wer|welche|welcher|welches|wann|warum)\b.{8,100}\?\s*$/i.test(t)) {
+  if (/^(?:wie|was|wo|wer|welche|welcher|welches|wann|warum)\b.{8,80}\?\s*$/i.test(t)) {
     return { label: t.replace(/\?\s*$/, "").trim(), rest: "" };
   }
   return null;
@@ -283,12 +328,27 @@ export function extractLabeledSections(
     .filter((s) => s.value.length > 0);
 }
 
-function sliceAround(blob: string, pattern: RegExp, radius = 180): string | null {
+function sliceAround(blob: string, pattern: RegExp, radius = 220): string | null {
   const m = blob.match(pattern);
   if (!m || m.index == null) return null;
-  const start = Math.max(0, m.index - 20);
-  const end = Math.min(blob.length, m.index + m[0].length + radius);
-  return blob.slice(start, end).replace(/\s+/g, " ").trim().slice(0, 500);
+  const before = blob.slice(0, m.index);
+  const bullet = Math.max(
+    before.lastIndexOf("•"),
+    before.lastIndexOf("\n"),
+    before.lastIndexOf(". "),
+  );
+  const start =
+    bullet >= 0 ? bullet + (before.slice(bullet).startsWith(". ") ? 2 : 1) : Math.max(0, m.index);
+  let end = m.index + m[0].length;
+  const after = blob.slice(end, Math.min(blob.length, end + radius + 120));
+  const stop = after.search(/[.!?]\s|[•\n]/);
+  if (stop >= 0) {
+    const ch = after[stop];
+    end = end + stop + (ch === "." || ch === "!" || ch === "?" ? 1 : 0);
+  } else {
+    end = Math.min(blob.length, end + radius);
+  }
+  return cleanMeetingValue(blob.slice(start, end).replace(/\s+/g, " "));
 }
 
 /** High-confidence facts from Kickoff-style prose, only filling empty hints. */
@@ -436,7 +496,7 @@ function mergeHint(
   hint: CoreQuestionPrefillHint,
   value: string,
 ) {
-  const next = value.trim();
+  const next = cleanMeetingValue(value);
   if (!next) return;
   const prev = into[hint]?.trim();
   if (!prev) {
@@ -496,13 +556,24 @@ export function parseMeetingBriefingContent(
           mergeHint(byHint, "target_group", rest);
           rest = "";
         }
-        if (rest.length >= 8) leftoverParts.push(rest);
+        if (rest.length >= 40 && !/beantwortet im meeting|kurzer kontext/i.test(rest)) {
+          leftoverParts.push(rest);
+        }
         continue;
       }
 
-      const rule = findLabelRule(section.label);
       if (skipNoiseLabel(section.label)) {
-        if (section.value.trim().length >= 20) leftoverParts.push(section.value.trim());
+        continue;
+      }
+      if (SERVICE_CATEGORY_LABEL.test(normalizeLabel(section.label))) {
+        mergeHint(byHint, "services", section.value);
+        continue;
+      }
+      const rule = findLabelRule(section.label);
+      if (rule?.hint === "online_channels") {
+        const channels = channelLabelsFromText(section.value);
+        if (channels) mergeHint(byHint, "online_channels", channels);
+        if (rule.alsoHint) mergeHint(byHint, rule.alsoHint, cleanMeetingValue(section.value));
         continue;
       }
       if (rule?.hint) {
@@ -534,12 +605,13 @@ export function parseMeetingBriefingContent(
         continue;
       }
 
-      // Unknown label → dedicated Zusatzfrage with that label
+      // Unknown label → Zusatzfrage only when it is a real question, not meeting chrome.
+      if (section.label.length > 80 || skipNoiseLabel(section.label)) continue;
       pushExtra(extras, {
         id: `extra_meeting_${slugify(section.label)}`,
         title: `${section.label.trim()}?`,
         description: "Aus beschrifteter Meeting-Notiz erzeugt.",
-        answer: section.value,
+        answer: cleanMeetingValue(section.value),
       });
     }
   };
@@ -568,7 +640,16 @@ export function parseMeetingBriefingContent(
   ];
   for (const [hint, value] of explicit) {
     const t = trimOrNull(value);
-    if (t) byHint[hint] = t.slice(0, 2000); // explicit overrides parsed
+    if (t) byHint[hint] = cleanMeetingValue(t).slice(0, 2000) || t.slice(0, 2000);
+  }
+
+  if (byHint.owner_name) {
+    const name = personNameFromText(byHint.owner_name);
+    if (name) byHint.owner_name = name;
+  }
+  if (byHint.online_channels && /termine werden|rezeption|sprachassistent/i.test(byHint.online_channels)) {
+    const channels = channelLabelsFromText(byHint.online_channels);
+    if (channels) byHint.online_channels = channels;
   }
 
   // URLs from explicit pages field if no labels were used
@@ -623,12 +704,17 @@ export function buildMeetingExtraQuestions(
   if (!briefing) return [];
   const parsed = parseMeetingBriefingContent(briefing);
   const extras = [...parsed.extras];
-  if (parsed.leftoverNotes) {
+  const leftover = parsed.leftoverNotes ? cleanMeetingValue(parsed.leftoverNotes) : "";
+  if (
+    leftover.length >= 80 &&
+    !/beantwortet im meeting/i.test(leftover) &&
+    !/^wunschpatienten\b/i.test(leftover)
+  ) {
     pushExtra(extras, {
       id: "extra_meeting_notes",
       title: "Weitere relevante Punkte aus dem Kundengespräch",
       description: "Restnotiz, die keinem Label zugeordnet wurde — prüfen oder verteilen.",
-      answer: parsed.leftoverNotes,
+      answer: leftover,
     });
   }
   return extras;

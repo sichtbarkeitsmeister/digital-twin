@@ -135,17 +135,42 @@ Ein Standort in Meerbusch, keine weiteren Standorte geplant.
         1. Privatpatient mit Hautkrebsvorsorge als Anker
         2. Laser-Interessent
     • ✅ Buchungsweg:
-Termine werden online über Doctolib oder telefonisch gebucht.
+Termine werden online über Doctolib oder telefonisch gebucht. 🔍 Details zur Rezeptions-/Rückruf-Prozessplanung wurden nicht vollständig geklärt – ggf. im Fragebogen oder Folgegespräch vertiefen. Block 1 – Praxis & Patientengruppen (Wunschkunden-Definition)
     • ✅ Ansprechpartnerin:
-Dr. Schürings selbst ist direkte Ansprechpartnerin für die laufende Abstimmung.`;
+Dr. Schürings selbst ist direkte Ansprechpartnerin für die laufende Abstimmung.
+
+Das Kickoff hat am 19.08.2026 stattgefunden. Diese Version ist dieZusammenfassung: beantwortete Punkte sind markiert.
+Medizinische Dermatologie:
+Hautkrebsvorsorge (inkl. KI-gestützter Diagnostik), Akne-Behandlung, Ekzeme
+Ästhetische Medizin:
+Botulinumtoxin/Faltenbehandlung, Migräne-Behandlung
+Laserbehandlungen:
+dauerhafte Haarentfernung, Tattooentfernung, Fotona4D`;
 
 const kickoffParsed = parseMeetingBriefingContent({ notes: kickoff });
 assert.match(kickoffParsed.byHint.region ?? "", /Meerbusch/);
 assert.match(kickoffParsed.byHint.online_channels ?? "", /Doctolib/);
 assert.match(kickoffParsed.byHint.typical_process ?? "", /Doctolib|telefon/i);
+assert.equal(/Block 1|Wunschkunden-Definition|ggf\. im Fragebogen/.test(kickoffParsed.byHint.typical_process ?? ""), false);
 assert.match(kickoffParsed.byHint.no_fit ?? "", /Selbstzahler|gesetzlich/i);
 assert.match(kickoffParsed.byHint.target_group ?? "", /Privatpatient|Laser/i);
-assert.match(kickoffParsed.byHint.owner_name ?? "", /Schürings/);
+assert.equal(kickoffParsed.byHint.owner_name, "Dr. Schürings");
+assert.equal(/Ansprechpartnerin für die laufende/.test(kickoffParsed.byHint.owner_name ?? ""), false);
+assert.equal(/KI-Sprachassistent|Block 1|Rezeption/.test(kickoffParsed.byHint.online_channels ?? ""), false);
+assert.match(kickoffParsed.byHint.online_channels ?? "", /Doctolib/);
+assert.equal(/^\.|gemac$|^ionale/.test(kickoffParsed.byHint.usp ?? ""), false);
+assert.match(kickoffParsed.byHint.usp ?? "", /Schulungszentrum|Fotona/i);
+assert.match(kickoffParsed.byHint.services ?? "", /Hautkrebsvorsorge|Akne/i);
+assert.equal(
+  kickoffParsed.extras.some((e) => /zusammenfassung|medizinische dermatologie|kickoff hat am/i.test(e.title)),
+  false,
+);
+
+const kickoffExtras = buildMeetingExtraQuestions({ notes: kickoff });
+assert.equal(
+  kickoffExtras.some((e) => e.id === "extra_meeting_notes" && /beantwortet im meeting/i.test(e.answer)),
+  false,
+);
 assert.match(kickoffParsed.byHint.org_name ?? "", /Haut- und Laserpraxis/);
 assert.match(kickoffParsed.byHint.colloquial_name ?? "", /Dermatologie/);
 assert.match(kickoffParsed.byHint.usp ?? "", /Schulungszentrum|Fotona/i);
@@ -162,11 +187,14 @@ const kickoffPrefills = suggestPrefillsFromMeeting({
     { key: "usp", hint: "usp" },
     { key: "respondent_name", hint: "owner_name" },
     { key: "team_members", hint: "team_members" },
+    { key: "portfolio", hint: "services" },
   ],
 });
 assert.equal(kickoffPrefills.location_catchment?.source, "meeting");
 assert.match(kickoffPrefills.location_catchment?.value ?? "", /Meerbusch/);
 assert.match(kickoffPrefills.online_channels?.value ?? "", /Doctolib/);
+assert.equal(kickoffPrefills.respondent_name?.value, "Dr. Schürings");
+assert.match(kickoffPrefills.portfolio?.value ?? "", /Hautkrebsvorsorge|Akne/i);
 assert.match(kickoffPrefills.no_fit_clients?.value ?? "", /Selbstzahler|gesetzlich/i);
 assert.match(kickoffPrefills.company_name?.value ?? "", /Haut- und Laserpraxis/);
 
