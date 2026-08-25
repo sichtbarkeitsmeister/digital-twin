@@ -39,7 +39,15 @@ export type CoreQuestionPrefillHint =
   | "nap_address"
   | "company_history"
   | "portfolio_links"
-  | "years_staff";
+  | "years_staff"
+  | "no_fit"
+  | "typical_process"
+  | "owner_role"
+  | "three_year_goal"
+  | "qualifications"
+  | "why_stay"
+  | "anything_else"
+  | "marketing_plan";
 
 export type CoreQuestionTemplate = {
   key: string;
@@ -362,6 +370,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title: "Welche Rolle oder Position hat diese Person in der Firma?",
         description: "z. B. Inhaber, Geschäftsführung, Assistenz, Marketing.",
         type: "text",
+        prefillHint: "owner_role",
       },
     ],
     "Wer den Fragebogen ausfüllt.",
@@ -450,6 +459,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: emptySlots("process", 3),
         allowExtraEntries: true,
         addEntryLabel: "Schritt hinzufügen",
+        prefillHint: "typical_process",
       },
       {
         key: "response_speed",
@@ -539,6 +549,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         description:
           "Fachlich oder menschlich nicht passend — nicht die Preisuntergrenze bei den Leistungen. z. B. bestimmte Anliegen, die ihr nicht übernehmt, oder Kunden, die nur den günstigsten Preis wollen.",
         type: "text",
+        prefillHint: "no_fit",
       },
       {
         key: "customer_values",
@@ -622,6 +633,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         options: emptySlots("quali", 3),
         allowExtraEntries: true,
         addEntryLabel: "Eintrag hinzufügen",
+        prefillHint: "qualifications",
       },
       {
         key: "company_history",
@@ -665,6 +677,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         description:
           "Warum jemand wiederkommt oder weiterempfiehlt — nicht der USP und nicht die Wahrnehmung weiter unten.",
         type: "text",
+        prefillHint: "why_stay",
       },
       {
         key: "proven_metrics",
@@ -798,11 +811,13 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title: "Wo soll die Firma in zwei bis drei Jahren stehen?",
         description: "Konkret: Standort, Team, neues Angebot oder Größe — kein Slogan.",
         type: "text",
+        prefillHint: "three_year_goal",
       },
       {
         key: "marketing_12_months",
         title: "Welche Marketing-Maßnahmen sind für die nächsten zwölf Monate geplant oder gewünscht?",
         type: "text",
+        prefillHint: "marketing_plan",
       },
     ],
   ),
@@ -814,6 +829,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "anything_else",
         title: "Gibt es noch etwas Wichtiges über die Firma, das bisher nicht gefragt wurde?",
         type: "text",
+        prefillHint: "anything_else",
       },
       {
         key: "elevator_pitch",

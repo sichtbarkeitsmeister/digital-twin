@@ -33,6 +33,7 @@ import {
   buildMeetingExtraQuestions,
   meetingBriefingContextText,
   meetingBriefingHasContent,
+  mergeSourceTextIntoBriefing,
   suggestPrefillsFromMeeting,
   type MeetingBriefing,
 } from "@/lib/surveys/meeting-briefing";
@@ -59,6 +60,7 @@ import { customizeCoreQuestions, mergeSuggestedCheckboxOptions } from "@/lib/sur
 import { generatedChoiceCustomOptionFlags } from "@/lib/surveys/choice-custom-options";
 import { fallbackExtraQuestions } from "@/lib/surveys/ai-extra-questions";
 import { generateAiExtraQuestions, proofreadAiExtraQuestions } from "@/lib/surveys/proofread-ai-extras";
+import { extractPrefillsFromUploads } from "@/lib/surveys/extract-upload-prefills";
 
 export type { MeetingBriefing, ExtraQuestionPlacement, FragebogenReviewDraft, ReviewQuestionItem };
 export { buildSurveyAndAnswersFromReview } from "@/lib/surveys/fragebogen-review-draft";
@@ -124,7 +126,6 @@ async function generateExtrasAndAiPrefills(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
-  const missing = input.coreItems.filter((c) => !c.hasPrefill);
   const audience =
     input.purpose === "anbieter"
       ? `Anbieter-Fragebogen für „${input.organisationName}“ (${vocab.label}). Wortwahl strikt: Anbieter = „${vocab.business}“, Person = „${vocab.singular}“ / „${vocab.plural}“, Arbeit = „${vocab.engagement}“. Nicht Mandat/Patient/Kunde vermischen.`
@@ -132,9 +133,6 @@ async function generateExtrasAndAiPrefills(input: {
         ? `Interner Recherche-Fragebogen (TEIL C) für „${input.organisationName}“. Nicht an den Kunden.`
         : `Persona-Fragebogen für Wunsch${vocab.singular.toLowerCase()} „${input.wunschkundeLabel?.trim() || "Avatar"}“ von „${input.organisationName}“ (${vocab.label}). Person heißt durchgängig ${vocab.singular}. Arbeit heißt ${vocab.engagement}.`;
 
-  const documentBlock = input.documentText?.trim()
-    ? `\nHochgeladene Dateien (HÖCHSTE PRIORITÄT):\n${input.documentText.slice(0, 8000)}\n`
-    : "";
   const meetingBlock = input.meetingContext?.trim()
     ? `\nMeeting-Briefing:\n${input.meetingContext.slice(0, 3500)}\n`
     : "";
@@ -142,12 +140,31 @@ async function generateExtrasAndAiPrefills(input: {
     ? `\nBereits erkannte Leistungen:\n${input.serviceLabels.map((s) => `- ${s}`).join("\n")}\n`
     : "";
 
-  const targets = missing.length > 0 ? missing : input.coreItems.slice(0, 12);
-
   let aiPrefills: Record<string, PrefillDraft> = {};
   let optionSets: Record<string, string[]> = {};
   let warning: string | null = null;
 
+  if (input.documentText?.trim()) {
+    const fromUploads = await extractPrefillsFromUploads({
+      organisationName: input.organisationName,
+      documentText: input.documentText,
+      coreItems: input.coreItems.map((c) => ({ key: c.key, title: c.title })),
+    });
+    aiPrefills = fromUploads.prefills;
+    optionSets = fromUploads.optionSets;
+    if (Object.keys(fromUploads.prefills).length === 0) {
+      warning =
+        "KI konnte die hochgeladenen Dateien nicht automatisch zuordnen. Treffer aus dem Meeting-Text sind trotzdem übernommen — bitte prüfen.";
+    }
+  }
+
+  const filledKeys = new Set([
+    ...input.coreItems.filter((c) => c.hasPrefill).map((c) => c.key),
+    ...Object.keys(aiPrefills),
+  ]);
+  const missing = input.coreItems.filter((c) => !filledKeys.has(c.key));
+
+  if (missing.length > 0) {
   try {
     const result = await callAnthropicFirstAvailable({
       anthropic,
@@ -163,12 +180,12 @@ async function generateExtrasAndAiPrefills(input: {
           content: `${audience}
 
 Offene Kernfragen (nur diese prefills füllen, wenn der Kontext es hergibt):
-${targets.map((c) => `- [${c.key}] ${c.title}`).join("\n")}
-${documentBlock}${meetingBlock}${servicesBlock}
+${missing.map((c) => `- [${c.key}] ${c.title}`).join("\n")}
+${meetingBlock}${servicesBlock}
 Crawl (Presse, Über uns, Team, Leistungen, Impressum zuerst):
 ${input.crawlSummary.slice(0, 9000)}
 
-Fülle nur Felder, die der Kontext klar hergibt. Team, Leistungen, USP, Standort, Impressum, Presse besonders. source=upload bei Dateien, sonst source=ai.
+Fülle nur Felder, die der Kontext klar hergibt. Team, Leistungen, USP, Standort, Impressum, Presse besonders. source=ai. Hochgeladene Dateien wurden separat ausgewertet — hier nicht nochmal raten.
 Strikt zuordnen — lieber weglassen als falsch:
 - company_name: nur offizieller Praxis-/Firmenname, nie Behandlungs- oder Preistext.
 - location_catchment: nur Sitz/Ort/Einzugsgebiet (z. B. Meerbusch), nie Preisliste. „pro Region“ bei Botox ist KEINE Region.
@@ -177,7 +194,7 @@ Leistungsnamen in optionSets.portfolio und optionSets.services_ranked (3–8 kur
 Für Persona außerdem optionSets.persona_goals, persona_objections, persona_alternatives, persona_budget (je 3–6 branchentypische Optionen).
 questions=[].
 
-{"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"upload"}],"optionSets":{"portfolio":["Leistung A"]},"questions":[]}`,
+{"prefills":[{"key":"team_members","value":"...","note":"kurz","source":"ai"}],"optionSets":{"portfolio":["Leistung A"]},"questions":[]}`,
         },
       ],
     });
@@ -200,25 +217,17 @@ questions=[].
         };
         const allowedKeys = new Set(input.coreItems.map((m) => m.key));
         const hintByKey = new Map(input.coreItems.map((m) => [m.key, m.hint]));
-        const alreadyFilled = new Set(
-          input.coreItems.filter((c) => c.hasPrefill).map((c) => c.key),
-        );
+        const alreadyFilled = new Set(filledKeys);
         for (const row of parsed.prefills ?? []) {
           const key = String(row.key ?? "").trim();
           const value = String(row.value ?? "").trim();
           if (!allowedKeys.has(key) || value.length < 3) continue;
-          const fromUpload = String(row.source ?? "").trim() === "upload";
-          if (!fromUpload && alreadyFilled.has(key)) continue;
-          if (!fromUpload && !isPlausiblePrefill(hintByKey.get(key), value)) continue;
+          if (alreadyFilled.has(key) || aiPrefills[key]) continue;
+          if (!isPlausiblePrefill(hintByKey.get(key), value)) continue;
           aiPrefills[key] = {
             value: value.slice(0, 2000),
-            source: fromUpload ? "upload" : "ai",
-            note: String(
-              row.note ??
-                (fromUpload
-                  ? "Aus hochgeladener Datei — bitte prüfen"
-                  : "KI-Vorschlag aus Crawl — bitte prüfen"),
-            ).slice(0, 160),
+            source: "ai",
+            note: String(row.note ?? "KI-Vorschlag aus Crawl — bitte prüfen").slice(0, 160),
           };
         }
         if (parsed.optionSets && typeof parsed.optionSets === "object") {
@@ -231,7 +240,7 @@ questions=[].
               key === "portfolio" || key === "services_ranked"
                 ? parseServiceLabelList(labels.join("\n"))
                 : labels.slice(0, 10);
-            if (cleaned.length >= 2) optionSets[key] = cleaned.slice(0, 10);
+            if (cleaned.length >= 2 && !optionSets[key]) optionSets[key] = cleaned.slice(0, 10);
           }
         }
       }
@@ -242,6 +251,7 @@ questions=[].
     warning = timedOut
       ? "KI-Vorausfüllung hat zu lange gedauert. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen."
       : "KI-Vorausfüllung ist ausgefallen. Crawl- und Dateiangaben sind trotzdem übernommen — bitte prüfen.";
+  }
   }
 
   let extras: Array<{ title: string; description: string }> = [];
@@ -323,6 +333,12 @@ export async function buildFragebogenReviewDraft(input: {
     if (saved) briefing = firstConversationToMeetingBriefing(saved);
   }
 
+  const meetingText = meetingBriefingHasContent(briefing)
+    ? meetingBriefingContextText(briefing)
+    : "";
+  const documentNotes = documents.map((doc) => doc.text).join("\n\n");
+  briefing = mergeSourceTextIntoBriefing(briefing, documentNotes);
+
   const heuristic = suggestPrefillsFromCrawl({
     context: crawl,
     hints,
@@ -331,11 +347,10 @@ export async function buildFragebogenReviewDraft(input: {
     briefing: briefing ?? {},
     hints,
   });
-  const meetingText = meetingBriefingHasContent(briefing)
-    ? meetingBriefingContextText(briefing)
-    : "";
 
-  const meetingServices = parseServiceLabelList(briefing?.services ?? "");
+  const meetingServices = parseServiceLabelList(
+    [briefing?.services ?? "", meeting.portfolio?.value ?? ""].join("\n"),
+  );
   const crawlServices = extractServiceLabels(crawl);
   const serviceLabels =
     meetingServices.length >= 2
@@ -371,12 +386,11 @@ export async function buildFragebogenReviewDraft(input: {
   });
 
   const prefills: Record<string, PrefillDraft> = { ...basePrefills };
+  for (const [key, draft] of Object.entries(meeting)) {
+    prefills[key] = draft;
+  }
   for (const [key, draft] of Object.entries(aiBundle.aiPrefills)) {
     if (draft.source === "upload" || !prefills[key]) prefills[key] = draft;
-  }
-  for (const [key, draft] of Object.entries(meeting)) {
-    if (prefills[key]?.source === "upload") continue;
-    prefills[key] = draft;
   }
 
   const optionSets: Record<string, string[]> = { ...aiBundle.optionSets };

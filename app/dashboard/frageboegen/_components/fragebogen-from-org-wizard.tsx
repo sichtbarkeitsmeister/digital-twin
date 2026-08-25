@@ -866,9 +866,10 @@ export function FragebogenFromOrgWizard(props: {
             3b. Gesprächsnotizen und Unterlagen
           </CardTitle>
           <CardDescription>
-            Meeting-Protokolle, vorhandene Gespräche oder Zusammenfassungen hochladen. Die KI
-            prüft, welche Fragen darin schon beantwortet sind, und füllt die Antworten vor —
-            danach nur noch gegenlesen.
+            Meeting-Protokolle, Kickoffs oder Zusammenfassungen hochladen. Klare Punkte
+            (Standort, Buchungsweg, Team, was nicht passt) werden direkt den Fragen
+            zugeordnet; die KI füllt den Rest, soweit der Text es hergibt — danach
+            gegenlesen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">

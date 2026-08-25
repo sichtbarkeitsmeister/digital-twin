@@ -110,4 +110,64 @@ USP: Digitaler Zwilling`,
 assert.match(fromNotesPrefill.region?.value ?? "", /Hamm/);
 assert.match(fromNotesPrefill.usp?.value ?? "", /Zwilling/);
 
+const kickoff = `Kickoff-Meeting:
+Wunschpatienten (Haut- und Laserpraxis Dr. Schürings, Meerbusch)
+Legende:
+✅ Beantwortet im Meeting
+
+Kurzer Kontext zur Praxis
+    • Praxis wurde umbenannt in "Haut- und Laserpraxis" – dieser neue Name ist auf der Website aktuell noch nicht sichtbar (steht dort weiterhin "Dr. Schürings Dermatologie").
+    • Dr. Schürings ist internationale Expertin für Fotona-Laser und die Praxis ist Schulungszentrum für andere Ärzte.
+    • Die Praxis behandelt keine gesetzlich Versicherten in diesem Sinne.
+    • Es gibt eine Kosmetikerin, die in der Praxis mitarbeitet – ihr Angebot fehlt aktuell komplett auf der Website.
+
+    • ✅ Wie läuft die Praxis aktuell?
+ Läuft gut. Aufteilung ca. 50 % Selbstzahler / 50 % Privatpatienten.
+    • ✅ Welche Patienten sind ihr am liebsten?
+Privatpatienten, die regelmäßig (etwa alle 1–2 Monate) kommen – Hautkrebsvorsorge als Anlass.
+    • ✅ Welche Patienten sind eher unattraktiv?
+Selbstzahler, die nur mit einer kleinen Einzelleistung kommen (z. B. Ausschlag + Creme, einmalig).
+    • ✅ Wo möchte sie wachsen?
+Laser-Behandlungen und größere Eingriffe wie Lipome und Atherome.
+    • ✅ Standort:
+Ein Standort in Meerbusch, keine weiteren Standorte geplant.
+    • ✅ Zwei Wunschkunden-Typen final festgelegt:
+        1. Privatpatient mit Hautkrebsvorsorge als Anker
+        2. Laser-Interessent
+    • ✅ Buchungsweg:
+Termine werden online über Doctolib oder telefonisch gebucht.
+    • ✅ Ansprechpartnerin:
+Dr. Schürings selbst ist direkte Ansprechpartnerin für die laufende Abstimmung.`;
+
+const kickoffParsed = parseMeetingBriefingContent({ notes: kickoff });
+assert.match(kickoffParsed.byHint.region ?? "", /Meerbusch/);
+assert.match(kickoffParsed.byHint.online_channels ?? "", /Doctolib/);
+assert.match(kickoffParsed.byHint.typical_process ?? "", /Doctolib|telefon/i);
+assert.match(kickoffParsed.byHint.no_fit ?? "", /Selbstzahler|gesetzlich/i);
+assert.match(kickoffParsed.byHint.target_group ?? "", /Privatpatient|Laser/i);
+assert.match(kickoffParsed.byHint.owner_name ?? "", /Schürings/);
+assert.match(kickoffParsed.byHint.org_name ?? "", /Haut- und Laserpraxis/);
+assert.match(kickoffParsed.byHint.colloquial_name ?? "", /Dermatologie/);
+assert.match(kickoffParsed.byHint.usp ?? "", /Schulungszentrum|Fotona/i);
+assert.match(kickoffParsed.byHint.team_members ?? "", /Kosmetikerin/);
+
+const kickoffPrefills = suggestPrefillsFromMeeting({
+  briefing: { notes: kickoff },
+  hints: [
+    { key: "location_catchment", hint: "region" },
+    { key: "online_channels", hint: "online_channels" },
+    { key: "typical_process", hint: "typical_process" },
+    { key: "no_fit_clients", hint: "no_fit" },
+    { key: "company_name", hint: "org_name" },
+    { key: "usp", hint: "usp" },
+    { key: "respondent_name", hint: "owner_name" },
+    { key: "team_members", hint: "team_members" },
+  ],
+});
+assert.equal(kickoffPrefills.location_catchment?.source, "meeting");
+assert.match(kickoffPrefills.location_catchment?.value ?? "", /Meerbusch/);
+assert.match(kickoffPrefills.online_channels?.value ?? "", /Doctolib/);
+assert.match(kickoffPrefills.no_fit_clients?.value ?? "", /Selbstzahler|gesetzlich/i);
+assert.match(kickoffPrefills.company_name?.value ?? "", /Haut- und Laserpraxis/);
+
 console.log("meeting-briefing: ok");
