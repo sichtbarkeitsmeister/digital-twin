@@ -377,9 +377,45 @@ export function normalizeSurveyPatchOperation(raw: unknown): unknown {
   return raw;
 }
 
+function expandSurveyPatchOperation(raw: unknown): unknown[] {
+  const op = asPlainObject(raw);
+  if (!op || op.op !== "update_step") return [normalizeSurveyPatchOperation(raw)];
+
+  const patch = asPlainObject(op.patch);
+  if (!patch || !Array.isArray(patch.fields)) return [normalizeSurveyPatchOperation(raw)];
+  const fields = patch.fields;
+
+  const expanded: unknown[] = [];
+  const title = typeof patch.title === "string" ? patch.title : undefined;
+  const description = typeof patch.description === "string" ? patch.description : undefined;
+  if (title !== undefined || description !== undefined) {
+    expanded.push({
+      op: "update_step",
+      stepId: op.stepId,
+      patch: {
+        ...(title !== undefined ? { title } : {}),
+        ...(description !== undefined ? { description } : {}),
+      },
+    });
+  }
+  for (const rawField of fields) {
+    const field = asPlainObject(rawField);
+    if (!field || typeof field.id !== "string" || !field.id.trim()) continue;
+    const { id, ...rest } = field;
+    if (Object.keys(rest).length === 0) continue;
+    expanded.push({
+      op: "update_field",
+      stepId: op.stepId,
+      fieldId: id,
+      patch: rest,
+    });
+  }
+  return expanded.length > 0 ? expanded : [normalizeSurveyPatchOperation(raw)];
+}
+
 function normalizePatchOperationsArray(operations: unknown): unknown {
   if (!Array.isArray(operations)) return operations;
-  return operations.map(normalizeSurveyPatchOperation);
+  return operations.flatMap(expandSurveyPatchOperation);
 }
 
 /** Normalize common model mistakes before schema validation. */

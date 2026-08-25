@@ -39,6 +39,7 @@ import {
 } from "@/lib/ai/chat-history-anthropic";
 import { createSseStream, sseHeaders } from "@/lib/ai/chat-stream";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
+import { extractDashboardSurveyIdsFromText } from "@/lib/surveys/dashboard-survey-url";
 import {
   isLargeSurveyCreationIntent,
   resolveSurveyActionModels,
@@ -62,7 +63,7 @@ import { surveySchema } from "@/lib/surveys/schema";
 
 export const maxDuration = 300;
 
-const MAX_CANDIDATE_SURVEY_CONTEXTS = 2;
+const MAX_CANDIDATE_SURVEY_CONTEXTS = 3;
 const MAX_KNOWN_SURVEYS = 50;
 const SURVEY_RANK_POOL = 100;
 const RAW_HISTORY_LIMIT = 10;
@@ -167,8 +168,10 @@ function persistablePageContext(pageContext: RequestPageContext) {
   const { currentSurvey: _currentSurvey, ...rest } = pageContext;
   return {
     ...rest,
-    surveyId: pageContext.currentSurvey?.id ?? rest.surveyId ?? null,
-    liveWizardDraft: Boolean(pageContext.currentSurvey) || Boolean(pageContext.liveWizardDraft),
+    surveyId: pageContext.liveWizardDraft
+      ? pageContext.currentSurvey?.id ?? rest.surveyId ?? null
+      : rest.surveyId ?? pageContext.currentSurvey?.id ?? null,
+    liveWizardDraft: Boolean(pageContext.liveWizardDraft),
   };
 }
 
@@ -990,7 +993,18 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     }
 
     const liveSurvey = parsed.data.pageContext.currentSurvey ?? null;
-    const activeSurveyId = liveSurvey?.id ?? parsed.data.pageContext.surveyId ?? null;
+    const pastedSurveyIds = extractDashboardSurveyIdsFromText(parsed.data.content);
+    const liveWizardDraft = Boolean(parsed.data.pageContext.liveWizardDraft);
+    const activeSurveyId =
+      (liveWizardDraft ? liveSurvey?.id ?? null : null) ??
+      parsed.data.pageContext.surveyId ??
+      liveSurvey?.id ??
+      pastedSurveyIds[0] ??
+      null;
+    const definitionSurveyIds = new Set<string>([
+      ...(activeSurveyId ? [activeSurveyId] : []),
+      ...pastedSurveyIds,
+    ]);
     const pageOrganisationId = parsed.data.pageContext.organisationId ?? null;
     const terms = toPromptTerms(parsed.data.content);
 
@@ -1020,6 +1034,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
     const knownSurveyIds = new Set<string>();
     if (activeSurveyId) knownSurveyIds.add(activeSurveyId);
+    for (const id of pastedSurveyIds) knownSurveyIds.add(id);
     for (const s of rankedSurveys) {
       if (knownSurveyIds.size >= MAX_KNOWN_SURVEYS) break;
       knownSurveyIds.add(s.id);
@@ -1027,6 +1042,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
     const candidateIdSet = new Set<string>();
     if (activeSurveyId) candidateIdSet.add(activeSurveyId);
+    for (const id of pastedSurveyIds) candidateIdSet.add(id);
     for (const s of rankedSurveys) {
       if (candidateIdSet.size >= MAX_CANDIDATE_SURVEY_CONTEXTS) break;
       candidateIdSet.add(s.id);
@@ -1127,7 +1143,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       pageContext: {
         page: parsed.data.pageContext.page,
         surveyId: activeSurveyId,
-        liveWizardDraft: Boolean(liveSurvey),
+        liveWizardDraft,
         visibility: parsed.data.pageContext.visibility,
         slug: parsed.data.pageContext.slug,
         notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
@@ -1199,7 +1215,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
                 stepOutline: buildStepOutline(s.definition),
                 duplicateIdReport: buildDuplicateIdReport(s.definition),
               };
-              if (activeSurveyId && s.id === activeSurveyId) {
+              if (definitionSurveyIds.has(s.id)) {
                 return { ...base, definition: s.definition };
               }
               return base;
@@ -1279,26 +1295,38 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     if (!rawAssistantText) {
       emit("status", { message: "Ich formuliere gerade die beste Antwort..." });
 
-      const firstCall = workspace
-        ? await callAnthropicWithSurveyWorkspaceTools({
+      const firstCall = await callAnthropicWithSurveyWorkspaceTools({
             anthropic,
             models: modelSelection.modelsToTry,
             maxTokens: modelSelection.maxTokens,
             system: systemBlocks,
             messages: anthropicHistory,
             timeoutMs: 240_000,
-            organisations: workspace.organisations,
+            organisations: workspace?.organisations ?? [],
             defaultOrganisationId: resolvedOrganisationId,
+            loadSurveyById: async (surveyId) => {
+              const { data } = await auth.supabase
+                .from("surveys")
+                .select("id,title,description,definition")
+                .eq("id", surveyId)
+                .is("deleted_at", null)
+                .maybeSingle();
+              if (!data) {
+                return `Umfrage ${surveyId} nicht gefunden (gelöscht oder keine Berechtigung).`;
+              }
+              const outline = buildStepOutline(data.definition);
+              const fieldCount = outline.reduce((n, step) => n + step.fieldCount, 0);
+              return JSON.stringify({
+                id: data.id,
+                title: data.title,
+                description: data.description,
+                stepCount: outline.length,
+                fieldCount,
+                stepOutline: outline,
+                definition: data.definition,
+              });
+            },
             onStatus: (message) => emit("status", { message }),
-          })
-        : await callAnthropicFirstAvailable({
-            anthropic,
-            models: modelSelection.modelsToTry,
-            maxTokens: modelSelection.maxTokens,
-            system: systemBlocks,
-            messages: anthropicHistory,
-            stream: true,
-            timeoutMs: 240_000,
           });
 
       if (!firstCall) {

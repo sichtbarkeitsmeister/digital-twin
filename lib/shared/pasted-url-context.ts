@@ -1,5 +1,6 @@
 import { isBlockedFetchHost } from "@/lib/shared/safe-fetch-url";
 import { decodeResponseTextSafely, sanitizeForLlmText } from "@/lib/shared/sanitize-llm-text";
+import { isDashboardSurveyAppUrl } from "@/lib/surveys/dashboard-survey-url";
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
 
@@ -22,6 +23,7 @@ export function extractUrlsFromText(text: string, max = MAX_URLS): string[] {
       const url = new URL(cleaned);
       if (url.protocol !== "http:" && url.protocol !== "https:") continue;
       if (isBlockedFetchHost(url.hostname)) continue;
+      if (isDashboardSurveyAppUrl(cleaned)) continue;
       const normalized = url.toString();
       if (seen.has(normalized)) continue;
       seen.add(normalized);
@@ -168,6 +170,7 @@ export const PASTED_URL_PROMPT_HINT_DE = [
 export const PASTED_URL_PROMPT_HINT_EN = [
   "## Pasted website URLs",
   "When the user includes http(s) links in a message, the system automatically fetches publicly visible page content.",
+  "Dashboard URLs such as /dashboard/surveys/<uuid>/edit are application routes, not public websites. The system loads that questionnaire from the database instead of fetching login/marketing HTML. Use Candidate survey contexts / lookup_survey.",
   "Use the section \"Pasted website content\" for analysis and concrete suggestions.",
   "Do not claim you viewed a page unless fetched content for that URL is present.",
 ].join("\n");

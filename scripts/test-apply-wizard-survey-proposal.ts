@@ -149,4 +149,28 @@ const wrong = applySurveyProposalToWizardDraft(base, {
 });
 assert.equal(wrong.ok, false);
 
+const wrongStep = applySurveyProposalToWizardDraft(base, {
+  kind: "patch_survey_definition",
+  summary: "Falscher Schritt, gleiche Feld-ID",
+  surveyId: DRAFT_ID,
+  operations: [
+    {
+      op: "update_field",
+      stepId: "core_persona_demo",
+      fieldId: "core_persona_name",
+      patch: { title: "Trotzdem übernehmen" },
+    },
+    {
+      op: "update_field",
+      stepId: "core_persona_problems",
+      fieldId: "core_persona_unspoken_drivers",
+      patch: { description: "Gibt es hier nicht" },
+    },
+  ],
+});
+if (!wrongStep.ok) throw new Error(wrongStep.message);
+assert.equal(wrongStep.draft.questions[0]?.title, "Trotzdem übernehmen");
+assert.equal(wrongStep.draft.questions[0]?.answer, "Max Mustermann");
+assert.deepEqual(wrongStep.skipped, ["core_persona_unspoken_drivers"]);
+
 console.log("apply-wizard-survey-proposal: ok");

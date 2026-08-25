@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import type { SurveyAiProposal } from "@/lib/ai/survey-assistant-types";
-import { applySurveyPatchOperations } from "@/lib/ai/survey-patch";
+import {
+  applySurveyPatchOperations,
+  describePatchAppliedMessage,
+} from "@/lib/ai/survey-patch";
 import { validateUniqueSurveyIds } from "@/lib/ai/survey-id-guards";
 import { updateDtAgent } from "@/lib/dt/db";
 import {
@@ -109,7 +112,7 @@ async function applyNonBatchSurveyProposal(
 
     return {
       ok: true,
-      message: "Umfrage per Patch aktualisiert.",
+      message: describePatchAppliedMessage(patched.skipped),
       navigateTo: `/dashboard/surveys/${proposal.surveyId}/edit`,
       revertPayload: {
         kind: "revert_definition",

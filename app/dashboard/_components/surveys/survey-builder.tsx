@@ -62,6 +62,7 @@ import {
   loadDraftSurvey,
   saveDraftSurvey,
 } from "@/lib/surveys/storage";
+import { setSurveyBuilderLiveSurvey } from "@/lib/surveys/survey-builder-live-store";
 import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
@@ -358,6 +359,11 @@ export function SurveyBuilder({
     window.addEventListener("beforeunload", markReloadRestore);
     return () => window.removeEventListener("beforeunload", markReloadRestore);
   }, [reloadRestoreFlagKey]);
+
+  React.useEffect(() => {
+    setSurveyBuilderLiveSurvey(survey);
+    return () => setSurveyBuilderLiveSurvey(null);
+  }, [survey]);
 
   // Initial load
   React.useEffect(() => {

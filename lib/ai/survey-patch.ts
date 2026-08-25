@@ -54,6 +54,21 @@ type PatchOperation =
       infoText: string;
     };
 
+export function describeSkippedPatchFields(skippedFieldIds: string[]): string | null {
+  if (skippedFieldIds.length === 0) return null;
+  const list = skippedFieldIds.join(", ");
+  return skippedFieldIds.length === 1
+    ? `1 Feld lag nicht (mehr) im Fragebogen und wurde übersprungen: ${list}.`
+    : `${skippedFieldIds.length} Felder lagen nicht (mehr) im Fragebogen und wurden übersprungen: ${list}.`;
+}
+
+export function describePatchAppliedMessage(skippedFieldIds: string[]): string {
+  const skipNote = describeSkippedPatchFields(skippedFieldIds);
+  return skipNote
+    ? `Umfrage per Patch aktualisiert. ${skipNote}`
+    : "Umfrage per Patch aktualisiert.";
+}
+
 export function applySurveyPatchOperations(input: {
   baseSurvey: unknown;
   operations: PatchOperation[];
@@ -67,10 +82,30 @@ export function applySurveyPatchOperations(input: {
 
   const findStepIndex = (stepId: string) => draft.steps.findIndex((s) => s.id === stepId);
 
+  /** Field ids are unique across the survey — prefer the hinted step, then search globally. */
+  const findField = (fieldId: string, preferredStepId?: string) => {
+    if (preferredStepId) {
+      const stepIdx = findStepIndex(preferredStepId);
+      if (stepIdx >= 0) {
+        const fieldIdx = draft.steps[stepIdx].fields.findIndex((f) => f.id === fieldId);
+        if (fieldIdx >= 0) return { stepIdx, fieldIdx };
+      }
+    }
+    for (let stepIdx = 0; stepIdx < draft.steps.length; stepIdx++) {
+      const fieldIdx = draft.steps[stepIdx].fields.findIndex((f) => f.id === fieldId);
+      if (fieldIdx >= 0) return { stepIdx, fieldIdx };
+    }
+    return null;
+  };
+
+  const skippedFieldIds: string[] = [];
+  let appliedCount = 0;
+
   for (const op of input.operations) {
     if (op.op === "update_info_text") {
       draft.infoText = op.infoText;
       draft.infoTextEnabled = op.infoText.trim().length > 0;
+      appliedCount += 1;
       continue;
     }
 
@@ -81,18 +116,21 @@ export function applySurveyPatchOperations(input: {
       if (p.infoText !== undefined) draft.infoText = p.infoText;
       if (p.infoTextEnabled !== undefined) draft.infoTextEnabled = p.infoTextEnabled;
       if (p.answerPlaceholder !== undefined) draft.answerPlaceholder = p.answerPlaceholder;
+      appliedCount += 1;
       continue;
     }
 
     if (op.op === "update_field") {
-      const stepIdx = findStepIndex(op.stepId);
-      if (stepIdx < 0) return { ok: false as const, message: `Schritt nicht gefunden: ${op.stepId}` };
-      const fieldIdx = draft.steps[stepIdx].fields.findIndex((f) => f.id === op.fieldId);
-      if (fieldIdx < 0) return { ok: false as const, message: `Feld nicht gefunden: ${op.fieldId}` };
-      draft.steps[stepIdx].fields[fieldIdx] = {
-        ...draft.steps[stepIdx].fields[fieldIdx],
+      const loc = findField(op.fieldId, op.stepId);
+      if (!loc) {
+        skippedFieldIds.push(op.fieldId);
+        continue;
+      }
+      draft.steps[loc.stepIdx].fields[loc.fieldIdx] = {
+        ...draft.steps[loc.stepIdx].fields[loc.fieldIdx],
         ...op.patch,
       } as (typeof draft.steps)[number]["fields"][number];
+      appliedCount += 1;
       continue;
     }
 
@@ -114,18 +152,19 @@ export function applySurveyPatchOperations(input: {
         0,
         op.field as (typeof draft.steps)[number]["fields"][number],
       );
+      appliedCount += 1;
       continue;
     }
 
     if (op.op === "delete_field") {
-      const stepIdx = findStepIndex(op.stepId);
-      if (stepIdx < 0) return { ok: false as const, message: `Schritt nicht gefunden: ${op.stepId}` };
-      const fieldIdx = draft.steps[stepIdx].fields.findIndex((f) => f.id === op.fieldId);
-      if (fieldIdx < 0) {
-        return { ok: false as const, message: `Feld nicht gefunden: ${op.fieldId}` };
+      const loc = findField(op.fieldId, op.stepId);
+      if (!loc) {
+        skippedFieldIds.push(op.fieldId);
+        continue;
       }
       // Safety: remove exactly one target field (never all duplicates via filter).
-      draft.steps[stepIdx].fields.splice(fieldIdx, 1);
+      draft.steps[loc.stepIdx].fields.splice(loc.fieldIdx, 1);
+      appliedCount += 1;
       continue;
     }
 
@@ -136,6 +175,7 @@ export function applySurveyPatchOperations(input: {
         ...draft.steps[stepIdx],
         ...op.patch,
       };
+      appliedCount += 1;
       continue;
     }
 
@@ -151,6 +191,7 @@ export function applySurveyPatchOperations(input: {
           ? Math.max(0, Math.min(op.index, draft.steps.length))
           : draft.steps.length;
       draft.steps.splice(idx, 0, op.step as (typeof draft.steps)[number]);
+      appliedCount += 1;
       continue;
     }
 
@@ -161,8 +202,19 @@ export function applySurveyPatchOperations(input: {
       }
       // Safety: remove exactly one target step (never all duplicates via filter).
       draft.steps.splice(stepIdx, 1);
+      appliedCount += 1;
       continue;
     }
+  }
+
+  if (appliedCount === 0) {
+    const skipNote = describeSkippedPatchFields(skippedFieldIds);
+    return {
+      ok: false as const,
+      message:
+        skipNote ??
+        "Keine Änderung übernommen — der Patch hat keine gültigen Operationen.",
+    };
   }
 
   const parsedPatched = surveySchema.safeParse(draft);
@@ -180,6 +232,5 @@ export function applySurveyPatchOperations(input: {
     };
   }
 
-  return { ok: true as const, survey: parsedPatched.data };
+  return { ok: true as const, survey: parsedPatched.data, skipped: skippedFieldIds };
 }
-

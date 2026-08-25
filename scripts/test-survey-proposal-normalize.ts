@@ -212,4 +212,52 @@ if (!patchGuard.ok) {
   assert.match(patchGuard.message, /field/i);
 }
 
+const updateStepWithFields = {
+  kind: "patch_survey_definition",
+  summary: "Grammatik im Demo-Schritt",
+  surveyId,
+  operations: [
+    {
+      op: "update_step",
+      stepId: "core_persona_demo",
+      patch: {
+        fields: [
+          {
+            id: "core_persona_job",
+            type: "ranking",
+            title: "Beruf",
+            description: "",
+            required: true,
+            options: [
+              { id: "persona_job_5", label: "Im Ruhestand" },
+              { id: "persona_job_1", label: "Angestellte" },
+            ],
+            allowCustomEntries: true,
+          },
+        ],
+      },
+    },
+    {
+      op: "update_field",
+      stepId: "core_persona_buying",
+      fieldId: "core_persona_contact_is_client",
+      patch: { title: "Kürzerer Titel" },
+    },
+  ],
+};
+const expanded = parseSurveyAiProposal(updateStepWithFields);
+assert.equal(expanded.success, true);
+if (expanded.success && expanded.data.kind === "patch_survey_definition") {
+  assert.equal(expanded.data.operations[0]?.op, "update_field");
+  assert.equal(
+    (expanded.data.operations[0] as { fieldId?: string }).fieldId,
+    "core_persona_job",
+  );
+  assert.equal(expanded.data.operations[1]?.op, "update_field");
+  assert.equal(
+    (expanded.data.operations[1] as { fieldId?: string }).fieldId,
+    "core_persona_contact_is_client",
+  );
+}
+
 console.log("ok: survey proposal normalize");

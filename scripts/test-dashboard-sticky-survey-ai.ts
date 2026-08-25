@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import { resolveDashboardSurveyAiPageContext } from "../app/dashboard/_components/dashboard-sticky-survey-ai-assistant";
+import { resolveDashboardSurveyAiPageContext, buildStickySurveyAiAssistantContext } from "../app/dashboard/_components/dashboard-sticky-survey-ai-assistant";
+import type { Survey } from "../lib/surveys/types";
 
 function params(q: string) {
   return new URLSearchParams(q);
@@ -77,4 +78,72 @@ testSurveyBuilder();
 testCreateAgent();
 testFrageboegenList();
 testFallbackAnywhere();
+
+const leftoverWizard: Survey = {
+  version: 1,
+  id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  title: "Wizard-Rest",
+  description: "",
+  steps: [
+    {
+      id: "s1",
+      title: "Schritt",
+      description: "",
+      fields: [
+        {
+          id: "f1",
+          type: "text",
+          title: "Frage",
+          description: "",
+          required: false,
+        },
+      ],
+    },
+  ],
+};
+
+const openSurvey: Survey = {
+  ...leftoverWizard,
+  id: "da79cd08-3520-4db0-bf41-d456841e6d95",
+  title: "Persona: Unternehmer/Gesellschafter (Westprüfung Kanzlei)",
+};
+
+function testOpenEditIgnoresWizardDraft() {
+  const resolved = resolveDashboardSurveyAiPageContext(
+    "/dashboard/surveys/da79cd08-3520-4db0-bf41-d456841e6d95/edit",
+    params(""),
+  );
+  const ctx = buildStickySurveyAiAssistantContext({
+    resolved,
+    wizardSurvey: leftoverWizard,
+    builderSurvey: openSurvey,
+  });
+  assert.equal(ctx.page, "survey_builder_edit");
+  assert.equal(ctx.surveyId, "da79cd08-3520-4db0-bf41-d456841e6d95");
+  assert.equal(ctx.liveWizardDraft, false);
+  assert.equal(ctx.currentSurvey?.id, "da79cd08-3520-4db0-bf41-d456841e6d95");
+  assert.equal(
+    ctx.currentSurvey?.title,
+    "Persona: Unternehmer/Gesellschafter (Westprüfung Kanzlei)",
+  );
+  console.log("open edit ignores leftover wizard draft: ok");
+}
+
+function testWizardPageStillUsesDraft() {
+  const resolved = resolveDashboardSurveyAiPageContext(
+    "/dashboard/frageboegen/neu",
+    params(""),
+  );
+  const ctx = buildStickySurveyAiAssistantContext({
+    resolved,
+    wizardSurvey: leftoverWizard,
+    builderSurvey: null,
+  });
+  assert.equal(ctx.liveWizardDraft, true);
+  assert.equal(ctx.surveyId, leftoverWizard.id);
+  console.log("wizard page uses draft: ok");
+}
+
+testOpenEditIgnoresWizardDraft();
+testWizardPageStillUsesDraft();
 console.log("all sticky survey ai context tests passed");

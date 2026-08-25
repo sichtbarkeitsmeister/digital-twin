@@ -34,6 +34,7 @@ import {
   countSurveyDeletesInProposal,
   parseSurveyAiProposal,
 } from "@/lib/ai/survey-assistant-types";
+import { describeSkippedPatchFields } from "@/lib/ai/survey-patch";
 import {
   applySurveyProposalToWizardDraft,
   isLiveWizardSurveyProposal,
@@ -228,6 +229,10 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
           ? props.pageContext.currentSurvey
             ? "Du prüfst gerade einen neuen Fragebogen-Entwurf. Änderungen gelten direkt in der Prüfung."
             : "Du erstellst gerade eine neue Umfrage."
+        : props.pageContext.page === "survey_builder_edit"
+          ? props.pageContext.currentSurvey?.title?.trim()
+            ? `Du bearbeitest gerade „${props.pageContext.currentSurvey.title.trim()}“.`
+            : "Du bearbeitest gerade eine bestehende Umfrage."
           : props.pageContext.page === "dt_agents"
             ? "Du bist in der Agenten-Verwaltung (DigitalTwin)."
             : props.pageContext.page === "survey_to_agent"
@@ -245,7 +250,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         ? `Sichtbarkeit: ${props.pageContext.visibility}`
         : null,
       props.pageContext.slug ? `Slug: ${props.pageContext.slug}` : null,
-      props.pageContext.currentSurvey
+      props.pageContext.liveWizardDraft && props.pageContext.currentSurvey
         ? "Offener Entwurf (noch nicht gespeichert)"
         : null,
     ]
@@ -808,13 +813,16 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       if (!confirmed) return;
     }
     setPendingActionId(actionId);
-    const liveSurveyId = props.pageContext.currentSurvey?.id ?? null;
+    const liveSurveyId = props.pageContext.liveWizardDraft
+      ? props.pageContext.currentSurvey?.id ?? null
+      : null;
     const parsedProposal =
       proposalSource?.proposal_json != null
         ? parseSurveyAiProposal(proposalSource.proposal_json)
         : null;
     let liveDraft = false;
     let nextLiveDraft = null as ReturnType<typeof getFragebogenWizardDraft>;
+    let liveSkipped: string[] = [];
     if (
       parsedProposal?.success &&
       isLiveWizardSurveyProposal(parsedProposal.data, liveSurveyId)
@@ -833,6 +841,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       }
       liveDraft = true;
       nextLiveDraft = applied.draft;
+      liveSkipped = applied.skipped;
     }
     const res = await fetch(
       `/api/ai/chats/${selectedChatId}/actions/${actionId}/apply`,
@@ -853,7 +862,12 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
     if (data.ok && liveDraft && nextLiveDraft) {
       setFragebogenWizardDraft(nextLiveDraft, "ai");
     }
-    setStatus(data.message, data.ok ? "success" : "error");
+    const skipNote = liveDraft ? describeSkippedPatchFields(liveSkipped) : null;
+    const statusMessage =
+      data.ok && skipNote
+        ? `${data.message} ${skipNote}`
+        : data.message;
+    setStatus(statusMessage, data.ok ? "success" : "error");
     if (!data.ok) {
       await maybeTriggerAutoFixForFailedAction(actionId, data.message);
     }
