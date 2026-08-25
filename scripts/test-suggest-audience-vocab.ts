@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 
+import { audienceWordingPreview } from "../lib/surveys/client-audience";
 import {
   fallbackSuggestAudienceVocab,
   heuristicSuggestAudienceVocab,
@@ -19,6 +20,7 @@ assert.equal(entrümpler.vocab.singular, "Kunde");
 assert.equal(entrümpler.vocab.engagement, "Entrümpelung");
 assert.equal(entrümpler.vocab.engagementGender, "f");
 assert.equal(entrümpler.vocab.business, "Betrieb");
+assert.match(audienceWordingPreview(entrümpler.vocab), /die Entrümpelung/);
 
 const ascii = heuristicSuggestAudienceVocab({ industry: "Entruempelung Berlin" });
 assert.ok(ascii);
