@@ -25,7 +25,7 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtTabs } from "@/components/dt/dt-tabs";
 import type { DtAgentEditRequestRow } from "@/lib/dt/agent-edit-requests";
-import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { filterAgentsHiddenFromOrgMembers, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { isProtectedSeoAdvisorAgent } from "@/lib/dt/delete-agent-policy";
 import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
@@ -478,6 +478,11 @@ export function DtAgentsManager(props: {
       if (!editValues.usesGlobalPrompt) {
         body.promptTemplate = editValues.prompt;
       }
+    } else if (editingAgent && isSeoAdvisorAgent(editingAgent)) {
+      body.usesGlobalPrompt = editingAgent.uses_global_prompt ?? true;
+      if (!editingAgent.uses_global_prompt) {
+        body.promptTemplate = editValues.prompt;
+      }
     } else if (
       editingAgent?.source_survey_id ||
       editingAgent?.uses_global_prompt
@@ -580,6 +585,20 @@ export function DtAgentsManager(props: {
   const canDisableAgent = (agent: AgentRow) =>
     !agent.is_enabled || agents.filter((a) => a.is_enabled).length > 1;
 
+  const orgWunschkunden = agents
+    .filter(
+      (a) =>
+        (a.kind === "wunschkunde" || a.kind === "persona") &&
+        a.slug !== "default" &&
+        !a.is_default,
+    )
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      role: a.role,
+      is_enabled: a.is_enabled,
+    }));
+
   const contextHref = `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(orgId)}${editingId ? `&agent=${encodeURIComponent(editingId)}` : agents[0] ? `&agent=${encodeURIComponent(agents[0].id)}` : ""}`;
 
   const showAdminChrome =
@@ -668,6 +687,8 @@ export function DtAgentsManager(props: {
                   onRequestChange={() => setRequestAgent(agent)}
                   canDisable={canDisableAgent(agent)}
                   alwaysOn={isProtectedAlwaysOn(agent)}
+                  organisationId={orgId}
+                  orgWunschkunden={orgWunschkunden}
                   globalPromptPreview={
                     agent.is_default
                       ? globalPromptForAgent(agent, globalPrompts)

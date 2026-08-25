@@ -10,6 +10,16 @@ export function isSeoAdvisorAgent(agent: {
   );
 }
 
+/** Survey-built Wunschkunden avatars — not the SEO advisor even if it stores an Anbieter source. */
+export function isSurveyPersonaAgent(agent: {
+  source_survey_id?: string | null;
+  slug?: string | null;
+  kind?: string | null;
+}): boolean {
+  if (!agent.source_survey_id) return false;
+  return !isSeoAdvisorAgent(agent);
+}
+
 type AgentVisibilityInput = {
   slug?: string | null;
   kind?: string | null;

@@ -20,6 +20,7 @@ import {
   loadDtSeoTasksForPrompt,
 } from "@/lib/dt/seo/task-context";
 import { loadOtherSeoChatsForPrompt } from "@/lib/dt/seo/org-chat-memory";
+import { loadWunschkundenKnowledgeForSeo } from "@/lib/dt/seo/wunschkunden-knowledge";
 import { loadGlobalSeoChecklist, resolveSeoChecklistRaw } from "@/lib/dt/seo/seo-checklist";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import { buildDtSystemPrompt } from "@/lib/dt/prompts/build-system-prompt";
@@ -200,6 +201,13 @@ export async function assembleDtChatFromDb(input: {
     promptMode === "seo"
       ? await loadOtherSeoChatsForPrompt(supabase, chat.organisation_id, chat.id)
       : "";
+  const needsWunschkunden =
+    promptMode === "seo" ||
+    agent.kind === "seo_advisor" ||
+    agent.kind === "geo_advisor";
+  const wunschkundenKnowledgeText = needsWunschkunden
+    ? await loadWunschkundenKnowledgeForSeo(supabase, chat.organisation_id)
+    : undefined;
 
   const lastUserMessage = [...prefixed].reverse().find((m) => m.role === "user");
   const pastedUrlsText = lastUserMessage?.content
@@ -236,6 +244,7 @@ export async function assembleDtChatFromDb(input: {
     seoTasksText:
       promptMode === "seo" ? formatDtSeoTasksForPrompt(seoTaskRows) : undefined,
     otherSeoChatsText: promptMode === "seo" ? otherSeoChatsText : undefined,
+    wunschkundenKnowledgeText,
     pastedUrlsText,
   });
 
@@ -299,6 +308,12 @@ export async function assembleDtChatEphemeral(input: {
     ? ((await buildPastedUrlContextText(input.content)) ?? undefined)
     : undefined;
 
+  const needsWunschkunden =
+    agent.kind === "seo_advisor" || agent.kind === "geo_advisor";
+  const wunschkundenKnowledgeText = needsWunschkunden
+    ? await loadWunschkundenKnowledgeForSeo(supabase, input.organisationId)
+    : undefined;
+
   const system = buildDtSystemPrompt({
     agent: {
       name: agent.name,
@@ -319,6 +334,7 @@ export async function assembleDtChatEphemeral(input: {
     globalRules: prefs?.global_assistant_rules,
     ghostMode: true,
     textMode: input.textMode,
+    wunschkundenKnowledgeText,
     pastedUrlsText,
   });
 

@@ -27,7 +27,7 @@ const PROMPT_META: Record<
   seo_advisor: {
     title: "SEO-Berater",
     description:
-      "Nur im SEO-Modus für Plattform-Admins. Nutzt SEO-Daten, Website-Inhalte und Anbieter-Wissen (Zusätzliche Anweisungen) der jeweiligen Organisation.",
+      "Nur im SEO-Modus für Plattform-Admins. Nutzt SEO-Daten, Website-Inhalte, Anbieter-Wissen und automatisch die Wunschkunden-Avatare der jeweiligen Organisation.",
     icon: Globe2,
   },
   survey_to_agent: {
