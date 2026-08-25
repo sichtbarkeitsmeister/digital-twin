@@ -171,6 +171,65 @@ function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function patchArticleBeforeNoun(
+  text: string,
+  fromArticle: string,
+  toArticle: string,
+  singular: string,
+  stripTrailingS = false,
+): string {
+  const noun = escapeRegExp(singular);
+  const nounPat = stripTrailingS ? `${noun}s?` : noun;
+  const apply = (from: string, to: string) => {
+    const re = new RegExp(`\\b${escapeRegExp(from)}(\\s+\\p{L}+)?\\s+${nounPat}\\b`, "gu");
+    return (input: string) =>
+      input.replace(re, (_m, adj?: string) =>
+        adj ? `${to}${adj} ${singular}` : `${to} ${singular}`,
+      );
+  };
+  let out = apply(fromArticle, toArticle)(text);
+  out = apply(capitalize(fromArticle), capitalize(toArticle))(out);
+  return out;
+}
+
+/** Fix leftover wrong-gender articles after noun swap (jedem Behandlung → jeder Behandlung). */
+export function repairArticlesForNoun(text: string, spec: NounSpec): string {
+  if (!text || !spec.singular) return text;
+  let out = text;
+  if (spec.gender === "f") {
+    out = patchArticleBeforeNoun(out, "jedem", "jeder", spec.singular);
+    out = patchArticleBeforeNoun(out, "jeden", "jede", spec.singular);
+    out = patchArticleBeforeNoun(out, "einen", "eine", spec.singular);
+    out = patchArticleBeforeNoun(out, "einem", "einer", spec.singular);
+    out = patchArticleBeforeNoun(out, "eines", "einer", spec.singular, true);
+    out = patchArticleBeforeNoun(out, "ein", "eine", spec.singular);
+    out = patchArticleBeforeNoun(out, "dem", "der", spec.singular);
+    out = patchArticleBeforeNoun(out, "den", "die", spec.singular);
+    out = patchArticleBeforeNoun(out, "das", "die", spec.singular);
+    out = patchArticleBeforeNoun(out, "jedes", "jede", spec.singular);
+    out = out.replace(new RegExp(`\\b${escapeRegExp(spec.singular)}s\\b`, "g"), spec.singular);
+  } else if (spec.gender === "m") {
+    out = patchArticleBeforeNoun(out, "eine", "einen", spec.singular);
+    out = patchArticleBeforeNoun(out, "jede", "jeder", spec.singular);
+  }
+  return out;
+}
+
+function repairArticlesForVocab(text: string, vocab: ClientAudienceVocab): string {
+  const nouns: NounSpec[] = [
+    nounFromVocab(vocab.engagement, vocab.engagementPlural, vocab.engagementGender),
+    nounFromVocab(vocab.project, vocab.projectPlural, vocab.projectGender),
+    nounFromVocab(vocab.booking, vocab.bookingPlural, vocab.bookingGender),
+    nounFromVocab(vocab.business, vocab.businessPlural, vocab.businessGender),
+    nounFromVocab(vocab.singular, vocab.plural, "m"),
+  ];
+  let out = text;
+  for (const spec of nouns) {
+    out = repairArticlesForNoun(out, spec);
+  }
+  return out;
+}
+
 function replaceWhole(text: string, from: string, to: string) {
   if (!from || from === to) return text;
   const re = new RegExp(`\\b${escapeRegExp(from)}\\b`, "g");
@@ -480,7 +539,7 @@ export function applyClientAudienceToText(
     out = applyBusinessAudienceToVocab(out, vocab);
   }
 
-  return out;
+  return repairArticlesForVocab(out, vocab);
 }
 
 export function applyBusinessAudienceToText(text: string, kind: ClientAudienceKind): string {

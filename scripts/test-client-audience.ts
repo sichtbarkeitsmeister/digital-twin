@@ -156,6 +156,14 @@ assert.equal(
   applyClientAudienceToText("bei jedem Auftrag besonders viel Zeit", "praxis"),
   "bei jeder Behandlung besonders viel Zeit",
 );
+assert.equal(
+  applyClientAudienceToText("bei jedem einzelnen Auftrag besonders viel Zeit", "praxis"),
+  "bei jeder einzelnen Behandlung besonders viel Zeit",
+);
+assert.equal(
+  applyClientAudienceToText("während eines Behandlungs", "praxis"),
+  "während einer Behandlung",
+);
 assert.match(
   applyClientAudienceToText("Individuelle Fragen für dieses Unternehmen", "praxis", {
     replaceBusiness: true,

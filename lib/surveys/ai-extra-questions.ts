@@ -3,10 +3,25 @@
  * Models often return objects ({ title, description }) — String(obj) is "[object Object]".
  */
 
+import type { ClientAudienceKind } from "@/lib/surveys/client-audience";
+
 export type AiExtraQuestion = {
   title: string;
   description: string;
 };
+
+export function extraGapHints(kind: ClientAudienceKind): string {
+  if (kind === "kanzlei") {
+    return "Nur Lücken, die zu DIESER Kanzlei passen, z. B. Spezialisierung, Gericht vs. außergerichtlich, Rechtsschutzversicherung, typische Mandatsdauer — nichts aus Medizin oder Handwerk.";
+  }
+  if (kind === "praxis") {
+    return "Nur Lücken, die zu DIESER Praxis passen, z. B. Geräte, privat/gesetzlich, Nachsorge, Vorher-Nachher — nichts aus Recht oder Bau, und nur was die Website hergibt.";
+  }
+  if (kind === "handwerk") {
+    return "Nur Lücken, die zu DIESEM Betrieb passen, z. B. Material, Gewährleistung, Notdienst, Vor-Ort vs. Werkstatt — nichts aus Medizin oder Kanzlei.";
+  }
+  return "Nur Lücken aus den tatsächlichen Leistungen und der Website, nicht aus einer anderen Branche.";
+}
 
 const TITLE_KEYS = ["title", "question", "frage", "text", "prompt", "label"] as const;
 const DESCRIPTION_KEYS = ["description", "hint", "why", "reason", "hinweis"] as const;

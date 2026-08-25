@@ -57,7 +57,8 @@ import {
 } from "@/lib/surveys/client-audience";
 import { customizeCoreQuestions, mergeSuggestedCheckboxOptions } from "@/lib/surveys/customize-fragebogen";
 import { generatedChoiceCustomOptionFlags } from "@/lib/surveys/choice-custom-options";
-import { parseAiExtraQuestions } from "@/lib/surveys/ai-extra-questions";
+import { extraGapHints, parseAiExtraQuestions } from "@/lib/surveys/ai-extra-questions";
+import { proofreadAiExtraQuestions } from "@/lib/surveys/proofread-ai-extras";
 
 export type { MeetingBriefing, ExtraQuestionPlacement, FragebogenReviewDraft, ReviewQuestionItem };
 export { buildSurveyAndAnswersFromReview } from "@/lib/surveys/fragebogen-review-draft";
@@ -157,7 +158,7 @@ Leistungsnamen in optionSets.portfolio und optionSets.services_ranked (3–8 kur
 Für Persona außerdem optionSets.persona_goals, persona_objections, persona_alternatives, persona_budget (je 3–6 branchentypische Optionen).
 ${
   input.includeAiExtras
-    ? `questions: genau ${maxExtras} Zusatzfragen, die oben NICHT vorkommen, aber für DIESE ${vocab.business} sinnvoll sind. Denk an Lücken aus Website/Leistungen/Branche (Geräte, Vorher-Nachher, gesetzlich/privat, Hyaluron-Marken, Abrechnung, Zielgruppe 40+, …). Jede Frage: title = die Frage, description = kurz warum + ein konkretes Antwort-Beispiel mit ${vocab.singular}/${vocab.engagement}. titles müssen Strings sein, keine Objekte.`
+    ? `questions: ${maxExtras} Zusatzfragen. ${extraGapHints(vocab.kind)} Denk zuerst: was fehlt in den Kernfragen für GENAU dieses Angebot? Jede Frage: title = grammatisch korrekte deutsche Frage, description = warum + ein konkretes Antwort-Beispiel mit ${vocab.singular}/${vocab.engagement}. Keine Objekte als title, keine Rechtschreibfehler, keine Artikel wie „jedem Behandlung“.`
     : "questions=[]."
 }
 
@@ -227,12 +228,22 @@ ${
         if (cleaned.length >= 2) optionSets[key] = cleaned.slice(0, 10);
       }
     }
-    const extras = input.includeAiExtras
+    let extras = input.includeAiExtras
       ? parseAiExtraQuestions(parsed.questions, {
           max: maxExtras,
           existingTitles: input.coreItems.map((c) => c.title),
         })
       : [];
+    if (extras.length > 0) {
+      extras = await proofreadAiExtraQuestions({
+        extras,
+        vocab,
+        organisationName: input.organisationName,
+        services: input.serviceLabels,
+        coreTitles: input.coreItems.map((c) => c.title),
+        max: maxExtras,
+      });
+    }
     return { extras, aiPrefills, optionSets, warning: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : "";

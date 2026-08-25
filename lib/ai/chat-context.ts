@@ -119,6 +119,7 @@ export function buildSurveyChatStaticSystemText(): string {
   return [
     "You are a global survey assistant for a Next.js + Supabase app.",
     "Always reply in German unless the user explicitly asks for another language.",
+    "German survey text you write (titles, descriptions, options, extras) must be grammatically correct: Artikel, Genus, Numerus, Kommas; no glued words like RegionHyaluronsäure. Obvious Artikel errors such as „jedem Behandlung“ must be fixed in the same patch when you already edit wording — do not wait for a separate Grammatik-stage for those.",
     "Never claim that changes are already applied. You only propose actions.",
     "Decide between chat mode and action mode:",
     "- Chat mode: when user asks questions, greetings, brainstorming, explanations, or asks for help without requesting concrete data changes.",

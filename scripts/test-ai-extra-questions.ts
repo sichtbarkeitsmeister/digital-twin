@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 
-import { parseAiExtraQuestions } from "../lib/surveys/ai-extra-questions";
+import { extraGapHints, parseAiExtraQuestions } from "../lib/surveys/ai-extra-questions";
 
 assert.deepEqual(parseAiExtraQuestions(null), []);
 assert.deepEqual(parseAiExtraQuestions("[object Object]"), []);
@@ -60,5 +60,10 @@ const deduped = parseAiExtraQuestions(
   { existingTitles: ["Welche Lasergeräte setzt die Praxis ein, und wofür?"] },
 );
 assert.equal(deduped.length, 0);
+
+assert.match(extraGapHints("praxis"), /Geräte|Nachsorge/);
+assert.equal(/Hyaluron|Arbeitsrecht|Spatenstich/.test(extraGapHints("praxis")), false);
+assert.match(extraGapHints("kanzlei"), /Mandat|Rechtsschutz/);
+assert.equal(/Hyaluron|Laser|Botox/.test(extraGapHints("kanzlei")), false);
 
 console.log("test-ai-extra-questions: ok");
