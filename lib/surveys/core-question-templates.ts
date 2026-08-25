@@ -8,7 +8,7 @@ import type {
 } from "@/lib/surveys/types";
 import {
   applyClientAudienceToText,
-  type ClientAudienceKind,
+  type AudienceRef,
 } from "@/lib/surveys/client-audience";
 
 export type CoreQuestionPrefillHint =
@@ -322,7 +322,7 @@ export const PERSONA_INFO_TEXT =
 
 export function surveyInfoTextForPurpose(
   purpose: SurveyPurpose,
-  audience: ClientAudienceKind = "unternehmen",
+  audience: AudienceRef = "unternehmen",
 ): {
   infoTextEnabled: boolean;
   infoText: string;
@@ -483,13 +483,13 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "price_communication_reason",
         title: "Aus welchem Grund wird das so gehandhabt?",
-        description: "z. B. „Jedes Mandat ist anders“ oder „Transparente Festpreise sollen Hürden senken“.",
+        description: "z. B. „Jeder Auftrag ist anders“ oder „Transparente Festpreise sollen Hürden senken“.",
         type: "text",
       },
       {
         key: "min_order_value",
         title:
-          "Ab welchem ungefähren Auftragswert (in Euro) lohnt sich ein Projekt oder eine Buchung wirklich – und ab welcher Größe wird ein Auftrag eher abgelehnt, weil er zu klein ist?",
+          "Ab welchem ungefähren Auftragswert (in Euro) lohnt sich ein Auftrag wirklich – und ab welcher Größe wird ein Auftrag abgelehnt, weil der Auftrag zu klein ist?",
         description: "z. B. „Unter 1.500 € nehmen wir in der Regel nicht an, außer Bestandskunden.“",
         type: "text",
       },
@@ -619,7 +619,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "company_history",
         title: "Seit wann gibt es die Firma, und was waren die wichtigsten Meilensteine seitdem?",
         description:
-          "Ein Eintrag pro Station: Jahr und Ereignis. Gemeint sind konkrete Wendepunkte, nicht der Alltag. Beispiele: „2012 – Praxis gegründet“, „2018 – Umzug in eigene Räume“, „2021 – zweite Fachkraft eingestellt“, „2024 – neues Behandlungsangebot“. Keine Slogans wie „stetiges Wachstum“.",
+          "Ein Eintrag pro Station: Jahr und Ereignis. Gemeint sind konkrete Wendepunkte, nicht der Alltag. Beispiele: „2012 – Firma gegründet“, „2018 – Umzug in eigene Räume“, „2021 – zweite Fachkraft eingestellt“, „2024 – neues Angebot“. Keine Slogans wie „stetiges Wachstum“.",
         type: "text_list",
         options: emptySlots("milestone", 3),
         allowExtraEntries: true,

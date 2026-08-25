@@ -27,6 +27,7 @@ import {
   firstConversationSummaryLines,
 } from "@/lib/surveys/first-conversation";
 import { loadFirstConversation } from "@/lib/surveys/first-conversation-store";
+import { mergeAudienceVocab } from "@/lib/surveys/client-audience";
 import {
   loadOrgCrawlStatusSnapshot,
   startOrganisationSiteCrawl,
@@ -254,10 +255,34 @@ const meetingBriefingSchema = z
   .optional()
   .nullable();
 
+const audienceKindSchema = z.enum(["kanzlei", "praxis", "handwerk", "unternehmen"]);
+const nounGenderSchema = z.enum(["m", "f", "n"]);
+const wordSchema = z.string().trim().min(1).max(40);
+const audienceVocabSchema = z.object({
+  kind: audienceKindSchema,
+  label: z.string().trim().min(1).max(80).optional(),
+  hint: z.string().trim().max(240).optional(),
+  business: wordSchema,
+  businessPlural: wordSchema,
+  businessGender: nounGenderSchema,
+  singular: wordSchema,
+  plural: wordSchema,
+  engagement: wordSchema,
+  engagementPlural: wordSchema,
+  engagementGender: nounGenderSchema,
+  project: wordSchema,
+  projectPlural: wordSchema,
+  projectGender: nounGenderSchema,
+  booking: wordSchema,
+  bookingPlural: wordSchema,
+  bookingGender: nounGenderSchema,
+});
+
 const previewSchema = z.object({
   organisationId: z.string().uuid(),
   purpose: z.enum(["persona", "anbieter", "intern"]),
-  clientAudience: z.enum(["kanzlei", "praxis", "unternehmen"]),
+  clientAudience: audienceKindSchema,
+  audienceVocab: audienceVocabSchema.optional(),
   wunschkundeLabel: z.string().trim().max(120).optional().nullable(),
   selectedCoreKeys: z.array(z.string().min(1)).min(1),
   includeAiExtras: z.boolean().default(true),
@@ -297,6 +322,10 @@ export async function previewFragebogenFromOrgAction(
       organisationId: parsed.data.organisationId,
       purpose: parsed.data.purpose,
       clientAudience: parsed.data.clientAudience,
+      audienceVocab: mergeAudienceVocab(
+        parsed.data.clientAudience,
+        parsed.data.audienceVocab,
+      ),
       wunschkundeLabel: parsed.data.wunschkundeLabel,
       selectedCoreKeys: parsed.data.selectedCoreKeys,
       includeAiExtras: parsed.data.includeAiExtras,
@@ -349,7 +378,8 @@ const createFromReviewSchema = z.object({
     crawlPageCount: z.number().int().nonnegative(),
     websiteUrl: z.string().nullable(),
     organisationName: z.string(),
-    clientAudience: z.enum(["kanzlei", "praxis", "unternehmen"]).optional(),
+    clientAudience: audienceKindSchema.optional(),
+    audienceVocab: audienceVocabSchema.optional(),
     definitionId: z.string().uuid().optional(),
     questions: z.array(reviewQuestionSchema).min(1),
     aiWarning: z.string().nullable().optional(),
@@ -385,7 +415,15 @@ export async function createFragebogenFromReviewAction(
   let answers: Record<string, unknown>;
   try {
     const built = buildSurveyAndAnswersFromReview({
-      draft: parsed.data.draft,
+      draft: {
+        ...parsed.data.draft,
+        audienceVocab: parsed.data.draft.audienceVocab
+          ? mergeAudienceVocab(
+              parsed.data.draft.audienceVocab.kind,
+              parsed.data.draft.audienceVocab,
+            )
+          : undefined,
+      },
       savePrefills: parsed.data.savePrefills,
     });
     definition = built.definition;

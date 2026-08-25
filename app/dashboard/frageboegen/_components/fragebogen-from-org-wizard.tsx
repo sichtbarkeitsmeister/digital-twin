@@ -38,10 +38,13 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { SurveyPurpose } from "@/lib/surveys/purpose";
 import {
-  CLIENT_AUDIENCE_OPTIONS,
   applyClientAudienceToText,
+  clientAudienceVocab,
+  resolveAudienceVocab,
   type ClientAudienceKind,
+  type ClientAudienceVocab,
 } from "@/lib/surveys/client-audience";
+import { FragebogenAudienceVocabEditor } from "@/app/dashboard/frageboegen/_components/fragebogen-audience-vocab-editor";
 import {
   QUESTIONNAIRE_FILE_ACCEPT,
   readQuestionnaireFileText,
@@ -80,6 +83,7 @@ export function FragebogenFromOrgWizard(props: {
   const [step, setStep] = useState<"configure" | "review">("configure");
   const [purpose, setPurpose] = useState<SurveyPurpose>("anbieter");
   const [clientAudience, setClientAudience] = useState<ClientAudienceKind | null>(null);
+  const [audienceVocab, setAudienceVocab] = useState<ClientAudienceVocab | null>(null);
   const [wunschkundeLabel, setWunschkundeLabel] = useState("");
   const [includeAiExtras, setIncludeAiExtras] = useState(true);
   const [extraPlacement, setExtraPlacement] = useState<"start" | "end">("end");
@@ -115,21 +119,22 @@ export function FragebogenFromOrgWizard(props: {
 
   const coreItems = useMemo(() => {
     const raw = purpose === "anbieter" ? anbieterCore : personaCore;
-    const audience = clientAudience ?? "unternehmen";
+    const vocab = audienceVocab ?? resolveAudienceVocab(clientAudience);
     const replaceBusiness = purpose === "anbieter";
     return raw.map((item) => ({
       ...item,
-      title: applyClientAudienceToText(item.title, audience, { replaceBusiness }),
-      description: applyClientAudienceToText(item.description, audience, { replaceBusiness }),
-      stepTitle: applyClientAudienceToText(item.stepTitle, audience, { replaceBusiness }),
+      title: applyClientAudienceToText(item.title, vocab, { replaceBusiness }),
+      description: applyClientAudienceToText(item.description, vocab, { replaceBusiness }),
+      stepTitle: applyClientAudienceToText(item.stepTitle, vocab, { replaceBusiness }),
     }));
-  }, [purpose, anbieterCore, personaCore, clientAudience]);
+  }, [purpose, anbieterCore, personaCore, clientAudience, audienceVocab]);
 
   useEffect(() => {
     let cancelled = false;
     setDraft(null);
     setStep("configure");
     setClientAudience(null);
+    setAudienceVocab(null);
     if (!organisationId) {
       setLoadingCtx(false);
       setOrgName("");
@@ -141,6 +146,7 @@ export function FragebogenFromOrgWizard(props: {
       setImpressum({ legalName: null, address: null, ownerName: null });
       setActiveCrawl(null);
       setClientAudience(null);
+    setAudienceVocab(null);
       setSeoSummary(null);
       setFirstConv(null);
       setSkipCrawl(false);
@@ -333,8 +339,8 @@ export function FragebogenFromOrgWizard(props: {
       setError("Bitte zuerst eine Organisation wählen oder anlegen.");
       return;
     }
-    if (!clientAudience) {
-      setError("Bitte zuerst wählen, ob es eine Kanzlei, eine Praxis oder ein anderes Unternehmen ist.");
+    if (!clientAudience || !audienceVocab) {
+      setError("Bitte zuerst wählen, wie über Anbieter, Kunden und die Arbeit gesprochen wird.");
       return;
     }
     const crawlRunning = Boolean(activeCrawl && ACTIVE_CRAWL.has(activeCrawl.status));
@@ -358,6 +364,7 @@ export function FragebogenFromOrgWizard(props: {
         organisationId,
         purpose,
         clientAudience,
+        audienceVocab,
         wunschkundeLabel: purpose === "persona" ? wunschkundeLabel : null,
         selectedCoreKeys: selectedKeys.filter((k) =>
           coreItems.some((c) => c.key === k),
@@ -501,13 +508,17 @@ export function FragebogenFromOrgWizard(props: {
             <CardDescription>
               {draft.organisationName} · {draft.crawlPageCount} Crawl-Seiten ·{" "}
               {included.length} Fragen · {prefilled} vorausgefüllt
-              {draft.clientAudience
+              {draft.audienceVocab
+                ? ` · ${draft.audienceVocab.business} / ${draft.audienceVocab.singular}`
+                : draft.clientAudience
                 ? ` · ${
                     draft.clientAudience === "kanzlei"
                       ? "Kanzlei / Mandant"
                       : draft.clientAudience === "praxis"
                         ? "Praxis / Patient"
-                        : "Unternehmen / Kunde"
+                        : draft.clientAudience === "handwerk"
+                          ? "Betrieb / Kunde"
+                          : "Unternehmen / Kunde"
                   }`
                 : ""}
             </CardDescription>
@@ -596,10 +607,11 @@ export function FragebogenFromOrgWizard(props: {
           Fragebogen aus Organisation
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Zuerst Website crawlen und die Art des Unternehmens wählen (Kanzlei, Praxis oder
-          anderes). Leistungen und Impressum werden übernommen, die Texte nutzen Mandant,
-          Patient oder Kunde. Der KI-Assistent bleibt unten rechts und kann den Entwurf
-          direkt anpassen, sobald die Vorschau da ist.
+          Zuerst Website crawlen und festlegen, wie über Anbieter, Kunden und die Arbeit
+          gesprochen wird (Praxis/Patient/Behandlung, Kanzlei/Mandant/Mandat, Handwerk/Kunde/Auftrag).
+          Die Wörter sind vor dem Erzeugen editierbar, Beispiele werden mit angepasst. Der
+          KI-Assistent bleibt unten rechts und kann den Entwurf direkt anpassen, sobald die
+          Vorschau da ist.
         </p>
       </div>
 
@@ -773,46 +785,24 @@ export function FragebogenFromOrgWizard(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">2. Art des Unternehmens</CardTitle>
+          <CardTitle className="text-base">2. Wie soll gesprochen werden?</CardTitle>
           <CardDescription>
-            Pflichtfeld vor jedem Fragebogen. Davon hängt ab, ob im Text Mandant, Patient oder
-            Kunde steht — durchgängig in Fragen, Erklärungen und Checkboxen.
+            Vor jedem Fragebogen. Steuert, ob im Text Praxis oder Kanzlei, Patient oder Mandant,
+            Behandlung oder Auftrag steht — durchgängig in Fragen, Beispielen und Checkboxen.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3">
-          <div className="grid gap-2 sm:grid-cols-3">
-            {CLIENT_AUDIENCE_OPTIONS.map((option) => (
-              <button
-                key={option.kind}
-                type="button"
-                onClick={() => setClientAudience(option.kind)}
-                className={cn(
-                  "rounded-xl border px-3 py-3 text-left text-sm transition",
-                  clientAudience === option.kind
-                    ? "border-sbkm-mint/50 bg-sbkm-mint/15 text-primary"
-                    : "border-sbkm-navy/10 hover:bg-sbkm-navy/5",
-                )}
-              >
-                <span className="block font-semibold">{option.label}</span>
-                <span className="mt-1 block text-xs text-secondary">{option.hint}</span>
-              </button>
-            ))}
-          </div>
-          {!clientAudience ? (
-            <p className="text-xs text-amber-800 dark:text-amber-200">
-              Bitte eine Art wählen, bevor der Fragebogen erzeugt wird.
-            </p>
-          ) : clientAudience === "kanzlei" ? (
-            <p className="text-xs text-secondary">
-              Im Fragebogen steht für die Person durchgängig „Mandant“. Der Auftrag
-              heißt „Mandat“ — das ist das Mandatsverhältnis, nicht die Person.
-            </p>
-          ) : (
-            <p className="text-xs text-secondary">
-              Im Fragebogen steht durchgängig „
-              {CLIENT_AUDIENCE_OPTIONS.find((item) => item.kind === clientAudience)?.singular}“.
-            </p>
-          )}
+        <CardContent>
+          <FragebogenAudienceVocabEditor
+            kind={clientAudience}
+            vocab={audienceVocab}
+            onSelectKind={(kind) => {
+              setClientAudience(kind);
+              setAudienceVocab(clientAudienceVocab(kind));
+            }}
+            onChangeVocab={(patch) =>
+              setAudienceVocab((prev) => (prev ? { ...prev, ...patch } : prev))
+            }
+          />
         </CardContent>
       </Card>
 
@@ -956,9 +946,7 @@ export function FragebogenFromOrgWizard(props: {
               )}
             >
               Kunden-Persona
-              {clientAudience && clientAudience !== "unternehmen"
-                ? ` (${clientAudience === "kanzlei" ? "Mandant" : "Patient"})`
-                : ""}
+              {audienceVocab ? ` (${audienceVocab.singular})` : ""}
             </button>
           </div>
           {purpose === "persona" ? (
@@ -981,9 +969,9 @@ export function FragebogenFromOrgWizard(props: {
             5. Standardfragen ({coreItems.length}, alle Pflichtfelder)
           </CardTitle>
           <CardDescription>
-            Alle Kernfragen sind vorausgewählt und Pflichtfelder. Formulierungen richten sich nach
-            der gewählten Unternehmensart. In der Prüfung können Antworten aus Dateien und Crawl
-            angepasst werden.
+            Alle Kernfragen sind vorausgewählt und Pflichtfelder. Formulierungen und Beispiele
+            richten sich nach der Wortwahl oben. In der Prüfung können Antworten aus Dateien
+            und Crawl angepasst werden.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -1076,6 +1064,7 @@ export function FragebogenFromOrgWizard(props: {
             loadingCtx ||
             !organisationId ||
             !clientAudience ||
+            !audienceVocab ||
             selectedCount === 0 ||
             Boolean(websiteUrl && pageCount === 0 && !skipCrawl)
           }

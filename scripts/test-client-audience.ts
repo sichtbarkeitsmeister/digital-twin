@@ -6,8 +6,10 @@ import assert from "node:assert/strict";
 
 import {
   applyClientAudienceToText,
+  audienceWordingPreview,
   clientAudienceVocab,
   isClientAudienceKind,
+  mergeAudienceVocab,
 } from "../lib/surveys/client-audience";
 import { customizeCoreQuestion } from "../lib/surveys/customize-fragebogen";
 import {
@@ -19,11 +21,14 @@ import {
 
 assert.equal(isClientAudienceKind("kanzlei"), true);
 assert.equal(isClientAudienceKind("praxis"), true);
+assert.equal(isClientAudienceKind("handwerk"), true);
 assert.equal(isClientAudienceKind("unternehmen"), true);
 assert.equal(isClientAudienceKind("kunde"), false);
 
 assert.equal(clientAudienceVocab("kanzlei").singular, "Mandant");
 assert.equal(clientAudienceVocab("praxis").singular, "Patient");
+assert.equal(clientAudienceVocab("praxis").engagement, "Behandlung");
+assert.equal(clientAudienceVocab("handwerk").business, "Betrieb");
 assert.equal(clientAudienceVocab("unternehmen").singular, "Kunde");
 
 const kanzlei = applyClientAudienceToText(
@@ -58,8 +63,47 @@ assert.equal(
   applyClientAudienceToText("Das Unternehmen", "praxis", { replaceBusiness: true }),
   "Die Praxis",
 );
+assert.equal(
+  applyClientAudienceToText("Das Unternehmen", "handwerk", { replaceBusiness: true }),
+  "Der Betrieb",
+);
 assert.equal(applyClientAudienceToText("Mandant und Mandat", "kanzlei"), "Mandant und Mandat");
 assert.match(applyClientAudienceToText("Auftrag vom Kunden", "kanzlei"), /Mandat vom Mandanten/);
+
+const praxisMandatExample = applyClientAudienceToText(
+  "z. B. „Jedes Mandat ist anders“ oder „Transparente Festpreise sollen Hürden senken“.",
+  "praxis",
+);
+assert.match(praxisMandatExample, /Jede Behandlung ist anders/);
+assert.equal(/Mandat/.test(praxisMandatExample), false);
+
+const praxisOrder = applyClientAudienceToText(
+  "Ab welchem ungefähren Auftragswert lohnt sich ein Auftrag wirklich – weil der Auftrag zu klein ist?",
+  "praxis",
+);
+assert.match(praxisOrder, /Behandlungswert/);
+assert.match(praxisOrder, /eine Behandlung/);
+assert.match(praxisOrder, /die Behandlung zu klein/);
+assert.equal(/ein Behandlung/.test(praxisOrder), false);
+assert.equal(/Auftrag/.test(praxisOrder), false);
+
+const customHandwerk = mergeAudienceVocab("handwerk", {
+  business: "Handwerker",
+  businessPlural: "Handwerker",
+  businessGender: "m",
+});
+assert.match(
+  applyClientAudienceToText("Die Firma hilft dem Kunden.", customHandwerk, {
+    replaceBusiness: true,
+  }),
+  /Der Handwerker hilft dem Kunden/,
+);
+
+const preview = audienceWordingPreview(clientAudienceVocab("praxis"));
+assert.match(preview, /Praxis/);
+assert.match(preview, /Patient/);
+assert.match(preview, /Behandlung/);
+assert.equal(/Mandat/.test(preview), false);
 
 const infoKanzlei = surveyInfoTextForPurpose("persona", "kanzlei");
 assert.match(infoKanzlei.infoText, /Mandant/);
@@ -79,6 +123,20 @@ assert.deepEqual(
   ["Arbeitsrecht", "Familienrecht", "Mietrecht"],
 );
 assert.match(customized.description, /Mandant|angeboten/);
+
+const reason = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "price_communication_reason");
+assert.ok(reason);
+const praxisReason = customizeCoreQuestion({ template: reason, audience: "praxis" });
+assert.match(praxisReason.description, /Jede Behandlung ist anders/);
+assert.equal(/Mandat/.test(praxisReason.description), false);
+
+const minOrder = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "min_order_value");
+assert.ok(minOrder);
+const praxisMin = customizeCoreQuestion({ template: minOrder, audience: "praxis" });
+assert.match(praxisMin.title, /Behandlungswert/);
+assert.match(praxisMin.title, /eine Behandlung/);
+assert.match(praxisMin.title, /die Behandlung zu klein/);
+assert.equal(/Mandat|Auftrag(?!geber)/.test(praxisMin.title), false);
 
 const personaHold = PERSONA_CORE_QUESTIONS.find((q) => q.key === "persona_hold_back");
 assert.ok(personaHold);
