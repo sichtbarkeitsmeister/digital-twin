@@ -48,11 +48,15 @@ import {
 import { runMultiPhaseSurveyCreation } from "@/lib/ai/survey-multiphase-create";
 import { buildQuestionnairePasteProposal } from "@/lib/ai/survey-markdown-paste";
 import { loadDtAgentsForSurveyAssistant } from "@/lib/ai/load-dt-agents-for-survey-assistant";
+import { loadSurveyAssistantWorkspace } from "@/lib/ai/load-survey-assistant-workspace";
+import { callAnthropicWithSurveyWorkspaceTools } from "@/lib/ai/survey-assistant-workspace-tools";
+import type { SurveyAssistantWorkspace } from "@/lib/ai/survey-assistant-workspace";
 import {
   describeSurveyProposalValidationError,
   normalizeSurveyAiProposalInput,
   parseSurveyAiProposal,
 } from "@/lib/ai/survey-assistant-types";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
 import { surveySchema } from "@/lib/surveys/schema";
 
@@ -1061,19 +1065,61 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     emit("status", { message: "Ich bereite den Kontext vor..." });
     const pastedWebsiteContent = await buildPastedUrlContextText(parsed.data.content);
 
-    const surveyOrgIds = rankedSurveys
-      .slice(0, MAX_KNOWN_SURVEYS)
-      .map((s: SurveyRankRow) => s.organisation_id)
-      .filter((id): id is string => Boolean(id));
+    const fromPool = activeSurveyId
+      ? rankedSurveys.find((s: SurveyRankRow) => s.id === activeSurveyId)
+      : undefined;
+    let activeSurveyOrgId = parsed.data.pageContext.organisationId ?? fromPool?.organisation_id ?? null;
+    let activeSurveyTitle = fromPool?.title ?? null;
+    if (activeSurveyId && (!fromPool || !activeSurveyOrgId)) {
+      const { data: activeSurveyRow } = await auth.supabase
+        .from("surveys")
+        .select("title,organisation_id")
+        .eq("id", activeSurveyId)
+        .maybeSingle();
+      activeSurveyTitle = activeSurveyTitle ?? activeSurveyRow?.title ?? null;
+      activeSurveyOrgId = activeSurveyOrgId ?? activeSurveyRow?.organisation_id ?? null;
+    }
+
+    const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId);
+    let workspace: SurveyAssistantWorkspace | null = null;
+    if (platformAdmin) {
+      emit("status", { message: "Ich lade Organisationen, Crawl und offene Aufgaben..." });
+      try {
+        workspace = await loadSurveyAssistantWorkspace({
+          pageOrganisationId: parsed.data.pageContext.organisationId ?? null,
+          surveyOrganisationId: activeSurveyOrgId,
+          userMessage: parsed.data.content,
+          surveyTitle: liveSurvey?.title ?? activeSurveyTitle,
+          conversationSummary,
+        });
+      } catch (err) {
+        console.warn("[survey-ai] loadSurveyAssistantWorkspace failed", err);
+      }
+    }
+
+    const surveyOrgIds = [
+      ...rankedSurveys
+        .slice(0, MAX_KNOWN_SURVEYS)
+        .map((s: SurveyRankRow) => s.organisation_id)
+        .filter((id): id is string => Boolean(id)),
+      ...(workspace?.focused.map((o) => o.organisationId) ?? []),
+      ...(activeSurveyOrgId ? [activeSurveyOrgId] : []),
+    ];
 
     const { knownAgents, focusedAgentPrompts, focusedAgentSurveyFacts } =
       await loadDtAgentsForSurveyAssistant({
       supabase: auth.supabase,
-      organisationId: parsed.data.pageContext.organisationId ?? null,
+      organisationId: parsed.data.pageContext.organisationId ?? activeSurveyOrgId,
       agentId: parsed.data.pageContext.agentId ?? null,
       surveyOrganisationIds: surveyOrgIds,
       userMessage: parsed.data.content,
     });
+
+    const resolvedOrganisationId =
+      parsed.data.pageContext.organisationId ??
+      activeSurveyOrgId ??
+      workspace?.focused[0]?.organisationId ??
+      null;
 
     const systemPromptInput: SurveyChatSystemPromptInput = {
       globalUserRules: globalAssistantRules,
@@ -1085,7 +1131,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         visibility: parsed.data.pageContext.visibility,
         slug: parsed.data.pageContext.slug,
         notificationEmails: parsed.data.pageContext.notificationEmails ?? [],
-        organisationId: parsed.data.pageContext.organisationId ?? null,
+        organisationId: resolvedOrganisationId,
         agentId: parsed.data.pageContext.agentId ?? null,
       },
       surveys: [
@@ -1096,6 +1142,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
                 title: liveSurvey.title,
                 visibility: "private" as const,
                 folderId: null,
+                organisationId: resolvedOrganisationId,
               },
             ]
           : []),
@@ -1109,6 +1156,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
             title: s.title,
             visibility: s.visibility,
             folderId: s.folder_id ?? null,
+            organisationId: s.organisation_id ?? null,
           })),
       ],
       folders: folderSnapshots,
@@ -1166,6 +1214,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       ),
       conversationSummary,
       pastedWebsiteContent,
+      workspace,
     };
 
     const systemBlocks = buildCachedSurveyChatSystem(systemPromptInput);
@@ -1187,6 +1236,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       contextTruncated: summaryDbSlice.length > 0,
       knownSurveyCount: knownSurveyIds.size,
       candidateSurveyCount: candidateIds.length,
+      organisationCount: workspace?.organisations.length ?? 0,
+      focusedOrgCount: workspace?.focused.length ?? 0,
     });
 
     // Non-blocking for the main reply path; title can finish in parallel-ish after first status.
@@ -1228,15 +1279,27 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     if (!rawAssistantText) {
       emit("status", { message: "Ich formuliere gerade die beste Antwort..." });
 
-      const firstCall = await callAnthropicFirstAvailable({
-        anthropic,
-        models: modelSelection.modelsToTry,
-        maxTokens: modelSelection.maxTokens,
-        system: systemBlocks,
-        messages: anthropicHistory,
-        stream: true,
-        timeoutMs: 240_000,
-      });
+      const firstCall = workspace
+        ? await callAnthropicWithSurveyWorkspaceTools({
+            anthropic,
+            models: modelSelection.modelsToTry,
+            maxTokens: modelSelection.maxTokens,
+            system: systemBlocks,
+            messages: anthropicHistory,
+            timeoutMs: 240_000,
+            organisations: workspace.organisations,
+            defaultOrganisationId: resolvedOrganisationId,
+            onStatus: (message) => emit("status", { message }),
+          })
+        : await callAnthropicFirstAvailable({
+            anthropic,
+            models: modelSelection.modelsToTry,
+            maxTokens: modelSelection.maxTokens,
+            system: systemBlocks,
+            messages: anthropicHistory,
+            stream: true,
+            timeoutMs: 240_000,
+          });
 
       if (!firstCall) {
         emit("error", {

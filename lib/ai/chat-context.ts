@@ -4,6 +4,11 @@ import {
   isPromptCachingEnabled,
   type SurveyChatSystem,
 } from "@/lib/ai/anthropic-helpers";
+import {
+  formatFocusedOrgWorkspaceForPrompt,
+  formatOrganisationDirectoryForPrompt,
+  type SurveyAssistantWorkspace,
+} from "@/lib/ai/survey-assistant-workspace";
 import { PASTED_URL_PROMPT_HINT_EN } from "@/lib/shared/pasted-url-context";
 
 type SurveySnapshot = {
@@ -11,6 +16,7 @@ type SurveySnapshot = {
   title: string;
   visibility: "private" | "public";
   folderId: string | null;
+  organisationId?: string | null;
 };
 
 type FolderSnapshot = { id: string; name: string };
@@ -105,6 +111,7 @@ export type SurveyChatSystemPromptInput = {
   attachmentSummaries: string[];
   conversationSummary: string;
   pastedWebsiteContent?: string | null;
+  workspace?: SurveyAssistantWorkspace | null;
 };
 
 /** Stable instructions (~3k tokens) — safe to prompt-cache across requests. */
@@ -158,6 +165,17 @@ export function buildSurveyChatStaticSystemText(): string {
     "Focused agent survey facts: when present, these are the FILLED questionnaire answers (not just stepOutline) for that agent’s source survey response.",
     "Use them to verify whether the DigitalTwin prompt absorbed rankings, names, numbers and statements. Compare Focused agent prompts against Focused agent survey facts when the user asks if a persona was built correctly.",
     "Questionnaire answers themselves are read-only here — propose edit_dt_agent_prompt to fix the twin, do not invent missing answers.",
+    "",
+    "Workspace access (organisations, crawls, open SEO tasks):",
+    "You HAVE read access to ALL organisations, their website crawls (dt_site_pages) and SEO task boards (dt_seo_tasks).",
+    "NEVER claim you have no access to crawls, websites, organisations, or open tasks. If a section is empty, say that this org has no crawl/tasks yet — that is not a permission problem.",
+    "\"Known organisations\" lists every organisation with crawl page counts and open-task counts.",
+    "\"Focused organisation workspace\" contains crawl excerpts, a URL index and open/in-progress tasks for the currently relevant org(s).",
+    "Use crawl content to fill survey placeholders (company name, services, team, NAP, hours, USP, competitors, reviews). Cite the source URL. Do not invent facts that are not in crawl/tasks.",
+    "If the needed organisation is not focused, or you need a full page / extra search: use tools lookup_organisation_workspace, search_website_content, read_website_page (pass organisationId from Known organisations).",
+    "If crawlPageCount is 0: tell the user no crawl exists yet and they can run „Jetzt crawlen“ in SEO-Einstellungen — do not ask them to paste the whole website unless they want a live one-off fetch.",
+    "Prefer the stored crawl over a pasted live URL when the same site is already crawled.",
+    "Open tasks are read-only here (do not invent SEO-board mutations). Mention existing open tasks when they are relevant to the survey work.",
     "",
     PASTED_URL_PROMPT_HINT_EN,
     "",
@@ -245,6 +263,7 @@ export function buildSurveyChatDynamicSystemText(input: {
   attachmentSummaries: string[];
   conversationSummary: string;
   pastedWebsiteContent?: string | null;
+  workspace?: SurveyAssistantWorkspace | null;
 }): string {
   const blocks = [
     `Current page context: ${JSON.stringify(input.pageContext)}`,
@@ -257,6 +276,19 @@ export function buildSurveyChatDynamicSystemText(input: {
     `Focused agent survey facts (filled questionnaire answers for coverage checks): ${JSON.stringify(input.focusedAgentSurveyFacts ?? [])}`,
     `Attachment summaries (current user message): ${JSON.stringify(input.attachmentSummaries)}`,
   ];
+
+  if (input.workspace) {
+    blocks.push(
+      `Known organisations (all, with crawl + open-task stats):\n${formatOrganisationDirectoryForPrompt(input.workspace.organisations)}`,
+    );
+    blocks.push(
+      `Focused organisation workspace (crawl excerpts + open tasks):\n${formatFocusedOrgWorkspaceForPrompt(input.workspace.focused)}`,
+    );
+  } else {
+    blocks.push(
+      "Known organisations: (not loaded this turn). If the user asks about crawl/tasks/organisations, say the workspace context is unavailable — do not invent data.",
+    );
+  }
 
   if (input.pastedWebsiteContent?.trim()) {
     blocks.push(`Pasted website content (auto-fetched from URLs in the latest user message):\n${input.pastedWebsiteContent.trim()}`);
