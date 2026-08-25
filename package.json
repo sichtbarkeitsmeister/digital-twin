@@ -32,6 +32,7 @@
     "test:seo-report-readiness": "tsx scripts/test-seo-report-readiness.ts",
     "test:prospect-persona-prompt": "tsx scripts/test-prospect-persona-prompt.ts",
     "test:owner-welcome-email": "tsx scripts/test-owner-welcome-email.ts",
+    "test:smtp-mailer": "tsx scripts/test-smtp-mailer.ts",
     "test:avatar-global-prompt-anchor": "tsx scripts/test-avatar-global-prompt-anchor.ts",
     "test:dashboard-sticky-survey-ai": "tsx scripts/test-dashboard-sticky-survey-ai.ts",
     "test:dashboard-survey-url": "tsx scripts/test-dashboard-survey-url.ts",

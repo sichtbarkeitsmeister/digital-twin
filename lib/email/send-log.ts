@@ -51,16 +51,20 @@ export function maskSmtpUser(value: string | undefined | null): string | null {
 export function getSmtpDiagnostics() {
   const host = process.env.SMTP_HOST?.trim() || null;
   const port = process.env.SMTP_PORT?.trim() || "587";
-  const user = process.env.SMTP_USER?.trim() || null;
+  const userRaw = process.env.SMTP_USER?.trim() || null;
+  const user = userRaw?.toLowerCase() || null;
   const fromRaw = process.env.SMTP_FROM?.trim() || user;
   const fromName = process.env.SMTP_FROM_NAME?.trim() || "Sichtbarkeitsmeister";
   const from =
     fromRaw && !fromRaw.includes("<")
-      ? `"${fromName}" <${fromRaw}>`
+      ? `${fromName} <${fromRaw}>`
       : fromRaw;
-  const hasPass = Boolean(
-    process.env.SMTP_PASS?.trim() || process.env.SMTP_PASSWORD?.trim(),
-  );
+  const passRaw = process.env.SMTP_PASS ?? process.env.SMTP_PASSWORD ?? "";
+  const passTrimmed = passRaw.trim();
+  const hasPass = Boolean(passTrimmed);
+  const passLooksQuoted =
+    (passTrimmed.startsWith('"') && passTrimmed.endsWith('"')) ||
+    (passTrimmed.startsWith("'") && passTrimmed.endsWith("'"));
 
   return {
     configured: Boolean(host && user && hasPass),
@@ -70,5 +74,10 @@ export function getSmtpDiagnostics() {
     user: maskSmtpUser(user),
     from,
     hasPassword: hasPass,
+    passwordLength: hasPass ? passTrimmed.length : 0,
+    passwordLooksQuoted: passLooksQuoted,
+    dualPassEnv:
+      Boolean(process.env.SMTP_PASS?.trim()) &&
+      Boolean(process.env.SMTP_PASSWORD?.trim()),
   };
 }

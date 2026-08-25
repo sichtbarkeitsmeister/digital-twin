@@ -10,6 +10,23 @@ function boolFromEnv(v: string | undefined, fallback: boolean) {
   return fallback;
 }
 
+/**
+ * Trim env values and strip accidental wrapping quotes from Vercel paste
+ * (`"secret"` / `'secret'`), which otherwise cause mailcow 535 auth failures.
+ */
+export function sanitizeSmtpSecret(value: string | undefined | null): string {
+  if (value == null) return "";
+  let s = value.trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  // Vercel / shells sometimes keep a trailing newline in secrets.
+  return s.replace(/\r?\n/g, "");
+}
+
 export type EmailSendContext = {
   kind?: string;
   metadata?: Record<string, unknown>;
@@ -25,29 +42,69 @@ export type EmailPayload = {
   context?: EmailSendContext;
 };
 
+export type SmtpRuntimeConfig = {
+  host: string;
+  port: number;
+  secure: boolean;
+  requireTls: boolean;
+  user: string;
+  pass: string;
+};
+
 let cachedTransport: nodemailer.Transporter | null = null;
 let cachedAuthUser: string | null = null;
+let cachedConfigKey: string | null = null;
 
-function getTransport() {
-  if (cachedTransport) return cachedTransport;
-
-  const host = process.env.SMTP_HOST;
-  const port = Number.parseInt(process.env.SMTP_PORT ?? "587", 10);
+export function readSmtpRuntimeConfig(): SmtpRuntimeConfig {
+  const host = sanitizeSmtpSecret(process.env.SMTP_HOST);
+  const port = Number.parseInt(
+    sanitizeSmtpSecret(process.env.SMTP_PORT) || "587",
+    10,
+  );
   const secure = boolFromEnv(process.env.SMTP_SECURE, port === 465);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS ?? process.env.SMTP_PASSWORD;
+  const user = sanitizeSmtpSecret(process.env.SMTP_USER).toLowerCase();
+  // Prefer SMTP_PASS; SMTP_PASSWORD is an alias used in some deploys.
+  const pass = sanitizeSmtpSecret(
+    process.env.SMTP_PASS || process.env.SMTP_PASSWORD,
+  );
 
   if (!host) throw new Error("Missing SMTP_HOST");
   if (!Number.isFinite(port)) throw new Error("Invalid SMTP_PORT");
   if (!user) throw new Error("Missing SMTP_USER");
   if (!pass) throw new Error("Missing SMTP_PASS (or SMTP_PASSWORD)");
 
-  cachedAuthUser = user;
-  cachedTransport = nodemailer.createTransport({
+  return {
     host,
     port,
     secure,
-    auth: { user, pass },
+    // Port 587 expects STARTTLS; without this some relays fail oddly.
+    requireTls: !secure && port === 587,
+    user,
+    pass,
+  };
+}
+
+function getTransport() {
+  const cfg = readSmtpRuntimeConfig();
+  const configKey = `${cfg.host}|${cfg.port}|${cfg.secure}|${cfg.user}|${cfg.pass.length}`;
+  if (cachedTransport && cachedConfigKey === configKey) return cachedTransport;
+
+  cachedAuthUser = cfg.user;
+  cachedConfigKey = configKey;
+  cachedTransport = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    requireTLS: cfg.requireTls,
+    auth: {
+      user: cfg.user,
+      pass: cfg.pass,
+    },
+    // Explicit LOGIN helps some mailcow / Postfix setups.
+    authMethod: "LOGIN",
+    connectionTimeout: 20_000,
+    greetingTimeout: 20_000,
+    socketTimeout: 30_000,
   });
 
   return cachedTransport;
@@ -61,7 +118,9 @@ const DEFAULT_FROM_NAME = "Sichtbarkeitsmeister";
  * - SMTP_FROM_NAME overrides the display name when SMTP_FROM has no name
  */
 export function getFromAddress() {
-  const raw = (process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "no-reply@example.com").trim();
+  const raw = sanitizeSmtpSecret(
+    process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "no-reply@example.com",
+  );
   if (!raw) return `${DEFAULT_FROM_NAME} <no-reply@example.com>`;
 
   // Already a formatted "Name <email>" header — keep as-is.
@@ -69,7 +128,8 @@ export function getFromAddress() {
     return raw;
   }
 
-  const name = (process.env.SMTP_FROM_NAME ?? DEFAULT_FROM_NAME).trim() || DEFAULT_FROM_NAME;
+  const name =
+    sanitizeSmtpSecret(process.env.SMTP_FROM_NAME) || DEFAULT_FROM_NAME;
   // Unquoted display name — some SMTP relays reject/"soft-fail" quoted From headers.
   const safeName = name.replace(/[<>\r\n"]/g, "").trim() || DEFAULT_FROM_NAME;
   return `${safeName} <${raw}>`;
@@ -91,6 +151,34 @@ export function parseEmailList(v: string | undefined): string[] {
     .split(/[,\n;]/g)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+export function formatSmtpFailureHint(rawMessage: string): string {
+  const msg = rawMessage.trim();
+  if (/535|authentication failed|invalid login/i.test(msg)) {
+    return (
+      `${msg} — SMTP-Login abgelehnt. Prüfe: ` +
+      `SMTP_USER = volle Adresse (z. B. seo@…), ` +
+      `SMTP_PASS ohne Anführungszeichen, ` +
+      `Environment = Production + Redeploy, ` +
+      `in mailcow für dieses Postfach „SMTP erlaubt“.`
+    );
+  }
+  return msg;
+}
+
+/** Probe auth without sending mail — used by admin test tooling. */
+export async function verifySmtpConnection(): Promise<
+  { ok: true } | { ok: false; reason: string }
+> {
+  try {
+    const transport = getTransport();
+    await transport.verify();
+    return { ok: true };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "SMTP-Verbindung fehlgeschlagen";
+    return { ok: false, reason: formatSmtpFailureHint(reason) };
+  }
 }
 
 export async function sendEmail(payload: EmailPayload) {
@@ -149,13 +237,13 @@ export async function sendEmail(payload: EmailPayload) {
 
     return { ok: true as const, skipped: false as const, messageId: info.messageId };
   } catch (err) {
-    const reason = err instanceof Error ? err.message : "E-Mail-Versand fehlgeschlagen";
+    const raw = err instanceof Error ? err.message : "E-Mail-Versand fehlgeschlagen";
+    const reason = formatSmtpFailureHint(raw);
     await logEmailSend({
       ...logBase,
       status: "failed",
       errorMessage: reason,
     });
-    throw err;
+    throw new Error(reason);
   }
 }
-

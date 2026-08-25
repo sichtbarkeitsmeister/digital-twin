@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
+import { getAppBaseUrl, sendEmail, verifySmtpConnection } from "@/lib/email/mailer";
 import { createClient } from "@/lib/supabase/server";
 
 export type MailActionState = {
@@ -81,6 +81,15 @@ export async function sendTestEmailAction(
   `;
 
   try {
+    const probe = await verifySmtpConnection();
+    if (!probe.ok) {
+      revalidatePath("/dashboard/admin/mails");
+      return {
+        ok: false,
+        message: `SMTP-Login fehlgeschlagen: ${probe.reason}`,
+      };
+    }
+
     const result = await sendEmail({
       to: [recipient],
       subject,
