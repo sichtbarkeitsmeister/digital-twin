@@ -217,4 +217,9 @@ assert.equal(
   false,
 );
 
+assert.deepEqual(
+  parseServiceLabelList("Botox-Injektionen, RegionHyaluronsäure-Filler, AmpulleLaserbehandlungen"),
+  ["Botox-Injektionen", "Hyaluronsäure-Filler", "Laserbehandlungen"],
+);
+
 console.log("org-crawl-prefill: ok");

@@ -152,6 +152,21 @@ assert.equal(
   }),
   "passt am besten zum Unternehmen",
 );
+assert.equal(
+  applyClientAudienceToText("bei jedem Auftrag besonders viel Zeit", "praxis"),
+  "bei jeder Behandlung besonders viel Zeit",
+);
+assert.match(
+  applyClientAudienceToText("Individuelle Fragen für dieses Unternehmen", "praxis", {
+    replaceBusiness: true,
+  }),
+  /diese Praxis/,
+);
+assert.equal(/Unternehmen/.test(
+  applyClientAudienceToText("Individuelle Fragen für dieses Unternehmen", "praxis", {
+    replaceBusiness: true,
+  }),
+), false);
 
 const minOrder = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "min_order_value");
 assert.ok(minOrder);
@@ -182,6 +197,12 @@ assert.equal(
   /Arbeitnehmer|Spatenstich|Rechtsanwalt/.test(`${praxisUsp.title} ${praxisUsp.description}`),
   false,
 );
+
+const volume = ANBIETER_CORE_QUESTIONS.find((q) => q.key === "volume_vs_depth");
+assert.ok(volume);
+const praxisVolume = customizeCoreQuestion({ template: volume, audience: "praxis" });
+assert.match(praxisVolume.title, /jeder Behandlung/);
+assert.equal(/jedem Behandlung/.test(praxisVolume.title), false);
 
 const personaHold = PERSONA_CORE_QUESTIONS.find((q) => q.key === "persona_hold_back");
 assert.ok(personaHold);

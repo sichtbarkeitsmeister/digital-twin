@@ -150,6 +150,9 @@ const ARTICLES: Record<
 const ARTICLE_KEYS = [
   "der",
   "jeder",
+  "jeden",
+  "jedem",
+  "jedes",
   "ein",
   "den",
   "dem",
@@ -407,9 +410,17 @@ function applyBusinessAudienceToVocab(text: string, vocab: ClientAudienceVocab):
   if (vocab.business !== "Firma") {
     const businessArticle = capitalize(ARTICLES[vocab.businessGender].der);
     const zuBusiness = zuPlusBusiness(vocab);
+    const dieses =
+      vocab.businessGender === "f"
+        ? `diese ${vocab.business}`
+        : vocab.businessGender === "m"
+          ? `diesen ${vocab.business}`
+          : `dieses ${vocab.business}`;
     out = out.replace(/\bDas Unternehmen\b/g, `${businessArticle} ${vocab.business}`);
     out = out.replace(/\bzum Unternehmen\b/g, zuBusiness);
     out = out.replace(/\bZum Unternehmen\b/g, capitalize(zuBusiness));
+    out = out.replace(/\bdieses Unternehmen\b/g, dieses);
+    out = out.replace(/\bDieses Unternehmen\b/g, capitalize(dieses));
   }
   return out;
 }
