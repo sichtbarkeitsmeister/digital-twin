@@ -323,7 +323,7 @@ export async function previewFragebogenFromOrgAction(
       return {
         ok: false,
         message:
-          "Bitte angeben, welche Zielgruppe dieser Persona-Fragebogen beschreibt — z. B. Privatpatient mit Vorsorge oder Laser-Interessent.",
+          "Bitte die Rolle oder den Typ eintragen — z. B. Privatpatient mit Vorsorge oder Laser-Interessent. Kein Personenname.",
       };
     }
   }
