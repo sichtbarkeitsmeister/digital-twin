@@ -68,6 +68,8 @@ assert.equal(deduped.length, 0);
 
 assert.match(extraGapHints("praxis"), /Geräte|Nachsorge/);
 assert.equal(/Hyaluron|Arbeitsrecht|Spatenstich/.test(extraGapHints("praxis")), false);
+assert.match(extraGapHints("praxis", "persona"), /Wunschmenschen|zusätzlich/);
+assert.equal(/Nachsorge|Geräte/.test(extraGapHints("praxis", "persona")), false);
 assert.match(extraGapHints("kanzlei"), /Mandat|Rechtsschutz/);
 assert.equal(/Hyaluron|Laser|Botox/.test(extraGapHints("kanzlei")), false);
 
@@ -91,5 +93,19 @@ assert.match(kanzleiExtras.map((q) => q.title).join(" "), /Gericht|Rechtsschutz|
 assert.equal(/Hyaluron|Laser|Botox|Nachsorge/.test(kanzleiExtras.map((q) => q.title).join(" ")), false);
 assert.match(kanzleiExtras[2]!.title, /Mandanten/);
 assert.equal(/mandantenn/i.test(kanzleiExtras[2]!.title), false);
+
+const personaFallbacks = fallbackExtraQuestions({
+  kind: "praxis",
+  vocab: clientAudienceVocab("praxis"),
+  purpose: "persona",
+});
+assert.equal(personaFallbacks.length, 4);
+assert.match(personaFallbacks.map((q) => q.title).join(" "), /Patient/);
+assert.equal(
+  /Nachsorge|Gerät|Vorher-Nachher|gesetzlich Versicherte/.test(
+    personaFallbacks.map((q) => `${q.title} ${q.description}`).join(" "),
+  ),
+  false,
+);
 
 console.log("test-ai-extra-questions: ok");

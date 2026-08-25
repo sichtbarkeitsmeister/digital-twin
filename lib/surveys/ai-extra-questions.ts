@@ -10,7 +10,13 @@ export type AiExtraQuestion = {
   description: string;
 };
 
-export function extraGapHints(kind: ClientAudienceKind): string {
+export function extraGapHints(
+  kind: ClientAudienceKind,
+  purpose: "persona" | "anbieter" | "intern" = "anbieter",
+): string {
+  if (purpose === "persona") {
+    return "Nur Fragen über DIESEN Wunschmenschen, nicht über den Betrieb. Nicht Website-Lücken oder den Praxisablauf. Stattdessen: wie oft die Person kommt, was sie zusätzlich bucht, wovor sie sich scheut, mit wem sie entscheidet, welche Alternative sie vergleicht. Lieber eine typische Frage mit Beispielsatz als ein leeres Array.";
+  }
   if (kind === "kanzlei") {
     return "Nur Lücken, die zu DIESER Kanzlei passen, z. B. Spezialisierung, Gericht vs. außergerichtlich, Rechtsschutzversicherung, typische Mandatsdauer — nichts aus Medizin oder Handwerk. Lieber typische Kanzlei-Fragen mit Beispiel als ein leeres Array.";
   }
@@ -117,8 +123,29 @@ export function fallbackExtraQuestions(input: {
   kind: ClientAudienceKind;
   vocab: ClientAudienceVocab;
   services?: string[] | null;
+  purpose?: "persona" | "anbieter" | "intern";
 }): AiExtraQuestion[] {
   const v = input.vocab;
+  if (input.purpose === "persona") {
+    return [
+      {
+        title: `Wie oft kommt dieser ${v.singular} typischerweise — einmalig oder regelmäßig?`,
+        description: `Beispiel: „Alle 1–2 Monate zur Vorsorge“ oder „Einmalig für eine konkrete ${v.engagement}.“`,
+      },
+      {
+        title: `Bucht dieser ${v.singular} oft etwas zusätzlich zum Hauptanlass, und was genau?`,
+        description: `Beispiel: „Kommt wegen A und nimmt oft B oder C mit.“`,
+      },
+      {
+        title: `Mit wem spricht dieser ${v.singular} die Entscheidung ab, bevor er zusagt?`,
+        description: `Beispiel: „Meist allein“ oder „erst mit Partnerin / Familie.“`,
+      },
+      {
+        title: `Welche andere Lösung oder welchen anderen Anbieter vergleicht dieser ${v.singular} konkret?`,
+        description: `Beispiel: eine namentlich bekannte Alternative in der Region, „abwarten“, „selbst machen“.`,
+      },
+    ];
+  }
   const service = (input.services ?? []).map((s) => s.trim()).find((s) => s.length >= 3) || v.engagement;
   if (input.kind === "kanzlei") {
     return [

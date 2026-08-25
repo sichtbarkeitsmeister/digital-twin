@@ -8,6 +8,7 @@
 
 import type { CoreQuestionPrefillHint } from "@/lib/surveys/core-question-templates";
 import type { PrefillDraft } from "@/lib/surveys/org-crawl-prefill";
+import type { SurveyPurpose } from "@/lib/surveys/purpose";
 
 export type MeetingBriefing = {
   /** Offizieller Firmenname aus dem Gespräch (falls abweichend von Org-Name). */
@@ -182,8 +183,22 @@ function findLabelRule(label: string): LabelRule | null {
   if (/unattraktiv|nicht zusammengearbeitet|passt nicht/.test(lower)) {
     return { match: /./, hint: "no_fit" };
   }
-  if (/am liebsten|wunschkunden-typen|wunschpatient|patientengruppen/.test(lower)) {
+  if (/am liebsten|patientengruppen/.test(lower)) {
     return { match: /./, hint: "target_group" };
+  }
+  if (/wunschkunden-typen|zwei wunschkunden/.test(lower)) {
+    return {
+      match: /./,
+      extraTitle: "Welche Wunschkunden-Typen wurden festgelegt?",
+      extraId: "extra_meeting_wunschkunde",
+    };
+  }
+  if (/läuft die (?:praxis|firma|kanzlei) aktuell|praxis aktuell/.test(lower)) {
+    return {
+      match: /./,
+      extraTitle: "Wie läuft die Praxis aktuell?",
+      extraId: "extra_meeting_practice_status",
+    };
   }
   if (/wachsen|zwei bis drei jahren|zukunft/.test(lower)) {
     return { match: /./, hint: "three_year_goal" };
@@ -717,8 +732,46 @@ export function suggestPrefillsFromMeeting(input: {
 }
 
 /** Zusatzfragen from parsed meeting (keywords, links, unknown labels, leftover). */
+const PERSONA_SKIP_MEETING_EXTRA_IDS = new Set([
+  "extra_meeting_focus_keywords",
+  "extra_meeting_pages_links",
+  "extra_meeting_industry",
+  "extra_meeting_owner_role",
+  "extra_meeting_colloquial",
+  "extra_meeting_practice_status",
+  "extra_meeting_wunschkunde",
+  "extra_meeting_notes",
+]);
+
+export function meetingExtraFitsPurpose(
+  extra: MeetingExtraDraft,
+  purpose: SurveyPurpose,
+): boolean {
+  if (purpose !== "persona") return true;
+  if (PERSONA_SKIP_MEETING_EXTRA_IDS.has(extra.id)) return false;
+  if (
+    /läuft (?:die|der) |aktuell\?|website|keyword|branche|mitarbeiterzahl|praxis aktuell/i.test(
+      extra.title,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Keep a 3–5-sentence portrait of ONE person, not a list of Wunschkunden-Typen. */
+export function oneIdealPersonDescription(value: string): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  const inventory = text.search(
+    /(?:zwei\s+wunschkunden-typen|\blaser-interessent\s+[–-]\s+jemand|\b\d+\.\s+[A-ZÄÖÜ])/i,
+  );
+  if (inventory > 40) return text.slice(0, inventory).trim();
+  return text;
+}
+
 export function buildMeetingExtraQuestions(
   briefing: MeetingBriefing | null | undefined,
+  purpose: SurveyPurpose = "anbieter",
 ): MeetingExtraDraft[] {
   if (!briefing) return [];
   const parsed = parseMeetingBriefingContent(briefing);
@@ -736,7 +789,7 @@ export function buildMeetingExtraQuestions(
       answer: leftover,
     });
   }
-  return extras;
+  return extras.filter((extra) => meetingExtraFitsPurpose(extra, purpose));
 }
 
 /** Freitext für KI/Heuristik: Notizen + Seiten/Links. */
