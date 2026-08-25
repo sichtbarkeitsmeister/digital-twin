@@ -115,6 +115,10 @@ assert.match(staticPrompt, /lookup_survey/);
 assert.match(staticPrompt, /search_website_content/);
 assert.match(staticPrompt, /read_website_page/);
 assert.match(staticPrompt, /NEVER claim you have no function to load a survey/i);
+assert.match(staticPrompt, /NEVER put a fields array into update_step/i);
+assert.match(staticPrompt, /Default maximum: 6 operations/i);
+assert.match(staticPrompt, /wait for green light/i);
+assert.match(staticPrompt, /lookup_survey if the outline is missing/i);
 
 const dynamic = buildSurveyChatDynamicSystemText({
   pageContext: { page: "survey_builder_edit", surveyId: null },
