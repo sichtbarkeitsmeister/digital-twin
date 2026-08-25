@@ -41,13 +41,16 @@ export function isLiveWizardSurveyProposal(
   return proposalSurveyId(proposal) === liveSurveyId;
 }
 
+type WizardApplyOk = { ok: true; draft: FragebogenReviewDraft; skipped: string[] };
+type WizardApplyFail = { ok: false; message: string };
+
 function applyAtomicProposalToWizardDraft(
   draft: FragebogenReviewDraft,
   proposal: Extract<
     SurveyAiProposal,
     { kind: "patch_survey_definition" | "edit_survey_definition" | "update_survey_metadata" }
   >,
-): { ok: true; draft: FragebogenReviewDraft } | { ok: false; message: string } {
+): WizardApplyOk | WizardApplyFail {
   const base = surveyFromReview(draft);
   const liveId = base.id;
 
@@ -62,14 +65,18 @@ function applyAtomicProposalToWizardDraft(
       >[0]["operations"],
     });
     if (!patched.ok) return patched;
-    return { ok: true, draft: mergeSurveyIntoReviewDraft(draft, patched.survey) };
+    return {
+      ok: true,
+      draft: mergeSurveyIntoReviewDraft(draft, patched.survey),
+      skipped: patched.skipped,
+    };
   }
 
   if (proposal.kind === "edit_survey_definition") {
     if (proposal.surveyId && proposal.surveyId !== liveId) {
       return { ok: false, message: "Der Vorschlag gehört nicht zum offenen Fragebogen-Entwurf." };
     }
-    return { ok: true, draft: mergeSurveyIntoReviewDraft(draft, proposal.survey) };
+    return { ok: true, draft: mergeSurveyIntoReviewDraft(draft, proposal.survey), skipped: [] };
   }
 
   if (proposal.surveyId !== liveId) {
@@ -82,15 +89,17 @@ function applyAtomicProposalToWizardDraft(
       title: proposal.title?.trim() || draft.title,
       description: proposal.description ?? draft.description,
     },
+    skipped: [],
   };
 }
 
 export function applySurveyProposalToWizardDraft(
   draft: FragebogenReviewDraft,
   proposal: SurveyAiProposal,
-): { ok: true; draft: FragebogenReviewDraft } | { ok: false; message: string } {
+): WizardApplyOk | WizardApplyFail {
   if (proposal.kind === "batch") {
     let next = draft;
+    const skipped: string[] = [];
     for (const step of proposal.steps) {
       if (
         step.kind !== "patch_survey_definition" &&
@@ -106,8 +115,9 @@ export function applySurveyProposalToWizardDraft(
       const applied = applyAtomicProposalToWizardDraft(next, step);
       if (!applied.ok) return applied;
       next = applied.draft;
+      skipped.push(...applied.skipped);
     }
-    return { ok: true, draft: next };
+    return { ok: true, draft: next, skipped };
   }
 
   if (

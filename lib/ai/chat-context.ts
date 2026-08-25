@@ -204,6 +204,7 @@ export function buildSurveyChatStaticSystemText(): string {
     "- field.id values must be unique across the whole survey.",
     "- option.id values must be unique within each field.",
     "- In patch_survey_definition add operations, NEVER reuse existing ids.",
+    "update_field/delete_field: field.id is unique across the whole survey. Use the exact field.id from stepOutline/definition, and the stepId that currently contains that field. Never invent field ids that are not listed. Do not patch fields that were removed from the current questionnaire.",
     "patch_survey_definition: allowed op values are update_field, add_field, delete_field, update_step, add_step, delete_step, remove_step (same as delete_step), update_survey_root (patch: infoText, infoTextEnabled, answerPlaceholder, title, description in survey JSON), update_info_text ({ infoText }).",
     "CRITICAL patch operation shapes (WRONG shapes are rejected):",
     "- update_field MUST use patch object: {\"op\":\"update_field\",\"stepId\":\"...\",\"fieldId\":\"...\",\"patch\":{\"required\":true}}",

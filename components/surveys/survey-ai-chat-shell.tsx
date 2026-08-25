@@ -34,6 +34,7 @@ import {
   countSurveyDeletesInProposal,
   parseSurveyAiProposal,
 } from "@/lib/ai/survey-assistant-types";
+import { describeSkippedPatchFields } from "@/lib/ai/survey-patch";
 import {
   applySurveyProposalToWizardDraft,
   isLiveWizardSurveyProposal,
@@ -815,6 +816,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         : null;
     let liveDraft = false;
     let nextLiveDraft = null as ReturnType<typeof getFragebogenWizardDraft>;
+    let liveSkipped: string[] = [];
     if (
       parsedProposal?.success &&
       isLiveWizardSurveyProposal(parsedProposal.data, liveSurveyId)
@@ -833,6 +835,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       }
       liveDraft = true;
       nextLiveDraft = applied.draft;
+      liveSkipped = applied.skipped;
     }
     const res = await fetch(
       `/api/ai/chats/${selectedChatId}/actions/${actionId}/apply`,
@@ -853,7 +856,12 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
     if (data.ok && liveDraft && nextLiveDraft) {
       setFragebogenWizardDraft(nextLiveDraft, "ai");
     }
-    setStatus(data.message, data.ok ? "success" : "error");
+    const skipNote = liveDraft ? describeSkippedPatchFields(liveSkipped) : null;
+    const statusMessage =
+      data.ok && skipNote
+        ? `${data.message} ${skipNote}`
+        : data.message;
+    setStatus(statusMessage, data.ok ? "success" : "error");
     if (!data.ok) {
       await maybeTriggerAutoFixForFailedAction(actionId, data.message);
     }
