@@ -24,6 +24,10 @@ const ascii = heuristicSuggestAudienceVocab({ industry: "Entruempelung Berlin" }
 assert.ok(ascii);
 assert.equal(ascii.vocab.engagement, "Entrümpelung");
 
+const umlautFirm = heuristicSuggestAudienceVocab({ organisationName: "Müller Entrümpler" });
+assert.ok(umlautFirm);
+assert.equal(umlautFirm.vocab.engagement, "Entrümpelung");
+
 const umzug = heuristicSuggestAudienceVocab({
   organisationName: "Schnell Umzugsunternehmen GmbH",
 });

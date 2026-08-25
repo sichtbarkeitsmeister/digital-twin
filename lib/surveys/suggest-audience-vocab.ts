@@ -60,7 +60,7 @@ const RULES: IndustryRule[] = [
     note: "Gesundheitsbranche → Patient und Behandlung.",
   },
   {
-    test: /entrümpel|entruempel|haushaltauflös|haushaltsauflös|wohnungsräum|wohnungsraeum/,
+    test: /entrümp|entruemp|haushalts?auflös|wohnungsräum|wohnungsraeum/,
     kind: "handwerk",
     fields: {
       business: "Betrieb",
