@@ -107,6 +107,14 @@ assert.equal(
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_contact_is_client" && q.type === "radio"));
 assert.ok(PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_contact_other" && q.type === "text"));
 assert.ok(
+  PERSONA_CORE_QUESTIONS.some((q) => q.key === "persona_regions" && q.prefillHint === "region"),
+);
+const personaCopy = PERSONA_CORE_QUESTIONS.map((q) => `${q.title} ${q.description}`).join("\n");
+assert.equal(
+  /Anwalt|Abmahnung|Handwerksbetrieb|Heilpraktiker|eine andere Kanzlei|Auftraggeber/.test(personaCopy),
+  false,
+);
+assert.ok(
   PERSONA_CORE_QUESTIONS.some(
     (q) =>
       q.key === "persona_first_contact_phrases" &&

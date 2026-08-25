@@ -34,6 +34,7 @@ import {
   meetingBriefingContextText,
   meetingBriefingHasContent,
   mergeSourceTextIntoBriefing,
+  oneIdealPersonDescription,
   suggestPrefillsFromMeeting,
   type MeetingBriefing,
 } from "@/lib/surveys/meeting-briefing";
@@ -112,6 +113,7 @@ async function generateExtrasAndAiPrefills(input: {
       kind: vocab.kind,
       vocab,
       services: input.serviceLabels,
+      purpose: input.purpose,
     }).slice(0, maxExtras);
 
   if (!apiKey) {
@@ -276,6 +278,7 @@ questions=[].
         organisationName: input.organisationName,
         services: input.serviceLabels,
         coreTitles,
+        purpose: input.purpose,
         max: maxExtras,
       });
     }
@@ -418,6 +421,7 @@ export async function buildFragebogenReviewDraft(input: {
   // (Region/USP → Kern; Fokuskeywords/Links → eigene Fragen; kein Notiz-Haufen).
   const meetingExtras: ReviewQuestionItem[] = buildMeetingExtraQuestions(
     briefing,
+    purpose,
   ).map((e) => ({
     id: e.id,
     kind: "extra" as const,
@@ -435,9 +439,13 @@ export async function buildFragebogenReviewDraft(input: {
   const coreQuestions: ReviewQuestionItem[] = customized.map((t) => {
     const draft = prefills[t.key];
     const flags = generatedChoiceCustomOptionFlags(t.type);
+    const answer =
+      t.key === "persona_description" && draft?.value
+        ? oneIdealPersonDescription(draft.value)
+        : (draft?.value ?? "");
     const options =
       t.type === "checkbox"
-        ? mergeSuggestedCheckboxOptions(t.options ?? [], draft?.value ?? "")
+        ? mergeSuggestedCheckboxOptions(t.options ?? [], answer)
         : (t.options ?? []).map((o) => ({ id: o.id, label: o.label }));
     return {
       id: fieldIdForCoreKey(t.key),
@@ -453,13 +461,14 @@ export async function buildFragebogenReviewDraft(input: {
       allowExtraEntries: flags.allowExtraEntries ?? t.allowExtraEntries,
       allowCustomEntries: flags.allowCustomEntries ?? t.allowCustomEntries,
       addEntryLabel: t.addEntryLabel,
-      answer: draft?.value ?? "",
+      answer,
       answerSource: draft?.source ?? "none",
       answerNote: draft?.note ?? "",
     };
   });
 
   const seoExtra: ReviewQuestionItem[] =
+    purpose === "anbieter" &&
     crawl.seoMetrics &&
     !customized.some((t) => t.prefillHint === "seo_metrics" && prefills[t.key]?.value)
       ? [

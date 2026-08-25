@@ -863,7 +863,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wie lässt sich dieser ideale Kunde in drei bis fünf Sätzen beschreiben (ungefähres Alter, Lebenssituation, warum die Zusammenarbeit mit ihm besonders gut funktioniert)?",
         description:
-          "Bitte konkret, z. B. „Anfang 40, führt einen Handwerksbetrieb, hat keine Zeit für Papierkram und will eine klare Empfehlung statt fünf Optionen.“",
+          "Bitte konkret, z. B. „Anfang 40, berufstätig mit wenig Zeit, will eine klare Empfehlung statt fünf Optionen.“",
         type: "text",
         prefillHint: "target_group",
       },
@@ -901,6 +901,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "persona_regions",
         title: "Aus welcher Gegend oder welchen Orten kommt dieser Kunde hauptsächlich?",
         type: "text",
+        prefillHint: "region",
       },
       {
         key: "persona_budget",
@@ -922,7 +923,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "persona_trigger",
         title: "Was ist der Auslöser, der diesen Kunden dazu bringt, überhaupt nach einer Lösung zu suchen?",
         description:
-          "Der konkrete Anlass, nicht das allgemeine Thema. z. B. „Abmahnung letzte Woche“, „akute Rückenschmerzen seit drei Tagen“, „Anbau soll im Frühjahr stehen“ — nicht „hat ein Problem“.",
+          "Der konkrete Anlass, nicht das allgemeine Thema. z. B. „seit drei Tagen starke Beschwerden“, „ein fester Termin in drei Monaten“, „eine Frist läuft nächste Woche ab“ — nicht „hat ein Problem“.",
         type: "text",
       },
       {
@@ -930,7 +931,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Was will dieser Kunde zu Beginn der Zusammenarbeit am meisten erreichen? Bitte nach Häufigkeit sortieren.",
         description:
-          "Was im Erstgespräch als Ziel genannt wird. Die Liste sollte zur Branche passen, z. B. „Kündigung abwenden“, „schmerzfrei durch den Alltag“, „Festpreis und Termin halten“.",
+          "Was im Erstgespräch als Ziel genannt wird. Die Liste sollte zur Branche passen, z. B. „schnell wieder belastbar sein“, „endlich Klarheit“, „ohne langes Hin und Her durchkommen“.",
         type: "ranking",
         options: opts("persona_goal", INDUSTRY_RANKING_PLACEHOLDERS),
         allowExtraEntries: true,
@@ -949,7 +950,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Gab es schlechte Erfahrungen mit früheren Lösungen, anderen Anbietern oder eigenen Versuchen? Was wurde darüber gesagt?",
         description:
-          "z. B. „Der letzte Anwalt hat wochenlang nicht zurückgerufen“ oder „Zwei Heilpraktiker, und es wurde nicht besser“.",
+          "z. B. „Beim letzten Mal hat wochenlang niemand zurückgerufen“ oder „Zwei Anläufe, und es wurde nicht besser“.",
         type: "text",
       },
     ],
@@ -1025,7 +1026,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "persona_contact_is_client",
         title:
-          "Ist die Person, die den Erstkontakt aufnimmt, meistens auch der eigentliche Auftraggeber (also die Person, die am Ende entscheidet und bezahlt), oder ist das oft jemand anderes (z. B. ein Familienmitglied, eine Assistenz, ein Angestellter)?",
+          "Ist die Person, die den Erstkontakt aufnimmt, meistens auch dieselbe, die am Ende entscheidet und bezahlt, oder ist das oft jemand anderes (z. B. ein Familienmitglied, eine Assistenz, ein Angestellter)?",
         type: "radio",
         options: PERSONA_CONTACT_IS_CLIENT,
       },
@@ -1119,7 +1120,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Welche Informationsquellen werden im Gespräch positiv erwähnt (z. B. Empfehlung von Bekannten, Google-Bewertungen, die eigene Website, Social Media, Presse)?",
         description:
-          "Auch, ob Google-Bewertungen oder die Website vorkommen. Oben steht, was am häufigsten genannt wird.",
+          "Auch, ob Google-Bewertungen oder die Website vorkommen. An erster Stelle steht, was am häufigsten genannt wird.",
         type: "ranking",
         options: opts("persona_source", PERSONA_INFO_SOURCES),
         allowExtraEntries: true,
@@ -1156,7 +1157,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
       {
         key: "persona_hurdle_remover",
         title: "Was hilft erfahrungsgemäß, diese Zurückhaltung zu überwinden?",
-        description: "z. B. „Festpreis im Erstgespräch nennen“, „Rückruf am selben Tag“, „kostenloses kurzes Vorgespräch“.",
+        description: "z. B. „Preis schon im Erstgespräch nennen“, „Rückruf am selben Tag“, „kostenloses kurzes Vorgespräch“.",
         type: "text",
       },
     ],
@@ -1186,7 +1187,7 @@ export const PERSONA_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Welche anderen Lösungen oder Anbieter werden ernsthaft in Betracht gezogen, bevor sich dieser Kunde entscheidet?",
         description:
-          "Womit wird konkret verglichen? z. B. eine andere Kanzlei in der Stadt, „selbst machen“, „abwarten“, eine Klinik, ein Billiganbieter.",
+          "Womit wird konkret verglichen? z. B. ein anderer Anbieter in der Stadt, „selbst machen“, „abwarten“, eine günstigere Alternative.",
         type: "ranking",
         options: opts("persona_alt", INDUSTRY_RANKING_PLACEHOLDERS),
         allowExtraEntries: true,

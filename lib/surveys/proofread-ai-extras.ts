@@ -60,7 +60,7 @@ export async function generateAiExtraQuestions(input: {
           content: `Firma: ${input.organisationName}
 Zweck: ${input.purpose}
 Art: ${vocab.label} — ${vocab.business} / ${vocab.singular} / ${vocab.engagement}
-${extraGapHints(vocab.kind)}
+${extraGapHints(vocab.kind, input.purpose)}
 
 Leistungen:
 ${services}
@@ -71,7 +71,11 @@ ${crawl}
 Schon gefragt (NICHT wiederholen):
 ${input.coreTitles.map((t) => `- ${t}`).join("\n")}
 
-Liefere genau ${max} konkrete Fragen zu Lücken DIESES Anbieters. Nie ein leeres questions-Array. Wenn die Website wenig hergibt, typische Lücken dieser Art von ${vocab.business} trotzdem stellen — mit Antwort-Beispiel. title = die Frage, description = warum + ein Antwort-Beispiel mit ${vocab.singular}/${vocab.engagement}. Korrektes Deutsch.
+${
+            input.purpose === "persona"
+              ? `Liefere genau ${max} konkrete Fragen über diesen Wunsch${vocab.singular}, die in den Kernfragen noch fehlen. Nicht über Website, Geräte, Nachsorge, Preise oder den Betrieb. Nie ein leeres questions-Array.`
+              : `Liefere genau ${max} konkrete Fragen zu Lücken DIESES Anbieters. Nie ein leeres questions-Array. Wenn die Website wenig hergibt, typische Lücken dieser Art von ${vocab.business} trotzdem stellen — mit Antwort-Beispiel.`
+          } title = die Frage, description = warum + ein Antwort-Beispiel mit ${vocab.singular}/${vocab.engagement}. Korrektes Deutsch.
 
 {"questions":[{"title":"...","description":"..."}]}`,
         },
@@ -101,6 +105,7 @@ export async function proofreadAiExtraQuestions(input: {
   organisationName: string;
   services: string[];
   coreTitles: string[];
+  purpose?: "persona" | "anbieter" | "intern";
   max?: number;
 }): Promise<AiExtraQuestion[]> {
   const draft = input.extras.filter((row) => row.title.trim().length >= 12);
@@ -131,7 +136,7 @@ export async function proofreadAiExtraQuestions(input: {
           role: "user",
           content: `Firma: ${input.organisationName}
 Art: ${input.vocab.label} (${input.vocab.business} / ${input.vocab.singular} / ${input.vocab.engagement})
-${extraGapHints(input.vocab.kind)}
+${extraGapHints(input.vocab.kind, input.purpose)}
 
 Leistungen:
 ${services}
@@ -143,7 +148,11 @@ Entwurf:
 ${JSON.stringify(draft, null, 2)}
 
 Prüfe jede Frage:
-1. Logik: passt sie zu DIESER Firma und diesen Leistungen? Streiche branchenfremde oder doppelte Fragen.
+1. Logik: ${
+            input.purpose === "persona"
+              ? "passt sie zu DIESEM Wunschmenschen? Streiche Fragen über Betrieb, Website, Geräte, Nachsorge oder Leistungspreise."
+              : "passt sie zu DIESER Firma und diesen Leistungen? Streiche branchenfremde oder doppelte Fragen."
+          }
 2. Rechtschreibung und Grammatik: Artikel, Genus, Numerus, Kommas, keine Wortkleberei (nicht „RegionHyaluronsäure“, nicht „jedem Behandlung“).
 3. description: ein kurzer Grund plus ein passendes Antwort-Beispiel. Wortwahl ${input.vocab.singular}/${input.vocab.engagement}.
 

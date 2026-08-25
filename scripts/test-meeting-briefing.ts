@@ -8,6 +8,7 @@ import {
   buildMeetingExtraQuestions,
   extractLabeledSections,
   meetingBriefingHasContent,
+  oneIdealPersonDescription,
   parseMeetingBriefingContent,
   suggestPrefillsFromMeeting,
 } from "../lib/surveys/meeting-briefing";
@@ -153,7 +154,8 @@ assert.match(kickoffParsed.byHint.online_channels ?? "", /Doctolib/);
 assert.match(kickoffParsed.byHint.typical_process ?? "", /Doctolib|telefon/i);
 assert.equal(/Block 1|Wunschkunden-Definition|ggf\. im Fragebogen/.test(kickoffParsed.byHint.typical_process ?? ""), false);
 assert.match(kickoffParsed.byHint.no_fit ?? "", /Selbstzahler|gesetzlich/i);
-assert.match(kickoffParsed.byHint.target_group ?? "", /Privatpatient|Laser/i);
+assert.match(kickoffParsed.byHint.target_group ?? "", /Privatpatient/i);
+assert.equal(/Laser-Interessent/.test(kickoffParsed.byHint.target_group ?? ""), false);
 assert.equal(kickoffParsed.byHint.owner_name, "Dr. Schürings");
 assert.equal(/Ansprechpartnerin für die laufende/.test(kickoffParsed.byHint.owner_name ?? ""), false);
 assert.equal(/KI-Sprachassistent|Block 1|Rezeption/.test(kickoffParsed.byHint.online_channels ?? ""), false);
@@ -169,6 +171,32 @@ assert.equal(
 const kickoffExtras = buildMeetingExtraQuestions({ notes: kickoff });
 assert.equal(
   kickoffExtras.some((e) => e.id === "extra_meeting_notes" && /beantwortet im meeting/i.test(e.answer)),
+  false,
+);
+assert.ok(kickoffExtras.some((e) => e.id === "extra_meeting_practice_status"));
+assert.match(kickoffParsed.byHint.target_group ?? "", /Privatpatienten, die regelmäßig/);
+assert.equal(/Laser-Interessent/.test(kickoffParsed.byHint.target_group ?? ""), false);
+
+const personaKickoffExtras = buildMeetingExtraQuestions({ notes: kickoff }, "persona");
+assert.equal(
+  personaKickoffExtras.some((e) =>
+    /praxis aktuell|wunschkunden-typen|fokus-keywords|branche/i.test(e.title),
+  ),
+  false,
+);
+
+assert.match(
+  oneIdealPersonDescription(
+    "Privatpatienten, die regelmäßig kommen – Hautkrebsvorsorge als Anlass. Laser-Interessent – jemand, der gezielt eine Laserbehandlung möchte.",
+  ),
+  /Privatpatienten, die regelmäßig kommen/,
+);
+assert.equal(
+  /Laser-Interessent/.test(
+    oneIdealPersonDescription(
+      "Privatpatienten, die regelmäßig kommen – Hautkrebsvorsorge als Anlass. Laser-Interessent – jemand, der gezielt eine Laserbehandlung möchte.",
+    ),
+  ),
   false,
 );
 assert.match(kickoffParsed.byHint.org_name ?? "", /Haut- und Laserpraxis/);

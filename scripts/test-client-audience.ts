@@ -238,4 +238,10 @@ const holdKanzlei = customizeCoreQuestion({
 assert.match(holdKanzlei.title, /Mandant/);
 assert.equal(/Kunde/.test(holdKanzlei.title), false);
 
+const personaContact = PERSONA_CORE_QUESTIONS.find((q) => q.key === "persona_contact_is_client");
+assert.ok(personaContact);
+const praxisContact = customizeCoreQuestion({ template: personaContact, audience: "praxis" });
+assert.equal(/Auftraggeber/.test(praxisContact.title), false);
+assert.match(praxisContact.title, /entscheidet und bezahlt/);
+
 console.log("client-audience: ok");
