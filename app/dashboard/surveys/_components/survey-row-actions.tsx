@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { Copy, Download, MoreHorizontal } from "lucide-react";
+import { useRef, useTransition } from "react";
+import { Copy, Download, FileUp, MoreHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,7 @@ import {
   duplicateSurveyAction,
   exportSurveyBundleAction,
   publishSurveyAction,
+  replaceSurveyQuestionsFromJsonAction,
   unpublishSurveyAction,
 } from "@/app/dashboard/surveys/actions";
 
@@ -33,6 +34,7 @@ export function SurveyRowActions(props: {
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const jsonReplaceRef = useRef<HTMLInputElement>(null);
 
   function safeFilename(input: string) {
     return (
@@ -57,6 +59,41 @@ export function SurveyRowActions(props: {
   }
 
   return (
+    <>
+    <input
+      ref={jsonReplaceRef}
+      type="file"
+      accept="application/json,.json"
+      className="hidden"
+      onChange={(e) => {
+        const file = e.currentTarget.files?.[0];
+        e.currentTarget.value = "";
+        if (!file) return;
+        const ok = window.confirm(
+          `Fragen der Umfrage „${props.title}“ durch „${file.name}“ ersetzen?\n\nTitel, Ordner und Organisation bleiben. Nur die Fragen/Schritte werden ausgetauscht.`,
+        );
+        if (!ok) return;
+        startTransition(async () => {
+          try {
+            const text = await file.text();
+            const payload = JSON.parse(text) as unknown;
+            const res = await replaceSurveyQuestionsFromJsonAction({
+              surveyId: props.surveyId,
+              payload,
+            });
+            if (!res.ok) {
+              window.alert(res.message);
+              return;
+            }
+            window.alert(res.message);
+            router.push(`/dashboard/surveys/${props.surveyId}/edit`);
+            router.refresh();
+          } catch {
+            window.alert("Ungültige JSON-Datei.");
+          }
+        });
+      }}
+    />
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="icon" variant="outline" disabled={isPending} aria-label="Aktionen">
@@ -197,6 +234,16 @@ export function SurveyRowActions(props: {
           Export (inkl. Antworten)
         </DropdownMenuItem>
 
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            jsonReplaceRef.current?.click();
+          }}
+        >
+          <FileUp className="h-4 w-4" />
+          Fragen aus JSON ersetzen
+        </DropdownMenuItem>
+
         <DropdownMenuSeparator />
 
         <DropdownMenuItem
@@ -222,5 +269,6 @@ export function SurveyRowActions(props: {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    </>
   );
 }

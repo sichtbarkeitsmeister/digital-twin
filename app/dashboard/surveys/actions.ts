@@ -7,6 +7,10 @@ import { z } from "zod";
 
 import { surveySchema } from "@/lib/surveys/schema";
 import {
+  definitionForExistingSurvey,
+  parseImportedSurveyJson,
+} from "@/lib/surveys/import-survey-json";
+import {
   buildDuplicatedSurveyTitle,
   withNewSurveyDefinitionId,
 } from "@/lib/surveys/duplicate";
@@ -918,6 +922,69 @@ export async function importRawFilledQuestionnairesBatchAction(
     ok: result.ok,
     message: result.message,
     data: { results: result.results, failed: result.failed },
+  };
+}
+
+const replaceQuestionsSchema = z.object({
+  surveyId: z.string().uuid(),
+  payload: z.unknown(),
+});
+
+/** Replace steps/fields of an existing survey from JSON (definition or export bundle). */
+export async function replaceSurveyQuestionsFromJsonAction(
+  input: z.input<typeof replaceQuestionsSchema>,
+): Promise<ActionState<{ surveyId: string; stepCount: number; fieldCount: number }>> {
+  const parsed = replaceQuestionsSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." };
+  }
+
+  const imported = parseImportedSurveyJson(parsed.data.payload);
+  if (!imported.ok) return { ok: false, message: imported.error };
+
+  const auth = await requirePlatformAdmin();
+  if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
+  const { supabase } = auth;
+
+  const { data: existing } = await supabase
+    .from("surveys")
+    .select("id,title,description,definition")
+    .eq("id", parsed.data.surveyId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!existing) return { ok: false, message: "Umfrage nicht gefunden." };
+
+  const existingDef = surveySchema.safeParse(existing.definition);
+  const existingDefinitionId = existingDef.success
+    ? existingDef.data.id
+    : imported.data.definition.id;
+
+  const nextDefinition = definitionForExistingSurvey({
+    existingDefinitionId,
+    existingTitle: existing.title ?? imported.data.title,
+    existingDescription: existing.description ?? imported.data.description,
+    imported: imported.data.definition,
+  });
+
+  const { error } = await supabase
+    .from("surveys")
+    .update({ definition: nextDefinition })
+    .eq("id", existing.id)
+    .is("deleted_at", null);
+  if (error) return { ok: false, message: "Fragen konnten nicht ersetzt werden." };
+
+  revalidatePath("/dashboard/surveys");
+  revalidatePath(`/dashboard/surveys/${existing.id}/edit`);
+
+  const fieldCount = nextDefinition.steps.reduce((n, step) => n + step.fields.length, 0);
+  return {
+    ok: true,
+    message: `Fragen ersetzt: ${nextDefinition.steps.length} Schritte, ${fieldCount} Felder.`,
+    data: {
+      surveyId: existing.id,
+      stepCount: nextDefinition.steps.length,
+      fieldCount,
+    },
   };
 }
 

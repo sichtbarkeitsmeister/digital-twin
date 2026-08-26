@@ -49,7 +49,7 @@ import {
   formatTextListAnswerForDisplay,
   isTextListAnswerValid,
 } from "@/lib/surveys/text-list-answer";
-import { surveySchema } from "@/lib/surveys/schema";
+import { parseImportedSurveyJson } from "@/lib/surveys/import-survey-json";
 import {
   normalizeSurveyPurpose,
   surveyPurposeLabel,
@@ -758,14 +758,12 @@ export function SurveyBuilder({
   function importSurveyFromText(text: string) {
     try {
       const parsedJson: unknown = JSON.parse(text);
-      const parsed = surveySchema.safeParse(parsedJson);
-      if (!parsed.success) {
-        const msg =
-          parsed.error.issues[0]?.message ?? "Ungültiges Umfrage-JSON.";
-        setStatus({ kind: "error", message: msg });
+      const imported = parseImportedSurveyJson(parsedJson);
+      if (!imported.ok) {
+        setStatus({ kind: "error", message: imported.error });
         return;
       }
-      setSurvey(parsed.data as Survey);
+      setSurvey(imported.data.definition as Survey);
       setCurrentStepIndex(0);
       setPreviewAnswers({});
       setStatus({ kind: "ok", message: "Umfrage-JSON importiert." });
