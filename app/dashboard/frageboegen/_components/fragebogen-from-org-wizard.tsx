@@ -348,7 +348,7 @@ export function FragebogenFromOrgWizard(props: {
     }
     if (purpose === "persona" && wunschkundeLabel.trim().length < 3) {
       setError(
-        "Bitte angeben, welche Zielgruppe dieser Persona-Fragebogen beschreibt — z. B. Privatpatient mit Vorsorge oder Laser-Interessent. Pro Typ einen eigenen Fragebogen erzeugen.",
+        "Bitte die Rolle oder den Typ eintragen — z. B. Privatpatient mit Vorsorge oder Laser-Interessent. Kein Personenname. Pro Typ einen eigenen Fragebogen erzeugen.",
       );
       return;
     }
@@ -967,9 +967,7 @@ export function FragebogenFromOrgWizard(props: {
           </div>
           {purpose === "persona" ? (
             <div className="grid max-w-lg gap-2">
-              <Label htmlFor="wunschkunde">
-                Welche Zielgruppe ist das? ({audienceVocab?.singular ?? "Wunschkunde"})
-              </Label>
+              <Label htmlFor="wunschkunde">Rolle / Typ dieses {audienceVocab?.singular ?? "Wunschkunden"}</Label>
               <Input
                 id="wunschkunde"
                 value={wunschkundeLabel}
@@ -977,9 +975,9 @@ export function FragebogenFromOrgWizard(props: {
                 placeholder="z. B. Privatpatient mit Vorsorge oder Laser-Interessent"
               />
               <p className="text-xs text-secondary">
-                Ein Fragebogen = eine Zielgruppe. Den Wizard für den zweiten Typ noch einmal
-                starten und hier den anderen Namen eintragen — sonst entstehen zwei gleiche
-                Entwürfe.
+                Kein Personenname — die Rolle oder der Typ aus dem Kickoff. Ein Fragebogen = ein
+                Typ. Für den zweiten Typ den Wizard noch einmal starten und hier die andere Rolle
+                eintragen.
               </p>
             </div>
           ) : null}
