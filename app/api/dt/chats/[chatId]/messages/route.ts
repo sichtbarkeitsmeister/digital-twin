@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { callDtAnthropicChat } from "@/lib/dt/anthropic-chat";
+import {
+  callDtAnthropicChat,
+  dtChatFailureUserMessage,
+} from "@/lib/dt/anthropic-chat";
 import { assembleDtChatFromDb } from "@/lib/dt/assemble-chat-prompt";
 import {
   buildAttachmentMetadataForMessage,
@@ -31,6 +34,8 @@ import {
 } from "@/lib/dt/seo/chat-task-proposals";
 import type { DtChatMode } from "@/lib/dt/types";
 import { createServiceClient } from "@/lib/supabase/service";
+
+export const maxDuration = 300;
 
 async function trackLlmUsage(input: {
   organisationId: string;
@@ -388,6 +393,61 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       });
     } catch (err) {
       console.warn("[dt] n8n chat failed, falling back to direct Anthropic:", err);
+
+      if (!ghostMode && userRow?.created_at) {
+        const { data: persistedAfterN8n } = await auth.supabase
+          .from("dt_chat_messages")
+          .select("id,chat_id,role,content,metadata,author_user_id,stopped,created_at")
+          .eq("chat_id", chatId)
+          .eq("role", "assistant")
+          .gt("created_at", userRow.created_at)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (persistedAfterN8n?.content?.trim()) {
+          const persistedFinal = finalizeAssistantSeoContent(
+            persistedAfterN8n.content,
+            chat.mode as DtChatMode,
+          );
+          const recoveredRow = {
+            ...persistedAfterN8n,
+            content: persistedFinal.content,
+            metadata: assistantMetadataExtras(
+              (persistedAfterN8n.metadata as Record<string, unknown>) ?? {},
+              chat.mode as DtChatMode,
+              persistedFinal.seoTaskProposals,
+            ),
+          };
+          if (
+            recoveredRow.content !== persistedAfterN8n.content ||
+            recoveredRow.metadata !== persistedAfterN8n.metadata
+          ) {
+            await auth.supabase
+              .from("dt_chat_messages")
+              .update({
+                content: recoveredRow.content,
+                metadata: recoveredRow.metadata,
+              })
+              .eq("id", persistedAfterN8n.id);
+          }
+          const titleSuggestion = await maybePersistDtAutoTitle({
+            supabase: auth.supabase,
+            chatId,
+            currentTitle: chat.title,
+            latestUserText: content,
+            assistantText: recoveredRow.content,
+            clearPrematureExternalTitle: true,
+          });
+          return NextResponse.json({
+            ok: true,
+            userMessage: userRow,
+            assistantMessage: recoveredRow,
+            titleSuggestion,
+            via: "n8n",
+          });
+        }
+      }
     }
   }
 
@@ -413,7 +473,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     return NextResponse.json(
       {
         ok: false,
-        message: "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.",
+        message: dtChatFailureUserMessage(err),
+        userMessage: userRow,
       },
       { status: 500 },
     );

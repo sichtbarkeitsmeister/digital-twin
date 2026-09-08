@@ -29,7 +29,29 @@ import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { DtChatMode, DtMessageRow } from "@/lib/dt/types";
 
-const HISTORY_LIMIT = 40;
+export const DT_CHAT_HISTORY_LIMIT = 40;
+/** Keep recent turns under a token-safe budget so long SEO threads still fit. */
+export const DT_CHAT_HISTORY_CHAR_BUDGET = 80_000;
+
+export function trimDtChatHistory<T extends { content: string }>(
+  rows: T[],
+  options?: { limit?: number; charBudget?: number },
+): T[] {
+  const limit = options?.limit ?? DT_CHAT_HISTORY_LIMIT;
+  const charBudget = options?.charBudget ?? DT_CHAT_HISTORY_CHAR_BUDGET;
+  const sliced = rows.slice(-limit);
+  if (sliced.length <= 1) return sliced;
+
+  let used = 0;
+  const kept: T[] = [];
+  for (let i = sliced.length - 1; i >= 0; i--) {
+    const len = sliced[i]!.content?.length ?? 0;
+    if (kept.length > 0 && used + len > charBudget) break;
+    kept.push(sliced[i]!);
+    used += len;
+  }
+  return kept.reverse();
+}
 
 export type DtAssembledChat = {
   system: string;
@@ -161,7 +183,7 @@ export async function assembleDtChatFromDb(input: {
     .eq("chat_id", input.chatId)
     .order("created_at", { ascending: true });
 
-  const history = ((messageRows ?? []) as DtMessageRow[]).slice(-HISTORY_LIMIT);
+  const history = trimDtChatHistory((messageRows ?? []) as DtMessageRow[]);
   const authorIds = history
     .filter((m) => m.role === "user" && m.author_user_id)
     .map((m) => m.author_user_id as string);
@@ -338,9 +360,9 @@ export async function assembleDtChatEphemeral(input: {
     pastedUrlsText,
   });
 
-  const messages: Anthropic.MessageParam[] = input.history
-    .slice(-HISTORY_LIMIT)
-    .map((m) => ({ role: m.role, content: m.content }));
+  const messages: Anthropic.MessageParam[] = trimDtChatHistory(input.history).map(
+    (m) => ({ role: m.role, content: m.content }),
+  );
 
   return {
     system,
