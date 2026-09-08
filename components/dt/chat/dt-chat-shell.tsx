@@ -989,7 +989,11 @@ export function DtChatShell(props: {
       };
 
       if (!json.ok) {
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        setMessages((prev) => {
+          const next = prev.filter((m) => m.id !== optimisticId);
+          if (json.userMessage) next.push(json.userMessage);
+          return next;
+        });
         setStatus(json.message ?? "Antwort fehlgeschlagen.");
         return;
       }

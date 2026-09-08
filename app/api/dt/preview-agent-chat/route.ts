@@ -9,6 +9,8 @@ import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "@/lib/dt/prompts/digital-twi
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { createServiceClient } from "@/lib/supabase/service";
 
+export const maxDuration = 300;
+
 const historySchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(32_000),

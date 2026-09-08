@@ -1,6 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import { extractAnthropicText } from "@/lib/ai/anthropic-helpers";
+import {
+  callAnthropicFirstAvailable,
+  extractAnthropicText,
+} from "@/lib/ai/anthropic-helpers";
 import { fallbackDtChatTitle } from "@/lib/dt/chat-title";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import {
@@ -325,24 +328,108 @@ async function runDtRetrievalTool(
   }
 }
 
-function sanitizeAnthropicMessages(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
-  return messages.map((message) => {
-    if (typeof message.content === "string") {
-      return { ...message, content: sanitizeForLlmText(message.content) };
-    }
+function textOfContentBlock(block: Anthropic.ContentBlockParam): string | null {
+  if (block.type === "text" && "text" in block && typeof block.text === "string") {
+    return block.text;
+  }
+  return null;
+}
 
-    if (!Array.isArray(message.content)) return message;
-
-    return {
-      ...message,
-      content: message.content.map((block) => {
-        if (block.type === "text" && "text" in block && typeof block.text === "string") {
-          return { ...block, text: sanitizeForLlmText(block.text) };
-        }
-        return block;
-      }),
-    };
+function isEmptyMessageContent(content: Anthropic.MessageParam["content"]): boolean {
+  if (typeof content === "string") return !content.trim();
+  if (!Array.isArray(content) || content.length === 0) return true;
+  return content.every((block) => {
+    const text = textOfContentBlock(block);
+    if (text !== null) return !text.trim();
+    return false;
   });
+}
+
+function sanitizeMessageContent(
+  content: Anthropic.MessageParam["content"],
+): Anthropic.MessageParam["content"] {
+  if (typeof content === "string") return sanitizeForLlmText(content);
+  if (!Array.isArray(content)) return content;
+  return content.map((block) => {
+    const text = textOfContentBlock(block);
+    if (text !== null) return { ...block, text: sanitizeForLlmText(text) };
+    return block;
+  });
+}
+
+function mergeMessageContent(
+  left: Anthropic.MessageParam["content"],
+  right: Anthropic.MessageParam["content"],
+): Anthropic.MessageParam["content"] {
+  if (typeof left === "string" && typeof right === "string") {
+    return `${left.trim()}\n\n${right.trim()}`;
+  }
+  const toBlocks = (value: Anthropic.MessageParam["content"]): Anthropic.ContentBlockParam[] => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return trimmed ? [{ type: "text", text: trimmed }] : [];
+    }
+    return Array.isArray(value) ? [...value] : [];
+  };
+  return [...toBlocks(left), ...toBlocks(right)];
+}
+
+/**
+ * Anthropic rejects empty content, consecutive same-role turns, and histories
+ * that do not start and end with a user message. Failed chat turns still persist
+ * the user row, so a retry would otherwise 400.
+ */
+export function normalizeDtAnthropicMessages(
+  messages: Anthropic.MessageParam[],
+): Anthropic.MessageParam[] {
+  const merged: Anthropic.MessageParam[] = [];
+
+  for (const raw of messages) {
+    if (raw.role !== "user" && raw.role !== "assistant") continue;
+    const content = sanitizeMessageContent(raw.content);
+    if (isEmptyMessageContent(content)) continue;
+    const next: Anthropic.MessageParam = { role: raw.role, content };
+    const last = merged[merged.length - 1];
+    if (last && last.role === next.role) {
+      last.content = mergeMessageContent(last.content, next.content);
+    } else {
+      merged.push(next);
+    }
+  }
+
+  while (merged.length > 0 && merged[0]!.role !== "user") merged.shift();
+  while (merged.length > 0 && merged[merged.length - 1]!.role !== "user") merged.pop();
+  return merged;
+}
+
+export function dtChatFailureUserMessage(err: unknown): string {
+  const chunks: string[] = [];
+  if (err instanceof Error && err.message) chunks.push(err.message);
+  if (err && typeof err === "object") {
+    const extra = err as {
+      status?: unknown;
+      error?: { message?: unknown; type?: unknown };
+    };
+    if (typeof extra.error?.message === "string") chunks.push(extra.error.message);
+    if (typeof extra.error?.type === "string") chunks.push(extra.error.type);
+    if (typeof extra.status === "number") chunks.push(String(extra.status));
+  }
+  const blob = chunks.join(" ");
+
+  if (/timeout|timed out|Zeitlimit|aborted/i.test(blob)) {
+    return "Die KI hat zu lange gebraucht. Bitte erneut versuchen.";
+  }
+  if (
+    /too many tokens|prompt is too long|context.?length|max.*context|input is too long/i.test(
+      blob,
+    )
+  ) {
+    return "Der Chat ist zu lang für eine KI-Antwort. Bitte einen neuen Chat starten.";
+  }
+  if (/rate.?limit|overloaded|529/i.test(blob)) {
+    return "Die KI ist gerade überlastet. Bitte in einem Moment erneut versuchen.";
+  }
+  return "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.";
 }
 
 function resultFromResponse(
@@ -370,33 +457,50 @@ export async function callDtAnthropicChat(params: {
     throw new Error("ANTHROPIC_API_KEY fehlt.");
   }
 
+  const messages = normalizeDtAnthropicMessages(params.messages);
+  if (messages.length === 0) {
+    throw new Error("Keine gültige Nutzer-Nachricht für die KI.");
+  }
+
   const model = resolveDtAnthropicModel(params.mode);
   const client = new Anthropic({ apiKey });
   const max_tokens = params.mode === "seo" ? 8192 : 4096;
   const system = sanitizeForLlmText(params.system);
+  const roundTimeoutMs = params.mode === "seo" ? 180_000 : 120_000;
 
   const retrievalOrgId = params.mode === "seo" ? params.retrieval?.organisationId : undefined;
 
-  if (!retrievalOrgId) {
-    const resp = await client.messages.create({
-      model,
-      max_tokens,
+  const createRound = async (input: {
+    convo: Anthropic.MessageParam[];
+    tools?: Anthropic.Tool[];
+  }): Promise<Anthropic.Message> => {
+    const result = await callAnthropicFirstAvailable({
+      anthropic: client,
+      models: [model],
+      maxTokens: max_tokens,
       system,
-      messages: sanitizeAnthropicMessages(params.messages),
+      messages: input.convo,
+      tools: input.tools,
+      timeoutMs: roundTimeoutMs,
     });
+    if (!result) {
+      throw new Error("Kein verfügbares Anthropic-Modell.");
+    }
+    return result.response;
+  };
+
+  if (!retrievalOrgId) {
+    const resp = await createRound({ convo: messages });
     return resultFromResponse(resp, model, sumAnthropicUsage(resp.usage));
   }
 
-  const messages: Anthropic.MessageParam[] = sanitizeAnthropicMessages(params.messages);
+  const convo: Anthropic.MessageParam[] = [...messages];
   let lastResp: Anthropic.Message | null = null;
   let totalUsage: DtAnthropicUsage = { inputTokens: 0, outputTokens: 0 };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const resp = await client.messages.create({
-      model,
-      max_tokens,
-      system,
-      messages,
+    const resp = await createRound({
+      convo,
       tools: DT_SEO_RETRIEVAL_TOOLS,
     });
     lastResp = resp;
@@ -410,22 +514,17 @@ export async function callDtAnthropicChat(params: {
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
     );
 
-    messages.push({ role: "assistant", content: resp.content });
+    convo.push({ role: "assistant", content: resp.content });
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const tu of toolUses) {
       const output = await runDtRetrievalTool(retrievalOrgId, tu.name, tu.input);
       toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: output });
     }
-    messages.push({ role: "user", content: toolResults });
+    convo.push({ role: "user", content: toolResults });
   }
 
-  const finalResp = await client.messages.create({
-    model,
-    max_tokens,
-    system,
-    messages,
-  });
+  const finalResp = await createRound({ convo });
   totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(finalResp.usage));
 
   return {

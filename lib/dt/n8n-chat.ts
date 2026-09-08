@@ -18,6 +18,9 @@ export type DtN8nChatResponse = {
   usage?: DtN8nChatUsage;
 };
 
+/** Leave enough time for the Next.js Anthropic fallback inside a 300s route. */
+export const N8N_DT_CHAT_TIMEOUT_MS = 120_000;
+
 export async function callDtN8nChat(params: {
   accessToken: string;
   chat: DtChatRow;
@@ -32,37 +35,53 @@ export async function callDtN8nChat(params: {
   }
 
   const url = new URL(webhook);
-  const res = await fetch(url.toString(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${params.accessToken}`,
-      "X-DT-Source": "nextjs-prod",
-    },
-    body: JSON.stringify({
-      chatId: params.chat.id,
-      organisationId: params.chat.organisation_id,
-      agentId: params.chat.agent_id,
-      mode: params.chat.mode,
-      message: params.message,
-      userMessageId: params.userMessageId,
-      ghostMode: params.ghostMode ?? false,
-      textMode: params.textMode ?? false,
-      attachments: [],
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), N8N_DT_CHAT_TIMEOUT_MS);
 
-  const json = (await res.json().catch(() => null)) as DtN8nChatResponse | null;
-  if (!res.ok || !json) {
-    throw new Error(json?.message ?? `n8n HTTP ${res.status}`);
+  try {
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${params.accessToken}`,
+        "X-DT-Source": "nextjs-prod",
+      },
+      body: JSON.stringify({
+        chatId: params.chat.id,
+        organisationId: params.chat.organisation_id,
+        agentId: params.chat.agent_id,
+        mode: params.chat.mode,
+        message: params.message,
+        userMessageId: params.userMessageId,
+        ghostMode: params.ghostMode ?? false,
+        textMode: params.textMode ?? false,
+        attachments: [],
+      }),
+      signal: controller.signal,
+    });
+
+    const json = (await res.json().catch(() => null)) as DtN8nChatResponse | null;
+    if (!res.ok || !json) {
+      throw new Error(json?.message ?? `n8n HTTP ${res.status}`);
+    }
+
+    const content = json.content ?? json.assistantMessage;
+    if (!content?.trim()) {
+      throw new Error(json.message ?? "n8n-Antwort ohne Inhalt.");
+    }
+
+    return { ...json, content: content.trim() };
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      (err.name === "AbortError" || /aborted|abort|timeout/i.test(err.message))
+    ) {
+      throw new Error("n8n Zeitüberschreitung.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-
-  const content = json.content ?? json.assistantMessage;
-  if (!content?.trim()) {
-    throw new Error(json.message ?? "n8n-Antwort ohne Inhalt.");
-  }
-
-  return { ...json, content: content.trim() };
 }
 
 export function mapN8nResultToAssistantRow(
