@@ -16,13 +16,75 @@ export type SurveyExamQuestion = {
 const PERSONA_OPENING_QUESTION =
   "Was beschäftigt dich gerade am meisten, und worüber würdest du mit uns zuerst sprechen wollen?";
 
-const COMPANY_WARMUP: Array<{ id: string; question: string }> = [
-  {
-    id: "warmup_company_known",
-    question:
-      "Wenn ich euer Unternehmen in einem Satz treffen soll: Wofür seid ihr bekannt, und was dürfen wir nicht weglassen?",
-  },
-];
+/** Display name for company/SEO exam probes (3rd party about the org). */
+export function companyExamOrganisationLabel(
+  organisationName?: string | null,
+): string {
+  const n = String(organisationName ?? "").trim();
+  return n || "das Unternehmen";
+}
+
+/**
+ * SEO-Advisor / Firmen-Test: never address the agent as if they work at the org
+ * (“ihr/euch”). Always refer to the organisation by name.
+ */
+export function rewriteCompanyAddressingToOrgName(
+  text: string,
+  organisationName?: string | null,
+): string {
+  const org = companyExamOrganisationLabel(organisationName);
+  let t = withoutEmDashes(String(text ?? ""));
+
+  t = t.replace(/\baus eurem Wissen\b/gi, `zu ${org}`);
+  t = t.replace(/\bbei euch\b/gi, `bei ${org}`);
+  t = t.replace(/\bzu euch\b/gi, `zu ${org}`);
+  t = t.replace(/\bmit euch\b/gi, `mit ${org}`);
+  t = t.replace(/\bvon euch\b/gi, `von ${org}`);
+  t = t.replace(/\bfür euch\b/gi, `für ${org}`);
+  t = t.replace(/\ban euch\b/gi, `an ${org}`);
+  t = t.replace(/\beuch\b/gi, org);
+
+  t = t.replace(/\bseid ihr\b/gi, `ist ${org}`);
+  t = t.replace(/\bhabt ihr\b/gi, `hat ${org}`);
+  t = t.replace(/\bmacht ihr\b/gi, `macht ${org}`);
+  t = t.replace(/\bietet ihr\b/gi, `bietet ${org}`);
+  t = t.replace(/\barbeitet ihr\b/gi, `arbeitet ${org}`);
+  t = t.replace(/\bsteht ihr\b/gi, `steht ${org}`);
+  t = t.replace(/\bkommt ihr\b/gi, `kommt ${org}`);
+  t = t.replace(/\bkennt ihr\b/gi, `kennt ${org}`);
+
+  t = t.replace(/\beuer(?:e[smnr]?|en|es)?\s+Unternehmen\b/gi, org);
+  t = t.replace(/\beuer(?:e[smnr]?|en|es)?\s+Firma\b/gi, org);
+  t = t.replace(/\beuer(?:e[smnr]?|en|es)?\s+Betrieb\b/gi, org);
+  t = t.replace(/\beuer(?:e[smnr]?|en|es)?\s+Organisation\b/gi, org);
+
+  t = t.replace(/\beurem\s+([\p{L}][\p{L}\-]*)\b/giu, `dem $1 von ${org}`);
+  t = t.replace(/\beurer\s+([\p{L}][\p{L}\-]*)\b/giu, `der $1 von ${org}`);
+  t = t.replace(/\beuren\s+([\p{L}][\p{L}\-]*)\b/giu, `den $1 von ${org}`);
+  t = t.replace(/\beures\s+([\p{L}][\p{L}\-]*)\b/giu, `des $1 von ${org}`);
+  t = t.replace(/\beure\s+([\p{L}][\p{L}\-]*)\b/giu, `die $1 von ${org}`);
+  t = t.replace(/\beuer\s+([\p{L}][\p{L}\-]*)\b/giu, `$1 von ${org}`);
+
+  // Remaining bare “ihr” as informal plural “you” (not “ihre/ihren…”).
+  t = t.replace(/\bihr\b/gi, org);
+
+  return t.replace(/\s{2,}/g, " ").replace(/\s+([?.!,;:])/g, "$1").trim();
+}
+
+function companyWarmupQuestions(
+  organisationName?: string | null,
+): Array<{ id: string; question: string }> {
+  const org = companyExamOrganisationLabel(organisationName);
+  return [
+    {
+      id: "warmup_company_known",
+      question: rewriteCompanyAddressingToOrgName(
+        `Wenn ich ${org} in einem Satz treffen soll: Wofür ist ${org} bekannt, und was dürfen wir nicht weglassen?`,
+        org,
+      ),
+    },
+  ];
+}
 
 /** No em/en dashes in spoken exam probes. */
 export function withoutEmDashes(text: string): string {
@@ -912,29 +974,42 @@ export function buildPersonaCoreExamQuestions(
   return core.map((q) => ({ ...q, question: sanitizePersonaProbe(q.question) }));
 }
 
-function toCompanyInterviewQuestion(fact: SurveyFact): string {
+function toCompanyInterviewQuestion(
+  fact: SurveyFact,
+  organisationName?: string | null,
+): string {
+  const org = companyExamOrganisationLabel(organisationName);
   const raw = stripDecorations(fact.kind === "answer" ? fact.fieldTitle : fact.label);
-  if (!raw) return "Welche Unternehmensfakten müssen wir aus dem Fragebogen treffen?";
+  if (!raw) {
+    return rewriteCompanyAddressingToOrgName(
+      `Welche Unternehmensfakten zu ${org} müssen wir aus dem Fragebogen treffen?`,
+      org,
+    );
+  }
   if (looksLikeQuestion(raw)) {
-    return withoutEmDashes(
-      `${raw.replace(/\?$/, "")}, bitte mit den konkreten Angaben aus eurem Wissen.`,
+    return rewriteCompanyAddressingToOrgName(
+      `${raw.replace(/\?$/, "")}, bitte mit den konkreten Angaben zu ${org}.`,
+      org,
     );
   }
 
   if (fact.fieldType === "ranking" || fact.fieldType === "checkbox" || fact.fieldType === "text_list") {
-    return withoutEmDashes(
-      `Was steht bei euch bei „${shortTopic(raw)}" ganz oben, und wie lautet die Reihenfolge laut Fragebogen?`,
+    return rewriteCompanyAddressingToOrgName(
+      `Was steht bei ${org} bei „${shortTopic(raw)}" ganz oben, und wie lautet die Reihenfolge laut Fragebogen?`,
+      org,
     );
   }
 
   if (/\d/.test(fact.value) || /%|€|euro|stern|platz|nr\.?/i.test(fact.value)) {
-    return withoutEmDashes(
-      `Welche konkreten Zahlen oder Fakten gelten bei euch zu „${raw}"?`,
+    return rewriteCompanyAddressingToOrgName(
+      `Welche konkreten Zahlen oder Fakten gelten bei ${org} zu „${raw}"?`,
+      org,
     );
   }
 
-  return withoutEmDashes(
-    `Was steht bei euch zu „${raw}" im Unternehmenswissen, bitte wörtlich und vollständig genug?`,
+  return rewriteCompanyAddressingToOrgName(
+    `Was steht bei ${org} zu „${raw}" im Unternehmenswissen, bitte wörtlich und vollständig genug?`,
+    org,
   );
 }
 
@@ -1039,6 +1114,8 @@ export function buildSurveyExamQuestions(
     maxQuestions?: number;
     audience?: SurveyExamAudience;
     surveyTitle?: string | null;
+    /** Required for company/SEO probes — questions refer to this name, not “ihr/euch”. */
+    organisationName?: string | null;
   },
 ): SurveyExamQuestion[] {
   const maxQuestions = options?.maxQuestions ?? 16;
@@ -1048,6 +1125,7 @@ export function buildSurveyExamQuestions(
     return buildPersonaExamScript(facts, maxQuestions, options?.surveyTitle);
   }
 
+  const organisationName = options?.organisationName ?? null;
   const draft: Array<SurveyExamQuestion & { priority: number }> = [];
   const seenNorm = new Set<string>();
 
@@ -1063,7 +1141,7 @@ export function buildSurveyExamQuestions(
   const ordered = [...answerFacts, ...followUps];
 
   for (const fact of ordered) {
-    const question = toCompanyInterviewQuestion(fact);
+    const question = toCompanyInterviewQuestion(fact, organisationName);
     push(
       {
         id: `exam_${fact.id}`,
@@ -1083,7 +1161,7 @@ export function buildSurveyExamQuestions(
     .map(({ priority: _p, ...q }) => q);
 
   if (out.length < maxQuestions) {
-    for (const w of COMPANY_WARMUP) {
+    for (const w of companyWarmupQuestions(organisationName)) {
       const key = w.question.toLowerCase().replace(/\s+/g, " ").trim();
       if (seenNorm.has(key)) continue;
       seenNorm.add(key);

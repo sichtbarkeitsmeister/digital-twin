@@ -16,11 +16,36 @@ export type LoadSurveyExamQuestionsResult =
       questions: SurveyExamQuestion[];
       audience: SurveyExamAudience;
       surveyPurpose: SurveyPurpose;
+      organisationName: string | null;
     }
   | { ok: false; status: number; message: string };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+async function resolveOrganisationName(input: {
+  organisationName?: string | null;
+  organisationId?: string | null;
+  surveyOrganisationId?: string | null;
+}): Promise<string | null> {
+  const explicit = String(input.organisationName ?? "").trim();
+  if (explicit) return explicit;
+
+  const orgId =
+    String(input.organisationId ?? "").trim() ||
+    String(input.surveyOrganisationId ?? "").trim() ||
+    null;
+  if (!orgId) return null;
+
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from("organisations")
+    .select("name")
+    .eq("id", orgId)
+    .maybeSingle();
+  const name = String((data as { name?: string | null } | null)?.name ?? "").trim();
+  return name || null;
 }
 
 /**
@@ -30,13 +55,17 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 export async function loadSurveyExamQuestionsForResponse(
   surveyId: string,
   responseId: string,
-  options?: { audience?: SurveyExamAudience },
+  options?: {
+    audience?: SurveyExamAudience;
+    organisationName?: string | null;
+    organisationId?: string | null;
+  },
 ): Promise<LoadSurveyExamQuestionsResult> {
   const supabase = createServiceClient();
 
   const { data: survey } = await supabase
     .from("surveys")
-    .select("id, title, definition, purpose")
+    .select("id, title, definition, purpose, organisation_id")
     .eq("id", surveyId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -84,9 +113,20 @@ export async function loadSurveyExamQuestionsForResponse(
   const audience: SurveyExamAudience =
     options?.audience ?? (surveyPurpose === "anbieter" ? "company" : "persona");
 
+  const organisationName =
+    audience === "company"
+      ? await resolveOrganisationName({
+          organisationName: options?.organisationName,
+          organisationId: options?.organisationId,
+          surveyOrganisationId: (survey as { organisation_id?: string | null })
+            .organisation_id,
+        })
+      : null;
+
   const questions = buildSurveyExamQuestions(facts.facts, {
     audience,
     surveyTitle: facts.surveyTitle,
+    organisationName,
   });
 
   return {
@@ -96,5 +136,6 @@ export async function loadSurveyExamQuestionsForResponse(
     questions,
     audience,
     surveyPurpose,
+    organisationName,
   };
 }
