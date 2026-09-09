@@ -433,7 +433,7 @@ export function DtPersonaTestingRail(props: {
                 ) : null}
 
                 {active ? (
-                  <div className="grid min-w-0 gap-3 overflow-hidden rounded-2xl border border-sbkm-navy/10 bg-white/85 p-4 shadow-[0_8px_24px_rgba(46,46,80,0.06)] dark:border-white/10 dark:bg-white/[0.05]">
+                  <div className="grid min-w-0 gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/85 p-4 shadow-[0_8px_24px_rgba(46,46,80,0.06)] dark:border-white/10 dark:bg-white/[0.05]">
                     <div className="min-w-0">
                       <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-sbkm-ink-500 dark:text-white/45">
                         Aktuelle Prüffrage
@@ -443,17 +443,20 @@ export function DtPersonaTestingRail(props: {
                       </p>
                     </div>
 
-                    <div className="min-w-0 overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/[0.12] dark:border-amber-400/25 dark:bg-amber-500/10">
-                      <p className="px-3 pt-3 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-900/75 [overflow-wrap:anywhere] dark:text-amber-100/75">
+                    <div className="min-w-0 rounded-xl border border-amber-500/30 bg-amber-500/[0.12] p-3 dark:border-amber-400/25 dark:bg-amber-500/10">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-amber-900/75 [overflow-wrap:anywhere] dark:text-amber-100/75">
                         {active.sollSource === "digest"
                           ? "SOLL aus Fragebogen (KI filtert zur Frage)"
                           : "SOLL aus Fragebogen"}
                       </p>
-                      <div className="max-h-[min(16rem,40vh)] overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-3 scrollbar-subtle">
-                        <p className={cn(wrapText, "mt-1.5 text-sm leading-relaxed text-amber-950 dark:text-amber-50")}>
-                          {active.expectedHint}
-                        </p>
-                      </div>
+                      <p
+                        className={cn(
+                          wrapText,
+                          "mt-1.5 max-h-[min(20rem,50vh)] overflow-x-hidden overflow-y-auto overscroll-contain text-sm leading-relaxed text-amber-950 scrollbar-subtle dark:text-amber-50",
+                        )}
+                      >
+                        {active.expectedHint}
+                      </p>
                     </div>
 
                     {/* Prominent AI verdict directly under SOLL */}
@@ -471,7 +474,7 @@ export function DtPersonaTestingRail(props: {
                         role="status"
                         aria-live="polite"
                         className={cn(
-                          "min-w-0 overflow-hidden rounded-xl border-2 px-4 py-4",
+                          "min-w-0 rounded-xl border-2 px-4 py-4",
                           active.aiSuggestion.suggested === "pass"
                             ? "border-emerald-500/50 bg-emerald-500/15"
                             : "border-red-500/50 bg-red-500/15",
@@ -500,7 +503,7 @@ export function DtPersonaTestingRail(props: {
                         <p
                           className={cn(
                             wrapText,
-                            "mt-2 max-h-[min(12rem,32vh)] overflow-y-auto overscroll-contain text-sm leading-relaxed scrollbar-subtle",
+                            "mt-2 text-sm leading-relaxed",
                             active.aiSuggestion.suggested === "pass"
                               ? "text-emerald-900/85 dark:text-emerald-100/90"
                               : "text-red-900/85 dark:text-red-100/90",
