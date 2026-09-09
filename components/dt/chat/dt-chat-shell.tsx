@@ -1341,7 +1341,7 @@ export function DtChatShell(props: {
 
             <AnimatePresence>{ghostMode ? <DtGhostBanner /> : null}</AnimatePresence>
 
-            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+            <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               {isInitialLoading && !ghostMode ? (
                 <DtChatSkeleton />
@@ -1449,7 +1449,7 @@ export function DtChatShell(props: {
                     setPrompt(question);
                     void handleSend(question);
                   }}
-                  className="absolute inset-y-0 right-0 z-20 shadow-[0_0_28px_rgba(46,46,80,0.14)] md:static md:z-auto md:shadow-none"
+                  className="absolute inset-y-0 right-0 z-20 h-full min-w-0 shadow-[0_0_28px_rgba(46,46,80,0.14)] md:static md:z-auto md:shadow-none lg:max-w-[min(28rem,50%)]"
                 />
               ) : null}
             </div>

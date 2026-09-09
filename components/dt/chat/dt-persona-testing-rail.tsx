@@ -303,15 +303,20 @@ export function DtPersonaTestingRail(props: {
 
   if (!props.enabled) return null;
 
+  const wrapText =
+    "min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]";
+
   return (
     <aside
       className={cn(
-        "flex min-h-0 shrink-0 flex-col border-l border-sbkm-navy/10 bg-gradient-to-b from-white/80 via-white/65 to-sbkm-mint/[0.06] backdrop-blur-md dark:border-white/10 dark:from-sbkm-ink-900/80 dark:via-sbkm-ink-900/55 dark:to-sbkm-mint/[0.04]",
-        expanded ? "w-[min(100%,26rem)] sm:w-[28rem] lg:w-[30rem]" : "w-12",
+        "flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l border-sbkm-navy/10 bg-gradient-to-b from-white/80 via-white/65 to-sbkm-mint/[0.06] backdrop-blur-md dark:border-white/10 dark:from-sbkm-ink-900/80 dark:via-sbkm-ink-900/55 dark:to-sbkm-mint/[0.04]",
+        expanded
+          ? "w-[min(26rem,100%)] shrink sm:w-[min(28rem,100%)]"
+          : "w-12 shrink-0",
         props.className,
       )}
     >
-      <div className="flex items-center gap-2 border-b border-sbkm-navy/10 px-3 py-3 dark:border-white/10">
+      <div className="flex shrink-0 items-center gap-2 border-b border-sbkm-navy/10 px-3 py-3 dark:border-white/10">
         <button
           type="button"
           aria-expanded={expanded}
@@ -349,8 +354,10 @@ export function DtPersonaTestingRail(props: {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 scrollbar-subtle"
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
           >
+            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-4 scrollbar-subtle">
+            <div className="grid min-w-0 gap-4">
             {loading ? (
               <p className="flex items-center gap-2 text-sm text-sbkm-ink-500 dark:text-white/55">
                 <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -360,7 +367,7 @@ export function DtPersonaTestingRail(props: {
               <p className="text-sm text-sbkm-ink-500 dark:text-white/55">{error}</p>
             ) : (
               <>
-                <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
+                <p className={cn(wrapText, "text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60")}>
                   „Nächste Frage“ oder eigene Prüffrage senden. Unter SOLL erscheint danach groß{" "}
                   <span className="font-semibold text-emerald-700 dark:text-emerald-300">Stimmt</span>{" "}
                   oder{" "}
@@ -373,7 +380,7 @@ export function DtPersonaTestingRail(props: {
                     type="button"
                     disabled={props.isBusy || props.disabled}
                     onClick={() => pick(nextQuestion)}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-pill bg-sbkm-navy px-4 text-sm font-semibold text-white shadow-[0_6px_16px_rgba(46,46,80,0.18)] transition hover:bg-sbkm-navy/90 disabled:opacity-50 dark:bg-sbkm-mint dark:text-sbkm-navy"
+                    className="inline-flex h-11 w-full min-w-0 items-center justify-center gap-2 rounded-pill bg-sbkm-navy px-4 text-sm font-semibold text-white shadow-[0_6px_16px_rgba(46,46,80,0.18)] transition hover:bg-sbkm-navy/90 disabled:opacity-50 dark:bg-sbkm-mint dark:text-sbkm-navy"
                   >
                     Nächste Frage
                     <ChevronRight className="size-4" aria-hidden />
@@ -386,7 +393,7 @@ export function DtPersonaTestingRail(props: {
                 ) : null}
 
                 {questions.length > 0 ? (
-                  <div className="grid gap-2">
+                  <div className="grid min-w-0 gap-2">
                     <label
                       htmlFor="dt-persona-custom-exam"
                       className="text-[11px] font-bold uppercase tracking-[0.08em] text-sbkm-ink-500 dark:text-white/45"
@@ -406,7 +413,7 @@ export function DtPersonaTestingRail(props: {
                         }
                       }}
                       placeholder="Eigene Frage eingeben — KI gleicht die Antwort mit dem Fragebogen ab …"
-                      className="w-full resize-y rounded-xl border border-sbkm-navy/15 bg-white/90 px-3 py-2.5 text-sm leading-snug text-sbkm-navy outline-none transition placeholder:text-sbkm-ink-400 focus:border-sbkm-mint/50 focus:ring-2 focus:ring-sbkm-mint/20 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white dark:placeholder:text-white/35"
+                      className="w-full min-w-0 resize-y rounded-xl border border-sbkm-navy/15 bg-white/90 px-3 py-2.5 text-sm leading-snug text-sbkm-navy outline-none transition placeholder:text-sbkm-ink-400 focus:border-sbkm-mint/50 focus:ring-2 focus:ring-sbkm-mint/20 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white dark:placeholder:text-white/35"
                     />
                     <button
                       type="button"
@@ -417,7 +424,7 @@ export function DtPersonaTestingRail(props: {
                         questions.length === 0
                       }
                       onClick={() => pickCustom()}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/85 px-4 text-sm font-semibold text-sbkm-navy transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white"
+                      className="inline-flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/85 px-4 text-sm font-semibold text-sbkm-navy transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white"
                     >
                       <Send className="size-3.5" aria-hidden />
                       Frage stellen & abgleichen
@@ -426,25 +433,27 @@ export function DtPersonaTestingRail(props: {
                 ) : null}
 
                 {active ? (
-                  <div className="grid gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/85 p-4 shadow-[0_8px_24px_rgba(46,46,80,0.06)] dark:border-white/10 dark:bg-white/[0.05]">
-                    <div>
+                  <div className="grid min-w-0 gap-3 overflow-hidden rounded-2xl border border-sbkm-navy/10 bg-white/85 p-4 shadow-[0_8px_24px_rgba(46,46,80,0.06)] dark:border-white/10 dark:bg-white/[0.05]">
+                    <div className="min-w-0">
                       <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-sbkm-ink-500 dark:text-white/45">
                         Aktuelle Prüffrage
                       </p>
-                      <p className="mt-1.5 text-sm font-semibold leading-snug text-sbkm-navy dark:text-white">
+                      <p className={cn(wrapText, "mt-1.5 text-sm font-semibold leading-snug text-sbkm-navy dark:text-white")}>
                         {active.question}
                       </p>
                     </div>
 
-                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.12] p-3 dark:border-amber-400/25 dark:bg-amber-500/10">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-amber-900/75 dark:text-amber-100/75">
+                    <div className="min-w-0 overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/[0.12] dark:border-amber-400/25 dark:bg-amber-500/10">
+                      <p className="px-3 pt-3 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-900/75 [overflow-wrap:anywhere] dark:text-amber-100/75">
                         {active.sollSource === "digest"
                           ? "SOLL aus Fragebogen (KI filtert zur Frage)"
                           : "SOLL aus Fragebogen"}
                       </p>
-                      <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-amber-950 dark:text-amber-50">
-                        {active.expectedHint}
-                      </p>
+                      <div className="max-h-[min(16rem,40vh)] overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-3 scrollbar-subtle">
+                        <p className={cn(wrapText, "mt-1.5 text-sm leading-relaxed text-amber-950 dark:text-amber-50")}>
+                          {active.expectedHint}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Prominent AI verdict directly under SOLL */}
@@ -462,7 +471,7 @@ export function DtPersonaTestingRail(props: {
                         role="status"
                         aria-live="polite"
                         className={cn(
-                          "rounded-xl border-2 px-4 py-4",
+                          "min-w-0 overflow-hidden rounded-xl border-2 px-4 py-4",
                           active.aiSuggestion.suggested === "pass"
                             ? "border-emerald-500/50 bg-emerald-500/15"
                             : "border-red-500/50 bg-red-500/15",
@@ -478,19 +487,20 @@ export function DtPersonaTestingRail(props: {
                         >
                           {active.aiSuggestion.suggested === "pass" ? (
                             <span className="inline-flex items-center gap-2">
-                              <Check className="size-6" aria-hidden />
+                              <Check className="size-6 shrink-0" aria-hidden />
                               Stimmt
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-2">
-                              <X className="size-6" aria-hidden />
+                              <X className="size-6 shrink-0" aria-hidden />
                               Stimmt nicht
                             </span>
                           )}
                         </p>
                         <p
                           className={cn(
-                            "mt-2 text-sm leading-relaxed",
+                            wrapText,
+                            "mt-2 max-h-[min(12rem,32vh)] overflow-y-auto overscroll-contain text-sm leading-relaxed scrollbar-subtle",
                             active.aiSuggestion.suggested === "pass"
                               ? "text-emerald-900/85 dark:text-emerald-100/90"
                               : "text-red-900/85 dark:text-red-100/90",
@@ -498,7 +508,7 @@ export function DtPersonaTestingRail(props: {
                         >
                           {active.aiSuggestion.reason}
                         </p>
-                        <p className="mt-2 text-[11px] text-sbkm-ink-500 dark:text-white/50">
+                        <p className={cn(wrapText, "mt-2 text-[11px] text-sbkm-ink-500 dark:text-white/50")}>
                           KI-Vorschlag
                           {active.aiSuggestion.confidence === "high"
                             ? " · hohe Sicherheit"
@@ -554,35 +564,35 @@ export function DtPersonaTestingRail(props: {
                       </div>
                     )}
 
-                    <div>
+                    <div className="min-w-0">
                       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-sbkm-ink-500 dark:text-white/45">
                         Deine Entscheidung
                       </p>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid min-w-0 grid-cols-1 gap-2 min-[220px]:grid-cols-2">
                         <button
                           type="button"
                           onClick={() => setVerdict(active.id, "pass")}
                           className={cn(
-                            "inline-flex h-11 items-center justify-center gap-1.5 rounded-pill border text-sm font-semibold transition",
+                            "inline-flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-pill border px-2 text-sm font-semibold transition",
                             active.verdict === "pass"
                               ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-900 dark:text-emerald-100"
                               : "border-sbkm-navy/15 bg-white/80 text-sbkm-navy hover:border-emerald-500/40 hover:bg-emerald-500/10 dark:border-white/15 dark:bg-white/5 dark:text-white",
                           )}
                         >
-                          <Check className="size-4" aria-hidden />
+                          <Check className="size-4 shrink-0" aria-hidden />
                           Stimmt
                         </button>
                         <button
                           type="button"
                           onClick={() => setVerdict(active.id, "fail")}
                           className={cn(
-                            "inline-flex h-11 items-center justify-center gap-1.5 rounded-pill border text-sm font-semibold transition",
+                            "inline-flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-pill border px-2 text-sm font-semibold transition",
                             active.verdict === "fail"
                               ? "border-red-500/50 bg-red-500/20 text-red-900 dark:text-red-100"
                               : "border-sbkm-navy/15 bg-white/80 text-sbkm-navy hover:border-red-500/40 hover:bg-red-500/10 dark:border-white/15 dark:bg-white/5 dark:text-white",
                           )}
                         >
-                          <X className="size-4" aria-hidden />
+                          <X className="size-4 shrink-0" aria-hidden />
                           Weicht ab
                         </button>
                       </div>
@@ -605,9 +615,9 @@ export function DtPersonaTestingRail(props: {
                         type="button"
                         disabled={props.isBusy || props.disabled}
                         onClick={() => pick(q)}
-                        className="rounded-xl border border-sbkm-navy/10 bg-white/75 px-3 py-2.5 text-left text-xs font-medium leading-snug text-sbkm-navy transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                        className="min-w-0 rounded-xl border border-sbkm-navy/10 bg-white/75 px-3 py-2.5 text-left text-xs font-medium leading-snug text-sbkm-navy transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white"
                       >
-                        {q.question}
+                        <span className={wrapText}>{q.question}</span>
                       </button>
                     ))}
                   </div>
@@ -627,13 +637,13 @@ export function DtPersonaTestingRail(props: {
                           type="button"
                           onClick={() => setActiveId(q.id)}
                           className={cn(
-                            "rounded-xl border px-3 py-2.5 text-left text-xs leading-snug transition",
+                            "min-w-0 rounded-xl border px-3 py-2.5 text-left text-xs leading-snug transition",
                             q.id === active?.id
                               ? "border-sbkm-mint/45 bg-sbkm-mint/10"
                               : "border-sbkm-navy/10 bg-white/55 hover:bg-white/85 dark:border-white/10 dark:bg-white/[0.03]",
                           )}
                         >
-                          <span className="line-clamp-2 font-medium text-sbkm-navy dark:text-white">
+                          <span className="mt-1.5 line-clamp-2 break-words font-medium text-sbkm-navy [overflow-wrap:anywhere] dark:text-white">
                             {q.question}
                           </span>
                           <span
@@ -662,6 +672,8 @@ export function DtPersonaTestingRail(props: {
                 ) : null}
               </>
             )}
+            </div>
+            </div>
           </motion.div>
         ) : null}
       </AnimatePresence>
