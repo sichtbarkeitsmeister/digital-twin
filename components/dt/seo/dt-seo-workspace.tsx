@@ -8,6 +8,7 @@ import { useDtSeoWorkspaceUrl } from "@/lib/dt/seo/workspace-url";
 import { DtSeoAuditPanel } from "@/components/dt/seo/dt-seo-audit-panel";
 import { DtSeoConfigForm } from "@/components/dt/seo/dt-seo-config-form";
 import { DtSeoGroundingPanel } from "@/components/dt/seo/dt-seo-grounding-panel";
+import { DtSeoWebsiteStructurePanel } from "@/components/dt/seo/dt-seo-website-structure-panel";
 import { DtSeoReportsPanel } from "@/components/dt/seo/dt-seo-reports-panel";
 import { DtSeoStatsOverview } from "@/components/dt/seo/dt-seo-stats-overview";
 import { DtSeoTaskBoard } from "@/components/dt/seo/dt-seo-task-board";
@@ -119,7 +120,7 @@ export function DtSeoWorkspace(props: {
             SEO ist für <span className="font-semibold">{selected.name}</span> noch nicht
             freigeschaltet.
             {canManage
-              ? " Ohne Freischaltung sind Chat, Statistik, Aufgaben, Reports und Grounding gesperrt."
+              ? " Ohne Freischaltung sind Chat, Statistik, Aufgaben, Reports, Analyse, Struktur und Grounding gesperrt."
               : " Bitte einen Administrator kontaktieren."}
           </p>
           {canManage ? (
@@ -154,6 +155,7 @@ export function DtSeoWorkspace(props: {
           { id: "tasks", label: "Aufgaben" },
           { id: "reports", label: "Reports" },
           { id: "analyse", label: "Analyse" },
+          { id: "struktur", label: "Struktur" },
           { id: "grounding", label: "Grounding" },
           { id: "settings", label: "Einstellungen" },
         ]}
@@ -258,6 +260,16 @@ export function DtSeoWorkspace(props: {
       {tab === "analyse" && seoEnabled ? (
         <div className="min-h-0 flex-1">
           <DtSeoAuditPanel organisationId={orgId} />
+        </div>
+      ) : null}
+
+      {tab === "struktur" && seoEnabled ? (
+        <div className="min-h-0 flex-1">
+          <DtSeoWebsiteStructurePanel
+            organisationId={orgId}
+            canEdit={canManage}
+            onOpenChat={() => writeUrl({ org: orgId, tab: "chat" })}
+          />
         </div>
       ) : null}
 

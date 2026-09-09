@@ -56,6 +56,7 @@
     "test:grounding-page-schedule": "tsx scripts/test-grounding-page-schedule.ts",
     "test:detect-grounding-page-date": "tsx scripts/test-detect-grounding-page-date.ts",
     "test:discover-grounding-page-url": "tsx scripts/test-discover-grounding-page-url.ts",
+    "test:website-structure": "tsx scripts/test-website-structure.ts",
     "types:generate": "tsx scripts/generate-types.ts",
     "auth:set-magic-link-rate-limit": "tsx scripts/set-supabase-magic-link-rate-limit.ts",
     "env:check": "node -e \"console.log('URL=',process.env.NEXT_PUBLIC_SUPABASE_URL); console.log('KEY=',(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'').slice(0,8));\"",

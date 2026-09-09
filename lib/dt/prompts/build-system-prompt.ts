@@ -33,6 +33,7 @@ export function isProspectPersonaKind(
   kind?: string | null,
   _slug?: string | null,
 ): boolean {
+  void _slug;
   return kind === "wunschkunde" || kind === "persona";
 }
 
@@ -50,6 +51,8 @@ export function buildDtSystemPrompt(input: {
   otherSeoChatsText?: string;
   /** Auto-injected Wunschkunden profiles (org avatars + persona surveys). */
   wunschkundenKnowledgeText?: string;
+  /** Uploaded website IA (SEO/GEO). Omitted for prospect personas. */
+  websiteStructureText?: string;
   pastedUrlsText?: string;
   textMode?: boolean;
 }): string {
@@ -94,6 +97,10 @@ export function buildDtSystemPrompt(input: {
 
   if (input.wunschkundenKnowledgeText?.trim()) {
     blocks.push("", input.wunschkundenKnowledgeText.trim());
+  }
+
+  if (!prospect && input.websiteStructureText?.trim()) {
+    blocks.push("", input.websiteStructureText.trim());
   }
 
   // After persona text so a mis-generated "brand ambassador" prompt cannot win.
