@@ -18,8 +18,19 @@ export const WEBSITE_STRUCTURE_MAX_NODES = 800;
 
 const PATHISH = /^(https?:\/\/|\/)[\w\-./%?#=&]+$/i;
 
+/**
+ * Postgres/PostgREST JSON rejects NUL (`\u0000`) with
+ * "unsupported Unicode escape sequence". Word/XML/UTF-16 dumps often contain it.
+ */
+export function sanitizeWebsiteStructureText(text: string): string {
+  return text
+    .replace(/^\uFEFF/, "")
+    .replace(/\u0000/g, "")
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+}
+
 export function clipWebsiteStructureRaw(text: string): string {
-  const trimmed = text.replace(/\r\n/g, "\n").trim();
+  const trimmed = sanitizeWebsiteStructureText(text).replace(/\r\n/g, "\n").trim();
   if (trimmed.length <= WEBSITE_STRUCTURE_MAX_RAW_CHARS) return trimmed;
   return trimmed.slice(0, WEBSITE_STRUCTURE_MAX_RAW_CHARS);
 }
