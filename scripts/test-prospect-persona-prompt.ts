@@ -119,9 +119,51 @@ function testResolveAvatarSpecificPrompt() {
   console.log("resolve avatar-specific prompt: ok");
 }
 
+function testProspectTextModeWritesInPersonaVoice() {
+  const prompt = buildDtSystemPrompt({
+    agent: {
+      name: "Joachim",
+      role: "Angehöriger",
+      prompt_template: "Ich bin Joachim.",
+      kind: "persona",
+      slug: "joachim",
+    },
+    org: { display_name: "Ayags" },
+    mode: "default",
+    textMode: true,
+  });
+
+  assert.match(prompt, /## Text-Modus/);
+  assert.match(prompt, /in DEINER Stimme/);
+  assert.doesNotMatch(prompt, /SEO-optimierte, publikationsreife Texte/);
+  assert.doesNotMatch(prompt, /Fokus-Keyword und semantische Varianten/);
+  console.log("prospect text mode: ok");
+}
+
+function testStaffTextModeStaysSeoCopy() {
+  const prompt = buildDtSystemPrompt({
+    agent: {
+      name: "SEO-Berater",
+      role: "SEO",
+      prompt_template: "Du bist der SEO-Berater.",
+      kind: "seo_advisor",
+      slug: "seo_advisor",
+    },
+    org: { display_name: "Ayags", focus_keyword: "Pflege" },
+    mode: "seo",
+    textMode: true,
+  });
+
+  assert.match(prompt, /SEO-optimierte, publikationsreife Texte/);
+  assert.doesNotMatch(prompt, /in DEINER Stimme/);
+  console.log("staff text mode: ok");
+}
+
 testKindDetection();
 testProspectPromptOmitsBrandEncyclopedia();
 testDefaultTwinIsAlsoProspect();
 testSurveyDefaultsAreAvatarSpecific();
 testResolveAvatarSpecificPrompt();
+testProspectTextModeWritesInPersonaVoice();
+testStaffTextModeStaysSeoCopy();
 console.log("all prospect persona prompt tests passed");

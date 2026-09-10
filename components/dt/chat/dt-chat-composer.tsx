@@ -24,9 +24,13 @@ import {
   personaTestingModeTitle,
   personaTestingPlaceholder,
 } from "@/lib/dt/persona-testing";
+import { textModeComposerPlaceholder } from "@/lib/dt/text-mode";
 
-const iconBtn =
-  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-transparent text-sbkm-navy transition duration-150 hover:border-sbkm-navy/10 hover:bg-sbkm-mint/15 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:pointer-events-none disabled:opacity-50 dark:text-white dark:hover:border-white/10 dark:hover:bg-white/10";
+const toolbarBtnBase =
+  "inline-flex h-9 shrink-0 items-center justify-center rounded-full border border-transparent text-sbkm-navy transition duration-150 hover:border-sbkm-navy/10 hover:bg-sbkm-mint/15 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:pointer-events-none disabled:opacity-50 dark:text-white dark:hover:border-white/10 dark:hover:bg-white/10";
+const iconBtn = cn(toolbarBtnBase, "w-9");
+const labeledBtn = cn(toolbarBtnBase, "w-auto gap-1.5 px-2.5");
+const labeledBtnText = "whitespace-nowrap text-xs font-bold";
 
 export function DtChatComposer(props: {
   value: string;
@@ -58,6 +62,8 @@ export function DtChatComposer(props: {
   /** Controlled Testing mode (rail lives beside the chat). */
   personaTesting?: boolean;
   onPersonaTestingChange?: (enabled: boolean) => void;
+  /** Wunschkunde / Umfrage-Persona: Text-Modus schreibt in ihrer Stimme. */
+  prospectPersona?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [quickActionsOpen, setQuickActionsOpen] = useState(
@@ -200,7 +206,10 @@ export function DtChatComposer(props: {
               props.ghostMode
                 ? "Ghost-Chat — wird nicht gespeichert …"
                 : props.textMode
-                  ? "Text-Modus — SEO-Text, der menschlich klingt …"
+                  ? textModeComposerPlaceholder(
+                      Boolean(props.prospectPersona),
+                      props.agentName,
+                    )
                   : personaTesting
                     ? personaTestingPlaceholder(
                         props.personaTestingLabel,
@@ -234,8 +243,8 @@ export function DtChatComposer(props: {
             }}
           />
 
-          <div className="flex items-center justify-between gap-2 border-t border-sbkm-navy/8 px-2 py-1.5 dark:border-white/8">
-            <div className="flex items-center gap-0.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-sbkm-navy/8 px-2 py-1.5 dark:border-white/8">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -266,34 +275,38 @@ export function DtChatComposer(props: {
                 type="button"
                 aria-pressed={props.ghostMode}
                 aria-label="Ghost-Modus"
+                title="Ghost-Modus"
                 disabled={props.isBusy}
                 onClick={() => props.onGhostModeChange(!props.ghostMode)}
                 className={cn(
-                  iconBtn,
-                  "w-auto gap-1.5 px-2.5",
+                  labeledBtn,
                   props.ghostMode &&
                     "border-amber-400/40 bg-amber-100/90 text-amber-950 hover:bg-amber-100 dark:bg-amber-500/20 dark:text-amber-100 dark:hover:bg-amber-500/25",
                 )}
               >
                 <Ghost className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="hidden text-xs font-bold sm:inline">Ghost</span>
+                <span className={labeledBtnText}>Ghost</span>
               </button>
 
               <button
                 type="button"
                 aria-pressed={props.textMode}
                 aria-label="Text-Modus"
+                title={
+                  props.prospectPersona
+                    ? "Text-Modus: fertigen Text in der Stimme dieser Persona schreiben"
+                    : "Text-Modus: SEO-Text schreiben, der menschlich klingt"
+                }
                 disabled={props.isBusy}
                 onClick={() => props.onTextModeChange(!props.textMode)}
                 className={cn(
-                  iconBtn,
-                  "w-auto gap-1.5 px-2.5",
+                  labeledBtn,
                   props.textMode &&
                     "border-violet-400/40 bg-violet-100/90 text-violet-950 hover:bg-violet-100 dark:bg-violet-500/20 dark:text-violet-100 dark:hover:bg-violet-500/25",
                 )}
               >
                 <PenLine className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="hidden text-xs font-bold sm:inline">Text</span>
+                <span className={labeledBtnText}>Text</span>
               </button>
 
               {props.personaTestingAvailable && props.personaTestingAgentId ? (
@@ -309,18 +322,13 @@ export function DtChatComposer(props: {
                   }
                   onClick={() => props.onPersonaTestingChange?.(!personaTesting)}
                   className={cn(
-                    iconBtn,
-                    "w-auto gap-1.5 px-2.5",
+                    labeledBtn,
                     personaTesting &&
                       "border-sky-400/40 bg-sky-100/90 text-sky-950 hover:bg-sky-100 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:bg-sky-500/25",
                   )}
                 >
                   <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
-                  <span className="hidden text-xs font-bold sm:inline">
-                    {personaTesting
-                      ? personaTestingModeTitle(props.personaTestingLabel)
-                      : "Test"}
-                  </span>
+                  <span className={labeledBtnText}>Test</span>
                 </button>
               ) : null}
             </div>
@@ -331,7 +339,7 @@ export function DtChatComposer(props: {
                 variant="outline"
                 size="sm"
                 aria-label="Antwort stoppen"
-                className="h-9 min-w-9 px-3 active:scale-[0.98]"
+                className="h-9 min-w-9 shrink-0 px-3 active:scale-[0.98]"
                 onClick={() => props.onStop?.()}
               >
                 <Square className="h-4 w-4 fill-current" />
@@ -343,7 +351,7 @@ export function DtChatComposer(props: {
                 size="sm"
                 aria-label="Senden"
                 disabled={!canSend}
-                className="h-9 min-w-9 px-3 active:scale-[0.98]"
+                className="h-9 min-w-9 shrink-0 px-3 active:scale-[0.98]"
                 onClick={() => props.onSend()}
               >
                 <ArrowUp className="h-4 w-4" />
