@@ -3,7 +3,11 @@ import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
-import { parseWebsiteStructure, clipWebsiteStructureRaw } from "@/lib/dt/seo/website-structure";
+import {
+  clipWebsiteStructureRaw,
+  parseWebsiteStructure,
+  sanitizeWebsiteStructureText,
+} from "@/lib/dt/seo/website-structure";
 import { createServiceClient } from "@/lib/supabase/service";
 
 const SELECT =
@@ -112,14 +116,20 @@ export async function PUT(req: Request) {
   }
 
   const supabase = createServiceClient();
+  const filename = parsed.data.filename
+    ? sanitizeWebsiteStructureText(parsed.data.filename).trim() || null
+    : null;
+  const notes = parsed.data.notes
+    ? sanitizeWebsiteStructureText(parsed.data.notes).trim() || null
+    : null;
   const row = {
     organisation_id: parsed.data.organisationId,
-    filename: parsed.data.filename?.trim() || null,
+    filename,
     mime_type: parsed.data.mimeType?.trim() || null,
     raw_text: clipWebsiteStructureRaw(parsed.data.text),
-    outline: structure.outline,
+    outline: sanitizeWebsiteStructureText(structure.outline),
     node_count: structure.nodeCount,
-    notes: parsed.data.notes?.trim() || null,
+    notes,
     uploaded_at: new Date().toISOString(),
     uploaded_by: auth.userId,
   };
@@ -131,10 +141,11 @@ export async function PUT(req: Request) {
     .maybeSingle();
 
   if (error || !data) {
-    return NextResponse.json(
-      { ok: false, message: error?.message ?? "Struktur konnte nicht gespeichert werden." },
-      { status: 500 },
-    );
+    const raw = error?.message ?? "";
+    const message = /unicode escape|\\u0000|unsupported unicode/i.test(raw)
+      ? "Die Datei enthält unsichtbare Steuerzeichen (häufig bei Word/XML). Bitte als .txt/.md speichern oder den Text einfügen und erneut speichern."
+      : raw || "Struktur konnte nicht gespeichert werden.";
+    return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 
   return NextResponse.json({

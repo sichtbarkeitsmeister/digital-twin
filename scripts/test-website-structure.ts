@@ -8,6 +8,7 @@ import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
 import {
   formatWebsiteStructureForPrompt,
   parseWebsiteStructure,
+  sanitizeWebsiteStructureText,
 } from "../lib/dt/seo/website-structure";
 
 function testMarkdownTree() {
@@ -147,6 +148,15 @@ function testEmptyRejected() {
   console.log("empty rejected: ok");
 }
 
+function testStripsNullBytes() {
+  const dirty = "\u0000- Startseite /\n  - Kontakt\u0000 /kontakt\n";
+  assert.equal(sanitizeWebsiteStructureText(dirty).includes("\u0000"), false);
+  const parsed = parseWebsiteStructure(dirty);
+  assert.ok(parsed.nodeCount >= 2);
+  assert.match(parsed.outline, /Kontakt/);
+  console.log("null bytes stripped: ok");
+}
+
 testMarkdownTree();
 testSitemapXml();
 testJsonTree();
@@ -156,4 +166,5 @@ testPromptIncludesImprovementHint();
 testSeoPromptInjectsStructure();
 testProspectOmitsStructure();
 testEmptyRejected();
+testStripsNullBytes();
 console.log("ok: website structure");
