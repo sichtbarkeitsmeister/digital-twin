@@ -22,8 +22,12 @@ import {
 import { loadOtherSeoChatsForPrompt } from "@/lib/dt/seo/org-chat-memory";
 import { loadWunschkundenKnowledgeForSeo } from "@/lib/dt/seo/wunschkunden-knowledge";
 import { loadGlobalSeoChecklist, resolveSeoChecklistRaw } from "@/lib/dt/seo/seo-checklist";
+import {
+  formatLoadedWebsiteStructureForPrompt,
+  loadDtWebsiteStructure,
+} from "@/lib/dt/seo/load-website-structure";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
-import { buildDtSystemPrompt } from "@/lib/dt/prompts/build-system-prompt";
+import { buildDtSystemPrompt, isProspectPersonaKind } from "@/lib/dt/prompts/build-system-prompt";
 import { resolveDtAgentPrompt } from "@/lib/dt/prompts/resolve-agent-prompt";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -230,6 +234,15 @@ export async function assembleDtChatFromDb(input: {
   const wunschkundenKnowledgeText = needsWunschkunden
     ? await loadWunschkundenKnowledgeForSeo(supabase, chat.organisation_id)
     : undefined;
+  const includeWebsiteStructure =
+    !isProspectPersonaKind(agent.kind, agent.slug) &&
+    (promptMode === "seo" || agent.kind === "seo_advisor" || agent.kind === "geo_advisor");
+  const websiteStructureText = includeWebsiteStructure
+    ? formatLoadedWebsiteStructureForPrompt(
+        await loadDtWebsiteStructure(supabase, chat.organisation_id),
+        { emptyHint: promptMode === "seo" },
+      )
+    : undefined;
 
   const lastUserMessage = [...prefixed].reverse().find((m) => m.role === "user");
   const pastedUrlsText = lastUserMessage?.content
@@ -267,6 +280,7 @@ export async function assembleDtChatFromDb(input: {
       promptMode === "seo" ? formatDtSeoTasksForPrompt(seoTaskRows) : undefined,
     otherSeoChatsText: promptMode === "seo" ? otherSeoChatsText : undefined,
     wunschkundenKnowledgeText,
+    websiteStructureText,
     pastedUrlsText,
   });
 
@@ -335,6 +349,14 @@ export async function assembleDtChatEphemeral(input: {
   const wunschkundenKnowledgeText = needsWunschkunden
     ? await loadWunschkundenKnowledgeForSeo(supabase, input.organisationId)
     : undefined;
+  const includeWebsiteStructure =
+    !isProspectPersonaKind(agent.kind, agent.slug) &&
+    (agent.kind === "seo_advisor" || agent.kind === "geo_advisor");
+  const websiteStructureText = includeWebsiteStructure
+    ? formatLoadedWebsiteStructureForPrompt(
+        await loadDtWebsiteStructure(supabase, input.organisationId),
+      )
+    : undefined;
 
   const system = buildDtSystemPrompt({
     agent: {
@@ -357,6 +379,7 @@ export async function assembleDtChatEphemeral(input: {
     ghostMode: true,
     textMode: input.textMode,
     wunschkundenKnowledgeText,
+    websiteStructureText,
     pastedUrlsText,
   });
 

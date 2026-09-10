@@ -26,6 +26,10 @@ import {
 import { loadOtherSeoChatsForPrompt } from "@/lib/dt/seo/org-chat-memory";
 import { loadWunschkundenKnowledgeForSeo } from "@/lib/dt/seo/wunschkunden-knowledge";
 import {
+  formatLoadedWebsiteStructureForPrompt,
+  loadDtWebsiteStructure,
+} from "@/lib/dt/seo/load-website-structure";
+import {
   formatSeoChecklist,
   loadGlobalSeoChecklist,
   resolveSeoChecklistRaw,
@@ -164,6 +168,19 @@ export async function loadDtAgentContextBundle(input: {
       : "";
   const wunschkundenKnowledgeText = includeWunschkunden
     ? await loadWunschkundenKnowledgeForSeo(supabase, input.organisationId)
+    : "";
+  const includeWebsiteStructure =
+    !isProspectPersonaKind(agent.kind, agent.slug) &&
+    (promptMode === "seo" ||
+      agent.kind === "seo_advisor" ||
+      agent.kind === "geo_advisor");
+  const websiteStructureRow = includeWebsiteStructure
+    ? await loadDtWebsiteStructure(supabase, input.organisationId)
+    : null;
+  const websiteStructureText = includeWebsiteStructure
+    ? formatLoadedWebsiteStructureForPrompt(websiteStructureRow, {
+        emptyHint: promptMode === "seo",
+      })
     : "";
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
@@ -499,6 +516,20 @@ export async function loadDtAgentContextBundle(input: {
         isEmpty: !otherSeoChatsText.trim() || otherSeoChatsText.includes("Noch keine anderen"),
         editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=chat`,
       }),
+      section({
+        id: "website_structure",
+        title: "Webseitenstruktur (hochgeladen)",
+        sourceLabel: "Organisation",
+        sourceType: "organisation",
+        description:
+          "Hochgeladene Informationsarchitektur (SEO → Struktur). Der Twin nutzt sie für Hierarchie und Verbesserungsvorschläge.",
+        content: websiteStructureText,
+        isEmpty: !websiteStructureRow,
+        editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=struktur`,
+        meta: websiteStructureRow
+          ? { nodeCount: websiteStructureRow.node_count }
+          : undefined,
+      }),
     );
   }
 
@@ -542,6 +573,9 @@ export async function loadDtAgentContextBundle(input: {
     otherSeoChatsText: promptMode === "seo" ? otherSeoChatsText : undefined,
     wunschkundenKnowledgeText: includeWunschkunden
       ? wunschkundenKnowledgeText
+      : undefined,
+    websiteStructureText: includeWebsiteStructure
+      ? websiteStructureText
       : undefined,
   });
 

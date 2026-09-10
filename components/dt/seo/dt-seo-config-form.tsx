@@ -335,6 +335,16 @@ export function DtSeoConfigForm(props: {
               if (v !== (config.sitemap_url ?? "")) void save({ sitemapUrl: v || null });
             }}
           />
+          <p className="text-xs text-sbkm-ink-500 dark:text-white/45">
+            Live-Sitemap für den Crawl. Die geplante Seitenstruktur lädst du unter{" "}
+            <Link
+              href={`/dashboard/verwaltung/seo?org=${encodeURIComponent(props.organisationId)}&tab=struktur`}
+              className="font-medium underline underline-offset-2"
+            >
+              Struktur
+            </Link>{" "}
+            hoch — der Twin kann sie lesen und Verbesserungen vorschlagen.
+          </p>
         </div>
         <div className="grid gap-1">
           <Label htmlFor="dt-focus">Fokus-Keyword</Label>
