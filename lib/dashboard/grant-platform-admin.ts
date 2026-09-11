@@ -108,7 +108,7 @@ export async function grantPlatformAdminRole(input: {
         `${email} ist neu eingeladen und hat die Admin-Ansicht.`,
         warning,
         inviteLink
-          ? "Bitte den Anmeldelink weitergeben — ohne diesen Link kommt sie oder er nicht rein."
+          ? "Bitte den neuen Anmeldelink per WhatsApp/Slack weitergeben — alte Links funktionieren nicht."
           : "Anmeldelink konnte nicht erzeugt werden. Login über die normale Anmeldeseite.",
       ]
         .filter(Boolean)
@@ -175,7 +175,7 @@ export async function grantPlatformAdminRole(input: {
     ok: true,
     inviteLink,
     message: inviteLink
-      ? `${email} hat die Admin-Ansicht. Bitte den Anmeldelink weitergeben, damit sie oder er sich einloggen kann.`
+      ? `${email} hat die Admin-Ansicht. Bitte den neuen Anmeldelink weitergeben — alte Links funktionieren nicht.`
       : `${email} hat jetzt die Admin-Ansicht (Verwaltung, SEO Modus).`,
   };
 }

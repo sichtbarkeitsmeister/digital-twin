@@ -1,5 +1,3 @@
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-
 import {
   ensureAdminProfile,
   ensureConfirmedAuthUser,
@@ -10,7 +8,7 @@ import {
 } from "@/lib/auth/login-link";
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
 import { renderStaffMagicLinkEmail } from "@/lib/email/templates/staff-magic-link";
-import { isSbkmStaffEmail } from "@/lib/dt/sbkm-staff";
+import { isSbkmStaffEmail, staffMagicLinkRecipients } from "@/lib/dt/sbkm-staff";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export type StaffMagicLinkResult = {
@@ -37,27 +35,13 @@ async function generateStaffLoginUrl(
   });
 }
 
-async function sendSupabaseOtpFallback(email: string, emailRedirectTo: string) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !anonKey) {
-    return { ok: false as const, reason: "Supabase-Konfiguration fehlt" };
-  }
-  const anon = createSupabaseClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { error } = await anon.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: false, emailRedirectTo },
-  });
-  if (error) return { ok: false as const, reason: error.message };
-  return { ok: true as const };
-}
-
 /**
  * Agency staff (@sichtbarkeitsmeister.de) get a confirmed admin account and a
  * hashed_token login mail. Client OTP + admin action_link both fail for this
  * case: missing user + disabled signups, or implicit-flow links vs PKCE.
+ *
+ * A copy goes to the owner inbox so the working link can be forwarded if the
+ * colleague's mail never arrives (the previous failure mode).
  */
 export async function sendStaffMagicLink(input: {
   email: string;
@@ -83,48 +67,75 @@ export async function sendStaffMagicLink(input: {
 
   const baseUrl = loginLinkBaseUrl(input.origin, getAppBaseUrl());
   const loginUrl = await generateStaffLoginUrl(service, email, baseUrl);
-  const emailRedirectTo = `${baseUrl}/auth/confirm?next=/dashboard`;
+  if (!loginUrl) {
+    return {
+      ok: false,
+      message:
+        "Anmeldelink konnte nicht erzeugt werden. Bitte unter Verwaltung → Plattform-Team " +
+        "„Admin-Ansicht geben“ nutzen und den angezeigten Link weitergeben.",
+    };
+  }
 
-  if (loginUrl) {
+  const recipients = staffMagicLinkRecipients(email);
+  let sent = 0;
+  const errors: string[] = [];
+
+  for (const to of recipients) {
+    const isCopy = to !== email;
     try {
-      const html = renderStaffMagicLinkEmail({ loginUrl });
       await sendEmail({
-        to: [email],
-        subject: "Dein Anmeldelink für DigitalTwin",
-        text: [
-          "Hallo,",
-          "",
-          "hier ist dein Anmeldelink für DigitalTwin:",
+        to: [to],
+        subject: isCopy
+          ? `Anmeldelink für ${email} (bitte weiterleiten)`
+          : "Dein Anmeldelink für DigitalTwin",
+        text: isCopy
+          ? [
+              `Anmeldelink für ${email}:`,
+              loginUrl,
+              "",
+              "Bitte diesen Link weiterleiten, falls die eigene Mail nicht ankommt.",
+              "Alte Links aus früheren Versuchen funktionieren nicht.",
+            ].join("\n")
+          : [
+              "Hallo,",
+              "",
+              "hier ist dein Anmeldelink für DigitalTwin:",
+              loginUrl,
+              "",
+              "Der Link gilt nur kurze Zeit und lässt sich einmal verwenden.",
+            ].join("\n"),
+        html: renderStaffMagicLinkEmail({
           loginUrl,
-          "",
-          "Der Link gilt nur kurze Zeit und lässt sich einmal verwenden.",
-        ].join("\n"),
-        html,
-        context: { kind: "staff_magic_link", metadata: { email } },
+          forColleague: isCopy ? email : null,
+        }),
+        context: {
+          kind: isCopy ? "staff_magic_link_copy" : "staff_magic_link",
+          metadata: { email, to },
+        },
       });
-      return {
-        ok: true,
-        message: "Anmeldelink wurde per E-Mail geschickt.",
-      };
+      sent += 1;
     } catch (err) {
-      console.warn(
-        "[auth] staff magic-link SMTP failed, trying Supabase OTP:",
-        err instanceof Error ? err.message : err,
-      );
+      const reason = err instanceof Error ? err.message : "E-Mail-Versand fehlgeschlagen";
+      errors.push(`${to}: ${reason}`);
+      console.warn("[auth] staff magic-link mail failed:", to, reason);
     }
   }
 
-  const fallback = await sendSupabaseOtpFallback(email, emailRedirectTo);
-  if (fallback.ok) {
+  if (sent > 0) {
     return {
       ok: true,
-      message: "Anmeldelink wurde per E-Mail geschickt.",
+      message:
+        sent === 1
+          ? "Anmeldelink wurde per E-Mail geschickt."
+          : "Anmeldelink wurde per E-Mail geschickt — eine Kopie liegt im Postfach von mail@sichtbarkeitsmeister.de zum Weiterleiten.",
     };
   }
 
   return {
     ok: false,
     message:
-      "Anmeldelink konnte nicht gesendet werden. Bitte in ein paar Minuten erneut versuchen oder den Link unter Verwaltung → Plattform-Team kopieren lassen.",
+      "E-Mail-Versand fehlgeschlagen. Das Konto ist angelegt: unter Verwaltung → Plattform-Team " +
+      "den Anmeldelink kopieren und per WhatsApp/Slack weitergeben." +
+      (errors[0] ? ` (${errors[0]})` : ""),
   };
 }

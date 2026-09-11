@@ -5,6 +5,7 @@ import {
   loginLinkBaseUrl,
   loginUrlFromGenerateLink,
   magicLinkConfirmUrl,
+  otpTypesToTry,
   sanitizeNextPath,
 } from "../lib/auth/login-link";
 import { renderStaffMagicLinkEmail } from "../lib/email/templates/staff-magic-link";
@@ -22,6 +23,9 @@ assert.equal(asEmailOtpType("magiclink"), "magiclink");
 assert.equal(asEmailOtpType("invite"), "invite");
 assert.equal(asEmailOtpType("email"), "email");
 assert.equal(asEmailOtpType("nope"), "magiclink");
+assert.deepEqual(otpTypesToTry("magiclink"), ["magiclink", "email", "invite"]);
+assert.deepEqual(otpTypesToTry("email"), ["email", "magiclink", "invite"]);
+assert.equal(otpTypesToTry("invite")[0], "invite");
 
 const url = magicLinkConfirmUrl("https://www.digital-twin-sbkm.de/", {
   tokenHash: "abc123",
@@ -64,5 +68,12 @@ const html = renderStaffMagicLinkEmail({
 });
 assert.match(html, /token_hash=tok/);
 assert.match(html, /Jetzt anmelden/);
+
+const copyHtml = renderStaffMagicLinkEmail({
+  loginUrl: "https://www.digital-twin-sbkm.de/auth/confirm?token_hash=tok&type=magiclink&next=%2Fdashboard",
+  forColleague: "vanessa.may@sichtbarkeitsmeister.de",
+});
+assert.match(copyHtml, /vanessa\.may@sichtbarkeitsmeister\.de/);
+assert.match(copyHtml, /weiterleiten/i);
 
 console.log("login-link: all ok");

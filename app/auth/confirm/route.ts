@@ -1,41 +1,80 @@
-import { redirect } from "next/navigation";
-import { type NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { type EmailOtpType } from "@supabase/supabase-js";
+import { NextResponse, type NextRequest } from "next/server";
 
-import { asEmailOtpType, sanitizeNextPath } from "@/lib/auth/login-link";
-import { createClient } from "@/lib/supabase/server";
+import { otpTypesToTry, sanitizeNextPath } from "@/lib/auth/login-link";
 
-function errorRedirect(message: string) {
-  redirect(`/auth/error?error=${encodeURIComponent(message)}`);
+type CookieToSet = {
+  name: string;
+  value: string;
+  options?: Parameters<NextResponse["cookies"]["set"]>[2];
+};
+
+function applyCookies(response: NextResponse, cookiesToSet: CookieToSet[]) {
+  for (const { name, value, options } of cookiesToSet) {
+    response.cookies.set(name, value, options);
+  }
+  return response;
 }
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const token_hash = searchParams.get("token_hash");
-  const typeParam = searchParams.get("type");
-  const code = searchParams.get("code");
-  const next = sanitizeNextPath(searchParams.get("next"), "/dashboard");
+  const token_hash = request.nextUrl.searchParams.get("token_hash");
+  const typeParam = request.nextUrl.searchParams.get("type");
+  const code = request.nextUrl.searchParams.get("code");
+  const next = sanitizeNextPath(request.nextUrl.searchParams.get("next"), "/dashboard");
 
-  const supabase = await createClient();
+  const successUrl = request.nextUrl.clone();
+  successUrl.pathname = next;
+  successUrl.search = "";
 
-  if (token_hash && typeParam) {
-    const type = asEmailOtpType(typeParam);
-    const { error } = await supabase.auth.verifyOtp({
-      type,
-      token_hash,
-    });
-    if (!error) {
-      redirect(next);
+  const errorUrl = request.nextUrl.clone();
+  errorUrl.pathname = "/auth/error";
+  errorUrl.search = "";
+
+  const fail = (message: string, cookiesToSet: CookieToSet[] = []) => {
+    errorUrl.searchParams.set("error", message);
+    return applyCookies(NextResponse.redirect(errorUrl), cookiesToSet);
+  };
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    return fail("No token hash or type");
+  }
+
+  let cookiesToSet: CookieToSet[] = [];
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(incoming) {
+        cookiesToSet = incoming;
+      },
+    },
+  });
+
+  if (token_hash) {
+    let lastError = "Token has expired or is invalid";
+    for (const type of otpTypesToTry(typeParam) as EmailOtpType[]) {
+      cookiesToSet = [];
+      const { error } = await supabase.auth.verifyOtp({ type, token_hash });
+      if (!error) {
+        return applyCookies(NextResponse.redirect(successUrl), cookiesToSet);
+      }
+      lastError = error.message;
     }
-    errorRedirect(error.message);
+    return fail(lastError, cookiesToSet);
   }
 
   if (code) {
+    cookiesToSet = [];
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      redirect(next);
+      return applyCookies(NextResponse.redirect(successUrl), cookiesToSet);
     }
-    errorRedirect(error.message);
+    return fail(error.message, cookiesToSet);
   }
 
-  errorRedirect("No token hash or type");
+  return fail("No token hash or type");
 }

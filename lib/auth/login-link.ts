@@ -36,6 +36,13 @@ export function asEmailOtpType(
   return fallback;
 }
 
+/** Try the type from the URL first, then the types generateLink actually issues. */
+export function otpTypesToTry(requested: string | null | undefined): EmailOtpType[] {
+  const primary = asEmailOtpType(requested);
+  const extras: EmailOtpType[] = ["magiclink", "email", "invite"];
+  return [primary, ...extras.filter((type) => type !== primary)];
+}
+
 /**
  * App-hosted confirm URL. `action_link` from admin generateLink is implicit-flow
  * and does not work with @supabase/ssr PKCE — hashed_token + verifyOtp does.
