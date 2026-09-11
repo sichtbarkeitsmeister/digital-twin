@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { renderDtPortalWelcomeEmail } from "@/lib/email/templates/dt-portal-welcome";
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
+import { loginUrlFromGenerateLink } from "@/lib/auth/login-link";
 import {
   legacyClientSlug,
   resolveLegacyClientKey,
@@ -660,10 +661,13 @@ export async function runDtMigration(opts: MigrationOptions): Promise<{
     const { data: linkData, error: linkErr } = await newDb.auth.admin.generateLink({
       type: "magiclink",
       email,
-      options: { redirectTo: `${appBase}/auth/login` },
     });
 
-    const loginUrl = linkData?.properties?.action_link ?? `${appBase}/auth/login`;
+    const loginUrl =
+      loginUrlFromGenerateLink(appBase, linkData?.properties, {
+        type: "magiclink",
+        next: "/dashboard",
+      }) ?? `${appBase}/auth/login`;
     const html = renderDtPortalWelcomeEmail({
       organisationName: entry.organisationName,
       loginUrl,

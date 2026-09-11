@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
+import { loginUrlFromGenerateLink } from "@/lib/auth/login-link";
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
 import { logEmailSend } from "@/lib/email/send-log";
 import { renderOrgMemberInviteEmail } from "@/lib/email/templates/org-member-invite";
@@ -85,7 +86,10 @@ export async function ensureMemberInviteLoginLink(
     return { ok: false, reason: `Anmeldelink fehlgeschlagen: ${linkErr.message}` };
   }
 
-  const link = linkData?.properties?.action_link?.trim();
+  const link = loginUrlFromGenerateLink(getAppBaseUrl(), linkData?.properties, {
+    type: linkType,
+    next: "/dashboard/inbox",
+  });
   if (!link) {
     return { ok: false, reason: "Anmeldelink leer (Supabase generateLink)." };
   }

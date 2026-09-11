@@ -1,30 +1,41 @@
-import { createClient } from "@/lib/supabase/server";
-import { type EmailOtpType } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { type NextRequest } from "next/server";
+
+import { asEmailOtpType, sanitizeNextPath } from "@/lib/auth/login-link";
+import { createClient } from "@/lib/supabase/server";
+
+function errorRedirect(message: string) {
+  redirect(`/auth/error?error=${encodeURIComponent(message)}`);
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get("token_hash");
-  const type = searchParams.get("type") as EmailOtpType | null;
-  const next = searchParams.get("next") ?? "/";
+  const typeParam = searchParams.get("type");
+  const code = searchParams.get("code");
+  const next = sanitizeNextPath(searchParams.get("next"), "/dashboard");
 
-  if (token_hash && type) {
-    const supabase = await createClient();
+  const supabase = await createClient();
 
+  if (token_hash && typeParam) {
+    const type = asEmailOtpType(typeParam);
     const { error } = await supabase.auth.verifyOtp({
       type,
       token_hash,
     });
     if (!error) {
-      // redirect user to specified redirect URL or root of app
       redirect(next);
-    } else {
-      // redirect the user to an error page with some instructions
-      redirect(`/auth/error?error=${error?.message}`);
     }
+    errorRedirect(error.message);
   }
 
-  // redirect the user to an error page with some instructions
-  redirect(`/auth/error?error=No token hash or type`);
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error) {
+      redirect(next);
+    }
+    errorRedirect(error.message);
+  }
+
+  errorRedirect("No token hash or type");
 }
