@@ -13,8 +13,8 @@ import {
   DtPillButton,
   DtTabs,
 } from "@/components/dt";
+import { requestMagicLinkAction } from "@/app/auth/actions";
 import { translateAuthError } from "@/lib/auth/error-messages";
-import { createClient } from "@/lib/supabase/client";
 
 export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
   const router = useRouter();
@@ -31,19 +31,16 @@ export function AuthCard({ defaultTab }: { defaultTab?: "signup" | "signin" }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const supabase = createClient();
     setIsLoading(true);
     setError(null);
     setSuccess(false);
 
     try {
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard`,
-        },
-      });
-      if (authError) throw authError;
+      const result = await requestMagicLinkAction(email, window.location.origin);
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
       setSuccess(true);
     } catch (err: unknown) {
       setError(translateAuthError(err instanceof Error ? err.message : null));

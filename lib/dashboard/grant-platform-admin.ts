@@ -1,4 +1,12 @@
-import { isAlreadyRegisteredAuthError, isForeignKeyRestrictError } from "@/lib/dashboard/auth-user-errors";
+import { isForeignKeyRestrictError } from "@/lib/dashboard/auth-user-errors";
+import {
+  createConfirmedUser,
+  ensureAdminProfile,
+  findAuthUserIdByEmail,
+  findProfileByEmail,
+  unbanAndConfirmUser,
+} from "@/lib/auth/ensure-auth-user";
+import { loginUrlFromGenerateLink } from "@/lib/auth/login-link";
 import { getAppBaseUrl } from "@/lib/email/mailer";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -8,102 +16,21 @@ export type GrantPlatformAdminResult = {
   inviteLink?: string | null;
 };
 
-type AuthUserRef = { id: string; email?: string | null };
 type ServiceClient = ReturnType<typeof createServiceClient>;
-
-function confirmRedirectUrl() {
-  return `${getAppBaseUrl()}/auth/confirm?next=/dashboard`;
-}
-
-function escapeIlike(email: string) {
-  return email.replace(/[%_]/g, "\\$&");
-}
-
-async function findProfileByEmail(service: ServiceClient, email: string) {
-  const { data, error } = await service
-    .from("profiles")
-    .select("id,email,role")
-    .ilike("email", escapeIlike(email))
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  return data;
-}
-
-async function findAuthUserIdByEmail(
-  service: ServiceClient,
-  email: string,
-): Promise<string | null> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/+$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (url && key) {
-    const res = await fetch(`${url}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
-      headers: { Authorization: `Bearer ${key}`, apikey: key },
-      cache: "no-store",
-    });
-    if (res.ok) {
-      const json = (await res.json()) as {
-        id?: string;
-        email?: string;
-        users?: AuthUserRef[];
-      };
-      if (json.id && json.email?.toLowerCase() === email) return json.id;
-      const match = json.users?.find((u) => u.email?.toLowerCase() === email);
-      if (match?.id) return match.id;
-    }
-  }
-
-  for (let page = 1; page <= 20; page += 1) {
-    const { data, error } = await service.auth.admin.listUsers({ page, perPage: 200 });
-    if (error) break;
-    const match = data.users.find((u) => u.email?.toLowerCase() === email);
-    if (match?.id) return match.id;
-    if (data.users.length < 200) break;
-  }
-
-  return null;
-}
-
-async function createConfirmedUser(service: ServiceClient, email: string): Promise<string> {
-  const { data, error } = await service.auth.admin.createUser({
-    email,
-    email_confirm: true,
-  });
-
-  if (data.user?.id && !error) return data.user.id;
-
-  if (error && isAlreadyRegisteredAuthError(error.message)) {
-    const id = await findAuthUserIdByEmail(service, email);
-    if (id) return id;
-  }
-
-  throw new Error(
-    error?.message?.trim() ||
-      "Konto konnte nicht angelegt werden. Bitte die E-Mail prüfen und erneut versuchen.",
-  );
-}
-
-async function ensureAdminProfile(service: ServiceClient, userId: string, email: string) {
-  const { error } = await service.from("profiles").upsert(
-    { id: userId, email, role: "admin" },
-    { onConflict: "id" },
-  );
-  if (error) {
-    throw new Error(`Rolle konnte nicht gesetzt werden: ${error.message}`);
-  }
-}
 
 async function generateLoginLink(service: ServiceClient, email: string): Promise<string | null> {
   const { data, error } = await service.auth.admin.generateLink({
     type: "magiclink",
     email,
-    options: { redirectTo: confirmRedirectUrl() },
   });
   if (error) {
     console.warn("[admin] magiclink after grant failed:", error.message);
     return null;
   }
-  return data.properties?.action_link?.trim() || null;
+  return loginUrlFromGenerateLink(getAppBaseUrl(), data.properties, {
+    type: "magiclink",
+    next: "/dashboard",
+  });
 }
 
 async function reassignCreatedBy(service: ServiceClient, fromUserId: string, toUserId: string) {
@@ -168,17 +95,7 @@ export async function grantPlatformAdminRole(input: {
 
     const userId = deleted || !existingId ? await createConfirmedUser(service, email) : existingId;
     if (!deleted && existingId) {
-      try {
-        await service.auth.admin.updateUserById(existingId, {
-          email_confirm: true,
-          ban_duration: "none",
-        });
-      } catch (err) {
-        console.warn(
-          "[admin] could not unban/confirm existing user:",
-          err instanceof Error ? err.message : err,
-        );
-      }
+      await unbanAndConfirmUser(service, existingId);
     }
 
     await ensureAdminProfile(service, userId, email);
@@ -191,8 +108,8 @@ export async function grantPlatformAdminRole(input: {
         `${email} ist neu eingeladen und hat die Admin-Ansicht.`,
         warning,
         inviteLink
-          ? "Bitte den Anmeldelink an Vanessa weitergeben — ohne diesen Link kommt sie nicht rein."
-          : "Anmeldelink konnte nicht erzeugt werden. Sie kann sich über die normale Login-Seite anmelden.",
+          ? "Bitte den Anmeldelink weitergeben — ohne diesen Link kommt sie oder er nicht rein."
+          : "Anmeldelink konnte nicht erzeugt werden. Login über die normale Anmeldeseite.",
       ]
         .filter(Boolean)
         .join(" "),
@@ -238,17 +155,7 @@ export async function grantPlatformAdminRole(input: {
   const created = !existingAuthId;
 
   if (existingAuthId) {
-    try {
-      await service.auth.admin.updateUserById(existingAuthId, {
-        email_confirm: true,
-        ban_duration: "none",
-      });
-    } catch (err) {
-      console.warn(
-        "[admin] could not unban/confirm existing user:",
-        err instanceof Error ? err.message : err,
-      );
-    }
+    await unbanAndConfirmUser(service, existingAuthId);
   }
 
   await ensureAdminProfile(service, userId, email);
@@ -268,7 +175,7 @@ export async function grantPlatformAdminRole(input: {
     ok: true,
     inviteLink,
     message: inviteLink
-      ? `${email} hat die Admin-Ansicht. Bitte den Anmeldelink weitergeben, damit sie sich einloggen kann.`
+      ? `${email} hat die Admin-Ansicht. Bitte den Anmeldelink weitergeben, damit sie oder er sich einloggen kann.`
       : `${email} hat jetzt die Admin-Ansicht (Verwaltung, SEO Modus).`,
   };
 }

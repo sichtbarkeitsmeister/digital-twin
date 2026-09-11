@@ -1,3 +1,4 @@
+import { loginUrlFromGenerateLink } from "@/lib/auth/login-link";
 import { getAppBaseUrl, sendEmail } from "@/lib/email/mailer";
 import {
   sendSupabaseAuthInviteEmail,
@@ -85,7 +86,10 @@ export async function ensureOwnerLoginLink(
     return null;
   }
 
-  const link = linkData?.properties?.action_link?.trim();
+  const link = loginUrlFromGenerateLink(getAppBaseUrl(), linkData?.properties, {
+    type: linkType,
+    next: "/",
+  });
   if (!link) return null;
 
   return { link, isNewAccount };

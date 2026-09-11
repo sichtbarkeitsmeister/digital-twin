@@ -50,9 +50,10 @@ export function PlatformAdminTeamCard(props: {
             className="h-10"
           />
           <p className="text-xs text-secondary">
-            Nach dem Freischalten erscheint ein Anmeldelink — den muss sie einmal anklicken.
-            Steckt das Konto fest: <strong>Konto löschen und neu einladen</strong>. Danach den
-            Anmeldelink an sie weitergeben.
+            Nach dem Freischalten erscheint ein Anmeldelink — den einmal anklicken, dann ist
+            sie oder er angemeldet. SBKM-Adressen können sich auch selbst über die Login-Seite
+            einen Link schicken. Steckt das Konto fest:{" "}
+            <strong>Konto löschen und neu einladen</strong>.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
