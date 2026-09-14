@@ -9,6 +9,7 @@ import {
 import { assembleDtChatEphemeral } from "@/lib/dt/assemble-chat-prompt";
 import { appendEphemeralAttachmentsToMessages } from "@/lib/dt/hydrate-ephemeral-attachments";
 import { requireAuthUser } from "@/lib/dt/db";
+import { finalizeDtAssistantContent, assistantMessageMetadataExtras } from "@/lib/dt/finalize-assistant-message";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -16,7 +17,7 @@ export const maxDuration = 300;
 
 const historySchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().max(32_000),
+  content: z.string().max(80_000),
 });
 
 const bodySchema = z
@@ -95,13 +96,22 @@ export async function POST(req: Request) {
       });
     }
 
+    const finalized = finalizeDtAssistantContent(direct.text, assembled.mode);
+
     return NextResponse.json({
       ok: true,
       assistantMessage: {
         id: `ghost-${Date.now()}`,
         role: "assistant" as const,
-        content: direct.text,
-        metadata: { via: "anthropic_ghost", model: direct.model },
+        content: finalized.content,
+        metadata: assistantMessageMetadataExtras(
+          { via: "anthropic_ghost", model: direct.model },
+          {
+            mode: assembled.mode,
+            seoTaskProposals: finalized.seoTaskProposals,
+            artifacts: finalized.artifacts,
+          },
+        ),
         created_at: new Date().toISOString(),
       },
       via: "anthropic_ghost",

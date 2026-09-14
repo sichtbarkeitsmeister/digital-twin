@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { contentWithDtChatArtifactsForLlm } from "@/lib/dt/chat-artifacts";
 import {
   hydrateDtHistoryForAnthropic,
   type DtDbAttachmentRow,
@@ -187,7 +188,12 @@ export async function assembleDtChatFromDb(input: {
     .eq("chat_id", input.chatId)
     .order("created_at", { ascending: true });
 
-  const history = trimDtChatHistory((messageRows ?? []) as DtMessageRow[]);
+  const historyForLlm = ((messageRows ?? []) as DtMessageRow[]).map((m) =>
+    m.role === "assistant"
+      ? { ...m, content: contentWithDtChatArtifactsForLlm(m.content, m.metadata) }
+      : m,
+  );
+  const history = trimDtChatHistory(historyForLlm);
   const authorIds = history
     .filter((m) => m.role === "user" && m.author_user_id)
     .map((m) => m.author_user_id as string);

@@ -419,7 +419,7 @@ export function formatWebsiteStructureForPrompt(input: {
     "",
     input.outline.trim(),
     "",
-    "Nutzung: Das ist die geplante/kommunizierte Informationsarchitektur — nicht der Crawl-Index. Du darfst sie einsehen, zusammenfassen und Verbesserungen vorschlagen (fehlende Seiten, unklare Hierarchie, SEO-IA, interne Verlinkung). Vergleiche mit „Prüfbare Unterseiten“ (Crawl) und der Sitemap, wenn nach Ist vs. Soll gefragt wird. Behaupte nicht, eine URL existiere live, nur weil sie hier steht — dafür Crawl- oder Live-Tools nutzen.",
+    "Nutzung: Das ist die geplante/kommunizierte Informationsarchitektur — nicht der Crawl-Index. Du darfst sie einsehen, zusammenfassen und Verbesserungen vorschlagen (fehlende Seiten, unklare Hierarchie, SEO-IA, interne Verlinkung). Vergleiche mit „Prüfbare Unterseiten“ (Crawl) und der Sitemap, wenn nach Ist vs. Soll gefragt wird. Behaupte nicht, eine URL existiere live, nur weil sie hier steht — dafür Crawl- oder Live-Tools nutzen. Wenn der Nutzer einen klickbaren Navigations- oder Seitenprototyp will, liefere eine HTML-Datei als dt-artifact (Download), nicht nur eine Beschreibung.",
   ];
   return blocks.filter((l) => l !== "").join("\n");
 }

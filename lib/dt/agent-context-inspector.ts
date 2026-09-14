@@ -239,7 +239,7 @@ export async function loadDtAgentContextBundle(input: {
       sourceType: "system",
       description: prospect
         ? "Fest im Code hinterlegte Regeln für Interessenten-/Wunschkunden-Personas."
-        : "Fest im Code hinterlegte Regeln für alle DigitalTwin-Chats (Sprache, Markdown, keine erfundenen Aktionen).",
+        : "Fest im Code hinterlegte Regeln für alle DigitalTwin-Chats (Sprache, Markdown, Datei-Artefakte, keine erfundenen Aktionen).",
       content: prospect
         ? buildProspectStaticSystemText()
         : buildDtChatStaticSystemText(),
@@ -447,7 +447,7 @@ export async function loadDtAgentContextBundle(input: {
         sourceLabel: "System",
         sourceType: "system",
         description:
-          "Verhaltensregeln für SEO-Chat inkl. Aufgaben-Vorschlagsformat.",
+          "Verhaltensregeln für SEO-Chat inkl. Aufgaben-Vorschlagsformat und HTML-Prototypen.",
         content: DT_SEO_MODE_INSTRUCTIONS,
       }),
       section({

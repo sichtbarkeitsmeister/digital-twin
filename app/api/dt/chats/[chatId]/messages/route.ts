@@ -28,10 +28,9 @@ import {
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import {
-  buildDtSeoTaskProposalMetadata,
-  parseDtSeoTaskProposalsFromText,
-  stripDtSeoTaskProposalBlocks,
-} from "@/lib/dt/seo/chat-task-proposals";
+  assistantMessageMetadataExtras,
+  finalizeDtAssistantContent,
+} from "@/lib/dt/finalize-assistant-message";
 import type { DtChatMode } from "@/lib/dt/types";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -144,25 +143,16 @@ async function maybePersistDtAutoTitle(input: {
   return titleSuggestion;
 }
 
-function finalizeAssistantSeoContent(text: string, mode: DtChatMode) {
-  if (mode !== "seo") {
-    return { content: text, seoTaskProposals: [] as ReturnType<typeof parseDtSeoTaskProposalsFromText> };
-  }
-  const seoTaskProposals = parseDtSeoTaskProposalsFromText(text);
-  const content = stripDtSeoTaskProposalBlocks(text);
-  return { content, seoTaskProposals };
-}
-
-function assistantMetadataExtras(
+function assistantMetadataFromFinalized(
   base: Record<string, unknown>,
   mode: DtChatMode,
-  seoTaskProposals: ReturnType<typeof parseDtSeoTaskProposalsFromText>,
+  finalized: ReturnType<typeof finalizeDtAssistantContent>,
 ) {
-  if (mode !== "seo" || seoTaskProposals.length === 0) return base;
-  return {
-    ...base,
-    seo_task_proposals: buildDtSeoTaskProposalMetadata(seoTaskProposals),
-  };
+  return assistantMessageMetadataExtras(base, {
+    mode,
+    seoTaskProposals: finalized.seoTaskProposals,
+    artifacts: finalized.artifacts,
+  });
 }
 
 const bodySchema = z
@@ -294,14 +284,14 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
       let assistantRow = mapN8nResultToAssistantRow(chatId, n8n, n8n.model);
 
-      const finalized = finalizeAssistantSeoContent(assistantRow.content, chat.mode as DtChatMode);
+      const finalized = finalizeDtAssistantContent(assistantRow.content, chat.mode as DtChatMode);
       assistantRow = {
         ...assistantRow,
         content: finalized.content,
-        metadata: assistantMetadataExtras(
+        metadata: assistantMetadataFromFinalized(
           assistantRow.metadata,
           chat.mode as DtChatMode,
-          finalized.seoTaskProposals,
+          finalized,
         ),
       };
 
@@ -315,17 +305,17 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           .eq("id", n8n.messageId)
           .maybeSingle();
         if (persisted) {
-          const persistedFinal = finalizeAssistantSeoContent(
+          const persistedFinal = finalizeDtAssistantContent(
             persisted.content,
             chat.mode as DtChatMode,
           );
           assistantRow = {
             ...persisted,
             content: persistedFinal.content,
-            metadata: assistantMetadataExtras(
+            metadata: assistantMetadataFromFinalized(
               (persisted.metadata as Record<string, unknown>) ?? {},
               chat.mode as DtChatMode,
-              persistedFinal.seoTaskProposals,
+              persistedFinal,
             ),
           };
           await auth.supabase
@@ -406,17 +396,17 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           .maybeSingle();
 
         if (persistedAfterN8n?.content?.trim()) {
-          const persistedFinal = finalizeAssistantSeoContent(
+          const persistedFinal = finalizeDtAssistantContent(
             persistedAfterN8n.content,
             chat.mode as DtChatMode,
           );
           const recoveredRow = {
             ...persistedAfterN8n,
             content: persistedFinal.content,
-            metadata: assistantMetadataExtras(
+            metadata: assistantMetadataFromFinalized(
               (persistedAfterN8n.metadata as Record<string, unknown>) ?? {},
               chat.mode as DtChatMode,
-              persistedFinal.seoTaskProposals,
+              persistedFinal,
             ),
           };
           if (
@@ -491,7 +481,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     created_at: string;
   };
 
-  const finalized = finalizeAssistantSeoContent(direct.text, chat.mode as DtChatMode);
+  const finalized = finalizeDtAssistantContent(direct.text, chat.mode as DtChatMode);
 
   if (!ghostMode) {
     const { data, error } = await auth.supabase
@@ -500,14 +490,14 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         chat_id: chatId,
         role: "assistant",
         content: finalized.content,
-        metadata: assistantMetadataExtras(
+        metadata: assistantMetadataFromFinalized(
           {
             model: direct.model,
             stop_reason: direct.stopReason,
             via: hasAttachments ? "anthropic_direct_attachments" : "anthropic_direct",
           },
           chat.mode as DtChatMode,
-          finalized.seoTaskProposals,
+          finalized,
         ),
         author_user_id: null,
         stopped: false,
@@ -546,10 +536,10 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       chat_id: chatId,
       role: "assistant",
       content: finalized.content,
-      metadata: assistantMetadataExtras(
+      metadata: assistantMetadataFromFinalized(
         { via: "anthropic_direct_ghost" },
         chat.mode as DtChatMode,
-        finalized.seoTaskProposals,
+        finalized,
       ),
       author_user_id: null,
       stopped: false,

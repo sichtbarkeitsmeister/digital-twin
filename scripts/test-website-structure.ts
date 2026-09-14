@@ -93,6 +93,7 @@ function testPromptIncludesImprovementHint() {
   assert.match(text, /## Webseitenstruktur \(hochgeladen\)/);
   assert.match(text, /Verbesserungen/);
   assert.match(text, /Crawl/);
+  assert.match(text, /dt-artifact/);
   console.log("prompt format: ok");
 }
 
