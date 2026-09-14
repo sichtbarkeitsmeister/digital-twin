@@ -4,32 +4,35 @@
  */
 import assert from "node:assert/strict";
 
-import { agentSupportsPersonaTesting } from "../lib/dt/persona-testing";
+import { agentHasSurveyExamProbes, agentSupportsPersonaTesting } from "../lib/dt/persona-testing";
 import { buildSurveyExamQuestions } from "../lib/dt/survey-exam-questions";
 import { extractSurveyFacts } from "../lib/dt/survey-facts";
 
+assert.equal(agentSupportsPersonaTesting({ id: "a1" }), true);
+assert.equal(agentSupportsPersonaTesting(null), false);
+assert.equal(agentSupportsPersonaTesting({ id: "" }), false);
+
 assert.equal(
-  agentSupportsPersonaTesting({
+  agentHasSurveyExamProbes({
     source_survey_id: "s1",
     source_survey_response_id: "r1",
   }),
   true,
 );
 assert.equal(
-  agentSupportsPersonaTesting({
+  agentHasSurveyExamProbes({
     source_survey_id: null,
     source_survey_response_id: "r1",
   }),
   false,
 );
 assert.equal(
-  agentSupportsPersonaTesting({
+  agentHasSurveyExamProbes({
     source_survey_id: "s1",
     source_survey_response_id: null,
   }),
   false,
 );
-assert.equal(agentSupportsPersonaTesting(null), false);
 
 const definition = {
   steps: [

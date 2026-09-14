@@ -16,7 +16,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { cn } from "@/components/dt/cn";
 import type { ExamAnswerCheckSuggestion } from "@/lib/dt/exam-answer-check";
-import { personaTestingModeTitle } from "@/lib/dt/persona-testing";
+import { PERSONA_PROMPT_FIT_HINT, personaTestingModeTitle } from "@/lib/dt/persona-testing";
 import {
   resolveCustomExamExpectedHint,
   type SurveyExamAudience,
@@ -105,7 +105,7 @@ export function DtPersonaTestingRail(props: {
         setAudience(json.audience === "company" ? "company" : "persona");
         setQuestions(json.questions ?? []);
         if (!json.available || !(json.questions?.length ?? 0)) {
-          setError("Keine Prüfungsfragen aus der Umfrage abgeleitet.");
+          setError(null);
         }
       } catch {
         if (!cancelled) {
@@ -171,15 +171,18 @@ export function DtPersonaTestingRail(props: {
   function pickCustom() {
     if (props.isBusy || props.disabled) return;
     const question = customQuestion.trim().replace(/\s+/g, " ");
-    if (!question || questions.length === 0) return;
+    if (!question) return;
 
-    const resolved = resolveCustomExamExpectedHint(question, questions);
-    if (!resolved.expectedHint.trim()) return;
+    const resolved =
+      questions.length > 0
+        ? resolveCustomExamExpectedHint(question, questions)
+        : { expectedHint: PERSONA_PROMPT_FIT_HINT, source: "digest" as const };
+    const expectedHint = resolved.expectedHint.trim() || PERSONA_PROMPT_FIT_HINT;
 
     const exam: SurveyExamQuestion = {
       id: `custom_${Date.now()}`,
       question,
-      expectedHint: resolved.expectedHint,
+      expectedHint,
       factId: "custom",
       kind: "answer",
     };
@@ -368,11 +371,20 @@ export function DtPersonaTestingRail(props: {
             ) : (
               <>
                 <p className={cn(wrapText, "text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60")}>
-                  „Nächste Frage“ oder eigene Prüffrage senden. Unter SOLL erscheint danach groß{" "}
-                  <span className="font-semibold text-emerald-700 dark:text-emerald-300">Stimmt</span>{" "}
-                  oder{" "}
-                  <span className="font-semibold text-red-700 dark:text-red-300">Stimmt nicht</span>
-                  — du bestätigst das Ergebnis.
+                  {questions.length > 0 ? (
+                    <>
+                      „Nächste Frage“ oder eigene Prüffrage senden. Unter SOLL erscheint danach groß{" "}
+                      <span className="font-semibold text-emerald-700 dark:text-emerald-300">Stimmt</span>{" "}
+                      oder{" "}
+                      <span className="font-semibold text-red-700 dark:text-red-300">Stimmt nicht</span>
+                      — du bestätigst das Ergebnis.
+                    </>
+                  ) : (
+                    <>
+                      Zu dieser Persona gibt es keinen verknüpften Fragebogen. Stelle eigene Prüffragen,
+                      um zu testen, ob sie sich an den Prompt hält.
+                    </>
+                  )}
                 </p>
 
                 {nextQuestion ? (
@@ -392,8 +404,7 @@ export function DtPersonaTestingRail(props: {
                   </p>
                 ) : null}
 
-                {questions.length > 0 ? (
-                  <div className="grid min-w-0 gap-2">
+                <div className="grid min-w-0 gap-2">
                     <label
                       htmlFor="dt-persona-custom-exam"
                       className="text-[11px] font-bold uppercase tracking-[0.08em] text-sbkm-ink-500 dark:text-white/45"
@@ -412,7 +423,11 @@ export function DtPersonaTestingRail(props: {
                           pickCustom();
                         }
                       }}
-                      placeholder="Eigene Frage eingeben — KI gleicht die Antwort mit dem Fragebogen ab …"
+                      placeholder={
+                        questions.length > 0
+                          ? "Eigene Frage eingeben — KI gleicht die Antwort mit dem Fragebogen ab …"
+                          : "Eigene Frage eingeben — KI prüft, ob die Antwort zum Prompt passt …"
+                      }
                       className="w-full min-w-0 resize-y rounded-xl border border-sbkm-navy/15 bg-white/90 px-3 py-2.5 text-sm leading-snug text-sbkm-navy outline-none transition placeholder:text-sbkm-ink-400 focus:border-sbkm-mint/50 focus:ring-2 focus:ring-sbkm-mint/20 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white dark:placeholder:text-white/35"
                     />
                     <button
@@ -420,8 +435,7 @@ export function DtPersonaTestingRail(props: {
                       disabled={
                         props.isBusy ||
                         props.disabled ||
-                        !customQuestion.trim() ||
-                        questions.length === 0
+                        !customQuestion.trim()
                       }
                       onClick={() => pickCustom()}
                       className="inline-flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/85 px-4 text-sm font-semibold text-sbkm-navy transition hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white"
@@ -430,7 +444,6 @@ export function DtPersonaTestingRail(props: {
                       Frage stellen & abgleichen
                     </button>
                   </div>
-                ) : null}
 
                 {active ? (
                   <div className="grid min-w-0 gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/85 p-4 shadow-[0_8px_24px_rgba(46,46,80,0.06)] dark:border-white/10 dark:bg-white/[0.05]">

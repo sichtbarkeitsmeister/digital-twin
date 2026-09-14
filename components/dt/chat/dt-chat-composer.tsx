@@ -296,7 +296,7 @@ export function DtChatComposer(props: {
                 <span className="hidden text-xs font-bold sm:inline">Text</span>
               </button>
 
-              {props.personaTestingAvailable && props.personaTestingAgentId ? (
+              {props.personaTestingAgentId ? (
                 <button
                   type="button"
                   aria-pressed={personaTesting}
