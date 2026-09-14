@@ -1,10 +1,21 @@
 import type { DtAgentRow } from "@/lib/dt/types";
 
+/** Fallback SOLL when there is no questionnaire bank — judge against the prompt. */
+export const PERSONA_PROMPT_FIT_HINT =
+  "Die Antwort muss zum hinterlegten Prompt dieser Persona passen: Rolle, Sprache und Fakten. Nichts erfinden, das nicht im Prompt steht.";
+
 /** True when the agent has survey lineage and can offer exam probes (persona or company). */
-export function agentSupportsPersonaTesting(
+export function agentHasSurveyExamProbes(
   agent: Pick<DtAgentRow, "source_survey_id" | "source_survey_response_id"> | null | undefined,
 ): boolean {
   return Boolean(agent?.source_survey_id && agent?.source_survey_response_id);
+}
+
+/** Test mode checks prompt behavior. Questionnaire probes are optional. */
+export function agentSupportsPersonaTesting(
+  agent: Pick<DtAgentRow, "id"> | null | undefined,
+): boolean {
+  return Boolean(agent?.id);
 }
 
 export type PersonaTestingAudienceLabel = "persona" | "company";
