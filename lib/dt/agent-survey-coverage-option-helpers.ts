@@ -16,28 +16,44 @@ export function pickDefaultCoverageOption(
   return options.find((o) => o.isSource) ?? options[0] ?? null;
 }
 
+function coverageMatchNeedles(agentName: string, extraLabels?: string | string[] | null): string[] {
+  const labels = [
+    agentName,
+    ...(Array.isArray(extraLabels) ? extraLabels : extraLabels ? [extraLabels] : []),
+  ];
+  const needles: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of labels) {
+    const normalized = raw.trim().toLowerCase().replace(/\s+/g, " ");
+    if (normalized.length >= 3 && !seen.has(normalized)) {
+      seen.add(normalized);
+      needles.push(normalized);
+    }
+    for (const token of normalized.split(/[\s/|,;·–—-]+/).filter((t) => t.length >= 4)) {
+      if (!seen.has(token)) {
+        seen.add(token);
+        needles.push(token);
+      }
+    }
+  }
+  return needles;
+}
+
 /**
- * Prefer stored source, then title match to the agent name, then newest.
+ * Prefer stored source, then title match to the agent name/role, then newest.
  */
 export function suggestCoverageOptionForAgent(
   options: AgentCoverageSurveyOption[],
   agentName: string,
+  extraLabels?: string | string[] | null,
 ): AgentCoverageSurveyOption | null {
   const source = options.find((o) => o.isSource);
   if (source) return source;
 
-  const normalized = agentName.trim().toLowerCase();
-  if (normalized.length >= 3) {
-    const full = options.find((o) =>
-      o.surveyTitle.toLowerCase().includes(normalized),
-    );
-    if (full) return full;
-
-    const tokens = normalized.split(/\s+/).filter((t) => t.length >= 4);
-    for (const token of tokens) {
-      const hit = options.find((o) => o.surveyTitle.toLowerCase().includes(token));
-      if (hit) return hit;
-    }
+  const needles = coverageMatchNeedles(agentName, extraLabels);
+  for (const needle of needles) {
+    const hit = options.find((o) => o.surveyTitle.toLowerCase().includes(needle));
+    if (hit) return hit;
   }
 
   return options[0] ?? null;
