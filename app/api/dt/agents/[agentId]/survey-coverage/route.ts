@@ -36,7 +36,7 @@ export async function GET(
   const { data: agent, error } = await auth.supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,name,kind,source_survey_id,source_survey_response_id",
+      "id,organisation_id,name,role,kind,source_survey_id,source_survey_response_id",
     )
     .eq("id", agentId)
     .maybeSingle();
@@ -65,6 +65,7 @@ export async function GET(
   const suggested = suggestCoverageOptionForAgent(
     options,
     (agent.name as string) ?? "",
+    (agent.role as string) ?? null,
   );
 
   return NextResponse.json({
@@ -93,7 +94,7 @@ export async function POST(
   const { data: agent, error } = await auth.supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,name,kind,source_survey_id,source_survey_response_id,prompt_template,prompt_append",
+      "id,organisation_id,name,role,kind,source_survey_id,source_survey_response_id,prompt_template,prompt_append",
     )
     .eq("id", agentId)
     .maybeSingle();
@@ -132,8 +133,11 @@ export async function POST(
       sourceResponseId: agent.source_survey_response_id as string | null,
     });
     const pick =
-      suggestCoverageOptionForAgent(options, (agent.name as string) ?? "") ??
-      null;
+      suggestCoverageOptionForAgent(
+        options,
+        (agent.name as string) ?? "",
+        (agent.role as string) ?? null,
+      ) ?? null;
     if (!pick) {
       return NextResponse.json(
         {
