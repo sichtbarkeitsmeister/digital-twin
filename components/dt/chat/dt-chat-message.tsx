@@ -209,9 +209,9 @@ export function DtChatMessage(props: {
         ) : null}
         {isUser ? (
           <p className="whitespace-pre-wrap">{displayContent}</p>
-        ) : (
+        ) : displayContent.trim() ? (
           <DtChatMarkdown content={displayContent} />
-        )}
+        ) : null}
         <AttachmentRow isUser={isUser} items={attachItems} />
         {!isUser ? <DtChatArtifacts artifacts={artifacts} /> : null}
         {!isUser && taskProposals.length > 0 && props.onSaveTaskProposal ? (

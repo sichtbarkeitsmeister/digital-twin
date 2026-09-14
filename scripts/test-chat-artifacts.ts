@@ -4,6 +4,9 @@
  */
 import assert from "node:assert/strict";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { DtChatArtifacts } from "../components/dt/chat/dt-chat-artifacts";
 import {
   contentWithDtChatArtifactsForLlm,
   extractDtChatArtifactsFromMessage,
@@ -208,6 +211,27 @@ function testStaffPromptHasArtifactsProspectDoesNot() {
   console.log("prompt gating: ok");
 }
 
+function testArtifactCardMarkup() {
+  const html = renderToStaticMarkup(
+    createElement(DtChatArtifacts, {
+      artifacts: [
+        {
+          filename: "westpruefung-navigation-prototyp.html",
+          mimeType: "text/html",
+          content: NAV_HTML,
+        },
+      ],
+    }),
+  );
+  assert.match(html, /westpruefung-navigation-prototyp\.html/);
+  assert.match(html, /HTML-Dokument/);
+  assert.match(html, /Herunterladen/);
+  assert.match(html, /Vorschau/);
+  assert.match(html, /Neuer Tab/);
+  assert.doesNotMatch(html, /<iframe/);
+  console.log("artifact card markup: ok");
+}
+
 testHeaderHtmlArtifact();
 testBareHtmlFenceBecomesDownload();
 testSmallHtmlSnippetIsNotAnArtifact();
@@ -217,4 +241,5 @@ testLeavesSeoTaskFence();
 testMetadataRoundtrip();
 testFilenameSanitizesPath();
 testStaffPromptHasArtifactsProspectDoesNot();
+testArtifactCardMarkup();
 console.log("ok: chat artifacts");
