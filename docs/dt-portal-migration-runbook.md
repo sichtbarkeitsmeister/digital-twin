@@ -77,6 +77,8 @@ npx tsx scripts/dt-migrate-from-old-supabase.ts --apply --send-invites
 
 Point legacy avatar pages to `https://www.digital-twin-sbkm.de/` (chat) and `/dashboard/verwaltung/seo` (SEO admin). Decommission OLD in Phase 8.
 
+After WordPress is unused, lock down OLD so the public anon key can no longer read customer SEO config / reports / tasks: run `scripts/lock-down-old-supabase-rls.sql` in the OLD project SQL Editor (`zijlepanidmvwxbuwldz` / *digitaltwin n8n Workflow*). See `docs/old-supabase-full-inventory.md`.
+
 ## Troubleshooting
 
 - **Missing OLD table** — script logs `skipped` and continues (partial OLD schemas).
