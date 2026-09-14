@@ -38,6 +38,7 @@ import {
 import {
   DT_MAX_ATTACHMENTS,
 } from "@/lib/dt/attachments-shared";
+import { contentWithDtChatArtifactsForLlm } from "@/lib/dt/chat-artifacts";
 import type { DtAttachmentDraft, DtStoredAttachment } from "@/lib/dt/client-attachments";
 import {
   fileToDtAttachmentDraft,
@@ -926,7 +927,10 @@ export function DtChatShell(props: {
           .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({
             role: m.role as "user" | "assistant",
-            content: m.content,
+            content:
+              m.role === "assistant"
+                ? contentWithDtChatArtifactsForLlm(m.content, m.metadata)
+                : m.content,
           }));
 
         const res = await fetch("/api/dt/ghost/chat", {
