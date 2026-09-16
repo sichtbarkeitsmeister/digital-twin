@@ -867,6 +867,11 @@ export function DtAgentCreateWizard(props: {
               className={cn(fieldTextareaClass, "min-h-[200px] font-mono text-xs")}
             />
           </label>
+          <DtAgentQuickActionsField
+            actions={preview.quick_actions ?? []}
+            onChange={(actions) => setPreview({ ...preview, quick_actions: actions })}
+            disabled={busy}
+          />
         </div>
       ) : null}
 

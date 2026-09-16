@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import { DtAgentQuickActionsField } from "@/components/dt/agents/dt-agent-quick-actions-field";
 import { DtAttachmentChips } from "@/components/dt/chat/dt-attachment-chips";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { cn } from "@/components/dt/cn";
@@ -35,6 +36,13 @@ export function DtChatComposer(props: {
   onStop?: () => void;
   isBusy: boolean;
   quickActions: string[];
+  /** Customer view: picking a Schnelltest sends it instead of only filling the box. */
+  onPickQuickAction?: (label: string) => void;
+  /** Org managers / staff can persist Schnelltests from the chat. */
+  canEditQuickActions?: boolean;
+  onSaveQuickActions?: (
+    actions: string[],
+  ) => Promise<{ ok: boolean; message?: string }>;
   /** When true, Schnelltests start collapsed (e.g. after conversation has begun). */
   quickActionsDefaultCollapsed?: boolean;
   disabled?: boolean;
@@ -63,7 +71,13 @@ export function DtChatComposer(props: {
   const [quickActionsOpen, setQuickActionsOpen] = useState(
     () => !props.quickActionsDefaultCollapsed,
   );
+  const [quickActionsEditing, setQuickActionsEditing] = useState(false);
+  const [quickActionsDraft, setQuickActionsDraft] = useState(props.quickActions);
+  const [quickActionsSaving, setQuickActionsSaving] = useState(false);
+  const [quickActionsError, setQuickActionsError] = useState<string | null>(null);
   const personaTesting = props.personaTesting ?? false;
+  const canEditQuickActions = Boolean(props.canEditQuickActions && props.onSaveQuickActions);
+  const showQuickActions = !personaTesting && (props.quickActions.length > 0 || canEditQuickActions);
   const canSend =
     (props.value.trim().length > 0 || props.attachments.length > 0) &&
     !props.isBusy &&
@@ -72,6 +86,11 @@ export function DtChatComposer(props: {
   useEffect(() => {
     setQuickActionsOpen(!props.quickActionsDefaultCollapsed);
   }, [props.quickActionsDefaultCollapsed]);
+
+  useEffect(() => {
+    if (quickActionsEditing) return;
+    setQuickActionsDraft(props.quickActions);
+  }, [props.quickActions, quickActionsEditing]);
 
   return (
     <div
@@ -119,35 +138,53 @@ export function DtChatComposer(props: {
       </AnimatePresence>
 
       <div className="mx-auto w-full max-w-3xl">
-        {props.quickActions.length > 0 && !personaTesting ? (
+        {showQuickActions ? (
           <div className="mb-2">
-            <button
-              type="button"
-              aria-expanded={quickActionsOpen}
-              aria-controls="dt-composer-quick-actions"
-              onClick={() => setQuickActionsOpen((open) => !open)}
-              className={cn(
-                "inline-flex h-8 max-w-full items-center gap-1.5 rounded-pill border px-2.5 text-left transition duration-150 active:scale-[0.98]",
-                quickActionsOpen
-                  ? "border-sbkm-mint/45 bg-sbkm-mint/10 dark:border-sbkm-mint/30 dark:bg-sbkm-mint/10"
-                  : "border-sbkm-navy/12 bg-white/80 hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 dark:border-white/12 dark:bg-white/5 dark:hover:bg-white/10",
-              )}
-            >
-              <span className="truncate text-xs font-semibold text-sbkm-navy dark:text-white">
-                Schnelltests
-                <span className="font-medium text-sbkm-ink-500 dark:text-white/50">
-                  {" "}
-                  · {props.quickActions.length}
-                </span>
-              </span>
-              <ChevronDown
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                aria-expanded={quickActionsOpen}
+                aria-controls="dt-composer-quick-actions"
+                onClick={() => setQuickActionsOpen((open) => !open)}
                 className={cn(
-                  "h-3.5 w-3.5 shrink-0 text-sbkm-ink-500 transition-transform duration-200 dark:text-white/60",
-                  quickActionsOpen && "rotate-180",
+                  "inline-flex h-8 max-w-full items-center gap-1.5 rounded-pill border px-2.5 text-left transition duration-150 active:scale-[0.98]",
+                  quickActionsOpen
+                    ? "border-sbkm-mint/45 bg-sbkm-mint/10 dark:border-sbkm-mint/30 dark:bg-sbkm-mint/10"
+                    : "border-sbkm-navy/12 bg-white/80 hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 dark:border-white/12 dark:bg-white/5 dark:hover:bg-white/10",
                 )}
-                aria-hidden
-              />
-            </button>
+              >
+                <span className="truncate text-xs font-semibold text-sbkm-navy dark:text-white">
+                  Schnelltests
+                  <span className="font-medium text-sbkm-ink-500 dark:text-white/50">
+                    {" "}
+                    · {props.quickActions.length}
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0 text-sbkm-ink-500 transition-transform duration-200 dark:text-white/60",
+                    quickActionsOpen && "rotate-180",
+                  )}
+                  aria-hidden
+                />
+              </button>
+              {canEditQuickActions && !quickActionsEditing ? (
+                <button
+                  type="button"
+                  disabled={props.isBusy || props.disabled || quickActionsSaving}
+                  onClick={() => {
+                    setQuickActionsError(null);
+                    setQuickActionsDraft(props.quickActions);
+                    setQuickActionsEditing(true);
+                    setQuickActionsOpen(true);
+                  }}
+                  className="inline-flex h-8 items-center gap-1 rounded-pill border border-sbkm-navy/12 bg-white/80 px-2.5 text-xs font-semibold text-sbkm-navy transition duration-150 hover:border-sbkm-mint/40 hover:bg-sbkm-mint/10 active:scale-[0.98] dark:border-white/12 dark:bg-white/5 dark:text-white"
+                >
+                  <PenLine className="h-3.5 w-3.5" aria-hidden />
+                  Bearbeiten
+                </button>
+              ) : null}
+            </div>
             <AnimatePresence initial={false}>
               {quickActionsOpen ? (
                 <motion.div
@@ -159,19 +196,81 @@ export function DtChatComposer(props: {
                   transition={{ duration: 0.18 }}
                   className="overflow-hidden"
                 >
-                  <div className="flex flex-wrap gap-1.5 pt-1.5">
-                    {props.quickActions.map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        disabled={props.isBusy || props.disabled}
-                        onClick={() => props.onChange(label)}
-                        className="rounded-pill border border-sbkm-navy/12 bg-white/75 px-2.5 py-1 text-[11px] font-semibold leading-snug text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+                  {quickActionsEditing && canEditQuickActions ? (
+                    <div className="grid gap-2 pt-1.5">
+                      <DtAgentQuickActionsField
+                        actions={quickActionsDraft}
+                        onChange={(actions) => {
+                          setQuickActionsError(null);
+                          setQuickActionsDraft(actions);
+                        }}
+                        disabled={props.isBusy || props.disabled || quickActionsSaving}
+                        hidePreview
+                      />
+                      {quickActionsError ? (
+                        <p className="text-xs text-red-600 dark:text-red-400" role="alert">
+                          {quickActionsError}
+                        </p>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <DtPillButton
+                          type="button"
+                          size="sm"
+                          disabled={props.isBusy || props.disabled || quickActionsSaving}
+                          onClick={() => {
+                            void (async () => {
+                              setQuickActionsSaving(true);
+                              setQuickActionsError(null);
+                              const result = await props.onSaveQuickActions!(quickActionsDraft);
+                              setQuickActionsSaving(false);
+                              if (!result.ok) {
+                                setQuickActionsError(result.message ?? "Speichern fehlgeschlagen.");
+                                return;
+                              }
+                              setQuickActionsEditing(false);
+                            })();
+                          }}
+                        >
+                          {quickActionsSaving ? "Speichern…" : "Speichern"}
+                        </DtPillButton>
+                        <DtPillButton
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={quickActionsSaving}
+                          onClick={() => {
+                            setQuickActionsDraft(props.quickActions);
+                            setQuickActionsError(null);
+                            setQuickActionsEditing(false);
+                          }}
+                        >
+                          Abbrechen
+                        </DtPillButton>
+                      </div>
+                    </div>
+                  ) : props.quickActions.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 pt-1.5">
+                      {props.quickActions.map((label) => (
+                        <button
+                          key={label}
+                          type="button"
+                          disabled={props.isBusy || props.disabled}
+                          onClick={() =>
+                            props.onPickQuickAction
+                              ? props.onPickQuickAction(label)
+                              : props.onChange(label)
+                          }
+                          className="rounded-pill border border-sbkm-navy/12 bg-white/75 px-2.5 py-1 text-[11px] font-semibold leading-snug text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition duration-150 hover:-translate-y-px hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 active:scale-[0.98] disabled:opacity-50 dark:border-white/12 dark:bg-white/5 dark:text-white"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="pt-1.5 text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/50">
+                      Noch keine Schnelltests — über „Bearbeiten“ anlegen und speichern.
+                    </p>
+                  )}
                 </motion.div>
               ) : null}
             </AnimatePresence>

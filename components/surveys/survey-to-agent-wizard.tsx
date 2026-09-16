@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { DtSelect } from "@/components/dt/dt-select";
+import { DtAgentQuickActionsField } from "@/components/dt/agents/dt-agent-quick-actions-field";
 import { cn } from "@/components/dt/cn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1212,6 +1213,15 @@ export function SurveyToAgentWizard(props: {
                   >
                     {promptExpanded ? "Weniger anzeigen" : "Vollständig anzeigen"}
                   </button>
+                </div>
+                <div className="sm:col-span-2">
+                  <DtAgentQuickActionsField
+                    actions={preview.quick_actions ?? []}
+                    onChange={(actions) =>
+                      setPreview({ ...preview, quick_actions: actions })
+                    }
+                    disabled={loading || creating || repairBusy}
+                  />
                 </div>
               </CardContent>
             </Card>

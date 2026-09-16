@@ -1377,7 +1377,7 @@ export function DtChatShell(props: {
                   }
                   onSuggestedFollowUp={
                     messages.length === 0 && !personaTesting
-                      ? (text) => setPrompt(text)
+                      ? (text) => void handleSend(text)
                       : undefined
                   }
                   seoTasks={props.seoMode || isSeoChat ? seoTasks : undefined}
@@ -1484,6 +1484,34 @@ export function DtChatShell(props: {
               onStop={() => abortRef.current?.abort()}
               isBusy={isBusy}
               quickActions={quickActions}
+              onPickQuickAction={(label) => void handleSend(label)}
+              canEditQuickActions={canManageAgents || Boolean(props.isPlatformAdmin)}
+              onSaveQuickActions={
+                selectedAgentId
+                  ? async (actions) => {
+                      const res = await fetch(`/api/dt/agents/${selectedAgentId}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ quickActions: actions }),
+                      });
+                      const json = (await res.json()) as { ok?: boolean; message?: string };
+                      if (!json.ok) {
+                        return {
+                          ok: false,
+                          message: json.message ?? "Speichern fehlgeschlagen.",
+                        };
+                      }
+                      setAgents((prev) =>
+                        prev.map((agent) =>
+                          agent.id === selectedAgentId
+                            ? { ...agent, quick_actions: actions }
+                            : agent,
+                        ),
+                      );
+                      return { ok: true };
+                    }
+                  : undefined
+              }
               quickActionsDefaultCollapsed={messages.length > 0}
               disabled={!selectedAgentId || (isInitialLoading && !ghostMode)}
               ghostMode={ghostMode}

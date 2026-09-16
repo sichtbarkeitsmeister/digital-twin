@@ -156,6 +156,7 @@ export function DtAgentsManager(props: {
     if (!isValidOrgId(fromUrl, props.organisations) || fromUrl === orgId) return;
     setOrgId(fromUrl);
     setEditingId(null);
+    setQuickActionsOnly(false);
     setInitialLoading(true);
   }, [searchParams, props.organisations, orgReady, orgId]);
 
@@ -167,6 +168,7 @@ export function DtAgentsManager(props: {
 
   const [createWizardOpen, setCreateWizardOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [quickActionsOnly, setQuickActionsOnly] = useState(false);
   const [editValues, setEditValues] = useState(agentFormValuesFromRow({
     name: "",
     role: null,
@@ -193,9 +195,10 @@ export function DtAgentsManager(props: {
     const row = agents.find((a) => a.id === agentFromUrl);
     if (!row) return;
     setEditingId(row.id);
+    setQuickActionsOnly(!canDirectlyEdit);
     setEditValues(agentFormValuesFromRow(row));
     setPageView("agents");
-  }, [searchParams, agents, editingId]);
+  }, [searchParams, agents, editingId, canDirectlyEdit]);
 
   const [globalPromptDraft, setGlobalPromptDraft] = useState<GlobalPrompts>({
     default: "",
@@ -368,8 +371,9 @@ export function DtAgentsManager(props: {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  function startEdit(agent: AgentRow) {
+  function startEdit(agent: AgentRow, mode: "full" | "quickActions" = "full") {
     setEditingId(agent.id);
+    setQuickActionsOnly(mode === "quickActions");
     setEditValues(agentFormValuesFromRow(agent));
     setPageView("agents");
     writeAgentQuery(agent.id);
@@ -377,6 +381,7 @@ export function DtAgentsManager(props: {
 
   function cancelEdit() {
     setEditingId(null);
+    setQuickActionsOnly(false);
     writeAgentQuery(null);
   }
 
@@ -457,6 +462,7 @@ export function DtAgentsManager(props: {
     );
     if (editingId === agent.id) {
       setEditingId(null);
+      setQuickActionsOnly(false);
       writeAgentQuery(null);
     }
     await refresh(true);
@@ -465,34 +471,38 @@ export function DtAgentsManager(props: {
   async function saveEdit() {
     if (!editingId) return;
     setBusy(true);
-    const body: Record<string, unknown> = {
-      name: editValues.name,
-      role: editValues.role || null,
-      promptAppend: editValues.promptAppend.trim() || null,
-      quickActions: quickActionsFromForm(editValues.quick),
-      isEnabled: editValues.enabled,
-      position: editValues.position,
-    };
-    if (editingAgent?.is_default) {
-      body.usesGlobalPrompt = editValues.usesGlobalPrompt;
-      if (!editValues.usesGlobalPrompt) {
+    const body: Record<string, unknown> = quickActionsOnly
+      ? { quickActions: quickActionsFromForm(editValues.quick) }
+      : {
+          name: editValues.name,
+          role: editValues.role || null,
+          promptAppend: editValues.promptAppend.trim() || null,
+          quickActions: quickActionsFromForm(editValues.quick),
+          isEnabled: editValues.enabled,
+          position: editValues.position,
+        };
+    if (!quickActionsOnly) {
+      if (editingAgent?.is_default) {
+        body.usesGlobalPrompt = editValues.usesGlobalPrompt;
+        if (!editValues.usesGlobalPrompt) {
+          body.promptTemplate = editValues.prompt;
+        }
+      } else if (editingAgent && isSeoAdvisorAgent(editingAgent)) {
+        body.usesGlobalPrompt = editingAgent.uses_global_prompt ?? true;
+        if (!editingAgent.uses_global_prompt) {
+          body.promptTemplate = editValues.prompt;
+        }
+      } else if (
+        editingAgent?.source_survey_id ||
+        editingAgent?.uses_global_prompt
+      ) {
+        // One editable field → prompt_append; shared rules from global DigitalTwin prompt.
+        body.usesGlobalPrompt = true;
+        body.promptTemplate = `Avatar: ${editValues.name}`;
+        body.promptAppend = editValues.promptAppend.trim() || null;
+      } else {
         body.promptTemplate = editValues.prompt;
       }
-    } else if (editingAgent && isSeoAdvisorAgent(editingAgent)) {
-      body.usesGlobalPrompt = editingAgent.uses_global_prompt ?? true;
-      if (!editingAgent.uses_global_prompt) {
-        body.promptTemplate = editValues.prompt;
-      }
-    } else if (
-      editingAgent?.source_survey_id ||
-      editingAgent?.uses_global_prompt
-    ) {
-      // One editable field → prompt_append; shared rules from global DigitalTwin prompt.
-      body.usesGlobalPrompt = true;
-      body.promptTemplate = `Avatar: ${editValues.name}`;
-      body.promptAppend = editValues.promptAppend.trim() || null;
-    } else {
-      body.promptTemplate = editValues.prompt;
     }
     const res = await fetch(`/api/dt/agents/${editingId}`, {
       method: "PATCH",
@@ -505,9 +515,11 @@ export function DtAgentsManager(props: {
       toast.error(json.message ?? "Speichern fehlgeschlagen.");
       return;
     }
+    const savedQuickActionsOnly = quickActionsOnly;
     setEditingId(null);
+    setQuickActionsOnly(false);
     writeAgentQuery(null);
-    toast.success("Agent gespeichert.");
+    toast.success(savedQuickActionsOnly ? "Schnelltests gespeichert." : "Agent gespeichert.");
     await refresh(true);
   }
 
@@ -660,9 +672,13 @@ export function DtAgentsManager(props: {
                   canDirectlyEdit={canDirectlyEdit}
                   pendingReview={Boolean(pendingByAgentId.get(agent.id))}
                   isEditing={editingId === agent.id}
+                  quickActionsOnly={quickActionsOnly && editingId === agent.id}
                   editValues={editValues}
                   onEditValuesChange={(patch) => setEditValues((v) => ({ ...v, ...patch }))}
                   onStartEdit={() => startEdit(agent)}
+                  onStartQuickActionsEdit={
+                    canDirectlyEdit ? undefined : () => startEdit(agent, "quickActions")
+                  }
                   onSaveEdit={() => void saveEdit()}
                   onCancelEdit={cancelEdit}
                   onToggleEnabled={(next) => void toggleEnabled(agent, next)}
@@ -755,7 +771,7 @@ export function DtAgentsManager(props: {
                 {initialLoading ? (
                   <span className="inline-block h-4 w-full max-w-md animate-pulse rounded bg-sbkm-navy/10 dark:bg-white/10" />
                 ) : (
-                  "Übersicht der verfügbaren Agenten. Änderungen als Anfrage einreichen."
+                  "Schnelltests direkt speichern. Andere Änderungen als Anfrage einreichen."
                 )}
               </p>
             ) : null}
