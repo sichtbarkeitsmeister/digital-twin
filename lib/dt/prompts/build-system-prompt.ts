@@ -53,6 +53,8 @@ export function buildDtSystemPrompt(input: {
   wunschkundenKnowledgeText?: string;
   /** Uploaded website IA (SEO/GEO). Omitted for prospect personas. */
   websiteStructureText?: string;
+  /** Evaluated meeting transcripts (Anbieter + Personas). Omitted for prospects. */
+  transcriptKnowledgeText?: string;
   pastedUrlsText?: string;
   textMode?: boolean;
 }): string {
@@ -101,6 +103,10 @@ export function buildDtSystemPrompt(input: {
 
   if (!prospect && input.websiteStructureText?.trim()) {
     blocks.push("", input.websiteStructureText.trim());
+  }
+
+  if (!prospect && input.transcriptKnowledgeText?.trim()) {
+    blocks.push("", input.transcriptKnowledgeText.trim());
   }
 
   // After persona text so a mis-generated "brand ambassador" prompt cannot win.

@@ -164,6 +164,15 @@ export default async function OrganisationFrageboegenPage({
                 {selectedOrganisationId ? (
                   <Button asChild variant="outline" size="sm">
                     <Link
+                      href={`/dashboard/transkripte?org=${encodeURIComponent(selectedOrganisationId)}`}
+                    >
+                      Transkripte
+                    </Link>
+                  </Button>
+                ) : null}
+                {selectedOrganisationId ? (
+                  <Button asChild variant="outline" size="sm">
+                    <Link
                       href={`/dashboard/erstgespraech?org=${encodeURIComponent(selectedOrganisationId)}`}
                     >
                       Erstgespräch

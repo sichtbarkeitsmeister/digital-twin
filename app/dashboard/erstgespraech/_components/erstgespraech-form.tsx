@@ -254,6 +254,13 @@ export function ErstgespraechForm(props: {
         </Button>
         {organisationId ? (
           <Button asChild type="button" variant="ghost">
+            <Link href={`/dashboard/transkripte?org=${encodeURIComponent(organisationId)}`}>
+              Zu den Transkripten
+            </Link>
+          </Button>
+        ) : null}
+        {organisationId ? (
+          <Button asChild type="button" variant="ghost">
             <Link href={`/dashboard/frageboegen?org=${encodeURIComponent(organisationId)}`}>
               Zu den Fragebögen
             </Link>

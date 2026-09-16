@@ -272,17 +272,31 @@ export async function OrganisationDetailView({
                   </p>
                 </div>
               </div>
-              <Button
-                asChild
-                size="sm"
-                variant="ghost"
-                className="h-8 text-xs font-semibold"
-              >
-                <Link href={`/dashboard/frageboegen?org=${encodeURIComponent(organisationId)}`}>
-                  Alle Fragebögen
-                  <ArrowRight className="size-3.5" />
-                </Link>
-              </Button>
+              <div className="flex flex-wrap items-center gap-1">
+                {platformAdmin ? (
+                  <Button
+                    asChild
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs font-semibold"
+                  >
+                    <Link href={`/dashboard/transkripte?org=${encodeURIComponent(organisationId)}`}>
+                      Transkripte
+                    </Link>
+                  </Button>
+                ) : null}
+                <Button
+                  asChild
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs font-semibold"
+                >
+                  <Link href={`/dashboard/frageboegen?org=${encodeURIComponent(organisationId)}`}>
+                    Alle Fragebögen
+                    <ArrowRight className="size-3.5" />
+                  </Link>
+                </Button>
+              </div>
             </div>
             <div className="p-2 sm:p-3">
               {surveys.length === 0 ? (
