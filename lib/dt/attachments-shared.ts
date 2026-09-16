@@ -78,7 +78,7 @@ export function guessDtMimeFromName(fileName: string, fallback = "application/oc
   if (n.endsWith(".xml")) return "application/xml";
   if (n.endsWith(".css")) return "text/css";
   if (n.endsWith(".js")) return "text/javascript";
-  if (n.endsWith(".xlsx")) {
+  if (n.endsWith(".xlsx") || n.endsWith(".xlsm")) {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   }
   if (n.endsWith(".xls")) return "application/vnd.ms-excel";
@@ -91,6 +91,71 @@ export function guessDtMimeFromName(fileName: string, fallback = "application/oc
   }
   if (n.endsWith(".zip")) return "application/zip";
   return fallback;
+}
+
+const GENERIC_UPLOAD_MIMES = new Set([
+  "",
+  "application/octet-stream",
+  "binary/octet-stream",
+  "application/zip",
+  "application/x-zip",
+  "application/x-zip-compressed",
+  "application/x-msdownload",
+]);
+
+export function isDtGenericUploadMime(mimeType: string): boolean {
+  return GENERIC_UPLOAD_MIMES.has(normalizeDtMime(mimeType));
+}
+
+function sniffDtMimeFromBytes(bytes: Uint8Array, fileName: string): string | null {
+  const fromName = guessDtMimeFromName(fileName, "");
+  if (bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+    return "application/pdf";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return "image/png";
+  }
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    return "image/gif";
+  }
+  if (bytes.length >= 12 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return "image/webp";
+  }
+  if (bytes.length >= 8 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) {
+    return fromName || "application/vnd.ms-excel";
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    return fromName || "application/zip";
+  }
+  return fromName || null;
+}
+
+/**
+ * Storage rejects generic types like application/octet-stream on the current bucket.
+ * Prefer a real type from the filename or file header.
+ */
+export function resolveDtStorageMime(
+  fileName: string,
+  declaredMime: string,
+  bytes?: Uint8Array,
+): string {
+  const sniffed = bytes ? sniffDtMimeFromBytes(bytes, fileName) : null;
+  const fromName = guessDtMimeFromName(fileName, "");
+  const declared = normalizeDtMime(declaredMime);
+
+  if (sniffed && (isDtGenericUploadMime(declared) || !declared)) return sniffed;
+  if (fromName && (isDtGenericUploadMime(declared) || !declared)) return fromName;
+  if (declared && !isDtGenericUploadMime(declared)) return declared;
+  return sniffed || fromName || "text/plain";
 }
 
 export const MAX_ATTACHMENT_BASE64_CHARS =

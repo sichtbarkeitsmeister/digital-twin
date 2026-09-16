@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
 
 import { extractTextPreviewFromBytes } from "../lib/dt/parse-attachment-text";
-import { guessDtMimeFromName, isDtPreviewableMime } from "../lib/dt/attachments-shared";
+import { guessDtMimeFromName, isDtPreviewableMime, resolveDtStorageMime } from "../lib/dt/attachments-shared";
 import {
   buildCreatedChatFile,
   ensureFileNameExtension,
@@ -117,6 +117,31 @@ async function testFileFences() {
   console.log("file fences: ok");
 }
 
+function testResolveStorageMime() {
+  const zipHeader = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+  assert.match(
+    resolveDtStorageMime("bericht.xlsx", "application/octet-stream", zipHeader),
+    /spreadsheet/,
+  );
+  assert.match(
+    resolveDtStorageMime("brief.docx", "application/x-zip-compressed", zipHeader),
+    /wordprocessingml/,
+  );
+  assert.equal(
+    resolveDtStorageMime(
+      "scan.pdf",
+      "application/octet-stream",
+      new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]),
+    ),
+    "application/pdf",
+  );
+  assert.notEqual(
+    resolveDtStorageMime("daten.bin", "application/octet-stream"),
+    "application/octet-stream",
+  );
+  console.log("resolve storage mime: ok");
+}
+
 function testHelpers() {
   assert.equal(guessDtMimeFromName("tabelle.xlsx").includes("spreadsheet"), true);
   assert.equal(guessDtMimeFromName("seite.html"), "text/html");
@@ -156,6 +181,7 @@ async function main() {
   await testCreateHtmlAndPdfAndXlsx();
   await testFileFences();
   testHelpers();
+  testResolveStorageMime();
   testPromptMentionsFiles();
   console.log("all dt chat file tests passed");
 }
