@@ -31,9 +31,8 @@ function looksLikePdf(fileName: string, mimeType: string, bytes: Uint8Array): bo
 
 async function extractPdfText(bytes: Uint8Array): Promise<string> {
   const { extractText } = await import("unpdf");
-  const result = await extractText(bytes, { mergePages: true });
-  const raw = typeof result.text === "string" ? result.text : result.text.join("\n\n");
-  return raw
+  const { text } = await extractText(bytes, { mergePages: true });
+  return text
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
