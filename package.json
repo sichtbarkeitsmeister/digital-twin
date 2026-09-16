@@ -62,6 +62,7 @@
     "test:discover-grounding-page-url": "tsx scripts/test-discover-grounding-page-url.ts",
     "test:website-structure": "tsx scripts/test-website-structure.ts",
     "test:meeting-transcripts": "tsx scripts/test-meeting-transcripts.ts",
+    "test:text-mode-prompt": "tsx scripts/test-text-mode-prompt.ts",
     "types:generate": "tsx scripts/generate-types.ts",
     "auth:set-magic-link-rate-limit": "tsx scripts/set-supabase-magic-link-rate-limit.ts",
     "env:check": "node -e \"console.log('URL=',process.env.NEXT_PUBLIC_SUPABASE_URL); console.log('KEY=',(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'').slice(0,8));\"",

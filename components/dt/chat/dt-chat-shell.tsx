@@ -250,7 +250,7 @@ export function DtChatShell(props: {
       : "default";
   const contextHref =
     props.isPlatformAdmin && selectedOrgId && selectedAgentId
-      ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}`
+      ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}${textMode ? "&textMode=1" : ""}`
       : null;
 
   const refreshChats = useCallback(async () => {

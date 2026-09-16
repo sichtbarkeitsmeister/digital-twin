@@ -13,6 +13,7 @@ const querySchema = z.object({
   org: z.string().uuid(),
   agent: z.string().uuid(),
   mode: z.enum(["default", "seo", "team"]).default("default"),
+  textMode: z.enum(["0", "1", "true", "false"]).optional(),
 });
 
 export async function GET(req: Request) {
@@ -34,6 +35,7 @@ export async function GET(req: Request) {
     org: url.searchParams.get("org"),
     agent: url.searchParams.get("agent"),
     mode: url.searchParams.get("mode") ?? "default",
+    textMode: url.searchParams.get("textMode") ?? undefined,
   });
 
   if (!parsed.success) {
@@ -83,6 +85,7 @@ export async function GET(req: Request) {
       organisationId: parsed.data.org,
       agentId: parsed.data.agent,
       mode: parsed.data.mode as DtAgentContextMode,
+      textMode: parsed.data.textMode === "1" || parsed.data.textMode === "true",
     });
 
     return NextResponse.json({ ok: true, bundle });
