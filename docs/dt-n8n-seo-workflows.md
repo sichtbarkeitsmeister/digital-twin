@@ -10,6 +10,8 @@ Maps the production workflow **Sichtbarkeitsmeister SEO-Report** (`6voT3Eu7jFETc
 | **DT v2 - Monthly Analytics** | `POST /webhook/dt-monthly-analytics` `{ organisationId }` | GSC + GA4 nodes (legacy credentials) |
 | **DT v2 - Monthly Analytics Scheduler** | Cron `0 3 1 * *` | Lists orgs → triggers collect webhook |
 | **DT v2 - SEO Report Scheduler** | Cron `0 4 1 * *` | Queues monthly SEO reports for all ready orgs |
+| **DT v2 - GSC URL Inspection** | `POST /webhook/dt-gsc-url-inspection` `{ organisationId, urls? }` | Per-URL index samples |
+| **DT v2 - GSC Pages** | `POST /webhook/dt-gsc-pages` `{ organisationId, crawlId? }` | Search Analytics pages → crawl seed + index badges |
 
 Legacy workflow is **not modified**.
 
@@ -23,6 +25,7 @@ Legacy workflow is **not modified**.
 | `GET /api/dt/internal/seo-org/[orgId]/config` | Per-org config for monthly job |
 | `POST /api/dt/internal/seo-monthly-stats` | Upsert `dt_seo_monthly_stats` |
 | `POST /api/dt/internal/seo-reports/queue` | Queue monthly SEO report(s); body `{}` = all ready orgs |
+| `POST /api/dt/internal/seo-gsc-pages` | Upsert GSC page rows and enqueue them on the active crawl |
 
 All internal routes: header `X-DT-Webhook-Secret: $DT_INTERNAL_WEBHOOK_SECRET`.
 
@@ -49,11 +52,17 @@ npm run dt:n8n:seo-report
 npm run dt:n8n:monthly-collect
 npm run dt:n8n:monthly-scheduler
 npm run dt:n8n:seo-report-scheduler
+npm run dt:n8n:gsc-url-inspection
+npm run dt:n8n:gsc-pages
 ```
 
 **GSC URL Inspection (Stichprobe):** Workflow `DT v2 - GSC URL Inspection`, Webhook
 `dt-gsc-url-inspection`. Deploy: `npm run dt:n8n:gsc-url-inspection`. Danach
-`N8N_DT_GSC_URL_INSPECTION_WEBHOOK` in Vercel setzen. Details: `docs/seo-indexierung.md`.
+`N8N_DT_GSC_URL_INSPECTION_WEBHOOK` in Vercel setzen.
+
+**GSC Pages (Crawl-Seed + Indexstatus):** Workflow `DT v2 - GSC Pages`, Webhook
+`dt-gsc-pages`. Deploy: `npm run dt:n8n:gsc-pages`. Danach
+`N8N_DT_GSC_PAGES_WEBHOOK` in Vercel setzen. Details: `docs/seo-indexierung.md`.
 
 **Wichtig:** Die SEO-Werkzeuge des Beraters (`read_sitemap`, `inspect_website_url`,
 `audit_site_indexability`, `read_index_status`, `request_gsc_index_check`,

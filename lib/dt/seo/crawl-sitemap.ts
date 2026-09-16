@@ -2,7 +2,21 @@ import * as cheerio from "cheerio";
 import { gunzipSync } from "node:zlib";
 
 import { isDtExcludedPageUrl } from "@/lib/dt/seo/build-seo-context";
+import {
+  extractSitemapLocs,
+  isSameCrawlSite,
+  normaliseUrl,
+} from "@/lib/dt/seo/crawl-url";
 import { checkSafePublicUrl } from "@/lib/shared/safe-fetch-url";
+
+export {
+  extractSitemapLocs,
+  isSameCrawlSite,
+  normaliseUrl,
+  resolveOrigin,
+  crawlHostKey,
+  decodeXmlEntities,
+} from "@/lib/dt/seo/crawl-url";
 
 export const USER_AGENT =
   "Mozilla/5.0 (compatible; DigitalTwin-SBKM-Crawler/1.0; +https://www.digital-twin-sbkm.de)";
@@ -39,38 +53,8 @@ type ParsedPage = {
   links: string[];
 };
 
-/**
- * Normalise a URL for frontier deduplication: lowercase host, strip default ports,
- * drop trailing slash (except root), drop index.html/index.php, strip tracking params.
- */
-export function normaliseUrl(raw: string, base?: string): string | null {
-  try {
-    const u = new URL(raw, base);
-    u.hash = "";
-    u.hostname = u.hostname.toLowerCase();
-    if ((u.protocol === "http:" && u.port === "80") || (u.protocol === "https:" && u.port === "443")) {
-      u.port = "";
-    }
-    for (const key of [...u.searchParams.keys()]) {
-      if (/^(utm_|fbclid|gclid|mc_)/i.test(key)) u.searchParams.delete(key);
-    }
-    let pathname = u.pathname;
-    if (pathname.length > 1 && pathname.endsWith("/")) {
-      pathname = pathname.slice(0, -1);
-    }
-    if (/\/index\.(html?|php)$/i.test(pathname)) {
-      pathname = pathname.replace(/\/index\.(html?|php)$/i, "") || "/";
-    }
-    u.pathname = pathname;
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
-
 function isCrawlableLink(resolved: URL, origin: string): boolean {
-  if (resolved.origin !== origin) return false;
-  if (!/^https?:$/.test(resolved.protocol)) return false;
+  if (!isSameCrawlSite(resolved.toString(), origin)) return false;
   if (
     /\.(jpg|jpeg|png|gif|webp|avif|svg|ico|pdf|zip|rar|gz|mp4|mp3|wav|mov|avi|css|js|json|xml|woff2?|ttf|eot)$/i.test(
       resolved.pathname,
@@ -170,8 +154,7 @@ export async function fetchUrlsFromSitemap(
   if (depth > 10 || collected.length >= SITEMAP_URL_LIMIT) return collected;
 
   const xml = await fetchSitemapBody(sitemapUrl);
-  const locs = [...xml.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((m) => m[1]!.trim());
-  const unique = [...new Set(locs)];
+  const unique = [...new Set(extractSitemapLocs(xml))];
 
   if (xml.includes("<sitemapindex")) {
     for (const sub of unique) {
@@ -279,7 +262,7 @@ async function fetchPageOnce(
   const contentType = res.headers.get("content-type") ?? "";
   if (res.ok && contentType.includes("text/html")) {
     const html = decodeHtml(await res.arrayBuffer(), contentType);
-    const parsed = parsePage(html, url, origin);
+    const parsed = parsePage(html, res.url || url, origin);
     return {
       page: {
         title: parsed.title,
@@ -349,15 +332,4 @@ export function toCrawledPage(url: string, origin: string): DtCrawledPage | null
     };
   }
   return null;
-}
-
-export function resolveOrigin(websiteUrl: string | null | undefined): string | null {
-  if (!websiteUrl?.trim()) return null;
-  const n = normaliseUrl(websiteUrl.trim());
-  if (!n) return null;
-  try {
-    return new URL(n).origin;
-  } catch {
-    return null;
-  }
 }

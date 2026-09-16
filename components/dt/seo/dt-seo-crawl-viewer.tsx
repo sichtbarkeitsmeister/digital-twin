@@ -16,6 +16,7 @@ import {
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { cn } from "@/components/dt/cn";
 import { Input } from "@/components/ui/input";
+import { indexStatusLabel, type CrawlIndexFilter, type PageIndexStatus } from "@/lib/dt/seo/gsc-pages";
 
 const PAGE_SIZE = 50;
 
@@ -25,12 +26,37 @@ export type CrawlPageSummary = {
   h1: string | null;
   meta_description: string | null;
   is_excluded: boolean;
-  crawled_at: string;
+  crawled_at: string | null;
+  inCrawl?: boolean;
+  inGsc?: boolean;
+  indexStatus?: PageIndexStatus;
+  gscClicks?: number | null;
+  gscImpressions?: number | null;
+  gscPosition?: number | null;
+  inspectionCoverage?: string | null;
+  inspectionVerdict?: string | null;
 };
 
 export type CrawlPageDetail = CrawlPageSummary & {
   text_content: string | null;
 };
+
+type IndexCounts = {
+  total: number;
+  crawled: number;
+  gsc: number;
+  gscOnly: number;
+  indexed: number;
+  notIndexed: number;
+  unknown: number;
+};
+
+const INDEX_FILTERS: { id: CrawlIndexFilter; label: string }[] = [
+  { id: "all", label: "Alle" },
+  { id: "indexed", label: "Indexiert" },
+  { id: "not_indexed", label: "Nicht indexiert" },
+  { id: "gsc_only", label: "Nur in GSC" },
+];
 
 function pageLabel(page: { title: string | null; h1: string | null; url: string }): string {
   return page.title?.trim() || page.h1?.trim() || page.url;
@@ -44,8 +70,13 @@ function formatChars(n: number): string {
 export function DtSeoCrawlViewer(props: { organisationId: string; organisationName?: string }) {
   const [stats, setStats] = useState<{
     count: number;
+    crawledCount: number;
     withTextCount: number;
     lastCrawledAt: string | null;
+    counts: IndexCounts | null;
+    gscSynced: boolean;
+    gscFetchedAt: string | null;
+    gscSyncStatus: string | null;
   } | null>(null);
   const [activeCrawl, setActiveCrawl] = useState<{
     status: string;
@@ -53,6 +84,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
     pagesDiscovered: number;
     maxPages: number;
     message: string | null;
+    gscSyncStatus?: string | null;
   } | null>(null);
   const [lastCrawlError, setLastCrawlError] = useState<string | null>(null);
   const [pages, setPages] = useState<CrawlPageSummary[]>([]);
@@ -60,6 +92,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [indexFilter, setIndexFilter] = useState<CrawlIndexFilter>("all");
   const [loadingList, setLoadingList] = useState(true);
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   const [detail, setDetail] = useState<CrawlPageDetail | null>(null);
@@ -73,6 +106,10 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
     return () => clearTimeout(t);
   }, [search]);
 
+  useEffect(() => {
+    setOffset(0);
+  }, [indexFilter]);
+
   const loadList = useCallback(async () => {
     setLoadingList(true);
     const params = new URLSearchParams({
@@ -81,21 +118,28 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
       offset: String(offset),
     });
     if (debouncedSearch) params.set("q", debouncedSearch);
+    if (indexFilter !== "all") params.set("index", indexFilter);
 
     const res = await fetch(`/api/dt/seo/crawl?${params}`);
     const json = (await res.json()) as {
       ok?: boolean;
       count?: number;
+      crawledCount?: number;
       withTextCount?: number;
       lastCrawledAt?: string | null;
       total?: number;
       pages?: CrawlPageSummary[];
+      counts?: IndexCounts;
+      gscSynced?: boolean;
+      gscFetchedAt?: string | null;
+      gscSyncStatus?: string | null;
       crawl?: {
         status: string;
         pagesCrawled: number;
         pagesDiscovered: number;
         maxPages: number;
         message: string | null;
+        gscSyncStatus?: string | null;
       } | null;
       lastCrawlError?: string | null;
     };
@@ -104,15 +148,20 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
 
     setStats({
       count: json.count ?? 0,
+      crawledCount: json.crawledCount ?? json.count ?? 0,
       withTextCount: json.withTextCount ?? 0,
       lastCrawledAt: json.lastCrawledAt ?? null,
+      counts: json.counts ?? null,
+      gscSynced: Boolean(json.gscSynced),
+      gscFetchedAt: json.gscFetchedAt ?? null,
+      gscSyncStatus: json.gscSyncStatus ?? json.crawl?.gscSyncStatus ?? null,
     });
     setActiveCrawl(json.crawl ?? null);
     setLastCrawlError(json.lastCrawlError ?? null);
     setTotal(json.total ?? 0);
     const rows = json.pages ?? [];
     setPages(rows);
-  }, [props.organisationId, offset, debouncedSearch]);
+  }, [props.organisationId, offset, debouncedSearch, indexFilter]);
 
   useEffect(() => {
     void loadList();
@@ -184,7 +233,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
             Zurück zu SEO-Einstellungen
           </Link>
           <h1 className="text-xl font-bold tracking-tight text-sbkm-navy sm:text-2xl dark:text-white">
-            Gecrawlte Website-Inhalte
+            Website-Seiten & Indexstatus
           </h1>
           {props.organisationName ? (
             <p className="text-sm text-sbkm-ink-600 dark:text-white/60">{props.organisationName}</p>
@@ -192,7 +241,12 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
         </div>
         {stats ? (
           <div className="flex flex-wrap gap-2 text-xs">
-            <StatPill label="Seiten gesamt" value={String(stats.count)} />
+            <StatPill label="Seiten gesamt" value={String(stats.counts?.total ?? stats.count)} />
+            <StatPill label="Indexiert" value={String(stats.counts?.indexed ?? "—")} />
+            <StatPill label="Nicht indexiert" value={String(stats.counts?.notIndexed ?? "—")} />
+            {stats.counts?.gscOnly ? (
+              <StatPill label="Nur in GSC" value={String(stats.counts.gscOnly)} />
+            ) : null}
             <StatPill label="Mit Text" value={String(stats.withTextCount)} />
             {stats.lastCrawledAt ? (
               <StatPill
@@ -229,9 +283,15 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
         </div>
       ) : null}
 
+      {stats && stats.gscSyncStatus === "pending" ? (
+        <DtGlassCard className="border-sbkm-navy/10 px-4 py-3 text-sm text-sbkm-navy dark:text-white">
+          Search-Console-Seiten werden abgeglichen …
+        </DtGlassCard>
+      ) : null}
+
       {stats && stats.count === 0 ? (
         <DtGlassCard className="p-6 text-sm text-sbkm-ink-600 dark:text-white/60">
-          Noch keine Seiten gecrawlt.{" "}
+          Noch keine Seiten gespeichert.{" "}
           <Link href={settingsHref} className="font-semibold text-sbkm-mint hover:underline">
             Jetzt crawlen
           </Link>
@@ -252,7 +312,31 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                   className="pl-9"
                 />
               </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {INDEX_FILTERS.map((filter) => {
+                  const active = indexFilter === filter.id;
+                  return (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      onClick={() => setIndexFilter(filter.id)}
+                      className={cn(
+                        "rounded-pill px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                        active
+                          ? "bg-sbkm-navy text-white dark:bg-sbkm-mint dark:text-sbkm-navy"
+                          : "bg-sbkm-navy/5 text-sbkm-ink-600 hover:bg-sbkm-navy/10 dark:bg-white/10 dark:text-white/70",
+                      )}
+                    >
+                      {filter.label}
+                    </button>
+                  );
+                })}
+              </div>
               <p className="mt-2 text-[11px] text-sbkm-ink-500 dark:text-white/45">{pageRange}</p>
+              <p className="mt-1 text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
+                Indexiert = in den Search-Console-Leistungsdaten (letzte 90 Tage) oder per
+                URL-Inspection bestätigt. Nicht indexiert = bei uns bekannt, aber ohne GSC-Impressionen.
+              </p>
             </div>
 
             <ul className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
@@ -284,11 +368,19 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                         <p className="mt-0.5 truncate text-[11px] text-sbkm-ink-500 dark:text-white/45">
                           {page.url}
                         </p>
-                        {page.is_excluded ? (
-                          <span className="mt-1 inline-block text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                            Ausgeschlossen
-                          </span>
-                        ) : null}
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          <IndexBadge status={page.indexStatus} />
+                          {page.inGsc && !page.inCrawl ? (
+                            <span className="inline-block rounded-pill bg-sbkm-navy/8 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sbkm-ink-600 dark:bg-white/10 dark:text-white/70">
+                              Nur GSC
+                            </span>
+                          ) : null}
+                          {page.is_excluded ? (
+                            <span className="inline-block text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                              Ausgeschlossen
+                            </span>
+                          ) : null}
+                        </div>
                       </button>
                     </li>
                   );
@@ -353,20 +445,60 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                       </a>
                     </div>
                     <div className="flex flex-wrap gap-2 text-[11px] text-sbkm-ink-500 dark:text-white/45">
+                      <IndexBadge status={detail.indexStatus} />
+                      {detail.inGsc && !detail.inCrawl ? (
+                        <span className="rounded-pill bg-sbkm-navy/5 px-2 py-0.5 dark:bg-white/10">
+                          Nur in Search Console
+                        </span>
+                      ) : null}
                       {detail.text_content?.trim() ? (
                         <span className="rounded-pill bg-sbkm-navy/5 px-2 py-0.5 dark:bg-white/10">
                           {formatChars(detail.text_content.trim().length)} Zeichen
                         </span>
                       ) : null}
-                      <span className="rounded-pill bg-sbkm-navy/5 px-2 py-0.5 dark:bg-white/10">
-                        {new Date(detail.crawled_at).toLocaleString("de-DE")}
-                      </span>
+                      {detail.crawled_at ? (
+                        <span className="rounded-pill bg-sbkm-navy/5 px-2 py-0.5 dark:bg-white/10">
+                          {new Date(detail.crawled_at).toLocaleString("de-DE")}
+                        </span>
+                      ) : (
+                        <span className="rounded-pill bg-sbkm-navy/5 px-2 py-0.5 dark:bg-white/10">
+                          Noch nicht gecrawlt
+                        </span>
+                      )}
                     </div>
                   </div>
                 </header>
 
                 <div className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle p-4">
                   <dl className="grid gap-4">
+                    {detail.gscImpressions != null || detail.inspectionCoverage ? (
+                      <div>
+                        <dt className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55">
+                          Search Console
+                        </dt>
+                        <dd className="text-sm leading-relaxed text-sbkm-navy dark:text-white/85">
+                          {detail.gscImpressions != null ? (
+                            <p>
+                              {detail.gscImpressions.toLocaleString("de-DE")} Impressionen
+                              {detail.gscClicks != null
+                                ? ` · ${detail.gscClicks.toLocaleString("de-DE")} Klicks`
+                                : ""}
+                              {detail.gscPosition != null
+                                ? ` · Ø Position ${detail.gscPosition.toFixed(1)}`
+                                : ""}
+                            </p>
+                          ) : (
+                            <p>Keine Impressionen in den letzten 90 Tagen.</p>
+                          )}
+                          {detail.inspectionCoverage ? (
+                            <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
+                              URL-Inspection: {detail.inspectionCoverage}
+                              {detail.inspectionVerdict ? ` (${detail.inspectionVerdict})` : ""}
+                            </p>
+                          ) : null}
+                        </dd>
+                      </div>
+                    ) : null}
                     {detail.h1?.trim() && detail.h1.trim() !== pageLabel(detail) ? (
                       <Field label="H1" icon={<Globe className="h-3.5 w-3.5" />} value={detail.h1.trim()} />
                     ) : null}
@@ -389,7 +521,9 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                           </pre>
                         ) : (
                           <p className="text-sm italic text-sbkm-ink-400 dark:text-white/35">
-                            Kein Textinhalt erfasst — evtl. JavaScript-gerendert oder leere Seite.
+                            {detail.inGsc && !detail.inCrawl
+                              ? "Diese URL kennt Google, unser Crawler hat sie noch nicht gespeichert. Beim nächsten Crawl wird sie mitgeladen."
+                              : "Kein Textinhalt erfasst — evtl. JavaScript-gerendert oder leere Seite."}
                           </p>
                         )}
                       </dd>
@@ -402,6 +536,27 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
         </div>
       )}
     </div>
+  );
+}
+
+function IndexBadge(props: { status?: PageIndexStatus }) {
+  const status = props.status ?? "unknown";
+  const label = indexStatusLabel(status);
+  const className =
+    status === "indexed"
+      ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300"
+      : status === "not_indexed"
+        ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
+        : "bg-sbkm-navy/8 text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60";
+  return (
+    <span
+      className={cn(
+        "inline-block rounded-pill px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        className,
+      )}
+    >
+      {label}
+    </span>
   );
 }
 

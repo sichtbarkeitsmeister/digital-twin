@@ -26,6 +26,7 @@
     "test:seo-crawl-reclaim": "tsx scripts/test-seo-crawl-reclaim.ts",
     "test:seo-excluded-urls": "tsx scripts/test-seo-excluded-urls.ts",
     "test:seo-indexability": "tsx scripts/test-seo-indexability-audit.ts",
+    "test:seo-gsc-pages": "tsx scripts/test-seo-gsc-pages.ts",
     "test:safe-fetch-url": "tsx scripts/test-safe-fetch-url.ts",
     "test:auth-error-messages": "tsx scripts/test-auth-error-messages.ts",
     "test:login-link": "tsx scripts/test-login-link.ts",
@@ -75,6 +76,7 @@
     "dt:n8n:monthly-scheduler": "node scripts/deploy-dt-v2-monthly-analytics-scheduled.mjs",
     "dt:n8n:seo-report-scheduler": "node scripts/deploy-dt-v2-seo-report-scheduled.mjs",
     "dt:n8n:gsc-url-inspection": "node scripts/deploy-dt-v2-gsc-url-inspection.mjs",
+    "dt:n8n:gsc-pages": "node scripts/deploy-dt-v2-gsc-pages.mjs",
     "test:url-index-status": "tsx scripts/test-url-index-status.ts"
   },
   "dependencies": {

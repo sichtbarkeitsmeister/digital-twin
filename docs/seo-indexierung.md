@@ -14,16 +14,44 @@
 
 Damit lässt sich die Frage „warum ist Seite X nicht bei Google?" zum technischen Teil beantworten: Ist die Seite erreichbar, erlaubt sie Indexierung, zeigt das Canonical auf sich selbst.
 
-## Warum es keinen GSC-Coverage-Sync gibt
+## Crawl + Search-Console-Seiten
+
+Beim „Jetzt crawlen“ lädt der Crawler drei Quellen:
+
+1. konfigurierte/entdeckte Sitemap
+2. interne Links (www/non-www und http/https gelten als dieselbe Site)
+3. GSC Search Analytics `dimension=page` der letzten 90 Tage (n8n-Workflow `DT v2 - GSC Pages`)
+
+Die Seitenliste unter SEO → Crawl zeigt **Indexiert** / **Nicht indexiert**:
+
+- **Indexiert** — URL kommt in den GSC-Leistungsdaten vor (Google hat sie gezeigt) oder eine URL-Inspection sagt PASS / indexed
+- **Nicht indexiert** — URL ist bei uns bekannt (Crawl/Sitemap), aber nicht in den GSC-Leistungsdaten; Inspection überschreibt das
+- **Nur in GSC** — Google kennt die URL, unser Crawler hatte sie über Sitemap/Links noch nicht gefunden; sie wird in die Crawl-Warteschlange gelegt
+
+### Deploy GSC-Pages
+
+```bash
+npm run dt:n8n:gsc-pages
+```
+
+Danach in Vercel setzen:
+
+```bash
+N8N_DT_GSC_PAGES_WEBHOOK=https://sichtbarkeitsmeister.app.n8n.cloud/webhook/dt-gsc-pages
+```
+
+SQL: `database/migrations/20260916_dt_seo_gsc_pages.sql` (`dt_seo_gsc_pages` + `dt_site_crawls.gsc_sync_status`).
+
+## Warum es keinen echten GSC-Coverage-Sync gibt
 
 Die Search-Console-API stellt den Coverage-/Indexierungsbericht **nicht** bereit. Verfügbar sind nur:
 
-- `searchanalytics.query` — Klicks, Impressionen, CTR, Position (nutzen wir bereits im Report und in der Monatsstatistik)
+- `searchanalytics.query` — Klicks, Impressionen, CTR, Position (nutzen wir für Report, Monatsstatistik und den Seiten-Abgleich)
 - `urlInspection.index.inspect` — Indexstatus **einer** URL pro Aufruf, 2.000 Aufrufe pro Tag und Property, rund 2–3 Sekunden pro Aufruf
 - `sitemaps.*` — eingereichte Sitemaps und ihr Verarbeitungsstatus
 - `sites.*` — Properties
 
-Es gibt keinen Endpunkt, der „alle nicht indexierten Seiten" liefert. Ein „Coverage-Sync" ist deshalb technisch nicht möglich.
+Es gibt keinen Endpunkt, der die GSC-UI-Liste „alle nicht indexierten Seiten“ inkl. Ausschlussgründen liefert. Der Crawl-Viewer approximiert das über Leistungsdaten + Crawl/Sitemap.
 
 ## Google-Indexstatus per URL-Inspection (Stichprobe)
 
@@ -51,6 +79,6 @@ Chat-Tools über den n8n-Pfad brauchen zusätzlich den üblichen Chat-Deploy (`n
 
 ### Grenzen
 
-- Kein vollständiger Coverage-Bericht
+- Kein vollständiger Coverage-Bericht mit Ausschlussgründen
 - Tageslimit ~2.000 Inspections pro Property
 - Stichproben standardmäßig max. 10–20 URLs pro Lauf
