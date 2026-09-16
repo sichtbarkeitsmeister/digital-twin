@@ -49,7 +49,7 @@ export function DtChatComposer(props: {
   onDragHighlight?: (v: boolean) => void;
   /** Active avatar name for the default placeholder. */
   agentName?: string;
-  /** Survey-built agent: show optional Testing toggle (persona or company probes). */
+  /** Staff-only: show the Testing toggle (persona or company probes). */
   personaTestingAvailable?: boolean;
   /** Selected agent id — used to load exam questions when testing is on. */
   personaTestingAgentId?: string | null;
@@ -297,7 +297,7 @@ export function DtChatComposer(props: {
                 <span className="hidden text-xs font-bold sm:inline">Text</span>
               </button>
 
-              {props.personaTestingAgentId ? (
+              {props.personaTestingAvailable && props.personaTestingAgentId ? (
                 <button
                   type="button"
                   aria-pressed={personaTesting}

@@ -9,7 +9,7 @@ import {
   getQuickActionsForAgent,
   type DtAgentOption,
 } from "@/components/dt/chat/dt-agent-switcher";
-import { agentSupportsPersonaTesting, personaTestingModeTitle } from "@/lib/dt/persona-testing";
+import { personaTestingAvailableToUser, personaTestingModeTitle } from "@/lib/dt/persona-testing";
 import { DtWunschkundenPanel } from "@/components/dt/chat/dt-wunschkunden-panel";
 import { DtChatComposer } from "@/components/dt/chat/dt-chat-composer";
 import { DtChatFilePreview, type DtChatPreviewFile } from "@/components/dt/chat/dt-chat-file-preview";
@@ -168,7 +168,10 @@ export function DtChatShell(props: {
     [agents, selectedAgentId],
   );
 
-  const personaTestingAvailable = agentSupportsPersonaTesting(selectedAgent);
+  const personaTestingAvailable = personaTestingAvailableToUser({
+    isPlatformAdmin: props.isPlatformAdmin,
+    agent: selectedAgent,
+  });
 
   const lastAssistantContent = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -1490,11 +1493,11 @@ export function DtChatShell(props: {
               attachments={attachments}
               agentName={displayAgentName}
               personaTestingAvailable={personaTestingAvailable}
-              personaTestingAgentId={selectedAgentId}
+              personaTestingAgentId={personaTestingAvailable ? selectedAgentId : null}
               personaTestingLabel={
                 selectedAgent?.kind === "seo_advisor" ? "company" : "persona"
               }
-              personaTesting={personaTesting}
+              personaTesting={personaTestingAvailable && personaTesting}
               onPersonaTestingChange={setPersonaTesting}
               onAddFiles={(files) => void processFiles(files)}
               onRemoveAttachment={(index) => {

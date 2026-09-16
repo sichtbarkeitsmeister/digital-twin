@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { isMemberOfOrganisation } from "@/lib/dashboard/org-context";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { loadSurveyExamQuestionsForResponse } from "@/lib/dt/load-survey-exam-questions";
 import {
   persistInferredExamSource,
@@ -26,6 +27,10 @@ export async function GET(
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
     return NextResponse.json({ ok: false, message: "Nicht angemeldet." }, { status: 401 });
+  }
+
+  if (!(await isPlatformAdmin(auth.supabase, auth.userId))) {
+    return NextResponse.json({ ok: false, message: "Kein Zugriff." }, { status: 403 });
   }
 
   const { agentId } = await context.params;

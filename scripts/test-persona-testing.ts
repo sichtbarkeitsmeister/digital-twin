@@ -4,13 +4,34 @@
  */
 import assert from "node:assert/strict";
 
-import { agentHasSurveyExamProbes, agentSupportsPersonaTesting } from "../lib/dt/persona-testing";
+import {
+  agentHasSurveyExamProbes,
+  agentSupportsPersonaTesting,
+  personaTestingAvailableToUser,
+} from "../lib/dt/persona-testing";
 import { buildSurveyExamQuestions } from "../lib/dt/survey-exam-questions";
 import { extractSurveyFacts } from "../lib/dt/survey-facts";
 
 assert.equal(agentSupportsPersonaTesting({ id: "a1" }), true);
 assert.equal(agentSupportsPersonaTesting(null), false);
 assert.equal(agentSupportsPersonaTesting({ id: "" }), false);
+
+assert.equal(
+  personaTestingAvailableToUser({ isPlatformAdmin: true, agent: { id: "a1" } }),
+  true,
+);
+assert.equal(
+  personaTestingAvailableToUser({ isPlatformAdmin: false, agent: { id: "a1" } }),
+  false,
+);
+assert.equal(
+  personaTestingAvailableToUser({ isPlatformAdmin: true, agent: null }),
+  false,
+);
+assert.equal(
+  personaTestingAvailableToUser({ isPlatformAdmin: undefined, agent: { id: "a1" } }),
+  false,
+);
 
 assert.equal(
   agentHasSurveyExamProbes({
