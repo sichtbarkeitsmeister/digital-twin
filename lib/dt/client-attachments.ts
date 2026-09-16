@@ -1,9 +1,8 @@
 import {
   DT_MAX_ATTACHMENT_BYTES,
-  DT_WORD_REJECT_MESSAGE,
+  guessDtMimeFromName,
   isDtMultimodalImageMime,
   isDtMultimodalMime,
-  isDtWordMime,
   normalizeDtMime,
 } from "@/lib/dt/attachments-shared";
 
@@ -17,25 +16,9 @@ export type DtAttachmentDraft = {
 };
 
 export function guessDtMimeFromFile(file: File): string {
-  if (file.type?.trim()) return file.type.trim();
-  const n = file.name.toLowerCase();
-  if (n.endsWith(".pdf")) return "application/pdf";
-  if (n.endsWith(".png")) return "image/png";
-  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
-  if (n.endsWith(".gif")) return "image/gif";
-  if (n.endsWith(".webp")) return "image/webp";
-  if (n.endsWith(".md")) return "text/markdown";
-  if (n.endsWith(".json")) return "application/json";
-  if (n.endsWith(".txt")) return "text/plain";
-  if (n.endsWith(".csv")) return "text/csv";
-  if (n.endsWith(".xlsx")) {
-    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  }
-  if (n.endsWith(".xls")) return "application/vnd.ms-excel";
-  if (n.endsWith(".docx")) {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  }
-  return "application/octet-stream";
+  const fromType = file.type?.trim();
+  if (fromType && fromType !== "application/octet-stream") return fromType;
+  return guessDtMimeFromName(file.name, fromType || "application/octet-stream");
 }
 
 export function readFileAsBase64(file: File): Promise<string> {
@@ -57,8 +40,8 @@ export async function fileToDtAttachmentDraft(
   const rawMime = guessDtMimeFromFile(file);
   const norm = normalizeDtMime(rawMime);
 
-  if (isDtWordMime(norm)) {
-    return { ok: false, message: DT_WORD_REJECT_MESSAGE };
+  if (file.size <= 0) {
+    return { ok: false, message: `„${file.name}“ ist leer.` };
   }
   if (file.size > DT_MAX_ATTACHMENT_BYTES) {
     return {
@@ -69,26 +52,33 @@ export async function fileToDtAttachmentDraft(
 
   const draft: DtAttachmentDraft = {
     fileName: file.name,
-    mimeType: rawMime || norm,
+    mimeType: rawMime || norm || "application/octet-stream",
     sizeBytes: file.size,
   };
 
-  if (isDtMultimodalMime(norm)) {
-    try {
-      draft.dataBase64 = await readFileAsBase64(file);
-      if (isDtMultimodalImageMime(norm)) {
-        draft.previewObjectUrl = URL.createObjectURL(file);
-      }
-    } catch {
-      return { ok: false, message: `„${file.name}“ konnte nicht gelesen werden.` };
-    }
-    return { ok: true, draft };
-  }
-
   try {
-    draft.textContent = (await file.text()).slice(0, 20_000);
+    draft.dataBase64 = await readFileAsBase64(file);
+    if (isDtMultimodalImageMime(norm) || isDtMultimodalImageMime(draft.mimeType)) {
+      draft.previewObjectUrl = URL.createObjectURL(file);
+    }
   } catch {
     return { ok: false, message: `„${file.name}“ konnte nicht gelesen werden.` };
+  }
+
+  if (!isDtMultimodalMime(norm) && !isDtMultimodalMime(draft.mimeType)) {
+    try {
+      const asText = await file.text();
+      const probe = asText.slice(0, 1024);
+      const looksBinary =
+        asText.startsWith("PK") ||
+        /[\u0000-\u0008]/.test(probe) ||
+        asText.includes("\u0000");
+      if (asText && !looksBinary) {
+        draft.textContent = asText.slice(0, 20_000);
+      }
+    } catch {
+      // binary — server extracts Excel/Word/etc. from dataBase64
+    }
   }
 
   return { ok: true, draft };
@@ -105,4 +95,5 @@ export type DtStoredAttachment = {
   mime_type: string;
   size_bytes?: number;
   signed_url?: string | null;
+  source?: "upload" | "created";
 };

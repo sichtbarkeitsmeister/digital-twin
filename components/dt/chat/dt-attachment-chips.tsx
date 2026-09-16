@@ -21,7 +21,6 @@ export function DtAttachmentChips(props: {
       {props.attachments.map((a, i) => {
         const m = normalizeDtMime(a.mimeType);
         const showThumb = Boolean(a.previewObjectUrl) && isDtMultimodalImageMime(m);
-        const Icon = m === "application/pdf" ? FileType : FileImage;
         return (
           <div
             key={`${a.fileName}-${i}`}
@@ -39,7 +38,11 @@ export function DtAttachmentChips(props: {
               />
             ) : (
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sbkm-mint/15">
-                <Icon className="h-5 w-5 text-sbkm-navy dark:text-white/70" aria-hidden />
+                {m === "application/pdf" ? (
+                  <FileType className="h-5 w-5 text-sbkm-navy dark:text-white/70" aria-hidden />
+                ) : (
+                  <FileImage className="h-5 w-5 text-sbkm-navy dark:text-white/70" aria-hidden />
+                )}
               </span>
             )}
             <span

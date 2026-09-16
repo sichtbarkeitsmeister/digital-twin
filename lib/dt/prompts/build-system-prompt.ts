@@ -1,3 +1,4 @@
+import { DT_CHAT_FILE_INSTRUCTIONS } from "@/lib/dt/chat-files";
 import {
   DT_SEO_MODE_INSTRUCTIONS,
   formatDtSitePagesForPrompt,
@@ -206,6 +207,8 @@ export function buildDtSystemPrompt(input: {
   if (input.pastedUrlsText?.trim()) {
     blocks.push("", "## Eingefügte Webseiten", input.pastedUrlsText.trim());
   }
+
+  blocks.push("", DT_CHAT_FILE_INSTRUCTIONS);
 
   return blocks.filter(Boolean).join("\n");
 }

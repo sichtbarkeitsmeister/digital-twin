@@ -3,9 +3,12 @@ import { z } from "zod";
 
 import { callDtAnthropicChat } from "@/lib/dt/anthropic-chat";
 import {
+  createdFilesToGhostMetadata,
   dtAttachmentInboundSchema,
   prepareInboundAttachments,
 } from "@/lib/dt/attachments";
+import { mergeCreatedChatFiles } from "@/lib/dt/chat-files";
+import { parseDtCreatedFilesFromText, stripDtCreatedFileFences } from "@/lib/dt/parse-chat-file-fences";
 import { assembleDtChatEphemeral } from "@/lib/dt/assemble-chat-prompt";
 import { appendEphemeralAttachmentsToMessages } from "@/lib/dt/hydrate-ephemeral-attachments";
 import { requireAuthUser } from "@/lib/dt/db";
@@ -95,13 +98,23 @@ export async function POST(req: Request) {
       });
     }
 
+    const fenceFiles = await parseDtCreatedFilesFromText(direct.text);
+    const createdFiles = mergeCreatedChatFiles(direct.createdFiles ?? [], fenceFiles);
+    const content = stripDtCreatedFileFences(direct.text);
+
     return NextResponse.json({
       ok: true,
       assistantMessage: {
         id: `ghost-${Date.now()}`,
         role: "assistant" as const,
-        content: direct.text,
-        metadata: { via: "anthropic_ghost", model: direct.model },
+        content,
+        metadata: {
+          via: "anthropic_ghost",
+          model: direct.model,
+          ...(createdFiles.length > 0
+            ? { created_files: createdFilesToGhostMetadata(createdFiles) }
+            : {}),
+        },
         created_at: new Date().toISOString(),
       },
       via: "anthropic_ghost",
