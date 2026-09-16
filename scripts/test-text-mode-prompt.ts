@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
 import {
   DT_DEFAULT_TEXT_MODE_INSTRUCTIONS,
+  DT_LEGACY_SEO_TEXT_MODE_INSTRUCTIONS,
   isDefaultTextModeInstructions,
   resolveTextModeInstructions,
 } from "../lib/dt/prompts/text-mode";
@@ -18,6 +19,9 @@ function testResolve() {
   assert.equal(isDefaultTextModeInstructions(null), true);
   assert.equal(isDefaultTextModeInstructions(DT_DEFAULT_TEXT_MODE_INSTRUCTIONS), true);
   assert.equal(isDefaultTextModeInstructions("custom"), false);
+  assert.equal(resolveTextModeInstructions(DT_LEGACY_SEO_TEXT_MODE_INSTRUCTIONS), DT_DEFAULT_TEXT_MODE_INSTRUCTIONS);
+  assert.equal(isDefaultTextModeInstructions(DT_LEGACY_SEO_TEXT_MODE_INSTRUCTIONS), true);
+  assert.doesNotMatch(resolveTextModeInstructions(DT_LEGACY_SEO_TEXT_MODE_INSTRUCTIONS), /SEO-optimierte/);
   console.log("resolve: ok");
 }
 
