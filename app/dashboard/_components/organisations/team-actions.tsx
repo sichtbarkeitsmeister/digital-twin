@@ -56,7 +56,7 @@ export function TeamActions(props: {
       <CenteredModal
         open={transfer}
         title="Ownership übertragen"
-        description="Nur Inhaber oder Plattform-Admin."
+        description="Nur Inhaber oder Plattform-Admin. Der bisherige Inhaber bleibt als Admin im Team."
         onClose={() => setTransfer(false)}
       >
         <TransferOwnershipForm

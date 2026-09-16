@@ -9,11 +9,13 @@ import {
   sendOrgMemberInviteEmail,
   sendSupabaseAuthInviteEmail,
 } from "@/lib/email/member-invite";
+import { ensureConfirmedAuthUser } from "@/lib/auth/ensure-auth-user";
+import { mapTransferOwnershipError } from "@/lib/dashboard/transfer-ownership-error";
+import { isOrgOwner, isPlatformAdmin } from "@/lib/dt/org-access";
 import {
   deliverOwnerWelcomeWithFallback,
   ensureOwnerLoginLink,
 } from "@/lib/email/owner-welcome";
-import { isOrgOwner, isPlatformAdmin } from "@/lib/dt/org-access";
 import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 import { ensureOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { pickSurveyFolderToRename } from "@/lib/dt/organisation-rename";
@@ -640,43 +642,59 @@ export async function transferOwnershipAction(
     return { ok: false, message: "Nicht angemeldet." };
   }
 
-  const service = createServiceClient();
-  const { data: profile, error: profileError } = await service
-    .from("profiles")
-    .select("id, email")
-    .eq("email", parsed.data.new_owner_email)
-    .maybeSingle();
-
-  if (profileError) {
-    return { ok: false, message: "E-Mail konnte nicht geprüft werden." };
-  }
-
-  if (!profile?.id) {
+  let service: ReturnType<typeof createServiceClient>;
+  try {
+    service = createServiceClient();
+  } catch (err) {
     return {
       ok: false,
       message:
-        "Kein Konto mit dieser E-Mail gefunden. Die Person muss sich zuerst registrieren.",
+        err instanceof Error
+          ? err.message
+          : "Server-Konfiguration unvollständig (Supabase Service Role).",
     };
   }
 
-  if (profile.id === user.id) {
-    return { ok: false, message: "Du bist bereits Inhaber dieser Organisation." };
-  }
-
-  const { error } = await supabase.rpc("transfer_organisation_ownership", {
-    org_id: parsed.data.organisation_id,
-    new_owner_user_id: profile.id,
-  });
-
-  if (error) {
-    return { ok: false, message: "Ownership konnte nicht übertragen werden." };
+  const ownerEmail = parsed.data.new_owner_email;
+  let owner: { userId: string; created: boolean };
+  try {
+    owner = await ensureConfirmedAuthUser(service, ownerEmail);
+  } catch (err) {
+    console.warn(
+      "[org] transfer ownership: could not resolve owner account:",
+      err instanceof Error ? err.message : err,
+    );
+    return {
+      ok: false,
+      message:
+        err instanceof Error
+          ? err.message
+          : "Konto für den neuen Inhaber konnte nicht vorbereitet werden.",
+    };
   }
 
   const { data: orgRow } = await service
     .from("organisations")
-    .select("name")
+    .select("name, owner_user_id")
     .eq("id", parsed.data.organisation_id)
     .maybeSingle();
+
+  if (orgRow?.owner_user_id === owner.userId) {
+    return {
+      ok: false,
+      message: "Diese Person ist bereits Inhaber dieser Organisation.",
+    };
+  }
+
+  const { error } = await supabase.rpc("transfer_organisation_ownership", {
+    org_id: parsed.data.organisation_id,
+    new_owner_user_id: owner.userId,
+  });
+
+  if (error) {
+    console.warn("[org] transfer_organisation_ownership failed:", error.message);
+    return { ok: false, message: mapTransferOwnershipError(error) };
+  }
 
   const organisationName = orgRow?.name?.trim() || "deine Organisation";
   const send_welcome = parsed.data.send_welcome;
@@ -685,14 +703,14 @@ export async function transferOwnershipAction(
   let inviteLink: string | null = null;
   let emailSent = false;
   if (send_welcome) {
-    const loginLink = await ensureOwnerLoginLink(parsed.data.new_owner_email);
+    const loginLink = await ensureOwnerLoginLink(ownerEmail);
     inviteLink = loginLink?.link ?? null;
     const delivery = await deliverOwnerWelcomeWithFallback({
-      email: parsed.data.new_owner_email,
+      email: ownerEmail,
       organisationName,
       organisationId: parsed.data.organisation_id,
       link: inviteLink,
-      isNewAccount: loginLink?.isNewAccount ?? false,
+      isNewAccount: owner.created || (loginLink?.isNewAccount ?? false),
       triggeredByUserId: user.id,
     });
     emailStatus = delivery.statusMessage;
@@ -700,8 +718,10 @@ export async function transferOwnershipAction(
   }
 
   revalidatePath("/dashboard/organisations");
+  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
   revalidatePath("/dashboard/admin/mails");
-  const baseMessage = `Ownership wurde an ${profile.email ?? parsed.data.new_owner_email} übertragen.`;
+  const createdNote = owner.created ? " Es gab noch kein Konto — wir haben eines angelegt." : "";
+  const baseMessage = `Ownership wurde an ${ownerEmail} übertragen.${createdNote}`;
   return {
     ok: true,
     emailSent,
