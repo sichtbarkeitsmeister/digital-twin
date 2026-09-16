@@ -1,14 +1,18 @@
 "use client";
 
+import { useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { FileImage, FileText, FileType } from "lucide-react";
+import { Download, FileImage, FileSpreadsheet, FileText, FileType } from "lucide-react";
 
 import { DtChatMarkdown } from "@/components/dt/chat/dt-chat-markdown";
 import { DtSeoChatTaskProposals } from "@/components/dt/seo/dt-seo-chat-task-proposals";
 import { cn } from "@/components/dt/cn";
+import type { DtChatPreviewFile } from "@/components/dt/chat/dt-chat-file-preview";
 import type { DtStoredAttachment } from "@/lib/dt/client-attachments";
 import {
+  isDtExcelMime,
   isDtMultimodalImageMime,
+  isDtPreviewableMime,
   normalizeDtMime,
 } from "@/lib/dt/attachments-shared";
 import {
@@ -28,6 +32,13 @@ export type DtChatMessageItem = {
   created_at: string;
 };
 
+type FileCardItem = {
+  fileName: string;
+  mimeNorm: string;
+  url?: string | null;
+  created?: boolean;
+};
+
 function metadataAttachments(md: Record<string, unknown> | undefined) {
   const raw = md?.attachments;
   if (!Array.isArray(raw)) return [];
@@ -44,59 +55,127 @@ function metadataAttachments(md: Record<string, unknown> | undefined) {
     .filter((v): v is NonNullable<typeof v> => v != null);
 }
 
+function ghostCreatedFiles(md: Record<string, unknown> | undefined) {
+  const raw = md?.created_files;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const o = entry as Record<string, unknown>;
+      const fileName = typeof o.fileName === "string" ? o.fileName : "";
+      const mimeType = typeof o.mimeType === "string" ? o.mimeType : "";
+      const dataBase64 = typeof o.dataBase64 === "string" ? o.dataBase64 : "";
+      if (!fileName || !dataBase64) return null;
+      return { fileName, mimeType, dataBase64 };
+    })
+    .filter((v): v is NonNullable<typeof v> => v != null);
+}
+
+function fileIcon(mimeNorm: string) {
+  if (isDtMultimodalImageMime(mimeNorm)) return FileImage;
+  if (mimeNorm === "application/pdf") return FileType;
+  if (isDtExcelMime(mimeNorm)) return FileSpreadsheet;
+  return FileText;
+}
+
+async function downloadUrl(url: string, fileName: string) {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2_000);
+}
+
 function AttachmentRow(props: {
   isUser: boolean;
-  items: Array<{
-    fileName: string;
-    mimeNorm: string;
-    imageSrc?: string | null;
-    onImageClick?: (src: string) => void;
-  }>;
+  items: FileCardItem[];
+  onPreview?: (file: DtChatPreviewFile) => void;
 }) {
   if (props.items.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {props.items.map((item, idx) => {
         const isImg = isDtMultimodalImageMime(item.mimeNorm);
-        const Icon = item.mimeNorm === "application/pdf" ? FileType : FileText;
-        const clickable = isImg && item.imageSrc && item.onImageClick;
+        const Icon = fileIcon(item.mimeNorm);
+        const previewable =
+          Boolean(item.url) &&
+          (isImg || isDtPreviewableMime(item.mimeNorm, item.fileName) || item.created);
         return (
-          <button
+          <div
             key={`${item.fileName}-${idx}`}
-            type="button"
-            disabled={!clickable}
-            onClick={() => {
-              if (item.imageSrc && item.onImageClick) item.onImageClick(item.imageSrc);
-            }}
             className={cn(
-              "flex max-w-[200px] items-start gap-2 rounded-xl border p-2 text-left transition",
+              "flex max-w-[240px] items-start gap-2 rounded-xl border p-2 text-left",
               props.isUser
                 ? "border-white/25 bg-white/10 text-white"
                 : "border-sbkm-navy/12 bg-white/60 text-sbkm-navy dark:border-white/12 dark:bg-white/5 dark:text-white",
-              clickable && "cursor-zoom-in hover:border-sbkm-mint/60",
-              !clickable && "cursor-default",
             )}
           >
-            {isImg && item.imageSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={item.imageSrc}
-                alt=""
-                className="h-14 w-14 shrink-0 rounded-lg object-cover"
-              />
-            ) : (
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-white/15">
-                {isImg ? (
-                  <FileImage className="h-6 w-6 opacity-70" aria-hidden />
-                ) : (
-                  <Icon className="h-6 w-6 opacity-70" aria-hidden />
-                )}
+            <button
+              type="button"
+              disabled={!previewable}
+              onClick={() => {
+                if (!item.url || !props.onPreview) return;
+                props.onPreview({
+                  url: item.url,
+                  fileName: item.fileName,
+                  mimeType: item.mimeNorm,
+                });
+              }}
+              className={cn(
+                "flex min-w-0 flex-1 items-start gap-2 text-left",
+                previewable && "cursor-zoom-in",
+                !previewable && "cursor-default",
+              )}
+            >
+              {isImg && item.url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={item.url}
+                  alt=""
+                  className="h-14 w-14 shrink-0 rounded-lg object-cover"
+                />
+              ) : (
+                <span
+                  className={cn(
+                    "flex h-14 w-14 shrink-0 items-center justify-center rounded-lg",
+                    props.isUser ? "bg-white/15" : "bg-sbkm-mint/20",
+                  )}
+                >
+                  <Icon className="h-6 w-6 opacity-80" aria-hidden />
+                </span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium" title={item.fileName}>
+                  {item.fileName}
+                </span>
+                {item.created ? (
+                  <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                    Öffnen · Download
+                  </span>
+                ) : previewable ? (
+                  <span className="mt-0.5 block text-[10px] opacity-70">Ansehen</span>
+                ) : null}
               </span>
-            )}
-            <span className="min-w-0 flex-1 truncate text-xs font-medium" title={item.fileName}>
-              {item.fileName}
-            </span>
-          </button>
+            </button>
+            {item.url ? (
+              <button
+                type="button"
+                className={cn(
+                  "mt-0.5 rounded-md p-1 opacity-80 hover:opacity-100",
+                  props.isUser ? "hover:bg-white/15" : "hover:bg-sbkm-navy/10 dark:hover:bg-white/10",
+                )}
+                aria-label={`${item.fileName} herunterladen`}
+                onClick={() => void downloadUrl(item.url!, item.fileName)}
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            ) : null}
+          </div>
         );
       })}
     </div>
@@ -109,6 +188,8 @@ export function DtChatMessage(props: {
   authorLabel?: string | null;
   showAuthor?: boolean;
   storedAttachments?: DtStoredAttachment[];
+  onPreviewFile?: (file: DtChatPreviewFile) => void;
+  /** @deprecated use onPreviewFile */
   onImageClick?: (src: string) => void;
   taskProposals?: DtSeoChatTaskProposal[];
   onSaveTaskProposal?: (
@@ -123,22 +204,56 @@ export function DtChatMessage(props: {
   const isUser = props.message.role === "user";
   const isAdminReply = props.message.metadata?.admin_reply === true;
   const metaItems = metadataAttachments(props.message.metadata);
-  const storedItems = (props.storedAttachments ?? []).map((row) => {
+  const ghostFiles = ghostCreatedFiles(props.message.metadata);
+  const ghostPayload = ghostFiles
+    .map((a) => `${a.fileName}:${a.mimeType}:${a.dataBase64.length}`)
+    .join("|");
+  const ghostUrls = useMemo(() => {
+    return ghostCreatedFiles(props.message.metadata).map((a) => {
+      const bin = Uint8Array.from(atob(a.dataBase64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bin], { type: a.mimeType || "application/octet-stream" });
+      return URL.createObjectURL(blob);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recreate only when payload changes
+  }, [props.message.id, ghostPayload]);
+
+  useEffect(() => {
+    return () => {
+      for (const url of ghostUrls) URL.revokeObjectURL(url);
+    };
+  }, [ghostUrls]);
+
+  const storedItems: FileCardItem[] = (props.storedAttachments ?? []).map((row) => {
     const mimeNorm = normalizeDtMime(row.mime_type);
     return {
       fileName: row.file_name,
       mimeNorm,
-      imageSrc: isDtMultimodalImageMime(mimeNorm) ? row.signed_url : null,
-      onImageClick: props.onImageClick,
+      url: row.signed_url ?? null,
+      created: !isUser || row.source === "created",
     };
   });
-  const draftItems = metaItems.map((a) => ({
+  const draftItems: FileCardItem[] = metaItems.map((a) => ({
     fileName: a.fileName,
     mimeNorm: normalizeDtMime(a.mimeType),
-    imageSrc: a.previewUrl ?? null,
-    onImageClick: props.onImageClick,
+    url: a.previewUrl ?? null,
+    created: false,
   }));
-  const attachItems = storedItems.length > 0 ? storedItems : draftItems;
+  const ghostItems: FileCardItem[] = ghostFiles.map((a, i) => ({
+    fileName: a.fileName,
+    mimeNorm: normalizeDtMime(a.mimeType),
+    url: ghostUrls[i] ?? null,
+    created: true,
+  }));
+  const attachItems =
+    storedItems.length > 0 ? storedItems : isUser ? draftItems : [...draftItems, ...ghostItems];
+
+  const onPreview = (file: DtChatPreviewFile) => {
+    if (props.onPreviewFile) {
+      props.onPreviewFile(file);
+      return;
+    }
+    if (isDtMultimodalImageMime(file.mimeType)) props.onImageClick?.(file.url);
+  };
 
   const taskProposals =
     props.taskProposals ??
@@ -198,7 +313,7 @@ export function DtChatMessage(props: {
         ) : (
           <DtChatMarkdown content={displayContent} />
         )}
-        <AttachmentRow isUser={isUser} items={attachItems} />
+        <AttachmentRow isUser={isUser} items={attachItems} onPreview={onPreview} />
         {!isUser && taskProposals.length > 0 && props.onSaveTaskProposal ? (
           <DtSeoChatTaskProposals
             proposals={taskProposals}

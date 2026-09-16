@@ -31,6 +31,12 @@ import {
 import { mergeUsage, sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { sanitizeForLlmText } from "@/lib/shared/sanitize-llm-text";
 import type { DtChatMode } from "@/lib/dt/types";
+import {
+  buildCreatedChatFile,
+  createdFileToolResultMessage,
+  DT_MAX_CREATED_FILES,
+  type DtCreatedChatFile,
+} from "@/lib/dt/chat-files";
 
 const MAX_TOOL_ROUNDS = 6;
 
@@ -44,6 +50,37 @@ export type DtAnthropicChatResult = {
   model: string;
   stopReason: string | null;
   usage: DtAnthropicUsage;
+  createdFiles: DtCreatedChatFile[];
+};
+
+const DT_CREATE_FILE_TOOL: Anthropic.Tool = {
+  name: "create_file",
+  description:
+    "Erzeugt eine echte Datei, die der Nutzer im Chat öffnen, anschauen und herunterladen kann (HTML-Vorschau, PDF, Excel, CSV, Markdown, Text, JSON). Nutze dies, sobald der Nutzer eine Datei, ein Dokument, eine Tabelle oder ein Artefakt braucht — nicht nur Code in der Antwort zeigen.",
+  input_schema: {
+    type: "object",
+    properties: {
+      filename: {
+        type: "string",
+        description: "Dateiname inkl. Endung, z. B. angebot.pdf, landingpage.html, keywords.xlsx",
+      },
+      format: {
+        type: "string",
+        enum: ["html", "markdown", "text", "csv", "json", "pdf", "xlsx"],
+        description: "Dateiformat. html = interaktive Vorschau, pdf = druckbares Dokument, xlsx = Excel.",
+      },
+      content: {
+        type: "string",
+        description:
+          "Dateiinhalt. HTML: Markup. PDF: Fließtext. Excel/CSV: Tabellen als CSV oder TSV. JSON: gültiges JSON.",
+      },
+      title: {
+        type: "string",
+        description: "Optionaler Anzeigetitel in der Dateikarte.",
+      },
+    },
+    required: ["filename", "format", "content"],
+  },
 };
 
 const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
@@ -234,7 +271,7 @@ async function runDtRetrievalTool(
   organisationId: string,
   name: string,
   input: unknown,
-): Promise<string> {
+): Promise<string | null> {
   const args = (input ?? {}) as Record<string, unknown>;
   try {
     if (name === "search_website_content") {
@@ -322,7 +359,7 @@ async function runDtRetrievalTool(
         description: typeof args.description === "string" ? args.description : null,
       });
     }
-    return `Unbekanntes Werkzeug: ${name}`;
+    return null;
   } catch (err) {
     return `Fehler beim Abrufen: ${err instanceof Error ? err.message : "unbekannt"}`;
   }
@@ -436,12 +473,14 @@ function resultFromResponse(
   resp: Anthropic.Message,
   model: string,
   usage: DtAnthropicUsage,
+  createdFiles: DtCreatedChatFile[],
 ): DtAnthropicChatResult {
   return {
     text: extractAnthropicText(resp) || "Keine Antwort erhalten.",
     model,
     stopReason: resp.stop_reason ?? null,
     usage,
+    createdFiles,
   };
 }
 
@@ -464,11 +503,15 @@ export async function callDtAnthropicChat(params: {
 
   const model = resolveDtAnthropicModel(params.mode);
   const client = new Anthropic({ apiKey });
-  const max_tokens = params.mode === "seo" ? 8192 : 4096;
+  const max_tokens = 8192;
   const system = sanitizeForLlmText(params.system);
   const roundTimeoutMs = params.mode === "seo" ? 180_000 : 120_000;
 
   const retrievalOrgId = params.mode === "seo" ? params.retrieval?.organisationId : undefined;
+  const tools: Anthropic.Tool[] = retrievalOrgId
+    ? [...DT_SEO_RETRIEVAL_TOOLS, DT_CREATE_FILE_TOOL]
+    : [DT_CREATE_FILE_TOOL];
+  const createdFiles: DtCreatedChatFile[] = [];
 
   const createRound = async (input: {
     convo: Anthropic.MessageParam[];
@@ -489,10 +532,28 @@ export async function callDtAnthropicChat(params: {
     return result.response;
   };
 
-  if (!retrievalOrgId) {
-    const resp = await createRound({ convo: messages });
-    return resultFromResponse(resp, model, sumAnthropicUsage(resp.usage));
-  }
+  const runTool = async (name: string, input: unknown): Promise<string> => {
+    if (name === "create_file") {
+      const args = (input ?? {}) as Record<string, unknown>;
+      if (createdFiles.length >= DT_MAX_CREATED_FILES) {
+        return `Höchstens ${DT_MAX_CREATED_FILES} Dateien pro Antwort.`;
+      }
+      const built = await buildCreatedChatFile({
+        fileName: String(args.filename ?? args.fileName ?? "datei.txt"),
+        format: args.format,
+        content: String(args.content ?? ""),
+        title: typeof args.title === "string" ? args.title : null,
+      });
+      if (!built.ok) return built.message;
+      createdFiles.push(built.file);
+      return createdFileToolResultMessage(built.file);
+    }
+    if (retrievalOrgId) {
+      const seo = await runDtRetrievalTool(retrievalOrgId, name, input);
+      if (seo != null) return seo;
+    }
+    return `Unbekanntes Werkzeug: ${name}`;
+  };
 
   const convo: Anthropic.MessageParam[] = [...messages];
   let lastResp: Anthropic.Message | null = null;
@@ -501,13 +562,13 @@ export async function callDtAnthropicChat(params: {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const resp = await createRound({
       convo,
-      tools: DT_SEO_RETRIEVAL_TOOLS,
+      tools,
     });
     lastResp = resp;
     totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(resp.usage));
 
     if (resp.stop_reason !== "tool_use") {
-      return resultFromResponse(resp, model, totalUsage);
+      return resultFromResponse(resp, model, totalUsage, createdFiles);
     }
 
     const toolUses = resp.content.filter(
@@ -518,7 +579,7 @@ export async function callDtAnthropicChat(params: {
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const tu of toolUses) {
-      const output = await runDtRetrievalTool(retrievalOrgId, tu.name, tu.input);
+      const output = await runTool(tu.name, tu.input);
       toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: output });
     }
     convo.push({ role: "user", content: toolResults });
@@ -535,6 +596,7 @@ export async function callDtAnthropicChat(params: {
     model,
     stopReason: finalResp.stop_reason ?? null,
     usage: totalUsage,
+    createdFiles,
   };
 }
 

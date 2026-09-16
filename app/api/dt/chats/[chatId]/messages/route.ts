@@ -12,7 +12,12 @@ import {
   dtAttachmentInboundSchema,
   persistDtChatAttachments,
   prepareInboundAttachments,
+  signDtChatAttachmentRows,
+  type DtChatAttachmentRow,
 } from "@/lib/dt/attachments";
+import { applyCreatedChatFiles } from "@/lib/dt/apply-created-chat-files";
+import { mergeCreatedChatFiles } from "@/lib/dt/chat-files";
+import { parseDtCreatedFilesFromText, stripDtCreatedFileFences } from "@/lib/dt/parse-chat-file-fences";
 import {
   DEFAULT_DT_CHAT_TITLE,
   isProvisionalDtChatTitle,
@@ -146,10 +151,13 @@ async function maybePersistDtAutoTitle(input: {
 
 function finalizeAssistantSeoContent(text: string, mode: DtChatMode) {
   if (mode !== "seo") {
-    return { content: text, seoTaskProposals: [] as ReturnType<typeof parseDtSeoTaskProposalsFromText> };
+    return {
+      content: stripDtCreatedFileFences(text),
+      seoTaskProposals: [] as ReturnType<typeof parseDtSeoTaskProposalsFromText>,
+    };
   }
   const seoTaskProposals = parseDtSeoTaskProposalsFromText(text);
-  const content = stripDtSeoTaskProposalBlocks(text);
+  const content = stripDtCreatedFileFences(stripDtSeoTaskProposalBlocks(text));
   return { content, seoTaskProposals };
 }
 
@@ -237,6 +245,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     stopped: boolean;
     created_at: string;
   } | null = null;
+  let userAttachmentRows: DtChatAttachmentRow[] = [];
 
   if (!ghostMode) {
     const { data, error } = await auth.supabase
@@ -273,6 +282,11 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       if (!persisted.ok) {
         return NextResponse.json({ ok: false, message: persisted.message }, { status: 500 });
       }
+      userAttachmentRows = await signDtChatAttachmentRows(
+        auth.supabase,
+        persisted.rows,
+        "upload",
+      );
     }
   }
 
@@ -280,8 +294,10 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
   const n8nWebhook = process.env.N8N_DT_CHAT_WEBHOOK?.trim();
   const session = (await auth.supabase.auth.getSession()).data.session;
   const accessToken = session?.access_token?.trim();
+  // File artifacts (PDF/HTML/Excel) need the Anthropic create_file tool in this process.
+  const useN8n = process.env.DT_CHAT_USE_N8N === "1";
 
-  if (n8nWebhook && accessToken && !hasAttachments) {
+  if (useN8n && n8nWebhook && accessToken && !hasAttachments) {
     try {
       const n8n = await callDtN8nChat({
         accessToken,
@@ -492,6 +508,11 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
   };
 
   const finalized = finalizeAssistantSeoContent(direct.text, chat.mode as DtChatMode);
+  const createdFiles = mergeCreatedChatFiles(
+    direct.createdFiles ?? [],
+    await parseDtCreatedFilesFromText(direct.text),
+  );
+  let createdAttachmentRows: DtChatAttachmentRow[] = [];
 
   if (!ghostMode) {
     const { data, error } = await auth.supabase
@@ -526,6 +547,25 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     }
     assistantRow = data;
 
+    if (createdFiles.length > 0) {
+      const applied = await applyCreatedChatFiles({
+        supabase: auth.supabase,
+        organisationId: chat.organisation_id,
+        chatId,
+        messageId: data.id,
+        files: createdFiles,
+        metadata: (data.metadata as Record<string, unknown>) ?? {},
+      });
+      createdAttachmentRows = applied.attachments;
+      if (applied.metadata !== data.metadata) {
+        await auth.supabase
+          .from("dt_chat_messages")
+          .update({ metadata: applied.metadata })
+          .eq("id", data.id);
+        assistantRow = { ...assistantRow, metadata: applied.metadata };
+      }
+    }
+
     if (direct.usage.inputTokens > 0 || direct.usage.outputTokens > 0) {
       await trackLlmUsage({
         organisationId: chat.organisation_id,
@@ -541,16 +581,29 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       });
     }
   } else {
+    const ghostMeta = assistantMetadataExtras(
+      {
+        via: "anthropic_direct_ghost",
+        ...(createdFiles.length > 0
+          ? {
+              created_files: createdFiles.map((f) => ({
+                fileName: f.fileName,
+                mimeType: f.mimeType,
+                sizeBytes: f.bytes.byteLength,
+                dataBase64: Buffer.from(f.bytes).toString("base64"),
+              })),
+            }
+          : {}),
+      },
+      chat.mode as DtChatMode,
+      finalized.seoTaskProposals,
+    );
     assistantRow = {
       id: `ghost-${Date.now()}`,
       chat_id: chatId,
       role: "assistant",
       content: finalized.content,
-      metadata: assistantMetadataExtras(
-        { via: "anthropic_direct_ghost" },
-        chat.mode as DtChatMode,
-        finalized.seoTaskProposals,
-      ),
+      metadata: ghostMeta,
       author_user_id: null,
       stopped: false,
       created_at: new Date().toISOString(),
@@ -571,6 +624,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     ok: true,
     userMessage: userRow,
     assistantMessage: assistantRow,
+    attachments: [...userAttachmentRows, ...createdAttachmentRows],
     titleSuggestion,
     via: hasAttachments ? "anthropic_direct_attachments" : "anthropic_direct",
   });

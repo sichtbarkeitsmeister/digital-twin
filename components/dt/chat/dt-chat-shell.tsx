@@ -12,7 +12,7 @@ import {
 import { agentSupportsPersonaTesting, personaTestingModeTitle } from "@/lib/dt/persona-testing";
 import { DtWunschkundenPanel } from "@/components/dt/chat/dt-wunschkunden-panel";
 import { DtChatComposer } from "@/components/dt/chat/dt-chat-composer";
-import { DtChatLightbox } from "@/components/dt/chat/dt-chat-lightbox";
+import { DtChatFilePreview, type DtChatPreviewFile } from "@/components/dt/chat/dt-chat-file-preview";
 import { DtGhostBanner } from "@/components/dt/chat/dt-ghost-banner";
 import { DtPersonaTestingRail } from "@/components/dt/chat/dt-persona-testing-rail";
 import {
@@ -129,7 +129,7 @@ export function DtChatShell(props: {
   const [personaTesting, setPersonaTesting] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
   const [textMode, setTextMode] = useState(false);
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<DtChatPreviewFile | null>(null);
   const [dropHighlight, setDropHighlight] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -983,6 +983,7 @@ export function DtChatShell(props: {
         ok?: boolean;
         userMessage?: DtChatMessageItem;
         assistantMessage?: DtChatMessageItem;
+        attachments?: DtStoredAttachment[];
         titleSuggestion?: string | null;
         via?: string;
         message?: string;
@@ -1008,6 +1009,19 @@ export function DtChatShell(props: {
         if (json.assistantMessage) next.push(json.assistantMessage);
         return next;
       });
+
+      if (json.attachments && json.attachments.length > 0) {
+        setAttachmentsByMessage((prev) => {
+          const next = new Map(prev);
+          for (const row of json.attachments ?? []) {
+            if (!row.message_id) continue;
+            const list = next.get(row.message_id) ?? [];
+            if (row.id && list.some((item) => item.id === row.id)) continue;
+            next.set(row.message_id, [...list, row]);
+          }
+          return next;
+        });
+      }
 
       if (json.titleSuggestion) {
         setChats((prev) =>
@@ -1193,7 +1207,7 @@ export function DtChatShell(props: {
 
   return (
     <>
-      <DtChatLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      <DtChatFilePreview file={previewFile} onClose={() => setPreviewFile(null)} />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1374,7 +1388,7 @@ export function DtChatShell(props: {
                           : undefined
                   }
                   attachmentsByMessageId={attachmentsByMessage}
-                  onImageClick={(src) => setLightboxSrc(src)}
+                  onPreviewFile={(file) => setPreviewFile(file)}
                   onSaveTaskProposal={
                     (props.seoMode || isSeoChat) &&
                     props.onSaveTaskProposal &&

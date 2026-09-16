@@ -256,6 +256,7 @@ export function DtChatComposer(props: {
                   props.attachments.length >= DT_MAX_ATTACHMENTS
                 }
                 aria-label="Datei anhängen"
+                title="Dateien anhängen (Excel, Word, PDF, HTML, Bilder, …)"
                 onClick={() => fileInputRef.current?.click()}
                 className={iconBtn}
               >

@@ -8,6 +8,7 @@ import { DtChatMessage, type DtChatMessageItem } from "@/components/dt/chat/dt-c
 import { DtChatThinking } from "@/components/dt/chat/dt-chat-thinking";
 import { cn } from "@/components/dt/cn";
 import type { DtStoredAttachment } from "@/lib/dt/client-attachments";
+import type { DtChatPreviewFile } from "@/components/dt/chat/dt-chat-file-preview";
 
 import type { DtSeoChatTaskProposal, DtSeoTaskProposalMatchRow } from "@/lib/dt/seo/chat-task-proposals";
 
@@ -26,6 +27,7 @@ export function DtChatThread(props: {
   suggestedFollowUps?: string[];
   onSuggestedFollowUp?: (text: string) => void;
   attachmentsByMessageId?: Map<string, DtStoredAttachment[]>;
+  onPreviewFile?: (file: DtChatPreviewFile) => void;
   onImageClick?: (src: string) => void;
   seoTasks?: DtSeoTaskProposalMatchRow[];
   onSaveTaskProposal?: (
@@ -151,6 +153,7 @@ export function DtChatThread(props: {
                     : null
                 }
                 storedAttachments={props.attachmentsByMessageId?.get(m.id)}
+                onPreviewFile={props.onPreviewFile}
                 onImageClick={props.onImageClick}
                 seoTasks={props.seoTasks}
                 onSaveTaskProposal={

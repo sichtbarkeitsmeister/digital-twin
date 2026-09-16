@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { loadDtAuthorProfiles } from "@/lib/dt/author-labels";
-import { DT_CHAT_ATTACHMENTS_BUCKET, isSkippedStoragePath } from "@/lib/dt/attachments";
+import {
+  DT_CHAT_ATTACHMENTS_BUCKET,
+  isSkippedStoragePath,
+  signDtChatAttachmentRows,
+} from "@/lib/dt/attachments";
 import { isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { getDtChatOrNull, loadDtMessages, requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
@@ -57,21 +61,7 @@ export async function GET(_: Request, context: { params: Promise<{ chatId: strin
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true });
 
-  const attachmentsWithUrls = await Promise.all(
-    (attachRows ?? []).map(async (row) => {
-      if (isSkippedStoragePath(row.storage_path)) {
-        return { ...row, signed_url: null as string | null };
-      }
-      const { data, error } = await auth.supabase.storage
-        .from(DT_CHAT_ATTACHMENTS_BUCKET)
-        .createSignedUrl(row.storage_path, 3600);
-      if (error) {
-        console.warn("[dt] attachment signed url:", row.storage_path, error.message);
-        return { ...row, signed_url: null };
-      }
-      return { ...row, signed_url: data.signedUrl };
-    }),
-  );
+  const attachmentsWithUrls = await signDtChatAttachmentRows(auth.supabase, attachRows ?? []);
 
   let seoTasks: Array<{
     id: string;
