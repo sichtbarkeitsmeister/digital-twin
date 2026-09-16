@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Info, Loader2, Send, X } from "lucide-react";
 
@@ -35,6 +36,11 @@ export function DtAgentEditRequestModal(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (props.open && props.agent) {
@@ -86,14 +92,16 @@ export function DtAgentEditRequestModal(props: {
     setTimeout(() => props.onClose(), 1200);
   }
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {props.open && props.agent && values ? (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-end justify-center bg-sbkm-navy/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          className="fixed inset-0 z-[200] flex items-end justify-center overflow-y-auto overscroll-contain bg-sbkm-navy/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="agent-request-title"
@@ -104,7 +112,7 @@ export function DtAgentEditRequestModal(props: {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 320 }}
-            className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-dt border border-sbkm-navy/10 bg-white shadow-dt-lg dark:border-white/10 dark:bg-sbkm-navy sm:rounded-dt"
+            className="flex max-h-[min(92dvh,calc(100dvh-1rem))] min-h-0 w-full max-w-lg flex-col overflow-hidden rounded-t-dt border border-sbkm-navy/10 bg-white shadow-dt-lg dark:border-white/10 dark:bg-sbkm-navy sm:rounded-dt"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="border-b border-sbkm-navy/10 px-5 py-4 dark:border-white/10">
@@ -139,7 +147,7 @@ export function DtAgentEditRequestModal(props: {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 py-4">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 scrollbar-subtle">
               <DtAgentFormFields
                 values={values}
                 onChange={(patch) => setValues((prev) => (prev ? { ...prev, ...patch } : prev))}
@@ -197,6 +205,7 @@ export function DtAgentEditRequestModal(props: {
           </motion.div>
         </motion.div>
       ) : null}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

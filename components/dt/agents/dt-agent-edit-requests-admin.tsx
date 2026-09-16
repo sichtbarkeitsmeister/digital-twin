@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Check, Loader2, X } from "lucide-react";
 
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { Badge } from "@/components/ui/badge";
+import { CenteredModal } from "@/components/ui/centered-modal";
 import { Textarea } from "@/components/ui/textarea";
 import type {
   DtAgentEditRequestView,
@@ -22,11 +23,46 @@ const FIELD_LABELS: Record<string, string> = {
   position: "Reihenfolge",
 };
 
-function formatChangeValue(key: string, value: unknown): string {
-  if (key === "quick_actions" && Array.isArray(value)) return value.join(", ");
-  if (key === "is_enabled") return value ? "Ja" : "Nein";
-  if (value === null || value === undefined || value === "") return "—";
-  return String(value);
+function proposedChangeLabels(changes: DtAgentProposedChanges): string {
+  return Object.keys(changes)
+    .map((field) => FIELD_LABELS[field] ?? field)
+    .join(" · ");
+}
+
+function DtAgentChangeValue(props: { field: string; value: unknown }) {
+  if (props.field === "quick_actions" && Array.isArray(props.value)) {
+    const items = props.value.map((item) => String(item).trim()).filter(Boolean);
+    if (items.length === 0) {
+      return <p className="mt-0.5 text-sbkm-ink-600 dark:text-white/65">—</p>;
+    }
+    return (
+      <ol className="mt-1.5 list-decimal space-y-2 pl-5 text-sbkm-ink-600 dark:text-white/65">
+        {items.map((item, index) => (
+          <li key={`${index}-${item.slice(0, 32)}`} className="break-words leading-relaxed">
+            {item}
+          </li>
+        ))}
+      </ol>
+    );
+  }
+
+  if (props.field === "is_enabled") {
+    return (
+      <p className="mt-0.5 break-words text-sbkm-ink-600 dark:text-white/65">
+        {props.value ? "Ja" : "Nein"}
+      </p>
+    );
+  }
+
+  if (props.value === null || props.value === undefined || props.value === "") {
+    return <p className="mt-0.5 text-sbkm-ink-600 dark:text-white/65">—</p>;
+  }
+
+  return (
+    <p className="mt-0.5 whitespace-pre-wrap break-words text-sbkm-ink-600 dark:text-white/65">
+      {String(props.value)}
+    </p>
+  );
 }
 
 function DtAgentChangesDiff(props: { changes: DtAgentProposedChanges }) {
@@ -37,17 +73,15 @@ function DtAgentChangesDiff(props: { changes: DtAgentProposedChanges }) {
 
   return (
     <ul className="grid gap-2 text-sm">
-      {entries.map(([key, value]) => (
+      {entries.map(([field, value]) => (
         <li
-          key={key}
+          key={field}
           className="rounded-dt border border-sbkm-navy/10 bg-sbkm-navy/[0.02] px-3 py-2 dark:border-white/10 dark:bg-white/5"
         >
           <span className="font-semibold text-sbkm-navy dark:text-white">
-            {FIELD_LABELS[key] ?? key}
+            {FIELD_LABELS[field] ?? field}
           </span>
-          <p className="mt-0.5 break-words text-sbkm-ink-600 dark:text-white/65">
-            {formatChangeValue(key, value)}
-          </p>
+          <DtAgentChangeValue field={field} value={value} />
         </li>
       ))}
     </ul>
@@ -155,6 +189,11 @@ export function DtAgentEditRequestsAdmin() {
                       {new Date(req.created_at).toLocaleString("de-DE")}
                     </span>
                   </p>
+                  {Object.keys(req.proposed_changes).length > 0 ? (
+                    <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
+                      {proposedChangeLabels(req.proposed_changes)}
+                    </p>
+                  ) : null}
                   {req.request_note ? (
                     <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
                       „{req.request_note}"
@@ -170,86 +209,90 @@ export function DtAgentEditRequestsAdmin() {
         </motion.div>
       )}
 
-      <AnimatePresence>
-        {active ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-sbkm-navy/50 p-4 backdrop-blur-sm"
-            onClick={() => !busy && setReviewId(null)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-dt border border-sbkm-navy/10 bg-white p-6 shadow-dt-lg dark:border-white/10 dark:bg-sbkm-navy"
-              onClick={(e) => e.stopPropagation()}
+      <CenteredModal
+        open={Boolean(active)}
+        onClose={() => {
+          if (!busy) setReviewId(null);
+        }}
+        closeDisabled={busy}
+        titleId="agent-review-title"
+        bodyClassName="scrollbar-subtle"
+        header={
+          <div className="shrink-0 border-b border-sbkm-navy/10 px-5 py-4 dark:border-white/10 sm:px-6">
+            <h2
+              id="agent-review-title"
+              className="text-lg font-semibold tracking-tight text-sbkm-navy dark:text-white"
             >
-              <h2 className="text-lg font-semibold tracking-tight text-sbkm-navy dark:text-white">
-                {active.agent_name}
-              </h2>
-              <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-                {active.organisation_name}
+              {active?.agent_name}
+            </h2>
+            <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+              {active?.organisation_name}
+            </p>
+            {active?.request_note ? (
+              <p className="mt-2 text-sm text-sbkm-ink-600 dark:text-white/60">
+                „{active.request_note}"
               </p>
+            ) : null}
+          </div>
+        }
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <DtPillButton
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setReviewId(null)}
+            >
+              Schließen
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              variant="outline"
+              disabled={busy}
+              className="gap-1.5"
+              onClick={() => void decide("reject")}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+              Ablehnen
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              disabled={busy}
+              className="gap-1.5"
+              onClick={() => void decide("approve")}
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              Übernehmen
+            </DtPillButton>
+          </div>
+        }
+      >
+        {active ? (
+          <>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-sbkm-ink-500">
+              Vorgeschlagene Änderungen
+            </p>
+            <DtAgentChangesDiff changes={active.proposed_changes} />
 
-              <div className="mt-4">
-                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-sbkm-ink-500">
-                  Vorgeschlagene Änderungen
-                </p>
-                <DtAgentChangesDiff changes={active.proposed_changes} />
-              </div>
-
-              <label className="mt-4 grid gap-1 text-sm">
-                <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-                  Hinweis bei Ablehnung (optional)
-                </span>
-                <Textarea
-                  value={reviewerNote}
-                  disabled={busy}
-                  onChange={(e) => setReviewerNote(e.target.value)}
-                  className="min-h-[72px] text-sm"
-                  placeholder="Kurze Begründung für den Kunden …"
-                />
-              </label>
-
-              <div className="mt-6 flex flex-wrap justify-end gap-2">
-                <DtPillButton
-                  type="button"
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => setReviewId(null)}
-                >
-                  Schließen
-                </DtPillButton>
-                <DtPillButton
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  className="gap-1.5"
-                  onClick={() => void decide("reject")}
-                >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                  Ablehnen
-                </DtPillButton>
-                <DtPillButton
-                  type="button"
-                  disabled={busy}
-                  className="gap-1.5"
-                  onClick={() => void decide("approve")}
-                >
-                  {busy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Check className="h-4 w-4" />
-                  )}
-                  Übernehmen
-                </DtPillButton>
-              </div>
-            </motion.div>
-          </motion.div>
+            <label className="mt-4 grid gap-1 text-sm">
+              <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
+                Hinweis bei Ablehnung (optional)
+              </span>
+              <Textarea
+                value={reviewerNote}
+                disabled={busy}
+                onChange={(e) => setReviewerNote(e.target.value)}
+                className="min-h-[72px] text-sm"
+                placeholder="Kurze Begründung für den Kunden …"
+              />
+            </label>
+          </>
         ) : null}
-      </AnimatePresence>
+      </CenteredModal>
     </div>
   );
 }
