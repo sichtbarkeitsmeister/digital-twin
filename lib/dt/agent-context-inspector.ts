@@ -30,6 +30,7 @@ import {
   loadDtWebsiteStructure,
 } from "@/lib/dt/seo/load-website-structure";
 import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
+import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
 import {
   formatSeoChecklist,
   loadGlobalSeoChecklist,
@@ -71,6 +72,9 @@ export type DtAgentContextBundle = {
   agentName: string;
   agentKind: string;
   mode: DtAgentContextMode;
+  textMode: boolean;
+  textModePrompt: string;
+  textModePromptIsDefault: boolean;
   sections: DtAgentContextSection[];
   excludedNote: string;
   assembledPreviewChars: number;
@@ -96,6 +100,7 @@ export async function loadDtAgentContextBundle(input: {
   organisationId: string;
   agentId: string;
   mode: DtAgentContextMode;
+  textMode?: boolean;
   supabase?: SupabaseClient;
 }): Promise<DtAgentContextBundle> {
   const supabase = input.supabase ?? createServiceClient();
@@ -190,6 +195,8 @@ export async function loadDtAgentContextBundle(input: {
     : "";
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
+  const textModeLoaded = await loadTextModeInstructions(supabase);
+  const includeTextMode = Boolean(input.textMode);
   const globalSeoChecklist = isSeoOrGeo
     ? await loadGlobalSeoChecklist(supabase)
     : [];
@@ -373,6 +380,20 @@ export async function loadDtAgentContextBundle(input: {
       }),
     );
   }
+
+  sections.push(
+    section({
+      id: "text_mode",
+      title: "Text-Modus",
+      sourceLabel: textModeLoaded.isDefault ? "System (Standard)" : "Global",
+      sourceType: textModeLoaded.isDefault ? "system" : "user",
+      description: includeTextMode
+        ? "Wird gerade im Preview mitgeführt — im Chat nur, wenn „Text“ aktiv ist. Plattformweit editierbar."
+        : "Nur im Chat, wenn „Text“ aktiv ist. Unten bearbeiten oder Preview mit Text-Modus einschalten.",
+      content: textModeLoaded.prompt,
+      meta: { isDefault: textModeLoaded.isDefault ? 1 : 0 },
+    }),
+  );
 
   if (isSeoOrGeo) {
     sections.push(
@@ -599,6 +620,8 @@ export async function loadDtAgentContextBundle(input: {
     transcriptKnowledgeText: includeWebsiteStructure
       ? transcriptKnowledgeText
       : undefined,
+    textMode: includeTextMode,
+    textModePrompt: textModeLoaded.prompt,
   });
 
   return {
@@ -608,6 +631,9 @@ export async function loadDtAgentContextBundle(input: {
     agentName: agent.name,
     agentKind: agent.kind,
     mode: input.mode,
+    textMode: includeTextMode,
+    textModePrompt: textModeLoaded.prompt,
+    textModePromptIsDefault: textModeLoaded.isDefault,
     sections,
     excludedNote:
       "Nicht enthalten: vollständiger Verlauf des aktuellen Chats, Nachrichten-Anhänge und dynamisch eingefügte URL-Inhalte. Andere SEO-Chats erscheinen als komprimierte Auszüge.",

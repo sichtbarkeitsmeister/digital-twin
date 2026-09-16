@@ -7,6 +7,7 @@ import { buildDtChatStaticSystemText, buildProspectStaticSystemText } from "@/li
 import { PASTED_URL_PROMPT_HINT_DE } from "@/lib/shared/pasted-url-context";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
 import { formatSeoChecklist } from "@/lib/dt/seo/seo-checklist";
+import { resolveTextModeInstructions } from "@/lib/dt/prompts/text-mode";
 import type { DtSitePageRow } from "@/lib/dt/types";
 
 export type DtPromptAgent = {
@@ -58,6 +59,8 @@ export function buildDtSystemPrompt(input: {
   transcriptKnowledgeText?: string;
   pastedUrlsText?: string;
   textMode?: boolean;
+  /** Override for the Text-Modus block (platform setting). Falls back to the code default. */
+  textModePrompt?: string;
 }): string {
   const prospect = isProspectPersonaKind(input.agent.kind, input.agent.slug);
 
@@ -182,26 +185,7 @@ export function buildDtSystemPrompt(input: {
   }
 
   if (input.textMode) {
-    blocks.push(
-      "",
-      "## Text-Modus",
-      "Der Nutzer möchte SEO-optimierte, publikationsreife Texte — kein Chat, sondern fertiger Copy-Output.",
-      "",
-      "### SEO",
-      "- Fokus-Keyword und semantische Varianten natürlich einweben (Titel, erster Absatz, H2/H3).",
-      "- Suchintention treffen; scannbare Struktur mit klaren Zwischenüberschriften.",
-      "- Bei Bedarf Meta-Titel, Meta-Description und interne Verlinkungsvorschläge klar getrennt anbieten.",
-      "- Kein Keyword-Stuffing, keine künstliche Wiederholung.",
-      "",
-      "### Menschlicher Ton (Anti-AI-Slop)",
-      "- Satzlängen und Rhythmus variieren; aktiv formulieren, konkrete Details statt Füllwörter.",
-      "- Vermeide Floskeln wie „in der heutigen schnelllebigen Welt“, „darüber hinaus“, „zudem“, „es ist wichtig zu beachten“.",
-      "- Kein leerer Schlussabsatz, kein Em-Dash-Overuse, natürliches Deutsch.",
-      "",
-      "### Output",
-      "- Liefere den fertigen Text zum direkten Einfügen.",
-      "- Meta-/Titel-Vorschläge klar abtrennen, wenn du sie mitlieferst.",
-    );
+    blocks.push("", resolveTextModeInstructions(input.textModePrompt));
   }
 
   if (input.pastedUrlsText?.trim()) {

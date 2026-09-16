@@ -17,6 +17,7 @@ import { DtTabs } from "@/components/dt/dt-tabs";
 import { cn } from "@/components/dt/cn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import type {
   DtAgentContextBundle,
   DtAgentContextMode,
@@ -25,6 +26,7 @@ import type {
 } from "@/lib/dt/agent-context-inspector";
 import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
 import { estimateSectionChars } from "@/lib/dt/agent-context-inspector";
+import { toast } from "sonner";
 
 type AgentOption = {
   id: string;
@@ -161,6 +163,124 @@ function ContextSectionCard(props: {
   );
 }
 
+function TextModePromptEditor(props: {
+  section: DtAgentContextSection;
+  prompt: string;
+  isDefault: boolean;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [draft, setDraft] = useState(props.prompt);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setDraft(props.prompt);
+  }, [props.prompt]);
+
+  const dirty = draft.trim() !== props.prompt.trim();
+  const chars = estimateSectionChars(draft);
+
+  async function save(next: string) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/dt/platform-settings/text-mode-prompt", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: next }),
+      });
+      const json = (await res.json()) as { ok?: boolean; message?: string };
+      if (!res.ok || !json.ok) {
+        toast.error(json.message ?? "Speichern fehlgeschlagen.");
+        return;
+      }
+      toast.success("Text-Modus-Prompt gespeichert — gilt ab der nächsten Nachricht.");
+      props.onSaved();
+    } catch {
+      toast.error("Speichern fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <motion.div
+      id="text-mode-prompt"
+      variants={item}
+      className="relative scroll-mt-24 overflow-hidden rounded-xl border border-border/80 bg-card shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]"
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-muted/20"
+        aria-expanded={open}
+      >
+        <div className="min-w-0 grid gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold tracking-tight text-primary">
+              {props.section.title}
+            </span>
+            <Badge variant="outline" className="text-[10px]">
+              {SOURCE_BADGE[props.section.sourceType]}
+            </Badge>
+            {props.isDefault ? (
+              <Badge variant="secondary" className="text-[10px]">
+                Standard
+              </Badge>
+            ) : (
+              <Badge className="text-[10px]">Angepasst</Badge>
+            )}
+            <span className="text-xs tabular-nums text-secondary">
+              {chars.toLocaleString("de-DE")} Zeichen
+            </span>
+          </div>
+          <p className="text-xs text-secondary">{props.section.description}</p>
+        </div>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-secondary transition-transform duration-200",
+            open && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </button>
+
+      {open ? (
+        <div className="border-t border-border/60 px-4 pb-4 pt-3">
+          <Textarea
+            value={draft}
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            className="min-h-[220px] font-mono text-xs leading-relaxed"
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || !dirty}
+              onClick={() => void save(draft)}
+            >
+              Speichern
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy || props.isDefault}
+              onClick={() => void save("")}
+            >
+              Standard wiederherstellen
+            </Button>
+            <span className="text-xs text-secondary">
+              Quelle: {props.section.sourceLabel}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </motion.div>
+  );
+}
+
 export function DtAgentContextInspector(props: {
   organisations: Array<{ id: string; name: string }>;
   initialOrgId: string;
@@ -183,6 +303,10 @@ export function DtAgentContextInspector(props: {
   const [agentId, setAgentId] = useState(
     () => searchParams.get("agent") ?? props.initialAgentId ?? "",
   );
+  const [textMode, setTextMode] = useState(() => {
+    const v = searchParams.get("textMode");
+    return v === "1" || v === "true";
+  });
   const [bundle, setBundle] = useState<DtAgentContextBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,19 +323,26 @@ export function DtAgentContextInspector(props: {
   }, [searchParams, props.organisations, orgId]);
 
   const syncUrl = useCallback(
-    (patch: { org?: string; agent?: string; mode?: DtAgentContextMode }) => {
+    (patch: {
+      org?: string;
+      agent?: string;
+      mode?: DtAgentContextMode;
+      textMode?: boolean;
+    }) => {
       const nextOrg = patch.org ?? orgId;
       const nextAgent = patch.agent ?? agentId;
       const nextMode = patch.mode ?? mode;
+      const nextTextMode = patch.textMode ?? textMode;
       const q = new URLSearchParams();
       q.set("org", nextOrg);
       if (nextAgent) q.set("agent", nextAgent);
       q.set("mode", nextMode);
+      if (nextTextMode) q.set("textMode", "1");
       router.replace(`/dashboard/verwaltung/agent-kontext?${q.toString()}`, {
         scroll: false,
       });
     },
-    [orgId, agentId, mode, router],
+    [orgId, agentId, mode, textMode, router],
   );
 
   const loadAgents = useCallback(async (oid: string) => {
@@ -242,6 +373,7 @@ export function DtAgentContextInspector(props: {
       agent: agentId,
       mode,
     });
+    if (textMode) q.set("textMode", "1");
     const res = await fetch(`/api/dt/agents/context?${q}`);
     const json = (await res.json()) as {
       ok?: boolean;
@@ -255,7 +387,7 @@ export function DtAgentContextInspector(props: {
       return;
     }
     setBundle(json.bundle);
-  }, [orgId, agentId, mode]);
+  }, [orgId, agentId, mode, textMode]);
 
   useEffect(() => {
     void (async () => {
@@ -312,7 +444,8 @@ export function DtAgentContextInspector(props: {
         <p className="mt-1 text-xs text-secondary dark:text-white/60">
           Chat-Verlauf, Nachrichten-Anhänge und dynamisch eingefügte URL-Inhalte
           aus einzelnen Nachrichten. Der SEO-Report und Crawl-Daten sind
-          enthalten, sobald sie vorliegen.
+          enthalten, sobald sie vorliegen. Text-Modus nur, wenn der Schalter unten an ist
+          (im Chat: Button „Text“).
         </p>
       </div>
 
@@ -352,6 +485,20 @@ export function DtAgentContextInspector(props: {
         }}
       />
 
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-primary">
+        <input
+          type="checkbox"
+          className="size-4 accent-sbkm-navy"
+          checked={textMode}
+          onChange={(e) => {
+            const next = e.target.checked;
+            setTextMode(next);
+            syncUrl({ textMode: next });
+          }}
+        />
+        Text-Modus im Preview (wie der Button „Text“ im Chat)
+      </label>
+
       {loading ? (
         <div className="grid gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -381,15 +528,25 @@ export function DtAgentContextInspector(props: {
           variants={container}
           initial="hidden"
           animate="show"
-          key={`${bundle.organisationId}-${bundle.agentId}-${bundle.mode}`}
+          key={`${bundle.organisationId}-${bundle.agentId}-${bundle.mode}-${bundle.textMode}`}
         >
-          {bundle.sections.map((section, index) => (
-            <ContextSectionCard
-              key={section.id}
-              section={section}
-              defaultOpen={index < 2}
-            />
-          ))}
+          {bundle.sections.map((section, index) =>
+            section.id === "text_mode" ? (
+              <TextModePromptEditor
+                key={section.id}
+                section={section}
+                prompt={bundle.textModePrompt}
+                isDefault={bundle.textModePromptIsDefault}
+                onSaved={() => void loadBundle()}
+              />
+            ) : (
+              <ContextSectionCard
+                key={section.id}
+                section={section}
+                defaultOpen={index < 2}
+              />
+            ),
+          )}
         </motion.div>
       ) : null}
     </div>
