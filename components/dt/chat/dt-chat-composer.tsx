@@ -299,7 +299,7 @@ export function DtChatComposer(props: {
               props.ghostMode
                 ? "Ghost-Chat — wird nicht gespeichert …"
                 : props.textMode
-                  ? "Text-Modus — SEO-Text, der menschlich klingt …"
+                  ? "Text-Modus — Flyer, Social, Kundeninfo …"
                   : personaTesting
                     ? personaTestingPlaceholder(
                         props.personaTestingLabel,
