@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 
 import { extractTextPreviewFromBytes } from "../lib/dt/parse-attachment-text";
 import { guessDtMimeFromName, isDtPreviewableMime, resolveDtStorageMime } from "../lib/dt/attachments-shared";
+import { formatAttachedFilesForPrompt } from "../lib/dt/format-attached-files-for-prompt";
 import {
   buildCreatedChatFile,
   ensureFileNameExtension,
@@ -170,8 +171,35 @@ function testPromptMentionsFiles() {
     mode: "default",
   });
   assert.match(prompt, /create_file/);
-  assert.match(prompt, /Excel/);
+  assert.match(prompt, /Angehängte Datei/);
   console.log("system prompt files: ok");
+}
+
+async function testUtf16Transcript() {
+  const raw = "Hallo Transkript\nSprecher 1: Das Angebot ist zu teuer.";
+  const bytes = Uint8Array.from(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(raw, "utf16le")]));
+  const extracted = await extractTextPreviewFromBytes(
+    "16.09.2026_Transkript_S.txt",
+    "text/plain",
+    bytes,
+  );
+  assert.equal(extracted.ok, true);
+  if (!extracted.ok) return;
+  assert.match(extracted.text, /Sprecher 1/);
+  assert.match(extracted.text, /zu teuer/);
+  console.log("utf-16 transcript: ok");
+}
+
+function testAttachmentPromptBlock() {
+  const withText = formatAttachedFilesForPrompt([
+    { fileName: "16.09.2026_Transkript_S.txt", text: "Sprecher 1: Hallo" },
+  ]);
+  assert.match(withText, /Angehängte Datei: 16\.09\.2026_Transkript_S\.txt/);
+  assert.match(withText, /Sprecher 1: Hallo/);
+  const withoutText = formatAttachedFilesForPrompt([{ fileName: "notiz.docx", text: "" }]);
+  assert.match(withoutText, /Angehängte Datei: notiz\.docx/);
+  assert.match(withoutText, /angehängt/);
+  console.log("attachment prompt block: ok");
 }
 
 async function main() {
@@ -183,6 +211,8 @@ async function main() {
   testHelpers();
   testResolveStorageMime();
   testPromptMentionsFiles();
+  testAttachmentPromptBlock();
+  await testUtf16Transcript();
   console.log("all dt chat file tests passed");
 }
 

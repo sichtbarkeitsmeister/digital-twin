@@ -13,7 +13,7 @@ import {
 import {
   DT_MAX_ATTACHMENTS,
   DT_MAX_ATTACHMENT_BYTES,
-  isDtMultimodalMime,
+  isDtTextLikeMime,
   MAX_ATTACHMENT_BASE64_CHARS,
   normalizeDtMime,
   resolveDtStorageMime,
@@ -98,12 +98,9 @@ async function uploadChatFileBytes(
   fileName: string,
 ): Promise<{ ok: true; mimeType: string } | { ok: false; message: string; mimeBlocked: boolean }> {
   const preferred = resolveDtStorageMime(fileName, mimeType, bytes);
+  const fallbacks = isDtTextLikeMime(preferred, fileName) ? ["text/plain", "text/csv"] : [];
   const candidates = Array.from(
-    new Set(
-      [preferred, mimeType, "text/plain", "text/csv"].map((m) =>
-        normalizeDtMime(m),
-      ).filter(Boolean),
-    ),
+    new Set([preferred, mimeType, ...fallbacks].map((m) => normalizeDtMime(m)).filter(Boolean)),
   );
 
   await ensureDtChatAttachmentsAcceptAllMimes();
@@ -379,7 +376,9 @@ export async function prepareInboundAttachments(
         items.push({
           ...a,
           mimeType,
-          textContent: text?.trim() ? text : a.textContent,
+          textContent: text?.trim()
+            ? text
+            : a.textContent?.trim() || `[Datei „${a.fileName}“ ist angehängt.]`,
           dataBase64: a.dataBase64,
         });
       } catch {

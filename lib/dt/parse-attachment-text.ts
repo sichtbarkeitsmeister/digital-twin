@@ -13,6 +13,27 @@ export type AttachmentTextExtract =
   | { ok: true; text: string }
   | { ok: false; message: string };
 
+function decodeTextBytes(bytes: Uint8Array): string {
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(bytes).replace(/^\uFEFF/, "");
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(bytes).replace(/^\uFEFF/, "");
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return new TextDecoder("utf-8").decode(bytes).replace(/^\uFEFF/, "");
+  }
+  const sample = bytes.subarray(0, Math.min(80, bytes.length));
+  let oddZeros = 0;
+  for (let i = 1; i < sample.length; i += 2) {
+    if (sample[i] === 0) oddZeros += 1;
+  }
+  if (sample.length >= 8 && oddZeros >= Math.floor(sample.length / 4)) {
+    return new TextDecoder("utf-16le").decode(bytes).replace(/\u0000/g, "");
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
 function binaryPlaceholder(fileName: string, mimeType: string, byteLength: number): string {
   const kb = Math.max(1, Math.round(byteLength / 1024));
   return `[Datei „${fileName}“ (${mimeType || "unbekannt"}, ${kb} KB) — Inhalt nicht als Text lesbar, Datei ist angehängt.]`;
@@ -90,12 +111,20 @@ export async function extractTextPreviewFromBytes(
   }
 
   if (isDtTextLikeMime(norm, fileName) || norm === "image/svg+xml") {
-    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes).slice(0, TEXT_PREVIEW_MAX);
-    return { ok: true, text };
+    const text = decodeTextBytes(bytes).slice(0, TEXT_PREVIEW_MAX);
+    return {
+      ok: true,
+      text: text.trim()
+        ? text
+        : `[Textdatei „${fileName}“ ist angehängt, der Inhalt war leer.]`,
+    };
   }
 
-  if (norm.startsWith("image/") || norm === "application/pdf") {
-    return { ok: true, text: "" };
+  if (norm.startsWith("image/") || norm === "application/pdf" || fileName.toLowerCase().endsWith(".pdf")) {
+    return {
+      ok: true,
+      text: `[Datei „${fileName}“ ist angehängt (${norm || "application/pdf"}).]`,
+    };
   }
 
   return { ok: true, text: binaryPlaceholder(fileName, norm || mimeType, bytes.byteLength) };

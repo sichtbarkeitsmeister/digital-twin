@@ -7,6 +7,7 @@ import {
 } from "@/lib/ai/chat-attachments";
 import type { DtInboundAttachment } from "@/lib/dt/attachments";
 import { isDtMultimodalMime } from "@/lib/dt/attachments-shared";
+import { formatAttachedFilesForPrompt } from "@/lib/dt/format-attached-files-for-prompt";
 
 /** Append multimodal blocks for the latest ghost-mode user turn (in-memory only). */
 export function appendEphemeralAttachmentsToMessages(
@@ -18,12 +19,10 @@ export function appendEphemeralAttachmentsToMessages(
     return [...messages, { role: "user", content: text || "(Anhang)" }];
   }
 
-  let textBody = text;
-  for (const a of attachments) {
-    if (a.textContent?.trim()) {
-      textBody += `\n\n--- ${a.fileName} ---\n${a.textContent.trim()}`;
-    }
-  }
+  const attachmentText = formatAttachedFilesForPrompt(
+    attachments.map((a) => ({ fileName: a.fileName, text: a.textContent })),
+  );
+  const textBody = attachmentText ? `${text}\n\n${attachmentText}` : text;
 
   const blocks: Anthropic.ContentBlockParam[] = [
     { type: "text", text: textBody.trim() || "(Anhang)" },
