@@ -19,7 +19,7 @@ import {
   resolveDtStorageMime,
 } from "@/lib/dt/attachments-shared";
 import type { DtCreatedChatFile } from "@/lib/dt/chat-files";
-import { extractTextPreviewFromBytes } from "@/lib/dt/parse-attachment-text";
+import { extractTextPreviewFromBytes, DT_ATTACHMENT_TEXT_PREVIEW_MAX } from "@/lib/dt/parse-attachment-text";
 import { ensureDtChatAttachmentsAcceptAllMimes } from "@/lib/dt/ensure-chat-attachments-bucket";
 
 export const DT_CHAT_ATTACHMENTS_BUCKET = "dt-chat-attachments";
@@ -29,7 +29,7 @@ export const dtAttachmentInboundSchema = z
     fileName: z.string().min(1).max(255),
     mimeType: z.string().min(1).max(120),
     sizeBytes: z.number().int().nonnegative().max(DT_MAX_ATTACHMENT_BYTES),
-    textContent: z.string().max(20_000).optional(),
+    textContent: z.string().max(40_000).optional(),
     dataBase64: z.string().max(MAX_ATTACHMENT_BASE64_CHARS).optional(),
   })
   .superRefine((a, ctx) => {
@@ -345,7 +345,7 @@ export function buildAttachmentMetadataForMessage(attachments: DtInboundAttachme
     fileName: a.fileName,
     mimeType: a.mimeType,
     sizeBytes: a.sizeBytes,
-    ...(a.textContent?.trim() ? { textPreview: a.textContent.trim().slice(0, 20_000) } : {}),
+    ...(a.textContent?.trim() ? { textPreview: a.textContent.trim().slice(0, DT_ATTACHMENT_TEXT_PREVIEW_MAX) } : {}),
   }));
 }
 

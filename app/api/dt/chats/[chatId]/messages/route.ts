@@ -7,6 +7,7 @@ import {
   dtChatFailureUserMessage,
 } from "@/lib/dt/anthropic-chat";
 import { assembleDtChatFromDb } from "@/lib/dt/assemble-chat-prompt";
+import { ensureLatestTurnHasMultimodalBlocks } from "@/lib/dt/hydrate-ephemeral-attachments";
 import {
   buildAttachmentMetadataForMessage,
   dtAttachmentInboundSchema,
@@ -479,7 +480,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
   try {
     direct = await callDtAnthropicChat({
       system: assembled.system,
-      messages: assembled.messages,
+      messages: ensureLatestTurnHasMultimodalBlocks(assembled.messages, prepared.items),
       mode: chat.mode as DtChatMode,
       retrieval:
         chat.mode === "seo" ? { organisationId: chat.organisation_id } : undefined,

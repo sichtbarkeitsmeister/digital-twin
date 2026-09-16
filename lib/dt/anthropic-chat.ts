@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   callAnthropicFirstAvailable,
   extractAnthropicText,
+  anthropicSurveyBetaHeaders,
 } from "@/lib/ai/anthropic-helpers";
 import { fallbackDtChatTitle } from "@/lib/dt/chat-title";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
@@ -502,7 +503,7 @@ export async function callDtAnthropicChat(params: {
   }
 
   const model = resolveDtAnthropicModel(params.mode);
-  const client = new Anthropic({ apiKey });
+  const client = new Anthropic({ apiKey, defaultHeaders: anthropicSurveyBetaHeaders() });
   const max_tokens = 8192;
   const system = sanitizeForLlmText(params.system);
   const roundTimeoutMs = params.mode === "seo" ? 180_000 : 120_000;
@@ -525,6 +526,7 @@ export async function callDtAnthropicChat(params: {
       messages: input.convo,
       tools: input.tools,
       timeoutMs: roundTimeoutMs,
+      headers: anthropicSurveyBetaHeaders(),
     });
     if (!result) {
       throw new Error("Kein verfügbares Anthropic-Modell.");

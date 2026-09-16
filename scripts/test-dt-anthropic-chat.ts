@@ -71,6 +71,26 @@ function testTrimHistoryAlwaysKeepsLastMessage() {
   console.log("trim history always keeps last message: ok");
 }
 
+function testKeepDocumentBlocks() {
+  const out = normalizeDtAnthropicMessages([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "kannst du das lesen?" },
+        {
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: "JVBERi0=" },
+        },
+      ],
+    },
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(Array.isArray(out[0]?.content), true);
+  const types = Array.isArray(out[0]?.content) ? out[0].content.map((b) => b.type) : [];
+  assert.deepEqual(types, ["text", "document"]);
+  console.log("keep pdf document blocks: ok");
+}
+
 function testFailureMessages() {
   assert.equal(
     dtChatFailureUserMessage(new Error("Request timed out")),
@@ -98,5 +118,6 @@ testDropEmptyAndLeadingAssistant();
 testKeepValidAlternatingHistory();
 testTrimHistoryKeepsLatestUnderBudget();
 testTrimHistoryAlwaysKeepsLastMessage();
+testKeepDocumentBlocks();
 testFailureMessages();
 console.log("all dt anthropic-chat tests passed");
