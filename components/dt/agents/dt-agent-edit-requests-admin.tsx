@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Check, Loader2, X } from "lucide-react";
 
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { Badge } from "@/components/ui/badge";
+import { CenteredModal } from "@/components/ui/centered-modal";
 import { Textarea } from "@/components/ui/textarea";
 import type {
   DtAgentEditRequestView,
@@ -208,102 +209,90 @@ export function DtAgentEditRequestsAdmin() {
         </motion.div>
       )}
 
-      <AnimatePresence>
+      <CenteredModal
+        open={Boolean(active)}
+        onClose={() => {
+          if (!busy) setReviewId(null);
+        }}
+        closeDisabled={busy}
+        titleId="agent-review-title"
+        bodyClassName="scrollbar-subtle"
+        header={
+          <div className="shrink-0 border-b border-sbkm-navy/10 px-5 py-4 dark:border-white/10 sm:px-6">
+            <h2
+              id="agent-review-title"
+              className="text-lg font-semibold tracking-tight text-sbkm-navy dark:text-white"
+            >
+              {active?.agent_name}
+            </h2>
+            <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+              {active?.organisation_name}
+            </p>
+            {active?.request_note ? (
+              <p className="mt-2 text-sm text-sbkm-ink-600 dark:text-white/60">
+                „{active.request_note}"
+              </p>
+            ) : null}
+          </div>
+        }
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <DtPillButton
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setReviewId(null)}
+            >
+              Schließen
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              variant="outline"
+              disabled={busy}
+              className="gap-1.5"
+              onClick={() => void decide("reject")}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+              Ablehnen
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              disabled={busy}
+              className="gap-1.5"
+              onClick={() => void decide("approve")}
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              Übernehmen
+            </DtPillButton>
+          </div>
+        }
+      >
         {active ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] overflow-y-auto overscroll-contain bg-sbkm-navy/50 backdrop-blur-sm"
-            onClick={() => !busy && setReviewId(null)}
-          >
-            <div className="flex min-h-full items-center justify-center p-4">
-              <motion.div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="agent-review-title"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.18 }}
-                className="flex max-h-[min(90dvh,calc(100dvh-2rem))] min-h-0 w-full max-w-xl flex-col overflow-hidden rounded-dt border border-sbkm-navy/10 bg-white shadow-dt-lg dark:border-white/10 dark:bg-sbkm-navy"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="shrink-0 border-b border-sbkm-navy/10 px-6 py-4 dark:border-white/10">
-                  <h2
-                    id="agent-review-title"
-                    className="text-lg font-semibold tracking-tight text-sbkm-navy dark:text-white"
-                  >
-                    {active.agent_name}
-                  </h2>
-                  <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-                    {active.organisation_name}
-                  </p>
-                  {active.request_note ? (
-                    <p className="mt-2 text-sm text-sbkm-ink-600 dark:text-white/60">
-                      „{active.request_note}"
-                    </p>
-                  ) : null}
-                </div>
+          <>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-sbkm-ink-500">
+              Vorgeschlagene Änderungen
+            </p>
+            <DtAgentChangesDiff changes={active.proposed_changes} />
 
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4 scrollbar-subtle">
-                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-sbkm-ink-500">
-                    Vorgeschlagene Änderungen
-                  </p>
-                  <DtAgentChangesDiff changes={active.proposed_changes} />
-
-                  <label className="mt-4 grid gap-1 text-sm">
-                    <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
-                      Hinweis bei Ablehnung (optional)
-                    </span>
-                    <Textarea
-                      value={reviewerNote}
-                      disabled={busy}
-                      onChange={(e) => setReviewerNote(e.target.value)}
-                      className="min-h-[72px] text-sm"
-                      placeholder="Kurze Begründung für den Kunden …"
-                    />
-                  </label>
-                </div>
-
-                <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-sbkm-navy/10 px-6 py-4 dark:border-white/10">
-                  <DtPillButton
-                    type="button"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => setReviewId(null)}
-                  >
-                    Schließen
-                  </DtPillButton>
-                  <DtPillButton
-                    type="button"
-                    variant="outline"
-                    disabled={busy}
-                    className="gap-1.5"
-                    onClick={() => void decide("reject")}
-                  >
-                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                    Ablehnen
-                  </DtPillButton>
-                  <DtPillButton
-                    type="button"
-                    disabled={busy}
-                    className="gap-1.5"
-                    onClick={() => void decide("approve")}
-                  >
-                    {busy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Check className="h-4 w-4" />
-                    )}
-                    Übernehmen
-                  </DtPillButton>
-                </div>
-              </motion.div>
-            </div>
-          </motion.div>
+            <label className="mt-4 grid gap-1 text-sm">
+              <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">
+                Hinweis bei Ablehnung (optional)
+              </span>
+              <Textarea
+                value={reviewerNote}
+                disabled={busy}
+                onChange={(e) => setReviewerNote(e.target.value)}
+                className="min-h-[72px] text-sm"
+                placeholder="Kurze Begründung für den Kunden …"
+              />
+            </label>
+          </>
         ) : null}
-      </AnimatePresence>
+      </CenteredModal>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 const sizeClass = {
   sm: "max-w-[min(100%,28rem)] max-h-[min(90dvh,640px)]",
+  md: "max-w-[min(100%,36rem)] max-h-[min(90dvh,calc(100dvh-2rem))]",
   lg: "max-w-[min(100%,64rem)] max-h-[min(90dvh,900px)]",
 } as const;
 
@@ -50,19 +51,20 @@ export function CenteredModal(props: {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-sbkm-navy/60 p-4 backdrop-blur-sm sm:p-6"
+          className="fixed inset-0 z-[200] overflow-y-auto overscroll-contain bg-sbkm-navy/60 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby={props.header || props.title ? titleId : undefined}
           onClick={props.closeDisabled ? undefined : props.onClose}
         >
+          <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
             className={cn(
-              "flex w-full flex-col overflow-hidden rounded-2xl border border-sbkm-navy/12 bg-white shadow-[0_24px_80px_rgba(0,0,0,0.35)] dark:border-white/12 dark:bg-[#1a1530]",
+              "flex min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-sbkm-navy/12 bg-white shadow-[0_24px_80px_rgba(0,0,0,0.35)] dark:border-white/12 dark:bg-[#1a1530]",
               sizeClass[props.size ?? "sm"],
             )}
             onClick={(e) => e.stopPropagation()}
@@ -111,6 +113,7 @@ export function CenteredModal(props: {
               </div>
             ) : null}
           </motion.div>
+          </div>
         </motion.div>
       ) : null}
     </AnimatePresence>,
