@@ -130,6 +130,7 @@ export function DtChatShell(props: {
   const [ghostMode, setGhostMode] = useState(false);
   const [textMode, setTextMode] = useState(false);
   const [previewFile, setPreviewFile] = useState<DtChatPreviewFile | null>(null);
+  const closePreview = useCallback(() => setPreviewFile(null), []);
   const [dropHighlight, setDropHighlight] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -729,6 +730,7 @@ export function DtChatShell(props: {
     setPrompt("");
     clearComposerAttachments();
     setStatus(null);
+    setPreviewFile(null);
     setMobileSidebarOpen(false);
     // Keep the currently selected avatar (e.g. Peter). Only fall back when invalid.
     setSelectedAgentId((prev) =>
@@ -752,6 +754,7 @@ export function DtChatShell(props: {
       writeDtLastChatId(null, props.seoMode);
       setMessages([]);
       setAttachmentsByMessage(new Map());
+      setPreviewFile(null);
     } else {
       startNewChat();
       void refreshChats();
@@ -768,6 +771,7 @@ export function DtChatShell(props: {
     }
     setSelectedChatId(chatId);
     setStatus(null);
+    setPreviewFile(null);
     setMobileSidebarOpen(false);
     syncChatUrl({ chat: chatId });
     await loadChat(chatId, {
@@ -1209,8 +1213,6 @@ export function DtChatShell(props: {
   }
 
   return (
-    <>
-      <DtChatFilePreview file={previewFile} onClose={() => setPreviewFile(null)} />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1452,9 +1454,78 @@ export function DtChatShell(props: {
                   }
                 />
               )}
+
+                {status ? (
+                  <p className="shrink-0 px-6 pb-2 text-sm text-red-600 dark:text-red-400" role="alert">
+                    {status}
+                  </p>
+                ) : null}
+
+                <DtChatComposer
+                  value={prompt}
+                  onChange={setPrompt}
+                  onSend={handleSend}
+                  onStop={() => abortRef.current?.abort()}
+                  isBusy={isBusy}
+                  quickActions={quickActions}
+                  onPickQuickAction={(label) => void handleSend(label)}
+                  canEditQuickActions={canManageAgents || Boolean(props.isPlatformAdmin)}
+                  onSaveQuickActions={
+                    selectedAgentId
+                      ? async (actions) => {
+                          const res = await fetch(`/api/dt/agents/${selectedAgentId}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ quickActions: actions }),
+                          });
+                          const json = (await res.json()) as { ok?: boolean; message?: string };
+                          if (!json.ok) {
+                            return {
+                              ok: false,
+                              message: json.message ?? "Speichern fehlgeschlagen.",
+                            };
+                          }
+                          setAgents((prev) =>
+                            prev.map((agent) =>
+                              agent.id === selectedAgentId
+                                ? { ...agent, quick_actions: actions }
+                                : agent,
+                            ),
+                          );
+                          return { ok: true };
+                        }
+                      : undefined
+                  }
+                  quickActionsDefaultCollapsed={messages.length > 0}
+                  disabled={!selectedAgentId || (isInitialLoading && !ghostMode)}
+                  ghostMode={ghostMode}
+                  onGhostModeChange={handleGhostToggle}
+                  textMode={textMode}
+                  onTextModeChange={setTextMode}
+                  attachments={attachments}
+                  agentName={displayAgentName}
+                  personaTestingAvailable={personaTestingAvailable}
+                  personaTestingAgentId={personaTestingAvailable ? selectedAgentId : null}
+                  personaTestingLabel={
+                    selectedAgent?.kind === "seo_advisor" ? "company" : "persona"
+                  }
+                  personaTesting={personaTestingAvailable && personaTesting}
+                  onPersonaTestingChange={setPersonaTesting}
+                  onAddFiles={(files) => void processFiles(files)}
+                  onRemoveAttachment={(index) => {
+                    setAttachments((prev) => {
+                      const copy = [...prev];
+                      const removed = copy.splice(index, 1)[0];
+                      if (removed) revokeDtDraftPreview(removed);
+                      return copy;
+                    });
+                  }}
+                  dropHighlight={dropHighlight}
+                  onDragHighlight={setDropHighlight}
+                />
               </div>
 
-              {personaTesting && selectedAgentId && personaTestingAvailable ? (
+              {personaTesting && selectedAgentId && personaTestingAvailable && !previewFile ? (
                 <DtPersonaTestingRail
                   agentId={selectedAgentId}
                   enabled={personaTesting}
@@ -1469,79 +1540,11 @@ export function DtChatShell(props: {
                   className="absolute inset-y-0 right-0 z-20 h-full min-w-0 shadow-[0_0_28px_rgba(46,46,80,0.14)] md:static md:z-auto md:shadow-none lg:max-w-[min(28rem,50%)]"
                 />
               ) : null}
+
+              <DtChatFilePreview file={previewFile} onClose={closePreview} />
             </div>
-
-            {status ? (
-              <p className="shrink-0 px-6 pb-2 text-sm text-red-600 dark:text-red-400" role="alert">
-                {status}
-              </p>
-            ) : null}
-
-            <DtChatComposer
-              value={prompt}
-              onChange={setPrompt}
-              onSend={handleSend}
-              onStop={() => abortRef.current?.abort()}
-              isBusy={isBusy}
-              quickActions={quickActions}
-              onPickQuickAction={(label) => void handleSend(label)}
-              canEditQuickActions={canManageAgents || Boolean(props.isPlatformAdmin)}
-              onSaveQuickActions={
-                selectedAgentId
-                  ? async (actions) => {
-                      const res = await fetch(`/api/dt/agents/${selectedAgentId}`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ quickActions: actions }),
-                      });
-                      const json = (await res.json()) as { ok?: boolean; message?: string };
-                      if (!json.ok) {
-                        return {
-                          ok: false,
-                          message: json.message ?? "Speichern fehlgeschlagen.",
-                        };
-                      }
-                      setAgents((prev) =>
-                        prev.map((agent) =>
-                          agent.id === selectedAgentId
-                            ? { ...agent, quick_actions: actions }
-                            : agent,
-                        ),
-                      );
-                      return { ok: true };
-                    }
-                  : undefined
-              }
-              quickActionsDefaultCollapsed={messages.length > 0}
-              disabled={!selectedAgentId || (isInitialLoading && !ghostMode)}
-              ghostMode={ghostMode}
-              onGhostModeChange={handleGhostToggle}
-              textMode={textMode}
-              onTextModeChange={setTextMode}
-              attachments={attachments}
-              agentName={displayAgentName}
-              personaTestingAvailable={personaTestingAvailable}
-              personaTestingAgentId={personaTestingAvailable ? selectedAgentId : null}
-              personaTestingLabel={
-                selectedAgent?.kind === "seo_advisor" ? "company" : "persona"
-              }
-              personaTesting={personaTestingAvailable && personaTesting}
-              onPersonaTestingChange={setPersonaTesting}
-              onAddFiles={(files) => void processFiles(files)}
-              onRemoveAttachment={(index) => {
-                setAttachments((prev) => {
-                  const copy = [...prev];
-                  const removed = copy.splice(index, 1)[0];
-                  if (removed) revokeDtDraftPreview(removed);
-                  return copy;
-                });
-              }}
-              dropHighlight={dropHighlight}
-              onDragHighlight={setDropHighlight}
-            />
           </main>
         </div>
       </motion.div>
-    </>
   );
 }
