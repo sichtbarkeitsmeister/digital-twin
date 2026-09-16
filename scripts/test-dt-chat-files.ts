@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
 
-import { extractTextPreviewFromBytes } from "../lib/dt/parse-attachment-text";
+import { extractTextPreviewFromBytes, isDtPlaceholderAttachmentText } from "../lib/dt/parse-attachment-text";
 import { guessDtMimeFromName, isDtPreviewableMime, resolveDtStorageMime } from "../lib/dt/attachments-shared";
 import { formatAttachedFilesForPrompt } from "../lib/dt/format-attached-files-for-prompt";
 import {
@@ -16,9 +16,11 @@ import {
   wrapHtmlDocument,
 } from "../lib/dt/chat-files";
 import { parseDtCreatedFilesFromText, stripDtCreatedFileFences } from "../lib/dt/parse-chat-file-fences";
-import { toWinAnsiPdfText } from "../lib/dt/chat-file-pdf";
+import { createPdfFromText, toWinAnsiPdfText } from "../lib/dt/chat-file-pdf";
 import { dtAttachmentInboundSchema } from "../lib/dt/attachments";
 import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
+import { ensureLatestTurnHasMultimodalBlocks } from "../lib/dt/hydrate-ephemeral-attachments";
+import { bufferToAnthropicBlocks } from "../lib/ai/chat-attachments";
 
 function xlsxBytes(): Uint8Array {
   const wb = XLSX.utils.book_new();
@@ -175,6 +177,59 @@ function testPromptMentionsFiles() {
   console.log("system prompt files: ok");
 }
 
+async function testPdfExtract() {
+  const bytes = await createPdfFromText({
+    text: "Sprecher 1: Das Angebot ist zu teuer.\nSprecher 2: Dann machen wir 10 Prozent Rabatt.",
+    title: "Transkript",
+  });
+  const extracted = await extractTextPreviewFromBytes(
+    "16.09.2026_Transkript_S.pdf",
+    "application/octet-stream",
+    bytes,
+  );
+  assert.equal(extracted.ok, true);
+  if (!extracted.ok) return;
+  assert.match(extracted.text, /Sprecher 1/);
+  assert.match(extracted.text, /zu teuer/);
+  assert.match(extracted.text, /10 Prozent Rabatt/);
+  assert.doesNotMatch(extracted.text, /ist angehängt \(application\/pdf\)/);
+  console.log("pdf extract: ok");
+}
+
+function testPlaceholderDetector() {
+  assert.equal(
+    isDtPlaceholderAttachmentText('[Datei „scan.pdf“ ist angehängt (application/pdf).]'),
+    true,
+  );
+  assert.equal(isDtPlaceholderAttachmentText("Sprecher 1: Hallo"), false);
+  assert.equal(isDtPlaceholderAttachmentText(""), true);
+  console.log("placeholder detector: ok");
+}
+
+function testPdfDocumentBlock() {
+  const blocks = bufferToAnthropicBlocks("application/pdf", Buffer.from("%PDF-1.4").toString("base64"));
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0]?.type, "document");
+  const messages = ensureLatestTurnHasMultimodalBlocks(
+    [{ role: "user", content: "kannst du die datei lesen?" }],
+    [
+      {
+        fileName: "16.09.2026_Transkript_S.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 12,
+        dataBase64: Buffer.from("%PDF-1.4 hello").toString("base64"),
+      },
+    ],
+  );
+  const last = messages.at(-1);
+  assert.equal(last?.role, "user");
+  assert.equal(Array.isArray(last?.content), true);
+  const types = Array.isArray(last?.content) ? last.content.map((b) => b.type) : [];
+  assert.ok(types.includes("text"));
+  assert.ok(types.includes("document"));
+  console.log("pdf document block: ok");
+}
+
 async function testUtf16Transcript() {
   const raw = "Hallo Transkript\nSprecher 1: Das Angebot ist zu teuer.";
   const bytes = Uint8Array.from(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(raw, "utf16le")]));
@@ -213,6 +268,9 @@ async function main() {
   testPromptMentionsFiles();
   testAttachmentPromptBlock();
   await testUtf16Transcript();
+  await testPdfExtract();
+  testPlaceholderDetector();
+  testPdfDocumentBlock();
   console.log("all dt chat file tests passed");
 }
 

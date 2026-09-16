@@ -193,10 +193,16 @@ export async function callAnthropicFirstAvailable(input: {
   timeoutMs?: number;
   /** Optional Anthropic tools (Survey KI workspace retrieval). */
   tools?: Anthropic.Tool[];
+  /** Extra request headers (PDF document blocks need pdfs-2024-09-25). */
+  headers?: Record<string, string>;
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const useStream = input.stream ?? input.maxTokens >= STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
   const toolParams = input.tools && input.tools.length > 0 ? { tools: input.tools } : {};
+  const requestOptions = (signal?: AbortSignal) => ({
+    ...(signal ? { signal } : {}),
+    ...(input.headers ? { headers: input.headers } : {}),
+  });
 
   for (const model of input.models) {
     const controller = input.timeoutMs ? new AbortController() : null;
@@ -223,7 +229,7 @@ export async function callAnthropicFirstAvailable(input: {
             messages: input.messages,
             ...toolParams,
           },
-          controller ? { signal: controller.signal } : undefined,
+          requestOptions(controller?.signal),
         );
         streamHandle = stream;
         const response = await stream.finalMessage();
@@ -238,7 +244,7 @@ export async function callAnthropicFirstAvailable(input: {
           messages: input.messages,
           ...toolParams,
         },
-        controller ? { signal: controller.signal } : undefined,
+        requestOptions(controller?.signal),
       );
       return { response, model };
     } catch (error) {

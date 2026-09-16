@@ -6,8 +6,31 @@ import {
   normalizeMimeType as normalizeDtAttachmentMime,
 } from "@/lib/ai/chat-attachments";
 import type { DtInboundAttachment } from "@/lib/dt/attachments";
-import { isDtMultimodalMime } from "@/lib/dt/attachments-shared";
+import { isDtMultimodalMime, resolveDtStorageMime } from "@/lib/dt/attachments-shared";
 import { formatAttachedFilesForPrompt } from "@/lib/dt/format-attached-files-for-prompt";
+
+function inboundMultimodalBlocks(attachments: DtInboundAttachment[]): Anthropic.ContentBlockParam[] {
+  const blocks: Anthropic.ContentBlockParam[] = [];
+  for (const a of attachments) {
+    if (!a.dataBase64?.trim()) continue;
+    try {
+      const bytes = decodeBase64Strict(a.dataBase64.trim());
+      const mime = resolveDtStorageMime(a.fileName, a.mimeType, bytes);
+      if (!isDtMultimodalMime(mime)) continue;
+      const b64 = Buffer.from(bytes).toString("base64");
+      blocks.push(...bufferToAnthropicBlocks(normalizeDtAttachmentMime(mime), b64));
+    } catch {
+      // skip invalid
+    }
+  }
+  return blocks;
+}
+
+function messageHasMultimodalBlocks(content: Anthropic.MessageParam["content"]): boolean {
+  return (
+    Array.isArray(content) && content.some((block) => block.type === "document" || block.type === "image")
+  );
+}
 
 /** Append multimodal blocks for the latest ghost-mode user turn (in-memory only). */
 export function appendEphemeralAttachmentsToMessages(
@@ -26,20 +49,43 @@ export function appendEphemeralAttachmentsToMessages(
 
   const blocks: Anthropic.ContentBlockParam[] = [
     { type: "text", text: textBody.trim() || "(Anhang)" },
+    ...inboundMultimodalBlocks(attachments),
   ];
-
-  for (const a of attachments) {
-    const norm = normalizeDtAttachmentMime(a.mimeType);
-    if (!isDtMultimodalMime(norm) || !a.dataBase64?.trim()) continue;
-    try {
-      const bytes = decodeBase64Strict(a.dataBase64.trim());
-      const b64 = Buffer.from(bytes).toString("base64");
-      blocks.push(...bufferToAnthropicBlocks(norm, b64));
-    } catch {
-      // skip invalid
-    }
-  }
 
   const content = blocks.length === 1 && blocks[0]?.type === "text" ? textBody : blocks;
   return [...messages, { role: "user", content }];
+}
+
+/**
+ * Persisted chats hydrate PDFs from storage; if that download fails, still attach
+ * the current turn's PDF/image bytes so Claude can read them.
+ */
+export function ensureLatestTurnHasMultimodalBlocks(
+  messages: Anthropic.MessageParam[],
+  attachments: DtInboundAttachment[],
+): Anthropic.MessageParam[] {
+  const extra = inboundMultimodalBlocks(attachments);
+  if (extra.length === 0) return messages;
+  if (messages.length === 0) {
+    return [{ role: "user", content: extra }];
+  }
+
+  const lastIdx = messages.length - 1;
+  const last = messages[lastIdx]!;
+  if (last.role !== "user") {
+    return [...messages, { role: "user", content: extra }];
+  }
+  if (messageHasMultimodalBlocks(last.content)) return messages;
+
+  const textBlocks: Anthropic.ContentBlockParam[] =
+    typeof last.content === "string"
+      ? last.content.trim()
+        ? [{ type: "text", text: last.content }]
+        : []
+      : Array.isArray(last.content)
+        ? [...last.content]
+        : [];
+  const next = [...messages];
+  next[lastIdx] = { role: "user", content: [...textBlocks, ...extra] };
+  return next;
 }

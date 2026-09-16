@@ -7,7 +7,41 @@ import {
   normalizeDtMime,
 } from "@/lib/dt/attachments-shared";
 
-const TEXT_PREVIEW_MAX = 20_000;
+/** True when stored preview is only a "file is attached" stub, not real content. */
+export function isDtPlaceholderAttachmentText(text: string | null | undefined): boolean {
+  const t = text?.trim() ?? "";
+  if (!t) return true;
+  return (
+    /^\[Datei „.+“ ist angehängt \([^)]*\)\.\]$/i.test(t) ||
+    /^\[Datei „.+“ \([^)]*\) — Inhalt nicht als Text lesbar/i.test(t)
+  );
+}
+
+function looksLikePdf(fileName: string, mimeType: string, bytes: Uint8Array): boolean {
+  const norm = normalizeDtMime(mimeType);
+  if (norm === "application/pdf" || fileName.toLowerCase().endsWith(".pdf")) return true;
+  return (
+    bytes.length >= 5 &&
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46
+  );
+}
+
+async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  const { extractText } = await import("unpdf");
+  const result = await extractText(bytes, { mergePages: true });
+  const raw = typeof result.text === "string" ? result.text : result.text.join("\n\n");
+  return raw
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export const DT_ATTACHMENT_TEXT_PREVIEW_MAX = 40_000;
+const TEXT_PREVIEW_MAX = DT_ATTACHMENT_TEXT_PREVIEW_MAX;
 
 export type AttachmentTextExtract =
   | { ok: true; text: string }
@@ -110,6 +144,24 @@ export async function extractTextPreviewFromBytes(
     }
   }
 
+  if (looksLikePdf(fileName, norm, bytes)) {
+    try {
+      const text = await extractPdfText(bytes);
+      if (text) {
+        return { ok: true, text: text.slice(0, TEXT_PREVIEW_MAX) };
+      }
+      return {
+        ok: true,
+        text: `[PDF „${fileName}“ ist angehängt. Der Text ist nicht auswählbar (Scan/Bild) — Inhalt wird als Dokument mitgelesen.]`,
+      };
+    } catch {
+      return {
+        ok: true,
+        text: `[PDF „${fileName}“ ist angehängt. Textextraktion fehlgeschlagen — Inhalt wird als Dokument mitgelesen.]`,
+      };
+    }
+  }
+
   if (isDtTextLikeMime(norm, fileName) || norm === "image/svg+xml") {
     const text = decodeTextBytes(bytes).slice(0, TEXT_PREVIEW_MAX);
     return {
@@ -120,10 +172,10 @@ export async function extractTextPreviewFromBytes(
     };
   }
 
-  if (norm.startsWith("image/") || norm === "application/pdf" || fileName.toLowerCase().endsWith(".pdf")) {
+  if (norm.startsWith("image/")) {
     return {
       ok: true,
-      text: `[Datei „${fileName}“ ist angehängt (${norm || "application/pdf"}).]`,
+      text: `[Datei „${fileName}“ ist angehängt (${norm || "image"}).]`,
     };
   }
 
