@@ -1,6 +1,7 @@
 import {
   DT_MAX_ATTACHMENT_BYTES,
   guessDtMimeFromName,
+  isDtGenericUploadMime,
   isDtMultimodalImageMime,
   isDtMultimodalMime,
   normalizeDtMime,
@@ -16,8 +17,8 @@ export type DtAttachmentDraft = {
 };
 
 export function guessDtMimeFromFile(file: File): string {
-  const fromType = file.type?.trim();
-  if (fromType && fromType !== "application/octet-stream") return fromType;
+  const fromType = file.type?.trim() ?? "";
+  if (fromType && !isDtGenericUploadMime(fromType)) return fromType;
   return guessDtMimeFromName(file.name, fromType || "application/octet-stream");
 }
 

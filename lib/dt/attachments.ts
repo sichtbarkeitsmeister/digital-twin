@@ -16,9 +16,11 @@ import {
   isDtMultimodalMime,
   MAX_ATTACHMENT_BASE64_CHARS,
   normalizeDtMime,
+  resolveDtStorageMime,
 } from "@/lib/dt/attachments-shared";
 import type { DtCreatedChatFile } from "@/lib/dt/chat-files";
 import { extractTextPreviewFromBytes } from "@/lib/dt/parse-attachment-text";
+import { ensureDtChatAttachmentsAcceptAllMimes } from "@/lib/dt/ensure-chat-attachments-bucket";
 
 export const DT_CHAT_ATTACHMENTS_BUCKET = "dt-chat-attachments";
 
@@ -71,27 +73,61 @@ export type DtPersistableChatFile = {
   bytes: Uint8Array;
 };
 
+function isMimeBlockedMessage(message: string): boolean {
+  return /mime|not allowed|invalid|unsupported|not supported/i.test(message);
+}
+
+async function tryUpload(
+  supabase: SupabaseClient,
+  path: string,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const result = await supabase.storage
+    .from(DT_CHAT_ATTACHMENTS_BUCKET)
+    .upload(path, bytes, { contentType, upsert: false });
+  if (!result.error) return { ok: true };
+  return { ok: false, message: result.error.message };
+}
+
 async function uploadChatFileBytes(
   supabase: SupabaseClient,
   path: string,
   bytes: Uint8Array,
   mimeType: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const contentType = normalizeDtMime(mimeType) || "application/octet-stream";
-  const first = await supabase.storage
-    .from(DT_CHAT_ATTACHMENTS_BUCKET)
-    .upload(path, bytes, { contentType, upsert: false });
-  if (!first.error) return { ok: true };
+  fileName: string,
+): Promise<{ ok: true; mimeType: string } | { ok: false; message: string; mimeBlocked: boolean }> {
+  const preferred = resolveDtStorageMime(fileName, mimeType, bytes);
+  const candidates = Array.from(
+    new Set(
+      [preferred, mimeType, "text/plain", "text/csv"].map((m) =>
+        normalizeDtMime(m),
+      ).filter(Boolean),
+    ),
+  );
 
-  const mimeBlocked = /mime|not allowed|invalid|unsupported/i.test(first.error.message);
-  if (mimeBlocked && contentType !== "application/octet-stream") {
-    const retry = await supabase.storage
-      .from(DT_CHAT_ATTACHMENTS_BUCKET)
-      .upload(path, bytes, { contentType: "application/octet-stream", upsert: false });
-    if (!retry.error) return { ok: true };
-    return { ok: false, message: retry.error.message };
+  await ensureDtChatAttachmentsAcceptAllMimes();
+
+  let lastMessage = "Datei konnte nicht gespeichert werden.";
+  for (const contentType of candidates) {
+    const uploaded = await tryUpload(supabase, path, bytes, contentType);
+    if (uploaded.ok) return { ok: true, mimeType: contentType };
+    lastMessage = uploaded.message;
+    if (!isMimeBlockedMessage(uploaded.message)) {
+      return { ok: false, message: lastMessage, mimeBlocked: false };
+    }
   }
-  return { ok: false, message: first.error.message };
+
+  // Bucket may have just been opened; retry the preferred type once more.
+  const retry = await tryUpload(supabase, path, bytes, preferred);
+  if (retry.ok) return { ok: true, mimeType: preferred };
+  lastMessage = retry.message;
+
+  return {
+    ok: false,
+    message: lastMessage,
+    mimeBlocked: isMimeBlockedMessage(lastMessage),
+  };
 }
 
 export async function persistDtChatFileBlobs(params: {
@@ -116,8 +152,36 @@ export async function persistDtChatFileBlobs(params: {
         safeFileName: safeName,
         uniqueSuffix: unique,
       });
-      const uploaded = await uploadChatFileBytes(params.supabase, path, file.bytes, file.mimeType);
+      const uploaded = await uploadChatFileBytes(
+        params.supabase,
+        path,
+        file.bytes,
+        file.mimeType,
+        file.fileName,
+      );
       if (!uploaded.ok) {
+        if (uploaded.mimeBlocked) {
+          const uniqueMeta = `${Date.now()}-meta-${i}`;
+          const metaPath = `meta-only/${params.messageId}/${uniqueMeta}_${safeName}`;
+          const { data, error: insErr } = await params.supabase
+            .from("dt_chat_attachments")
+            .insert({
+              chat_id: params.chatId,
+              message_id: params.messageId,
+              storage_path: metaPath,
+              file_name: file.fileName,
+              mime_type: resolveDtStorageMime(file.fileName, file.mimeType, file.bytes),
+              size_bytes: file.bytes.byteLength,
+            })
+            .select("id,chat_id,message_id,storage_path,file_name,mime_type,size_bytes,created_at")
+            .single();
+          if (insErr || !data) {
+            await cleanupUploaded(params.supabase, uploadedPaths);
+            return { ok: false, message: insErr?.message ?? uploaded.message };
+          }
+          rows.push(data as DtChatAttachmentRow);
+          continue;
+        }
         await cleanupUploaded(params.supabase, uploadedPaths);
         return uploaded;
       }
@@ -129,7 +193,7 @@ export async function persistDtChatFileBlobs(params: {
           message_id: params.messageId,
           storage_path: path,
           file_name: file.fileName,
-          mime_type: file.mimeType,
+          mime_type: uploaded.mimeType,
           size_bytes: file.bytes.byteLength,
         })
         .select("id,chat_id,message_id,storage_path,file_name,mime_type,size_bytes,created_at")
@@ -160,10 +224,11 @@ export async function persistDtChatAttachments(params: {
   for (const a of params.attachments) {
     if (a.dataBase64?.trim()) {
       try {
+        const bytes = decodeBase64Strict(a.dataBase64.trim());
         blobs.push({
           fileName: a.fileName,
-          mimeType: a.mimeType,
-          bytes: decodeBase64Strict(a.dataBase64.trim()),
+          mimeType: resolveDtStorageMime(a.fileName, a.mimeType, bytes),
+          bytes,
         });
       } catch {
         return { ok: false, message: `„${a.fileName}“ konnte nicht gelesen werden.` };
@@ -308,10 +373,12 @@ export async function prepareInboundAttachments(
     if (a.dataBase64?.trim()) {
       try {
         const bytes = decodeBase64Strict(a.dataBase64.trim());
-        const extracted = await extractTextPreviewFromBytes(a.fileName, a.mimeType, bytes);
+        const mimeType = resolveDtStorageMime(a.fileName, a.mimeType, bytes);
+        const extracted = await extractTextPreviewFromBytes(a.fileName, mimeType, bytes);
         const text = extracted.ok ? extracted.text : extracted.message;
         items.push({
           ...a,
+          mimeType,
           textContent: text?.trim() ? text : a.textContent,
           dataBase64: a.dataBase64,
         });
