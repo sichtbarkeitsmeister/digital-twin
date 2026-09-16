@@ -1,6 +1,7 @@
 import "server-only";
 
 import { syncCrawlJobHealth } from "@/lib/dt/seo/sync-crawl-job-health";
+import { triggerGscPagesSync } from "@/lib/dt/seo/trigger-gsc-pages-sync";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -53,7 +54,7 @@ export async function loadOrgCrawlStatusSnapshot(
       supabase
         .from("dt_site_crawls")
         .select(
-          "id,status,pages_crawled,pages_discovered,max_pages,message,started_at,finished_at",
+          "id,status,pages_crawled,pages_discovered,max_pages,message,started_at,finished_at,gsc_sync_status",
         )
         .eq("organisation_id", organisationId)
         .in("status", ["queued", "running"])
@@ -144,13 +145,17 @@ export async function startOrganisationSiteCrawl(input: {
     };
   }
 
+  const webhookConfigured = Boolean(process.env.N8N_DT_GSC_PAGES_WEBHOOK?.trim());
   const { data: crawl, error: insertError } = await service
     .from("dt_site_crawls")
     .insert({
       organisation_id: input.organisationId,
       status: "queued",
       created_by_user_id: input.userId,
-      message: "Crawl in Warteschlange …",
+      message: webhookConfigured
+        ? "Crawl in Warteschlange … GSC-Seiten werden mitgeladen."
+        : "Crawl in Warteschlange …",
+      gsc_sync_status: webhookConfigured ? "pending" : "skipped",
     })
     .select("id")
     .single();
@@ -183,11 +188,30 @@ export async function startOrganisationSiteCrawl(input: {
 
   kickJobsWorker(5);
 
+  if (webhookConfigured) {
+    void triggerGscPagesSync({
+      organisationId: input.organisationId,
+      crawlId: crawl.id,
+    }).then((sync) => {
+      if (sync.skipped || sync.ok) return;
+      void service
+        .from("dt_site_crawls")
+        .update({
+          gsc_sync_status: "error",
+          message: sync.message,
+        })
+        .eq("id", crawl.id)
+        .eq("gsc_sync_status", "pending");
+    });
+  }
+
   return {
     ok: true,
     crawlId: crawl.id,
     reused: false,
     status: "queued",
-    message: "Hintergrund-Crawl gestartet.",
+    message: webhookConfigured
+      ? "Hintergrund-Crawl gestartet. Seiten aus der Search Console werden mitgeladen."
+      : "Hintergrund-Crawl gestartet.",
   };
 }

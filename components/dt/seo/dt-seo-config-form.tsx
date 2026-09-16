@@ -63,10 +63,16 @@ type CrawlStatus = {
 
 type CrawlInfo = {
   count: number;
+  crawledCount?: number;
   withTextCount: number;
   lastCrawledAt: string | null;
   crawl: CrawlStatus | null;
   lastCrawlError: string | null;
+  counts?: {
+    indexed?: number;
+    notIndexed?: number;
+    gscOnly?: number;
+  } | null;
 };
 
 const ACTIVE_CRAWL_STATUSES = new Set(["queued", "running"]);
@@ -121,18 +127,22 @@ export function DtSeoConfigForm(props: {
     const json = (await res.json()) as {
       ok?: boolean;
       count?: number;
+      crawledCount?: number;
       withTextCount?: number;
       lastCrawledAt?: string | null;
       crawl?: CrawlStatus | null;
       lastCrawlError?: string | null;
+      counts?: CrawlInfo["counts"];
     };
     if (json.ok) {
       setCrawlInfo({
         count: json.count ?? 0,
+        crawledCount: json.crawledCount,
         withTextCount: json.withTextCount ?? 0,
         lastCrawledAt: json.lastCrawledAt ?? null,
         crawl: json.crawl ?? null,
         lastCrawlError: json.lastCrawlError ?? null,
+        counts: json.counts ?? null,
       });
       return json.crawl ?? null;
     }
@@ -240,8 +250,8 @@ export function DtSeoConfigForm(props: {
     }
     if (!crawlInfo || crawlInfo.count === 0) {
       return config?.sitemap_url
-        ? "Liest URLs aus der Sitemap (oder auto-entdeckt) und erfasst Titel, H1, Meta-Description und Textinhalt."
-        : "Ohne Sitemap werden Sitemap und interne Links automatisch von der Website-URL entdeckt.";
+        ? "Liest URLs aus Sitemap, internen Links und der Google Search Console. Indexierte und nicht indexierte Seiten werden danach angezeigt."
+        : "Ohne Sitemap werden Sitemap, interne Links und Search-Console-Seiten automatisch entdeckt.";
     }
     const when = crawlInfo.lastCrawledAt
       ? new Date(crawlInfo.lastCrawledAt).toLocaleString("de-DE")
@@ -250,7 +260,11 @@ export function DtSeoConfigForm(props: {
       crawlInfo.withTextCount > 0
         ? ` · ${crawlInfo.withTextCount} mit Textinhalt`
         : "";
-    return `${crawlInfo.count} Seiten gespeichert${textNote}${when ? ` · zuletzt ${when}` : ""}.`;
+    const indexNote =
+      crawlInfo.counts && (crawlInfo.counts.indexed != null || crawlInfo.counts.notIndexed != null)
+        ? ` · ${crawlInfo.counts.indexed ?? 0} indexiert / ${crawlInfo.counts.notIndexed ?? 0} nicht indexiert`
+        : "";
+    return `${crawlInfo.count} Seiten gespeichert${textNote}${indexNote}${when ? ` · zuletzt ${when}` : ""}.`;
   }
 
   function crawlHasError(): boolean {
@@ -618,15 +632,16 @@ export function DtSeoConfigForm(props: {
             </div>
           </div>
           <p className="text-xs text-sbkm-ink-500 dark:text-white/45">
-            Der Crawl läuft im Hintergrund und kann tausende Seiten erfassen. Pro Seite werden Titel, H1,
-            Meta-Description und der vollständige Textinhalt gespeichert.
+            Der Crawl läuft im Hintergrund und erfasst Sitemap, interne Links und Seiten aus der
+            Google Search Console. Pro Seite werden Titel, H1, Meta-Description, Textinhalt und der
+            Indexstatus (indexiert / nicht indexiert) gespeichert.
           </p>
           {crawlInfo && crawlInfo.count > 0 ? (
             <Link
               href={crawlViewerHref}
               className="inline-flex w-fit items-center gap-1.5 text-xs font-semibold text-sbkm-mint hover:underline"
             >
-              Gecrawlte Inhalte ansehen ({crawlInfo.count} Seiten)
+              Seiten & Indexstatus ansehen ({crawlInfo.count} Seiten)
               <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </Link>
           ) : null}

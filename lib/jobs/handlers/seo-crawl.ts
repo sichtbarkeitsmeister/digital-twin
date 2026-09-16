@@ -1,11 +1,13 @@
 import {
   expandSitemapSeeds,
   fetchAndParse,
+  isSameCrawlSite,
   normaliseUrl,
   resolveOrigin,
   toCrawledPage,
   type DtCrawledPage,
 } from "@/lib/dt/seo/crawl-sitemap";
+import { shouldWaitForGscSync } from "@/lib/dt/seo/gsc-pages";
 import { reclaimStuckCrawlUrls } from "@/lib/dt/seo/reclaim-stuck-crawl-urls";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
@@ -41,6 +43,8 @@ type CrawlRow = {
   pages_crawled: number;
   pages_discovered: number;
   message: string | null;
+  gsc_sync_status: string | null;
+  started_at: string | null;
 };
 
 type ClaimedUrl = { id: string; url: string; depth: number };
@@ -91,7 +95,9 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
 
   const { data: crawl, error: crawlError } = await supabase
     .from("dt_site_crawls")
-    .select("id,organisation_id,status,max_pages,pages_crawled,pages_discovered,message")
+    .select(
+      "id,organisation_id,status,max_pages,pages_crawled,pages_discovered,message,gsc_sync_status,started_at",
+    )
     .eq("id", crawlId)
     .maybeSingle();
 
@@ -127,7 +133,7 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
 
   const { data: freshCrawl } = await supabase
     .from("dt_site_crawls")
-    .select("status,max_pages,pages_crawled,pages_discovered")
+    .select("status,max_pages,pages_crawled,pages_discovered,gsc_sync_status,started_at")
     .eq("id", crawlId)
     .maybeSingle();
 
@@ -275,6 +281,26 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
 
   const hasPending = await hasPendingUrls(supabase, crawlId);
   if (!hasPending) {
+    const waitingForGsc = shouldWaitForGscSync({
+      status: freshCrawl.gsc_sync_status,
+      startedAt: freshCrawl.started_at,
+    });
+    if (waitingForGsc) {
+      await supabase
+        .from("dt_site_crawls")
+        .update({
+          message: "Wartet auf Search-Console-Seiten …",
+        })
+        .eq("id", crawlId);
+      await enqueueJob({
+        kind: "seo.crawl",
+        organisationId,
+        payload: { crawlId, organisationId },
+        runAfter: new Date(Date.now() + 8_000),
+      });
+      kickJobsWorker(3);
+      return { ok: true, result: { waitingForGsc: true, pagesCrawled } };
+    }
     await supabase
       .from("dt_site_crawls")
       .update({
@@ -319,16 +345,38 @@ async function seedFrontier(
   if (websiteNorm) seeds.add(websiteNorm);
 
   let sitemapCount = 0;
+  let gscCount = 0;
   let sourceNote = "Website-Crawl (interne Links)";
   try {
     const expanded = await expandSitemapSeeds(origin, config.sitemap_url);
     sitemapCount = expanded.sitemapCount;
-    for (const u of expanded.seeds) seeds.add(u);
+    for (const u of expanded.seeds) {
+      if (isSameCrawlSite(u, origin)) seeds.add(u);
+    }
     if (sitemapCount > 0) {
       sourceNote = `Sitemap (${sitemapCount} URLs) + interne Links`;
     }
   } catch {
     /* fall back to link crawl */
+  }
+
+  const { data: gscRows } = await supabase
+    .from("dt_seo_gsc_pages")
+    .select("url")
+    .eq("organisation_id", crawl.organisation_id)
+    .limit(crawl.max_pages);
+  for (const row of gscRows ?? []) {
+    const n = normaliseUrl(row.url);
+    if (n && isSameCrawlSite(n, origin)) {
+      seeds.add(n);
+      gscCount += 1;
+    }
+  }
+  if (gscCount > 0) {
+    sourceNote =
+      sitemapCount > 0
+        ? `Sitemap (${sitemapCount}) + GSC (${gscCount}) + interne Links`
+        : `GSC (${gscCount} URLs) + interne Links`;
   }
 
   if (seeds.size === 0) {
@@ -390,9 +438,29 @@ async function finishIfEmpty(
 
   const { data: crawl } = await supabase
     .from("dt_site_crawls")
-    .select("pages_crawled")
+    .select("pages_crawled,gsc_sync_status,started_at")
     .eq("id", crawlId)
     .maybeSingle();
+
+  if (
+    shouldWaitForGscSync({
+      status: crawl?.gsc_sync_status,
+      startedAt: crawl?.started_at,
+    })
+  ) {
+    await supabase
+      .from("dt_site_crawls")
+      .update({ message: "Wartet auf Search-Console-Seiten …" })
+      .eq("id", crawlId);
+    await enqueueJob({
+      kind: "seo.crawl",
+      organisationId,
+      payload: { crawlId, organisationId },
+      runAfter: new Date(Date.now() + 8_000),
+    });
+    kickJobsWorker(3);
+    return { waitingForGsc: true };
+  }
 
   await supabase
     .from("dt_site_crawls")
