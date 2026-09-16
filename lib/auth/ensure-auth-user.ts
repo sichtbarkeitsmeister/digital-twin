@@ -96,6 +96,32 @@ export async function ensureAdminProfile(service: ServiceClient, userId: string,
   }
 }
 
+/** Insert a customer profile if the auth user has no `profiles` row yet. */
+export async function ensureProfileExists(
+  service: ServiceClient,
+  userId: string,
+  email: string,
+) {
+  const { data } = await service.from("profiles").select("id").eq("id", userId).maybeSingle();
+  if (data?.id) return;
+
+  const { error } = await service.from("profiles").insert({
+    id: userId,
+    email,
+    role: "customer",
+  });
+  if (!error) return;
+
+  const { data: raced } = await service
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (raced?.id) return;
+
+  throw new Error(`Profil konnte nicht angelegt werden: ${error.message}`);
+}
+
 export async function ensureConfirmedAuthUser(
   service: ServiceClient,
   email: string,
@@ -104,8 +130,10 @@ export async function ensureConfirmedAuthUser(
   const existingAuthId = existingProfile?.id ?? (await findAuthUserIdByEmail(service, email));
   if (existingAuthId) {
     await unbanAndConfirmUser(service, existingAuthId);
+    await ensureProfileExists(service, existingAuthId, email);
     return { userId: existingAuthId, created: false };
   }
   const userId = await createConfirmedUser(service, email);
+  await ensureProfileExists(service, userId, email);
   return { userId, created: true };
 }
