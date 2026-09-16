@@ -28,6 +28,8 @@ export function DtAgentFormFields(props: {
   promptNote?: string;
   /** Hide the enabled checkbox (agent must stay active). */
   hideEnabled?: boolean;
+  /** Hide Schnelltests (orgs save them directly, not via Änderungsanfrage). */
+  hideQuickActions?: boolean;
   /** Show global-sync toggle + conditional prompt UI for default agents. */
   supportsGlobalSync?: boolean;
   /** Show additional instructions textarea (stacked on base prompt). */
@@ -46,6 +48,7 @@ export function DtAgentFormFields(props: {
     hidePrompt,
     promptNote,
     hideEnabled,
+    hideQuickActions,
     supportsGlobalSync,
     supportsAppend,
     appendLabel,
@@ -179,11 +182,18 @@ export function DtAgentFormFields(props: {
         </label>
       ) : null}
 
-      <DtAgentQuickActionsField
-        actions={quickActionsFromForm(values.quick)}
-        onChange={(actions) => onChange({ quick: actions.join("\n") })}
-        disabled={disabled}
-      />
+      {hideQuickActions ? (
+        <p className="rounded-2xl border border-sbkm-navy/10 bg-sbkm-mint/10 px-3 py-2 text-xs text-sbkm-ink-600 dark:border-white/10 dark:bg-white/5 dark:text-white/55">
+          Schnelltests speichern Sie direkt über den Button „Schnelltests“ — ohne
+          Freigabe.
+        </p>
+      ) : (
+        <DtAgentQuickActionsField
+          actions={quickActionsFromForm(values.quick)}
+          onChange={(actions) => onChange({ quick: actions.join("\n") })}
+          disabled={disabled}
+        />
+      )}
       <label className="grid gap-1 text-sm">
         <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">Reihenfolge</span>
         <input

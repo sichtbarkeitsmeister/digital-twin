@@ -36,23 +36,17 @@ export type DtAgentEditRequestView = DtAgentEditRequestRow & {
 const REQUEST_SELECT =
   "id,organisation_id,agent_id,requested_by_user_id,status,proposed_changes,request_note,reviewer_note,reviewed_by_user_id,reviewed_at,created_at,updated_at";
 
+type AgentEditSnapshot = {
+  name: string;
+  role: string | null;
+  prompt_template: string;
+  is_enabled: boolean;
+  position: number;
+};
+
 export function buildAgentProposedChanges(params: {
-  current: {
-    name: string;
-    role: string | null;
-    prompt_template: string;
-    quick_actions: string[];
-    is_enabled: boolean;
-    position: number;
-  };
-  next: {
-    name: string;
-    role: string | null;
-    prompt_template: string;
-    quick_actions: string[];
-    is_enabled: boolean;
-    position: number;
-  };
+  current: AgentEditSnapshot;
+  next: AgentEditSnapshot;
 }): DtAgentProposedChanges | null {
   const patch: DtAgentProposedChanges = {};
   const { current, next } = params;
@@ -62,10 +56,6 @@ export function buildAgentProposedChanges(params: {
   if (next.prompt_template !== current.prompt_template) patch.prompt_template = next.prompt_template;
   if (next.is_enabled !== current.is_enabled) patch.is_enabled = next.is_enabled;
   if (next.position !== current.position) patch.position = next.position;
-
-  const currentQuick = JSON.stringify(current.quick_actions);
-  const nextQuick = JSON.stringify(next.quick_actions);
-  if (currentQuick !== nextQuick) patch.quick_actions = next.quick_actions;
 
   return Object.keys(patch).length > 0 ? patch : null;
 }
