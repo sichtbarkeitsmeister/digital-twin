@@ -33,6 +33,8 @@ import { cn } from "@/lib/utils";
 const FILE_ACCEPT =
   ".txt,.md,.markdown,.docx,.vtt,.srt,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
+const FILE_EXT = /\.(txt|md|markdown|docx|doc|vtt|srt)$/i;
+
 async function readTranscriptFile(file: File): Promise<string> {
   const name = file.name.toLowerCase();
   if (name.endsWith(".docx") || name.endsWith(".doc")) {
@@ -41,6 +43,15 @@ async function readTranscriptFile(file: File): Promise<string> {
   const text = (await file.text()).trim();
   if (!text) throw new Error(`„${file.name}“ ist leer.`);
   return text;
+}
+
+function isTranscriptFile(file: File): boolean {
+  if (FILE_EXT.test(file.name)) return true;
+  return (
+    file.type === "text/plain" ||
+    file.type === "text/markdown" ||
+    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  );
 }
 
 function formatDeDate(iso: string | null | undefined): string {
@@ -84,6 +95,7 @@ export function TranscriptsPanel(props: {
   const [notes, setNotes] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [rawById, setRawById] = useState<Record<string, string>>({});
+  const [dropHighlight, setDropHighlight] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -115,6 +127,22 @@ export function TranscriptsPanel(props: {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  async function applyTranscriptFile(file: File) {
+    if (!isTranscriptFile(file)) {
+      toast.error("Bitte .txt, .md, .docx, .vtt oder .srt ablegen.");
+      return;
+    }
+    try {
+      const text = await readTranscriptFile(file);
+      setDraft(text);
+      setFilename(file.name);
+      if (!title.trim()) setTitle(file.name.replace(/\.[^.]+$/, ""));
+      toast.success(`„${file.name}“ gelesen.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Datei konnte nicht gelesen werden.");
+    }
+  }
 
   async function processTranscript(id: string) {
     setProcessingId(id);
@@ -240,7 +268,42 @@ export function TranscriptsPanel(props: {
             beides.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4">
+        <CardContent
+          className={cn(
+            "relative grid gap-4 rounded-b-xl transition-colors",
+            dropHighlight && "bg-sbkm-mint/[0.08]",
+          )}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            if (e.dataTransfer.types.includes("Files")) setDropHighlight(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            const rel = e.relatedTarget as Node | null;
+            if (!e.currentTarget.contains(rel)) setDropHighlight(false);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDropHighlight(false);
+            const files = e.dataTransfer.files;
+            if (!files?.length) return;
+            void applyTranscriptFile(files[0]!);
+          }}
+        >
+          {dropHighlight ? (
+            <div
+              className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-sbkm-mint/50 bg-sbkm-mint/[0.08]"
+              aria-hidden
+            >
+              <p className="rounded-xl bg-white/90 px-5 py-3 text-sm font-semibold text-sbkm-navy shadow-sm dark:bg-sbkm-navy/80 dark:text-white">
+                Datei hier ablegen
+              </p>
+            </div>
+          ) : null}
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="transcript-title">Titel (optional)</Label>
@@ -267,19 +330,11 @@ export function TranscriptsPanel(props: {
               type="file"
               accept={FILE_ACCEPT}
               className="hidden"
-              onChange={async (e) => {
+              onChange={(e) => {
                 const file = e.target.files?.[0];
                 e.target.value = "";
                 if (!file) return;
-                try {
-                  const text = await readTranscriptFile(file);
-                  setDraft(text);
-                  setFilename(file.name);
-                  if (!title.trim()) setTitle(file.name.replace(/\.[^.]+$/, ""));
-                  toast.success(`„${file.name}“ gelesen.`);
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : "Datei konnte nicht gelesen werden.");
-                }
+                void applyTranscriptFile(file);
               }}
             />
             <Button
@@ -294,7 +349,9 @@ export function TranscriptsPanel(props: {
             {filename ? (
               <span className="text-xs text-secondary">Datei: {filename}</span>
             ) : (
-              <span className="text-xs text-secondary">.txt, .md, .docx, .vtt, .srt oder Text einfügen</span>
+              <span className="text-xs text-secondary">
+                .txt, .md, .docx, .vtt, .srt — oder Datei hierher ziehen / Text einfügen
+              </span>
             )}
           </div>
           <Textarea
