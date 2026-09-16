@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { FileImage, FileText, FileType } from "lucide-react";
 
+import { DtChatArtifacts } from "@/components/dt/chat/dt-chat-artifacts";
 import { DtChatMarkdown } from "@/components/dt/chat/dt-chat-markdown";
 import { DtSeoChatTaskProposals } from "@/components/dt/seo/dt-seo-chat-task-proposals";
 import { cn } from "@/components/dt/cn";
@@ -11,6 +12,10 @@ import {
   isDtMultimodalImageMime,
   normalizeDtMime,
 } from "@/lib/dt/attachments-shared";
+import {
+  extractDtChatArtifactsFromMessage,
+  stripDtChatArtifactBlocks,
+} from "@/lib/dt/chat-artifacts";
 import {
   extractDtSeoTaskProposalsFromMessage,
   matchSavedSeoTaskProposalIndexes,
@@ -149,7 +154,16 @@ export function DtChatMessage(props: {
         })
       : []);
 
-  const displayContent = !isUser ? stripDtSeoTaskProposalBlocks(props.message.content) : props.message.content;
+  const artifacts = !isUser
+    ? extractDtChatArtifactsFromMessage({
+        content: props.message.content,
+        metadata: props.message.metadata,
+      })
+    : [];
+
+  const displayContent = !isUser
+    ? stripDtSeoTaskProposalBlocks(stripDtChatArtifactBlocks(props.message.content))
+    : props.message.content;
 
   const savedProposalIndexes =
     !isUser && taskProposals.length > 0
@@ -195,10 +209,11 @@ export function DtChatMessage(props: {
         ) : null}
         {isUser ? (
           <p className="whitespace-pre-wrap">{displayContent}</p>
-        ) : (
+        ) : displayContent.trim() ? (
           <DtChatMarkdown content={displayContent} />
-        )}
+        ) : null}
         <AttachmentRow isUser={isUser} items={attachItems} />
+        {!isUser ? <DtChatArtifacts artifacts={artifacts} /> : null}
         {!isUser && taskProposals.length > 0 && props.onSaveTaskProposal ? (
           <DtSeoChatTaskProposals
             proposals={taskProposals}

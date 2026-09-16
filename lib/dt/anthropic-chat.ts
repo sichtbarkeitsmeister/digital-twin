@@ -464,9 +464,10 @@ export async function callDtAnthropicChat(params: {
 
   const model = resolveDtAnthropicModel(params.mode);
   const client = new Anthropic({ apiKey });
-  const max_tokens = params.mode === "seo" ? 8192 : 4096;
+  // SEO/HTML-Prototypen brauchen mehr Output (eine ~32-KB-HTML-Datei liegt oft über 4k Tokens).
+  const max_tokens = params.mode === "seo" ? 16_384 : 8_192;
   const system = sanitizeForLlmText(params.system);
-  const roundTimeoutMs = params.mode === "seo" ? 180_000 : 120_000;
+  const roundTimeoutMs = params.mode === "seo" ? 180_000 : 150_000;
 
   const retrievalOrgId = params.mode === "seo" ? params.retrieval?.organisationId : undefined;
 
