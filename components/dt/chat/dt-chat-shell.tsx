@@ -1473,6 +1473,10 @@ export function DtChatShell(props: {
               onGhostModeChange={handleGhostToggle}
               textMode={textMode}
               onTextModeChange={setTextMode}
+              prospectPersona={
+                selectedAgent?.kind === "wunschkunde" ||
+                selectedAgent?.kind === "persona"
+              }
               attachments={attachments}
               agentName={displayAgentName}
               personaTestingAvailable={personaTestingAvailable}
