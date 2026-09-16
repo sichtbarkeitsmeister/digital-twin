@@ -333,7 +333,7 @@ export async function loadDtAgentContextBundle(input: {
     );
   }
 
-  if (prospect) {
+  if (prospect && !includeTextMode) {
     sections.push(
       section({
         id: "prospect_role_override",

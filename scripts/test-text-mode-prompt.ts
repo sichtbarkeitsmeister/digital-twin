@@ -35,12 +35,13 @@ function testPromptInjection() {
   };
 
   const off = buildDtSystemPrompt(base);
-  assert.doesNotMatch(off, /publikationsreife Texte/);
+  assert.doesNotMatch(off, /Flyer, Social-Media-Posts/);
 
   const onDefault = buildDtSystemPrompt({ ...base, textMode: true });
-  assert.match(onDefault, /## Text-Modus/);
-  assert.match(onDefault, /publikationsreife Texte/);
-  assert.match(onDefault, /Anti-AI-Slop/);
+  assert.match(onDefault, /## Text-Modus \(hat Vorrang\)/);
+  assert.match(onDefault, /Flyer, Social-Media-Posts/);
+  assert.doesNotMatch(onDefault, /SEO-optimierte/);
+  assert.doesNotMatch(onDefault, /Fokus-Keyword/);
 
   const onCustom = buildDtSystemPrompt({
     ...base,
@@ -48,7 +49,22 @@ function testPromptInjection() {
     textModePrompt: "## Text-Modus\nSchreibe wie ein Zahnarzt, keine Marketing-Floskeln.",
   });
   assert.match(onCustom, /Schreibe wie ein Zahnarzt/);
-  assert.doesNotMatch(onCustom, /publikationsreife Texte/);
+  assert.doesNotMatch(onCustom, /Flyer, Social-Media-Posts/);
+
+  const personaOn = buildDtSystemPrompt({
+    agent: {
+      name: "Alexander",
+      role: "Interessent",
+      prompt_template: "Ich bin Interessent.",
+      kind: "persona",
+      slug: "alexander",
+    },
+    org: { display_name: "Beispiel GmbH" },
+    mode: "default",
+    textMode: true,
+  });
+  assert.match(personaOn, /Verlasse jetzt die Gesprächs-Persona/);
+  assert.doesNotMatch(personaOn, /Rollen-Ausrichtung \(verbindlich/);
   console.log("injection: ok");
 }
 

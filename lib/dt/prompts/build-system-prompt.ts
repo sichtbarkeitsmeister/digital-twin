@@ -114,7 +114,8 @@ export function buildDtSystemPrompt(input: {
   }
 
   // After persona text so a mis-generated "brand ambassador" prompt cannot win.
-  if (prospect) {
+  // Text mode is for staff/customer copy (flyer, social, infos) — leave the prospect lock.
+  if (prospect && !input.textMode) {
     blocks.push(
       "",
       "## Rollen-Ausrichtung (verbindlich, hat Vorrang)",
