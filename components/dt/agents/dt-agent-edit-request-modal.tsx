@@ -8,7 +8,6 @@ import { Info, Loader2, Send, X } from "lucide-react";
 import {
   DtAgentFormFields,
   agentFormValuesFromRow,
-  quickActionsFromForm,
   type DtAgentFormValues,
 } from "@/components/dt/agents/dt-agent-form-fields";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -73,7 +72,6 @@ export function DtAgentEditRequestModal(props: {
         name: values.name.trim(),
         role: values.role.trim() || null,
         promptTemplate: values.prompt,
-        quickActions: quickActionsFromForm(values.quick),
         isEnabled: values.enabled,
         position: values.position,
         requestNote: requestNote.trim() || undefined,
@@ -141,8 +139,8 @@ export function DtAgentEditRequestModal(props: {
               <div className="mt-3 flex gap-2 rounded-dt border border-sbkm-mint/25 bg-sbkm-mint/10 px-3 py-2 text-xs text-sbkm-navy dark:text-white/80">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sbkm-mint" aria-hidden />
                 <span>
-                  Anpassungen am Verhalten laufen über uns — so bleibt die Qualität für alle Nutzer
-                  gleich hoch.
+                  Anpassungen am Verhalten laufen über uns. Schnelltests speichern Sie direkt —
+                  ohne diese Anfrage.
                 </span>
               </div>
             </div>
@@ -153,6 +151,7 @@ export function DtAgentEditRequestModal(props: {
                 onChange={(patch) => setValues((prev) => (prev ? { ...prev, ...patch } : prev))}
                 disabled={busy}
                 hidePrompt
+                hideQuickActions
                 promptNote="Beschreiben Sie unten einfach, was der Agent künftig anders machen soll — die technische Umsetzung übernehmen wir."
               />
               <label className="mt-4 grid gap-1 text-sm">

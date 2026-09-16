@@ -10,7 +10,6 @@ import {
 import { isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { requireAuthUser } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents, canManageDtAgents, isPlatformAdmin } from "@/lib/dt/org-access";
-import { parseQuickActions } from "@/lib/dt/types";
 
 const querySchema = z.object({
   org: z.string().uuid().optional(),
@@ -26,7 +25,6 @@ const bodySchema = z.object({
   name: z.string().trim().min(1).max(120),
   role: z.string().trim().max(120).nullable(),
   promptTemplate: z.string().max(32_000),
-  quickActions: z.array(z.string().trim().min(1).max(200)).max(12),
   isEnabled: z.boolean(),
   position: z.number().int().min(0).max(999),
   requestNote: z.string().trim().max(2000).optional(),
@@ -118,7 +116,7 @@ export async function POST(req: Request) {
 
   const { data: agent } = await auth.supabase
     .from("dt_agents")
-    .select("id,organisation_id,slug,kind,name,role,prompt_template,quick_actions,is_enabled,position")
+    .select("id,organisation_id,slug,kind,name,role,prompt_template,is_enabled,position")
     .eq("id", parsed.data.agentId)
     .maybeSingle();
 
@@ -138,7 +136,6 @@ export async function POST(req: Request) {
       name: agent.name,
       role: agent.role,
       prompt_template: agent.prompt_template,
-      quick_actions: parseQuickActions(agent.quick_actions),
       is_enabled: agent.is_enabled,
       position: agent.position,
     },
@@ -146,7 +143,6 @@ export async function POST(req: Request) {
       name: parsed.data.name,
       role: parsed.data.role,
       prompt_template: parsed.data.promptTemplate,
-      quick_actions: parsed.data.quickActions,
       is_enabled: parsed.data.isEnabled,
       position: parsed.data.position,
     },
