@@ -116,6 +116,37 @@ assert.equal(
   "r-fam",
 );
 
+const westpruefung: AgentCoverageSurveyOption[] = [
+  {
+    surveyId: "s-anb",
+    responseId: "r-anb",
+    surveyTitle: "Anbieter: Westprüfung Kanzlei",
+    purpose: "anbieter",
+    completedAt: "2026-08-02T12:00:00.000Z",
+    isSource: false,
+  },
+  {
+    surveyId: "s-ges",
+    responseId: "r-ges",
+    surveyTitle: "Persona: Unternehmer/Gesellschafter (Westprüfung Kanzlei) - A-Mandate",
+    purpose: "persona",
+    completedAt: "2026-08-01T12:00:00.000Z",
+    isSource: false,
+  },
+];
+assert.equal(
+  suggestCoverageOptionForAgent(westpruefung, "Matthias", "Geschäftsführender Gesellschafter")
+    ?.responseId,
+  "r-ges",
+);
+assert.equal(
+  suggestCoverageOptionForAgent(
+    westpruefung.filter((o) => o.purpose === "persona"),
+    "Matthias",
+  )?.responseId,
+  "r-ges",
+);
+
 const usedLabel = formatCoverageOptionLabel({
   ...unmarked[0]!,
   usedByOtherAgentName: "Nadine Müller",
