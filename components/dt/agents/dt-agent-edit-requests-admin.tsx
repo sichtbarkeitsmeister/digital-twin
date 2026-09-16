@@ -17,7 +17,7 @@ const FIELD_LABELS: Record<string, string> = {
   name: "Name",
   role: "Rolle",
   prompt_template: "Prompt",
-  quick_actions: "Schnellaktionen",
+  quick_actions: "Schnelltests",
   is_enabled: "Aktiv",
   position: "Reihenfolge",
 };

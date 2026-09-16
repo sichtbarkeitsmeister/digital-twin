@@ -18,6 +18,7 @@ export function DtAgentQuickActionsField(props: {
   actions: string[];
   onChange: (actions: string[]) => void;
   disabled?: boolean;
+  hidePreview?: boolean;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -57,9 +58,9 @@ export function DtAgentQuickActionsField(props: {
     <div className="grid gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/40 p-3 dark:border-white/10 dark:bg-white/[0.03]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Schnellaktionen</p>
+          <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Schnelltests</p>
           <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
-            Vorschlags-Chips über dem Chat-Eingabefeld — optional
+            Vorschlags-Chips über dem Chat-Eingabefeld — in der Kundenansicht sichtbar
           </p>
         </div>
         <span className="shrink-0 text-xs tabular-nums text-sbkm-ink-500 dark:text-white/40">
@@ -67,6 +68,7 @@ export function DtAgentQuickActionsField(props: {
         </span>
       </div>
 
+      {props.hidePreview ? null : (
       <div className="rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.03] p-3 dark:border-white/8 dark:bg-white/[0.02]">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-sbkm-ink-500 dark:text-white/40">
           Vorschau im Chat
@@ -91,6 +93,7 @@ export function DtAgentQuickActionsField(props: {
           </p>
         )}
       </div>
+      )}
 
       {props.actions.length > 0 ? (
         <ul className="grid gap-2">

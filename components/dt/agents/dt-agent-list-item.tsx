@@ -16,8 +16,10 @@ import type { LucideIcon } from "lucide-react";
 import {
   DtAgentFormFields,
   agentFormValuesFromRow,
+  quickActionsFromForm,
   type DtAgentFormValues,
 } from "@/components/dt/agents/dt-agent-form-fields";
+import { DtAgentQuickActionsField } from "@/components/dt/agents/dt-agent-quick-actions-field";
 import { DtAgentSurveyCoverageCheck } from "@/components/dt/agents/dt-agent-survey-coverage-check";
 import { DtSeoWunschkundenPanel } from "@/components/dt/agents/dt-seo-wunschkunden-panel";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
@@ -117,6 +119,7 @@ function AgentActions(props: {
   alwaysOn?: boolean;
   canDisable: boolean;
   onStartEdit: () => void;
+  onStartQuickActionsEdit?: () => void;
   onToggleEnabled: (next: boolean) => void;
   onDeleteChats?: () => void;
   onDelete: () => void;
@@ -125,17 +128,32 @@ function AgentActions(props: {
 }) {
   if (!props.canDirectlyEdit) {
     return (
-      <DtPillButton
-        type="button"
-        size="sm"
-        variant="outline"
-        disabled={props.busy || props.pendingReview}
-        className="gap-1.5"
-        onClick={props.onRequestChange}
-      >
-        <MoreHorizontal className="size-4" aria-hidden />
-        {props.pendingReview ? "Anfrage läuft" : "Änderung vorschlagen"}
-      </DtPillButton>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {props.onStartQuickActionsEdit ? (
+          <DtPillButton
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={props.busy}
+            className="gap-1.5"
+            onClick={props.onStartQuickActionsEdit}
+          >
+            <Pencil className="size-4" aria-hidden />
+            Schnelltests
+          </DtPillButton>
+        ) : null}
+        <DtPillButton
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={props.busy || props.pendingReview}
+          className="gap-1.5"
+          onClick={props.onRequestChange}
+        >
+          <MoreHorizontal className="size-4" aria-hidden />
+          {props.pendingReview ? "Anfrage läuft" : "Änderung vorschlagen"}
+        </DtPillButton>
+      </div>
     );
   }
 
@@ -205,9 +223,12 @@ export function DtAgentListItem(props: {
   canDirectlyEdit: boolean;
   pendingReview?: boolean;
   isEditing: boolean;
+  /** When true, only Schnelltests are editable (org/customer view). */
+  quickActionsOnly?: boolean;
   editValues: DtAgentFormValues;
   onEditValuesChange: (patch: Partial<DtAgentFormValues>) => void;
   onStartEdit: () => void;
+  onStartQuickActionsEdit?: () => void;
   onSaveEdit: () => void;
   onCancelEdit: () => void;
   onToggleEnabled: (next: boolean) => void;
@@ -240,6 +261,7 @@ export function DtAgentListItem(props: {
   const isSurveyPersona = isSurveyPersonaAgent(agent);
 
   if (props.isEditing) {
+    const quickActionsOnly = Boolean(props.quickActionsOnly);
     return (
       <motion.div
         layout="position"
@@ -251,8 +273,27 @@ export function DtAgentListItem(props: {
       >
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-sbkm-navy dark:text-white">
           <Pencil className="size-4 text-sbkm-mint" aria-hidden />
-          {agent.name} bearbeiten
+          {quickActionsOnly ? `Schnelltests für ${agent.name}` : `${agent.name} bearbeiten`}
         </div>
+        {quickActionsOnly ? (
+          <div className="grid gap-3">
+            <DtAgentQuickActionsField
+              actions={quickActionsFromForm(props.editValues.quick)}
+              onChange={(actions) => props.onEditValuesChange({ quick: actions.join("\n") })}
+              disabled={props.busy}
+              hidePreview
+            />
+            <div className="flex flex-wrap gap-2">
+              <DtPillButton type="button" size="sm" disabled={props.busy} onClick={props.onSaveEdit}>
+                Speichern
+              </DtPillButton>
+              <DtPillButton type="button" size="sm" variant="ghost" onClick={props.onCancelEdit}>
+                Abbrechen
+              </DtPillButton>
+            </div>
+          </div>
+        ) : (
+          <>
         <DtAgentFormFields
           values={props.editValues}
           onChange={props.onEditValuesChange}
@@ -348,6 +389,8 @@ export function DtAgentListItem(props: {
             </DtPillButton>
           </div>
         </div>
+          </>
+        )}
       </motion.div>
     );
   }
@@ -395,6 +438,7 @@ export function DtAgentListItem(props: {
         alwaysOn={props.alwaysOn}
         canDisable={props.canDisable}
         onStartEdit={props.onStartEdit}
+        onStartQuickActionsEdit={props.onStartQuickActionsEdit}
         onToggleEnabled={props.onToggleEnabled}
         onDeleteChats={props.onDeleteChats}
         onDelete={props.onDelete}

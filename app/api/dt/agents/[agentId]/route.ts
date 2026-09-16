@@ -6,8 +6,9 @@ import {
   deleteDtAgentErrorCode,
   deleteDtAgentUserMessage,
 } from "@/lib/dt/delete-agent";
+import { canApplyAgentPatch } from "@/lib/dt/agent-quick-actions-patch";
 import { requireAuthUser, updateDtAgent } from "@/lib/dt/db";
-import { canDirectlyEditDtAgents } from "@/lib/dt/org-access";
+import { canDirectlyEditDtAgents, canManageDtAgents } from "@/lib/dt/org-access";
 
 const patchSchema = z
   .object({
@@ -89,24 +90,27 @@ export async function PATCH(
     return NextResponse.json({ ok: false, message: "Agent nicht gefunden." }, { status: 404 });
   }
 
-  const allowed = await canDirectlyEditDtAgents(auth.supabase, auth.userId);
-  if (!allowed) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message:
-          "Direkte Bearbeitung ist nur für Administratoren möglich. Bitte eine Änderungsanfrage senden.",
-      },
-      { status: 403 },
-    );
-  }
-
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
       { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe." },
       { status: 400 },
     );
+  }
+
+  const isPlatformAdmin = await canDirectlyEditDtAgents(auth.supabase, auth.userId);
+  const canManageOrg = await canManageDtAgents(
+    auth.supabase,
+    auth.userId,
+    existing.organisation_id as string,
+  );
+  const allowed = canApplyAgentPatch({
+    isPlatformAdmin,
+    canManageOrg,
+    patch: parsed.data,
+  });
+  if (!allowed.ok) {
+    return NextResponse.json({ ok: false, message: allowed.message }, { status: 403 });
   }
 
   if (
