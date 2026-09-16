@@ -46,7 +46,7 @@ const FORMAT_EXT: Record<DtCreatedFileFormat, string> = {
 };
 
 export const DT_CHAT_FILE_INSTRUCTIONS = `## Dateien
-Nutzer können beliebige Dateien anhängen (Excel, Word, PDF, Bilder, Text, HTML, …). Du erhältst daraus einen Textauszug; Bilder und PDFs siehst du direkt.
+Wenn der Nutzer eine Datei anhängt, steht der Inhalt im User-Text unter „--- Angehängte Datei: … ---“ (plus Bild/PDF direkt). Behaupte nie, du sähest keine Datei, wenn so ein Block da ist.
 
 Wenn der Nutzer eine Datei zum Anschauen oder Herunterladen braucht, erzeuge sie mit dem Werkzeug create_file — nicht nur als Codeblock in der Chat-Antwort. Behaupte nie, du könntest keine Dateien erstellen.
 

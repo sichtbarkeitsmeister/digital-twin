@@ -50,7 +50,7 @@ export function isDtTextLikeMime(mimeType: string, fileName = ""): boolean {
   ) {
     return true;
   }
-  return /\.(txt|md|markdown|csv|json|html|htm|xml|svg|css|js|ts|tsx|jsx|yml|yaml|sql|log|rtf)$/i.test(
+  return /\.(txt|md|markdown|csv|tsv|json|html|htm|xml|svg|css|js|ts|tsx|jsx|yml|yaml|sql|log|rtf|vtt|srt)$/i.test(
     n,
   );
 }

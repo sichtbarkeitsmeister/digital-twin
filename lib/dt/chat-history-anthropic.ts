@@ -9,6 +9,9 @@ import {
   normalizeDtAttachmentMime,
   Uint8ArrayToBase64Utf8Friendly,
 } from "@/lib/dt/attachments";
+import { isDtMultimodalMime, resolveDtStorageMime } from "@/lib/dt/attachments-shared";
+import { extractTextPreviewFromBytes } from "@/lib/dt/parse-attachment-text";
+import { formatAttachedFilesForPrompt } from "@/lib/dt/format-attached-files-for-prompt";
 
 export type DtDbMessageRow = {
   id: string;
@@ -56,35 +59,46 @@ async function buildDtUserMessageContent(
   supabase: SupabaseClient,
   attachRows: DtDbAttachmentRow[],
 ): Promise<string | Anthropic.ContentBlockParam[]> {
-  let textBody = m.content;
   const meta =
     m.metadata && typeof m.metadata === "object" ? (m.metadata as Record<string, unknown>) : null;
   const metaAttachments = Array.isArray(meta?.attachments)
-    ? (meta.attachments as Array<{ fileName?: unknown; textPreview?: unknown }>)
+    ? (meta.attachments as Array<{
+        fileName?: unknown;
+        mimeType?: unknown;
+        textPreview?: unknown;
+      }>)
     : [];
 
+  const filesForPrompt: Array<{ fileName: string; text?: string | null }> = [];
+  const seen = new Set<string>();
+
+  const addFile = (fileName: string, text?: string | null) => {
+    const key = fileName.trim().toLowerCase() || `anon-${seen.size}`;
+    if (seen.has(key)) {
+      const existing = filesForPrompt.find((f) => f.fileName.trim().toLowerCase() === key);
+      if (existing && !existing.text?.trim() && text?.trim()) existing.text = text;
+      return;
+    }
+    seen.add(key);
+    filesForPrompt.push({ fileName: fileName.trim() || "Anhang", text });
+  };
+
   for (const a of metaAttachments) {
-    const preview =
-      typeof a.textPreview === "string" && a.textPreview.trim().length > 0
-        ? a.textPreview.trim()
-        : null;
-    if (!preview) continue;
     const name =
       typeof a.fileName === "string" && a.fileName.trim() ? a.fileName.trim() : "Anhang";
-    textBody += `\n\n--- ${name} ---\n${preview}`;
+    const preview =
+      typeof a.textPreview === "string" && a.textPreview.trim() ? a.textPreview.trim() : null;
+    addFile(name, preview);
   }
 
-  const multimodal = attachRows.filter(
-    (r) => isMultimodalMediaType(r.mime_type) && !isSkippedStoragePath(r.storage_path),
-  );
-
-  if (multimodal.length === 0) return textBody;
-
-  const blocks: Anthropic.ContentBlockParam[] = [{ type: "text", text: textBody }];
+  const multimodalBlocks: Anthropic.ContentBlockParam[] = [];
   let used = 0;
 
-  for (const row of multimodal) {
-    if (used >= MAX_HISTORICAL_MULTIMODAL) break;
+  for (const row of attachRows) {
+    addFile(row.file_name);
+    if (isSkippedStoragePath(row.storage_path)) continue;
+    if (used >= MAX_HISTORICAL_MULTIMODAL) continue;
+
     const { data, error } = await supabase.storage
       .from(DT_CHAT_ATTACHMENTS_BUCKET)
       .download(row.storage_path);
@@ -94,14 +108,30 @@ async function buildDtUserMessageContent(
     }
     try {
       const buf = new Uint8Array(await data.arrayBuffer());
-      const b64 = Uint8ArrayToBase64Utf8Friendly(buf);
-      const norm = normalizeDtAttachmentMime(row.mime_type);
-      blocks.push(...bufferToAnthropicBlocks(norm, b64));
-      used += 1;
+      const mime = resolveDtStorageMime(row.file_name, row.mime_type, buf);
+      const existing = filesForPrompt.find(
+        (f) => f.fileName.trim().toLowerCase() === row.file_name.trim().toLowerCase(),
+      );
+      if (!existing?.text?.trim()) {
+        const extracted = await extractTextPreviewFromBytes(row.file_name, mime, buf);
+        addFile(row.file_name, extracted.ok ? extracted.text : extracted.message);
+      }
+      if (isDtMultimodalMime(mime) || isMultimodalMediaType(mime)) {
+        const b64 = Uint8ArrayToBase64Utf8Friendly(buf);
+        const blocks = bufferToAnthropicBlocks(normalizeDtAttachmentMime(mime), b64);
+        if (blocks.length > 0) {
+          multimodalBlocks.push(...blocks);
+          used += 1;
+        }
+      }
     } catch (e) {
       console.warn("[dt] attachment buffer failed", row.storage_path, e);
     }
   }
 
-  return blocks.length === 1 ? textBody : blocks;
+  const attachmentText = formatAttachedFilesForPrompt(filesForPrompt);
+  const textBody = attachmentText ? `${m.content}\n\n${attachmentText}` : m.content;
+
+  if (multimodalBlocks.length === 0) return textBody;
+  return [{ type: "text", text: textBody }, ...multimodalBlocks];
 }
