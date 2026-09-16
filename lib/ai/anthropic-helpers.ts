@@ -110,6 +110,103 @@ export function extractFirstJsonObject(text: string): string | null {
   return null;
 }
 
+/** Drop commas that sit immediately before `}` or `]` (common LLM JSON slip). */
+export function stripTrailingCommasInJson(input: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i]!;
+
+    if (inString) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < input.length && /\s/.test(input[j]!)) j += 1;
+      if (j < input.length && (input[j] === "}" || input[j] === "]")) {
+        continue;
+      }
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+/**
+ * Close a truncated `{…` payload: finish an open string, drop a dangling comma,
+ * then emit the missing `}` / `]` so a cut-off LLM answer can still parse.
+ */
+export function closeTruncatedJsonObject(text: string): string | null {
+  const input = stripCodeFences(text);
+  const start = input.indexOf("{");
+  if (start < 0) return null;
+
+  let slice = input.slice(start);
+  let inString = false;
+  let escaped = false;
+  const stack: Array<"{" | "["> = [];
+
+  for (let i = 0; i < slice.length; i += 1) {
+    const ch = slice[i]!;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") stack.push("{");
+    else if (ch === "[") stack.push("[");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+
+  if (!inString && stack.length === 0) return null;
+
+  if (inString) {
+    if (escaped) slice += "\\";
+    slice += '"';
+  }
+
+  slice = slice.replace(/,\s*$/, "");
+  while (stack.length > 0) {
+    const open = stack.pop();
+    slice += open === "{" ? "}" : "]";
+  }
+  return slice;
+}
+
 function tryParseOnce(text: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(text);
@@ -122,27 +219,62 @@ function tryParseOnce(text: string): Record<string, unknown> | null {
   }
 }
 
-export function tryParseJsonObject(text: string): Record<string, unknown> | null {
+function* llmJsonCandidates(text: string): Generator<string> {
   const normalized = stripCodeFences(text)
     .replace(/^\uFEFF/, "")
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2018\u2019]/g, "'")
     .trim();
 
-  const direct = tryParseOnce(normalized);
-  if (direct) return direct;
-
-  const escaped = tryParseOnce(escapeControlCharsInJsonStrings(normalized));
-  if (escaped) return escaped;
+  const variants = [
+    normalized,
+    escapeControlCharsInJsonStrings(normalized),
+    stripTrailingCommasInJson(normalized),
+    stripTrailingCommasInJson(escapeControlCharsInJsonStrings(normalized)),
+  ];
+  for (const variant of variants) yield variant;
 
   const firstObject = extractFirstJsonObject(normalized);
   if (firstObject) {
-    const fromSlice = tryParseOnce(firstObject);
-    if (fromSlice) return fromSlice;
-    const fromEscapedSlice = tryParseOnce(escapeControlCharsInJsonStrings(firstObject));
-    if (fromEscapedSlice) return fromEscapedSlice;
+    yield firstObject;
+    yield escapeControlCharsInJsonStrings(firstObject);
+    yield stripTrailingCommasInJson(firstObject);
+    yield stripTrailingCommasInJson(escapeControlCharsInJsonStrings(firstObject));
   }
 
+  const closed = closeTruncatedJsonObject(escapeControlCharsInJsonStrings(normalized));
+  if (closed) {
+    yield closed;
+    yield stripTrailingCommasInJson(closed);
+  }
+}
+
+export function tryParseJsonObject(text: string): Record<string, unknown> | null {
+  const seen = new Set<string>();
+  for (const candidate of llmJsonCandidates(text)) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    const parsed = tryParseOnce(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+export function extractToolUseInput(
+  resp: Anthropic.Messages.Message,
+  name: string,
+): unknown | null {
+  const block = resp.content.find(
+    (item): item is Anthropic.ToolUseBlock => item.type === "tool_use" && item.name === name,
+  );
+  return block ? block.input : null;
+}
+
+export function coerceJsonObject(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") return tryParseJsonObject(value);
   return null;
 }
 
@@ -193,12 +325,17 @@ export async function callAnthropicFirstAvailable(input: {
   timeoutMs?: number;
   /** Optional Anthropic tools (Survey KI workspace retrieval). */
   tools?: Anthropic.Tool[];
+  /** Optional tool_choice (e.g. force a JSON submit tool). */
+  toolChoice?: Anthropic.Messages.ToolChoice;
   /** Extra request headers (PDF document blocks need pdfs-2024-09-25). */
   headers?: Record<string, string>;
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const useStream = input.stream ?? input.maxTokens >= STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
-  const toolParams = input.tools && input.tools.length > 0 ? { tools: input.tools } : {};
+  const toolParams = {
+    ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
+    ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
+  };
   const requestOptions = (signal?: AbortSignal) => ({
     ...(signal ? { signal } : {}),
     ...(input.headers ? { headers: input.headers } : {}),

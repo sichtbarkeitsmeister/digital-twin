@@ -8,7 +8,11 @@ import type {
 const personaSchema = z.object({
   name: z.string().trim().min(2).max(120),
   role: z.string().trim().max(200).nullable().optional(),
-  priority: z.enum(["A", "B", "C"]).optional(),
+  priority: z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const t = value.trim().toUpperCase();
+    return t === "A" || t === "B" || t === "C" ? t : undefined;
+  }, z.enum(["A", "B", "C"]).optional()),
   isPrimary: z.boolean().optional(),
   is_primary: z.boolean().optional(),
   description: z.string().trim().max(4000).optional().default(""),
@@ -27,7 +31,7 @@ const extractSchema = z.object({
   summary: z.string().trim().min(1).max(4000),
   anbieterMarkdown: z.string().trim().max(20_000).optional(),
   anbieter_markdown: z.string().trim().max(20_000).optional(),
-  personas: z.array(personaSchema).max(8).optional().default([]),
+  personas: z.array(z.unknown()).max(8).optional().default([]),
 });
 
 function emptyToNull(value: string | null | undefined): string | null {
@@ -72,7 +76,10 @@ export function parseTranscriptExtractJson(raw: unknown): DtTranscriptExtract {
   }
   const data = parsed.data;
   const personas = (data.personas ?? [])
-    .map(normalizePersona)
+    .map((item) => {
+      const persona = personaSchema.safeParse(item);
+      return persona.success ? normalizePersona(persona.data) : null;
+    })
     .filter((p): p is DtTranscriptPersonaExtract => p != null)
     .slice(0, 6);
   if (personas.length > 0 && !personas.some((p) => p.isPrimary)) {

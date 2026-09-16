@@ -4,7 +4,15 @@
  */
 import assert from "node:assert/strict";
 
+import type Anthropic from "@anthropic-ai/sdk";
+
+import {
+  closeTruncatedJsonObject,
+  stripTrailingCommasInJson,
+  tryParseJsonObject,
+} from "../lib/ai/anthropic-helpers";
 import { mergeMarkedBlock } from "../lib/dt/transcripts/apply-knowledge";
+import { jsonFromTranscriptResponse } from "../lib/dt/transcripts/extract";
 import { formatTranscriptKnowledgeForPrompt } from "../lib/dt/transcripts/format-for-prompt";
 import { parseTranscriptExtractJson } from "../lib/dt/transcripts/parse-extract";
 import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
@@ -151,8 +159,87 @@ function testPromptFormatAndGating() {
   console.log("prompt format + gating: ok");
 }
 
+function testLlmJsonRepair() {
+  const trailing = tryParseJsonObject(`{"title":"Kick-off","summary":"Gespräch über Mandate",}`);
+  assert.equal(trailing?.title, "Kick-off");
+  assert.equal(trailing?.summary, "Gespräch über Mandate");
+
+  const smart = tryParseJsonObject(`{“title”: “Kick-off”, “summary”: “Gespräch”}`);
+  assert.equal(smart?.title, "Kick-off");
+  assert.equal(smart?.summary, "Gespräch");
+
+  const fenced = tryParseJsonObject('```json\n{"title":"A","summary":"B"}\n```');
+  assert.equal(fenced?.title, "A");
+
+  const truncatedRaw =
+    '{"title":"Kick-off","summary":"Gespräch über Wunschkunden","anbieterMarkdown":"## Kanzlei\\n- Lohn","personas":[{"name":"Leitung Pflegeheim","description":"Sucht Verlässlichkeit.","promptAppend":"Ich leite ein Heim und brauche';
+  const closed = closeTruncatedJsonObject(truncatedRaw);
+  assert.ok(closed);
+  const truncated = tryParseJsonObject(truncatedRaw);
+  assert.equal(truncated?.title, "Kick-off");
+  assert.equal(typeof truncated?.personas, "object");
+  assert.equal(stripTrailingCommasInJson('{"a":1,}'), '{"a":1}');
+  console.log("llm json repair: ok");
+}
+
+function testParseExtractSkipsBrokenPersona() {
+  const extract = parseTranscriptExtractJson({
+    title: "Kick-off",
+    summary: "Gespräch über Wunschkunden und Leistungen der Kanzlei.",
+    anbieterMarkdown: "## Leistungen\n- Jahresabschluss",
+    personas: [
+      {
+        name: "Leitung Pflegeheim",
+        role: "Einrichtungsleitung",
+        priority: "a",
+        description: "Sucht verlässliche Steuerberatung für stationäre Pflege.",
+        promptAppend:
+          "Ich leite ein Pflegeheim und brauche jemanden, der Fristen im Blick hat. ".repeat(4),
+      },
+      { name: "x" },
+      "kein objekt",
+    ],
+  });
+  assert.equal(extract.personas.length, 1);
+  assert.equal(extract.personas[0]?.priority, "A");
+  console.log("parse extract skips broken persona: ok");
+}
+
+function testJsonFromTranscriptResponse() {
+  const fromTool = jsonFromTranscriptResponse({
+    content: [
+      {
+        type: "tool_use",
+        id: "toolu_test",
+        name: "submit_transcript_extract",
+        input: {
+          title: "Kick-off",
+          summary: "Gespräch.",
+          anbieterMarkdown: "- Lohn",
+          personas: [],
+        },
+      },
+    ],
+  } as Anthropic.Messages.Message);
+  assert.equal((fromTool as { title?: string } | null)?.title, "Kick-off");
+
+  const fromText = jsonFromTranscriptResponse({
+    content: [
+      {
+        type: "text",
+        text: 'Hier:\n{"title":"Westprüfung","summary":"Interview.","anbieterMarkdown":"- Steuer","personas":[]}',
+      },
+    ],
+  } as Anthropic.Messages.Message);
+  assert.equal((fromText as { title?: string } | null)?.title, "Westprüfung");
+  console.log("json from transcript response: ok");
+}
+
 testSanitizeAndSlug();
 testParseExtract();
+testParseExtractSkipsBrokenPersona();
+testLlmJsonRepair();
+testJsonFromTranscriptResponse();
 testMergeBlock();
 testPromptFormatAndGating();
 console.log("ok: meeting transcripts");
