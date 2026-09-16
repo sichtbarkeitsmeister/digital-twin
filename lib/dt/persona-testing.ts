@@ -18,6 +18,14 @@ export function agentSupportsPersonaTesting(
   return Boolean(agent?.id);
 }
 
+/** Persona-/Firmen-Test is staff-only — never shown in the customer chat. */
+export function personaTestingAvailableToUser(input: {
+  isPlatformAdmin: boolean | null | undefined;
+  agent: Pick<DtAgentRow, "id"> | null | undefined;
+}): boolean {
+  return Boolean(input.isPlatformAdmin) && agentSupportsPersonaTesting(input.agent);
+}
+
 export type PersonaTestingAudienceLabel = "persona" | "company";
 
 /** Short mode name shown in chat chrome while Testing is on. */
