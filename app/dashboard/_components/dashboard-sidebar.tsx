@@ -9,6 +9,7 @@ import {
   ClipboardList,
   ClipboardPenLine,
   FileSearch,
+  FileText,
   Inbox,
   MessageCircle,
   Plug,
@@ -145,6 +146,15 @@ export function DashboardSidebar({
       : []),
   ];
 
+  const transkripteItem: NavItem | null = isPlatformAdmin
+    ? {
+        label: "Transkripte",
+        href: "/dashboard/transkripte",
+        icon: FileText,
+        match: (pathname: string) => pathname.startsWith("/dashboard/transkripte"),
+      }
+    : null;
+
   const erstgespraechItem: NavItem | null = isPlatformAdmin
     ? {
         label: "Erstgespräch",
@@ -213,7 +223,11 @@ export function DashboardSidebar({
         ))}
       </nav>
 
-      {verwaltungItems.length > 0 || erstgespraechItem || frageboegenItem || isPlatformAdmin ? (
+      {verwaltungItems.length > 0 ||
+      transkripteItem ||
+      erstgespraechItem ||
+      frageboegenItem ||
+      isPlatformAdmin ? (
         <div className="grid gap-2 pt-2">
           <div className="border-t border-sbkm-navy/10 pt-3 dark:border-white/10">
             <p className="px-2 text-[11px] font-bold uppercase tracking-[0.14em] text-sbkm-ink-500">
@@ -227,6 +241,9 @@ export function DashboardSidebar({
             {isPlatformAdmin
               ? adminItems.map((item) => <NavLink key={item.href} item={item} />)
               : null}
+            {transkripteItem ? (
+              <NavLink key={transkripteItem.href} item={transkripteItem} />
+            ) : null}
             {erstgespraechItem ? (
               <NavLink key={erstgespraechItem.href} item={erstgespraechItem} />
             ) : null}

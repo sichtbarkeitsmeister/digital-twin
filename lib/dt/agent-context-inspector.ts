@@ -29,6 +29,7 @@ import {
   formatLoadedWebsiteStructureForPrompt,
   loadDtWebsiteStructure,
 } from "@/lib/dt/seo/load-website-structure";
+import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
 import {
   formatSeoChecklist,
   loadGlobalSeoChecklist,
@@ -179,6 +180,11 @@ export async function loadDtAgentContextBundle(input: {
     : null;
   const websiteStructureText = includeWebsiteStructure
     ? formatLoadedWebsiteStructureForPrompt(websiteStructureRow, {
+        emptyHint: promptMode === "seo",
+      })
+    : "";
+  const transcriptKnowledgeText = includeWebsiteStructure
+    ? await loadTranscriptKnowledgeForPrompt(supabase, input.organisationId, {
         emptyHint: promptMode === "seo",
       })
     : "";
@@ -530,6 +536,19 @@ export async function loadDtAgentContextBundle(input: {
           ? { nodeCount: websiteStructureRow.node_count }
           : undefined,
       }),
+      section({
+        id: "meeting_transcripts",
+        title: "Meeting-Transkripte",
+        sourceLabel: "Organisation",
+        sourceType: "organisation",
+        description:
+          "Ausgewertete Kundeninterviews (Verwaltung → Transkripte). Anbieter- und Persona-Wissen aus den Gesprächen.",
+        content: transcriptKnowledgeText,
+        isEmpty:
+          !transcriptKnowledgeText.trim() ||
+          transcriptKnowledgeText.includes("Noch keine ausgewerteten"),
+        editHref: `/dashboard/transkripte?org=${orgQuery}`,
+      }),
     );
   }
 
@@ -576,6 +595,9 @@ export async function loadDtAgentContextBundle(input: {
       : undefined,
     websiteStructureText: includeWebsiteStructure
       ? websiteStructureText
+      : undefined,
+    transcriptKnowledgeText: includeWebsiteStructure
+      ? transcriptKnowledgeText
       : undefined,
   });
 
