@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Download, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import {
   isDtMultimodalImageMime,
@@ -39,6 +40,7 @@ function wrapHtmlPreview(html: string): string {
 export function DtChatFilePreview(props: {
   file: DtChatPreviewFile | null;
   onClose: () => void;
+  className?: string;
 }) {
   const mime = normalizeDtMime(props.file?.mimeType ?? "");
   const isImage = props.file ? isDtMultimodalImageMime(mime) : false;
@@ -55,6 +57,15 @@ export function DtChatFilePreview(props: {
   const [htmlBody, setHtmlBody] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    if (!props.file) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [props.file, props.onClose]);
 
   useEffect(() => {
     setTextBody(null);
@@ -81,79 +92,79 @@ export function DtChatFilePreview(props: {
 
   const htmlSrcDoc = useMemo(() => htmlBody, [htmlBody]);
 
-  if (!props.file) return null;
-
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-sbkm-navy/80 p-4 backdrop-blur-sm"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Vorschau ${props.file.fileName}`}
-        onClick={props.onClose}
-      >
-        <button
-          type="button"
-          className="absolute right-4 top-4 rounded-full bg-white/90 p-2 text-sbkm-navy shadow-dt hover:bg-white"
-          aria-label="Schließen"
-          onClick={props.onClose}
+      {props.file ? (
+        <motion.aside
+          key={`${props.file.fileName}:${props.file.url}`}
+          initial={{ opacity: 0, x: 28 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 28 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          role="complementary"
+          aria-label={`Datei ${props.file.fileName}`}
+          className={cn(
+            "flex min-h-0 min-w-0 flex-col overflow-hidden bg-white shadow-[0_0_28px_rgba(46,46,80,0.14)] dark:bg-sbkm-navy",
+            "absolute inset-0 z-30",
+            "md:static md:inset-auto md:z-auto md:w-[48%] md:min-w-[20rem] md:max-w-[46rem] md:shrink-0 md:border-l md:border-sbkm-navy/10 md:shadow-none dark:md:border-white/10",
+            props.className,
+          )}
         >
-          <X className="h-5 w-5" />
-        </button>
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.96 }}
-          transition={{ duration: 0.2 }}
-          className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-dt-lg dark:bg-sbkm-navy"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between gap-3 border-b border-sbkm-navy/10 px-4 py-3 dark:border-white/10">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-sbkm-navy/10 px-3 py-2.5 dark:border-white/10 sm:px-4">
             <p className="min-w-0 truncate text-sm font-semibold text-sbkm-navy dark:text-white">
               {props.file.fileName}
             </p>
-            <DtPillButton
-              type="button"
-              variant="outline"
-              className="h-9 shrink-0 px-3 text-xs"
-              disabled={downloading}
-              onClick={() => {
-                setDownloading(true);
-                void downloadUrl(props.file!.url, props.file!.fileName).finally(() =>
-                  setDownloading(false),
-                );
-              }}
-            >
-              <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              Herunterladen
-            </DtPillButton>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <DtPillButton
+                type="button"
+                variant="outline"
+                className="h-9 px-3 text-xs"
+                disabled={downloading}
+                onClick={() => {
+                  setDownloading(true);
+                  void downloadUrl(props.file!.url, props.file!.fileName).finally(() =>
+                    setDownloading(false),
+                  );
+                }}
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                Herunterladen
+              </DtPillButton>
+              <button
+                type="button"
+                className="inline-grid h-9 w-9 place-items-center rounded-full text-sbkm-navy transition hover:bg-sbkm-navy/10 dark:text-white dark:hover:bg-white/10"
+                aria-label="Datei schließen"
+                onClick={props.onClose}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-          <div className="min-h-[40vh] flex-1 overflow-auto bg-sbkm-mint/[0.06] p-3 dark:bg-black/20">
+          <div className="min-h-0 flex-1 overflow-hidden bg-sbkm-mint/[0.06] dark:bg-black/20">
             {isImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={props.file.url}
-                alt={props.file.fileName}
-                className="mx-auto max-h-[75vh] max-w-full rounded-xl object-contain"
-              />
+              <div className="flex h-full items-center justify-center overflow-auto p-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={props.file.url}
+                  alt={props.file.fileName}
+                  className="max-h-full max-w-full rounded-xl object-contain"
+                />
+              </div>
             ) : isPdf ? (
               <iframe
                 title={props.file.fileName}
                 src={props.file.url}
-                className="h-[75vh] w-full rounded-xl border-0 bg-white"
+                className="h-full w-full border-0 bg-white"
               />
             ) : isHtml && htmlSrcDoc ? (
               <iframe
                 title={props.file.fileName}
                 sandbox="allow-same-origin"
                 srcDoc={htmlSrcDoc}
-                className="h-[75vh] w-full rounded-xl border-0 bg-white"
+                className="h-full w-full border-0 bg-white"
               />
             ) : isText && textBody != null ? (
-              <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs text-sbkm-navy dark:bg-white/5 dark:text-white">
+              <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs text-sbkm-navy dark:text-white">
                 {textBody}
               </pre>
             ) : loadError ? (
@@ -166,8 +177,8 @@ export function DtChatFilePreview(props: {
               </p>
             )}
           </div>
-        </motion.div>
-      </motion.div>
+        </motion.aside>
+      ) : null}
     </AnimatePresence>
   );
 }
