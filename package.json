@@ -54,6 +54,7 @@
     "test:raw-filled-questionnaire": "tsx scripts/test-raw-filled-questionnaire.ts",
     "test:persona-testing": "tsx scripts/test-persona-testing.ts",
     "test:agent-quick-actions-patch": "tsx scripts/test-agent-quick-actions-patch.ts",
+    "test:agent-editor-query": "tsx scripts/test-agent-editor-query.ts",
     "test:survey-exam-questions": "tsx scripts/test-survey-exam-questions.ts",
     "test:agent-survey-coverage": "tsx scripts/test-agent-survey-coverage.ts",
     "test:organisation-survey-open-href": "tsx scripts/test-organisation-survey-open-href.ts",

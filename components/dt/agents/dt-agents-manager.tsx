@@ -25,6 +25,7 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtTabs } from "@/components/dt/dt-tabs";
 import type { DtAgentEditRequestRow } from "@/lib/dt/agent-edit-requests";
+import { shouldOpenAgentEditorFromQuery } from "@/lib/dt/agents/agent-editor-query";
 import { filterAgentsHiddenFromOrgMembers, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { isProtectedSeoAdvisorAgent } from "@/lib/dt/delete-agent-policy";
 import { checklistToText } from "@/lib/dt/seo/seo-checklist";
@@ -127,6 +128,7 @@ export function DtAgentsManager(props: {
     searchParams.get("view") === "prompts" ? "prompts" : "agents",
   );
   const secondaryLoadedForOrgRef = useRef<string | null>(null);
+  const ignoreStaleAgentQueryRef = useRef(false);
 
   // Resolve preferred org before the first client fetch (URL > localStorage > SSR).
   useLayoutEffect(() => {
@@ -190,8 +192,19 @@ export function DtAgentsManager(props: {
   // Keep Survey-KI focus in sync when opening an agent from deep links.
   useEffect(() => {
     const agentFromUrl = searchParams.get("agent");
-    if (!agentFromUrl) return;
-    if (editingId === agentFromUrl) return;
+    if (!agentFromUrl) {
+      ignoreStaleAgentQueryRef.current = false;
+      return;
+    }
+    if (
+      !shouldOpenAgentEditorFromQuery({
+        agentIdInUrl: agentFromUrl,
+        editingId,
+        ignoreStaleAgentQuery: ignoreStaleAgentQueryRef.current,
+      })
+    ) {
+      return;
+    }
     const row = agents.find((a) => a.id === agentFromUrl);
     if (!row) return;
     setEditingId(row.id);
@@ -372,6 +385,7 @@ export function DtAgentsManager(props: {
   }
 
   function startEdit(agent: AgentRow, mode: "full" | "quickActions" = "full") {
+    ignoreStaleAgentQueryRef.current = false;
     setEditingId(agent.id);
     setQuickActionsOnly(mode === "quickActions");
     setEditValues(agentFormValuesFromRow(agent));
@@ -379,10 +393,15 @@ export function DtAgentsManager(props: {
     writeAgentQuery(agent.id);
   }
 
-  function cancelEdit() {
+  function closeEditor() {
+    ignoreStaleAgentQueryRef.current = true;
     setEditingId(null);
     setQuickActionsOnly(false);
     writeAgentQuery(null);
+  }
+
+  function cancelEdit() {
+    closeEditor();
   }
 
   async function deleteAgentChats(
@@ -461,9 +480,7 @@ export function DtAgentsManager(props: {
         : `Agent „${agent.name}" entfernt.`,
     );
     if (editingId === agent.id) {
-      setEditingId(null);
-      setQuickActionsOnly(false);
-      writeAgentQuery(null);
+      closeEditor();
     }
     await refresh(true);
   }
@@ -516,9 +533,7 @@ export function DtAgentsManager(props: {
       return;
     }
     const savedQuickActionsOnly = quickActionsOnly;
-    setEditingId(null);
-    setQuickActionsOnly(false);
-    writeAgentQuery(null);
+    closeEditor();
     toast.success(savedQuickActionsOnly ? "Schnelltests gespeichert." : "Agent gespeichert.");
     await refresh(true);
   }
