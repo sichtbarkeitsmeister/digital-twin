@@ -20,15 +20,44 @@ export const DT_DEFAULT_TEXT_MODE_INSTRUCTIONS = [
   "- Wenn Format unklar ist, nimm das Nächstliegende (z. B. Post, Flyer-Fließtext, kurze Info) und schreib los.",
 ].join("\n");
 
+/** Previous SEO-focused default — treat as unset so saved copies pick up the new wording. */
+export const DT_LEGACY_SEO_TEXT_MODE_INSTRUCTIONS = [
+  "## Text-Modus",
+  "Der Nutzer möchte SEO-optimierte, publikationsreife Texte — kein Chat, sondern fertiger Copy-Output.",
+  "",
+  "### SEO",
+  "- Fokus-Keyword und semantische Varianten natürlich einweben (Titel, erster Absatz, H2/H3).",
+  "- Suchintention treffen; scannbare Struktur mit klaren Zwischenüberschriften.",
+  "- Bei Bedarf Meta-Titel, Meta-Description und interne Verlinkungsvorschläge klar getrennt anbieten.",
+  "- Kein Keyword-Stuffing, keine künstliche Wiederholung.",
+  "",
+  "### Menschlicher Ton (Anti-AI-Slop)",
+  "- Satzlängen und Rhythmus variieren; aktiv formulieren, konkrete Details statt Füllwörter.",
+  "- Vermeide Floskeln wie „in der heutigen schnelllebigen Welt“, „darüber hinaus“, „zudem“, „es ist wichtig zu beachten“.",
+  "- Kein leerer Schlussabsatz, kein Em-Dash-Overuse, natürliches Deutsch.",
+  "",
+  "### Output",
+  "- Liefere den fertigen Text zum direkten Einfügen.",
+  "- Meta-/Titel-Vorschläge klar abtrennen, wenn du sie mitlieferst.",
+].join("\n");
+
+function normalizeTextModePrompt(value: string): string {
+  return value.replace(/\r\n/g, "\n").trim();
+}
+
 export function resolveTextModeInstructions(
   stored: string | null | undefined,
 ): string {
-  const trimmed = stored?.trim() ?? "";
-  return trimmed || DT_DEFAULT_TEXT_MODE_INSTRUCTIONS;
+  const trimmed = normalizeTextModePrompt(stored ?? "");
+  if (!trimmed || trimmed === normalizeTextModePrompt(DT_LEGACY_SEO_TEXT_MODE_INSTRUCTIONS)) {
+    return DT_DEFAULT_TEXT_MODE_INSTRUCTIONS;
+  }
+  return trimmed;
 }
 
 export function isDefaultTextModeInstructions(value: string | null | undefined): boolean {
-  return resolveTextModeInstructions(value) === DT_DEFAULT_TEXT_MODE_INSTRUCTIONS;
+  const resolved = resolveTextModeInstructions(value);
+  return resolved === DT_DEFAULT_TEXT_MODE_INSTRUCTIONS;
 }
 
 export async function loadTextModeInstructions(

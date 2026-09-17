@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import {
-  DT_DEFAULT_TEXT_MODE_INSTRUCTIONS,
+  isDefaultTextModeInstructions,
   resolveTextModeInstructions,
 } from "@/lib/dt/prompts/text-mode";
 
@@ -35,7 +35,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     prompt,
-    isDefault: !stored || stored === DT_DEFAULT_TEXT_MODE_INSTRUCTIONS,
+    isDefault: isDefaultTextModeInstructions(stored),
   });
 }
 
@@ -61,8 +61,7 @@ export async function PATCH(req: Request) {
   }
 
   const trimmed = parsed.data.prompt.trim();
-  const nextStored =
-    !trimmed || trimmed === DT_DEFAULT_TEXT_MODE_INSTRUCTIONS ? null : trimmed;
+  const nextStored = isDefaultTextModeInstructions(trimmed) ? null : trimmed;
 
   const { data, error } = await auth.supabase
     .from("dt_platform_settings")
@@ -87,6 +86,6 @@ export async function PATCH(req: Request) {
   return NextResponse.json({
     ok: true,
     prompt,
-    isDefault: !stored || stored === DT_DEFAULT_TEXT_MODE_INSTRUCTIONS,
+    isDefault: isDefaultTextModeInstructions(stored),
   });
 }
