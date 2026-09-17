@@ -499,6 +499,20 @@ export function DtAgentContextInspector(props: {
         Text-Modus im Preview (wie der Button „Text“ im Chat)
       </label>
 
+      {bundle
+        ? bundle.sections
+            .filter((section) => section.id === "text_mode")
+            .map((section) => (
+              <TextModePromptEditor
+                key={section.id}
+                section={section}
+                prompt={bundle.textModePrompt}
+                isDefault={bundle.textModePromptIsDefault}
+                onSaved={() => void loadBundle()}
+              />
+            ))
+        : null}
+
       {loading ? (
         <div className="grid gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -530,23 +544,15 @@ export function DtAgentContextInspector(props: {
           animate="show"
           key={`${bundle.organisationId}-${bundle.agentId}-${bundle.mode}-${bundle.textMode}`}
         >
-          {bundle.sections.map((section, index) =>
-            section.id === "text_mode" ? (
-              <TextModePromptEditor
-                key={section.id}
-                section={section}
-                prompt={bundle.textModePrompt}
-                isDefault={bundle.textModePromptIsDefault}
-                onSaved={() => void loadBundle()}
-              />
-            ) : (
+          {bundle.sections
+            .filter((section) => section.id !== "text_mode")
+            .map((section, index) => (
               <ContextSectionCard
                 key={section.id}
                 section={section}
                 defaultOpen={index < 2}
               />
-            ),
-          )}
+            ))}
         </motion.div>
       ) : null}
     </div>
