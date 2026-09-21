@@ -95,6 +95,7 @@ const fromRow = onboardingRecordFromRow({
 
 const checklist = onboardingChecklist(fromRow, 3);
 assert.equal(checklist.mediaLink, true);
+assert.equal(onboardingChecklist(fromRow, 0).mediaLink, false);
 assert.equal(checklist.hoster, true);
 assert.equal(checklist.smtp, true);
 assert.equal(checklist.cms, true);
@@ -116,7 +117,9 @@ assert.match(prompt, /support@sichtbarkeitsmeister.de/);
 assert.match(prompt, /André Petermann/);
 assert.match(prompt, /Konkurrent A/);
 assert.match(prompt, /rechnung@example.de/);
-assert.match(prompt, /onboarding\/upload/);
+assert.match(prompt, /dashboard\/onboarding/);
+assert.match(prompt, /Bilder und Videos/);
+assert.doesNotMatch(prompt, /onboarding\/upload/);
 assert.doesNotMatch(prompt, /secret-hoster/);
 assert.doesNotMatch(prompt, /smtp-secret/);
 assert.doesNotMatch(prompt, /cms-secret/);

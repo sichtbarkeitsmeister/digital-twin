@@ -117,7 +117,7 @@ export function onboardingChecklist(
 ): DtOnboardingChecklist {
   const competitorsFilled = record.competitors.filter((item) => item.trim()).length;
   return {
-    mediaLink: Boolean(record.uploadToken && record.uploadPassword),
+    mediaLink: fileCount > 0,
     hoster: Boolean(record.hosterUser && record.hosterPassword),
     smtp: Boolean(
       record.smtpHost && record.smtpPort && record.smtpUsername && record.smtpPassword,
