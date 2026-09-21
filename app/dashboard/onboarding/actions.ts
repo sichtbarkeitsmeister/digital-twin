@@ -6,7 +6,9 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireOnboardingAccess } from "@/lib/dt/onboarding/access";
 import {
+  DT_ONBOARDING_ADDITIONAL_INFO_MAX,
   DT_ONBOARDING_MAX_COMPETITORS,
+  DT_ONBOARDING_MAX_CUSTOMER_CONTACTS,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 import {
@@ -34,6 +36,17 @@ const recordSchema = z.object({
   cmsPassword: z.string().max(200),
   competitors: z.array(z.string().max(200)).max(DT_ONBOARDING_MAX_COMPETITORS),
   billingEmail: z.string().max(200),
+  customerContacts: z
+    .array(
+      z.object({
+        name: z.string().max(120),
+        role: z.string().max(120),
+        email: z.string().max(200),
+        phone: z.string().max(80),
+      }),
+    )
+    .max(DT_ONBOARDING_MAX_CUSTOMER_CONTACTS),
+  additionalInfo: z.string().max(DT_ONBOARDING_ADDITIONAL_INFO_MAX),
 });
 
 async function requireOnboardingUser(organisationId: string) {

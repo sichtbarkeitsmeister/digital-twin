@@ -4,12 +4,29 @@ import {
   DT_ONBOARDING_SUPPORT_EMAIL,
   DT_ONBOARDING_SUPPORT_NOTE,
   onboardingDashboardPath,
+  type DtOnboardingCustomerContact,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 import { onboardingChecklist } from "@/lib/dt/onboarding/normalize";
 
 function statusLine(label: string, ok: boolean): string {
   return `- ${label}: ${ok ? "hinterlegt" : "noch offen"}`;
+}
+
+function customerContactLines(contacts: DtOnboardingCustomerContact[]): string[] {
+  const filled = contacts.filter(
+    (contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim(),
+  );
+  if (filled.length === 0) return ["Noch nicht angegeben."];
+  return filled.map((contact) => {
+    const parts = [
+      contact.name.trim() || "Ohne Namen",
+      contact.role.trim(),
+      contact.email.trim(),
+      contact.phone.trim(),
+    ].filter(Boolean);
+    return `- ${parts.join(" · ")}`;
+  });
 }
 
 /**
@@ -51,6 +68,7 @@ export function formatOnboardingForPrompt(input: {
     statusLine("CMS-Zugang", checklist.cms),
     statusLine("Mitbewerber", checklist.competitors),
     statusLine("Buchhaltungs-E-Mail", checklist.billingEmail),
+    statusLine("Ansprechpartner Kunde", checklist.customerContacts),
     `- Hochgeladene Dateien: ${input.fileCount}`,
     "",
     `Bilder und Dateien liegen auf der Onboarding-Seite unter „Bilder und Videos“.`,
@@ -60,6 +78,12 @@ export function formatOnboardingForPrompt(input: {
     competitors.length > 0
       ? `Mitbewerber: ${competitors.join(", ")}`
       : "Mitbewerber: noch nicht angegeben.",
+    "",
+    "### Ansprechpartner beim Kunden",
+    ...customerContactLines(input.record.customerContacts),
+    input.record.additionalInfo.trim()
+      ? `Weitere Informationen: ${input.record.additionalInfo.trim()}`
+      : "Weitere Informationen: keine.",
     "",
     "### Direkte Ansprechpartner (Sichtbarkeitsmeister)",
     ...DT_ONBOARDING_CONTACTS.map((c) => `- ${c.name}: ${c.role}`),

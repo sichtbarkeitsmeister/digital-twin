@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { ZumChatButton } from "@/components/zum-chat-button";
+import { OnboardingContacts } from "@/app/dashboard/onboarding/_components/onboarding-contacts";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -225,7 +226,15 @@ export function DashboardSidebar({
       <ZumChatButton size="full" className="w-full justify-center shadow-dt" />
 
       <nav className="grid gap-1">
-        {mainItems.map((item) => (
+        {mainItems.slice(0, 2).map((item) => (
+          <NavLink key={item.href} item={item} />
+        ))}
+      </nav>
+
+      <OnboardingContacts variant="sidebar" />
+
+      <nav className="grid gap-1">
+        {mainItems.slice(2).map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
       </nav>
