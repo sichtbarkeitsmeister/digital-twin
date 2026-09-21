@@ -43,6 +43,8 @@ assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.email === "ap@sichtbarkeitsmeiste
 assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.name === "Tami Sulakadze"));
 assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.email === "support@sichtbarkeitsmeister.de"));
 assert.match(DT_ONBOARDING_SUPPORT_NOTE, /support@sichtbarkeitsmeister.de/);
+assert.match(DT_ONBOARDING_SUPPORT_NOTE, /Urlaub/);
+assert.doesNotMatch(DT_ONBOARDING_SUPPORT_NOTE, /alle E-Mails an diese Adresse/);
 assert.equal(DT_ONBOARDING_SUPPORT_EMAIL, "support@sichtbarkeitsmeister.de");
 
 const addressingReader =

@@ -74,14 +74,14 @@ export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
   {
     name: "Support",
     shortRole: "Alle weiteren Fragen",
-    role: "Für alle weiteren Fragen. Erreichbar unter support@sichtbarkeitsmeister.de.",
+    role: "Kann für alle weiteren Fragen genutzt werden oder wenn jemand in Urlaub ist. Erreichbar unter support@sichtbarkeitsmeister.de.",
     email: "support@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 60",
   },
 ];
 
 export const DT_ONBOARDING_SUPPORT_NOTE =
-  "Die zentrale E-Mail-Adresse lautet support@sichtbarkeitsmeister.de. Anfragen an diese Adresse werden immer abgefragt. Direkte E-Mails können in der Urlaubszeit unbeantwortet bleiben. Deshalb alle E-Mails an diese Adresse senden.";
+  "support@sichtbarkeitsmeister.de kann für alle weiteren Fragen genutzt werden oder wenn jemand in Urlaub ist.";
 
 export const DT_ONBOARDING_PHONE_NOTE =
   "Telefonisch ist die Zentrale unter 0211 - 97 26 53 60 erreichbar. Wenn unter der oben aufgeführten Durchwahl niemand ans Telefon geht, erfolgt die Weiterleitung automatisch in die Zentrale. Anliegen werden in der Regel dort angenommen.";
