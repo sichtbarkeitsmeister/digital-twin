@@ -1,8 +1,11 @@
 import {
+  DT_ONBOARDING_ADDITIONAL_INFO_MAX,
   DT_ONBOARDING_MAX_COMPETITORS,
+  DT_ONBOARDING_MAX_CUSTOMER_CONTACTS,
   DT_ONBOARDING_SMTP_PROTOCOLS,
-  EMPTY_ONBOARDING_RECORD,
+  EMPTY_CUSTOMER_CONTACT,
   type DtOnboardingChecklist,
+  type DtOnboardingCustomerContact,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 
@@ -29,6 +32,28 @@ function normalizeCompetitors(value: unknown): string[] {
   return padded;
 }
 
+function normalizeCustomerContacts(value: unknown): DtOnboardingCustomerContact[] {
+  const raw = Array.isArray(value) ? value : [];
+  const cleaned: DtOnboardingCustomerContact[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const contact: DtOnboardingCustomerContact = {
+      name: clip(asString(row.name), 120),
+      role: clip(asString(row.role), 120),
+      email: clip(asString(row.email), 200),
+      phone: clip(asString(row.phone), 80),
+    };
+    if (!contact.name && !contact.role && !contact.email && !contact.phone) continue;
+    cleaned.push(contact);
+    if (cleaned.length >= DT_ONBOARDING_MAX_CUSTOMER_CONTACTS) break;
+  }
+  const padded = [...cleaned];
+  while (padded.length < DT_ONBOARDING_MAX_CUSTOMER_CONTACTS) {
+    padded.push({ ...EMPTY_CUSTOMER_CONTACT });
+  }
+  return padded;
+}
 function normalizeProtocol(value: string): string {
   const upper = value.trim().toUpperCase();
   const match = DT_ONBOARDING_SMTP_PROTOCOLS.find((item) => item.toUpperCase() === upper);
@@ -54,6 +79,13 @@ export function normalizeOnboardingRecord(
     cmsPassword: clip(asString(src.cmsPassword ?? src.cms_password), 200),
     competitors: normalizeCompetitors(src.competitors),
     billingEmail: clip(asString(src.billingEmail ?? src.billing_email), 200),
+    customerContacts: normalizeCustomerContacts(
+      src.customerContacts ?? src.customer_contacts,
+    ),
+    additionalInfo: clip(
+      asString(src.additionalInfo ?? src.additional_info),
+      DT_ONBOARDING_ADDITIONAL_INFO_MAX,
+    ),
   };
 }
 
@@ -72,8 +104,10 @@ export function onboardingRecordFromRow(row: {
   cms_password?: string | null;
   competitors?: unknown;
   billing_email?: string | null;
+  customer_contacts?: unknown;
+  additional_info?: string | null;
 } | null): DtOnboardingRecord {
-  if (!row) return { ...EMPTY_ONBOARDING_RECORD, competitors: ["", "", "", "", ""] };
+  if (!row) return normalizeOnboardingRecord(null);
   return normalizeOnboardingRecord({
     uploadToken: row.upload_token ?? "",
     uploadPassword: row.upload_password ?? "",
@@ -89,6 +123,8 @@ export function onboardingRecordFromRow(row: {
     cmsPassword: row.cms_password ?? "",
     competitors: row.competitors,
     billingEmail: row.billing_email ?? "",
+    customerContacts: row.customer_contacts,
+    additionalInfo: row.additional_info ?? "",
   });
 }
 
@@ -108,6 +144,10 @@ export function onboardingRowFromRecord(record: DtOnboardingRecord) {
     cms_password: record.cmsPassword || null,
     competitors: record.competitors.filter(Boolean),
     billing_email: record.billingEmail || null,
+    customer_contacts: record.customerContacts.filter(
+      (contact) => contact.name || contact.role || contact.email || contact.phone,
+    ),
+    additional_info: record.additionalInfo || null,
   };
 }
 
@@ -116,6 +156,9 @@ export function onboardingChecklist(
   fileCount = 0,
 ): DtOnboardingChecklist {
   const competitorsFilled = record.competitors.filter((item) => item.trim()).length;
+  const contactsFilled = record.customerContacts.some(
+    (contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim(),
+  );
   return {
     mediaLink: fileCount > 0,
     hoster: Boolean(record.hosterUser && record.hosterPassword),
@@ -125,6 +168,7 @@ export function onboardingChecklist(
     cms: Boolean(record.cmsLoginUrl && record.cmsUser && record.cmsPassword),
     competitors: competitorsFilled > 0,
     billingEmail: /.+@.+\..+/.test(record.billingEmail),
+    customerContacts: contactsFilled,
     files: fileCount,
   };
 }
@@ -140,6 +184,7 @@ export function onboardingFilledCount(checklist: DtOnboardingChecklist): {
     checklist.cms,
     checklist.competitors,
     checklist.billingEmail,
+    checklist.customerContacts,
   ];
   return { filled: flags.filter(Boolean).length, total: flags.length };
 }
@@ -149,6 +194,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function validateOnboardingRecord(record: DtOnboardingRecord): string | null {
   if (record.billingEmail && !EMAIL_RE.test(record.billingEmail)) {
     return "Bitte eine gültige E-Mail-Adresse für die Buchhaltung angeben.";
+  }
+  for (const contact of record.customerContacts) {
+    if (contact.email && !EMAIL_RE.test(contact.email)) {
+      return "Bitte gültige E-Mail-Adressen bei den Ansprechpartnern angeben.";
+    }
   }
   if (record.smtpPort && !/^\d{2,5}$/.test(record.smtpPort)) {
     return "SMTP-Port bitte als Zahl angeben (z. B. 587).";

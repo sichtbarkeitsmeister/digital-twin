@@ -22,12 +22,16 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
+  DT_ONBOARDING_ADDITIONAL_INFO_MAX,
   DT_ONBOARDING_MAX_COMPETITORS,
+  DT_ONBOARDING_MAX_CUSTOMER_CONTACTS,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
   DT_ONBOARDING_SMTP_PROTOCOLS,
   EMPTY_ONBOARDING_RECORD,
+  type DtOnboardingCustomerContact,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 import {
@@ -100,6 +104,17 @@ export function OnboardingForm(props: {
 
   function patch<K extends keyof DtOnboardingRecord>(key: K, value: DtOnboardingRecord[K]) {
     setRecord((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function patchContact(
+    index: number,
+    key: keyof DtOnboardingCustomerContact,
+    value: string,
+  ) {
+    const next = record.customerContacts.map((contact, i) =>
+      i === index ? { ...contact, [key]: value } : contact,
+    );
+    patch("customerContacts", next);
   }
 
   function persist() {
@@ -398,13 +413,97 @@ export function OnboardingForm(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">7. Direkte Ansprechpartner im Projekt</CardTitle>
           <CardDescription>
-            Das Team von Sichtbarkeitsmeister — so erreichen Sie uns.
+            Wen dürfen wir bei Ihnen zum Projekt kontaktieren? Name, Funktion, E-Mail und Telefon.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          {Array.from({ length: DT_ONBOARDING_MAX_CUSTOMER_CONTACTS }, (_, index) => {
+            const contact = record.customerContacts[index] ?? {
+              name: "",
+              role: "",
+              email: "",
+              phone: "",
+            };
+            return (
+              <div
+                key={index}
+                className="grid gap-3 rounded-xl border border-sbkm-navy/10 p-3 dark:border-white/10 sm:grid-cols-2"
+              >
+                <p className="text-xs font-semibold text-secondary sm:col-span-2">
+                  Ansprechpartner {index + 1}
+                </p>
+                <div className="grid gap-2">
+                  <Label htmlFor={`contact-name-${index}`}>Name</Label>
+                  <Input
+                    id={`contact-name-${index}`}
+                    value={contact.name}
+                    onChange={(e) => patchContact(index, "name", e.target.value)}
+                    disabled={disabled}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor={`contact-role-${index}`}>Funktion</Label>
+                  <Input
+                    id={`contact-role-${index}`}
+                    value={contact.role}
+                    onChange={(e) => patchContact(index, "role", e.target.value)}
+                    disabled={disabled}
+                    autoComplete="off"
+                    placeholder="z. B. Geschäftsführung"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor={`contact-email-${index}`}>E-Mail</Label>
+                  <Input
+                    id={`contact-email-${index}`}
+                    type="email"
+                    value={contact.email}
+                    onChange={(e) => patchContact(index, "email", e.target.value)}
+                    disabled={disabled}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor={`contact-phone-${index}`}>Telefon</Label>
+                  <Input
+                    id={`contact-phone-${index}`}
+                    value={contact.phone}
+                    onChange={(e) => patchContact(index, "phone", e.target.value)}
+                    disabled={disabled}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">8. Weitere Informationen</CardTitle>
+          <CardDescription>
+            Falls Sie uns noch etwas mitteilen möchten — Hinweise, Zugänge, Wünsche.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <OnboardingContacts />
+          <div className="grid gap-2">
+            <Label htmlFor="additional-info">Weitere Informationen</Label>
+            <Textarea
+              id="additional-info"
+              value={record.additionalInfo}
+              onChange={(e) => patch("additionalInfo", e.target.value)}
+              disabled={disabled}
+              rows={6}
+              maxLength={DT_ONBOARDING_ADDITIONAL_INFO_MAX}
+              placeholder="Optional"
+            />
+          </div>
         </CardContent>
       </Card>
+
+      <OnboardingContacts variant="page" className="lg:hidden" />
 
       {error ? (
         <p className="text-sm text-red-600 dark:text-red-400" role="alert">

@@ -18,7 +18,7 @@ import {
 import { createServiceClient } from "@/lib/supabase/service";
 
 const ONBOARDING_SELECT =
-  "organisation_id, upload_token, upload_password, hoster_user, hoster_password, smtp_host, smtp_port, smtp_protocol, smtp_username, smtp_password, cms_login_url, cms_user, cms_password, competitors, billing_email, updated_at, updated_by_user_id";
+  "organisation_id, upload_token, upload_password, hoster_user, hoster_password, smtp_host, smtp_port, smtp_protocol, smtp_username, smtp_password, cms_login_url, cms_user, cms_password, competitors, billing_email, customer_contacts, additional_info, updated_at, updated_by_user_id";
 
 type OnboardingRow = {
   organisation_id: string;
@@ -36,6 +36,8 @@ type OnboardingRow = {
   cms_password: string | null;
   competitors: unknown;
   billing_email: string | null;
+  customer_contacts: unknown;
+  additional_info: string | null;
   updated_at: string;
   updated_by_user_id: string | null;
 };

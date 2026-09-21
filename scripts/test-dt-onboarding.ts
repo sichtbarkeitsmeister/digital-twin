@@ -66,6 +66,30 @@ assert.equal(tooMany.smtpProtocol, "TLS");
 assert.equal(tooMany.billingEmail, "buchhaltung@firma.de");
 assert.equal(tooMany.hosterUser, "host");
 
+const withContacts = normalizeOnboardingRecord({
+  customerContacts: [
+    { name: "  Lars Diehl ", role: "GF", email: "lars@example.de", phone: "0123" },
+    { name: "", role: "", email: "", phone: "" },
+  ],
+  additionalInfo: "  Bitte Logo in SVG  ",
+});
+assert.equal(withContacts.customerContacts[0]?.name, "Lars Diehl");
+assert.equal(withContacts.customerContacts[0]?.email, "lars@example.de");
+assert.equal(withContacts.customerContacts.length, 5);
+assert.equal(withContacts.additionalInfo, "Bitte Logo in SVG");
+assert.equal(
+  onboardingChecklist(withContacts, 0).customerContacts,
+  true,
+);
+assert.match(
+  validateOnboardingRecord(
+    normalizeOnboardingRecord({
+      customerContacts: [{ name: "A", role: "", email: "not-an-email", phone: "" }],
+    }),
+  ) ?? "",
+  /Ansprechpartner/,
+);
+
 assert.equal(validateOnboardingRecord(tooMany), null);
 assert.match(
   validateOnboardingRecord(normalizeOnboardingRecord({ billingEmail: "not-an-email" })) ?? "",
@@ -91,6 +115,10 @@ const fromRow = onboardingRecordFromRow({
   cms_password: "cms-secret",
   competitors: ["Konkurrent A", "Konkurrent B"],
   billing_email: "rechnung@example.de",
+  customer_contacts: [
+    { name: "Lars Diehl", role: "Geschäftsführung", email: "lars@example.de", phone: "0211 123" },
+  ],
+  additional_info: "Logo folgt nächste Woche.",
 });
 
 const checklist = onboardingChecklist(fromRow, 3);
@@ -101,8 +129,10 @@ assert.equal(checklist.smtp, true);
 assert.equal(checklist.cms, true);
 assert.equal(checklist.competitors, true);
 assert.equal(checklist.billingEmail, true);
+assert.equal(checklist.customerContacts, true);
 assert.equal(checklist.files, 3);
-assert.equal(onboardingFilledCount(checklist).filled, 6);
+assert.equal(onboardingFilledCount(checklist).filled, 7);
+assert.equal(onboardingFilledCount(checklist).total, 7);
 
 const emptyChecklist = onboardingChecklist(EMPTY_ONBOARDING_RECORD, 0);
 assert.equal(onboardingFilledCount(emptyChecklist).filled, 0);
@@ -117,6 +147,8 @@ assert.match(prompt, /support@sichtbarkeitsmeister.de/);
 assert.match(prompt, /André Petermann/);
 assert.match(prompt, /Konkurrent A/);
 assert.match(prompt, /rechnung@example.de/);
+assert.match(prompt, /Lars Diehl/);
+assert.match(prompt, /Logo folgt nächste Woche/);
 assert.match(prompt, /dashboard\/onboarding/);
 assert.match(prompt, /Bilder und Videos/);
 assert.doesNotMatch(prompt, /onboarding\/upload/);

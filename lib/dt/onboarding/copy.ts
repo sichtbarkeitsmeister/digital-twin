@@ -21,6 +21,7 @@ export const DT_ONBOARDING_SWITCHBOARD_PHONE = "0211 - 97 26 53 60";
 
 export type DtOnboardingContact = {
   name: string;
+  shortRole: string;
   role: string;
   email: string;
   extension: string;
@@ -30,6 +31,7 @@ export type DtOnboardingContact = {
 export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
   {
     name: "André Petermann",
+    shortRole: "Projektleitung",
     role: "Ich leite Dich durch das Projekt und bin unter E-Mail ap@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 61) zu erreichen. Gerne kannst Du auch mobil unter 0179 - 2 11 03 59 Kontakt aufnehmen.",
     email: "ap@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 61",
@@ -37,24 +39,28 @@ export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
   },
   {
     name: "Alina Lancman",
+    shortRole: "Webdesign",
     role: "Sie ist Webdesignerin bei uns und unter al@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 63) zu erreichen. Sie erstellt Deine Webseite und passt diese auf Deine Änderungswünsche an.",
     email: "al@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 63",
   },
   {
     name: "Tamuna Sulakadze",
+    shortRole: "Firmenprofile",
     role: "Sie überarbeitet die Firmenprofile und ist unter tamuna.sulakadze@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 67) erreichbar.",
     email: "tamuna.sulakadze@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 67",
   },
   {
     name: "Anja May",
+    shortRole: "SEO",
     role: "Sie macht bei uns die SEO-Analysen. Sie ist unter a.may@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 66) erreichbar.",
     email: "a.may@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 66",
   },
   {
     name: "Tanja Krüger",
+    shortRole: "SEO",
     role: "Sie macht bei uns ebenfalls die SEO-Analysen. Sie ist unter tanja.krueger@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 65) erreichbar.",
     email: "tanja.krueger@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 65",
@@ -68,6 +74,8 @@ export const DT_ONBOARDING_PHONE_NOTE =
   "Telefonisch können Sie unsere Zentrale unter 0211 - 97 26 53 60 erreichen. Wenn unter der oben aufgeführten Durchwahl niemand ans Telefon geht, landen Sie automatisch in der Zentrale. Ihre Anliegen werden Sie aber in der Regel los.";
 
 export const DT_ONBOARDING_MAX_COMPETITORS = 5;
+export const DT_ONBOARDING_MAX_CUSTOMER_CONTACTS = 5;
+export const DT_ONBOARDING_ADDITIONAL_INFO_MAX = 4000;
 
 export const DT_ONBOARDING_SMTP_PROTOCOLS = ["TLS", "STARTTLS", "SSL", "Kein"] as const;
 
@@ -75,6 +83,20 @@ export type DtOnboardingSmtpProtocol = (typeof DT_ONBOARDING_SMTP_PROTOCOLS)[num
 
 export const DT_ONBOARDING_MAX_FILES = 80;
 export const DT_ONBOARDING_MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+export type DtOnboardingCustomerContact = {
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+};
+
+export const EMPTY_CUSTOMER_CONTACT: DtOnboardingCustomerContact = {
+  name: "",
+  role: "",
+  email: "",
+  phone: "",
+};
 
 export type DtOnboardingRecord = {
   uploadToken: string;
@@ -91,6 +113,8 @@ export type DtOnboardingRecord = {
   cmsPassword: string;
   competitors: string[];
   billingEmail: string;
+  customerContacts: DtOnboardingCustomerContact[];
+  additionalInfo: string;
 };
 
 export const EMPTY_ONBOARDING_RECORD: DtOnboardingRecord = {
@@ -108,6 +132,11 @@ export const EMPTY_ONBOARDING_RECORD: DtOnboardingRecord = {
   cmsPassword: "",
   competitors: ["", "", "", "", ""],
   billingEmail: "",
+  customerContacts: Array.from(
+    { length: DT_ONBOARDING_MAX_CUSTOMER_CONTACTS },
+    () => ({ ...EMPTY_CUSTOMER_CONTACT }),
+  ),
+  additionalInfo: "",
 };
 
 export type DtOnboardingFileRow = {
@@ -126,6 +155,7 @@ export type DtOnboardingChecklist = {
   cms: boolean;
   competitors: boolean;
   billingEmail: boolean;
+  customerContacts: boolean;
   files: number;
 };
 
