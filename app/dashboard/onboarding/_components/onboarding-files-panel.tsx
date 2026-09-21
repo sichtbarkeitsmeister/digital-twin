@@ -61,7 +61,7 @@ function FilePreview(props: { file: DtOnboardingFileRow }) {
   }
   return (
     <div className="grid h-full w-full place-items-center bg-muted/50">
-      <FileText className="size-8 text-secondary" aria-hidden />
+      <FileText className="size-5 text-secondary" aria-hidden />
     </div>
   );
 }
@@ -262,7 +262,7 @@ export function OnboardingFilesPanel(props: {
           Noch keine Dateien. Hochgeladene Bilder und Videos erscheinen hier.
         </p>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {files.map((file) => (
             <li
               key={file.id}
@@ -276,7 +276,7 @@ export function OnboardingFilesPanel(props: {
               >
                 <FilePreview file={file} />
               </button>
-              <div className="grid gap-2 p-3">
+              <div className="grid gap-1.5 p-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-primary">{file.fileName}</p>
                   <p className="text-xs text-secondary">
