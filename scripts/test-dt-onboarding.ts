@@ -51,6 +51,7 @@ const addressingReader =
   /\b(du|dich|dir|dein|deine|deinen|deinem|deiner|sie|ihnen|ihre|ihren|ihrem|ihrer)\b/i;
 for (const contact of DT_ONBOARDING_CONTACTS) {
   assert.equal(addressingReader.test(contact.role), false, contact.name);
+  assert.doesNotMatch(contact.role, /Durchwahl/);
 }
 assert.equal(addressingReader.test(DT_ONBOARDING_SUPPORT_NOTE), false);
 assert.equal(addressingReader.test(DT_ONBOARDING_PHONE_NOTE), false);
