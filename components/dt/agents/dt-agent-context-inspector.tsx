@@ -23,9 +23,9 @@ import type {
   DtAgentContextMode,
   DtAgentContextSection,
   DtAgentContextSourceType,
-} from "@/lib/dt/agent-context-inspector";
+} from "@/lib/dt/agent-context-types";
+import { estimateSectionChars } from "@/lib/dt/agent-context-types";
 import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
-import { estimateSectionChars } from "@/lib/dt/agent-context-inspector";
 import { toast } from "sonner";
 
 type AgentOption = {
