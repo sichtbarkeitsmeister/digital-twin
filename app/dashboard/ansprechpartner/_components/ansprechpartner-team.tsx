@@ -3,6 +3,7 @@ import { Mail, Phone } from "lucide-react";
 import {
   DT_ONBOARDING_CONTACTS,
   DT_ONBOARDING_PHONE_NOTE,
+  DT_ONBOARDING_SUPPORT_NOTE,
   DT_ONBOARDING_SWITCHBOARD_PHONE,
   type DtOnboardingContact,
 } from "@/lib/dt/onboarding/copy";
@@ -87,7 +88,8 @@ export function AnsprechpartnerTeam() {
       </ul>
 
       <div className="rounded-2xl border border-sbkm-navy/15 bg-sbkm-navy/[0.04] p-5 dark:border-white/15 dark:bg-white/[0.06]">
-        <p className="text-sm leading-relaxed text-secondary">{DT_ONBOARDING_PHONE_NOTE}</p>
+        <p className="text-sm leading-relaxed text-primary">{DT_ONBOARDING_SUPPORT_NOTE}</p>
+        <p className="mt-4 text-sm leading-relaxed text-secondary">{DT_ONBOARDING_PHONE_NOTE}</p>
         <p className="mt-2 inline-flex items-center gap-2 text-sm font-medium text-primary">
           <Phone className="size-4" aria-hidden />
           {DT_ONBOARDING_SWITCHBOARD_PHONE}
