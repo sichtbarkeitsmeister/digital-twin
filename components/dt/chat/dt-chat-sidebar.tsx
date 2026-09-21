@@ -616,6 +616,16 @@ export function DtChatSidebar(props: {
         >
           Onboarding
         </Link>
+        <Link
+          href="/dashboard/ansprechpartner"
+          prefetch
+          className={cn(
+            "mt-2 inline-flex w-full items-center justify-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/70 font-semibold text-sbkm-navy transition hover:bg-sbkm-mint/15 dark:border-white/15 dark:bg-white/5 dark:text-white",
+            dense ? "h-8 text-xs" : "h-9 text-sm",
+          )}
+        >
+          Deine Ansprechpartner
+        </Link>
         {!dense ? (
         <Link
           href="/settings#digital-twin-settings"

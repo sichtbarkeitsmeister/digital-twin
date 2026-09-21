@@ -13,7 +13,8 @@ export function DashboardPrefetcher({
   useEffect(() => {
     const routes = [
       "/dashboard/inbox",
-      "/dashboard/organisations",
+      "/dashboard/onboarding",
+      "/dashboard/ansprechpartner",
       "/dashboard/organisations",
     ];
 

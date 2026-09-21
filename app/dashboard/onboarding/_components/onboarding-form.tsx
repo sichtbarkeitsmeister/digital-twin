@@ -7,7 +7,6 @@ import {
   loadOnboardingAction,
   saveOnboardingAction,
 } from "@/app/dashboard/onboarding/actions";
-import { OnboardingContacts } from "@/app/dashboard/onboarding/_components/onboarding-contacts";
 import { OnboardingFilesPanel } from "@/app/dashboard/onboarding/_components/onboarding-files-panel";
 import { SecretField } from "@/app/dashboard/onboarding/_components/secret-field";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
@@ -502,8 +501,6 @@ export function OnboardingForm(props: {
           </div>
         </CardContent>
       </Card>
-
-      <OnboardingContacts variant="page" className="lg:hidden" />
 
       {error ? (
         <p className="text-sm text-red-600 dark:text-red-400" role="alert">

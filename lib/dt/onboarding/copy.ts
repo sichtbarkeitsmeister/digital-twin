@@ -26,6 +26,7 @@ export type DtOnboardingContact = {
   email: string;
   extension: string;
   mobile?: string;
+  photoSrc?: string;
 };
 
 export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
