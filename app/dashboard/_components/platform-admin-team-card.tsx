@@ -171,7 +171,7 @@ export function PlatformAdminTeamCard(props: {
                       disabled={pending || !canDemote}
                       className={cn("shrink-0", !canDemote && "opacity-60")}
                     >
-                      Entfernen
+                      {isSelf ? "Eigene Admin-Ansicht entfernen" : "Entfernen"}
                     </Button>
                   </form>
                 </li>

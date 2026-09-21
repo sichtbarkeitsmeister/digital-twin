@@ -71,6 +71,8 @@ async function AdminPlatformTeamPageContent() {
           <h1 className="text-2xl font-bold tracking-tight text-primary">Plattform-Team</h1>
           <p className="max-w-2xl text-sm text-secondary">
             Wer die Admin-Ansicht sieht: Verwaltung, SEO Modus, Jobs und E-Mails.
+            Zum Prüfen der Kundenansicht die eigene Adresse hier entfernen und die Seite neu laden.
+            Ein späterer Login macht SBKM-Konten nicht mehr automatisch wieder zum Admin.
           </p>
         </div>
         <Badge>Plattform-Admin</Badge>
