@@ -29,11 +29,23 @@ export type DtOnboardingContact = {
   photoSrc?: string;
 };
 
+/**
+ * SBKM project contacts shown on /dashboard/ansprechpartner.
+ * Roles follow the public booking page (termin-buchen) plus DigitalTwin.
+ * There is no admin UI yet — change assignments here in code.
+ */
 export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
   {
+    name: "Tanja Krüger",
+    shortRole: "SEO, GEO, DigitalTwin",
+    role: "SEO, GEO (KI-Sichtbarkeit) und DigitalTwin. Erste Ansprechpartnerin für DigitalTwin. Erreichbar unter tanja.krueger@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 65).",
+    email: "tanja.krueger@sichtbarkeitsmeister.de",
+    extension: "0211 - 97 26 53 65",
+  },
+  {
     name: "André Petermann",
-    shortRole: "Projektleitung",
-    role: "Projektleitung. Erreichbar per E-Mail ap@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 61) sowie mobil unter 0179 - 2 11 03 59.",
+    shortRole: "Geschäftsführung",
+    role: "Geschäftsführung. Erstgespräch und Strategie. Erreichbar unter ap@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 61) sowie mobil unter 0179 - 2 11 03 59.",
     email: "ap@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 61",
     mobile: "0179 - 2 11 03 59",
@@ -41,30 +53,30 @@ export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
   {
     name: "Alina Lancman",
     shortRole: "Webdesign",
-    role: "Webdesignerin bei Sichtbarkeitsmeister. Erreichbar unter al@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 63). Zuständig für die Webseite und Änderungswünsche.",
+    role: "Webdesign. Zuständig für die Webseite und Änderungswünsche. Erreichbar unter al@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 63).",
     email: "al@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 63",
   },
   {
-    name: "Tamuna Sulakadze",
-    shortRole: "Firmenprofile",
-    role: "Zuständig für die Überarbeitung der Firmenprofile. Erreichbar unter tamuna.sulakadze@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 67).",
-    email: "tamuna.sulakadze@sichtbarkeitsmeister.de",
-    extension: "0211 - 97 26 53 67",
-  },
-  {
     name: "Anja May",
-    shortRole: "SEO",
-    role: "Zuständig für SEO-Analysen. Erreichbar unter a.may@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 66).",
+    shortRole: "SEO und KI",
+    role: "SEO und KI-Strategie. Erreichbar unter a.may@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 66).",
     email: "a.may@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 66",
   },
   {
-    name: "Tanja Krüger",
-    shortRole: "SEO",
-    role: "Ebenfalls zuständig für SEO-Analysen. Erreichbar unter tanja.krueger@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 65).",
-    email: "tanja.krueger@sichtbarkeitsmeister.de",
-    extension: "0211 - 97 26 53 65",
+    name: "Tami Sulakadze",
+    shortRole: "Profilmanagement",
+    role: "Profilmanagement (Local SEO). Erreichbar unter tamuna.sulakadze@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 67).",
+    email: "tamuna.sulakadze@sichtbarkeitsmeister.de",
+    extension: "0211 - 97 26 53 67",
+  },
+  {
+    name: "Support",
+    shortRole: "Alle weiteren Fragen",
+    role: "Für alle weiteren Fragen. Erreichbar unter support@sichtbarkeitsmeister.de.",
+    email: "support@sichtbarkeitsmeister.de",
+    extension: "0211 - 97 26 53 60",
   },
 ];
 

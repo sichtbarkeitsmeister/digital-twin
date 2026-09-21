@@ -35,9 +35,13 @@ import { isDashboardOrgBarPath } from "../lib/dt/seo/dashboard-path";
 
 assert.equal(DT_ONBOARDING_MEDIA_ITEMS.length, 6);
 assert.match(DT_ONBOARDING_MEDIA_INTRO, /Bilder oder Videos/);
-assert.equal(DT_ONBOARDING_CONTACTS.length, 5);
+assert.equal(DT_ONBOARDING_CONTACTS.length, 6);
+assert.equal(DT_ONBOARDING_CONTACTS[0]?.name, "Tanja Krüger");
+assert.match(DT_ONBOARDING_CONTACTS[0]?.role ?? "", /DigitalTwin/);
+assert.match(DT_ONBOARDING_CONTACTS[0]?.shortRole ?? "", /GEO/);
 assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.email === "ap@sichtbarkeitsmeister.de"));
-assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.name === "Tanja Krüger"));
+assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.name === "Tami Sulakadze"));
+assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.email === "support@sichtbarkeitsmeister.de"));
 assert.match(DT_ONBOARDING_SUPPORT_NOTE, /support@sichtbarkeitsmeister.de/);
 assert.equal(DT_ONBOARDING_SUPPORT_EMAIL, "support@sichtbarkeitsmeister.de");
 
