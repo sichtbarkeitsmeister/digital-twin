@@ -1,13 +1,34 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { shouldListAllOnboardingOrganisations } from "@/lib/dt/sbkm-staff";
+
+async function emailForUser(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<string | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user?.id === userId && user.email) return user.email;
+  const { data } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle();
+  return typeof data?.email === "string" ? data.email : null;
+}
 
 export async function canAccessOrgOnboarding(
   supabase: SupabaseClient,
   userId: string,
   organisationId: string,
 ): Promise<boolean> {
-  if (await isPlatformAdmin(supabase, userId)) return true;
+  const platformAdmin = await isPlatformAdmin(supabase, userId);
+  const email = await emailForUser(supabase, userId);
+  if (shouldListAllOnboardingOrganisations({ isPlatformAdmin: platformAdmin, email })) {
+    return true;
+  }
   const { data } = await supabase
     .from("organisation_members")
     .select("user_id")

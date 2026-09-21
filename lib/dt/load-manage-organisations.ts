@@ -1,6 +1,14 @@
+import "server-only";
+
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { loadDtUserOrganisations } from "@/lib/dt/load-user-organisations";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { shouldListAllOnboardingOrganisations } from "@/lib/dt/sbkm-staff";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { organisationOptionLabel } from "@/lib/shared/organisation-option";
 
 export type DtManageOrganisation = {
@@ -12,7 +20,7 @@ export type DtManageOrganisation = {
 
 async function withDisplayNames(
   orgs: Array<{ id: string; name: string; slug?: string | null }>,
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Pick<SupabaseClient, "from">,
 ): Promise<DtManageOrganisation[]> {
   const ids = orgs.map((o) => o.id);
   const displayById = new Map<string, string>();
@@ -107,5 +115,50 @@ export async function loadDtFragebogenOrganisations(userId: string): Promise<{
       supabase,
     ),
     isPlatformAdmin: false,
+  };
+}
+
+/**
+ * Organisations selectable on the customer onboarding page.
+ * Agency staff keep the full customer list even after a demotion to customer view.
+ */
+export async function loadDtOnboardingOrganisations(userId: string): Promise<{
+  organisations: DtManageOrganisation[];
+  isPlatformAdmin: boolean;
+}> {
+  const supabase = await createClient();
+  const platformAdmin = await isPlatformAdmin(supabase, userId);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  let email = user?.id === userId ? user.email : null;
+  if (!email) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", userId)
+      .maybeSingle();
+    email = typeof data?.email === "string" ? data.email : null;
+  }
+
+  if (
+    !shouldListAllOnboardingOrganisations({
+      isPlatformAdmin: platformAdmin,
+      email,
+    })
+  ) {
+    return loadDtFragebogenOrganisations(userId);
+  }
+
+  const reader = platformAdmin ? supabase : createServiceClient();
+  const { data: allOrgs } = await reader
+    .from("organisations")
+    .select("id, name, slug")
+    .is("archived_at", null)
+    .order("name", { ascending: true });
+
+  return {
+    organisations: await withDisplayNames(allOrgs ?? [], reader),
+    isPlatformAdmin: platformAdmin,
   };
 }
