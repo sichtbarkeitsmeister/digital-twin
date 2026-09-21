@@ -43,10 +43,10 @@ export function AnsprechpartnerTeam() {
     <div className="grid gap-6">
       <div className="grid gap-1">
         <h1 className="text-2xl font-bold tracking-tight text-primary">
-          Deine Ansprechpartner
+          Ansprechpartner
         </h1>
         <p className="max-w-2xl text-sm text-secondary">
-          Das Team von Sichtbarkeitsmeister — so erreichst du uns im Projekt.
+          Team von Sichtbarkeitsmeister — Erreichbarkeit im Projekt.
         </p>
       </div>
 

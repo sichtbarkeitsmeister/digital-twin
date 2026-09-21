@@ -624,7 +624,7 @@ export function DtChatSidebar(props: {
             dense ? "h-8 text-xs" : "h-9 text-sm",
           )}
         >
-          Deine Ansprechpartner
+          Ansprechpartner
         </Link>
         {!dense ? (
         <Link

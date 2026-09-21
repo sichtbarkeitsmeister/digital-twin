@@ -10,6 +10,7 @@ import {
   DT_ONBOARDING_MAX_COMPETITORS,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
+  DT_ONBOARDING_PHONE_NOTE,
   DT_ONBOARDING_SUPPORT_EMAIL,
   DT_ONBOARDING_SUPPORT_NOTE,
   EMPTY_ONBOARDING_RECORD,
@@ -39,6 +40,18 @@ assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.email === "ap@sichtbarkeitsmeiste
 assert.ok(DT_ONBOARDING_CONTACTS.some((c) => c.name === "Tanja Krüger"));
 assert.match(DT_ONBOARDING_SUPPORT_NOTE, /support@sichtbarkeitsmeister.de/);
 assert.equal(DT_ONBOARDING_SUPPORT_EMAIL, "support@sichtbarkeitsmeister.de");
+
+const addressingReader =
+  /\b(du|dich|dir|dein|deine|deinen|deinem|deiner|sie|ihnen|ihre|ihren|ihrem|ihrer)\b/i;
+for (const contact of DT_ONBOARDING_CONTACTS) {
+  assert.equal(addressingReader.test(contact.role), false, contact.name);
+}
+assert.equal(addressingReader.test(DT_ONBOARDING_SUPPORT_NOTE), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_PHONE_NOTE), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_MEDIA_INTRO), false);
+for (const item of DT_ONBOARDING_MEDIA_ITEMS) {
+  assert.equal(addressingReader.test(item), false, item);
+}
 
 const token = generateOnboardingUploadToken();
 assert.ok(token.length >= 16);

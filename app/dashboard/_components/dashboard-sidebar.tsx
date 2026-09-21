@@ -103,7 +103,7 @@ export function DashboardSidebar({
       match: (pathname: string) => pathname.startsWith("/dashboard/onboarding"),
     },
     {
-      label: "Deine Ansprechpartner",
+      label: "Ansprechpartner",
       href: "/dashboard/ansprechpartner",
       icon: Phone,
       match: (pathname: string) => pathname.startsWith("/dashboard/ansprechpartner"),
