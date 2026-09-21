@@ -27,6 +27,7 @@ import {
   loadDtWebsiteStructure,
 } from "@/lib/dt/seo/load-website-structure";
 import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
+import { loadOnboardingPromptText } from "@/lib/dt/onboarding/load-prompt";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import { buildDtSystemPrompt, isProspectPersonaKind } from "@/lib/dt/prompts/build-system-prompt";
 import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
@@ -251,6 +252,9 @@ export async function assembleDtChatFromDb(input: {
         emptyHint: promptMode === "seo",
       })
     : undefined;
+  const onboardingText = !isProspectPersonaKind(agent.kind, agent.slug)
+    ? await loadOnboardingPromptText(chat.organisation_id)
+    : undefined;
   const textModePrompt = input.textMode
     ? (await loadTextModeInstructions(supabase)).prompt
     : undefined;
@@ -294,6 +298,7 @@ export async function assembleDtChatFromDb(input: {
     wunschkundenKnowledgeText,
     websiteStructureText,
     transcriptKnowledgeText,
+    onboardingText,
     pastedUrlsText,
   });
 
@@ -373,6 +378,9 @@ export async function assembleDtChatEphemeral(input: {
   const transcriptKnowledgeText = includeWebsiteStructure
     ? await loadTranscriptKnowledgeForPrompt(supabase, input.organisationId)
     : undefined;
+  const onboardingText = !isProspectPersonaKind(agent.kind, agent.slug)
+    ? await loadOnboardingPromptText(input.organisationId)
+    : undefined;
   const textModePrompt = input.textMode
     ? (await loadTextModeInstructions(supabase)).prompt
     : undefined;
@@ -401,6 +409,7 @@ export async function assembleDtChatEphemeral(input: {
     wunschkundenKnowledgeText,
     websiteStructureText,
     transcriptKnowledgeText,
+    onboardingText,
     pastedUrlsText,
   });
 

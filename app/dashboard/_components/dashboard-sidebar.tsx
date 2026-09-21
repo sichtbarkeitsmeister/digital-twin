@@ -10,6 +10,7 @@ import {
   ClipboardPenLine,
   FileSearch,
   FileText,
+  FolderUp,
   Inbox,
   MessageCircle,
   Plug,
@@ -94,6 +95,12 @@ export function DashboardSidebar({
 }) {
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
+    {
+      label: "Onboarding",
+      href: "/dashboard/onboarding",
+      icon: FolderUp,
+      match: (pathname: string) => pathname.startsWith("/dashboard/onboarding"),
+    },
     // Leadinfo company lists stay internal — customers never see this tab.
     ...(showLeads ? [{ label: "Leads", href: "/dashboard/leads", icon: Sparkles }] : []),
     { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },

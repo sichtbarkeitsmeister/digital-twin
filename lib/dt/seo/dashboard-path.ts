@@ -25,11 +25,16 @@ export function isManageOrgBarPath(pathname: string): boolean {
   );
 }
 
+export function isOnboardingDashboardPath(pathname: string): boolean {
+  return pathname === "/dashboard/onboarding" || pathname.startsWith("/dashboard/onboarding/");
+}
+
 export function isDashboardOrgBarPath(pathname: string): boolean {
   return (
     isSeoDashboardPath(pathname) ||
     isManageOrgBarPath(pathname) ||
-    isOrganisationDashboardPath(pathname)
+    isOrganisationDashboardPath(pathname) ||
+    isOnboardingDashboardPath(pathname)
   );
 }
 

@@ -81,6 +81,7 @@ export async function updateSession(request: NextRequest) {
     !pathname.startsWith("/auth") &&
     !pathname.startsWith("/s") &&
     !pathname.startsWith("/surveys") &&
+    !pathname.startsWith("/onboarding") &&
     !isNextInternal
   ) {
     // no user, potentially respond by redirecting the user to the login page
