@@ -127,9 +127,6 @@ export async function grantPlatformAdminRole(input: {
     if (profile.role !== "admin") {
       return { ok: true, message: `${email} ist bereits ein normales Konto.` };
     }
-    if (profile.id === input.actorUserId) {
-      return { ok: false, message: "Du kannst dir die Admin-Ansicht nicht selbst entziehen." };
-    }
 
     const { count, error: countError } = await service
       .from("profiles")
@@ -145,6 +142,12 @@ export async function grantPlatformAdminRole(input: {
     const { error } = await service.from("profiles").update({ role: "customer" }).eq("id", profile.id);
     if (error) {
       return { ok: false, message: `Rolle konnte nicht geändert werden: ${error.message}` };
+    }
+    if (profile.id === input.actorUserId) {
+      return {
+        ok: true,
+        message: `${email} hat jetzt die Kundenansicht. Bitte die Seite einmal neu laden.`,
+      };
     }
     return { ok: true, message: `${email} ist wieder ein normales Konto.` };
   }

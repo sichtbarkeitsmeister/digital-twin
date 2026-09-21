@@ -55,9 +55,8 @@ async function sendSupabaseOtpFallback(email: string, emailRedirectTo: string) {
 }
 
 /**
- * Agency staff (@sichtbarkeitsmeister.de) get a confirmed admin account and a
- * hashed_token login mail. Client OTP + admin action_link both fail for this
- * case: missing user + disabled signups, or implicit-flow links vs PKCE.
+ * Agency staff (@sichtbarkeitsmeister.de) get a login mail.
+ * New staff accounts start as platform admin; existing accounts keep their stored role.
  */
 export async function sendStaffMagicLink(input: {
   email: string;
@@ -78,8 +77,12 @@ export async function sendStaffMagicLink(input: {
     };
   }
 
-  const { userId } = await ensureConfirmedAuthUser(service, email);
-  await ensureAdminProfile(service, userId, email);
+  const { userId, created } = await ensureConfirmedAuthUser(service, email);
+  // First-time SBKM accounts become admin. Existing accounts keep the stored
+  // role — otherwise demoting ads@ (or any colleague) is undone on the next login.
+  if (created) {
+    await ensureAdminProfile(service, userId, email);
+  }
 
   const baseUrl = loginLinkBaseUrl(input.origin, getAppBaseUrl());
   const loginUrl = await generateStaffLoginUrl(service, email, baseUrl);
