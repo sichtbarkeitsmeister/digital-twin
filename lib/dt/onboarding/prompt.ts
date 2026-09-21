@@ -4,7 +4,6 @@ import {
   DT_ONBOARDING_SUPPORT_EMAIL,
   DT_ONBOARDING_SUPPORT_NOTE,
   onboardingDashboardPath,
-  onboardingPublicPath,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 import { onboardingChecklist } from "@/lib/dt/onboarding/normalize";
@@ -23,7 +22,7 @@ export function formatOnboardingForPrompt(input: {
   appBaseUrl?: string;
 }): string {
   const dashboard = onboardingDashboardPath(input.organisationId);
-  if (!input.record?.uploadToken) {
+  if (!input.record) {
     return [
       "## Onboarding",
       `Onboarding-Daten für diese Organisation liegen unter ${dashboard}.`,
@@ -39,18 +38,14 @@ export function formatOnboardingForPrompt(input: {
 
   const checklist = onboardingChecklist(input.record, input.fileCount);
   const competitors = input.record.competitors.map((item) => item.trim()).filter(Boolean);
-  const publicPath = onboardingPublicPath(input.record.uploadToken);
-  const publicUrl = input.appBaseUrl
-    ? `${input.appBaseUrl.replace(/\/+$/, "")}${publicPath}`
-    : publicPath;
 
   return [
     "## Onboarding",
     `Die Onboarding-Seite dieser Organisation ist ${dashboard}.`,
-    "Passwörter (Cloud, Hoster, SMTP, CMS) niemals im Chat ausgeben. Immer auf die Onboarding-Seite verweisen, dort sind sie abrufbar.",
+    "Passwörter (Hoster, SMTP, CMS) niemals im Chat ausgeben. Immer auf die Onboarding-Seite verweisen, dort sind sie abrufbar.",
     "",
     "### Status",
-    statusLine("Cloud-Upload-Link", checklist.mediaLink),
+    statusLine("Bilder und Videos", checklist.mediaLink),
     statusLine("Hoster-Zugang", checklist.hoster),
     statusLine("SMTP-Zugang", checklist.smtp),
     statusLine("CMS-Zugang", checklist.cms),
@@ -58,7 +53,7 @@ export function formatOnboardingForPrompt(input: {
     statusLine("Buchhaltungs-E-Mail", checklist.billingEmail),
     `- Hochgeladene Dateien: ${input.fileCount}`,
     "",
-    `Upload-Link (nur Upload, kein Download von außen): ${publicUrl}`,
+    `Bilder und Dateien liegen auf der Onboarding-Seite unter „Bilder und Videos“.`,
     input.record.billingEmail
       ? `Buchhaltungs-E-Mail: ${input.record.billingEmail}`
       : "Buchhaltungs-E-Mail: noch nicht angegeben.",

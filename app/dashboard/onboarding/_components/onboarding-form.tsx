@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { ClipboardList, Loader2, RefreshCw } from "lucide-react";
+import { ClipboardList, Loader2 } from "lucide-react";
 
 import {
   loadOnboardingAction,
@@ -11,7 +11,6 @@ import { OnboardingContacts } from "@/app/dashboard/onboarding/_components/onboa
 import { OnboardingFilesPanel } from "@/app/dashboard/onboarding/_components/onboarding-files-panel";
 import { SecretField } from "@/app/dashboard/onboarding/_components/secret-field";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
-import { CopyToClipboardButton } from "@/app/dashboard/_components/copy-to-clipboard-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,7 +28,6 @@ import {
   DT_ONBOARDING_MEDIA_ITEMS,
   DT_ONBOARDING_SMTP_PROTOCOLS,
   EMPTY_ONBOARDING_RECORD,
-  onboardingPublicPath,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 import {
@@ -55,7 +53,6 @@ function formatUpdatedAt(value: string | null) {
 export function OnboardingForm(props: {
   organisationId: string | null;
   organisations: Array<{ id: string; name: string; slug?: string | null }>;
-  appBaseUrl: string;
 }) {
   const organisationId = props.organisationId;
   const [isPending, startTransition] = useTransition();
@@ -101,15 +98,11 @@ export function OnboardingForm(props: {
   );
   const counts = useMemo(() => onboardingFilledCount(checklist), [checklist]);
 
-  const uploadUrl = record.uploadToken
-    ? `${props.appBaseUrl.replace(/\/+$/, "")}${onboardingPublicPath(record.uploadToken)}`
-    : "";
-
   function patch<K extends keyof DtOnboardingRecord>(key: K, value: DtOnboardingRecord[K]) {
     setRecord((prev) => ({ ...prev, [key]: value }));
   }
 
-  function persist(regenerateUpload = false) {
+  function persist() {
     if (!organisationId) {
       setError("Bitte zuerst eine Organisation wählen.");
       return;
@@ -121,7 +114,6 @@ export function OnboardingForm(props: {
       const res = await saveOnboardingAction({
         organisationId,
         record,
-        regenerateUpload,
       });
       setStatus(null);
       if (!res.ok || !res.data) {
@@ -142,8 +134,8 @@ export function OnboardingForm(props: {
         <h1 className="text-2xl font-bold tracking-tight text-primary">Onboarding</h1>
         <p className="max-w-2xl text-sm text-secondary">
           Zugangsdaten, Bildmaterial und Ansprechpartner — alles über den DigitalTwin-Zugang.
-          Bitte füllen Sie die Felder aus. Cloud-Link und Passwort können Sie hier jederzeit
-          abrufen.
+          Bitte füllen Sie die Felder aus. Hochgeladene Bilder erscheinen unter „Bilder und
+          Videos“.
         </p>
       </div>
 
@@ -193,7 +185,8 @@ export function OnboardingForm(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">1. Bilder und Videos</CardTitle>
           <CardDescription>
-            Upload-Link nur zum Hochladen — von außen können keine Dateien heruntergeladen werden.
+            Hier liegen alle Dateien, die für diese Organisation hochgeladen wurden. Klicken Sie
+            eine Datei an, um sie zu öffnen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -203,37 +196,6 @@ export function OnboardingForm(props: {
               <li key={item}>{item}</li>
             ))}
           </ul>
-
-          <div className="grid gap-2">
-            <Label htmlFor="cloud-link">Link zur Cloud</Label>
-            <div className="flex flex-wrap gap-2">
-              <Input id="cloud-link" value={uploadUrl} readOnly className="bg-muted/40" />
-              <CopyToClipboardButton text={uploadUrl} disabled={!uploadUrl} />
-            </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="cloud-pass">Passwort</Label>
-            <SecretField
-              id="cloud-pass"
-              value={record.uploadPassword}
-              readOnly
-              disabled={disabled}
-            />
-          </div>
-
-          <div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isPending || disabled}
-              onClick={() => persist(true)}
-            >
-              <RefreshCw className="size-3.5" />
-              Neuen Link und neues Passwort erzeugen
-            </Button>
-          </div>
 
           <OnboardingFilesPanel
             organisationId={organisationId}
@@ -455,7 +417,7 @@ export function OnboardingForm(props: {
         <Button
           type="button"
           disabled={isPending || loading || !organisationId}
-          onClick={() => persist(false)}
+          onClick={() => persist()}
         >
           {isPending ? (
             <>

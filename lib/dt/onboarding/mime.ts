@@ -31,3 +31,11 @@ export function guessOnboardingMime(fileName: string, declared: string | null): 
   const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
   return MIME_BY_EXT[ext] ?? "";
 }
+
+export function isOnboardingImageMime(mimeType: string): boolean {
+  return mimeType.startsWith("image/");
+}
+
+export function isOnboardingVideoMime(mimeType: string): boolean {
+  return mimeType.startsWith("video/");
+}

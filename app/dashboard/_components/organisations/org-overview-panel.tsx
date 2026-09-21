@@ -263,8 +263,8 @@ export function OrgOverviewPanel(props: {
           />
           <div className="grid gap-3 p-4 sm:p-5">
             <p className="text-sm text-secondary">
-              Cloud-Link und Passwort für den Bild-Upload, Hoster/SMTP/CMS, Mitbewerber und die
-              Buchhaltungs-E-Mail liegen im DigitalTwin-Zugang.
+              Bilder und Videos, Hoster/SMTP/CMS, Mitbewerber und die Buchhaltungs-E-Mail liegen im
+              DigitalTwin-Zugang.
             </p>
             <Button asChild size="sm" variant="outline" className="w-fit active:scale-[0.98]">
               <Link href={`/dashboard/onboarding?org=${orgQuery}`}>

@@ -6,7 +6,12 @@ import {
   DT_ONBOARDING_MAX_FILES,
   type DtOnboardingFileRow,
 } from "@/lib/dt/onboarding/copy";
-import { DT_ONBOARDING_ALLOWED_MIMES, guessOnboardingMime } from "@/lib/dt/onboarding/mime";
+import {
+  DT_ONBOARDING_ALLOWED_MIMES,
+  guessOnboardingMime,
+  isOnboardingImageMime,
+  isOnboardingVideoMime,
+} from "@/lib/dt/onboarding/mime";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export const DT_ONBOARDING_UPLOADS_BUCKET = "dt-onboarding-uploads";
@@ -175,19 +180,37 @@ export async function listOnboardingFiles(
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("dt_org_onboarding_files")
-    .select("id, file_name, mime_type, size_bytes, created_at")
+    .select("id, file_name, mime_type, size_bytes, created_at, storage_path")
     .eq("organisation_id", organisationId)
     .order("created_at", { ascending: false });
   if (error) {
     console.error("[onboarding] list files:", error.message);
     return [];
   }
-  return (data ?? []).map((row) => ({
+
+  const rows = data ?? [];
+  const previewPaths = rows
+    .filter((row) => isOnboardingImageMime(row.mime_type) || isOnboardingVideoMime(row.mime_type))
+    .map((row) => row.storage_path);
+  const previewByPath = new Map<string, string>();
+  if (previewPaths.length > 0) {
+    const signed = await supabase.storage
+      .from(DT_ONBOARDING_UPLOADS_BUCKET)
+      .createSignedUrls(previewPaths, 3600);
+    for (const item of signed.data ?? []) {
+      if (item.path && item.signedUrl && !item.error) {
+        previewByPath.set(item.path, item.signedUrl);
+      }
+    }
+  }
+
+  return rows.map((row) => ({
     id: row.id,
     fileName: row.file_name,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
     createdAt: row.created_at,
+    previewUrl: previewByPath.get(row.storage_path) ?? null,
   }));
 }
 

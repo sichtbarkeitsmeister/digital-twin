@@ -116,6 +116,7 @@ export type DtOnboardingFileRow = {
   mimeType: string;
   sizeBytes: number;
   createdAt: string;
+  previewUrl?: string | null;
 };
 
 export type DtOnboardingChecklist = {

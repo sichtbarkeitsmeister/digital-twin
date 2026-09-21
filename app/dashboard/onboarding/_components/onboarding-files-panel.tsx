@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, Loader2, Trash2, Upload } from "lucide-react";
+import { Download, FileText, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import type { DtOnboardingFileRow } from "@/lib/dt/onboarding/copy";
 import { uploadOnboardingFileToSignedUrl } from "@/lib/dt/onboarding/client-upload";
-import { guessOnboardingMime } from "@/lib/dt/onboarding/mime";
+import {
+  guessOnboardingMime,
+  isOnboardingImageMime,
+  isOnboardingVideoMime,
+} from "@/lib/dt/onboarding/mime";
 import { cn } from "@/lib/utils";
 
 const ACCEPT =
@@ -31,6 +35,35 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function FilePreview(props: { file: DtOnboardingFileRow }) {
+  const { file } = props;
+  if (file.previewUrl && isOnboardingImageMime(file.mimeType)) {
+    return (
+      <img
+        src={file.previewUrl}
+        alt={file.fileName}
+        className="h-full w-full object-cover"
+      />
+    );
+  }
+  if (file.previewUrl && isOnboardingVideoMime(file.mimeType)) {
+    return (
+      <video
+        src={file.previewUrl}
+        className="h-full w-full object-cover"
+        muted
+        playsInline
+        preload="metadata"
+      />
+    );
+  }
+  return (
+    <div className="grid h-full w-full place-items-center bg-muted/50">
+      <FileText className="size-8 text-secondary" aria-hidden />
+    </div>
+  );
 }
 
 export function OnboardingFilesPanel(props: {
@@ -204,7 +237,7 @@ export function OnboardingFilesPanel(props: {
           {uploading ? "Lade hoch…" : "Dateien hierher ziehen oder klicken"}
         </span>
         <span className="text-xs text-secondary">
-          Bilder, Videos, PDF, SVG — max. 50 MB je Datei. Von außen ist nur Upload möglich, kein Download.
+          Bilder, Videos, PDF, SVG — max. 50 MB je Datei
         </span>
         <input
           type="file"
@@ -225,39 +258,51 @@ export function OnboardingFilesPanel(props: {
           Lade Dateien…
         </p>
       ) : files.length === 0 ? (
-        <p className="text-sm text-secondary">Noch keine Dateien hochgeladen.</p>
+        <p className="text-sm text-secondary">
+          Noch keine Dateien. Hochgeladene Bilder und Videos erscheinen hier.
+        </p>
       ) : (
-        <ul className="grid gap-2">
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {files.map((file) => (
             <li
               key={file.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sbkm-navy/10 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]"
+              className="overflow-hidden rounded-xl border border-sbkm-navy/10 bg-white/60 dark:border-white/10 dark:bg-white/[0.04]"
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-primary">{file.fileName}</p>
-                <p className="text-xs text-secondary">
-                  {formatSize(file.sizeBytes)} · {formatDate(file.createdAt)}
-                </p>
-              </div>
-              <div className="flex gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void download(file.id)}
-                >
-                  <Download className="size-3.5" />
-                  Öffnen
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void remove(file.id, file.fileName)}
-                >
-                  <Trash2 className="size-3.5" />
-                  Löschen
-                </Button>
+              <button
+                type="button"
+                className="block aspect-[4/3] w-full overflow-hidden bg-muted/40"
+                onClick={() => void download(file.id)}
+                aria-label={`${file.fileName} öffnen`}
+              >
+                <FilePreview file={file} />
+              </button>
+              <div className="grid gap-2 p-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-primary">{file.fileName}</p>
+                  <p className="text-xs text-secondary">
+                    {formatSize(file.sizeBytes)} · {formatDate(file.createdAt)}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void download(file.id)}
+                  >
+                    <Download className="size-3.5" />
+                    Öffnen
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void remove(file.id, file.fileName)}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Löschen
+                  </Button>
+                </div>
               </div>
             </li>
           ))}
