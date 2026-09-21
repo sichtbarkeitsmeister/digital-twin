@@ -57,6 +57,8 @@ export function buildDtSystemPrompt(input: {
   websiteStructureText?: string;
   /** Evaluated meeting transcripts (Anbieter + Personas). Omitted for prospects. */
   transcriptKnowledgeText?: string;
+  /** Customer onboarding (contacts, competitors, status). Never includes passwords. */
+  onboardingText?: string;
   pastedUrlsText?: string;
   textMode?: boolean;
   /** Override for the Text-Modus block (platform setting). Falls back to the code default. */
@@ -111,6 +113,10 @@ export function buildDtSystemPrompt(input: {
 
   if (!prospect && input.transcriptKnowledgeText?.trim()) {
     blocks.push("", input.transcriptKnowledgeText.trim());
+  }
+
+  if (!prospect && input.onboardingText?.trim()) {
+    blocks.push("", input.onboardingText.trim());
   }
 
   // After persona text so a mis-generated "brand ambassador" prompt cannot win.

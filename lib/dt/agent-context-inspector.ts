@@ -30,6 +30,7 @@ import {
   loadDtWebsiteStructure,
 } from "@/lib/dt/seo/load-website-structure";
 import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
+import { loadOnboardingPromptText } from "@/lib/dt/onboarding/load-prompt";
 import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
 import {
   formatSeoChecklist,
@@ -192,6 +193,9 @@ export async function loadDtAgentContextBundle(input: {
     ? await loadTranscriptKnowledgeForPrompt(supabase, input.organisationId, {
         emptyHint: promptMode === "seo",
       })
+    : "";
+  const onboardingText = !isProspectPersonaKind(agent.kind, agent.slug)
+    ? await loadOnboardingPromptText(input.organisationId)
     : "";
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
@@ -573,6 +577,21 @@ export async function loadDtAgentContextBundle(input: {
     );
   }
 
+  if (onboardingText) {
+    sections.push(
+      section({
+        id: "onboarding",
+        title: "Onboarding",
+        sourceLabel: "Organisation",
+        sourceType: "organisation",
+        description:
+          "Kunden-Onboarding ohne Passwörter: Status, Mitbewerber, Buchhaltung, Ansprechpartner. Zugangsdaten nur unter Dashboard → Onboarding.",
+        content: onboardingText,
+        editHref: `/dashboard/onboarding?org=${orgQuery}`,
+      }),
+    );
+  }
+
   if (promptMode === "team") {
     sections.push(
       section({
@@ -620,6 +639,7 @@ export async function loadDtAgentContextBundle(input: {
     transcriptKnowledgeText: includeWebsiteStructure
       ? transcriptKnowledgeText
       : undefined,
+    onboardingText: onboardingText || undefined,
     textMode: includeTextMode,
     textModePrompt: textModeLoaded.prompt,
   });

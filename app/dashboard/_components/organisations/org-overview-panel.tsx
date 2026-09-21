@@ -7,11 +7,11 @@ import { motion } from "framer-motion";
 import {
   ArrowRight,
   Bot,
+  ClipboardList,
   ExternalLink,
   Globe,
   MessageCircle,
   Sparkles,
-  Zap,
 } from "lucide-react";
 
 import { formatOrgDate } from "@/lib/dashboard/organisation-ui";
@@ -251,6 +251,30 @@ export function OrgOverviewPanel(props: {
         <StatPill label="Mitglieder" value={props.memberCount} />
         <StatPill label="Agenten" value={enabledAgents.length} />
         <StatPill label={fourthStat.label} value={fourthStat.value} />
+      </motion.div>
+
+      <motion.div variants={item}>
+        <OverviewCard>
+          <CardHeaderRow
+            title="Onboarding"
+            description="Zugangsdaten, Bild-Upload, Mitbewerber und Ansprechpartner"
+            href={`/dashboard/onboarding?org=${orgQuery}`}
+            linkLabel="Öffnen"
+          />
+          <div className="grid gap-3 p-4 sm:p-5">
+            <p className="text-sm text-secondary">
+              Cloud-Link und Passwort für den Bild-Upload, Hoster/SMTP/CMS, Mitbewerber und die
+              Buchhaltungs-E-Mail liegen im DigitalTwin-Zugang.
+            </p>
+            <Button asChild size="sm" variant="outline" className="w-fit active:scale-[0.98]">
+              <Link href={`/dashboard/onboarding?org=${orgQuery}`}>
+                <ClipboardList className="size-3.5" />
+                Onboarding öffnen
+                <ArrowRight className="size-3.5" />
+              </Link>
+            </Button>
+          </div>
+        </OverviewCard>
       </motion.div>
 
       <motion.div variants={item}>

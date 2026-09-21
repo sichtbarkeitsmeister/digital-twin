@@ -11,10 +11,12 @@ export function CopyToClipboardButton({
   text,
   className,
   label = "Kopieren",
+  disabled,
 }: {
   text: string;
   className?: string;
   label?: string;
+  disabled?: boolean;
 }) {
   const [status, setStatus] = React.useState<"idle" | "ok" | "error">("idle");
 
@@ -36,6 +38,7 @@ export function CopyToClipboardButton({
       size="sm"
       variant="outline"
       onClick={onCopy}
+      disabled={disabled || !text}
       className={cn(className)}
       aria-label={label}
     >

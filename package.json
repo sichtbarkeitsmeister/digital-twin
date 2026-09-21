@@ -49,6 +49,7 @@
     "test:suggest-audience-vocab": "tsx scripts/test-suggest-audience-vocab.ts",
     "test:apply-wizard-survey-proposal": "tsx scripts/test-apply-wizard-survey-proposal.ts",
     "test:first-conversation": "tsx scripts/test-first-conversation.ts",
+    "test:dt-onboarding": "tsx scripts/test-dt-onboarding.ts",
     "test:org-crawl-prefill": "tsx scripts/test-org-crawl-prefill.ts",
     "test:meeting-briefing": "tsx scripts/test-meeting-briefing.ts",
     "test:survey-paste-retry": "tsx scripts/test-survey-paste-retry.ts",
