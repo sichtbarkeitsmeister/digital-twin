@@ -154,8 +154,8 @@ export function OnboardingForm(props: {
             Organisation
           </CardTitle>
           <CardDescription>
-            Eine Onboarding-Akte pro Organisation. Mitglieder und das Agentur-Team sehen dieselben
-            Daten.
+            Eine Onboarding-Akte pro Organisation. Über die Suche können Sie den Kunden wechseln.
+            Mitglieder und das Agentur-Team sehen dieselben Daten.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">

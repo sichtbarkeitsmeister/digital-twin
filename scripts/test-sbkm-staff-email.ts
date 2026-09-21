@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { isAlreadyRegisteredAuthError, isForeignKeyRestrictError } from "../lib/dashboard/auth-user-errors";
 import { sortPlatformTeamMembers } from "../lib/dashboard/platform-admin-team";
-import { isSbkmStaffEmail } from "../lib/dt/sbkm-staff";
+import {
+  isSbkmStaffEmail,
+  shouldListAllOnboardingOrganisations,
+} from "../lib/dt/sbkm-staff";
 
 assert.equal(isSbkmStaffEmail("vanessa.may@sichtbarkeitsmeister.de"), true);
 assert.equal(isSbkmStaffEmail("  Mail@Sichtbarkeitsmeister.DE  "), true);
@@ -14,6 +17,28 @@ assert.equal(isSbkmStaffEmail("sichtbarkeitsmeister.de"), false);
 assert.equal(isSbkmStaffEmail("@sichtbarkeitsmeister.de"), false);
 assert.equal(isSbkmStaffEmail(""), false);
 assert.equal(isSbkmStaffEmail(null), false);
+
+assert.equal(
+  shouldListAllOnboardingOrganisations({
+    isPlatformAdmin: false,
+    email: "ads@sichtbarkeitsmeister.de",
+  }),
+  true,
+);
+assert.equal(
+  shouldListAllOnboardingOrganisations({
+    isPlatformAdmin: true,
+    email: "kunde@praxis.de",
+  }),
+  true,
+);
+assert.equal(
+  shouldListAllOnboardingOrganisations({
+    isPlatformAdmin: false,
+    email: "kunde@praxis.de",
+  }),
+  false,
+);
 
 assert.deepEqual(
   sortPlatformTeamMembers([
