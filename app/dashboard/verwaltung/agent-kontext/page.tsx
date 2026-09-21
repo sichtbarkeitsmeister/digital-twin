@@ -5,7 +5,7 @@ import { DtAgentContextInspector } from "@/components/dt/agents/dt-agent-context
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
-import type { DtAgentContextMode } from "@/lib/dt/agent-context-inspector";
+import type { DtAgentContextMode } from "@/lib/dt/agent-context-types";
 import { createClient } from "@/lib/supabase/server";
 
 function InspectorFallback() {

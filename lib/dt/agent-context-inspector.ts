@@ -1,5 +1,13 @@
+import "server-only";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type {
+  DtAgentContextBundle,
+  DtAgentContextMode,
+  DtAgentContextSection,
+} from "@/lib/dt/agent-context-types";
+import { estimateSectionChars } from "@/lib/dt/agent-context-types";
 import {
   buildDtSystemPrompt,
   isProspectPersonaKind,
@@ -41,49 +49,12 @@ import { PASTED_URL_PROMPT_HINT_DE } from "@/lib/shared/pasted-url-context";
 import { resolveDtAgentPrompt } from "@/lib/dt/prompts/resolve-agent-prompt";
 import { createServiceClient } from "@/lib/supabase/service";
 
-export type DtAgentContextSourceType =
-  | "system"
-  | "agent"
-  | "organisation"
-  | "user"
-  | "crawl"
-  | "report"
-  | "analytics"
-  | "tasks"
-  | "dynamic";
-
-export type DtAgentContextMode = "default" | "seo" | "team";
-
-export type DtAgentContextSection = {
-  id: string;
-  title: string;
-  sourceLabel: string;
-  sourceType: DtAgentContextSourceType;
-  description: string;
-  content: string;
-  isEmpty: boolean;
-  editHref?: string;
-  meta?: Record<string, string | number>;
-};
-
-export type DtAgentContextBundle = {
-  organisationId: string;
-  organisationName: string;
-  agentId: string;
-  agentName: string;
-  agentKind: string;
-  mode: DtAgentContextMode;
-  textMode: boolean;
-  textModePrompt: string;
-  textModePromptIsDefault: boolean;
-  sections: DtAgentContextSection[];
-  excludedNote: string;
-  assembledPreviewChars: number;
-};
-
-export function estimateSectionChars(content: string): number {
-  return content.trim().length;
-}
+export type {
+  DtAgentContextBundle,
+  DtAgentContextMode,
+  DtAgentContextSection,
+  DtAgentContextSourceType,
+} from "@/lib/dt/agent-context-types";
 
 function section(
   partial: Omit<DtAgentContextSection, "isEmpty"> & { isEmpty?: boolean },

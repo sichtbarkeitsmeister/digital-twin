@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getAppBaseUrl } from "@/lib/email/mailer";
+import { getAppBaseUrl } from "@/lib/app-url";
 import { formatOnboardingForPrompt } from "@/lib/dt/onboarding/prompt";
 import { countOnboardingFiles, loadOnboarding } from "@/lib/dt/onboarding/store";
 
