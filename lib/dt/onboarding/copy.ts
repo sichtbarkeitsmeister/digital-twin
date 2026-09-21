@@ -4,13 +4,13 @@
  */
 
 export const DT_ONBOARDING_MEDIA_INTRO =
-  "Haben Sie vielleicht noch irgendwelche Bilder oder Videos, welche wir verwenden können?";
+  "Bitte Bilder oder Videos bereitstellen, die verwendet werden können:";
 
 export const DT_ONBOARDING_MEDIA_ITEMS = [
   "Mitarbeiterfotos",
   "Fotos von Firmenfahrzeugen",
-  "Fotos von Ihnen",
-  "Fotos von Projekten von Ihnen",
+  "Personenfotos",
+  "Projektfotos",
   "sonstige Fotos",
   "Logo am besten als SVG-Datei",
 ] as const;
@@ -26,13 +26,14 @@ export type DtOnboardingContact = {
   email: string;
   extension: string;
   mobile?: string;
+  photoSrc?: string;
 };
 
 export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
   {
     name: "André Petermann",
     shortRole: "Projektleitung",
-    role: "Ich leite Dich durch das Projekt und bin unter E-Mail ap@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 61) zu erreichen. Gerne kannst Du auch mobil unter 0179 - 2 11 03 59 Kontakt aufnehmen.",
+    role: "Projektleitung. Erreichbar per E-Mail ap@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 61) sowie mobil unter 0179 - 2 11 03 59.",
     email: "ap@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 61",
     mobile: "0179 - 2 11 03 59",
@@ -40,38 +41,38 @@ export const DT_ONBOARDING_CONTACTS: DtOnboardingContact[] = [
   {
     name: "Alina Lancman",
     shortRole: "Webdesign",
-    role: "Sie ist Webdesignerin bei uns und unter al@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 63) zu erreichen. Sie erstellt Deine Webseite und passt diese auf Deine Änderungswünsche an.",
+    role: "Webdesignerin bei Sichtbarkeitsmeister. Erreichbar unter al@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 63). Zuständig für die Webseite und Änderungswünsche.",
     email: "al@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 63",
   },
   {
     name: "Tamuna Sulakadze",
     shortRole: "Firmenprofile",
-    role: "Sie überarbeitet die Firmenprofile und ist unter tamuna.sulakadze@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 67) erreichbar.",
+    role: "Zuständig für die Überarbeitung der Firmenprofile. Erreichbar unter tamuna.sulakadze@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 67).",
     email: "tamuna.sulakadze@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 67",
   },
   {
     name: "Anja May",
     shortRole: "SEO",
-    role: "Sie macht bei uns die SEO-Analysen. Sie ist unter a.may@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 66) erreichbar.",
+    role: "Zuständig für SEO-Analysen. Erreichbar unter a.may@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 66).",
     email: "a.may@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 66",
   },
   {
     name: "Tanja Krüger",
     shortRole: "SEO",
-    role: "Sie macht bei uns ebenfalls die SEO-Analysen. Sie ist unter tanja.krueger@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 65) erreichbar.",
+    role: "Ebenfalls zuständig für SEO-Analysen. Erreichbar unter tanja.krueger@sichtbarkeitsmeister.de (Durchwahl 0211 - 97 26 53 65).",
     email: "tanja.krueger@sichtbarkeitsmeister.de",
     extension: "0211 - 97 26 53 65",
   },
 ];
 
 export const DT_ONBOARDING_SUPPORT_NOTE =
-  "Die wichtigste E-Mail ist die support@sichtbarkeitsmeister.de. Unter dieser E-Mail können Sie uns am besten immer anschreiben. Diese wird immer abgefragt. Bei den direkten E-Mails kann es passieren, dass gerade in der Urlaubszeit Ihre Aufgaben nicht abgearbeitet werden. Deshalb empfehle ich Ihnen alle E-Mail dort hinzuschicken.";
+  "Die zentrale E-Mail-Adresse lautet support@sichtbarkeitsmeister.de. Anfragen an diese Adresse werden immer abgefragt. Direkte E-Mails können in der Urlaubszeit unbeantwortet bleiben. Deshalb alle E-Mails an diese Adresse senden.";
 
 export const DT_ONBOARDING_PHONE_NOTE =
-  "Telefonisch können Sie unsere Zentrale unter 0211 - 97 26 53 60 erreichen. Wenn unter der oben aufgeführten Durchwahl niemand ans Telefon geht, landen Sie automatisch in der Zentrale. Ihre Anliegen werden Sie aber in der Regel los.";
+  "Telefonisch ist die Zentrale unter 0211 - 97 26 53 60 erreichbar. Wenn unter der oben aufgeführten Durchwahl niemand ans Telefon geht, erfolgt die Weiterleitung automatisch in die Zentrale. Anliegen werden in der Regel dort angenommen.";
 
 export const DT_ONBOARDING_MAX_COMPETITORS = 5;
 export const DT_ONBOARDING_MAX_CUSTOMER_CONTACTS = 5;

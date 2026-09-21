@@ -7,7 +7,6 @@ import {
   loadOnboardingAction,
   saveOnboardingAction,
 } from "@/app/dashboard/onboarding/actions";
-import { OnboardingContacts } from "@/app/dashboard/onboarding/_components/onboarding-contacts";
 import { OnboardingFilesPanel } from "@/app/dashboard/onboarding/_components/onboarding-files-panel";
 import { SecretField } from "@/app/dashboard/onboarding/_components/secret-field";
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
@@ -149,8 +148,7 @@ export function OnboardingForm(props: {
         <h1 className="text-2xl font-bold tracking-tight text-primary">Onboarding</h1>
         <p className="max-w-2xl text-sm text-secondary">
           Zugangsdaten, Bildmaterial und Ansprechpartner — alles über den DigitalTwin-Zugang.
-          Bitte füllen Sie die Felder aus. Hochgeladene Bilder erscheinen unter „Bilder und
-          Videos“.
+          Bitte die Felder ausfüllen. Hochgeladene Bilder erscheinen unter „Bilder und Videos“.
         </p>
       </div>
 
@@ -200,8 +198,8 @@ export function OnboardingForm(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">1. Bilder und Videos</CardTitle>
           <CardDescription>
-            Hier liegen alle Dateien, die für diese Organisation hochgeladen wurden. Klicken Sie
-            eine Datei an, um sie zu öffnen.
+            Hier liegen alle Dateien, die für diese Organisation hochgeladen wurden. Zum Öffnen
+            eine Datei anklicken.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -262,7 +260,7 @@ export function OnboardingForm(props: {
               id="smtp-host"
               value={record.smtpHost}
               onChange={(e) => patch("smtpHost", e.target.value)}
-              placeholder="z. B. mail.ihre-domain.de"
+              placeholder="z. B. mail.beispiel.de"
               disabled={disabled}
               autoComplete="off"
             />
@@ -331,7 +329,7 @@ export function OnboardingForm(props: {
               id="cms-url"
               value={record.cmsLoginUrl}
               onChange={(e) => patch("cmsLoginUrl", e.target.value)}
-              placeholder="https://ihre-domain.de/wp-admin"
+              placeholder="https://beispiel.de/wp-admin"
               disabled={disabled}
               autoComplete="off"
             />
@@ -364,7 +362,7 @@ export function OnboardingForm(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">5. Mitbewerber</CardTitle>
           <CardDescription>
-            Nennen Sie bis zu 5 Mitbewerber, mit denen Sie sich vergleichen.
+            Bis zu 5 Mitbewerber für den Vergleich.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -390,8 +388,8 @@ export function OnboardingForm(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">6. E-Mail für die Buchhaltung</CardTitle>
           <CardDescription>
-            Um die Kommunikation mit der Buchhaltung zu vereinfachen, können Sie uns die
-            E-Mail-Adresse für Ihre Rechnungsthemen mitteilen.
+            E-Mail-Adresse für Rechnungsthemen, um die Kommunikation mit der Buchhaltung zu
+            vereinfachen.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -413,7 +411,7 @@ export function OnboardingForm(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">7. Direkte Ansprechpartner im Projekt</CardTitle>
           <CardDescription>
-            Wen dürfen wir bei Ihnen zum Projekt kontaktieren? Name, Funktion, E-Mail und Telefon.
+            Kontakte auf Kundenseite für das Projekt: Name, Funktion, E-Mail und Telefon.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -484,7 +482,7 @@ export function OnboardingForm(props: {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">8. Weitere Informationen</CardTitle>
           <CardDescription>
-            Falls Sie uns noch etwas mitteilen möchten — Hinweise, Zugänge, Wünsche.
+            Optionale Hinweise, Zugänge oder Wünsche.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -502,8 +500,6 @@ export function OnboardingForm(props: {
           </div>
         </CardContent>
       </Card>
-
-      <OnboardingContacts variant="page" className="lg:hidden" />
 
       {error ? (
         <p className="text-sm text-red-600 dark:text-red-400" role="alert">

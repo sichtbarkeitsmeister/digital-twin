@@ -19,10 +19,10 @@ import {
   Users,
   Workflow,
   Mail,
+  Phone,
 } from "lucide-react";
 
 import { ZumChatButton } from "@/components/zum-chat-button";
-import { OnboardingContacts } from "@/app/dashboard/onboarding/_components/onboarding-contacts";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -101,6 +101,12 @@ export function DashboardSidebar({
       href: "/dashboard/onboarding",
       icon: FolderUp,
       match: (pathname: string) => pathname.startsWith("/dashboard/onboarding"),
+    },
+    {
+      label: "Ansprechpartner",
+      href: "/dashboard/ansprechpartner",
+      icon: Phone,
+      match: (pathname: string) => pathname.startsWith("/dashboard/ansprechpartner"),
     },
     // Leadinfo company lists stay internal — customers never see this tab.
     ...(showLeads ? [{ label: "Leads", href: "/dashboard/leads", icon: Sparkles }] : []),
@@ -226,15 +232,7 @@ export function DashboardSidebar({
       <ZumChatButton size="full" className="w-full justify-center shadow-dt" />
 
       <nav className="grid gap-1">
-        {mainItems.slice(0, 2).map((item) => (
-          <NavLink key={item.href} item={item} />
-        ))}
-      </nav>
-
-      <OnboardingContacts variant="sidebar" />
-
-      <nav className="grid gap-1">
-        {mainItems.slice(2).map((item) => (
+        {mainItems.map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
       </nav>
