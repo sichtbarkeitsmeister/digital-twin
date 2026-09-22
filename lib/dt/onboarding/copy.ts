@@ -19,6 +19,8 @@ export const DT_ONBOARDING_SUPPORT_EMAIL = "support@sichtbarkeitsmeister.de";
 
 export const DT_ONBOARDING_SWITCHBOARD_PHONE = "0211 - 97 26 53 60";
 
+export const DT_ONBOARDING_PASSFLOW_URL = "https://passflow.de/";
+
 export type DtOnboardingContact = {
   name: string;
   shortRole: string;

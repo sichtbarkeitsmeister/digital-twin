@@ -8,6 +8,7 @@ import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
 import {
   DT_ONBOARDING_CONTACTS,
   DT_ONBOARDING_MAX_COMPETITORS,
+  DT_ONBOARDING_PASSFLOW_URL,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
   DT_ONBOARDING_PHONE_NOTE,
@@ -46,6 +47,7 @@ assert.match(DT_ONBOARDING_SUPPORT_NOTE, /support@sichtbarkeitsmeister.de/);
 assert.match(DT_ONBOARDING_SUPPORT_NOTE, /Urlaub/);
 assert.doesNotMatch(DT_ONBOARDING_SUPPORT_NOTE, /alle E-Mails an diese Adresse/);
 assert.equal(DT_ONBOARDING_SUPPORT_EMAIL, "support@sichtbarkeitsmeister.de");
+assert.equal(DT_ONBOARDING_PASSFLOW_URL, "https://passflow.de/");
 
 const addressingReader =
   /\b(du|dich|dir|dein|deine|deinen|deinem|deiner|sie|ihnen|ihre|ihren|ihrem|ihrer)\b/i;
