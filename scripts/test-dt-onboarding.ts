@@ -8,6 +8,10 @@ import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
 import {
   DT_ONBOARDING_CONTACTS,
   DT_ONBOARDING_MAX_COMPETITORS,
+  DT_ONBOARDING_PASSFLOW_FALLBACK,
+  DT_ONBOARDING_PASSFLOW_INTRO,
+  DT_ONBOARDING_PASSFLOW_STEPS,
+  DT_ONBOARDING_PASSFLOW_TITLE,
   DT_ONBOARDING_PASSFLOW_URL,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
@@ -48,6 +52,9 @@ assert.match(DT_ONBOARDING_SUPPORT_NOTE, /Urlaub/);
 assert.doesNotMatch(DT_ONBOARDING_SUPPORT_NOTE, /alle E-Mails an diese Adresse/);
 assert.equal(DT_ONBOARDING_SUPPORT_EMAIL, "support@sichtbarkeitsmeister.de");
 assert.equal(DT_ONBOARDING_PASSFLOW_URL, "https://passflow.de/");
+assert.match(DT_ONBOARDING_PASSFLOW_TITLE, /Passflow/);
+assert.equal(DT_ONBOARDING_PASSFLOW_STEPS.length, 3);
+assert.match(DT_ONBOARDING_PASSFLOW_FALLBACK, /Felder darunter/);
 
 const addressingReader =
   /\b(du|dich|dir|dein|deine|deinen|deinem|deiner|sie|ihnen|ihre|ihren|ihrem|ihrer)\b/i;
@@ -58,6 +65,11 @@ for (const contact of DT_ONBOARDING_CONTACTS) {
 assert.equal(addressingReader.test(DT_ONBOARDING_SUPPORT_NOTE), false);
 assert.equal(addressingReader.test(DT_ONBOARDING_PHONE_NOTE), false);
 assert.equal(addressingReader.test(DT_ONBOARDING_MEDIA_INTRO), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_PASSFLOW_INTRO), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_PASSFLOW_FALLBACK), false);
+for (const step of DT_ONBOARDING_PASSFLOW_STEPS) {
+  assert.equal(addressingReader.test(step), false, step);
+}
 for (const item of DT_ONBOARDING_MEDIA_ITEMS) {
   assert.equal(addressingReader.test(item), false, item);
 }
