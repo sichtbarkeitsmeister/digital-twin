@@ -29,6 +29,10 @@ import {
   onboardingRecordFromRow,
   validateOnboardingRecord,
 } from "../lib/dt/onboarding/normalize";
+import {
+  buildPassflowNotifyEmail,
+  shouldNotifyPassflowLink,
+} from "../lib/dt/onboarding/passflow";
 import { formatOnboardingForPrompt } from "../lib/dt/onboarding/prompt";
 import {
   generateOnboardingUploadPassword,
@@ -60,9 +64,11 @@ assert.match(DT_ONBOARDING_SUPPORT_NOTE, /Urlaub/);
 assert.doesNotMatch(DT_ONBOARDING_SUPPORT_NOTE, /alle E-Mails an diese Adresse/);
 assert.equal(DT_ONBOARDING_SUPPORT_EMAIL, "support@sichtbarkeitsmeister.de");
 assert.equal(DT_ONBOARDING_PASSFLOW_URL, "https://passflow.de/");
-assert.match(DT_ONBOARDING_PASSFLOW_TITLE, /Passflow/);
+assert.match(DT_ONBOARDING_PASSFLOW_TITLE, /Notlösung/);
 assert.equal(DT_ONBOARDING_PASSFLOW_STEPS.length, 3);
-assert.match(DT_ONBOARDING_PASSFLOW_FALLBACK, /Felder darunter/);
+assert.match(DT_ONBOARDING_PASSFLOW_FALLBACK, /abläuft/);
+assert.match(DT_ONBOARDING_PASSFLOW_INTRO, /Feldern oben/);
+assert.match(DT_ONBOARDING_PASSFLOW_STEPS[2] ?? "", /einfügen/);
 
 const addressingReader =
   /\b(du|dich|dir|dein|deine|deinen|deinem|deiner|sie|ihnen|ihre|ihren|ihrem|ihrer)\b/i;
@@ -101,12 +107,15 @@ const tooMany = normalizeOnboardingRecord({
   smtpProtocol: "tls",
   billingEmail: "  buchhaltung@firma.de ",
   hosterUser: " host ",
+  passflowUrl: "  https://passflow.de/share/abc  ",
 });
 assert.equal(tooMany.competitors.length, DT_ONBOARDING_MAX_COMPETITORS);
 assert.deepEqual(tooMany.competitors, ["A", "B", "C", "D", "E"]);
 assert.equal(tooMany.smtpProtocol, "TLS");
 assert.equal(tooMany.billingEmail, "buchhaltung@firma.de");
 assert.equal(tooMany.hosterUser, "host");
+assert.equal(tooMany.passflowUrl, "https://passflow.de/share/abc");
+assert.equal(EMPTY_ONBOARDING_RECORD.passflowUrl, "");
 
 const withContacts = normalizeOnboardingRecord({
   customerContacts: [
@@ -141,6 +150,16 @@ assert.match(
   validateOnboardingRecord(normalizeOnboardingRecord({ smtpPort: "abc" })) ?? "",
   /SMTP-Port/,
 );
+assert.match(
+  validateOnboardingRecord(normalizeOnboardingRecord({ passflowUrl: "not a url" })) ?? "",
+  /Passflow-Link/,
+);
+assert.equal(
+  validateOnboardingRecord(
+    normalizeOnboardingRecord({ passflowUrl: "https://passflow.de/share/abc" }),
+  ),
+  null,
+);
 
 const fromRow = onboardingRecordFromRow({
   upload_token: token,
@@ -155,6 +174,7 @@ const fromRow = onboardingRecordFromRow({
   cms_login_url: "https://example.de/wp-admin",
   cms_user: "admin",
   cms_password: "cms-secret",
+  passflow_url: "https://passflow.de/share/secret-token",
   competitors: ["Konkurrent A", "Konkurrent B"],
   billing_email: "rechnung@example.de",
   customer_contacts: [
@@ -198,6 +218,8 @@ assert.doesNotMatch(prompt, /secret-hoster/);
 assert.doesNotMatch(prompt, /smtp-secret/);
 assert.doesNotMatch(prompt, /cms-secret/);
 assert.doesNotMatch(prompt, /CloudPass1/);
+assert.doesNotMatch(prompt, /passflow\.de\/share\/secret-token/);
+assert.match(prompt, /Passflow-Link: hinterlegt/);
 assert.match(prompt, /Passwörter/);
 
 const staffPrompt = buildDtSystemPrompt({
@@ -252,21 +274,79 @@ const sealed = encryptOnboardingRowSecrets(
     hoster_password: "host-secret",
     smtp_password: "smtp-secret",
     cms_password: "cms-secret",
+    passflow_url: "https://passflow.de/share/secret-token",
   },
   cryptoKey,
 );
 assert.equal(isOnboardingSecretCiphertext(sealed.hoster_password ?? ""), true);
 assert.doesNotMatch(sealed.cms_password ?? "", /cms-secret/);
+assert.equal(isOnboardingSecretCiphertext(sealed.passflow_url ?? ""), true);
+assert.doesNotMatch(sealed.passflow_url ?? "", /secret-token/);
 const opened = decryptOnboardingRecordSecrets(
   {
     uploadPassword: sealed.upload_password ?? "",
     hosterPassword: sealed.hoster_password ?? "",
     smtpPassword: sealed.smtp_password ?? "",
     cmsPassword: sealed.cms_password ?? "",
+    passflowUrl: sealed.passflow_url ?? "",
   },
   cryptoKey,
 );
 assert.equal(opened.hosterPassword, "host-secret");
 assert.equal(opened.cmsPassword, "cms-secret");
+assert.equal(opened.passflowUrl, "https://passflow.de/share/secret-token");
+
+assert.equal(
+  shouldNotifyPassflowLink({
+    previousUrl: "",
+    nextUrl: "https://passflow.de/share/a",
+    alreadyNotified: false,
+  }),
+  true,
+);
+assert.equal(
+  shouldNotifyPassflowLink({
+    previousUrl: "https://passflow.de/share/a",
+    nextUrl: "https://passflow.de/share/a",
+    alreadyNotified: true,
+  }),
+  false,
+);
+assert.equal(
+  shouldNotifyPassflowLink({
+    previousUrl: "https://passflow.de/share/a",
+    nextUrl: "https://passflow.de/share/a",
+    alreadyNotified: false,
+  }),
+  true,
+);
+assert.equal(
+  shouldNotifyPassflowLink({
+    previousUrl: "https://passflow.de/share/a",
+    nextUrl: "https://passflow.de/share/b",
+    alreadyNotified: true,
+  }),
+  true,
+);
+assert.equal(
+  shouldNotifyPassflowLink({
+    previousUrl: "https://passflow.de/share/a",
+    nextUrl: "",
+    alreadyNotified: false,
+  }),
+  false,
+);
+
+const notifyMail = buildPassflowNotifyEmail({
+  orgName: "Muster GmbH",
+  dashboardUrl: "https://app.example/dashboard/onboarding?org=11111111-1111-4111-8111-111111111111",
+});
+assert.match(notifyMail.subject, /Muster GmbH/);
+assert.match(notifyMail.text, /dashboard\/onboarding/);
+assert.match(notifyMail.text, /abläuft/);
+assert.doesNotMatch(notifyMail.text, /passflow\.de\/share/);
+assert.doesNotMatch(notifyMail.html, /passflow\.de\/share/);
+assert.equal(addressingReader.test(notifyMail.text), false);
+assert.equal(addressingReader.test(notifyMail.html.replace(/<[^>]+>/g, " ")), false);
 
 console.log("dt-onboarding: ok");

@@ -222,34 +222,6 @@ export function OnboardingForm(props: {
         </CardContent>
       </Card>
 
-      <Card className="border-sbkm-navy/20 bg-sbkm-mint/20 dark:border-sbkm-mint/30 dark:bg-sbkm-mint/10">
-        <CardHeader className="pb-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge>Empfohlen</Badge>
-            <CardTitle className="text-base">{DT_ONBOARDING_PASSFLOW_TITLE}</CardTitle>
-          </div>
-          <CardDescription>{DT_ONBOARDING_PASSFLOW_INTRO}</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <ol className="list-decimal space-y-1 pl-5 text-sm text-primary">
-            {DT_ONBOARDING_PASSFLOW_STEPS.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-          <Button asChild className="w-fit">
-            <a
-              href={DT_ONBOARDING_PASSFLOW_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Passflow öffnen
-              <ExternalLink className="size-4" aria-hidden />
-            </a>
-          </Button>
-          <p className="text-xs text-secondary">{DT_ONBOARDING_PASSFLOW_FALLBACK}</p>
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">2. Zugangsdaten zum Hoster</CardTitle>
@@ -388,6 +360,46 @@ export function OnboardingForm(props: {
               />
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">Notlösung</Badge>
+            <CardTitle className="text-base">{DT_ONBOARDING_PASSFLOW_TITLE}</CardTitle>
+          </div>
+          <CardDescription>{DT_ONBOARDING_PASSFLOW_INTRO}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-primary">
+            {DT_ONBOARDING_PASSFLOW_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          <div className="grid gap-2">
+            <Label htmlFor="passflow-url">Passflow-Link</Label>
+            <Input
+              id="passflow-url"
+              type="url"
+              value={record.passflowUrl}
+              onChange={(e) => patch("passflowUrl", e.target.value)}
+              placeholder="https://passflow.de/…"
+              disabled={disabled}
+              autoComplete="off"
+            />
+          </div>
+          <Button asChild variant="outline" className="w-fit">
+            <a
+              href={DT_ONBOARDING_PASSFLOW_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Passflow öffnen
+              <ExternalLink className="size-4" aria-hidden />
+            </a>
+          </Button>
+          <p className="text-xs text-secondary">{DT_ONBOARDING_PASSFLOW_FALLBACK}</p>
         </CardContent>
       </Card>
 

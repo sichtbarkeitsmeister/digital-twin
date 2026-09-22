@@ -19,10 +19,12 @@ import {
   generateOnboardingUploadPassword,
   generateOnboardingUploadToken,
 } from "@/lib/dt/onboarding/secrets";
+import { notifyPassflowLinkDeposited } from "@/lib/dt/onboarding/notify-passflow";
+import { shouldNotifyPassflowLink } from "@/lib/dt/onboarding/passflow";
 import { createServiceClient } from "@/lib/supabase/service";
 
 const ONBOARDING_SELECT =
-  "organisation_id, upload_token, upload_password, hoster_user, hoster_password, smtp_host, smtp_port, smtp_protocol, smtp_username, smtp_password, cms_login_url, cms_user, cms_password, competitors, billing_email, customer_contacts, additional_info, updated_at, updated_by_user_id";
+  "organisation_id, upload_token, upload_password, hoster_user, hoster_password, smtp_host, smtp_port, smtp_protocol, smtp_username, smtp_password, cms_login_url, cms_user, cms_password, passflow_url, passflow_notified_at, competitors, billing_email, customer_contacts, additional_info, updated_at, updated_by_user_id";
 
 type OnboardingRow = {
   organisation_id: string;
@@ -38,6 +40,8 @@ type OnboardingRow = {
   cms_login_url: string | null;
   cms_user: string | null;
   cms_password: string | null;
+  passflow_url: string | null;
+  passflow_notified_at: string | null;
   competitors: unknown;
   billing_email: string | null;
   customer_contacts: unknown;
@@ -57,6 +61,7 @@ export async function loadOnboarding(
   record: DtOnboardingRecord;
   updatedAt: string | null;
   exists: boolean;
+  passflowNotifiedAt: string | null;
 }> {
   const supabase = db(client);
   const { data, error } = await supabase
@@ -67,18 +72,29 @@ export async function loadOnboarding(
 
   if (error) {
     console.error("[onboarding] load:", error.message);
-    return { record: EMPTY_ONBOARDING_RECORD, updatedAt: null, exists: false };
+    return {
+      record: EMPTY_ONBOARDING_RECORD,
+      updatedAt: null,
+      exists: false,
+      passflowNotifiedAt: null,
+    };
   }
 
   const row = data as OnboardingRow | null;
   if (!row) {
-    return { record: EMPTY_ONBOARDING_RECORD, updatedAt: null, exists: false };
+    return {
+      record: EMPTY_ONBOARDING_RECORD,
+      updatedAt: null,
+      exists: false,
+      passflowNotifiedAt: null,
+    };
   }
 
   return {
     record: decryptOnboardingRecordSecrets(onboardingRecordFromRow(row)),
     updatedAt: row.updated_at,
     exists: true,
+    passflowNotifiedAt: row.passflow_notified_at ?? null,
   };
 }
 
@@ -155,12 +171,16 @@ export async function saveOnboarding(input: {
     uploadPassword,
   });
 
+  const previousPassflowUrl = existing.record.passflowUrl;
+  const passflowUrlChanged = record.passflowUrl.trim() !== previousPassflowUrl.trim();
+
   const { data, error } = await supabase
     .from("dt_org_onboarding")
     .upsert(
       {
         organisation_id: input.organisationId,
         ...encryptOnboardingRowSecrets(onboardingRowFromRecord(record)),
+        ...(passflowUrlChanged ? { passflow_notified_at: null } : {}),
         updated_by_user_id: input.userId,
         updated_at: new Date().toISOString(),
       },
@@ -175,9 +195,37 @@ export async function saveOnboarding(input: {
   }
 
   const row = data as OnboardingRow | null;
+  const savedRecord = row
+    ? decryptOnboardingRecordSecrets(onboardingRecordFromRow(row))
+    : record;
+
+  if (
+    shouldNotifyPassflowLink({
+      previousUrl: previousPassflowUrl,
+      nextUrl: savedRecord.passflowUrl,
+      alreadyNotified: Boolean(existing.passflowNotifiedAt),
+    })
+  ) {
+    const notified = await notifyPassflowLinkDeposited({
+      supabase,
+      organisationId: input.organisationId,
+      userId: input.userId,
+    });
+    if (notified.sent) {
+      const notifiedAt = new Date().toISOString();
+      const { error: notifyError } = await supabase
+        .from("dt_org_onboarding")
+        .update({ passflow_notified_at: notifiedAt })
+        .eq("organisation_id", input.organisationId);
+      if (notifyError) {
+        console.error("[onboarding] passflow notified_at:", notifyError.message);
+      }
+    }
+  }
+
   return {
     ok: true,
-    record: row ? decryptOnboardingRecordSecrets(onboardingRecordFromRow(row)) : record,
+    record: savedRecord,
     updatedAt: row?.updated_at ?? new Date().toISOString(),
   };
 }

@@ -82,6 +82,7 @@ export function encryptOnboardingRowSecrets<
     hoster_password?: string | null;
     smtp_password?: string | null;
     cms_password?: string | null;
+    passflow_url?: string | null;
   },
 >(row: T, key = resolveOnboardingSecretsKey()): T {
   return {
@@ -98,6 +99,9 @@ export function encryptOnboardingRowSecrets<
     cms_password: row.cms_password
       ? encryptOnboardingSecret(row.cms_password, key)
       : row.cms_password ?? null,
+    passflow_url: row.passflow_url
+      ? encryptOnboardingSecret(row.passflow_url, key)
+      : row.passflow_url ?? null,
   };
 }
 
@@ -107,6 +111,7 @@ export function decryptOnboardingRecordSecrets<
     hosterPassword: string;
     smtpPassword: string;
     cmsPassword: string;
+    passflowUrl: string;
   },
 >(record: T, key?: Buffer): T {
   return {
@@ -115,5 +120,6 @@ export function decryptOnboardingRecordSecrets<
     hosterPassword: decryptOnboardingSecret(record.hosterPassword, key),
     smtpPassword: decryptOnboardingSecret(record.smtpPassword, key),
     cmsPassword: decryptOnboardingSecret(record.cmsPassword, key),
+    passflowUrl: decryptOnboardingSecret(record.passflowUrl, key),
   };
 }
