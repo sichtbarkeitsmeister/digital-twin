@@ -26,6 +26,10 @@ import {
   DT_ONBOARDING_ADDITIONAL_INFO_MAX,
   DT_ONBOARDING_MAX_COMPETITORS,
   DT_ONBOARDING_MAX_CUSTOMER_CONTACTS,
+  DT_ONBOARDING_PASSFLOW_FALLBACK,
+  DT_ONBOARDING_PASSFLOW_INTRO,
+  DT_ONBOARDING_PASSFLOW_STEPS,
+  DT_ONBOARDING_PASSFLOW_TITLE,
   DT_ONBOARDING_PASSFLOW_URL,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
@@ -218,22 +222,33 @@ export function OnboardingForm(props: {
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/70 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/[0.04]">
-        <p className="max-w-xl text-sm text-secondary">
-          Hoster-, SMTP- und CMS-Zugänge können über Passflow geteilt werden. Die Felder darunter
-          bleiben optional.
-        </p>
-        <Button asChild className="w-fit shrink-0">
-          <a
-            href={DT_ONBOARDING_PASSFLOW_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Passflow öffnen
-            <ExternalLink className="size-4" aria-hidden />
-          </a>
-        </Button>
-      </div>
+      <Card className="border-sbkm-navy/20 bg-sbkm-mint/20 dark:border-sbkm-mint/30 dark:bg-sbkm-mint/10">
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge>Empfohlen</Badge>
+            <CardTitle className="text-base">{DT_ONBOARDING_PASSFLOW_TITLE}</CardTitle>
+          </div>
+          <CardDescription>{DT_ONBOARDING_PASSFLOW_INTRO}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-primary">
+            {DT_ONBOARDING_PASSFLOW_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          <Button asChild className="w-fit">
+            <a
+              href={DT_ONBOARDING_PASSFLOW_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Passflow öffnen
+              <ExternalLink className="size-4" aria-hidden />
+            </a>
+          </Button>
+          <p className="text-xs text-secondary">{DT_ONBOARDING_PASSFLOW_FALLBACK}</p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">
