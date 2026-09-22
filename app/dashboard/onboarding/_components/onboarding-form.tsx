@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { ClipboardList, Loader2 } from "lucide-react";
+import { ClipboardList, ExternalLink, Loader2 } from "lucide-react";
 
 import {
   loadOnboardingAction,
@@ -26,6 +26,7 @@ import {
   DT_ONBOARDING_ADDITIONAL_INFO_MAX,
   DT_ONBOARDING_MAX_COMPETITORS,
   DT_ONBOARDING_MAX_CUSTOMER_CONTACTS,
+  DT_ONBOARDING_PASSFLOW_URL,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
   DT_ONBOARDING_SMTP_PROTOCOLS,
@@ -216,6 +217,23 @@ export function OnboardingForm(props: {
           />
         </CardContent>
       </Card>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/70 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/[0.04]">
+        <p className="max-w-xl text-sm text-secondary">
+          Hoster-, SMTP- und CMS-Zugänge können über Passflow geteilt werden. Die Felder darunter
+          bleiben optional.
+        </p>
+        <Button asChild className="w-fit shrink-0">
+          <a
+            href={DT_ONBOARDING_PASSFLOW_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Passflow öffnen
+            <ExternalLink className="size-4" aria-hidden />
+          </a>
+        </Button>
+      </div>
 
       <Card>
         <CardHeader className="pb-3">
