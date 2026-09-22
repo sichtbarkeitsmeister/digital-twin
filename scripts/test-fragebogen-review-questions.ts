@@ -5,12 +5,14 @@ import {
   buildSurveyAndAnswersFromReview,
   createEmptyExtraQuestion,
   createSurveyDefinitionId,
+  insertExtraStep,
   mergeSurveyIntoReviewDraft,
   reviewQuestionToSurveyField,
   surveyFromReview,
   type FragebogenReviewDraft,
   type ReviewQuestionItem,
 } from "../lib/surveys/fragebogen-review-draft";
+import type { SurveyStep } from "../lib/surveys/types";
 
 function baseDraft(questions: ReviewQuestionItem[]): FragebogenReviewDraft {
   return {
@@ -281,5 +283,98 @@ assert.equal(merged.title, "Persona: Gepatcht");
 assert.equal(merged.definitionId, definitionId);
 assert.equal(merged.questions[0]?.answer, "Max Mustermann");
 assert.equal(merged.questions[0]?.coreKey, "persona_name");
+
+const stubStep = (id: string): SurveyStep => ({
+  id,
+  title: id,
+  description: "",
+  fields: [{ id: `${id}_f`, type: "text", title: id, description: "", required: false }],
+});
+const extrasStub = stubStep("extra_individual");
+assert.deepEqual(
+  insertExtraStep([stubStep("core_intro"), stubStep("core_closing")], extrasStub, "end").map(
+    (s) => s.id,
+  ),
+  ["core_intro", "extra_individual", "core_closing"],
+);
+assert.deepEqual(
+  insertExtraStep([stubStep("core_intro"), stubStep("core_closing")], extrasStub, "start").map(
+    (s) => s.id,
+  ),
+  ["extra_individual", "core_intro", "core_closing"],
+);
+assert.deepEqual(
+  insertExtraStep([stubStep("core_intro")], extrasStub, "end").map((s) => s.id),
+  ["core_intro", "extra_individual"],
+);
+
+function includedQuestion(
+  patch: Partial<ReviewQuestionItem> & Pick<ReviewQuestionItem, "id" | "kind" | "title">,
+): ReviewQuestionItem {
+  return {
+    description: "",
+    included: true,
+    required: true,
+    type: "text",
+    options: [],
+    answer: "",
+    answerSource: "none",
+    answerNote: "",
+    ...patch,
+  };
+}
+
+const anbieterWithExtras = surveyFromReview({
+  title: "Anbieter: Test",
+  description: "Test",
+  purpose: "anbieter",
+  extraPlacement: "end",
+  crawlPageCount: 0,
+  websiteUrl: null,
+  organisationName: "Test GmbH",
+  questions: [
+    includedQuestion({
+      id: "core_company_name",
+      kind: "core",
+      coreKey: "company_name",
+      title: "Name",
+    }),
+    includedQuestion({
+      id: "core_anything_else",
+      kind: "core",
+      coreKey: "anything_else",
+      title: "Sonstiges",
+    }),
+    includedQuestion({
+      id: "extra_1",
+      kind: "extra",
+      title: "Individuelle Frage",
+    }),
+  ],
+});
+assert.deepEqual(anbieterWithExtras.steps.map((s) => s.id), [
+  "core_company",
+  "extra_individual",
+  "core_closing",
+]);
+
+const personaWithExtras = surveyFromReview({
+  ...baseDraft([
+    coreQuestion(),
+    includedQuestion({
+      id: "core_persona_anything_else",
+      kind: "core",
+      coreKey: "persona_anything_else",
+      title: "Sonstiges",
+    }),
+    includedQuestion({
+      id: "extra_p",
+      kind: "extra",
+      title: "Individuelle Persona-Frage",
+    }),
+  ]),
+});
+assert.equal(personaWithExtras.steps.at(-1)?.id, "core_persona_close");
+assert.equal(personaWithExtras.steps.at(-2)?.id, "extra_individual");
 
 console.log("fragebogen-review-questions: all ok");
