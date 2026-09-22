@@ -37,6 +37,14 @@ import {
 } from "../lib/dt/onboarding/secrets";
 import { guessOnboardingMime } from "../lib/dt/onboarding/mime";
 import { isDashboardOrgBarPath } from "../lib/dt/seo/dashboard-path";
+import {
+  decryptOnboardingRecordSecrets,
+  decryptOnboardingSecret,
+  encryptOnboardingRowSecrets,
+  encryptOnboardingSecret,
+  isOnboardingSecretCiphertext,
+  ONBOARDING_SECRET_PREFIX,
+} from "../lib/dt/onboarding/secret-crypto";
 
 assert.equal(DT_ONBOARDING_MEDIA_ITEMS.length, 6);
 assert.match(DT_ONBOARDING_MEDIA_INTRO, /Bilder oder Videos/);
@@ -227,5 +235,38 @@ assert.equal(guessOnboardingMime("notes.exe", "application/x-msdownload"), "");
 assert.equal(isDashboardOrgBarPath("/dashboard/onboarding"), true);
 assert.equal(isDashboardOrgBarPath("/dashboard/onboarding/"), true);
 assert.equal(isDashboardOrgBarPath("/dashboard/organisations"), true);
+
+const cryptoKey = Buffer.from("0".repeat(64), "hex");
+const cipher = encryptOnboardingSecret("hoster-geheim", cryptoKey);
+assert.equal(cipher.startsWith(ONBOARDING_SECRET_PREFIX), true);
+assert.equal(isOnboardingSecretCiphertext(cipher), true);
+assert.doesNotMatch(cipher, /hoster-geheim/);
+assert.equal(decryptOnboardingSecret(cipher, cryptoKey), "hoster-geheim");
+assert.equal(decryptOnboardingSecret("altes-klartext-passwort", cryptoKey), "altes-klartext-passwort");
+assert.equal(encryptOnboardingSecret(cipher, cryptoKey), cipher);
+assert.equal(decryptOnboardingSecret(cipher, Buffer.from("1".repeat(64), "hex")), "");
+
+const sealed = encryptOnboardingRowSecrets(
+  {
+    upload_password: "upload-secret",
+    hoster_password: "host-secret",
+    smtp_password: "smtp-secret",
+    cms_password: "cms-secret",
+  },
+  cryptoKey,
+);
+assert.equal(isOnboardingSecretCiphertext(sealed.hoster_password ?? ""), true);
+assert.doesNotMatch(sealed.cms_password ?? "", /cms-secret/);
+const opened = decryptOnboardingRecordSecrets(
+  {
+    uploadPassword: sealed.upload_password ?? "",
+    hosterPassword: sealed.hoster_password ?? "",
+    smtpPassword: sealed.smtp_password ?? "",
+    cmsPassword: sealed.cms_password ?? "",
+  },
+  cryptoKey,
+);
+assert.equal(opened.hosterPassword, "host-secret");
+assert.equal(opened.cmsPassword, "cms-secret");
 
 console.log("dt-onboarding: ok");

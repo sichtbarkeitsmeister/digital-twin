@@ -75,7 +75,11 @@ export async function loadOnboardingAction(input: {
   const auth = await requireOnboardingUser(parsed.data.organisationId);
   if (!auth.ok || !auth.userId) return { ok: false, message: auth.message };
 
-  const ensured = await ensureOnboarding(parsed.data.organisationId, auth.userId);
+  const ensured = await ensureOnboarding(
+    parsed.data.organisationId,
+    auth.userId,
+    auth.supabase,
+  );
   return {
     ok: true,
     message: "ok",
@@ -113,6 +117,7 @@ export async function saveOnboardingAction(input: {
     record,
     userId: auth.userId,
     regenerateUpload: parsed.data.regenerateUpload === true,
+    client: auth.supabase,
   });
   if (!saved.ok) return { ok: false, message: saved.message };
 

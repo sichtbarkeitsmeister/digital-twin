@@ -12,6 +12,10 @@ import {
   onboardingRowFromRecord,
 } from "@/lib/dt/onboarding/normalize";
 import {
+  decryptOnboardingRecordSecrets,
+  encryptOnboardingRowSecrets,
+} from "@/lib/dt/onboarding/secret-crypto";
+import {
   generateOnboardingUploadPassword,
   generateOnboardingUploadToken,
 } from "@/lib/dt/onboarding/secrets";
@@ -72,7 +76,7 @@ export async function loadOnboarding(
   }
 
   return {
-    record: onboardingRecordFromRow(row),
+    record: decryptOnboardingRecordSecrets(onboardingRecordFromRow(row)),
     updatedAt: row.updated_at,
     exists: true,
   };
@@ -106,7 +110,7 @@ export async function ensureOnboarding(
     .upsert(
       {
         organisation_id: organisationId,
-        ...onboardingRowFromRecord(record),
+        ...encryptOnboardingRowSecrets(onboardingRowFromRecord(record)),
         updated_by_user_id: userId,
         updated_at: new Date().toISOString(),
       },
@@ -122,7 +126,7 @@ export async function ensureOnboarding(
 
   const row = data as OnboardingRow | null;
   return {
-    record: row ? onboardingRecordFromRow(row) : record,
+    record: row ? decryptOnboardingRecordSecrets(onboardingRecordFromRow(row)) : record,
     updatedAt: row?.updated_at ?? new Date().toISOString(),
     created: !loaded.exists,
   };
@@ -156,7 +160,7 @@ export async function saveOnboarding(input: {
     .upsert(
       {
         organisation_id: input.organisationId,
-        ...onboardingRowFromRecord(record),
+        ...encryptOnboardingRowSecrets(onboardingRowFromRecord(record)),
         updated_by_user_id: input.userId,
         updated_at: new Date().toISOString(),
       },
@@ -166,13 +170,14 @@ export async function saveOnboarding(input: {
     .maybeSingle();
 
   if (error) {
-    return { ok: false, message: error.message || "Onboarding konnte nicht gespeichert werden." };
+    console.error("[onboarding] save:", error.message);
+    return { ok: false, message: "Onboarding konnte nicht gespeichert werden." };
   }
 
   const row = data as OnboardingRow | null;
   return {
     ok: true,
-    record: row ? onboardingRecordFromRow(row) : record,
+    record: row ? decryptOnboardingRecordSecrets(onboardingRecordFromRow(row)) : record,
     updatedAt: row?.updated_at ?? new Date().toISOString(),
   };
 }
@@ -193,7 +198,7 @@ export async function loadOnboardingByUploadToken(token: string): Promise<{
   const row = data as OnboardingRow;
   return {
     organisationId: row.organisation_id,
-    record: onboardingRecordFromRow(row),
+    record: decryptOnboardingRecordSecrets(onboardingRecordFromRow(row)),
   };
 }
 
