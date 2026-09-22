@@ -34,6 +34,7 @@ const recordSchema = z.object({
   cmsLoginUrl: z.string().max(500),
   cmsUser: z.string().max(200),
   cmsPassword: z.string().max(200),
+  passflowUrl: z.string().max(500),
   competitors: z.array(z.string().max(200)).max(DT_ONBOARDING_MAX_COMPETITORS),
   billingEmail: z.string().max(200),
   customerContacts: z

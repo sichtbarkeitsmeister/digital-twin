@@ -77,6 +77,7 @@ export function normalizeOnboardingRecord(
     cmsLoginUrl: clip(asString(src.cmsLoginUrl ?? src.cms_login_url), 500),
     cmsUser: clip(asString(src.cmsUser ?? src.cms_user), 200),
     cmsPassword: clip(asString(src.cmsPassword ?? src.cms_password), 200),
+    passflowUrl: clip(asString(src.passflowUrl ?? src.passflow_url), 500),
     competitors: normalizeCompetitors(src.competitors),
     billingEmail: clip(asString(src.billingEmail ?? src.billing_email), 200),
     customerContacts: normalizeCustomerContacts(
@@ -102,6 +103,7 @@ export function onboardingRecordFromRow(row: {
   cms_login_url?: string | null;
   cms_user?: string | null;
   cms_password?: string | null;
+  passflow_url?: string | null;
   competitors?: unknown;
   billing_email?: string | null;
   customer_contacts?: unknown;
@@ -121,6 +123,7 @@ export function onboardingRecordFromRow(row: {
     cmsLoginUrl: row.cms_login_url ?? "",
     cmsUser: row.cms_user ?? "",
     cmsPassword: row.cms_password ?? "",
+    passflowUrl: row.passflow_url ?? "",
     competitors: row.competitors,
     billingEmail: row.billing_email ?? "",
     customerContacts: row.customer_contacts,
@@ -142,6 +145,7 @@ export function onboardingRowFromRecord(record: DtOnboardingRecord) {
     cms_login_url: record.cmsLoginUrl || null,
     cms_user: record.cmsUser || null,
     cms_password: record.cmsPassword || null,
+    passflow_url: record.passflowUrl || null,
     competitors: record.competitors.filter(Boolean),
     billing_email: record.billingEmail || null,
     customer_contacts: record.customerContacts.filter(
@@ -204,18 +208,24 @@ export function validateOnboardingRecord(record: DtOnboardingRecord): string | n
     return "SMTP-Port bitte als Zahl angeben (z. B. 587).";
   }
   if (record.cmsLoginUrl) {
-    try {
-      const url = new URL(
-        /^https?:\/\//i.test(record.cmsLoginUrl)
-          ? record.cmsLoginUrl
-          : `https://${record.cmsLoginUrl}`,
-      );
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        return "CMS-Anmeldelink muss eine http(s)-URL sein.";
-      }
-    } catch {
-      return "CMS-Anmeldelink ist keine gültige URL.";
+    const cmsError = validateHttpUrl(record.cmsLoginUrl, "CMS-Anmeldelink");
+    if (cmsError) return cmsError;
+  }
+  if (record.passflowUrl) {
+    const passflowError = validateHttpUrl(record.passflowUrl, "Passflow-Link");
+    if (passflowError) return passflowError;
+  }
+  return null;
+}
+
+function validateHttpUrl(value: string, label: string): string | null {
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `${label} muss eine http(s)-URL sein.`;
     }
+  } catch {
+    return `${label} ist keine gültige URL.`;
   }
   return null;
 }

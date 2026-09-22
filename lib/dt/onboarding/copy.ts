@@ -21,19 +21,19 @@ export const DT_ONBOARDING_SWITCHBOARD_PHONE = "0211 - 97 26 53 60";
 
 export const DT_ONBOARDING_PASSFLOW_URL = "https://passflow.de/";
 
-export const DT_ONBOARDING_PASSFLOW_TITLE = "Zugangsdaten über Passflow teilen";
+export const DT_ONBOARDING_PASSFLOW_TITLE = "Passflow als Notlösung";
 
 export const DT_ONBOARDING_PASSFLOW_INTRO =
-  "Bevorzugter Weg für Hoster, SMTP und CMS. Verschlüsselt und zeitlich begrenzt.";
+  "Wenn Zugangsdaten nicht in den Feldern oben hinterlegt werden können. Verschlüsselt und zeitlich begrenzt.";
 
 export const DT_ONBOARDING_PASSFLOW_STEPS = [
   "Passflow öffnen.",
   "Die Zugänge dort anlegen.",
-  "Den Passflow-Link an das Projektteam senden.",
+  "Den Passflow-Link hier einfügen und Onboarding speichern.",
 ] as const;
 
 export const DT_ONBOARDING_PASSFLOW_FALLBACK =
-  "Die Felder darunter nur nutzen, wenn Passflow nicht möglich ist.";
+  "Das Projektteam erhält eine Info und holt den Link ab, bevor er abläuft.";
 
 export type DtOnboardingContact = {
   name: string;
@@ -140,6 +140,7 @@ export type DtOnboardingRecord = {
   cmsLoginUrl: string;
   cmsUser: string;
   cmsPassword: string;
+  passflowUrl: string;
   competitors: string[];
   billingEmail: string;
   customerContacts: DtOnboardingCustomerContact[];
@@ -159,6 +160,7 @@ export const EMPTY_ONBOARDING_RECORD: DtOnboardingRecord = {
   cmsLoginUrl: "",
   cmsUser: "",
   cmsPassword: "",
+  passflowUrl: "",
   competitors: ["", "", "", "", ""],
   billingEmail: "",
   customerContacts: Array.from(
