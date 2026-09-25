@@ -11,8 +11,10 @@ import {
   isMultimodalMediaType,
 } from "@/lib/ai/chat-attachments";
 import {
+  DT_CHAT_ATTACHMENTS_BUCKET,
   DT_MAX_ATTACHMENTS,
   DT_MAX_ATTACHMENT_BYTES,
+  isDtChatOwnedStoragePath,
   isDtTextLikeMime,
   MAX_ATTACHMENT_BASE64_CHARS,
   normalizeDtMime,
@@ -22,7 +24,7 @@ import type { DtCreatedChatFile } from "@/lib/dt/chat-files";
 import { extractTextPreviewFromBytes, DT_ATTACHMENT_TEXT_PREVIEW_MAX } from "@/lib/dt/parse-attachment-text";
 import { ensureDtChatAttachmentsAcceptAllMimes } from "@/lib/dt/ensure-chat-attachments-bucket";
 
-export const DT_CHAT_ATTACHMENTS_BUCKET = "dt-chat-attachments";
+export { DT_CHAT_ATTACHMENTS_BUCKET };
 
 export const dtAttachmentInboundSchema = z
   .object({
@@ -31,9 +33,11 @@ export const dtAttachmentInboundSchema = z
     sizeBytes: z.number().int().nonnegative().max(DT_MAX_ATTACHMENT_BYTES),
     textContent: z.string().max(40_000).optional(),
     dataBase64: z.string().max(MAX_ATTACHMENT_BASE64_CHARS).optional(),
+    /** Set when the browser uploaded the bytes to storage before the chat POST. */
+    storagePath: z.string().min(1).max(500).optional(),
   })
   .superRefine((a, ctx) => {
-    if (!a.dataBase64?.trim() && !a.textContent?.trim()) {
+    if (!a.dataBase64?.trim() && !a.textContent?.trim() && !a.storagePath?.trim()) {
       ctx.addIssue({
         code: "custom",
         message: `Für „${a.fileName}“ fehlt die Datei.`,
@@ -218,7 +222,18 @@ export async function persistDtChatAttachments(params: {
   const blobs: DtPersistableChatFile[] = [];
   const metaOnly: DtInboundAttachment[] = [];
 
+  const alreadyStored: DtInboundAttachment[] = [];
+
   for (const a of params.attachments) {
+    if (a.storagePath?.trim() && !a.dataBase64?.trim()) {
+      if (
+        !isDtChatOwnedStoragePath(a.storagePath, params.organisationId, params.chatId)
+      ) {
+        return { ok: false, message: `„${a.fileName}“ liegt außerhalb dieses Chats.` };
+      }
+      alreadyStored.push(a);
+      continue;
+    }
     if (a.dataBase64?.trim()) {
       try {
         const bytes = decodeBase64Strict(a.dataBase64.trim());
@@ -247,6 +262,26 @@ export async function persistDtChatAttachments(params: {
   if (!persisted.ok) return persisted;
 
   const rows = [...persisted.rows];
+  for (const a of alreadyStored) {
+    const storagePath = a.storagePath?.trim() ?? "";
+    if (!storagePath) continue;
+    const { data, error: insErr } = await params.supabase
+      .from("dt_chat_attachments")
+      .insert({
+        chat_id: params.chatId,
+        message_id: params.messageId,
+        storage_path: storagePath,
+        file_name: a.fileName,
+        mime_type: a.mimeType,
+        size_bytes: a.sizeBytes,
+      })
+      .select("id,chat_id,message_id,storage_path,file_name,mime_type,size_bytes,created_at")
+      .single();
+    if (insErr || !data) {
+      return { ok: false, message: insErr?.message ?? "Anhang konnte nicht gespeichert werden." };
+    }
+    rows.push(data as DtChatAttachmentRow);
+  }
   for (let i = 0; i < metaOnly.length; i += 1) {
     const a = metaOnly[i]!;
     const unique = `${Date.now()}-meta-${i}`;
@@ -358,8 +393,23 @@ export function buildCreatedFileMetadata(files: DtCreatedChatFile[]) {
   }));
 }
 
+async function downloadStoredChatAttachment(
+  supabase: SupabaseClient,
+  path: string,
+): Promise<Uint8Array | null> {
+  try {
+    const { data, error } = await supabase.storage.from(DT_CHAT_ATTACHMENTS_BUCKET).download(path);
+    if (error || !data) return null;
+    const buf = new Uint8Array(await data.arrayBuffer());
+    return buf.byteLength > 0 ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function prepareInboundAttachments(
   attachments: DtInboundAttachment[],
+  scope?: { supabase: SupabaseClient; organisationId: string; chatId: string },
 ): Promise<{ ok: true; items: DtInboundAttachment[] } | { ok: false; message: string }> {
   if (attachments.length > DT_MAX_ATTACHMENTS) {
     return { ok: false, message: `Höchstens ${DT_MAX_ATTACHMENTS} Anhänge pro Nachricht.` };
@@ -367,6 +417,42 @@ export async function prepareInboundAttachments(
 
   const items: DtInboundAttachment[] = [];
   for (const a of attachments) {
+    if (a.storagePath?.trim()) {
+      if (!scope) {
+        return { ok: false, message: `„${a.fileName}“ konnte nicht zugeordnet werden.` };
+      }
+      const storagePath = a.storagePath.trim();
+      if (!isDtChatOwnedStoragePath(storagePath, scope.organisationId, scope.chatId)) {
+        return { ok: false, message: `„${a.fileName}“ liegt außerhalb dieses Chats.` };
+      }
+      const bytes = await downloadStoredChatAttachment(scope.supabase, storagePath);
+      if (!bytes) {
+        if (!a.dataBase64?.trim()) {
+          return { ok: false, message: `„${a.fileName}“ konnte nicht gelesen werden.` };
+        }
+      } else if (bytes.byteLength > DT_MAX_ATTACHMENT_BYTES) {
+        return {
+          ok: false,
+          message: `„${a.fileName}“ ist zu groß (max. ${Math.round(DT_MAX_ATTACHMENT_BYTES / (1024 * 1024))} MB).`,
+        };
+      } else {
+        const mimeType = resolveDtStorageMime(a.fileName, a.mimeType, bytes);
+        const extracted = await extractTextPreviewFromBytes(a.fileName, mimeType, bytes);
+        const text = extracted.ok ? extracted.text : extracted.message;
+        items.push({
+          ...a,
+          storagePath,
+          mimeType,
+          sizeBytes: bytes.byteLength,
+          dataBase64: undefined,
+          textContent: text?.trim()
+            ? text
+            : a.textContent?.trim() || `[Datei „${a.fileName}“ ist angehängt.]`,
+        });
+        continue;
+      }
+    }
+
     if (a.dataBase64?.trim()) {
       try {
         const bytes = decodeBase64Strict(a.dataBase64.trim());
