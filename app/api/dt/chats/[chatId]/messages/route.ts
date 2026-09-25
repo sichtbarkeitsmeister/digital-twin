@@ -38,6 +38,7 @@ import {
   parseDtSeoTaskProposalsFromText,
   stripDtSeoTaskProposalBlocks,
 } from "@/lib/dt/seo/chat-task-proposals";
+import { DT_MAX_CHAT_MESSAGE_CHARS } from "@/lib/dt/attachments-shared";
 import type { DtChatMode } from "@/lib/dt/types";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -176,7 +177,7 @@ function assistantMetadataExtras(
 
 const bodySchema = z
   .object({
-    content: z.string().max(32_000).default(""),
+    content: z.string().max(DT_MAX_CHAT_MESSAGE_CHARS).default(""),
     ghostMode: z.boolean().optional(),
     textMode: z.boolean().optional(),
     attachments: z.array(dtAttachmentInboundSchema).max(5).optional().default([]),
@@ -194,7 +195,7 @@ const bodySchema = z
     }
   });
 
-export async function POST(req: Request, context: { params: Promise<{ chatId: string }> }) {
+async function postDtChatMessage(req: Request, context: { params: Promise<{ chatId: string }> }) {
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
     return NextResponse.json({ ok: false, message: "Nicht angemeldet." }, { status: 401 });
@@ -221,7 +222,11 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     );
   }
 
-  const prepared = await prepareInboundAttachments(parsed.data.attachments ?? []);
+  const prepared = await prepareInboundAttachments(parsed.data.attachments ?? [], {
+    supabase: auth.supabase,
+    organisationId: chat.organisation_id,
+    chatId,
+  });
   if (!prepared.ok) {
     return NextResponse.json({ ok: false, message: prepared.message }, { status: 400 });
   }
@@ -629,4 +634,19 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     titleSuggestion,
     via: hasAttachments ? "anthropic_direct_attachments" : "anthropic_direct",
   });
+}
+
+export async function POST(req: Request, context: { params: Promise<{ chatId: string }> }) {
+  try {
+    return await postDtChatMessage(req, context);
+  } catch (err) {
+    console.error("[dt/chat/messages] failed", err);
+    return NextResponse.json(
+      {
+        ok: false,
+        message: "Die Nachricht konnte nicht verarbeitet werden. Bitte erneut versuchen.",
+      },
+      { status: 500 },
+    );
+  }
 }
