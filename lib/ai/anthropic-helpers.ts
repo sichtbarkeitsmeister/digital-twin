@@ -313,6 +313,139 @@ function isAbortError(error: unknown): boolean {
   return name === "AbortError" || /aborted|abort|timeout/i.test(message);
 }
 
+function anthropicErrorBlob(error: unknown): string {
+  const chunks: string[] = [];
+  if (error instanceof Error && error.message) chunks.push(error.message);
+  if (error && typeof error === "object") {
+    const extra = error as {
+      status?: unknown;
+      error?: { message?: unknown; type?: unknown };
+    };
+    if (typeof extra.error?.message === "string") chunks.push(extra.error.message);
+    if (typeof extra.error?.type === "string") chunks.push(extra.error.type);
+    if (typeof extra.status === "number") chunks.push(String(extra.status));
+  }
+  return chunks.join(" ");
+}
+
+/** Retired beta flags are rejected with 400 and would fail the whole chat turn. */
+export function isAnthropicBetaHeaderError(error: unknown): boolean {
+  const blob = anthropicErrorBlob(error);
+  return /anthropic-beta/i.test(blob) && /unexpected value/i.test(blob);
+}
+
+type AnthropicStreamDelta = {
+  type?: string;
+  text?: string;
+  partial_json?: string;
+  thinking?: string;
+  signature?: string;
+  stop_reason?: Anthropic.Message["stop_reason"];
+  stop_sequence?: string | null;
+};
+
+type AnthropicStreamEvent = {
+  type: string;
+  index?: number;
+  message?: Anthropic.Message;
+  content_block?: Anthropic.ContentBlock;
+  delta?: AnthropicStreamDelta;
+  usage?: {
+    input_tokens?: number | null;
+    output_tokens?: number | null;
+  };
+};
+
+/**
+ * Build a Message from the raw SSE stream.
+ * The SDK's `messages.stream().finalMessage()` throws when a `message_delta`
+ * omits `usage` (`event.usage.output_tokens`), which drops the whole reply.
+ */
+export async function readAnthropicMessageStream(
+  stream: AsyncIterable<{ type: string }>,
+): Promise<Anthropic.Message> {
+  let message: Anthropic.Message | null = null;
+  const toolJson: string[] = [];
+
+  for await (const raw of stream) {
+    const event = raw as AnthropicStreamEvent;
+    if (event.type === "message_start" && event.message) {
+      message = {
+        ...event.message,
+        content: [],
+        usage: event.message.usage ?? {
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+      };
+      continue;
+    }
+    if (!message) continue;
+
+    if (event.type === "content_block_start" && event.content_block && event.index != null) {
+      message.content[event.index] = { ...event.content_block };
+      toolJson[event.index] = "";
+      continue;
+    }
+
+    if (event.type === "content_block_delta" && event.index != null && event.delta) {
+      const block = message.content[event.index];
+      const delta = event.delta;
+      if (!block) continue;
+      if (delta.type === "text_delta" && block.type === "text" && typeof delta.text === "string") {
+        message.content[event.index] = { ...block, text: `${block.text}${delta.text}` };
+      } else if (
+        delta.type === "input_json_delta" &&
+        block.type === "tool_use" &&
+        typeof delta.partial_json === "string"
+      ) {
+        toolJson[event.index] = `${toolJson[event.index] ?? ""}${delta.partial_json}`;
+        let input: unknown = block.input;
+        try {
+          input = JSON.parse(toolJson[event.index] || "{}");
+        } catch {
+          /* keep the last complete object while JSON is still partial */
+        }
+        message.content[event.index] = { ...block, input };
+      } else if (
+        delta.type === "thinking_delta" &&
+        block.type === "thinking" &&
+        typeof delta.thinking === "string"
+      ) {
+        message.content[event.index] = { ...block, thinking: `${block.thinking}${delta.thinking}` };
+      } else if (
+        delta.type === "signature_delta" &&
+        block.type === "thinking" &&
+        typeof delta.signature === "string"
+      ) {
+        message.content[event.index] = { ...block, signature: delta.signature };
+      }
+      continue;
+    }
+
+    if (event.type === "message_delta") {
+      if (event.delta) {
+        message.stop_reason = event.delta.stop_reason ?? message.stop_reason;
+        message.stop_sequence = event.delta.stop_sequence ?? message.stop_sequence;
+      }
+      const usage = event.usage;
+      if (usage && message.usage) {
+        if (typeof usage.output_tokens === "number") {
+          message.usage.output_tokens = usage.output_tokens;
+        }
+        if (typeof usage.input_tokens === "number") {
+          message.usage.input_tokens = usage.input_tokens;
+        }
+      }
+    }
+  }
+
+  if (!message || message.role !== "assistant") {
+    throw new Error("Die KI-Antwort war leer.");
+  }
+  return message;
+}
+
 export async function callAnthropicFirstAvailable(input: {
   anthropic: Anthropic;
   models: string[];
@@ -328,7 +461,7 @@ export async function callAnthropicFirstAvailable(input: {
   /** Optional tool_choice (e.g. force a JSON submit tool). */
   toolChoice?: Anthropic.Messages.ToolChoice;
   /** Extra request headers (PDF document blocks need pdfs-2024-09-25). */
-  headers?: Record<string, string>;
+  headers?: Record<string, string | null | undefined>;
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const useStream = input.stream ?? input.maxTokens >= STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
@@ -336,10 +469,6 @@ export async function callAnthropicFirstAvailable(input: {
     ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
     ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
   };
-  const requestOptions = (signal?: AbortSignal) => ({
-    ...(signal ? { signal } : {}),
-    ...(input.headers ? { headers: input.headers } : {}),
-  });
 
   for (const model of input.models) {
     const controller = input.timeoutMs ? new AbortController() : null;
@@ -356,34 +485,49 @@ export async function callAnthropicFirstAvailable(input: {
           }, input.timeoutMs)
         : null;
 
-    try {
+    const requestOptions = (headers: Record<string, string | null | undefined> | undefined) => ({
+      ...(controller?.signal ? { signal: controller.signal } : {}),
+      ...(headers ? { headers } : {}),
+    });
+
+    const createMessage = async (
+      headers: Record<string, string | null | undefined> | undefined,
+    ): Promise<Anthropic.Message> => {
+      const body = {
+        model,
+        max_tokens: input.maxTokens,
+        system: input.system,
+        messages: input.messages,
+        ...toolParams,
+      };
       if (useStream) {
-        const stream = input.anthropic.messages.stream(
-          {
-            model,
-            max_tokens: input.maxTokens,
-            system: input.system,
-            messages: input.messages,
-            ...toolParams,
-          },
-          requestOptions(controller?.signal),
+        const stream = await input.anthropic.messages.create(
+          { ...body, stream: true },
+          requestOptions(headers),
         );
-        streamHandle = stream;
-        const response = await stream.finalMessage();
+        const abortable = stream as unknown as { abort?: () => void };
+        if (typeof abortable.abort === "function") {
+          streamHandle = { abort: () => abortable.abort?.() };
+        }
+        return readAnthropicMessageStream(stream);
+      }
+      return input.anthropic.messages.create(body, requestOptions(headers));
+    };
+
+    try {
+      try {
+        const response = await createMessage(input.headers);
+        return { response, model };
+      } catch (error) {
+        // A retired beta flag rejects the request before the model runs.
+        // One retry without that header still answers plain chat turns.
+        if (!isAnthropicBetaHeaderError(error)) throw error;
+        const response = await createMessage({
+          ...(input.headers ?? {}),
+          "anthropic-beta": null,
+        });
         return { response, model };
       }
-
-      const response = await input.anthropic.messages.create(
-        {
-          model,
-          max_tokens: input.maxTokens,
-          system: input.system,
-          messages: input.messages,
-          ...toolParams,
-        },
-        requestOptions(controller?.signal),
-      );
-      return { response, model };
     } catch (error) {
       lastError = error;
       if (isAbortError(error)) {

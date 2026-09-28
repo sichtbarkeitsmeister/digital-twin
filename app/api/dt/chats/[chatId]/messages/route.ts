@@ -468,16 +468,15 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     }
   }
 
-  const assembled = await assembleDtChatFromDb({
-    chatId,
-    userId: auth.userId,
-    ghostMode,
-    textMode,
-    supabase: auth.supabase,
-  });
-
   let direct: Awaited<ReturnType<typeof callDtAnthropicChat>>;
   try {
+    const assembled = await assembleDtChatFromDb({
+      chatId,
+      userId: auth.userId,
+      ghostMode,
+      textMode,
+      supabase: auth.supabase,
+    });
     direct = await callDtAnthropicChat({
       system: assembled.system,
       messages: ensureLatestTurnHasMultimodalBlocks(assembled.messages, prepared.items),

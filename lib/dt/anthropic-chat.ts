@@ -3,7 +3,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   callAnthropicFirstAvailable,
   extractAnthropicText,
-  anthropicSurveyBetaHeaders,
 } from "@/lib/ai/anthropic-helpers";
 import { fallbackDtChatTitle } from "@/lib/dt/chat-title";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
@@ -440,6 +439,37 @@ export function normalizeDtAnthropicMessages(
   return merged;
 }
 
+/** PDF beta only when this turn actually sends a PDF. Other betas are not used here. */
+export function dtAnthropicBetaHeaders(
+  messages: Anthropic.MessageParam[],
+): Record<string, string> | undefined {
+  const needsPdf = messages.some((message) => {
+    if (!Array.isArray(message.content)) return false;
+    return message.content.some((block) => {
+      if (block.type !== "document" || !("source" in block)) return false;
+      const source = block.source;
+      return (
+        !!source &&
+        typeof source === "object" &&
+        "media_type" in source &&
+        source.media_type === "application/pdf"
+      );
+    });
+  });
+  if (!needsPdf) return undefined;
+  return { "anthropic-beta": "pdfs-2024-09-25" };
+}
+
+/** Primary model, then a live fallback if that id was retired (404). */
+export function dtAnthropicModelsForMode(mode: DtChatMode): string[] {
+  const primary = resolveDtAnthropicModel(mode);
+  const fallbacks =
+    mode === "seo"
+      ? ["claude-sonnet-4-6", "claude-sonnet-5"]
+      : ["claude-haiku-4-5-20251001", "claude-haiku-4-5"];
+  return [...new Set([primary, ...fallbacks].map((model) => model.trim()).filter(Boolean))];
+}
+
 export function dtChatFailureUserMessage(err: unknown): string {
   const chunks: string[] = [];
   if (err instanceof Error && err.message) chunks.push(err.message);
@@ -454,15 +484,33 @@ export function dtChatFailureUserMessage(err: unknown): string {
   }
   const blob = chunks.join(" ");
 
+  if (err instanceof Error) {
+    const own = err.message.trim();
+    if (
+      own.startsWith("ANTHROPIC_API_KEY") ||
+      own.startsWith("Keine gültige") ||
+      own.startsWith("Kein verfügbares") ||
+      own.startsWith("Die KI-Antwort war leer")
+    ) {
+      return own;
+    }
+  }
+
   if (/timeout|timed out|Zeitlimit|aborted/i.test(blob)) {
     return "Die KI hat zu lange gebraucht. Bitte erneut versuchen.";
   }
   if (
-    /too many tokens|prompt is too long|context.?length|max.*context|input is too long/i.test(
+    /too many tokens|prompt is too long|context.?length|max.*context|input is too long|request too large|payload too large/i.test(
       blob,
     )
   ) {
     return "Der Chat ist zu lang für eine KI-Antwort. Bitte einen neuen Chat starten.";
+  }
+  if (/credit balance|insufficient credits|billing|purchase credits/i.test(blob)) {
+    return "Das KI-Guthaben ist aufgebraucht. Bitte das Anthropic-Konto prüfen.";
+  }
+  if (/invalid x-api-key|authentication_error|permission_error/i.test(blob)) {
+    return "Die KI-Anmeldung wurde abgelehnt. Bitte den API-Schlüssel prüfen.";
   }
   if (/rate.?limit|overloaded|529/i.test(blob)) {
     return "Die KI ist gerade überlastet. Bitte in einem Moment erneut versuchen.";
@@ -502,8 +550,12 @@ export async function callDtAnthropicChat(params: {
     throw new Error("Keine gültige Nutzer-Nachricht für die KI.");
   }
 
-  const model = resolveDtAnthropicModel(params.mode);
-  const client = new Anthropic({ apiKey, defaultHeaders: anthropicSurveyBetaHeaders() });
+  const models = dtAnthropicModelsForMode(params.mode);
+  const betaHeaders = dtAnthropicBetaHeaders(messages);
+  const client = new Anthropic({
+    apiKey,
+    ...(betaHeaders ? { defaultHeaders: betaHeaders } : {}),
+  });
   const max_tokens = 8192;
   const system = sanitizeForLlmText(params.system);
   const roundTimeoutMs = params.mode === "seo" ? 180_000 : 120_000;
@@ -517,21 +569,21 @@ export async function callDtAnthropicChat(params: {
   const createRound = async (input: {
     convo: Anthropic.MessageParam[];
     tools?: Anthropic.Tool[];
-  }): Promise<Anthropic.Message> => {
+  }): Promise<{ response: Anthropic.Message; model: string }> => {
     const result = await callAnthropicFirstAvailable({
       anthropic: client,
-      models: [model],
+      models,
       maxTokens: max_tokens,
       system,
       messages: input.convo,
       tools: input.tools,
       timeoutMs: roundTimeoutMs,
-      headers: anthropicSurveyBetaHeaders(),
+      headers: betaHeaders,
     });
     if (!result) {
       throw new Error("Kein verfügbares Anthropic-Modell.");
     }
-    return result.response;
+    return result;
   };
 
   const runTool = async (name: string, input: unknown): Promise<string> => {
@@ -559,18 +611,21 @@ export async function callDtAnthropicChat(params: {
 
   const convo: Anthropic.MessageParam[] = [...messages];
   let lastResp: Anthropic.Message | null = null;
+  let usedModel = models[0] ?? resolveDtAnthropicModel(params.mode);
   let totalUsage: DtAnthropicUsage = { inputTokens: 0, outputTokens: 0 };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const resp = await createRound({
+    const roundResult = await createRound({
       convo,
       tools,
     });
+    const resp = roundResult.response;
+    usedModel = roundResult.model;
     lastResp = resp;
     totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(resp.usage));
 
     if (resp.stop_reason !== "tool_use") {
-      return resultFromResponse(resp, model, totalUsage, createdFiles);
+      return resultFromResponse(resp, usedModel, totalUsage, createdFiles);
     }
 
     const toolUses = resp.content.filter(
@@ -587,7 +642,9 @@ export async function callDtAnthropicChat(params: {
     convo.push({ role: "user", content: toolResults });
   }
 
-  const finalResp = await createRound({ convo });
+  const finalRound = await createRound({ convo });
+  usedModel = finalRound.model;
+  const finalResp = finalRound.response;
   totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(finalResp.usage));
 
   return {
@@ -595,7 +652,7 @@ export async function callDtAnthropicChat(params: {
       extractAnthropicText(finalResp) ||
       (lastResp ? extractAnthropicText(lastResp) : "") ||
       "Keine Antwort erhalten.",
-    model,
+    model: usedModel,
     stopReason: finalResp.stop_reason ?? null,
     usage: totalUsage,
     createdFiles,
