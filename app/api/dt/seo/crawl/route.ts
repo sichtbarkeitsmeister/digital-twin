@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { resolveOrigin } from "@/lib/dt/seo/crawl-sitemap";
-import { derivePageIndexStatus, type CrawlIndexFilter } from "@/lib/dt/seo/gsc-pages";
+import { crawlPagesToCsv, derivePageIndexStatus, type CrawlIndexFilter } from "@/lib/dt/seo/gsc-pages";
 import { loadCrawlViewerSnapshot } from "@/lib/dt/seo/load-crawl-viewer";
 import { startOrganisationSiteCrawl } from "@/lib/dt/seo/start-org-crawl";
 import { syncCrawlJobHealth } from "@/lib/dt/seo/sync-crawl-job-health";
@@ -21,6 +21,7 @@ const querySchema = z.object({
   q: z.string().trim().max(200).optional(),
   url: z.string().trim().max(2048).optional(),
   index: z.enum(["all", "indexed", "not_indexed", "unknown", "gsc_only"]).optional(),
+  format: z.enum(["json", "csv"]).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });
@@ -72,6 +73,7 @@ export async function GET(req: Request) {
     q: url.searchParams.get("q") ?? undefined,
     url: url.searchParams.get("url") ?? undefined,
     index: url.searchParams.get("index") ?? undefined,
+    format: url.searchParams.get("format") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
     offset: url.searchParams.get("offset") ?? undefined,
   });
@@ -146,8 +148,8 @@ export async function GET(req: Request) {
     });
   }
 
-  const limit = parsed.data.limit ?? 80;
-  const offset = parsed.data.offset ?? 0;
+  const limit = parsed.data.format === "csv" ? 20_000 : (parsed.data.limit ?? 80);
+  const offset = parsed.data.format === "csv" ? 0 : (parsed.data.offset ?? 0);
   const search = parsed.data.q ? sanitizeSearchTerm(parsed.data.q) : "";
   const indexFilter = (parsed.data.index ?? "all") as CrawlIndexFilter;
 
@@ -164,6 +166,19 @@ export async function GET(req: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Crawl-Daten konnten nicht geladen werden.";
     return NextResponse.json({ ok: false, message }, { status: 500 });
+  }
+
+  if (parsed.data.format === "csv") {
+    const csv = crawlPagesToCsv(snapshot.pages);
+    const stamp = new Date().toISOString().slice(0, 10);
+    return new NextResponse(csv, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="seiten-indexstatus-${stamp}.csv"`,
+        "Cache-Control": "no-store",
+      },
+    });
   }
 
   const [{ count: crawledCount }, { count: withTextCount }, { data: latest }, activeCrawl, { data: lastCrawl }] =

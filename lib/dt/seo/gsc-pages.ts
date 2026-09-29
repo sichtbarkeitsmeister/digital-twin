@@ -78,6 +78,52 @@ export function indexStatusLabel(status: PageIndexStatus): string {
   return "Unbekannt";
 }
 
+function csvCell(value: string | number | boolean | null | undefined): string {
+  const raw =
+    value === null || value === undefined ? "" : typeof value === "number" ? String(value) : String(value);
+  if (/[;"\n\r]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
+  return raw;
+}
+
+/** Semicolon CSV for Excel (DE), including index status and GSC metrics. */
+export function crawlPagesToCsv(pages: CrawlViewerPage[]): string {
+  const header = [
+    "URL",
+    "Titel",
+    "H1",
+    "Meta-Description",
+    "Indexstatus",
+    "Im Crawl",
+    "In Search Console",
+    "Impressionen",
+    "Klicks",
+    "Position",
+    "Inspection",
+    "Inspection-Verdict",
+    "Ausgeschlossen",
+    "Gecrawlt am",
+  ];
+  const lines = pages.map((page) =>
+    [
+      csvCell(page.url),
+      csvCell(page.title),
+      csvCell(page.h1),
+      csvCell(page.meta_description),
+      csvCell(indexStatusLabel(page.indexStatus)),
+      csvCell(page.inCrawl ? "ja" : "nein"),
+      csvCell(page.inGsc ? "ja" : "nein"),
+      csvCell(page.gscImpressions),
+      csvCell(page.gscClicks),
+      csvCell(page.gscPosition),
+      csvCell(page.inspectionCoverage),
+      csvCell(page.inspectionVerdict),
+      csvCell(page.is_excluded ? "ja" : "nein"),
+      csvCell(page.crawled_at ? new Date(page.crawled_at).toISOString() : ""),
+    ].join(";"),
+  );
+  return `\uFEFF${[header.join(";"), ...lines].join("\r\n")}\r\n`;
+}
+
 type CrawlPageInput = {
   url: string;
   title: string | null;
