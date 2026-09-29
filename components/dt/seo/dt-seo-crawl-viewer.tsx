@@ -31,6 +31,7 @@ export type CrawlPageSummary = {
   inCrawl?: boolean;
   inGsc?: boolean;
   indexStatus?: PageIndexStatus;
+  indexReason?: string | null;
   gscClicks?: number | null;
   gscImpressions?: number | null;
   gscPosition?: number | null;
@@ -391,8 +392,10 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
               </div>
               <p className="mt-2 text-[11px] text-sbkm-ink-500 dark:text-white/45">{pageRange}</p>
               <p className="mt-1 text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
-                Indexiert = in den Search-Console-Leistungsdaten (letzte 90 Tage) oder per
-                URL-Inspection bestätigt. Nicht indexiert = bei uns bekannt, aber ohne GSC-Impressionen.
+                Indexiert = genau diese URL in den Search-Console-Leistungsdaten (90 Tage) oder
+                URL-Inspection PASS. www-/http-Varianten und Weiterleitungen zählen wie in GSC
+                als nicht indexiert. Den vollen Coverage-Bericht mit allen Ausschlussgründen
+                liefert Google nicht per API.
               </p>
             </div>
 
@@ -427,6 +430,11 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                         </p>
                         <div className="mt-1 flex flex-wrap gap-1">
                           <IndexBadge status={page.indexStatus} />
+                          {page.indexStatus === "not_indexed" && page.indexReason ? (
+                            <span className="line-clamp-1 text-[10px] text-sbkm-ink-500 dark:text-white/45">
+                              {page.indexReason}
+                            </span>
+                          ) : null}
                           {page.inGsc && !page.inCrawl ? (
                             <span className="inline-block rounded-pill bg-sbkm-navy/8 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sbkm-ink-600 dark:bg-white/10 dark:text-white/70">
                               Nur GSC
@@ -528,7 +536,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
 
                 <div className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle p-4">
                   <dl className="grid gap-4">
-                    {detail.gscImpressions != null || detail.inspectionCoverage ? (
+                    {detail.gscImpressions != null || detail.inspectionCoverage || detail.indexReason ? (
                       <div>
                         <dt className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55">
                           Search Console
@@ -547,6 +555,11 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                           ) : (
                             <p>Keine Impressionen in den letzten 90 Tagen.</p>
                           )}
+                          {detail.indexReason ? (
+                            <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
+                              Indexgrund: {detail.indexReason}
+                            </p>
+                          ) : null}
                           {detail.inspectionCoverage ? (
                             <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
                               URL-Inspection: {detail.inspectionCoverage}

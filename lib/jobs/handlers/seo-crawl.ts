@@ -178,8 +178,8 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
       crawledRows.push(excludedRow);
       return;
     }
-    const { page, links } = await fetchAndParse(item.url, origin);
-    crawledRows.push({ url: item.url, ...page, is_excluded: false });
+    const { page, links, finalUrl } = await fetchAndParse(item.url, origin);
+    crawledRows.push({ url: item.url, ...page, is_excluded: false, final_url: finalUrl });
     for (const link of links) {
       const n = normaliseUrl(link);
       if (n) newLinks.push({ url: n, depth: item.depth + 1 });
@@ -196,14 +196,26 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
       meta_description: r.meta_description,
       text_content: r.text_content,
       is_excluded: r.is_excluded,
+      final_url: r.final_url ?? r.url,
       crawled_at: now,
     }));
     for (let i = 0; i < payloadRows.length; i += 25) {
+      const chunk = payloadRows.slice(i, i + 25);
       const { error } = await supabase
         .from("dt_site_pages")
-        .upsert(payloadRows.slice(i, i + 25), { onConflict: "organisation_id,url" });
+        .upsert(chunk, { onConflict: "organisation_id,url" });
       if (error) {
-        return { ok: false, error: `Upsert failed: ${error.message}` };
+        if (/final_url/i.test(error.message)) {
+          const stripped = chunk.map(({ final_url: _ignored, ...rest }) => rest);
+          const retry = await supabase
+            .from("dt_site_pages")
+            .upsert(stripped, { onConflict: "organisation_id,url" });
+          if (retry.error) {
+            return { ok: false, error: `Upsert failed: ${retry.error.message}` };
+          }
+        } else {
+          return { ok: false, error: `Upsert failed: ${error.message}` };
+        }
       }
     }
   }

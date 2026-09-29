@@ -4,7 +4,14 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { resolveOrigin } from "@/lib/dt/seo/crawl-sitemap";
-import { crawlPagesToCsv, derivePageIndexStatus, type CrawlIndexFilter } from "@/lib/dt/seo/gsc-pages";
+import {
+  coverageUrlsEqual,
+  crawlPagesToCsv,
+  deriveIndexReason,
+  derivePageIndexStatus,
+  isCoverageRedirectVariant,
+  type CrawlIndexFilter,
+} from "@/lib/dt/seo/gsc-pages";
 import { loadCrawlViewerSnapshot } from "@/lib/dt/seo/load-crawl-viewer";
 import { startOrganisationSiteCrawl } from "@/lib/dt/seo/start-org-crawl";
 import { syncCrawlJobHealth } from "@/lib/dt/seo/sync-crawl-job-health";
@@ -29,6 +36,17 @@ const querySchema = z.object({
 function sanitizeSearchTerm(term: string): string {
   return term.replace(/[%,()]/g, " ").trim();
 }
+
+type SitePageDetail = {
+  url: string;
+  title: string | null;
+  h1: string | null;
+  meta_description: string | null;
+  text_content: string | null;
+  is_excluded: boolean;
+  crawled_at: string;
+  final_url?: string | null;
+};
 
 type CrawlStatusRow = {
   id: string;
@@ -97,12 +115,26 @@ export async function GET(req: Request) {
 
   if (parsed.data.url) {
     const pageUrl = parsed.data.url;
-    let { data: page } = await auth.supabase
-      .from("dt_site_pages")
-      .select("url,title,h1,meta_description,text_content,is_excluded,crawled_at")
-      .eq("organisation_id", orgId)
-      .eq("url", pageUrl)
-      .maybeSingle();
+    let page: SitePageDetail | null = null;
+    {
+      const first = await auth.supabase
+        .from("dt_site_pages")
+        .select("url,title,h1,meta_description,text_content,is_excluded,crawled_at,final_url")
+        .eq("organisation_id", orgId)
+        .eq("url", pageUrl)
+        .maybeSingle();
+      if (first.data) {
+        page = first.data as SitePageDetail;
+      } else if (first.error && /final_url/i.test(first.error.message)) {
+        const retry = await auth.supabase
+          .from("dt_site_pages")
+          .select("url,title,h1,meta_description,text_content,is_excluded,crawled_at")
+          .eq("organisation_id", orgId)
+          .eq("url", pageUrl)
+          .maybeSingle();
+        page = (retry.data as SitePageDetail | null) ?? null;
+      }
+    }
 
     if (!page) {
       const { data: fuzzy } = await auth.supabase
@@ -112,7 +144,7 @@ export async function GET(req: Request) {
         .ilike("url", `%${sanitizeSearchTerm(pageUrl).slice(-120)}%`)
         .limit(1)
         .maybeSingle();
-      page = fuzzy;
+      page = (fuzzy as SitePageDetail | null) ?? null;
     }
 
     const extra = await loadPageIndexExtras(service, orgId, page?.url ?? pageUrl);
@@ -120,11 +152,26 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, message: "Seite nicht gefunden." }, { status: 404 });
     }
 
+    const resolvedUrl = page?.url ?? extra.gsc?.url ?? pageUrl;
+    const gscExactMatch = extra.gsc ? coverageUrlsEqual(resolvedUrl, extra.gsc.url) : false;
+    const redirected = isCoverageRedirectVariant(
+      resolvedUrl,
+      page?.final_url ?? extra.gsc?.url ?? null,
+    );
     const inGsc = Boolean(extra.gsc);
+    const indexStatus = derivePageIndexStatus({
+      gscSynced: extra.gscSynced,
+      inGsc,
+      gscExactMatch,
+      redirected: redirected && !gscExactMatch,
+      inspectionCoverage: extra.inspection?.coverage_state,
+      inspectionVerdict: extra.inspection?.verdict,
+    });
+
     return NextResponse.json({
       ok: true,
       page: {
-        url: page?.url ?? extra.gsc?.url ?? pageUrl,
+        url: resolvedUrl,
         title: page?.title ?? null,
         h1: page?.h1 ?? null,
         meta_description: page?.meta_description ?? null,
@@ -133,11 +180,13 @@ export async function GET(req: Request) {
         crawled_at: page?.crawled_at ?? null,
         inCrawl: Boolean(page),
         inGsc,
-        indexStatus: derivePageIndexStatus({
-          gscSynced: extra.gscSynced,
-          inGsc,
+        indexStatus,
+        indexReason: deriveIndexReason({
+          status: indexStatus,
           inspectionCoverage: extra.inspection?.coverage_state,
-          inspectionVerdict: extra.inspection?.verdict,
+          redirected: redirected && !gscExactMatch,
+          redirectTarget: extra.gsc && !gscExactMatch ? extra.gsc.url : (page?.final_url ?? null),
+          gscExactMatch,
         }),
         gscClicks: extra.gsc?.clicks ?? null,
         gscImpressions: extra.gsc?.impressions ?? null,
