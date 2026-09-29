@@ -40,6 +40,9 @@ export function serializeTranscriptDetail(row: DtMeetingTranscriptRow): DtTransc
   };
 }
 
+/** Keep interview notes from crowding the model out of a normal reply. */
+const TRANSCRIPT_PROMPT_MAX_CHARS = 12_000;
+
 const LIST_SELECT =
   "id,organisation_id,filename,mime_type,title,notes,raw_text,summary,anbieter_markdown,personas_json,status,error_message,applied_at,uploaded_by,processed_at,created_at,updated_at";
 
@@ -110,5 +113,7 @@ export function formatTranscriptKnowledgeForPrompt(input: {
     }
   });
 
-  return blocks.join("\n");
+  const text = blocks.join("\n");
+  if (text.length <= TRANSCRIPT_PROMPT_MAX_CHARS) return text;
+  return `${text.slice(0, TRANSCRIPT_PROMPT_MAX_CHARS - 1).trimEnd()}…\n\n(Weitere Transkript-Auszüge wurden gekürzt, damit die Antwort noch ins Kontextfenster passt.)`;
 }

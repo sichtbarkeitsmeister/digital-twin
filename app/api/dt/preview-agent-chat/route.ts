@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { callDtAnthropicChat } from "@/lib/dt/anthropic-chat";
+import { callDtAnthropicChat, dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
 import { requireAuthUser } from "@/lib/dt/db";
 import { canManageDtAgents } from "@/lib/dt/org-access";
 import { buildDtSystemPrompt } from "@/lib/dt/prompts/build-system-prompt";
@@ -134,7 +134,7 @@ export async function POST(req: Request) {
       model: direct.model,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Probe-Chat fehlgeschlagen.";
+    const message = err instanceof Error ? dtChatFailureUserMessage(err) : "Probe-Chat fehlgeschlagen.";
     console.warn("[dt] preview-agent-chat:", message);
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { callDtAnthropicChat } from "@/lib/dt/anthropic-chat";
+import { callDtAnthropicChat, dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
 import {
   createdFilesToGhostMetadata,
   dtAttachmentInboundSchema,
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
       via: "anthropic_ghost",
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Ghost-Chat fehlgeschlagen.";
+    const message = err instanceof Error ? dtChatFailureUserMessage(err) : "Ghost-Chat fehlgeschlagen.";
     console.warn("[dt] ghost chat:", message);
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
