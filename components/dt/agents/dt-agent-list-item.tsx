@@ -398,7 +398,7 @@ export function DtAgentListItem(props: {
   const rowContent = (
     <div
       className={cn(
-        "flex flex-col gap-3 px-4 py-3.5 transition-colors sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4",
+        "flex min-w-0 flex-col gap-3 px-4 py-3.5 transition-colors sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4",
         !agent.is_enabled && "opacity-80",
         props.compact && "hover:bg-white/30 dark:hover:bg-white/[0.02]",
       )}
@@ -415,8 +415,8 @@ export function DtAgentListItem(props: {
           <Icon className="size-4 sm:size-5" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="truncate text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white sm:text-base">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <p className="min-w-0 max-w-full truncate text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white sm:text-base">
               {agent.name}
             </p>
             <AgentMetaBadges
@@ -425,7 +425,7 @@ export function DtAgentListItem(props: {
               showPromptBadges={props.canDirectlyEdit}
             />
           </div>
-          <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55 sm:text-sm">
+          <p className="mt-0.5 min-w-0 break-words text-xs text-sbkm-ink-600 dark:text-white/55 sm:text-sm">
             {agent.role ?? agentKindLabel(agent.kind, agent.slug)}
           </p>
         </div>
