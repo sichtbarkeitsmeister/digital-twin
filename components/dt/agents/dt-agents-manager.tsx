@@ -619,7 +619,9 @@ export function DtAgentsManager(props: {
   const agentsMainContent = (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
       <section className="grid min-w-0 gap-4">
-        <div className="relative">
+        {/* min-w-0: the row titles are nowrap, so without this the list's
+            min-content widens the card and it slides under the sidebar. */}
+        <div className="relative min-w-0">
           {initialLoading ? (
             <AgentsListSkeleton />
           ) : agents.length === 0 ? (
@@ -655,7 +657,7 @@ export function DtAgentsManager(props: {
               variant="subtle"
               padding="none"
               className={cn(
-                "relative overflow-hidden transition-opacity duration-150",
+                "relative w-full min-w-0 overflow-hidden transition-opacity duration-150",
                 refreshing && "opacity-60",
               )}
             >
@@ -740,7 +742,7 @@ export function DtAgentsManager(props: {
       </section>
 
       {showAdminChrome ? (
-        <div className="hidden lg:block">
+        <div className="hidden min-w-0 lg:block">
           {initialLoading ? (
             <AgentsSidebarSkeleton />
           ) : (
