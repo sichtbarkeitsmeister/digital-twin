@@ -10,6 +10,7 @@ import {
   derivePageIndexStatus,
   filterCrawlViewerPages,
   mapGscAnalyticsRows,
+  crawlPagesToCsv,
   mergeCrawlAndGscPages,
   shouldWaitForGscSync,
 } from "../lib/dt/seo/gsc-pages";
@@ -175,10 +176,56 @@ function testWaitForGsc() {
   console.log("gsc wait window: ok");
 }
 
+function testCsvExport() {
+  const csv = crawlPagesToCsv([
+    {
+      url: 'https://example.de/a;b',
+      title: 'Titel "X"',
+      h1: "H1",
+      meta_description: "Zeile 1\nZeile 2",
+      is_excluded: false,
+      crawled_at: "2026-09-29T10:00:00.000Z",
+      inCrawl: true,
+      inGsc: true,
+      indexStatus: "indexed",
+      gscClicks: 4,
+      gscImpressions: 80,
+      gscPosition: 3.2,
+      inspectionCoverage: null,
+      inspectionVerdict: null,
+    },
+    {
+      url: "https://example.de/geheim",
+      title: null,
+      h1: null,
+      meta_description: null,
+      is_excluded: true,
+      crawled_at: null,
+      inCrawl: true,
+      inGsc: false,
+      indexStatus: "not_indexed",
+      gscClicks: null,
+      gscImpressions: null,
+      gscPosition: null,
+      inspectionCoverage: "Crawled - currently not indexed",
+      inspectionVerdict: "NEUTRAL",
+    },
+  ]);
+
+  assert.equal(csv.startsWith("\uFEFF"), true);
+  assert.match(csv, /URL;Titel;H1;Meta-Description;Indexstatus;Im Crawl;In Search Console/);
+  assert.match(csv, /Indexiert;ja;ja;80;4;3.2/);
+  assert.match(csv, /Nicht indexiert;ja;nein;;;;Crawled - currently not indexed;NEUTRAL;ja;/);
+  assert.match(csv, /"https:\/\/example\.de\/a;b"/);
+  assert.match(csv, /"Titel ""X"""/);
+  console.log("csv export: ok");
+}
+
 testSameSite();
 testSitemapLocs();
 testIndexStatus();
 testMerge();
 testMapGscRows();
 testWaitForGsc();
+testCsvExport();
 console.log("All gsc crawl index tests passed.");

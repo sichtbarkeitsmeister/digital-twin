@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Download,
   ExternalLink,
   FileText,
   Globe,
@@ -97,6 +98,8 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   const [detail, setDetail] = useState<CrawlPageDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [downloadingCsv, setDownloadingCsv] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -219,6 +222,37 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
     return `${from}–${to} von ${total}`;
   }, [offset, total]);
 
+  async function downloadCsv() {
+    setDownloadingCsv(true);
+    setCsvError(null);
+    try {
+      const params = new URLSearchParams({
+        org: props.organisationId,
+        format: "csv",
+      });
+      if (debouncedSearch) params.set("q", debouncedSearch);
+      if (indexFilter !== "all") params.set("index", indexFilter);
+      const res = await fetch(`/api/dt/seo/crawl?${params}`);
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(payload?.message || "Download fehlgeschlagen.");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `seiten-indexstatus-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setCsvError(err instanceof Error ? err.message : "Download fehlgeschlagen.");
+    } finally {
+      setDownloadingCsv(false);
+    }
+  }
+
   const settingsHref = `/dashboard/verwaltung/seo?org=${encodeURIComponent(props.organisationId)}&tab=settings`;
 
   return (
@@ -239,23 +273,46 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
             <p className="text-sm text-sbkm-ink-600 dark:text-white/60">{props.organisationName}</p>
           ) : null}
         </div>
-        {stats ? (
-          <div className="flex flex-wrap gap-2 text-xs">
-            <StatPill label="Seiten gesamt" value={String(stats.counts?.total ?? stats.count)} />
-            <StatPill label="Indexiert" value={String(stats.counts?.indexed ?? "—")} />
-            <StatPill label="Nicht indexiert" value={String(stats.counts?.notIndexed ?? "—")} />
-            {stats.counts?.gscOnly ? (
-              <StatPill label="Nur in GSC" value={String(stats.counts.gscOnly)} />
-            ) : null}
-            <StatPill label="Mit Text" value={String(stats.withTextCount)} />
-            {stats.lastCrawledAt ? (
-              <StatPill
-                label="Zuletzt"
-                value={new Date(stats.lastCrawledAt).toLocaleString("de-DE")}
-              />
-            ) : null}
-          </div>
-        ) : null}
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          {stats && stats.count > 0 ? (
+            <button
+              type="button"
+              disabled={downloadingCsv}
+              onClick={() => void downloadCsv()}
+              title="Alle aktuell gefilterten Seiten inkl. Indexstatus als Excel-CSV"
+              className="inline-flex items-center gap-1.5 rounded-pill border border-sbkm-navy/15 bg-white/70 px-3 py-1.5 text-xs font-semibold text-sbkm-navy transition-colors hover:border-sbkm-navy/30 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white"
+            >
+              {downloadingCsv ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Download className="h-3.5 w-3.5" aria-hidden />
+              )}
+              Als CSV herunterladen
+            </button>
+          ) : null}
+          {csvError ? (
+            <p className="text-[11px] text-red-700 dark:text-red-300" role="alert">
+              {csvError}
+            </p>
+          ) : null}
+          {stats ? (
+            <div className="flex flex-wrap gap-2 text-xs">
+              <StatPill label="Seiten gesamt" value={String(stats.counts?.total ?? stats.count)} />
+              <StatPill label="Indexiert" value={String(stats.counts?.indexed ?? "—")} />
+              <StatPill label="Nicht indexiert" value={String(stats.counts?.notIndexed ?? "—")} />
+              {stats.counts?.gscOnly ? (
+                <StatPill label="Nur in GSC" value={String(stats.counts.gscOnly)} />
+              ) : null}
+              <StatPill label="Mit Text" value={String(stats.withTextCount)} />
+              {stats.lastCrawledAt ? (
+                <StatPill
+                  label="Zuletzt"
+                  value={new Date(stats.lastCrawledAt).toLocaleString("de-DE")}
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {activeCrawl && (activeCrawl.status === "queued" || activeCrawl.status === "running") ? (
