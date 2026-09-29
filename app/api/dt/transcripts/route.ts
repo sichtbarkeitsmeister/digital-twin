@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
+import { personasAwaitingConfirmation } from "@/lib/dt/transcripts/apply-knowledge";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
 import {
   listMeetingTranscripts,
@@ -36,9 +37,24 @@ export async function GET(req: Request) {
 
   try {
     const rows = await listMeetingTranscripts(auth.supabase, orgId);
+    const { data: agents } = await auth.supabase
+      .from("dt_agents")
+      .select("name,slug,kind")
+      .eq("organisation_id", orgId);
+    const matchAgents = (agents ?? []).map((agent) => ({
+      name: typeof agent.name === "string" ? agent.name : "",
+      slug: typeof agent.slug === "string" ? agent.slug : null,
+      kind: typeof agent.kind === "string" ? agent.kind : "",
+    }));
     return NextResponse.json({
       ok: true,
-      transcripts: rows.map(serializeTranscriptListItem),
+      transcripts: rows.map((row) => {
+        const item = serializeTranscriptListItem(row);
+        return {
+          ...item,
+          pendingPersonas: personasAwaitingConfirmation(item.personas, matchAgents),
+        };
+      }),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Transkripte konnten nicht geladen werden.";

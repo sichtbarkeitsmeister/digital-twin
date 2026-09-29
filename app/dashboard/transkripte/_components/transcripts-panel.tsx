@@ -16,6 +16,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardContent,
@@ -26,7 +27,10 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { DtTranscriptListItem } from "@/lib/dt/transcripts/types";
+import type {
+  DtTranscriptListItem,
+  DtTranscriptPersonaExtract,
+} from "@/lib/dt/transcripts/types";
 import { readQuestionnaireFileText } from "@/lib/surveys/read-questionnaire-file-text";
 import { cn } from "@/lib/utils";
 
@@ -88,6 +92,8 @@ export function TranscriptsPanel(props: {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [selectedNames, setSelectedNames] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [filename, setFilename] = useState<string | null>(null);
@@ -154,7 +160,7 @@ export function TranscriptsPanel(props: {
         ok?: boolean;
         message?: string;
         transcript?: DtTranscriptListItem;
-        createdPersonaIds?: string[];
+        pendingPersonas?: DtTranscriptPersonaExtract[];
         updatedPersonaIds?: string[];
         warnings?: string[];
       };
@@ -163,13 +169,21 @@ export function TranscriptsPanel(props: {
         await refresh();
         return;
       }
-      setItems((prev) => prev.map((row) => (row.id === id ? json.transcript! : row)));
-      const created = json.createdPersonaIds?.length ?? 0;
+      const pending = json.pendingPersonas ?? json.transcript.pendingPersonas ?? [];
+      setItems((prev) =>
+        prev.map((row) =>
+          row.id === id ? { ...json.transcript!, pendingPersonas: pending } : row,
+        ),
+      );
+      setSelectedNames((prev) => ({ ...prev, [id]: [] }));
       const updated = json.updatedPersonaIds?.length ?? 0;
+      const pendingCount = pending.length;
       toast.success(
-        created || updated
-          ? `Ausgewertet. ${created} Avatar${created === 1 ? "" : "e"} angelegt, ${updated} aktualisiert.`
-          : "Ausgewertet und dem Twin-Wissen zugeordnet.",
+        pendingCount
+          ? `Ausgewertet. ${pendingCount} Persona${pendingCount === 1 ? "" : "s"} warten auf Bestätigung.`
+          : updated
+            ? `Ausgewertet. ${updated} bestehende Persona${updated === 1 ? "" : "s"} ergänzt.`
+            : "Ausgewertet. Anbieterwissen wurde übernommen.",
       );
       if (json.warnings?.length) {
         toast.message(json.warnings.slice(0, 3).join(" · "));
@@ -224,6 +238,64 @@ export function TranscriptsPanel(props: {
     }
   }
 
+  function togglePersona(transcriptId: string, name: string, checked: boolean) {
+    setSelectedNames((prev) => {
+      const current = prev[transcriptId] ?? [];
+      const next = checked
+        ? [...current, name]
+        : current.filter((item) => item !== name);
+      return { ...prev, [transcriptId]: next };
+    });
+  }
+
+  async function confirmPersonas(item: DtTranscriptListItem) {
+    const names = selectedNames[item.id] ?? [];
+    if (names.length === 0) {
+      toast.error("Bitte mindestens eine Persona auswählen.");
+      return;
+    }
+    setConfirmingId(item.id);
+    try {
+      const res = await fetch(`/api/dt/transcripts/${encodeURIComponent(item.id)}/personas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ names }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        createdNames?: string[];
+        pendingPersonas?: DtTranscriptPersonaExtract[];
+        warnings?: string[];
+      };
+      if (!res.ok || !json.ok) {
+        toast.error(json.message ?? "Personas konnten nicht angelegt werden.");
+        return;
+      }
+      const created = json.createdNames?.length ?? 0;
+      setItems((prev) =>
+        prev.map((row) =>
+          row.id === item.id
+            ? { ...row, pendingPersonas: json.pendingPersonas ?? [] }
+            : row,
+        ),
+      );
+      setSelectedNames((prev) => ({ ...prev, [item.id]: [] }));
+      toast.success(
+        created
+          ? `${created} Persona${created === 1 ? "" : "s"} angelegt.`
+          : "Keine neue Persona angelegt.",
+      );
+      if (json.warnings?.length) {
+        toast.message(json.warnings.slice(0, 3).join(" · "));
+      }
+    } catch {
+      toast.error("Personas konnten nicht angelegt werden.");
+    } finally {
+      setConfirmingId(null);
+    }
+  }
+
   async function remove(id: string) {
     if (!window.confirm("Dieses Transkript wirklich löschen?")) return;
     const res = await fetch(`/api/dt/transcripts/${encodeURIComponent(id)}`, {
@@ -263,9 +335,8 @@ export function TranscriptsPanel(props: {
         <CardHeader>
           <CardTitle className="text-base">Neues Transkript</CardTitle>
           <CardDescription>
-            Nach dem Kundeninterview hier hochladen. Der Twin liest das Gespräch, zieht
-            Anbieterwissen (Unternehmen) und Kundenwissen (A-Mandate / Personas) und speichert
-            beides.
+            Nach dem Kundeninterview hier hochladen. Der Twin übernimmt das Anbieterwissen
+            automatisch. Erkannte Personas werden erst angelegt, wenn du sie bestätigst.
           </CardDescription>
         </CardHeader>
         <CardContent
@@ -388,8 +459,8 @@ export function TranscriptsPanel(props: {
               : `${items.length} ${items.length === 1 ? "Transkript" : "Transkripte"}`}
           </CardTitle>
           <CardDescription>
-            Gespeicherte Interviews dieser Organisation. Ausgewertete Inhalte fließen in den
-            DigitalTwin (SEO-Berater und Personas).
+            Gespeicherte Interviews dieser Organisation. Anbieterwissen fließt in den
+            SEO-Berater. Neue Personas legt nur eine Bestätigung an.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -488,6 +559,68 @@ export function TranscriptsPanel(props: {
                         </Button>
                       </div>
                     </div>
+                    {(item.pendingPersonas ?? []).length > 0 ? (
+                      <div className="mt-3 grid gap-3 rounded-lg border border-sbkm-navy/10 bg-sbkm-mint/[0.06] p-3 dark:border-white/10">
+                        <div className="grid gap-1">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+                            Erkannte Personas
+                          </p>
+                          <p className="text-sm text-primary">
+                            Diese Typen stehen im Transkript. Es wird nichts angelegt, solange du
+                            keine auswählst.
+                          </p>
+                        </div>
+                        <ul className="grid gap-2">
+                          {item.pendingPersonas.map((persona, index) => {
+                            const checked = (selectedNames[item.id] ?? []).includes(persona.name);
+                            const inputId = `persona-${item.id}-${index}`;
+                            return (
+                              <li key={persona.name} className="flex items-start gap-2">
+                                <Checkbox
+                                  id={inputId}
+                                  className="mt-0.5"
+                                  checked={checked}
+                                  disabled={confirmingId === item.id}
+                                  onCheckedChange={(value) =>
+                                    togglePersona(item.id, persona.name, value === true)
+                                  }
+                                />
+                                <label htmlFor={inputId} className="grid gap-0.5 text-sm">
+                                  <span className="font-medium text-primary">
+                                    {persona.name}
+                                    {persona.role ? ` · ${persona.role}` : ""}{" "}
+                                    <span className="font-normal text-secondary">
+                                      ({persona.priority})
+                                    </span>
+                                  </span>
+                                  {persona.description ? (
+                                    <span className="text-xs text-secondary">
+                                      {persona.description}
+                                    </span>
+                                  ) : null}
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        <div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={
+                              confirmingId === item.id ||
+                              (selectedNames[item.id] ?? []).length === 0
+                            }
+                            onClick={() => void confirmPersonas(item)}
+                          >
+                            {confirmingId === item.id ? (
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                            ) : null}
+                            Ausgewählte anlegen
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
                     {open ? (
                       <pre
                         className={cn(

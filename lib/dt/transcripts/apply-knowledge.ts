@@ -93,15 +93,30 @@ type AgentRow = {
   organisation_id: string;
 };
 
-function findMatchingAgent(
-  agents: AgentRow[],
+export type TranscriptPersonaMatchAgent = {
+  name: string;
+  slug: string | null;
+  kind: string;
+};
+
+function findMatchingAgent<T extends { name: string; slug: string | null }>(
+  agents: T[],
   persona: DtTranscriptPersonaExtract,
-): AgentRow | null {
+): T | null {
   const key = normalizePersonaKey(persona.name);
   const slug = slugFromPersonaName(persona.name);
   const exactSlug = agents.find((a) => (a.slug ?? "") === slug);
   if (exactSlug) return exactSlug;
   return agents.find((a) => normalizePersonaKey(a.name) === key) ?? null;
+}
+
+/** Personas from an extract that do not already exist as a Wunschkunde/Persona agent. */
+export function personasAwaitingConfirmation(
+  personas: DtTranscriptPersonaExtract[],
+  agents: TranscriptPersonaMatchAgent[],
+): DtTranscriptPersonaExtract[] {
+  const prospect = agents.filter((agent) => isProspectPersonaKind(agent.kind, agent.slug));
+  return personas.filter((persona) => !findMatchingAgent(prospect, persona));
 }
 
 export async function applyTranscriptExtractToOrg(input: {
@@ -110,12 +125,12 @@ export async function applyTranscriptExtractToOrg(input: {
   extract: DtTranscriptExtract;
 }): Promise<{
   seoAgentId: string | null;
-  createdPersonaIds: string[];
   updatedPersonaIds: string[];
+  pendingPersonas: DtTranscriptPersonaExtract[];
   warnings: string[];
 }> {
   const warnings: string[] = [];
-  const createdPersonaIds: string[] = [];
+  const pendingPersonas: DtTranscriptPersonaExtract[] = [];
   const updatedPersonaIds: string[] = [];
 
   const { data: processed } = await input.supabase
@@ -182,9 +197,6 @@ export async function applyTranscriptExtractToOrg(input: {
   const prospectAgents = ((agentRows ?? []) as AgentRow[]).filter((a) =>
     isProspectPersonaKind(a.kind, a.slug),
   );
-  const usedSlugs = new Set(
-    ((agentRows ?? []) as AgentRow[]).map((a) => a.slug).filter((s): s is string => Boolean(s)),
-  );
 
   for (const persona of input.extract.personas) {
     const match = findMatchingAgent(prospectAgents, persona);
@@ -206,9 +218,52 @@ export async function applyTranscriptExtractToOrg(input: {
       continue;
     }
 
-    const append = ensureAvatarGlobalPromptAnchor(
-      persona.promptAppend.trim() || inner,
-    );
+    pendingPersonas.push(persona);
+  }
+
+  return { seoAgentId, updatedPersonaIds, pendingPersonas, warnings };
+}
+
+/**
+ * Creates persona agents only for names the user confirmed.
+ * Names that already exist as agents are skipped.
+ */
+export async function createConfirmedTranscriptPersonas(input: {
+  supabase: SupabaseClient;
+  organisationId: string;
+  personas: DtTranscriptPersonaExtract[];
+  names: string[];
+}): Promise<{ createdPersonaIds: string[]; createdNames: string[]; warnings: string[] }> {
+  const warnings: string[] = [];
+  const createdPersonaIds: string[] = [];
+  const createdNames: string[] = [];
+  const wanted = new Set(input.names.map((name) => normalizePersonaKey(name)).filter(Boolean));
+  if (wanted.size === 0) {
+    return { createdPersonaIds, createdNames, warnings };
+  }
+
+  const { data: agentRows } = await input.supabase
+    .from("dt_agents")
+    .select("id,name,slug,kind,prompt_append,organisation_id")
+    .eq("organisation_id", input.organisationId);
+
+  const allAgents = (agentRows ?? []) as AgentRow[];
+  const prospectAgents = allAgents.filter((agent) =>
+    isProspectPersonaKind(agent.kind, agent.slug),
+  );
+  const usedSlugs = new Set(
+    allAgents.map((agent) => agent.slug).filter((slug): slug is string => Boolean(slug)),
+  );
+
+  for (const persona of input.personas) {
+    if (!wanted.has(normalizePersonaKey(persona.name))) continue;
+    if (findMatchingAgent(prospectAgents, persona)) {
+      warnings.push(`${persona.name}: existiert bereits und wurde nicht erneut angelegt.`);
+      continue;
+    }
+
+    const inner = personaBlock(persona);
+    const append = ensureAvatarGlobalPromptAnchor(persona.promptAppend.trim() || inner);
     if (append.length < 220) {
       warnings.push(`${persona.name}: zu wenig Text für einen neuen Avatar.`);
       continue;
@@ -244,18 +299,21 @@ export async function applyTranscriptExtractToOrg(input: {
       continue;
     }
     const id = typeof created === "string" ? created : null;
-    if (id) {
-      createdPersonaIds.push(id);
-      prospectAgents.push({
-        id,
-        name: persona.name,
-        slug,
-        kind: "persona",
-        prompt_append: append,
-        organisation_id: input.organisationId,
-      });
+    if (!id) {
+      warnings.push(`${persona.name}: konnte nicht angelegt werden.`);
+      continue;
     }
+    createdPersonaIds.push(id);
+    createdNames.push(persona.name);
+    prospectAgents.push({
+      id,
+      name: persona.name,
+      slug,
+      kind: "persona",
+      prompt_append: append,
+      organisation_id: input.organisationId,
+    });
   }
 
-  return { seoAgentId, createdPersonaIds, updatedPersonaIds, warnings };
+  return { createdPersonaIds, createdNames, warnings };
 }
