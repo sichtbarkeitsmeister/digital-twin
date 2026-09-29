@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
 import {
   pollAgentGenerationBatchFromSurvey,
   startAgentGenerationBatchFromSurvey,
@@ -181,7 +182,9 @@ export async function POST(
       organisationName: started.organisationName,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Generierung fehlgeschlagen.";
+    console.error("[survey-to-agent] generate failed:", err);
+    const message =
+      err instanceof Error ? dtChatFailureUserMessage(err) : "Generierung fehlgeschlagen.";
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 }

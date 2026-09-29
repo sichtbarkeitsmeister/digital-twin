@@ -122,7 +122,15 @@ function testFailureMessages() {
       status: 400,
       error: { type: "invalid_request_error", message: "Your credit balance is too low." },
     }),
-    "Das KI-Guthaben ist aufgebraucht. Bitte das Anthropic-Konto prüfen.",
+    "Das Anthropic-Guthaben ist aufgebraucht. Unter Plans & Billing Credits kaufen — danach antworten Chat und Agent-Generierung wieder.",
+  );
+  assert.equal(
+    dtChatFailureUserMessage(
+      new Error(
+        '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_test"}',
+      ),
+    ),
+    "Das Anthropic-Guthaben ist aufgebraucht. Unter Plans & Billing Credits kaufen — danach antworten Chat und Agent-Generierung wieder.",
   );
   assert.equal(
     dtChatFailureUserMessage(new Error("401 invalid x-api-key")),

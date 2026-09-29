@@ -507,7 +507,7 @@ export function dtChatFailureUserMessage(err: unknown): string {
     return "Der Chat ist zu lang für eine KI-Antwort. Bitte einen neuen Chat starten.";
   }
   if (/credit balance|insufficient credits|billing|purchase credits/i.test(blob)) {
-    return "Das KI-Guthaben ist aufgebraucht. Bitte das Anthropic-Konto prüfen.";
+    return "Das Anthropic-Guthaben ist aufgebraucht. Unter Plans & Billing Credits kaufen — danach antworten Chat und Agent-Generierung wieder.";
   }
   if (/invalid x-api-key|authentication_error|permission_error/i.test(blob)) {
     return "Die KI-Anmeldung wurde abgelehnt. Bitte den API-Schlüssel prüfen.";
