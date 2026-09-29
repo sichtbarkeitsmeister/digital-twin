@@ -58,6 +58,8 @@ export type DtTranscriptListItem = {
   summary: string | null;
   anbieterMarkdown: string | null;
   personas: DtTranscriptPersonaExtract[];
+  /** Recognized in the transcript and not yet an agent. Never created without confirmation. */
+  pendingPersonas: DtTranscriptPersonaExtract[];
   status: DtTranscriptStatus;
   errorMessage: string | null;
   appliedAt: string | null;

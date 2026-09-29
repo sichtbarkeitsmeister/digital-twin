@@ -121,12 +121,13 @@ export async function POST(
       console.warn("[dt/transcripts] apply save:", applySaveError.message);
     }
 
+    const transcript = serializeTranscriptListItem(
+      (finalRow ?? saved) as DtMeetingTranscriptRow,
+    );
     return NextResponse.json({
       ok: true,
-      transcript: serializeTranscriptListItem(
-        (finalRow ?? saved) as DtMeetingTranscriptRow,
-      ),
-      createdPersonaIds: applied.createdPersonaIds,
+      transcript: { ...transcript, pendingPersonas: applied.pendingPersonas },
+      pendingPersonas: applied.pendingPersonas,
       updatedPersonaIds: applied.updatedPersonaIds,
       warnings: applied.warnings,
     });

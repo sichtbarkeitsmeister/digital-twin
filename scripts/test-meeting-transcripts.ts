@@ -11,7 +11,10 @@ import {
   stripTrailingCommasInJson,
   tryParseJsonObject,
 } from "../lib/ai/anthropic-helpers";
-import { mergeMarkedBlock } from "../lib/dt/transcripts/apply-knowledge";
+import {
+  mergeMarkedBlock,
+  personasAwaitingConfirmation,
+} from "../lib/dt/transcripts/apply-knowledge";
 import { jsonFromTranscriptResponse } from "../lib/dt/transcripts/extract";
 import { formatTranscriptKnowledgeForPrompt } from "../lib/dt/transcripts/format-for-prompt";
 import { parseTranscriptExtractJson } from "../lib/dt/transcripts/parse-extract";
@@ -235,11 +238,47 @@ function testJsonFromTranscriptResponse() {
   console.log("json from transcript response: ok");
 }
 
+function testPersonasAwaitConfirmation() {
+  const persona = {
+    name: "Der Unternehmer im Gesellschafterkonflikt",
+    role: "Gesellschafter",
+    priority: "A" as const,
+    isPrimary: true,
+    description: "Streit in der GmbH.",
+    goals: null,
+    pains: null,
+    objections: null,
+    language: null,
+    buyingTriggers: null,
+    promptAppend: "Ich bin Gesellschafter.",
+  };
+  const pending = personasAwaitingConfirmation(
+    [persona],
+    [{ name: "Christiane", slug: "christiane", kind: "persona" }],
+  );
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0]?.name, persona.name);
+
+  const matched = personasAwaitingConfirmation(
+    [persona],
+    [{ name: persona.name, slug: "anderer_slug", kind: "persona" }],
+  );
+  assert.equal(matched.length, 0);
+
+  const seoDoesNotMatch = personasAwaitingConfirmation(
+    [persona],
+    [{ name: persona.name, slug: "seo_advisor", kind: "seo_advisor" }],
+  );
+  assert.equal(seoDoesNotMatch.length, 1);
+  console.log("personas await confirmation: ok");
+}
+
 testSanitizeAndSlug();
 testParseExtract();
 testParseExtractSkipsBrokenPersona();
 testLlmJsonRepair();
 testJsonFromTranscriptResponse();
 testMergeBlock();
+testPersonasAwaitConfirmation();
 testPromptFormatAndGating();
 console.log("ok: meeting transcripts");

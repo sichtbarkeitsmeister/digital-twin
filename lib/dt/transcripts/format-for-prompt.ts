@@ -22,6 +22,7 @@ export function serializeTranscriptListItem(
     summary: row.summary,
     anbieterMarkdown: row.anbieter_markdown,
     personas: personasFromJson(row.personas_json),
+    pendingPersonas: [],
     status: row.status,
     errorMessage: row.error_message,
     appliedAt: row.applied_at,
