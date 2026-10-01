@@ -18,6 +18,7 @@ type SitePageRow = {
   meta_description: string | null;
   is_excluded: boolean;
   crawled_at: string;
+  final_url?: string | null;
 };
 
 async function fetchAllRows<T>(
@@ -52,17 +53,30 @@ export async function loadCrawlViewerSnapshot(input: {
 
   const [crawled, gscPages, inspections] = await Promise.all([
     fetchAllRows<SitePageRow>(async (from, to) => {
-      const { data, error } = await supabase
+      const withFinal = await supabase
+        .from("dt_site_pages")
+        .select("url,title,h1,meta_description,is_excluded,crawled_at,final_url")
+        .eq("organisation_id", input.organisationId)
+        .order("url", { ascending: true })
+        .range(from, to);
+      if (!withFinal.error) {
+        return (withFinal.data ?? []) as SitePageRow[];
+      }
+      if (!/final_url/i.test(withFinal.error.message)) {
+        if (/does not exist|schema cache/i.test(withFinal.error.message)) return [];
+        throw new Error(withFinal.error.message);
+      }
+      const fallback = await supabase
         .from("dt_site_pages")
         .select("url,title,h1,meta_description,is_excluded,crawled_at")
         .eq("organisation_id", input.organisationId)
         .order("url", { ascending: true })
         .range(from, to);
-      if (error) {
-        if (/does not exist|schema cache/i.test(error.message)) return [];
-        throw new Error(error.message);
+      if (fallback.error) {
+        if (/does not exist|schema cache/i.test(fallback.error.message)) return [];
+        throw new Error(fallback.error.message);
       }
-      return (data ?? []) as SitePageRow[];
+      return (fallback.data ?? []) as SitePageRow[];
     }),
     fetchAllRows<GscPageRow>(async (from, to) => {
       const { data, error } = await supabase

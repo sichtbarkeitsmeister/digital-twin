@@ -7,10 +7,13 @@ import {
 } from "../lib/dt/seo/crawl-url";
 import {
   countCrawlViewerPages,
+  coverageUrlsEqual,
+  crawlPagesToCsv,
+  deriveIndexReason,
   derivePageIndexStatus,
   filterCrawlViewerPages,
+  isCoverageRedirectVariant,
   mapGscAnalyticsRows,
-  crawlPagesToCsv,
   mergeCrawlAndGscPages,
   shouldWaitForGscSync,
 } from "../lib/dt/seo/gsc-pages";
@@ -71,6 +74,25 @@ function testIndexStatus() {
     }),
     "not_indexed",
   );
+  assert.equal(
+    derivePageIndexStatus({ gscSynced: true, inGsc: true, gscExactMatch: false }),
+    "not_indexed",
+  );
+  assert.equal(
+    derivePageIndexStatus({ gscSynced: true, inGsc: true, redirected: true }),
+    "not_indexed",
+  );
+  assert.equal(isCoverageRedirectVariant("https://example.de/a", "https://www.example.de/a"), true);
+  assert.equal(isCoverageRedirectVariant("https://www.example.de/a", "https://www.example.de/a"), false);
+  assert.equal(coverageUrlsEqual("https://www.example.de/a/", "https://www.example.de/a"), true);
+  assert.equal(
+    deriveIndexReason({
+      status: "not_indexed",
+      gscExactMatch: false,
+      redirectTarget: "https://www.example.de/a",
+    }),
+    "Seite mit Weiterleitung → https://www.example.de/a",
+  );
   console.log("index status: ok");
 }
 
@@ -120,24 +142,35 @@ function testMerge() {
     origin: "https://example.de",
   });
 
-  assert.equal(merged.length, 3);
-  const home = merged.find((p) => p.url.includes("/home"));
-  assert.equal(home?.inGsc, true);
-  assert.equal(home?.indexStatus, "indexed");
+  assert.equal(merged.length, 4);
+  const crawledHome = merged.find((p) => p.url === "https://example.de/home");
+  assert.equal(crawledHome?.inGsc, true);
+  assert.equal(crawledHome?.indexStatus, "not_indexed");
+  assert.equal(crawledHome?.isRedirect, true);
+  assert.match(crawledHome?.indexReason ?? "", /Seite mit Weiterleitung/);
+  assert.equal(crawledHome?.redirectTarget, "https://www.example.de/home");
+  const indexedHome = merged.find((p) => p.url === "https://www.example.de/home");
+  assert.equal(indexedHome?.inCrawl, false);
+  assert.equal(indexedHome?.indexStatus, "indexed");
+  assert.equal(indexedHome?.isRedirect, false);
   const secret = merged.find((p) => p.url.includes("/geheim"));
   assert.equal(secret?.indexStatus, "not_indexed");
+  assert.equal(secret?.isRedirect, false);
   const gscOnly = merged.find((p) => p.url.includes("/gsc-only"));
   assert.equal(gscOnly?.inCrawl, false);
   assert.equal(gscOnly?.indexStatus, "indexed");
 
   const filtered = filterCrawlViewerPages(merged, { index: "not_indexed" });
-  assert.equal(filtered.length, 1);
-  assert.equal(filtered[0]?.url.includes("/geheim"), true);
+  assert.equal(filtered.length, 2);
+  const redirects = filterCrawlViewerPages(merged, { index: "redirect" });
+  assert.equal(redirects.length, 1);
+  assert.equal(redirects[0]?.url, "https://example.de/home");
 
   const counts = countCrawlViewerPages(merged);
   assert.equal(counts.indexed, 2);
-  assert.equal(counts.notIndexed, 1);
-  assert.equal(counts.gscOnly, 1);
+  assert.equal(counts.notIndexed, 2);
+  assert.equal(counts.gscOnly, 2);
+  assert.equal(counts.redirects, 1);
   console.log("merge + filter: ok");
 }
 
@@ -188,6 +221,9 @@ function testCsvExport() {
       inCrawl: true,
       inGsc: true,
       indexStatus: "indexed",
+      indexReason: null,
+      isRedirect: false,
+      redirectTarget: null,
       gscClicks: 4,
       gscImpressions: 80,
       gscPosition: 3.2,
@@ -204,6 +240,9 @@ function testCsvExport() {
       inCrawl: true,
       inGsc: false,
       indexStatus: "not_indexed",
+      indexReason: "Gecrawlt, derzeit nicht indexiert",
+      isRedirect: false,
+      redirectTarget: null,
       gscClicks: null,
       gscImpressions: null,
       gscPosition: null,
@@ -213,9 +252,9 @@ function testCsvExport() {
   ]);
 
   assert.equal(csv.startsWith("\uFEFF"), true);
-  assert.match(csv, /URL;Titel;H1;Meta-Description;Indexstatus;Im Crawl;In Search Console/);
-  assert.match(csv, /Indexiert;ja;ja;80;4;3.2/);
-  assert.match(csv, /Nicht indexiert;ja;nein;;;;Crawled - currently not indexed;NEUTRAL;ja;/);
+  assert.match(csv, /URL;Titel;H1;Meta-Description;Indexstatus;Indexgrund;Weiterleitung;Weiterleitung-Ziel;Im Crawl;In Search Console/);
+  assert.match(csv, /Indexiert;;nein;;ja;ja;80;4;3.2/);
+  assert.match(csv, /Nicht indexiert;Gecrawlt, derzeit nicht indexiert;nein;;ja;nein;;;;Crawled - currently not indexed;NEUTRAL;ja;/);
   assert.match(csv, /"https:\/\/example\.de\/a;b"/);
   assert.match(csv, /"Titel ""X"""/);
   console.log("csv export: ok");

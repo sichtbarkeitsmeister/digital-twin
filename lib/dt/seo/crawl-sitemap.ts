@@ -43,6 +43,7 @@ export type DtCrawledPage = {
   meta_description: string | null;
   text_content: string | null;
   is_excluded: boolean;
+  final_url?: string | null;
 };
 
 type ParsedPage = {
@@ -253,16 +254,21 @@ function decodeHtml(buf: ArrayBuffer, contentType: string): string {
 async function fetchPageOnce(
   url: string,
   origin: string,
-): Promise<{ page: Omit<DtCrawledPage, "url" | "is_excluded">; links: string[] } | null> {
+): Promise<{
+  page: Omit<DtCrawledPage, "url" | "is_excluded" | "final_url">;
+  links: string[];
+  finalUrl: string;
+} | null> {
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/xhtml+xml" },
     signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
     redirect: "follow",
   });
+  const finalUrl = res.url || url;
   const contentType = res.headers.get("content-type") ?? "";
   if (res.ok && contentType.includes("text/html")) {
     const html = decodeHtml(await res.arrayBuffer(), contentType);
-    const parsed = parsePage(html, res.url || url, origin);
+    const parsed = parsePage(html, finalUrl, origin);
     return {
       page: {
         title: parsed.title,
@@ -271,16 +277,17 @@ async function fetchPageOnce(
         text_content: parsed.text_content,
       },
       links: parsed.links,
+      finalUrl,
     };
   }
-  return null;
+  return { page: { title: null, h1: null, meta_description: null, text_content: null }, links: [], finalUrl };
 }
 
 /** Fetch and parse a single page; retries once on network/timeout errors. */
 export async function fetchAndParse(
   url: string,
   origin: string,
-): Promise<{ page: Omit<DtCrawledPage, "url" | "is_excluded">; links: string[] }> {
+): Promise<{ page: Omit<DtCrawledPage, "url" | "is_excluded">; links: string[]; finalUrl: string }> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const result = await fetchPageOnce(url, origin);
@@ -293,6 +300,7 @@ export async function fetchAndParse(
   return {
     page: { title: null, h1: null, meta_description: null, text_content: null },
     links: [],
+    finalUrl: url,
   };
 }
 

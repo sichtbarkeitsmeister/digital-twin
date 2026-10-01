@@ -35,6 +35,11 @@ export type CrawlViewerPage = {
   inCrawl: boolean;
   inGsc: boolean;
   indexStatus: PageIndexStatus;
+  /** Human-readable GSC-style reason when not indexed. */
+  indexReason: string | null;
+  /** True when the page is a redirect / www-http variant (GSC: Seite mit Weiterleitung). */
+  isRedirect: boolean;
+  redirectTarget: string | null;
   gscClicks: number | null;
   gscImpressions: number | null;
   gscPosition: number | null;
@@ -42,16 +47,68 @@ export type CrawlViewerPage = {
   inspectionVerdict: string | null;
 };
 
-export type CrawlIndexFilter = "all" | "indexed" | "not_indexed" | "unknown" | "gsc_only";
+export type CrawlIndexFilter = "all" | "indexed" | "not_indexed" | "unknown" | "gsc_only" | "redirect";
 
 const INDEXED_COVERAGE =
   /submitted and indexed|indexed, not submitted|indexed, though blocked/i;
 const NOT_INDEXED_COVERAGE =
   /currently not indexed|unknown to google|excluded|not found|soft 404|blocked by robots|page with redirect|alternate page|duplicate/i;
 
+/** True when two URLs are the same after normalise (keeps www + scheme). */
+export function coverageUrlsEqual(a: string, b: string): boolean {
+  return (normaliseUrl(a) ?? a) === (normaliseUrl(b) ?? b);
+}
+
+/**
+ * GSC Coverage treats www/non-www, http/https and other landed URLs as
+ * separate entries. The requested URL is then usually "Seite mit Weiterleitung".
+ */
+export function isCoverageRedirectVariant(pageUrl: string, otherUrl: string | null | undefined): boolean {
+  if (!otherUrl) return false;
+  return !coverageUrlsEqual(pageUrl, otherUrl);
+}
+
+const COVERAGE_LABEL_DE: Array<{ test: RegExp; label: string }> = [
+  { test: /page with redirect/i, label: "Seite mit Weiterleitung" },
+  { test: /crawled - currently not indexed/i, label: "Gecrawlt, derzeit nicht indexiert" },
+  { test: /discovered - currently not indexed/i, label: "Gefunden, derzeit nicht indexiert" },
+  { test: /alternate page|duplicate/i, label: "Alternativseite mit kanonischem Tag" },
+  { test: /not found|soft 404/i, label: "Nicht gefunden (404)" },
+  { test: /blocked by robots/i, label: "Durch robots.txt blockiert" },
+  { test: /excluded by.?noindex/i, label: "Durch noindex ausgeschlossen" },
+  { test: /unknown to google/i, label: "Google unbekannt" },
+];
+
+export function isRedirectCoverage(coverage: string | null | undefined): boolean {
+  return /page with redirect/i.test(String(coverage ?? ""));
+}
+
+export function deriveRedirectMeta(input: {
+  redirected?: boolean;
+  redirectTarget?: string | null;
+  inspectionCoverage?: string | null;
+}): { isRedirect: boolean; redirectTarget: string | null } {
+  return {
+    isRedirect: Boolean(input.redirected) || isRedirectCoverage(input.inspectionCoverage),
+    redirectTarget: input.redirectTarget?.trim() || null,
+  };
+}
+
+export function coverageStateLabel(coverage: string | null | undefined): string | null {
+  const raw = String(coverage ?? "").trim();
+  if (!raw) return null;
+  for (const row of COVERAGE_LABEL_DE) {
+    if (row.test.test(raw)) return row.label;
+  }
+  return raw;
+}
+
 export function derivePageIndexStatus(input: {
   gscSynced: boolean;
   inGsc: boolean;
+  /** Exact Search Analytics URL (www/scheme must match). Default true when omitted. */
+  gscExactMatch?: boolean;
+  redirected?: boolean;
   inspectionCoverage?: string | null;
   inspectionVerdict?: string | null;
 }): PageIndexStatus {
@@ -67,9 +124,34 @@ export function derivePageIndexStatus(input: {
     if (coverage) return "not_indexed";
   }
 
+  if (input.redirected) return "not_indexed";
+  if (input.inGsc && input.gscExactMatch === false) return "not_indexed";
   if (input.inGsc) return "indexed";
   if (input.gscSynced) return "not_indexed";
   return "unknown";
+}
+
+export function deriveIndexReason(input: {
+  status: PageIndexStatus;
+  inspectionCoverage?: string | null;
+  redirected?: boolean;
+  redirectTarget?: string | null;
+  gscExactMatch?: boolean;
+}): string | null {
+  if (input.status !== "not_indexed") return null;
+  const fromInspection = coverageStateLabel(input.inspectionCoverage);
+  if (fromInspection) {
+    if (fromInspection === "Seite mit Weiterleitung" && input.redirectTarget) {
+      return `Seite mit Weiterleitung → ${input.redirectTarget}`;
+    }
+    return fromInspection;
+  }
+  if (input.redirected || input.gscExactMatch === false) {
+    return input.redirectTarget
+      ? `Seite mit Weiterleitung → ${input.redirectTarget}`
+      : "Seite mit Weiterleitung";
+  }
+  return "Keine Impressionen in den letzten 90 Tagen";
 }
 
 export function indexStatusLabel(status: PageIndexStatus): string {
@@ -93,6 +175,9 @@ export function crawlPagesToCsv(pages: CrawlViewerPage[]): string {
     "H1",
     "Meta-Description",
     "Indexstatus",
+    "Indexgrund",
+    "Weiterleitung",
+    "Weiterleitung-Ziel",
     "Im Crawl",
     "In Search Console",
     "Impressionen",
@@ -110,6 +195,9 @@ export function crawlPagesToCsv(pages: CrawlViewerPage[]): string {
       csvCell(page.h1),
       csvCell(page.meta_description),
       csvCell(indexStatusLabel(page.indexStatus)),
+      csvCell(page.indexReason),
+      csvCell(page.isRedirect ? "ja" : "nein"),
+      csvCell(page.redirectTarget),
       csvCell(page.inCrawl ? "ja" : "nein"),
       csvCell(page.inGsc ? "ja" : "nein"),
       csvCell(page.gscImpressions),
@@ -131,18 +219,77 @@ type CrawlPageInput = {
   meta_description: string | null;
   is_excluded: boolean;
   crawled_at: string;
+  final_url?: string | null;
 };
+
+function lookupExact<T extends { url: string }>(exact: Map<string, T>, url: string): T | undefined {
+  const normalised = normaliseUrl(url) ?? url;
+  return exact.get(normalised) ?? exact.get(url);
+}
 
 function lookupByUrlOrKey<T extends { url: string }>(
   exact: Map<string, T>,
   byKey: Map<string, T>,
   url: string,
 ): T | undefined {
-  const normalised = normaliseUrl(url) ?? url;
-  const hit = exact.get(normalised) ?? exact.get(url);
+  const hit = lookupExact(exact, url);
   if (hit) return hit;
   const key = pageComparisonKey(url);
   return key ? byKey.get(key) : undefined;
+}
+
+function toViewerPage(input: {
+  url: string;
+  title: string | null;
+  h1: string | null;
+  meta_description: string | null;
+  is_excluded: boolean;
+  crawled_at: string | null;
+  inCrawl: boolean;
+  gscSynced: boolean;
+  gscRow?: GscPageRow | null;
+  gscExactMatch: boolean;
+  redirected: boolean;
+  redirectTarget: string | null;
+  inspection?: InspectionSlice | null;
+}): CrawlViewerPage {
+  const inGsc = Boolean(input.gscRow);
+  const indexStatus = derivePageIndexStatus({
+    gscSynced: input.gscSynced,
+    inGsc,
+    gscExactMatch: input.gscExactMatch,
+    redirected: input.redirected,
+    inspectionCoverage: input.inspection?.coverage_state,
+    inspectionVerdict: input.inspection?.verdict,
+  });
+  return {
+    url: input.url,
+    title: input.title,
+    h1: input.h1,
+    meta_description: input.meta_description,
+    is_excluded: input.is_excluded,
+    crawled_at: input.crawled_at,
+    inCrawl: input.inCrawl,
+    inGsc,
+    indexStatus,
+    indexReason: deriveIndexReason({
+      status: indexStatus,
+      inspectionCoverage: input.inspection?.coverage_state,
+      redirected: input.redirected,
+      redirectTarget: input.redirectTarget,
+      gscExactMatch: input.gscExactMatch,
+    }),
+    ...deriveRedirectMeta({
+      redirected: input.redirected,
+      redirectTarget: input.redirectTarget,
+      inspectionCoverage: input.inspection?.coverage_state,
+    }),
+    gscClicks: input.gscRow?.clicks ?? null,
+    gscImpressions: input.gscRow?.impressions ?? null,
+    gscPosition: input.gscRow?.position ?? null,
+    inspectionCoverage: input.inspection?.coverage_state ?? null,
+    inspectionVerdict: input.inspection?.verdict ?? null,
+  };
 }
 
 function buildLookups<T extends { url: string }>(rows: T[]): {
@@ -163,6 +310,7 @@ function buildLookups<T extends { url: string }>(rows: T[]): {
 /**
  * Merge crawled pages with GSC performance rows and URL-Inspection samples.
  * GSC-only URLs (known to Google, missing from the crawl) are appended.
+ * www/http variants are kept as separate URLs: only an exact GSC URL counts as indexed.
  */
 export function mergeCrawlAndGscPages(input: {
   crawled: CrawlPageInput[];
@@ -173,68 +321,64 @@ export function mergeCrawlAndGscPages(input: {
 }): CrawlViewerPage[] {
   const gsc = buildLookups(input.gscPages);
   const inspections = buildLookups(input.inspections ?? []);
-  const crawledKeys = new Set<string>();
+  const crawledExact = new Set<string>();
   const merged: CrawlViewerPage[] = [];
 
   for (const page of input.crawled) {
-    const key = pageComparisonKey(page.url);
-    if (key) crawledKeys.add(key);
-    crawledKeys.add(normaliseUrl(page.url) ?? page.url);
+    crawledExact.add(normaliseUrl(page.url) ?? page.url);
+    crawledExact.add(page.url);
 
-    const gscRow = lookupByUrlOrKey(gsc.exact, gsc.byKey, page.url);
+    const gscExact = lookupExact(gsc.exact, page.url);
+    const gscRow = gscExact ?? lookupByUrlOrKey(gsc.exact, gsc.byKey, page.url);
+    const gscExactMatch = Boolean(gscExact);
     const inspection = lookupByUrlOrKey(inspections.exact, inspections.byKey, page.url);
-    const inGsc = Boolean(gscRow);
-    merged.push({
-      url: page.url,
-      title: page.title,
-      h1: page.h1,
-      meta_description: page.meta_description,
-      is_excluded: page.is_excluded,
-      crawled_at: page.crawled_at,
-      inCrawl: true,
-      inGsc,
-      indexStatus: derivePageIndexStatus({
+    const redirected = isCoverageRedirectVariant(page.url, page.final_url);
+    const redirectTarget =
+      (redirected ? page.final_url : null) ||
+      (!gscExactMatch && gscRow ? gscRow.url : null);
+
+    merged.push(
+      toViewerPage({
+        url: page.url,
+        title: page.title,
+        h1: page.h1,
+        meta_description: page.meta_description,
+        is_excluded: page.is_excluded,
+        crawled_at: page.crawled_at,
+        inCrawl: true,
         gscSynced: input.gscSynced,
-        inGsc,
-        inspectionCoverage: inspection?.coverage_state,
-        inspectionVerdict: inspection?.verdict,
+        gscRow,
+        gscExactMatch,
+        redirected: redirected || Boolean(!gscExactMatch && gscRow),
+        redirectTarget,
+        inspection,
       }),
-      gscClicks: gscRow?.clicks ?? null,
-      gscImpressions: gscRow?.impressions ?? null,
-      gscPosition: gscRow?.position ?? null,
-      inspectionCoverage: inspection?.coverage_state ?? null,
-      inspectionVerdict: inspection?.verdict ?? null,
-    });
+    );
   }
 
   for (const gscRow of input.gscPages) {
     const normalised = normaliseUrl(gscRow.url) ?? gscRow.url;
-    const key = pageComparisonKey(gscRow.url);
-    if (crawledKeys.has(normalised) || (key && crawledKeys.has(key))) continue;
+    if (crawledExact.has(normalised) || crawledExact.has(gscRow.url)) continue;
     if (input.origin && !isSameCrawlSite(gscRow.url, input.origin)) continue;
 
     const inspection = lookupByUrlOrKey(inspections.exact, inspections.byKey, gscRow.url);
-    merged.push({
-      url: normalised,
-      title: null,
-      h1: null,
-      meta_description: null,
-      is_excluded: false,
-      crawled_at: null,
-      inCrawl: false,
-      inGsc: true,
-      indexStatus: derivePageIndexStatus({
+    merged.push(
+      toViewerPage({
+        url: normalised,
+        title: null,
+        h1: null,
+        meta_description: null,
+        is_excluded: false,
+        crawled_at: null,
+        inCrawl: false,
         gscSynced: true,
-        inGsc: true,
-        inspectionCoverage: inspection?.coverage_state,
-        inspectionVerdict: inspection?.verdict,
+        gscRow,
+        gscExactMatch: true,
+        redirected: false,
+        redirectTarget: null,
+        inspection,
       }),
-      gscClicks: gscRow.clicks,
-      gscImpressions: gscRow.impressions,
-      gscPosition: gscRow.position,
-      inspectionCoverage: inspection?.coverage_state ?? null,
-      inspectionVerdict: inspection?.verdict ?? null,
-    });
+    );
   }
 
   merged.sort((a, b) => a.url.localeCompare(b.url));
@@ -252,6 +396,7 @@ export function filterCrawlViewerPages(
     if (index === "not_indexed" && page.indexStatus !== "not_indexed") return false;
     if (index === "unknown" && page.indexStatus !== "unknown") return false;
     if (index === "gsc_only" && !(page.inGsc && !page.inCrawl)) return false;
+    if (index === "redirect" && !page.isRedirect) return false;
     if (!needle) return true;
     const hay = [page.url, page.title, page.h1, page.meta_description]
       .filter(Boolean)
@@ -269,6 +414,7 @@ export function countCrawlViewerPages(pages: CrawlViewerPage[]): {
   indexed: number;
   notIndexed: number;
   unknown: number;
+  redirects: number;
 } {
   let crawled = 0;
   let gsc = 0;
@@ -276,10 +422,12 @@ export function countCrawlViewerPages(pages: CrawlViewerPage[]): {
   let indexed = 0;
   let notIndexed = 0;
   let unknown = 0;
+  let redirects = 0;
   for (const page of pages) {
     if (page.inCrawl) crawled += 1;
     if (page.inGsc) gsc += 1;
     if (page.inGsc && !page.inCrawl) gscOnly += 1;
+    if (page.isRedirect) redirects += 1;
     if (page.indexStatus === "indexed") indexed += 1;
     else if (page.indexStatus === "not_indexed") notIndexed += 1;
     else unknown += 1;
@@ -292,6 +440,7 @@ export function countCrawlViewerPages(pages: CrawlViewerPage[]): {
     indexed,
     notIndexed,
     unknown,
+    redirects,
   };
 }
 
