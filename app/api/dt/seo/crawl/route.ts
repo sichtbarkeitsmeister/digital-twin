@@ -9,6 +9,7 @@ import {
   crawlPagesToCsv,
   deriveIndexReason,
   derivePageIndexStatus,
+  deriveRedirectMeta,
   isCoverageRedirectVariant,
   type CrawlIndexFilter,
 } from "@/lib/dt/seo/gsc-pages";
@@ -27,7 +28,7 @@ const querySchema = z.object({
   org: z.string().uuid(),
   q: z.string().trim().max(200).optional(),
   url: z.string().trim().max(2048).optional(),
-  index: z.enum(["all", "indexed", "not_indexed", "unknown", "gsc_only"]).optional(),
+  index: z.enum(["all", "indexed", "not_indexed", "unknown", "gsc_only", "redirect"]).optional(),
   format: z.enum(["json", "csv"]).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
@@ -158,14 +159,21 @@ export async function GET(req: Request) {
       resolvedUrl,
       page?.final_url ?? extra.gsc?.url ?? null,
     );
+    const redirectedFlag = redirected && !gscExactMatch;
     const inGsc = Boolean(extra.gsc);
     const indexStatus = derivePageIndexStatus({
       gscSynced: extra.gscSynced,
       inGsc,
       gscExactMatch,
-      redirected: redirected && !gscExactMatch,
+      redirected: redirectedFlag,
       inspectionCoverage: extra.inspection?.coverage_state,
       inspectionVerdict: extra.inspection?.verdict,
+    });
+    const redirectTarget = extra.gsc && !gscExactMatch ? extra.gsc.url : (page?.final_url ?? null);
+    const redirectMeta = deriveRedirectMeta({
+      redirected: redirectedFlag,
+      redirectTarget,
+      inspectionCoverage: extra.inspection?.coverage_state,
     });
 
     return NextResponse.json({
@@ -184,10 +192,12 @@ export async function GET(req: Request) {
         indexReason: deriveIndexReason({
           status: indexStatus,
           inspectionCoverage: extra.inspection?.coverage_state,
-          redirected: redirected && !gscExactMatch,
-          redirectTarget: extra.gsc && !gscExactMatch ? extra.gsc.url : (page?.final_url ?? null),
+          redirected: redirectedFlag,
+          redirectTarget,
           gscExactMatch,
         }),
+        isRedirect: redirectMeta.isRedirect,
+        redirectTarget: redirectMeta.redirectTarget,
         gscClicks: extra.gsc?.clicks ?? null,
         gscImpressions: extra.gsc?.impressions ?? null,
         gscPosition: extra.gsc?.position ?? null,

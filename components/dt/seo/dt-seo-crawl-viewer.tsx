@@ -32,6 +32,8 @@ export type CrawlPageSummary = {
   inGsc?: boolean;
   indexStatus?: PageIndexStatus;
   indexReason?: string | null;
+  isRedirect?: boolean;
+  redirectTarget?: string | null;
   gscClicks?: number | null;
   gscImpressions?: number | null;
   gscPosition?: number | null;
@@ -51,12 +53,14 @@ type IndexCounts = {
   indexed: number;
   notIndexed: number;
   unknown: number;
+  redirects: number;
 };
 
 const INDEX_FILTERS: { id: CrawlIndexFilter; label: string }[] = [
   { id: "all", label: "Alle" },
   { id: "indexed", label: "Indexiert" },
   { id: "not_indexed", label: "Nicht indexiert" },
+  { id: "redirect", label: "Weiterleitung" },
   { id: "gsc_only", label: "Nur in GSC" },
 ];
 
@@ -301,6 +305,9 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
               <StatPill label="Seiten gesamt" value={String(stats.counts?.total ?? stats.count)} />
               <StatPill label="Indexiert" value={String(stats.counts?.indexed ?? "—")} />
               <StatPill label="Nicht indexiert" value={String(stats.counts?.notIndexed ?? "—")} />
+              {stats.counts?.redirects ? (
+                <StatPill label="Weiterleitung" value={String(stats.counts.redirects)} />
+              ) : null}
               {stats.counts?.gscOnly ? (
                 <StatPill label="Nur in GSC" value={String(stats.counts.gscOnly)} />
               ) : null}
@@ -430,7 +437,9 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                         </p>
                         <div className="mt-1 flex flex-wrap gap-1">
                           <IndexBadge status={page.indexStatus} />
-                          {page.indexStatus === "not_indexed" && page.indexReason ? (
+                          {page.isRedirect ? (
+                            <RedirectBadge target={page.redirectTarget} />
+                          ) : page.indexStatus === "not_indexed" && page.indexReason ? (
                             <span className="line-clamp-1 text-[10px] text-sbkm-ink-500 dark:text-white/45">
                               {page.indexReason}
                             </span>
@@ -511,6 +520,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                     </div>
                     <div className="flex flex-wrap gap-2 text-[11px] text-sbkm-ink-500 dark:text-white/45">
                       <IndexBadge status={detail.indexStatus} />
+                      {detail.isRedirect ? <RedirectBadge target={detail.redirectTarget} /> : null}
                       {detail.inGsc && !detail.inCrawl ? (
                         <span className="rounded-pill bg-sbkm-navy/5 px-2 py-0.5 dark:bg-white/10">
                           Nur in Search Console
@@ -555,7 +565,24 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                           ) : (
                             <p>Keine Impressionen in den letzten 90 Tagen.</p>
                           )}
-                          {detail.indexReason ? (
+                          {detail.isRedirect ? (
+                            <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
+                              Seite mit Weiterleitung
+                              {detail.redirectTarget ? (
+                                <>
+                                  {" → "}
+                                  <a
+                                    href={detail.redirectTarget}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="break-all text-sbkm-mint hover:underline"
+                                  >
+                                    {detail.redirectTarget}
+                                  </a>
+                                </>
+                              ) : null}
+                            </p>
+                          ) : detail.indexReason ? (
                             <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
                               Indexgrund: {detail.indexReason}
                             </p>
@@ -606,6 +633,17 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
         </div>
       )}
     </div>
+  );
+}
+
+function RedirectBadge(props: { target?: string | null }) {
+  return (
+    <span
+      title={props.target ? `Weiterleitung → ${props.target}` : "Seite mit Weiterleitung"}
+      className="inline-block rounded-pill bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-300"
+    >
+      Weiterleitung
+    </span>
   );
 }
 

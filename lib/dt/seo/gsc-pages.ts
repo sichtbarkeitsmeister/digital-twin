@@ -37,6 +37,9 @@ export type CrawlViewerPage = {
   indexStatus: PageIndexStatus;
   /** Human-readable GSC-style reason when not indexed. */
   indexReason: string | null;
+  /** True when the page is a redirect / www-http variant (GSC: Seite mit Weiterleitung). */
+  isRedirect: boolean;
+  redirectTarget: string | null;
   gscClicks: number | null;
   gscImpressions: number | null;
   gscPosition: number | null;
@@ -44,7 +47,7 @@ export type CrawlViewerPage = {
   inspectionVerdict: string | null;
 };
 
-export type CrawlIndexFilter = "all" | "indexed" | "not_indexed" | "unknown" | "gsc_only";
+export type CrawlIndexFilter = "all" | "indexed" | "not_indexed" | "unknown" | "gsc_only" | "redirect";
 
 const INDEXED_COVERAGE =
   /submitted and indexed|indexed, not submitted|indexed, though blocked/i;
@@ -75,6 +78,21 @@ const COVERAGE_LABEL_DE: Array<{ test: RegExp; label: string }> = [
   { test: /excluded by.?noindex/i, label: "Durch noindex ausgeschlossen" },
   { test: /unknown to google/i, label: "Google unbekannt" },
 ];
+
+export function isRedirectCoverage(coverage: string | null | undefined): boolean {
+  return /page with redirect/i.test(String(coverage ?? ""));
+}
+
+export function deriveRedirectMeta(input: {
+  redirected?: boolean;
+  redirectTarget?: string | null;
+  inspectionCoverage?: string | null;
+}): { isRedirect: boolean; redirectTarget: string | null } {
+  return {
+    isRedirect: Boolean(input.redirected) || isRedirectCoverage(input.inspectionCoverage),
+    redirectTarget: input.redirectTarget?.trim() || null,
+  };
+}
 
 export function coverageStateLabel(coverage: string | null | undefined): string | null {
   const raw = String(coverage ?? "").trim();
@@ -158,6 +176,8 @@ export function crawlPagesToCsv(pages: CrawlViewerPage[]): string {
     "Meta-Description",
     "Indexstatus",
     "Indexgrund",
+    "Weiterleitung",
+    "Weiterleitung-Ziel",
     "Im Crawl",
     "In Search Console",
     "Impressionen",
@@ -176,6 +196,8 @@ export function crawlPagesToCsv(pages: CrawlViewerPage[]): string {
       csvCell(page.meta_description),
       csvCell(indexStatusLabel(page.indexStatus)),
       csvCell(page.indexReason),
+      csvCell(page.isRedirect ? "ja" : "nein"),
+      csvCell(page.redirectTarget),
       csvCell(page.inCrawl ? "ja" : "nein"),
       csvCell(page.inGsc ? "ja" : "nein"),
       csvCell(page.gscImpressions),
@@ -256,6 +278,11 @@ function toViewerPage(input: {
       redirected: input.redirected,
       redirectTarget: input.redirectTarget,
       gscExactMatch: input.gscExactMatch,
+    }),
+    ...deriveRedirectMeta({
+      redirected: input.redirected,
+      redirectTarget: input.redirectTarget,
+      inspectionCoverage: input.inspection?.coverage_state,
     }),
     gscClicks: input.gscRow?.clicks ?? null,
     gscImpressions: input.gscRow?.impressions ?? null,
@@ -369,6 +396,7 @@ export function filterCrawlViewerPages(
     if (index === "not_indexed" && page.indexStatus !== "not_indexed") return false;
     if (index === "unknown" && page.indexStatus !== "unknown") return false;
     if (index === "gsc_only" && !(page.inGsc && !page.inCrawl)) return false;
+    if (index === "redirect" && !page.isRedirect) return false;
     if (!needle) return true;
     const hay = [page.url, page.title, page.h1, page.meta_description]
       .filter(Boolean)
@@ -386,6 +414,7 @@ export function countCrawlViewerPages(pages: CrawlViewerPage[]): {
   indexed: number;
   notIndexed: number;
   unknown: number;
+  redirects: number;
 } {
   let crawled = 0;
   let gsc = 0;
@@ -393,10 +422,12 @@ export function countCrawlViewerPages(pages: CrawlViewerPage[]): {
   let indexed = 0;
   let notIndexed = 0;
   let unknown = 0;
+  let redirects = 0;
   for (const page of pages) {
     if (page.inCrawl) crawled += 1;
     if (page.inGsc) gsc += 1;
     if (page.inGsc && !page.inCrawl) gscOnly += 1;
+    if (page.isRedirect) redirects += 1;
     if (page.indexStatus === "indexed") indexed += 1;
     else if (page.indexStatus === "not_indexed") notIndexed += 1;
     else unknown += 1;
@@ -409,6 +440,7 @@ export function countCrawlViewerPages(pages: CrawlViewerPage[]): {
     indexed,
     notIndexed,
     unknown,
+    redirects,
   };
 }
 
