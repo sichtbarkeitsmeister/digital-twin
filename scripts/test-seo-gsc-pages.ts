@@ -14,6 +14,7 @@ import {
   filterCrawlViewerPages,
   isCoverageRedirectVariant,
   mapGscAnalyticsRows,
+  matchCoverageRow,
   mergeCrawlAndGscPages,
   shouldWaitForGscSync,
 } from "../lib/dt/seo/gsc-pages";
@@ -88,10 +89,33 @@ function testIndexStatus() {
   assert.equal(
     deriveIndexReason({
       status: "not_indexed",
+      inGsc: true,
       gscExactMatch: false,
       redirectTarget: "https://www.example.de/a",
     }),
     "Seite mit Weiterleitung → https://www.example.de/a",
+  );
+  assert.equal(
+    deriveIndexReason({
+      status: "not_indexed",
+      inGsc: false,
+      gscExactMatch: false,
+    }),
+    "Keine Impressionen in den letzten 90 Tagen",
+  );
+  assert.equal(
+    matchCoverageRow(
+      [{ url: "https://praxismeerbusch.de/" }],
+      "http://praxismeerbusch.de/",
+    )?.exact,
+    false,
+  );
+  assert.equal(
+    matchCoverageRow(
+      [{ url: "https://praxismeerbusch.de/" }],
+      "http://praxismeerbusch.de/",
+    )?.row.url,
+    "https://praxismeerbusch.de/",
   );
   console.log("index status: ok");
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -105,6 +105,8 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
   const [csvError, setCsvError] = useState<string | null>(null);
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -198,6 +200,14 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
       setDetail(null);
       return;
     }
+    const fromList = pagesRef.current.find((page) => page.url === selectedUrl);
+    if (fromList) {
+      setDetail((current) =>
+        current?.url === selectedUrl
+          ? current
+          : { ...fromList, text_content: current?.url === selectedUrl ? current.text_content : null },
+      );
+    }
     let cancelled = false;
     setLoadingDetail(true);
     void fetch(
@@ -206,12 +216,21 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
       .then((r) => r.json())
       .then((json: { ok?: boolean; page?: CrawlPageDetail }) => {
         if (cancelled) return;
-        setDetail(json.ok && json.page ? json.page : null);
+        if (json.ok && json.page) {
+          setDetail({
+            ...fromList,
+            ...json.page,
+            isRedirect: Boolean(json.page.isRedirect || fromList?.isRedirect),
+            redirectTarget: json.page.redirectTarget || fromList?.redirectTarget || null,
+            indexReason: json.page.indexReason || fromList?.indexReason || null,
+          });
+        } else {
+          setDetail(fromList ? { ...fromList, text_content: null } : null);
+        }
         setLoadingDetail(false);
       })
       .catch(() => {
         if (!cancelled) {
-          setDetail(null);
           setLoadingDetail(false);
         }
       });
@@ -491,7 +510,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
               <div className="flex flex-1 items-center justify-center p-8 text-sm text-sbkm-ink-500">
                 Wähle eine Seite aus der Liste.
               </div>
-            ) : loadingDetail ? (
+            ) : loadingDetail && !detail ? (
               <div className="flex flex-1 items-center justify-center gap-2 p-8 text-sm text-sbkm-ink-500">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 Seite wird geladen …
@@ -561,6 +580,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                               {detail.gscPosition != null
                                 ? ` · Ø Position ${detail.gscPosition.toFixed(1)}`
                                 : ""}
+                              {detail.isRedirect ? " (Ziel-URL)" : ""}
                             </p>
                           ) : (
                             <p>Keine Impressionen in den letzten 90 Tagen.</p>
