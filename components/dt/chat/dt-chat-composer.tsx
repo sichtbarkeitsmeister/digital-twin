@@ -404,8 +404,8 @@ export function DtChatComposer(props: {
                   disabled={props.isBusy}
                   title={
                     props.personaTestingLabel === "company"
-                      ? "Firmen-Test: Prüffragen aus dem Anbieter-Fragebogen ein-/ausblenden"
-                      : "Persona-Test: Prüffragen aus dem Kunden-Fragebogen ein-/ausblenden"
+                      ? "Firmen-Test: Prüffragen aus Fragebogen oder Firmenwissen ein-/ausblenden"
+                      : "Persona-Test: Prüffragen aus Fragebogen oder Persona-Einstellungen ein-/ausblenden"
                   }
                   onClick={() => props.onPersonaTestingChange?.(!personaTesting)}
                   className={cn(

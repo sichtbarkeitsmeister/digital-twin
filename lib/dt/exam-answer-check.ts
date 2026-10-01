@@ -7,6 +7,9 @@ import {
 
 export type ExamAnswerCheckAudience = "persona" | "company";
 
+/** Where SOLL came from: a questionnaire, or the twin's own settings. */
+export type ExamSollBasis = "survey" | "persona";
+
 export type ExamAnswerCheckSuggestion = {
   suggested: "pass" | "fail";
   reason: string;
@@ -84,8 +87,10 @@ export function heuristicExamAnswerSuggestion(input: {
   assistantAnswer: string;
   question?: string;
   audience?: ExamAnswerCheckAudience;
+  basis?: ExamSollBasis;
 }): ExamAnswerCheckSuggestion {
   const audience = input.audience === "company" ? "company" : "persona";
+  const fromPersona = input.basis === "persona";
   const question = input.question?.trim() ?? "";
 
   // Interessent asked about the company: shallow knowledge is the correct role.
@@ -120,7 +125,9 @@ export function heuristicExamAnswerSuggestion(input: {
     suggested: "fail",
     reason:
       hits.length === 0
-        ? "Die erwarteten Fragebogen-Angaben sind in der Antwort kaum erkennbar."
+        ? fromPersona
+          ? "Die erwarteten Angaben aus den Persona-Einstellungen sind in der Antwort kaum erkennbar."
+          : "Die erwarteten Fragebogen-Angaben sind in der Antwort kaum erkennbar."
         : `Nur teilweise abgedeckt (${hits.slice(0, 3).join(", ")}); Kerninhalt fehlt.`,
     confidence: "low",
   };
@@ -131,15 +138,25 @@ export function buildExamCheckUserPrompt(input: {
   expectedHint: string;
   assistantAnswer: string;
   audience?: ExamAnswerCheckAudience;
+  basis?: ExamSollBasis;
 }): string {
   const audience = input.audience === "company" ? "company" : "persona";
+  const fromPersona = input.basis === "persona";
+  const sollLead =
+    audience === "company"
+      ? fromPersona
+        ? "SOLL aus den hinterlegten Firmen-Einstellungen (muss sinngemäß vorkommen):"
+        : "SOLL-Inhalt aus dem Anbieter-Fragebogen (muss sinngemäß vorkommen):"
+      : fromPersona
+        ? "SOLL aus den Persona-Einstellungen (DISG, Pain Points, Entscheidungskriterien, Hormozi — nur was dort steht):"
+        : "SOLL aus dem Fragebogen (Persona-Situation/Fakten — KEIN Anspruch auf Firmen-Enzyklopädie):";
 
   if (audience === "company") {
     return [
       "Prüffrage an den Firmen-/SEO-Assistenten:",
       input.question.trim().slice(0, 800),
       "",
-      "SOLL-Inhalt aus dem Anbieter-Fragebogen (muss sinngemäß vorkommen):",
+      sollLead,
       input.expectedHint.trim().slice(0, 1500),
       "",
       "IST-Antwort:",
@@ -156,7 +173,7 @@ export function buildExamCheckUserPrompt(input: {
     "Prüffrage an die Wunschkunden-/Interessenten-Persona:",
     input.question.trim().slice(0, 800),
     "",
-    "SOLL aus dem Fragebogen (Persona-Situation/Fakten — KEIN Anspruch auf Firmen-Enzyklopädie):",
+    sollLead,
     input.expectedHint.trim().slice(0, 1500),
     "",
     "IST-Antwort der Persona:",
@@ -170,11 +187,17 @@ export function buildExamCheckUserPrompt(input: {
   ].join("\n");
 }
 
-function examCheckSystemPrompt(audience: ExamAnswerCheckAudience): string {
+function examCheckSystemPrompt(
+  audience: ExamAnswerCheckAudience,
+  basis: ExamSollBasis,
+): string {
   if (audience === "company") {
-    return "Du bist ein strenger aber fairer Prüfer für Firmen-/SEO-Assistenten. Vergleiche SOLL (Fragebogen) mit IST (Antwort). Kein Markdown, nur JSON.";
+    const source = basis === "persona" ? "hinterlegte Einstellungen" : "Fragebogen";
+    return `Du bist ein strenger aber fairer Prüfer für Firmen-/SEO-Assistenten. Vergleiche SOLL (${source}) mit IST (Antwort). Kein Markdown, nur JSON.`;
   }
-  return "Du bist ein strenger aber fairer Prüfer für Wunschkunden-Personas (Interessenten). Persona-Fakten müssen stimmen; Firmenwissen darf nur oberflächlich sein. Kein Markdown, nur JSON.";
+  const source =
+    basis === "persona" ? "den Persona-Einstellungen" : "dem Fragebogen";
+  return `Du bist ein strenger aber fairer Prüfer für Wunschkunden-Personas (Interessenten). Persona-Fakten aus ${source} müssen stimmen; Firmenwissen darf nur oberflächlich sein. Kein Markdown, nur JSON.`;
 }
 
 /** Cheap Haiku check: does the twin answer match questionnaire expectations for its role? */
@@ -183,20 +206,22 @@ export async function checkExamAnswerAgainstExpected(input: {
   expectedHint: string;
   assistantAnswer: string;
   audience?: ExamAnswerCheckAudience;
+  basis?: ExamSollBasis;
 }): Promise<ExamAnswerCheckSuggestion | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) return null;
 
   const audience = input.audience === "company" ? "company" : "persona";
+  const basis = input.basis === "persona" ? "persona" : "survey";
   const client = new Anthropic({ apiKey });
-  const userPrompt = buildExamCheckUserPrompt({ ...input, audience });
+  const userPrompt = buildExamCheckUserPrompt({ ...input, audience, basis });
 
   for (const model of resolveExamCheckModels()) {
     try {
       const res = await client.messages.create({
         model,
         max_tokens: 220,
-        system: examCheckSystemPrompt(audience),
+        system: examCheckSystemPrompt(audience, basis),
         messages: [{ role: "user", content: userPrompt }],
       });
       const suggestion = parseExamAnswerSuggestion(extractAnthropicText(res));
@@ -216,6 +241,7 @@ export async function checkExamAnswerAgainstExpectedOrHeuristic(input: {
   expectedHint: string;
   assistantAnswer: string;
   audience?: ExamAnswerCheckAudience;
+  basis?: ExamSollBasis;
 }): Promise<ExamAnswerCheckSuggestion & { via: "ai" | "heuristic" }> {
   const ai = await checkExamAnswerAgainstExpected(input);
   if (ai) return { ...ai, via: "ai" };

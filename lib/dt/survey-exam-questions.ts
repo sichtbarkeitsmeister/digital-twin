@@ -1190,6 +1190,7 @@ function tokenizeForExamMatch(text: string): string[] {
 export function resolveCustomExamExpectedHint(
   customQuestion: string,
   bank: Array<Pick<SurveyExamQuestion, "question" | "expectedHint">>,
+  options?: { digestLead?: string },
 ): { expectedHint: string; source: "matched" | "digest" } {
   const q = customQuestion.trim();
   if (!q || bank.length === 0) {
@@ -1224,7 +1225,8 @@ export function resolveCustomExamExpectedHint(
     .filter(Boolean) as string[];
 
   const digest = [
-    "Fragebogen-Auszug — prüfe nur Angaben, die zur Prüffrage passen:",
+    options?.digestLead?.trim() ||
+      "Fragebogen-Auszug — prüfe nur Angaben, die zur Prüffrage passen:",
     ...lines,
   ]
     .join("\n")
