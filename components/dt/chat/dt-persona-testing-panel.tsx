@@ -63,7 +63,9 @@ export function DtPersonaTestingPanel(props: {
         setAudience(json.audience === "company" ? "company" : "persona");
         setQuestions(json.questions ?? []);
         if (!json.available || !(json.questions?.length ?? 0)) {
-          setError("Keine Prüfungsfragen aus der Umfrage abgeleitet.");
+          setError(
+            "Keine Prüffragen ableitbar. Weder abgeschlossener Fragebogen noch auswertbare Einstellungen.",
+          );
         }
       } catch {
         if (!cancelled) {
@@ -171,7 +173,7 @@ export function DtPersonaTestingPanel(props: {
             ) : openQuestions.length > 0 ? (
               <>
                 <p className="pt-1 text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/55">
-                  Prüft, ob Fragebogen-Angaben übernommen wurden und der Twin
+                  Prüft, ob die hinterlegten Angaben übernommen wurden und der Twin
                   entsprechend denkt und reagiert.
                 </p>
                 <div className="flex flex-wrap gap-1.5 pt-1.5">

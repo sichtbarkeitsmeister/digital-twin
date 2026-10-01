@@ -54,6 +54,7 @@ export function DtPersonaTestingRail(props: {
 }) {
   const [questions, setQuestions] = useState<SurveyExamQuestion[]>([]);
   const [audience, setAudience] = useState<SurveyExamAudience>("persona");
+  const [questionSource, setQuestionSource] = useState<"survey" | "persona">("survey");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asked, setAsked] = useState<AskedExam[]>([]);
@@ -67,6 +68,7 @@ export function DtPersonaTestingRail(props: {
     if (!props.enabled) {
       setQuestions([]);
       setAudience("persona");
+      setQuestionSource("survey");
       setError(null);
       setAsked([]);
       setActiveId(null);
@@ -80,6 +82,7 @@ export function DtPersonaTestingRail(props: {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setQuestionSource("survey");
     setAsked([]);
     setActiveId(null);
     setExpanded(true);
@@ -93,16 +96,19 @@ export function DtPersonaTestingRail(props: {
           ok?: boolean;
           available?: boolean;
           audience?: SurveyExamAudience;
+          questionSource?: "survey" | "persona";
           questions?: SurveyExamQuestion[];
           message?: string;
         };
         if (cancelled) return;
         if (!json.ok) {
           setQuestions([]);
+          setQuestionSource("survey");
           setError(json.message ?? "Prüfungsfragen konnten nicht geladen werden.");
           return;
         }
         setAudience(json.audience === "company" ? "company" : "persona");
+        setQuestionSource(json.questionSource === "persona" ? "persona" : "survey");
         setQuestions(json.questions ?? []);
         if (!json.available || !(json.questions?.length ?? 0)) {
           setError(null);
@@ -175,7 +181,12 @@ export function DtPersonaTestingRail(props: {
 
     const resolved =
       questions.length > 0
-        ? resolveCustomExamExpectedHint(question, questions)
+        ? resolveCustomExamExpectedHint(question, questions, {
+            digestLead:
+              questionSource === "persona"
+                ? "Persona-Einstellungen — prüfe nur Angaben, die zur Prüffrage passen:"
+                : undefined,
+          })
         : { expectedHint: PERSONA_PROMPT_FIT_HINT, source: "digest" as const };
     const expectedHint = resolved.expectedHint.trim() || PERSONA_PROMPT_FIT_HINT;
 
@@ -222,6 +233,7 @@ export function DtPersonaTestingRail(props: {
           expectedHint: exam.expectedHint,
           assistantAnswer,
           audience,
+          basis: questionSource === "persona" ? "persona" : "survey",
         }),
       });
       const json = (await res.json()) as {
@@ -302,6 +314,7 @@ export function DtPersonaTestingRail(props: {
     active?.aiError,
     active?.question,
     checking,
+    questionSource,
   ]);
 
   if (!props.enabled) return null;
@@ -342,6 +355,7 @@ export function DtPersonaTestingRail(props: {
             {!loading && questions.length > 0 ? (
               <p className="truncate text-xs text-sbkm-ink-500 dark:text-white/55">
                 {openQuestions.length}/{questions.length} offen
+                {questionSource === "persona" ? " · aus Einstellungen" : ""}
                 {passCount ? ` · ${passCount} ok` : ""}
                 {failCount ? ` · ${failCount} abweichend` : ""}
               </p>
@@ -371,7 +385,13 @@ export function DtPersonaTestingRail(props: {
             ) : (
               <>
                 <p className={cn(wrapText, "text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60")}>
-                  {questions.length > 0 ? (
+                  {questions.length > 0 && questionSource === "persona" ? (
+                    <>
+                      Prüffragen aus den Persona-Einstellungen: DISG, Pain Points, Entscheidungskriterien
+                      und der große Wunsch (Traumergebnis, Dringlichkeit, Aufwand, Wahrscheinlichkeit),
+                      soweit sie hinterlegt sind. „Nächste Frage“ sendet sie, danach prüft die KI die Antwort.
+                    </>
+                  ) : questions.length > 0 ? (
                     <>
                       „Nächste Frage“ oder eigene Prüffrage senden. Unter SOLL erscheint danach groß{" "}
                       <span className="font-semibold text-emerald-700 dark:text-emerald-300">Stimmt</span>{" "}
@@ -381,8 +401,8 @@ export function DtPersonaTestingRail(props: {
                     </>
                   ) : (
                     <>
-                      Zu dieser Persona gibt es keinen verknüpften Fragebogen. Stelle eigene Prüffragen,
-                      um zu testen, ob sie sich an den Prompt hält.
+                      Zu dieser Persona gibt es weder einen abgeschlossenen Fragebogen noch auswertbare
+                      Einstellungen. Stelle eigene Prüffragen, um zu testen, ob sie sich an den Prompt hält.
                     </>
                   )}
                 </p>
@@ -424,9 +444,11 @@ export function DtPersonaTestingRail(props: {
                         }
                       }}
                       placeholder={
-                        questions.length > 0
-                          ? "Eigene Frage eingeben — KI gleicht die Antwort mit dem Fragebogen ab …"
-                          : "Eigene Frage eingeben — KI prüft, ob die Antwort zum Prompt passt …"
+                        questionSource === "persona"
+                          ? "Eigene Frage eingeben — KI gleicht die Antwort mit den Persona-Einstellungen ab …"
+                          : questions.length > 0
+                            ? "Eigene Frage eingeben — KI gleicht die Antwort mit dem Fragebogen ab …"
+                            : "Eigene Frage eingeben — KI prüft, ob die Antwort zum Prompt passt …"
                       }
                       className="w-full min-w-0 resize-y rounded-xl border border-sbkm-navy/15 bg-white/90 px-3 py-2.5 text-sm leading-snug text-sbkm-navy outline-none transition placeholder:text-sbkm-ink-400 focus:border-sbkm-mint/50 focus:ring-2 focus:ring-sbkm-mint/20 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white dark:placeholder:text-white/35"
                     />
@@ -459,8 +481,12 @@ export function DtPersonaTestingRail(props: {
                     <div className="min-w-0 rounded-xl border border-amber-500/30 bg-amber-500/[0.12] p-3 dark:border-amber-400/25 dark:bg-amber-500/10">
                       <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-amber-900/75 [overflow-wrap:anywhere] dark:text-amber-100/75">
                         {active.sollSource === "digest"
-                          ? "SOLL aus Fragebogen (KI filtert zur Frage)"
-                          : "SOLL aus Fragebogen"}
+                          ? questionSource === "persona"
+                            ? "SOLL aus Persona-Einstellungen (KI filtert zur Frage)"
+                            : "SOLL aus Fragebogen (KI filtert zur Frage)"
+                          : questionSource === "persona"
+                            ? "SOLL aus Persona-Einstellungen"
+                            : "SOLL aus Fragebogen"}
                       </p>
                       <p
                         className={cn(

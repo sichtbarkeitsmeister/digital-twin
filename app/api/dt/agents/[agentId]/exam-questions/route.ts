@@ -5,10 +5,16 @@ import { isMemberOfOrganisation } from "@/lib/dashboard/org-context";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { loadSurveyExamQuestionsForResponse } from "@/lib/dt/load-survey-exam-questions";
 import {
+  chooseExamQuestionBank,
+  loadPersonaConfigExamQuestions,
+} from "@/lib/dt/persona-config-exam";
+import {
   persistInferredExamSource,
   resolveAgentExamSource,
 } from "@/lib/dt/resolve-agent-exam-source";
-import type { SurveyExamAudience } from "@/lib/dt/survey-exam-questions";
+import type { SurveyExamAudience, SurveyExamQuestion } from "@/lib/dt/survey-exam-questions";
+
+export const maxDuration = 30;
 
 function audienceForAgentKind(kind: string | null | undefined): SurveyExamAudience {
   if (kind === "seo_advisor") return "company";
@@ -16,9 +22,10 @@ function audienceForAgentKind(kind: string | null | undefined): SurveyExamAudien
 }
 
 /**
- * Interviewer script for probing a survey-built agent in the main DT chat.
- * Persona agents get Wunschkunde (du) probes; SEO advisors get company probes.
- * If source_survey_* is missing, we still look up the org questionnaire.
+ * Interviewer script for the persona/company test.
+ * Completed questionnaires win. Otherwise the model reads the twin's own
+ * settings (DISG, pain points, decision criteria, Hormozi) and the rail
+ * checks the answer against that SOLL.
  */
 export async function GET(
   _: Request,
@@ -37,7 +44,7 @@ export async function GET(
   const { data: agent, error } = await auth.supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,name,role,kind,source_survey_id,source_survey_response_id,is_enabled",
+      "id,organisation_id,name,role,kind,source_survey_id,source_survey_response_id,is_enabled,prompt_template,prompt_append,avatar_data,uses_global_prompt",
     )
     .eq("id", agentId)
     .maybeSingle();
@@ -66,41 +73,70 @@ export async function GET(
     sourceResponseId: agent.source_survey_response_id as string | null,
   });
 
-  if (!source) {
+  let surveyQuestions: SurveyExamQuestion[] | null = null;
+  let surveyTitle: string | null = null;
+  let surveyAudience = audience;
+  if (source) {
+    const loaded = await loadSurveyExamQuestionsForResponse(source.surveyId, source.responseId, {
+      audience,
+    });
+    if (loaded.ok && loaded.questions.length > 0) {
+      surveyQuestions = loaded.questions;
+      surveyTitle = loaded.surveyTitle;
+      surveyAudience = loaded.audience;
+      if (source.inferred) {
+        void persistInferredExamSource({
+          agentId: agent.id as string,
+          surveyId: source.surveyId,
+          responseId: source.responseId,
+        });
+      }
+    }
+  }
+
+  if (surveyQuestions && surveyQuestions.length > 0) {
     return NextResponse.json({
       ok: true,
-      available: false,
-      audience,
-      surveyTitle: null,
-      factCount: 0,
-      questions: [],
+      available: true,
+      audience: surveyAudience,
+      questionSource: "survey",
+      surveyTitle,
+      factCount: surveyQuestions.length,
+      questions: surveyQuestions,
     });
   }
 
-  const loaded = await loadSurveyExamQuestionsForResponse(source.surveyId, source.responseId, {
-    audience,
-  });
-  if (!loaded.ok) {
-    return NextResponse.json(
-      { ok: false, message: loaded.message },
-      { status: loaded.status },
+  let personaQuestions: SurveyExamQuestion[] = [];
+  try {
+    const loadedPersona = await loadPersonaConfigExamQuestions({
+      name: agent.name as string | null,
+      role: agent.role as string | null,
+      audience,
+      promptTemplate: agent.prompt_template as string | null,
+      promptAppend: agent.prompt_append as string | null,
+      avatarData: agent.avatar_data,
+      usesGlobalPrompt: Boolean(agent.uses_global_prompt),
+    });
+    personaQuestions = loadedPersona.questions;
+  } catch (error) {
+    console.warn(
+      "[dt] persona config exam questions failed",
+      error instanceof Error ? error.message : error,
     );
   }
 
-  if (source.inferred && loaded.questions.length > 0) {
-    void persistInferredExamSource({
-      agentId: agent.id as string,
-      surveyId: source.surveyId,
-      responseId: source.responseId,
-    });
-  }
+  const chosen = chooseExamQuestionBank({
+    surveyQuestions,
+    personaQuestions,
+  });
 
   return NextResponse.json({
     ok: true,
-    available: true,
-    audience: loaded.audience,
-    surveyTitle: loaded.surveyTitle,
-    factCount: loaded.factCount,
-    questions: loaded.questions,
+    available: chosen.questions.length > 0,
+    audience,
+    questionSource: chosen.questionSource,
+    surveyTitle: null,
+    factCount: chosen.questions.length,
+    questions: chosen.questions,
   });
 }
