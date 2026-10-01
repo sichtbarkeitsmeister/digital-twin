@@ -40,6 +40,7 @@ export async function loadCrawlViewerSnapshot(input: {
   origin?: string | null;
   q?: string;
   index?: CrawlIndexFilter;
+  reason?: string;
   offset: number;
   limit: number;
 }): Promise<{
@@ -118,7 +119,11 @@ export async function loadCrawlViewerSnapshot(input: {
     gscSynced: gscPages.length > 0,
     origin: input.origin,
   });
-  const filtered = filterCrawlViewerPages(merged, { q: input.q, index: input.index });
+  const filtered = filterCrawlViewerPages(merged, {
+    q: input.q,
+    index: input.index,
+    reason: input.reason,
+  });
   const counts = countCrawlViewerPages(merged);
   const pages = filtered.slice(input.offset, input.offset + input.limit);
 

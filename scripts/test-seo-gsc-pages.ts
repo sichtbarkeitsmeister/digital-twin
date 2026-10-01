@@ -100,8 +100,9 @@ function testIndexStatus() {
       status: "not_indexed",
       inGsc: false,
       gscExactMatch: false,
+      inCrawl: true,
     }),
-    "Keine Impressionen in den letzten 90 Tagen",
+    "Gecrawlt – derzeit nicht indexiert",
   );
   assert.equal(
     matchCoverageRow(
@@ -168,7 +169,8 @@ function testMerge() {
 
   assert.equal(merged.length, 4);
   const crawledHome = merged.find((p) => p.url === "https://example.de/home");
-  assert.equal(crawledHome?.inGsc, true);
+  assert.equal(crawledHome?.inGsc, false);
+  assert.equal(crawledHome?.gscImpressions, null);
   assert.equal(crawledHome?.indexStatus, "not_indexed");
   assert.equal(crawledHome?.isRedirect, true);
   assert.match(crawledHome?.indexReason ?? "", /Seite mit Weiterleitung/);
@@ -180,6 +182,7 @@ function testMerge() {
   const secret = merged.find((p) => p.url.includes("/geheim"));
   assert.equal(secret?.indexStatus, "not_indexed");
   assert.equal(secret?.isRedirect, false);
+  assert.equal(secret?.indexReason, "Gecrawlt – derzeit nicht indexiert");
   const gscOnly = merged.find((p) => p.url.includes("/gsc-only"));
   assert.equal(gscOnly?.inCrawl, false);
   assert.equal(gscOnly?.indexStatus, "indexed");
@@ -195,7 +198,66 @@ function testMerge() {
   assert.equal(counts.notIndexed, 2);
   assert.equal(counts.gscOnly, 2);
   assert.equal(counts.redirects, 1);
+  assert.deepEqual(counts.notIndexedReasons, [
+    { reason: "Gecrawlt – derzeit nicht indexiert", count: 1 },
+    { reason: "Seite mit Weiterleitung", count: 1 },
+  ]);
   console.log("merge + filter: ok");
+}
+
+function testHomepageRedirectCapture() {
+  const merged = mergeCrawlAndGscPages({
+    crawled: [
+      {
+        url: "https://praxismeerbusch.de/",
+        title: "Praxis Start",
+        h1: "Start",
+        meta_description: null,
+        is_excluded: false,
+        crawled_at: "2026-10-01T08:00:00.000Z",
+      },
+      {
+        url: "https://praxismeerbusch.de/praxis/leistungen/hautkrebsvorsorge",
+        title: "Praxis Start",
+        h1: "Start",
+        meta_description: null,
+        is_excluded: false,
+        crawled_at: "2026-10-01T08:00:00.000Z",
+      },
+    ],
+    gscPages: [
+      {
+        url: "https://praxismeerbusch.de/",
+        clicks: 10,
+        impressions: 100,
+        ctr: 0.1,
+        position: 4,
+        fetched_at: "2026-10-01T08:00:00.000Z",
+        period_start: null,
+        period_end: null,
+      },
+      {
+        url: "https://praxismeerbusch.de/praxis/leistungen/hautkrebsvorsorge",
+        clicks: 0,
+        impressions: 1,
+        ctr: 0,
+        position: 1,
+        fetched_at: "2026-10-01T08:00:00.000Z",
+        period_start: null,
+        period_end: null,
+      },
+    ],
+    gscSynced: true,
+    origin: "https://praxismeerbusch.de",
+  });
+  const old = merged.find((p) => p.url.includes("hautkrebsvorsorge"));
+  assert.equal(old?.indexStatus, "not_indexed");
+  assert.equal(old?.isRedirect, true);
+  assert.equal(old?.gscImpressions, null);
+  assert.equal(old?.redirectTarget, "https://praxismeerbusch.de/");
+  const home = merged.find((p) => p.url === "https://praxismeerbusch.de/");
+  assert.equal(home?.indexStatus, "indexed");
+  console.log("homepage redirect capture: ok");
 }
 
 function testMapGscRows() {
@@ -276,7 +338,7 @@ function testCsvExport() {
   ]);
 
   assert.equal(csv.startsWith("\uFEFF"), true);
-  assert.match(csv, /URL;Titel;H1;Meta-Description;Indexstatus;Indexgrund;Weiterleitung;Weiterleitung-Ziel;Im Crawl;In Search Console/);
+  assert.match(csv, /URL;Titel;H1;Meta-Description;Indexstatus;Indexgrund;Weiterleitung;Weiterleitung-Ziel;Im Crawl;In Leistungsdaten/);
   assert.match(csv, /Indexiert;;nein;;ja;ja;80;4;3.2/);
   assert.match(csv, /Nicht indexiert;Gecrawlt, derzeit nicht indexiert;nein;;ja;nein;;;;Crawled - currently not indexed;NEUTRAL;ja;/);
   assert.match(csv, /"https:\/\/example\.de\/a;b"/);
@@ -288,6 +350,7 @@ testSameSite();
 testSitemapLocs();
 testIndexStatus();
 testMerge();
+testHomepageRedirectCapture();
 testMapGscRows();
 testWaitForGsc();
 testCsvExport();

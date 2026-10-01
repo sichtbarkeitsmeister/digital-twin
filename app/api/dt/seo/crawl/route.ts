@@ -29,6 +29,7 @@ const querySchema = z.object({
   q: z.string().trim().max(200).optional(),
   url: z.string().trim().max(2048).optional(),
   index: z.enum(["all", "indexed", "not_indexed", "unknown", "gsc_only", "redirect"]).optional(),
+  reason: z.string().trim().max(120).optional(),
   format: z.enum(["json", "csv"]).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
@@ -92,6 +93,7 @@ export async function GET(req: Request) {
     q: url.searchParams.get("q") ?? undefined,
     url: url.searchParams.get("url") ?? undefined,
     index: url.searchParams.get("index") ?? undefined,
+    reason: url.searchParams.get("reason") ?? undefined,
     format: url.searchParams.get("format") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
     offset: url.searchParams.get("offset") ?? undefined,
@@ -155,12 +157,10 @@ export async function GET(req: Request) {
 
     const resolvedUrl = page?.url ?? extra.gsc?.url ?? pageUrl;
     const gscExactMatch = extra.gscExactMatch;
-    const redirected = isCoverageRedirectVariant(
-      resolvedUrl,
-      page?.final_url ?? extra.gsc?.url ?? null,
-    );
-    const redirectedFlag = redirected && !gscExactMatch;
-    const inGsc = Boolean(extra.gsc);
+    const redirectedFromFinal = isCoverageRedirectVariant(resolvedUrl, page?.final_url ?? null);
+    const redirectedFromGsc = Boolean(extra.gsc) && !gscExactMatch;
+    const redirectedFlag = redirectedFromFinal || redirectedFromGsc;
+    const inGsc = Boolean(extra.gsc) && gscExactMatch && !redirectedFlag;
     const indexStatus = derivePageIndexStatus({
       gscSynced: extra.gscSynced,
       inGsc,
@@ -169,11 +169,14 @@ export async function GET(req: Request) {
       inspectionCoverage: extra.inspection?.coverage_state,
       inspectionVerdict: extra.inspection?.verdict,
     });
-    const redirectTarget =
-      extra.gsc && !gscExactMatch ? extra.gsc.url : (page?.final_url ?? extra.gsc?.url ?? null);
+    const redirectTarget = redirectedFromFinal
+      ? (page?.final_url ?? extra.gsc?.url ?? null)
+      : extra.gsc && !gscExactMatch
+        ? extra.gsc.url
+        : null;
     const redirectMeta = deriveRedirectMeta({
       redirected: redirectedFlag,
-      redirectTarget: redirectedFlag ? redirectTarget : null,
+      redirectTarget,
       inspectionCoverage: extra.inspection?.coverage_state,
     });
 
@@ -197,12 +200,13 @@ export async function GET(req: Request) {
           redirectTarget: redirectMeta.redirectTarget,
           gscExactMatch,
           inGsc,
+          inCrawl: Boolean(page),
         }),
         isRedirect: redirectMeta.isRedirect,
         redirectTarget: redirectMeta.redirectTarget,
-        gscClicks: extra.gsc?.clicks ?? null,
-        gscImpressions: extra.gsc?.impressions ?? null,
-        gscPosition: extra.gsc?.position ?? null,
+        gscClicks: redirectMeta.isRedirect || !gscExactMatch ? null : (extra.gsc?.clicks ?? null),
+        gscImpressions: redirectMeta.isRedirect || !gscExactMatch ? null : (extra.gsc?.impressions ?? null),
+        gscPosition: redirectMeta.isRedirect || !gscExactMatch ? null : (extra.gsc?.position ?? null),
         inspectionCoverage: extra.inspection?.coverage_state ?? null,
         inspectionVerdict: extra.inspection?.verdict ?? null,
       },
@@ -221,6 +225,7 @@ export async function GET(req: Request) {
       origin,
       q: search || undefined,
       index: indexFilter,
+      reason: parsed.data.reason,
       offset,
       limit,
     });
