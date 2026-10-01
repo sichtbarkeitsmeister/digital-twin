@@ -54,14 +54,13 @@ type IndexCounts = {
   notIndexed: number;
   unknown: number;
   redirects: number;
+  notIndexedReasons?: Array<{ reason: string; count: number }>;
 };
 
 const INDEX_FILTERS: { id: CrawlIndexFilter; label: string }[] = [
-  { id: "all", label: "Alle" },
+  { id: "all", label: "Alle bekannten Seiten" },
   { id: "indexed", label: "Indexiert" },
   { id: "not_indexed", label: "Nicht indexiert" },
-  { id: "redirect", label: "Weiterleitung" },
-  { id: "gsc_only", label: "Nur in GSC" },
 ];
 
 function pageLabel(page: { title: string | null; h1: string | null; url: string }): string {
@@ -99,6 +98,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [indexFilter, setIndexFilter] = useState<CrawlIndexFilter>("all");
+  const [reasonFilter, setReasonFilter] = useState<string | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   const [detail, setDetail] = useState<CrawlPageDetail | null>(null);
@@ -118,7 +118,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
 
   useEffect(() => {
     setOffset(0);
-  }, [indexFilter]);
+  }, [indexFilter, reasonFilter]);
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
@@ -129,6 +129,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
     });
     if (debouncedSearch) params.set("q", debouncedSearch);
     if (indexFilter !== "all") params.set("index", indexFilter);
+    if (reasonFilter) params.set("reason", reasonFilter);
 
     const res = await fetch(`/api/dt/seo/crawl?${params}`);
     const json = (await res.json()) as {
@@ -171,7 +172,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
     setTotal(json.total ?? 0);
     const rows = json.pages ?? [];
     setPages(rows);
-  }, [props.organisationId, offset, debouncedSearch, indexFilter]);
+  }, [props.organisationId, offset, debouncedSearch, indexFilter, reasonFilter]);
 
   useEffect(() => {
     void loadList();
@@ -223,6 +224,10 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
             isRedirect: Boolean(json.page.isRedirect || fromList?.isRedirect),
             redirectTarget: json.page.redirectTarget || fromList?.redirectTarget || null,
             indexReason: json.page.indexReason || fromList?.indexReason || null,
+            gscImpressions: json.page.isRedirect || fromList?.isRedirect ? null : json.page.gscImpressions,
+            gscClicks: json.page.isRedirect || fromList?.isRedirect ? null : json.page.gscClicks,
+            gscPosition: json.page.isRedirect || fromList?.isRedirect ? null : json.page.gscPosition,
+            inGsc: json.page.isRedirect || fromList?.isRedirect ? false : json.page.inGsc,
           });
         } else {
           setDetail(fromList ? { ...fromList, text_content: null } : null);
@@ -256,6 +261,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
       });
       if (debouncedSearch) params.set("q", debouncedSearch);
       if (indexFilter !== "all") params.set("index", indexFilter);
+      if (reasonFilter) params.set("reason", reasonFilter);
       const res = await fetch(`/api/dt/seo/crawl?${params}`);
       if (!res.ok) {
         const payload = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -291,7 +297,7 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
             Zurück zu SEO-Einstellungen
           </Link>
           <h1 className="text-xl font-bold tracking-tight text-sbkm-navy sm:text-2xl dark:text-white">
-            Website-Seiten & Indexstatus
+            Seitenindexierung
           </h1>
           {props.organisationName ? (
             <p className="text-sm text-sbkm-ink-600 dark:text-white/60">{props.organisationName}</p>
@@ -320,22 +326,20 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
             </p>
           ) : null}
           {stats ? (
-            <div className="flex flex-wrap gap-2 text-xs">
-              <StatPill label="Seiten gesamt" value={String(stats.counts?.total ?? stats.count)} />
-              <StatPill label="Indexiert" value={String(stats.counts?.indexed ?? "—")} />
-              <StatPill label="Nicht indexiert" value={String(stats.counts?.notIndexed ?? "—")} />
-              {stats.counts?.redirects ? (
-                <StatPill label="Weiterleitung" value={String(stats.counts.redirects)} />
-              ) : null}
-              {stats.counts?.gscOnly ? (
-                <StatPill label="Nur in GSC" value={String(stats.counts.gscOnly)} />
-              ) : null}
-              <StatPill label="Mit Text" value={String(stats.withTextCount)} />
+            <div className="flex flex-col items-start gap-1 sm:items-end">
+              <CoverageBar
+                indexed={stats.counts?.indexed ?? 0}
+                notIndexed={stats.counts?.notIndexed ?? 0}
+                active={indexFilter}
+                onSelect={(id) => {
+                  setReasonFilter(null);
+                  setIndexFilter(id);
+                }}
+              />
               {stats.lastCrawledAt ? (
-                <StatPill
-                  label="Zuletzt"
-                  value={new Date(stats.lastCrawledAt).toLocaleString("de-DE")}
-                />
+                <p className="text-[11px] text-sbkm-ink-500 dark:text-white/45">
+                  Zuletzt gecrawlt {new Date(stats.lastCrawledAt).toLocaleString("de-DE")}
+                </p>
               ) : null}
             </div>
           ) : null}
@@ -373,6 +377,56 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
         </DtGlassCard>
       ) : null}
 
+      {stats && stats.count > 0 && (stats.counts?.notIndexedReasons?.length ?? 0) > 0 ? (
+        <DtGlassCard className="overflow-hidden p-0">
+          <div className="border-b border-sbkm-navy/10 px-4 py-3 dark:border-white/10">
+            <h2 className="text-sm font-semibold text-sbkm-navy dark:text-white">
+              Warum Seiten nicht indexiert werden
+            </h2>
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-sbkm-navy/10 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-500 dark:border-white/10 dark:text-white/45">
+                <th className="px-4 py-2 font-bold">Grund</th>
+                <th className="px-4 py-2 text-right font-bold">Seiten</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.counts?.notIndexedReasons?.map((row) => {
+                const active = reasonFilter === row.reason;
+                return (
+                  <tr key={row.reason}>
+                    <td colSpan={2} className="p-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (active) {
+                            setReasonFilter(null);
+                            setIndexFilter("not_indexed");
+                            return;
+                          }
+                          setIndexFilter("not_indexed");
+                          setReasonFilter(row.reason);
+                        }}
+                        className={cn(
+                          "flex w-full items-center justify-between gap-4 px-4 py-2.5 text-left transition-colors",
+                          active
+                            ? "bg-sbkm-mint/15 text-sbkm-navy dark:text-white"
+                            : "text-sbkm-navy hover:bg-sbkm-navy/5 dark:text-white/85 dark:hover:bg-white/5",
+                        )}
+                      >
+                        <span>{row.reason}</span>
+                        <span className="tabular-nums font-semibold">{row.count}</span>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </DtGlassCard>
+      ) : null}
+
       {stats && stats.count === 0 ? (
         <DtGlassCard className="p-6 text-sm text-sbkm-ink-600 dark:text-white/60">
           Noch keine Seiten gespeichert.{" "}
@@ -403,7 +457,10 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                     <button
                       key={filter.id}
                       type="button"
-                      onClick={() => setIndexFilter(filter.id)}
+                      onClick={() => {
+                        setReasonFilter(null);
+                        setIndexFilter(filter.id);
+                      }}
                       className={cn(
                         "rounded-pill px-2.5 py-1 text-[11px] font-semibold transition-colors",
                         active
@@ -418,10 +475,9 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
               </div>
               <p className="mt-2 text-[11px] text-sbkm-ink-500 dark:text-white/45">{pageRange}</p>
               <p className="mt-1 text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
-                Indexiert = genau diese URL in den Search-Console-Leistungsdaten (90 Tage) oder
-                URL-Inspection PASS. www-/http-Varianten und Weiterleitungen zählen wie in GSC
-                als nicht indexiert. Den vollen Coverage-Bericht mit allen Ausschlussgründen
-                liefert Google nicht per API.
+                Wie in der Search Console: indexierte URLs und nicht indexierte URLs mit Grund.
+                Weiterleitungen (http/www, Ziel-URL) stehen unter „Seite mit Weiterleitung“, nicht
+                bei den Indexierten.
               </p>
             </div>
 
@@ -565,28 +621,16 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
 
                 <div className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle p-4">
                   <dl className="grid gap-4">
-                    {detail.gscImpressions != null || detail.inspectionCoverage || detail.indexReason ? (
+                    {detail.indexStatus ? (
                       <div>
                         <dt className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55">
-                          Search Console
+                          {detail.isRedirect || detail.indexStatus === "not_indexed"
+                            ? "Warum diese URL nicht indexiert wird"
+                            : "Indexierung"}
                         </dt>
                         <dd className="text-sm leading-relaxed text-sbkm-navy dark:text-white/85">
-                          {detail.gscImpressions != null ? (
-                            <p>
-                              {detail.gscImpressions.toLocaleString("de-DE")} Impressionen
-                              {detail.gscClicks != null
-                                ? ` · ${detail.gscClicks.toLocaleString("de-DE")} Klicks`
-                                : ""}
-                              {detail.gscPosition != null
-                                ? ` · Ø Position ${detail.gscPosition.toFixed(1)}`
-                                : ""}
-                              {detail.isRedirect ? " (Ziel-URL)" : ""}
-                            </p>
-                          ) : (
-                            <p>Keine Impressionen in den letzten 90 Tagen.</p>
-                          )}
                           {detail.isRedirect ? (
-                            <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
+                            <p>
                               Seite mit Weiterleitung
                               {detail.redirectTarget ? (
                                 <>
@@ -602,11 +646,25 @@ export function DtSeoCrawlViewer(props: { organisationId: string; organisationNa
                                 </>
                               ) : null}
                             </p>
-                          ) : detail.indexReason ? (
-                            <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
-                              Indexgrund: {detail.indexReason}
+                          ) : detail.indexStatus === "indexed" ? (
+                            <p>
+                              Indexiert
+                              {detail.gscImpressions != null ? (
+                                <>
+                                  {" · "}
+                                  {detail.gscImpressions.toLocaleString("de-DE")} Impressionen
+                                  {detail.gscClicks != null
+                                    ? ` · ${detail.gscClicks.toLocaleString("de-DE")} Klicks`
+                                    : ""}
+                                  {detail.gscPosition != null
+                                    ? ` · Ø Position ${detail.gscPosition.toFixed(1)}`
+                                    : ""}
+                                </>
+                              ) : null}
                             </p>
-                          ) : null}
+                          ) : (
+                            <p>{detail.indexReason || indexStatusLabel(detail.indexStatus ?? "unknown")}</p>
+                          )}
                           {detail.inspectionCoverage ? (
                             <p className="mt-1 text-xs text-sbkm-ink-600 dark:text-white/55">
                               URL-Inspection: {detail.inspectionCoverage}
@@ -688,12 +746,46 @@ function IndexBadge(props: { status?: PageIndexStatus }) {
   );
 }
 
-function StatPill(props: { label: string; value: string }) {
+function CoverageBar(props: {
+  indexed: number;
+  notIndexed: number;
+  active: CrawlIndexFilter;
+  onSelect: (id: "all" | "indexed" | "not_indexed") => void;
+}) {
+  const total = props.indexed + props.notIndexed;
+  const indexedShare = total > 0 ? Math.max(props.indexed / total, props.indexed > 0 ? 0.12 : 0) : 0.5;
+  const notIndexedShare = total > 0 ? Math.max(props.notIndexed / total, props.notIndexed > 0 ? 0.12 : 0) : 0.5;
   return (
-    <span className="rounded-pill border border-sbkm-navy/10 bg-white/60 px-2.5 py-1 dark:border-white/10 dark:bg-white/5">
-      <span className="text-sbkm-ink-500 dark:text-white/45">{props.label}: </span>
-      <span className="font-semibold text-sbkm-navy dark:text-white">{props.value}</span>
-    </span>
+    <div className="w-full max-w-md sm:w-80">
+      <div className="flex overflow-hidden rounded-xl text-xs font-semibold text-white">
+        <button
+          type="button"
+          onClick={() => props.onSelect("not_indexed")}
+          style={{ flexGrow: notIndexedShare }}
+          className={cn(
+            "min-w-0 px-3 py-2.5 text-left transition-opacity hover:opacity-90",
+            props.active === "not_indexed" ? "bg-slate-600" : "bg-slate-500",
+          )}
+        >
+          <span className="block text-[10px] font-medium uppercase tracking-wide opacity-80">
+            Nicht indexiert
+          </span>
+          <span className="tabular-nums text-sm">{props.notIndexed.toLocaleString("de-DE")}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onSelect("indexed")}
+          style={{ flexGrow: indexedShare }}
+          className={cn(
+            "min-w-0 px-3 py-2.5 text-left transition-opacity hover:opacity-90",
+            props.active === "indexed" ? "bg-emerald-700" : "bg-emerald-600",
+          )}
+        >
+          <span className="block text-[10px] font-medium uppercase tracking-wide opacity-80">Indexiert</span>
+          <span className="tabular-nums text-sm">{props.indexed.toLocaleString("de-DE")}</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
