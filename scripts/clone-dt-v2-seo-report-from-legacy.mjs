@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { patchDtV2SeoReportNodes } from "./n8n/patch-dt-v2-seo-report-nodes.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 nextEnv.loadEnvConfig(root, false);
@@ -163,6 +164,8 @@ function patchLegacyWorkflow(workflow) {
       (edge) => edge.node !== "HTTP Request",
     );
   }
+
+  patchDtV2SeoReportNodes(nodes);
 
   return {
     name: targetName,

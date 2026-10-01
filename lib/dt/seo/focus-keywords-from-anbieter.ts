@@ -24,6 +24,9 @@ export type AnbieterFocusKeywordsResult = {
   matchedFieldTitles: string[];
 };
 
+/** Core-question keys whose answers are the Fokus-Keywords (not the place-only question). */
+const FOCUS_KEYWORD_CORE_KEYS = new Set(["keyword_offer", "keyword_problem"]);
+
 /** Field titles that usually hold Fokus-Keywords in Anbieter questionnaires. */
 export function looksLikeFocusKeywordFieldTitle(title: string): boolean {
   const t = title
@@ -41,7 +44,27 @@ export function looksLikeFocusKeywordFieldTitle(title: string): boolean {
   if (/seo\s*-?\s*keywords?/.test(t)) return true;
   if (/^keywords?\b/.test(t)) return true;
   if (/\bsuchbegriffe?\b/.test(t) && /fokus|haupt|ziel|seo|ranking/.test(t)) return true;
+  // Standard Anbieter questions. The title does not say "Fokus-Keyword";
+  // the description does ("Intern heißen sie Fokus-Keywords").
+  if (/angebotsbegriffe/.test(t)) return true;
+  if (/problembegriffe/.test(t)) return true;
   return false;
+}
+
+type FocusKeywordField = {
+  id?: string;
+  title?: string;
+  coreKey?: string;
+};
+
+/** Title, stable core id (`core_keyword_offer`), or explicit coreKey. */
+export function looksLikeFocusKeywordField(field: FocusKeywordField): boolean {
+  const coreKey = String(field.coreKey ?? "").trim();
+  if (FOCUS_KEYWORD_CORE_KEYS.has(coreKey)) return true;
+  const id = String(field.id ?? "").trim();
+  if (id === "extra_meeting_focus_keywords") return true;
+  if (id.startsWith("core_") && FOCUS_KEYWORD_CORE_KEYS.has(id.slice("core_".length))) return true;
+  return looksLikeFocusKeywordFieldTitle(field.title ?? "");
 }
 
 function splitKeywordChunks(raw: string): string[] {
@@ -66,7 +89,7 @@ export function extractFocusKeywordsFromAnbieterSurvey(input: {
 
   for (const step of steps) {
     for (const field of step.fields ?? []) {
-      if (!looksLikeFocusKeywordFieldTitle(field.title ?? "")) continue;
+      if (!looksLikeFocusKeywordField(field)) continue;
       matchedFieldTitles.push(field.title);
       const raw = input.answers[field.id];
       const answer = normalizeSurveyAnswer(raw, field as SurveyField).trim();

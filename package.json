@@ -74,6 +74,7 @@
     "dt:migrate:apply": "tsx scripts/dt-migrate-from-old-supabase.mjs --apply",
     "dt:n8n:chat": "node scripts/deploy-dt-chat-n8n-workflow.mjs",
     "dt:n8n:seo-report": "node scripts/clone-dt-v2-seo-report-from-legacy.mjs",
+    "dt:n8n:seo-report-patch": "node scripts/patch-dt-v2-seo-report.mjs",
     "dt:n8n:monthly-collect": "node scripts/deploy-dt-v2-monthly-analytics-collect.mjs",
     "dt:n8n:monthly-scheduler": "node scripts/deploy-dt-v2-monthly-analytics-scheduled.mjs",
     "dt:n8n:seo-report-scheduler": "node scripts/deploy-dt-v2-seo-report-scheduled.mjs",
