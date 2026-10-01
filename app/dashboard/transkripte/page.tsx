@@ -4,6 +4,7 @@ import { FileText } from "lucide-react";
 
 import { OrganisationSwitcher } from "@/app/dashboard/_components/organisation-switcher";
 import { TranscriptsPanel } from "@/app/dashboard/transkripte/_components/transcripts-panel";
+import { WorkshopBoard } from "@/app/dashboard/transkripte/_components/workshop-board";
 import { PersistedOrganisationUrlSync } from "@/components/shared/persisted-organisation-url-sync";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
@@ -51,9 +52,9 @@ export default async function TranskriptePage({
               Transkripte
             </h1>
             <p className="max-w-2xl text-sm text-secondary">
-              Organisation anlegen, Website crawlen, Kunde interviewen — danach das Meeting-Transkript
-              hier ablegen. Der Twin wertet es aus und ordnet die Infos dem Anbieterwissen und den
-              Wunschkunden zu.
+              Gespräche und Zusammenfassungen bleiben im Bestand der Organisation. Der Twin wertet
+              den ganzen Bestand aus. Anbieter und Avatare entstehen erst, wenn du den jeweiligen
+              Schritt freigibst.
             </p>
           </div>
           {organisations.length > 0 ? (
@@ -70,10 +71,13 @@ export default async function TranskriptePage({
             Bitte zuerst eine Organisation wählen.
           </p>
         ) : (
-          <TranscriptsPanel
-            organisationId={organisationId}
-            organisationName={organisationOptionLabel(selected)}
-          />
+          <>
+            <TranscriptsPanel
+              organisationId={organisationId}
+              organisationName={organisationOptionLabel(selected)}
+            />
+            <WorkshopBoard organisationId={organisationId} />
+          </>
         )}
       </div>
     </>

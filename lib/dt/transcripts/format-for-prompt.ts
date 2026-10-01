@@ -19,6 +19,8 @@ export function serializeTranscriptListItem(
     mimeType: row.mime_type,
     title: row.title,
     notes: row.notes,
+    sourceKind: row.source_kind === "summary" ? "summary" : "raw",
+    spokenOn: row.spoken_on ?? null,
     summary: row.summary,
     anbieterMarkdown: row.anbieter_markdown,
     personas: personasFromJson(row.personas_json),
@@ -44,8 +46,8 @@ export function serializeTranscriptDetail(row: DtMeetingTranscriptRow): DtTransc
 /** Keep interview notes from crowding the model out of a normal reply. */
 const TRANSCRIPT_PROMPT_MAX_CHARS = 12_000;
 
-const LIST_SELECT =
-  "id,organisation_id,filename,mime_type,title,notes,raw_text,summary,anbieter_markdown,personas_json,status,error_message,applied_at,uploaded_by,processed_at,created_at,updated_at";
+export const TRANSCRIPT_ROW_SELECT =
+  "id,organisation_id,filename,mime_type,title,notes,source_kind,spoken_on,raw_text,summary,anbieter_markdown,personas_json,status,error_message,applied_at,uploaded_by,processed_at,created_at,updated_at";
 
 export async function listMeetingTranscripts(
   supabase: SupabaseClient,
@@ -53,7 +55,7 @@ export async function listMeetingTranscripts(
 ): Promise<DtMeetingTranscriptRow[]> {
   const { data, error } = await supabase
     .from("dt_meeting_transcripts")
-    .select(LIST_SELECT)
+    .select(TRANSCRIPT_ROW_SELECT)
     .eq("organisation_id", organisationId)
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);

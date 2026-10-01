@@ -5,6 +5,7 @@ import { requireAuthUser } from "@/lib/dt/db";
 import { personasAwaitingConfirmation } from "@/lib/dt/transcripts/apply-knowledge";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
 import {
+  TRANSCRIPT_ROW_SELECT,
   listMeetingTranscripts,
   serializeTranscriptListItem,
 } from "@/lib/dt/transcripts/format-for-prompt";
@@ -17,6 +18,8 @@ const postSchema = z.object({
   mimeType: z.string().trim().max(120).nullable().optional(),
   title: z.string().trim().max(200).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  sourceKind: z.enum(["raw", "summary"]).optional(),
+  spokenOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
 export async function GET(req: Request) {
@@ -102,6 +105,7 @@ export async function POST(req: Request) {
   const notes = parsed.data.notes
     ? sanitizeTranscriptText(parsed.data.notes).trim() || null
     : null;
+  const sourceKind = parsed.data.sourceKind === "summary" ? "summary" : "raw";
 
   const { data, error } = await auth.supabase
     .from("dt_meeting_transcripts")
@@ -111,13 +115,14 @@ export async function POST(req: Request) {
       mime_type: parsed.data.mimeType?.trim() || null,
       title,
       notes,
+      source_kind: sourceKind,
+      spoken_on: parsed.data.spokenOn ?? null,
       raw_text: rawText,
+      summary: sourceKind === "summary" ? rawText : null,
       status: "uploaded",
       uploaded_by: auth.userId,
     })
-    .select(
-      "id,organisation_id,filename,mime_type,title,notes,raw_text,summary,anbieter_markdown,personas_json,status,error_message,applied_at,uploaded_by,processed_at,created_at,updated_at",
-    )
+    .select(TRANSCRIPT_ROW_SELECT)
     .single();
 
   if (error || !data) {
