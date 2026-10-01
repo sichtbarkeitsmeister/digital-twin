@@ -79,6 +79,18 @@ const COVERAGE_LABEL_DE: Array<{ test: RegExp; label: string }> = [
   { test: /unknown to google/i, label: "Google unbekannt" },
 ];
 
+export function matchCoverageRow<T extends { url: string }>(
+  rows: T[],
+  url: string,
+): { row: T; exact: boolean } | null {
+  const exact = rows.find((row) => coverageUrlsEqual(row.url, url));
+  if (exact) return { row: exact, exact: true };
+  const key = pageComparisonKey(url);
+  if (!key) return null;
+  const fuzzy = rows.find((row) => pageComparisonKey(row.url) === key);
+  return fuzzy ? { row: fuzzy, exact: false } : null;
+}
+
 export function isRedirectCoverage(coverage: string | null | undefined): boolean {
   return /page with redirect/i.test(String(coverage ?? ""));
 }
@@ -137,6 +149,7 @@ export function deriveIndexReason(input: {
   redirected?: boolean;
   redirectTarget?: string | null;
   gscExactMatch?: boolean;
+  inGsc?: boolean;
 }): string | null {
   if (input.status !== "not_indexed") return null;
   const fromInspection = coverageStateLabel(input.inspectionCoverage);
@@ -146,7 +159,7 @@ export function deriveIndexReason(input: {
     }
     return fromInspection;
   }
-  if (input.redirected || input.gscExactMatch === false) {
+  if (input.redirected || (input.inGsc && input.gscExactMatch === false)) {
     return input.redirectTarget
       ? `Seite mit Weiterleitung → ${input.redirectTarget}`
       : "Seite mit Weiterleitung";
@@ -278,6 +291,7 @@ function toViewerPage(input: {
       redirected: input.redirected,
       redirectTarget: input.redirectTarget,
       gscExactMatch: input.gscExactMatch,
+      inGsc,
     }),
     ...deriveRedirectMeta({
       redirected: input.redirected,

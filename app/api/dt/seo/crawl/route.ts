@@ -5,12 +5,12 @@ import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { resolveOrigin } from "@/lib/dt/seo/crawl-sitemap";
 import {
-  coverageUrlsEqual,
   crawlPagesToCsv,
   deriveIndexReason,
   derivePageIndexStatus,
   deriveRedirectMeta,
   isCoverageRedirectVariant,
+  matchCoverageRow,
   type CrawlIndexFilter,
 } from "@/lib/dt/seo/gsc-pages";
 import { loadCrawlViewerSnapshot } from "@/lib/dt/seo/load-crawl-viewer";
@@ -154,7 +154,7 @@ export async function GET(req: Request) {
     }
 
     const resolvedUrl = page?.url ?? extra.gsc?.url ?? pageUrl;
-    const gscExactMatch = extra.gsc ? coverageUrlsEqual(resolvedUrl, extra.gsc.url) : false;
+    const gscExactMatch = extra.gscExactMatch;
     const redirected = isCoverageRedirectVariant(
       resolvedUrl,
       page?.final_url ?? extra.gsc?.url ?? null,
@@ -169,10 +169,11 @@ export async function GET(req: Request) {
       inspectionCoverage: extra.inspection?.coverage_state,
       inspectionVerdict: extra.inspection?.verdict,
     });
-    const redirectTarget = extra.gsc && !gscExactMatch ? extra.gsc.url : (page?.final_url ?? null);
+    const redirectTarget =
+      extra.gsc && !gscExactMatch ? extra.gsc.url : (page?.final_url ?? extra.gsc?.url ?? null);
     const redirectMeta = deriveRedirectMeta({
       redirected: redirectedFlag,
-      redirectTarget,
+      redirectTarget: redirectedFlag ? redirectTarget : null,
       inspectionCoverage: extra.inspection?.coverage_state,
     });
 
@@ -193,8 +194,9 @@ export async function GET(req: Request) {
           status: indexStatus,
           inspectionCoverage: extra.inspection?.coverage_state,
           redirected: redirectedFlag,
-          redirectTarget,
+          redirectTarget: redirectMeta.redirectTarget,
           gscExactMatch,
+          inGsc,
         }),
         isRedirect: redirectMeta.isRedirect,
         redirectTarget: redirectMeta.redirectTarget,
@@ -313,16 +315,16 @@ async function loadPageIndexExtras(
     impressions: number;
     position: number | null;
   } | null;
+  gscExactMatch: boolean;
   inspection: { coverage_state: string | null; verdict: string | null } | null;
   gscSynced: boolean;
 }> {
-  const [{ data: gscExact }, { count: gscCount }, { data: inspectionExact }] = await Promise.all([
+  const [{ data: gscRows }, { count: gscCount }, { data: inspectionRows }] = await Promise.all([
     supabase
       .from("dt_seo_gsc_pages")
       .select("url,clicks,impressions,position")
       .eq("organisation_id", organisationId)
-      .eq("url", pageUrl)
-      .maybeSingle(),
+      .limit(5000),
     supabase
       .from("dt_seo_gsc_pages")
       .select("id", { count: "exact", head: true })
@@ -331,45 +333,27 @@ async function loadPageIndexExtras(
       .from("dt_seo_url_index_status")
       .select("url,verdict,coverage_state")
       .eq("organisation_id", organisationId)
-      .eq("url", pageUrl)
-      .maybeSingle(),
+      .limit(200),
   ]);
 
-  let gsc = gscExact;
-  if (!gsc) {
-    const { data: gscFuzzy } = await supabase
-      .from("dt_seo_gsc_pages")
-      .select("url,clicks,impressions,position")
-      .eq("organisation_id", organisationId)
-      .ilike("url", `%${sanitizeSearchTerm(pageUrl).slice(-120)}%`)
-      .limit(1)
-      .maybeSingle();
-    gsc = gscFuzzy;
-  }
-
-  let inspection = inspectionExact;
-  if (!inspection) {
-    const { data: inspFuzzy } = await supabase
-      .from("dt_seo_url_index_status")
-      .select("url,verdict,coverage_state")
-      .eq("organisation_id", organisationId)
-      .ilike("url", `%${sanitizeSearchTerm(pageUrl).slice(-120)}%`)
-      .limit(1)
-      .maybeSingle();
-    inspection = inspFuzzy;
-  }
+  const gscMatch = matchCoverageRow(gscRows ?? [], pageUrl);
+  const inspectionMatch = matchCoverageRow(inspectionRows ?? [], pageUrl);
 
   return {
-    gsc: gsc
+    gsc: gscMatch
       ? {
-          url: gsc.url,
-          clicks: gsc.clicks,
-          impressions: gsc.impressions,
-          position: gsc.position,
+          url: gscMatch.row.url,
+          clicks: gscMatch.row.clicks,
+          impressions: gscMatch.row.impressions,
+          position: gscMatch.row.position,
         }
       : null,
-    inspection: inspection
-      ? { coverage_state: inspection.coverage_state, verdict: inspection.verdict }
+    gscExactMatch: Boolean(gscMatch?.exact),
+    inspection: inspectionMatch
+      ? {
+          coverage_state: inspectionMatch.row.coverage_state,
+          verdict: inspectionMatch.row.verdict,
+        }
       : null,
     gscSynced: (gscCount ?? 0) > 0,
   };
