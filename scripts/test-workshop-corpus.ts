@@ -24,6 +24,8 @@ import {
   normalizeAnbieterItems,
   normalizeAvatarPlan,
   normalizeDossier,
+  forgetMissingAvatarAgents,
+  isMissingAgentError,
   normalizePreview,
   orderWorkshopSources,
   readAnbieterState,
@@ -412,6 +414,46 @@ function testAvatarNameRoleAndQuickActions() {
   console.log("avatar name, role, quick actions: ok");
 }
 
+function testMissingAgentLink() {
+  const live = "11111111-1111-4111-8111-111111111111";
+  const gone = "22222222-2222-4222-8222-222222222222";
+  const plan = {
+    status: "approved" as const,
+    sourceFingerprint: "abc",
+    approvedFingerprint: "abc",
+    revisionNote: "",
+    notWanted: "",
+    avatars: [
+      {
+        key: "a",
+        title: "Geschäftsführer ohne eigene IT",
+        whySeparate: "",
+        cases: [],
+        dossier: null,
+        preview: null,
+        agentId: gone,
+      },
+      {
+        key: "b",
+        title: "Zweiter",
+        whySeparate: "",
+        cases: [],
+        dossier: null,
+        preview: null,
+        agentId: live,
+      },
+    ],
+  };
+  const next = forgetMissingAvatarAgents(plan, new Set([live]));
+  assert.equal(next.avatars[0]?.agentId, null);
+  assert.equal(next.avatars[1]?.agentId, live);
+  assert.equal(forgetMissingAvatarAgents(plan, new Set([live, gone])), plan);
+  assert.equal(isMissingAgentError("agent_not_found"), true);
+  assert.equal(isMissingAgentError("P0001: agent_not_found"), true);
+  assert.equal(isMissingAgentError("forbidden"), false);
+  console.log("missing agent link: ok");
+}
+
 testOrder();
 testFingerprintAndStatus();
 testChecklistAndSeoText();
@@ -420,4 +462,5 @@ testAvatarRestore();
 testValueFields();
 testRevisionNote();
 testAvatarNameRoleAndQuickActions();
+testMissingAgentLink();
 console.log("workshop corpus: all ok");
