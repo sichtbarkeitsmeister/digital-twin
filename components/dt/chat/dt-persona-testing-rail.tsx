@@ -386,11 +386,19 @@ export function DtPersonaTestingRail(props: {
               <>
                 <p className={cn(wrapText, "text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60")}>
                   {questions.length > 0 && questionSource === "persona" ? (
-                    <>
-                      Prüffragen aus den Persona-Einstellungen: DISG, Pain Points, Entscheidungskriterien
-                      und der große Wunsch (Traumergebnis, Dringlichkeit, Aufwand, Wahrscheinlichkeit),
-                      soweit sie hinterlegt sind. „Nächste Frage“ sendet sie, danach prüft die KI die Antwort.
-                    </>
+                    audience === "company" ? (
+                      <>
+                        Prüffragen aus dem hinterlegten Wissen, in der Sprache der Fragebögen: zuerst
+                        Schmerz, Wunsch-Ergebnis und Hürde, dann Demografie und DISG, danach die
+                        Praxisfakten. „Nächste Frage“ sendet sie, danach prüft die KI die Antwort.
+                      </>
+                    ) : (
+                      <>
+                        Prüffragen wie im Wunschkunden-Fragebogen: zuerst Schmerz, Wunsch-Ergebnis und
+                        Hürde, dann weitere Hormozi-Punkte, demografische Merkmale und DISG. „Nächste
+                        Frage“ sendet sie, danach prüft die KI die Antwort.
+                      </>
+                    )
                   ) : questions.length > 0 ? (
                     <>
                       „Nächste Frage“ oder eigene Prüffrage senden. Unter SOLL erscheint danach groß{" "}
