@@ -339,18 +339,23 @@ export function WorkshopBoard(props: { organisationId: string }) {
                   ? "Bestand neu auswerten"
                   : "Bestand auswerten"}
             </Button>
-            <Button
-              type="button"
-              disabled={anbieter?.status !== "proposed" || busy != null}
-              onClick={() => void postAnbieter("approve")}
-            >
-              {busy === "anbieter-approve" ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-              ) : (
-                <CheckCircle2 className="size-4" aria-hidden />
-              )}
-              {anbieter?.approvedFingerprint ? "Erneut freigeben" : "Freigeben und in den SEO-Berater schreiben"}
-            </Button>
+            {anbieter?.status === "proposed" ? (
+              <Button
+                type="button"
+                className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+                disabled={busy != null}
+                onClick={() => void postAnbieter("approve")}
+              >
+                {busy === "anbieter-approve" ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  <CheckCircle2 className="size-4" aria-hidden />
+                )}
+                {anbieter.approvedFingerprint
+                  ? "Erneut freigeben"
+                  : "Freigeben und in den SEO-Berater schreiben"}
+              </Button>
+            ) : null}
           </div>
           {busy === "anbieter-evaluate" ? (
             <p className="flex items-center gap-2 text-sm text-primary">
@@ -361,7 +366,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
           {anbieterError ? <p className="text-sm text-destructive">{anbieterError}</p> : null}
           {anbieter?.status === "empty" && busy !== "anbieter-evaluate" ? (
             <p className="text-sm text-secondary">
-              Die Freigabe wird erst klickbar, wenn die Auswertung einen Vorschlag geliefert hat.
+              Der dunkle Freigabe-Button erscheint unter den zwölf Punkten, sobald der Vorschlag da ist.
             </p>
           ) : null}
           {anbieter?.status === "stale" ? (
@@ -429,31 +434,34 @@ export function WorkshopBoard(props: { organisationId: string }) {
               {busy === "plan" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
               {busy === "plan" ? "Plan wird vorgeschlagen…" : avatarPlan && avatarPlan.avatars.length > 0 ? "Plan neu vorschlagen" : "Avatar-Plan vorschlagen"}
             </Button>
-            <Button
-              type="button"
-              disabled={!planEditable || busy != null}
-              onClick={() =>
-                void postAvatars(
-                  {
-                    action: "approve",
-                    notWanted,
-                    titles: (avatarPlan?.avatars ?? []).map((avatar) => ({
-                      key: avatar.key,
-                      title: (titles[avatar.key] ?? avatar.title).trim(),
-                    })),
-                  },
-                  "approve",
-                  "Avatar-Plan freigegeben. Jetzt Avatar für Avatar.",
-                )
-              }
-            >
-              {busy === "approve" ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-              ) : (
-                <CheckCircle2 className="size-4" aria-hidden />
-              )}
-              Plan freigeben
-            </Button>
+            {planEditable ? (
+              <Button
+                type="button"
+                className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+                disabled={busy != null}
+                onClick={() =>
+                  void postAvatars(
+                    {
+                      action: "approve",
+                      notWanted,
+                      titles: (avatarPlan?.avatars ?? []).map((avatar) => ({
+                        key: avatar.key,
+                        title: (titles[avatar.key] ?? avatar.title).trim(),
+                      })),
+                    },
+                    "approve",
+                    "Avatar-Plan freigegeben. Jetzt Avatar für Avatar.",
+                  )
+                }
+              >
+                {busy === "approve" ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  <CheckCircle2 className="size-4" aria-hidden />
+                )}
+                Plan freigeben
+              </Button>
+            ) : null}
           </div>
           {busy === "plan" ? (
             <p className="flex items-center gap-2 text-sm text-primary">

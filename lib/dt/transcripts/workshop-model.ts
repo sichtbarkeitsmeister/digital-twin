@@ -94,7 +94,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function asString(value: unknown, max: number): string {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
+  return asText(value, max);
+}
+
+function asText(value: unknown, max: number): string {
+  if (typeof value === "string") return value.trim().slice(0, max);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value).slice(0, max);
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => (typeof part === "string" || typeof part === "number" ? asText(part, max) : ""))
+      .filter(Boolean)
+      .join("\n")
+      .slice(0, max);
+  }
+  return "";
 }
 
 export function compareWorkshopSources(a: WorkshopSource, b: WorkshopSource): number {
@@ -176,25 +189,52 @@ function pointKeyFrom(value: string): AnbieterPointKey | null {
       return point.key;
     }
   }
-  return null;
+  const loose = ANBIETER_POINTS.filter((point) => {
+    const label = compactPointName(point.label);
+    return compact.includes(point.key) || compact.includes(label) || label.includes(compact);
+  });
+  return loose.length === 1 ? loose[0].key : null;
+}
+
+function itemCurrent(item: Record<string, unknown>): string {
+  for (const key of ["current", "text", "stand", "inhalt", "fakt", "beschreibung", "value", "summary"]) {
+    const text = asString(item[key], 2000);
+    if (text) return text;
+  }
+  let best = "";
+  for (const [key, value] of Object.entries(item)) {
+    if (key === "key" || key === "label" || key === "earlier" || key === "sources") continue;
+    const text = asString(value, 2000);
+    if (text.length > best.length) best = text;
+  }
+  return best;
+}
+
+function anbieterRows(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  const record = asRecord(raw);
+  if (!record) return [];
+  if (Array.isArray(record.items)) return record.items;
+  if (record.items && typeof record.items === "object") return anbieterRows(record.items);
+  if (Array.isArray(record.anbieter)) return record.anbieter;
+  const rows: unknown[] = [];
+  for (const [key, value] of Object.entries(record)) {
+    if (!pointKeyFrom(key)) continue;
+    const item = asRecord(value);
+    rows.push(item ? { key, ...item } : { key, current: value });
+  }
+  return rows;
 }
 
 export function normalizeAnbieterItems(raw: unknown): AnbieterItem[] {
-  const record = asRecord(raw);
-  const rows = Array.isArray(raw)
-    ? raw
-    : Array.isArray(record?.items)
-      ? record.items
-      : Array.isArray(record?.anbieter)
-        ? record.anbieter
-        : [];
+  const rows = anbieterRows(raw);
   const byKey = new Map<string, { current: string; earlier: string | null; sources: string }>();
   for (const row of rows) {
     const item = asRecord(row);
     if (!item) continue;
-    const key = pointKeyFrom(asString(item.key, 80) || asString(item.label, 80));
+    const key = pointKeyFrom(asString(item.key, 120) || asString(item.label, 120));
     if (!key) continue;
-    const current = asString(item.current ?? item.text ?? item.stand, 2000);
+    const current = itemCurrent(item);
     const earlier = asString(item.earlier, 2000);
     byKey.set(key, {
       current,
