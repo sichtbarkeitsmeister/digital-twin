@@ -21,6 +21,7 @@ const bodySchema = z.object({
   action: z.enum(["plan", "approve", "dossier", "preview", "create"]),
   avatarKey: z.string().min(1).max(48).optional(),
   notWanted: z.string().max(2000).optional(),
+  instruction: z.string().trim().max(4_000).optional(),
   titles: z
     .array(z.object({ key: z.string().min(1).max(48), title: z.string().trim().min(2).max(120) }))
     .max(6)
@@ -70,16 +71,20 @@ export async function POST(req: Request) {
     const organisationName = org?.name?.trim() || "Organisation";
 
     if (action === "plan") {
+      const instruction = parsed.data.instruction?.trim() ?? "";
       const result = await proposeAvatarPlan({
         organisationName,
         sources: state.sources,
         previous: state.avatarPlan.avatars,
+        instruction,
+        notWanted: state.avatarPlan.notWanted,
       });
       await recordUsage(auth.supabase, organisationId, auth.userId, result);
       await saveAvatarPlan(auth.supabase, organisationId, {
         status: "proposed",
         sourceFingerprint: state.fingerprint,
         approvedFingerprint: null,
+        revisionNote: instruction || state.avatarPlan.revisionNote,
         notWanted: result.notWanted,
         avatars: result.avatars,
       });

@@ -13,6 +13,8 @@ import {
   buildCorpusPrompt,
   buildCurrentAnbieterMarkdown,
   corpusFingerprint,
+  describeAnbieterStand,
+  formatRevisionBlock,
   normalizeAnbieterItems,
   normalizeAvatarPlan,
   normalizeDossier,
@@ -284,6 +286,39 @@ function testAvatarRestore() {
   console.log("avatar restore: ok");
 }
 
+function testRevisionNote() {
+  const block = formatRevisionBlock(
+    "Bantek liegt in Mülheim. Endphone streichen.",
+    describeAnbieterStand([
+      {
+        key: "beweise",
+        label: "Beweise & Erfolge",
+        current: "Bantek in Münchenheim. Früher Endphone.",
+        earlier: null,
+        sources: "",
+      },
+    ]),
+  );
+  assert.match(block, /prüfenden Person/);
+  assert.match(block, /Mülheim/);
+  assert.match(block, /Bisheriger Vorschlag/);
+  assert.match(block, /Münchenheim/);
+  assert.equal(formatRevisionBlock("   ", "Stand"), "");
+
+  const stored = readAnbieterState(
+    {
+      sourceFingerprint: "abc",
+      approvedFingerprint: null,
+      revisionNote: "Ort korrigieren",
+      items: [{ key: "leistungen", current: "Betreuung" }],
+    },
+    "abc",
+  );
+  assert.equal(stored.revisionNote, "Ort korrigieren");
+  assert.equal(stored.status, "proposed");
+  console.log("revision note: ok");
+}
+
 function testValueFields() {
   const legacy = normalizeDossier({
     narrative: "Der Kunde will Ruhe.",
@@ -326,4 +361,5 @@ testChecklistAndSeoText();
 testCorpusPrompt();
 testAvatarRestore();
 testValueFields();
+testRevisionNote();
 console.log("workshop corpus: all ok");

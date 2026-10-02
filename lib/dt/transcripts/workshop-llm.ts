@@ -15,6 +15,9 @@ import {
   type WorkshopAvatar,
   type WorkshopSource,
   buildCorpusPrompt,
+  describeAnbieterStand,
+  describeAvatarStand,
+  formatRevisionBlock,
   normalizeAnbieterItems,
   normalizeAvatarPlan,
   normalizeDossier,
@@ -110,6 +113,8 @@ function anbieterPayloadHint(value: unknown): string {
 export async function evaluateAnbieterCorpus(input: {
   organisationName: string;
   sources: WorkshopSource[];
+  instruction?: string;
+  currentItems?: AnbieterItem[];
 }): Promise<{ items: AnbieterItem[]; usage: { inputTokens: number; outputTokens: number }; model: string | null }> {
   const pointProperties = Object.fromEntries(
     ANBIETER_POINTS.map((point) => [
@@ -132,13 +137,23 @@ export async function evaluateAnbieterCorpus(input: {
       required: ANBIETER_POINTS.map((point) => point.key),
     },
   };
-  const user = [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n");
+  const revision = formatRevisionBlock(
+    input.instruction ?? "",
+    describeAnbieterStand(input.currentItems ?? []),
+  );
+  const user = [
+    `Organisation: ${input.organisationName}`,
+    "",
+    buildCorpusPrompt(input.sources),
+    revision ? `\n${revision}` : "",
+  ].join("\n");
   const system = `${CORPUS_RULES}
 
 Du füllst die Anbieter-Checkliste direkt in die Felder ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
 Jedes Feld enthält alle belegten Fakten dieses Punkts, nicht nur eine Kurzfassung.
 Was niemand gesagt hat, bleibt ein leerer String. Erfundene Fakten sind verboten.
-Eine Angabe, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.`;
+Eine Angabe, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.
+${revision ? "Liegt eine Anweisung bei, setzt du sie an den genannten Punkten um. Eine fehlerhafte Transkription verliert gegen diese Anweisung." : ""}`;
   const first = await callTool({ system, user, tool, maxTokens: 32_000 });
   let items = normalizeAnbieterItems(first.json);
   let usage = first.usage;
@@ -173,6 +188,8 @@ export async function proposeAvatarPlan(input: {
   organisationName: string;
   sources: WorkshopSource[];
   previous: WorkshopAvatar[];
+  instruction?: string;
+  notWanted?: string;
 }): Promise<{
   notWanted: string;
   avatars: WorkshopAvatar[];
@@ -216,6 +233,10 @@ export async function proposeAvatarPlan(input: {
       required: ["avatars"],
     },
   };
+  const revision = formatRevisionBlock(
+    input.instruction ?? "",
+    describeAvatarStand({ notWanted: input.notWanted ?? "", avatars: input.previous }),
+  );
   const { json, usage, model } = await callTool({
     system: `${CORPUS_RULES}
 
@@ -225,8 +246,14 @@ Eine andere Leistung oder eine andere Größe allein erzeugt keinen zweiten Avat
 Fallbeispiele sind Belege unter dem Avatar, niemals eigene Avatare.
 Menschen, die sie nicht als Kunden wollen, gehören nach notWanted.
 Schmerz, Traumergebnis, Dringlichkeit, Hürde, Aufwand und Zeit schreibst du hier nicht aus.
-Höchstens sechs Avatare. Titel sind Arbeitstitel der Zielgruppe, keine Personennamen aus einem einzelnen Fall.`,
-    user: [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n"),
+Höchstens sechs Avatare. Titel sind Arbeitstitel der Zielgruppe, keine Personennamen aus einem einzelnen Fall.
+${revision ? "Liegt eine Anweisung bei, passt du Anzahl, Titel, Abgrenzung und Fälle daran an. Nichts darüber hinaus erfinden." : ""}`,
+    user: [
+      `Organisation: ${input.organisationName}`,
+      "",
+      buildCorpusPrompt(input.sources),
+      revision ? `\n${revision}` : "",
+    ].join("\n"),
     tool,
     maxTokens: 16_384,
   });
