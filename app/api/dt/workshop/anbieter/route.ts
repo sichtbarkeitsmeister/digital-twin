@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
-import { evaluateAnbieterCorpus } from "@/lib/dt/transcripts/workshop-llm";
+import { evaluateAnbieterCorpus, workshopFailureMessage } from "@/lib/dt/transcripts/workshop-llm";
 import { loadWorkshopState, saveAnbieterState, syncAnbieterToSeoAdvisor } from "@/lib/dt/transcripts/workshop-store";
 
 export const maxDuration = 300;
@@ -105,7 +105,10 @@ export async function POST(req: Request) {
     const fresh = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
     return NextResponse.json({ ok: true, anbieter: fresh.anbieter });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Anbieter-Auswertung fehlgeschlagen.";
-    return NextResponse.json({ ok: false, message }, { status: 500 });
+    const message = workshopFailureMessage(err, "Anbieter-Auswertung fehlgeschlagen.");
+    return NextResponse.json(
+      { ok: false, message: message || "Anbieter-Auswertung fehlgeschlagen." },
+      { status: 500 },
+    );
   }
 }
