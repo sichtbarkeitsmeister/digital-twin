@@ -1,63 +1,11 @@
-# Database Schema Documentation
+# Datenbank
 
-## Overview
+Die aktuelle Anleitung steht im Wiki im Projektroot: [README.md](../README.md), Abschnitt **7. Die Datenbank einrichten**.
 
-This directory contains the database schema and migrations for the DigitalTwin SaaS application.
+Kurzfassung:
 
-## Phase 1 Schema
+1. Zuerst `schema.sql` im Supabase SQL Editor ausführen.
+2. Danach jede Datei in `migrations/` ausführen, die älteste zuerst. Der Dateiname beginnt mit dem Datum.
+3. `schema.sql` allein enthält nur Profile, Firmen, Mitglieder, Einladungen und Fragebögen. Chat, SEO, Onboarding, Jobs und Leadinfo kommen aus den Migrationen.
 
-### Tables
-
-#### `profiles`
-
-Extended user profiles that link to Supabase Auth users.
-
-**Columns:**
-- `id` (UUID, PRIMARY KEY) - References `auth.users(id)`
-- `email` (TEXT, NOT NULL) - User email address
-- `role` (TEXT, NOT NULL) - User role: 'admin' or 'customer' (default: 'customer')
-- `created_at` (TIMESTAMP) - Account creation timestamp
-- `updated_at` (TIMESTAMP) - Last update timestamp
-
-**Indexes:**
-- `profiles_email_idx` - Index on email for faster lookups
-- `profiles_role_idx` - Index on role for admin queries
-
-**Row Level Security (RLS):**
-- ✅ Enabled on all operations
-- Users can view/update their own profile
-- Admins can view all profiles
-- Users can insert their own profile on signup
-
-## Setup Instructions
-
-1. **Run the schema migration:**
-   - Go to your Supabase project dashboard
-   - Navigate to SQL Editor
-   - Copy and paste the contents of `schema.sql`
-   - Execute the script
-
-2. **Verify RLS is enabled:**
-   - Go to Table Editor in Supabase
-   - Select the `profiles` table
-   - Verify "Enable Row Level Security" is checked
-
-3. **Test the policies:**
-   - Create a test user via signup
-   - Verify profile is created automatically
-   - Test that users can only see their own profile
-
-## Security Notes
-
-- All tables have RLS enabled by default
-- Policies follow the principle of least privilege
-- Admin access is explicitly checked via role
-- Profile creation is automated via trigger
-
-## Future Schema Additions (Phase 2+)
-
-- `chat_messages` - Chat conversation history
-- `chat_sessions` - Chat session tracking
-- `admin_settings` - Admin configuration
-
-These will be added in later phases as needed.
+`pg_cron`, `pg_net` und die Tabelle `app_settings` erklärt derselbe Abschnitt.
