@@ -15,9 +15,15 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { AVATAR_VALUE_FIELDS, type AvatarValueKey } from "@/lib/dt/transcripts/avatar-value";
+import {
+  AVATAR_VALUE_FIELDS,
+  avatarNextAction,
+  type AvatarValueKey,
+} from "@/lib/dt/transcripts/avatar-value";
 
 export const WORKSHOP_CHANGED_EVENT = "dt-workshop-changed";
+
+const NEXT_BUTTON = "bg-sbkm-navy text-white hover:bg-sbkm-ink-700";
 
 type SectionStatus = "empty" | "proposed" | "approved" | "stale";
 
@@ -108,6 +114,69 @@ function statusBadge(status: SectionStatus) {
   if (status === "stale") return <Badge variant="destructive">Veraltet</Badge>;
   if (status === "proposed") return <Badge variant="secondary">Zur Freigabe</Badge>;
   return <Badge variant="outline">Offen</Badge>;
+}
+
+function AvatarStepButtons(props: {
+  avatar: WorkshopAvatar;
+  busy: string | null;
+  onDossier: () => void;
+  onPreview: () => void;
+  onCreate: () => void;
+}) {
+  const next = avatarNextAction(props.avatar);
+  const label = next === "dossier" ? "Akte" : next === "preview" ? "Vorschau" : "Agent anlegen";
+  return (
+    <div className="grid gap-2">
+      <p className="text-sm font-medium text-primary">
+        {next === "done" ? "Dieser Avatar ist angelegt." : `Als Nächstes: ${label}`}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={next === "dossier" ? "default" : "outline"}
+          className={next === "dossier" ? NEXT_BUTTON : undefined}
+          disabled={props.busy != null}
+          onClick={props.onDossier}
+        >
+          {props.busy === `dossier:${props.avatar.key}` ? (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          ) : null}
+          {next === "dossier" ? "Als Nächstes: Akte" : "Akte"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={next === "preview" ? "default" : "outline"}
+          className={next === "preview" ? NEXT_BUTTON : undefined}
+          disabled={props.busy != null || !props.avatar.dossier}
+          onClick={props.onPreview}
+        >
+          {props.busy === `preview:${props.avatar.key}` ? (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          ) : null}
+          {next === "preview" ? "Als Nächstes: Vorschau" : "Vorschau"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={next === "create" ? "default" : "outline"}
+          className={next === "create" ? NEXT_BUTTON : undefined}
+          disabled={props.busy != null || !props.avatar.preview}
+          onClick={props.onCreate}
+        >
+          {props.busy === `create:${props.avatar.key}` ? (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          ) : null}
+          {next === "create"
+            ? "Als Nächstes: Agent anlegen"
+            : props.avatar.agentId
+              ? "Agent aktualisieren"
+              : "Agent anlegen"}
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export function WorkshopBoard(props: { organisationId: string }) {
@@ -277,6 +346,18 @@ export function WorkshopBoard(props: { organisationId: string }) {
   }
 
   const planEditable = avatarPlan?.status === "proposed";
+  const anbieterNext =
+    anbieter?.status === "empty" || anbieter?.status === "stale"
+      ? "evaluate"
+      : anbieter?.status === "proposed"
+        ? "approve"
+        : null;
+  const planNext =
+    !avatarPlan || avatarPlan.status === "empty" || avatarPlan.status === "stale" || avatarPlan.avatars.length === 0
+      ? "plan"
+      : avatarPlan.status === "proposed"
+        ? "approve"
+        : null;
 
   return (
     <div className="grid gap-6">
@@ -340,7 +421,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant={anbieterNext === "evaluate" ? "default" : "outline"}
+              className={anbieterNext === "evaluate" ? NEXT_BUTTON : undefined}
               disabled={loading || sources.length === 0 || busy != null}
               onClick={() => void postAnbieter("evaluate")}
             >
@@ -349,9 +431,13 @@ export function WorkshopBoard(props: { organisationId: string }) {
               ) : null}
               {busy === "anbieter-evaluate"
                 ? "Wertet aus…"
-                : anbieter && anbieter.status !== "empty"
-                  ? "Bestand neu auswerten"
-                  : "Bestand auswerten"}
+                : anbieterNext === "evaluate"
+                  ? anbieter?.status === "stale"
+                    ? "Als Nächstes: Bestand neu auswerten"
+                    : "Als Nächstes: Bestand auswerten"
+                  : anbieter && anbieter.status !== "empty"
+                    ? "Bestand neu auswerten"
+                    : "Bestand auswerten"}
             </Button>
             <Button
               type="button"
@@ -367,7 +453,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
             {anbieter?.status === "proposed" ? (
               <Button
                 type="button"
-                className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+                className={NEXT_BUTTON}
                 disabled={busy != null}
                 onClick={() => void postAnbieter("approve")}
               >
@@ -377,8 +463,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
                   <CheckCircle2 className="size-4" aria-hidden />
                 )}
                 {anbieter.approvedFingerprint
-                  ? "Erneut freigeben"
-                  : "Freigeben und in den SEO-Berater schreiben"}
+                  ? "Als Nächstes: erneut freigeben"
+                  : "Als Nächstes: freigeben"}
               </Button>
             ) : null}
           </div>
@@ -400,10 +486,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
             />
           </div>
           {anbieterError ? <p className="text-sm text-destructive">{anbieterError}</p> : null}
-          {anbieter?.status === "empty" && busy !== "anbieter-evaluate" ? (
-            <p className="text-sm text-secondary">
-              Der dunkle Freigabe-Button erscheint unter den Punkten, sobald der Vorschlag da ist.
-            </p>
+          {anbieterNext === "approve" && busy !== "anbieter-approve" ? (
+            <p className="text-sm text-primary">Der dunkle Button ist der nächste Schritt.</p>
           ) : null}
           {anbieter?.status === "stale" ? (
             <p className="text-sm text-destructive">
@@ -462,14 +546,23 @@ export function WorkshopBoard(props: { organisationId: string }) {
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant={planNext === "plan" ? "default" : "outline"}
+              className={planNext === "plan" ? NEXT_BUTTON : undefined}
               disabled={loading || sources.length === 0 || busy != null}
               onClick={() =>
                 void postAvatars({ action: "plan" }, "plan", "Avatar-Plan liegt vor. Bitte prüfen.")
               }
             >
               {busy === "plan" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              {busy === "plan" ? "Plan wird vorgeschlagen…" : avatarPlan && avatarPlan.avatars.length > 0 ? "Plan neu vorschlagen" : "Avatar-Plan vorschlagen"}
+              {busy === "plan"
+                ? "Plan wird vorgeschlagen…"
+                : planNext === "plan"
+                  ? avatarPlan && avatarPlan.avatars.length > 0
+                    ? "Als Nächstes: Plan neu vorschlagen"
+                    : "Als Nächstes: Avatar-Plan vorschlagen"
+                  : avatarPlan && avatarPlan.avatars.length > 0
+                    ? "Plan neu vorschlagen"
+                    : "Avatar-Plan vorschlagen"}
             </Button>
             <Button
               type="button"
@@ -489,7 +582,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
             {planEditable ? (
               <Button
                 type="button"
-                className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+                className={NEXT_BUTTON}
                 disabled={busy != null}
                 onClick={() =>
                   void postAvatars(
@@ -511,7 +604,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
                 ) : (
                   <CheckCircle2 className="size-4" aria-hidden />
                 )}
-                Plan freigeben
+                Als Nächstes: Plan freigeben
               </Button>
             ) : null}
           </div>
@@ -533,10 +626,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
             />
           </div>
           {avatarError ? <p className="text-sm text-destructive">{avatarError}</p> : null}
-          {(avatarPlan?.status === "empty" || avatarPlan?.status === "stale") && busy !== "plan" ? (
-            <p className="text-sm text-secondary">
-              „Plan freigeben“ wird erst klickbar, wenn ein Vorschlag vorliegt.
-            </p>
+          {planNext === "approve" && busy !== "approve" ? (
+            <p className="text-sm text-primary">Der dunkle Button ist der nächste Schritt.</p>
           ) : null}
           {avatarPlan?.status === "stale" ? (
             <p className="text-sm text-destructive">
@@ -594,61 +685,31 @@ export function WorkshopBoard(props: { organisationId: string }) {
                     </ul>
                   ) : null}
                   {avatarPlan.status === "approved" ? (
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy != null}
-                        onClick={() =>
-                          void postAvatars(
-                            { action: "dossier", avatarKey: avatar.key },
-                            `dossier:${avatar.key}`,
-                            "Akte liegt vor.",
-                          )
-                        }
-                      >
-                        {busy === `dossier:${avatar.key}` ? (
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                        ) : null}
-                        Akte
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy != null || !avatar.dossier}
-                        onClick={() =>
-                          void postAvatars(
-                            { action: "preview", avatarKey: avatar.key },
-                            `preview:${avatar.key}`,
-                            "Vorschau liegt vor.",
-                          )
-                        }
-                      >
-                        {busy === `preview:${avatar.key}` ? (
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                        ) : null}
-                        Vorschau
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={busy != null || !avatar.preview}
-                        onClick={() =>
-                          void postAvatars(
-                            { action: "create", avatarKey: avatar.key },
-                            `create:${avatar.key}`,
-                            avatar.agentId ? "Avatar aktualisiert." : "Avatar angelegt.",
-                          )
-                        }
-                      >
-                        {busy === `create:${avatar.key}` ? (
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                        ) : null}
-                        {avatar.agentId ? "Agent aktualisieren" : "Agent anlegen"}
-                      </Button>
-                    </div>
+                    <AvatarStepButtons
+                      avatar={avatar}
+                      busy={busy}
+                      onDossier={() =>
+                        void postAvatars(
+                          { action: "dossier", avatarKey: avatar.key },
+                          `dossier:${avatar.key}`,
+                          "Akte liegt vor.",
+                        )
+                      }
+                      onPreview={() =>
+                        void postAvatars(
+                          { action: "preview", avatarKey: avatar.key },
+                          `preview:${avatar.key}`,
+                          "Vorschau liegt vor.",
+                        )
+                      }
+                      onCreate={() =>
+                        void postAvatars(
+                          { action: "create", avatarKey: avatar.key },
+                          `create:${avatar.key}`,
+                          avatar.agentId ? "Avatar aktualisiert." : "Avatar angelegt.",
+                        )
+                      }
+                    />
                   ) : null}
                   {avatar.dossier ? (
                     <div className="grid gap-2 text-sm">
