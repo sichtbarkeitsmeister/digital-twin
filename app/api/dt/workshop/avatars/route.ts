@@ -156,7 +156,11 @@ export async function POST(req: Request) {
     }
 
     if (action === "preview") {
-      const result = await previewAvatarFromDossier({ organisationName, avatar });
+      const revisionNote = [state.avatarPlan.revisionNote, state.anbieter.revisionNote]
+        .map((note) => note.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      const result = await previewAvatarFromDossier({ organisationName, avatar, revisionNote });
       await recordUsage(auth.supabase, organisationId, auth.userId, result);
       await saveAvatarPlan(
         auth.supabase,
