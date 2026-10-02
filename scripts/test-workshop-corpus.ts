@@ -5,6 +5,12 @@
 import assert from "node:assert/strict";
 
 import {
+  AVATAR_QUICK_ACTIONS,
+  avatarFirstName,
+  avatarShortRole,
+  ensureAvatarIntroducesSelf,
+} from "../lib/dt/transcripts/avatar-value";
+import {
   isMarkdownTranscriptFilename,
   resolveTranscriptReading,
 } from "../lib/dt/transcripts/markdown-file";
@@ -18,6 +24,7 @@ import {
   normalizeAnbieterItems,
   normalizeAvatarPlan,
   normalizeDossier,
+  normalizePreview,
   orderWorkshopSources,
   readAnbieterState,
   readAvatarPlan,
@@ -268,7 +275,7 @@ function testAvatarRestore() {
           cases: [],
           dossier: previous[0]?.dossier,
           preview: {
-            name: "Leitung Pflegeheim",
+            name: "Sabine Keller",
             role: "Einrichtungsleitung",
             summary: "Will Fristen im Blick.",
             promptAppend: "Ich leite ein Pflegeheim und will klare Worte. ".repeat(4),
@@ -280,7 +287,8 @@ function testAvatarRestore() {
     "abc",
   );
   assert.equal(stored.status, "approved");
-  assert.equal(stored.avatars[0]?.preview?.name, "Leitung Pflegeheim");
+  assert.equal(stored.avatars[0]?.preview?.name, "Sabine");
+  assert.match(stored.avatars[0]?.preview?.promptAppend ?? "", /^Ich heiße Sabine\./);
   assert.equal(stored.avatars[0]?.agentId, "agent-1");
   assert.equal(stored.notWanted, "Konzerne");
   console.log("avatar restore: ok");
@@ -355,6 +363,55 @@ function testValueFields() {
   console.log("value fields: ok");
 }
 
+function testAvatarNameRoleAndQuickActions() {
+  assert.equal(avatarFirstName("Thomas Berger"), "Thomas");
+  assert.equal(avatarFirstName("lea"), "Lea");
+  assert.equal(avatarFirstName("Geschäftsführer ohne eigene IT"), "");
+
+  const longRole =
+    "Geschäftsführer eines Unternehmens mit 20 bis 100 Mitarbeitern, ohne eigene IT-Abteilung";
+  const short = avatarShortRole(longRole);
+  assert.ok(short.length <= 72, short);
+  assert.ok(short.split(/\s+/).length <= 6, short);
+  assert.doesNotMatch(short, /[,:;–\-]$/);
+  assert.equal(avatarShortRole("Geschäftsführer ohne eigene IT"), "Geschäftsführer ohne eigene IT");
+
+  const body = `${"Du sprichst mit mir als Geschäftsführer. ".repeat(6)}Ich will Ruhe.`;
+  const intro = ensureAvatarIntroducesSelf("Lea", body);
+  assert.match(intro, /^Ich heiße Lea\./);
+  assert.equal(ensureAvatarIntroducesSelf("Lea", intro), intro);
+
+  const preview = normalizePreview({
+    name: "Thomas Berger",
+    role: longRole,
+    summary: "Kurz",
+    promptAppend: body,
+  });
+  assert.equal(preview?.name, "Thomas");
+  assert.equal(preview?.role.split(/\s+/).length <= 6, true);
+  assert.match(preview?.promptAppend ?? "", /^Ich heiße Thomas\./);
+  assert.equal(
+    normalizePreview({
+      name: "Geschäftsführer ohne eigene IT",
+      role: "Geschäftsführer ohne eigene IT",
+      summary: "Kurz",
+      promptAppend: body,
+    }),
+    null,
+  );
+
+  assert.equal(AVATAR_QUICK_ACTIONS.length, 5);
+  assert.equal(AVATAR_QUICK_ACTIONS[0], "Stell dich bitte vor");
+  assert.equal(
+    AVATAR_QUICK_ACTIONS[1],
+    "Wie bist du auf uns aufmerksam geworden und was bringt dich zu uns?",
+  );
+  assert.equal(AVATAR_QUICK_ACTIONS[2], "Was weißt du schon alles über uns?");
+  assert.equal(AVATAR_QUICK_ACTIONS[3], "Wie kann ich dir helfen?");
+  assert.equal(AVATAR_QUICK_ACTIONS[4], "Was erwartest du nach der Zusammenarbeit mit uns?");
+  console.log("avatar name, role, quick actions: ok");
+}
+
 testOrder();
 testFingerprintAndStatus();
 testChecklistAndSeoText();
@@ -362,4 +419,5 @@ testCorpusPrompt();
 testAvatarRestore();
 testValueFields();
 testRevisionNote();
+testAvatarNameRoleAndQuickActions();
 console.log("workshop corpus: all ok");

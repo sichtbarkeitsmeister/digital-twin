@@ -363,8 +363,11 @@ export async function previewAvatarFromDossier(input: {
     input_schema: {
       type: "object",
       properties: {
-        name: { type: "string" },
-        role: { type: "string" },
+        name: {
+          type: "string",
+          description: "Genau ein erfundener Vorname, zum Beispiel Lea. Kein Nachname, keine Berufsbezeichnung.",
+        },
+        role: { type: "string", description: "Kurze Definition in höchstens sechs Wörtern, zum Beispiel Geschäftsführer ohne eigene IT." },
         summary: { type: "string" },
         promptAppend: { type: "string" },
       },
@@ -374,6 +377,9 @@ export async function previewAvatarFromDossier(input: {
   const { json, usage, model } = await callTool({
     system: `Du schreibst den avatar-spezifischen Text für einen Wunschkunden.
 Nur die Akte verwenden. Ich-Perspektive des Interessenten, kein Markenbotschafter.
+name ist genau ein erfundener Vorname, der zur Person passt. Kein Nachname. Kein Name aus dem Bestand. Nicht der Arbeitstitel und keine Berufsbezeichnung wie Geschäftsführer.
+role ist eine kurze Definition in höchstens sechs Wörtern, ohne Satz und ohne Mitarbeiterzahl.
+Der erste Satz von promptAppend lautet exakt „Ich heiße {name}." Damit stellt sich der Avatar vor, wenn er danach gefragt wird.
 promptAppend auf Deutsch, ohne den globalen Regelblock zu wiederholen.
 Jeder belegte Punkt der Wertgleichung muss im Text vorkommen: Schmerz, Traumergebnis, Dringlichkeit, Hürde, Aufwand und Verzicht, Zeit, Wahrscheinlichkeit.
 Was als „offen, nicht erfinden“ markiert ist, darf nicht ergänzt werden.
@@ -388,6 +394,8 @@ Zitate nur übernehmen, wenn sie in der Akte stehen.`,
     maxTokens: 32_000,
   });
   const preview = normalizePreview(json);
-  if (!preview) throw new Error("Die Vorschau war unvollständig.");
+  if (!preview) {
+    throw new Error("Die Vorschau braucht einen erfundenen Vornamen und einen kurzen Rollentext.");
+  }
   return { preview, usage, model };
 }

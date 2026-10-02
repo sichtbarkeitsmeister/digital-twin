@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 
-import type { AvatarValueKey } from "@/lib/dt/transcripts/avatar-value";
+import {
+  avatarFirstName,
+  avatarShortRole,
+  ensureAvatarIntroducesSelf,
+  type AvatarValueKey,
+} from "@/lib/dt/transcripts/avatar-value";
 import { normalizePersonaKey, slugFromPersonaName } from "@/lib/dt/transcripts/sanitize";
 
 export const WORKSHOP_CORPUS_START = "<!-- DT_WORKSHOP_CORPUS_START -->";
@@ -490,12 +495,15 @@ export function normalizeDossier(raw: unknown): WorkshopAvatar["dossier"] {
 export function normalizePreview(raw: unknown): WorkshopAvatar["preview"] {
   const record = asRecord(raw);
   if (!record) return null;
-  const name = asString(record.name, 120);
-  const promptAppend = asString(record.promptAppend ?? record.prompt_append, 32_000);
+  const name = avatarFirstName(asString(record.name, 80));
+  const promptAppend = ensureAvatarIntroducesSelf(
+    name,
+    asString(record.promptAppend ?? record.prompt_append, 32_000),
+  );
   if (name.length < 2 || promptAppend.length < 80) return null;
   return {
     name,
-    role: asString(record.role, 200),
+    role: avatarShortRole(asString(record.role, 200)),
     summary: asString(record.summary, 800),
     promptAppend,
   };
