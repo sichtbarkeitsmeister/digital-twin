@@ -35,6 +35,8 @@ export type DtMeetingTranscriptRow = {
   mime_type: string | null;
   title: string | null;
   notes: string | null;
+  source_kind: "raw" | "summary";
+  spoken_on: string | null;
   raw_text: string;
   summary: string | null;
   anbieter_markdown: string | null;
@@ -55,6 +57,8 @@ export type DtTranscriptListItem = {
   mimeType: string | null;
   title: string | null;
   notes: string | null;
+  sourceKind: "raw" | "summary";
+  spokenOn: string | null;
   summary: string | null;
   anbieterMarkdown: string | null;
   personas: DtTranscriptPersonaExtract[];

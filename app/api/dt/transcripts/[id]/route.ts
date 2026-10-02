@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
-import { applyTranscriptExtractToOrg } from "@/lib/dt/transcripts/apply-knowledge";
 import {
+  TRANSCRIPT_ROW_SELECT,
   serializeTranscriptDetail,
   serializeTranscriptListItem,
 } from "@/lib/dt/transcripts/format-for-prompt";
@@ -14,10 +14,11 @@ import { sanitizeTranscriptText } from "@/lib/dt/transcripts/sanitize";
 const patchSchema = z.object({
   notes: z.string().trim().max(2000).nullable().optional(),
   title: z.string().trim().max(200).nullable().optional(),
+  spokenOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  sourceKind: z.enum(["raw", "summary"]).optional(),
 });
 
-const SELECT =
-  "id,organisation_id,filename,mime_type,title,notes,raw_text,summary,anbieter_markdown,personas_json,status,error_message,applied_at,uploaded_by,processed_at,created_at,updated_at";
+const SELECT = TRANSCRIPT_ROW_SELECT;
 
 async function loadOwnedTranscript(
   supabase: Awaited<ReturnType<typeof requireAuthUser>>["supabase"],
@@ -89,6 +90,8 @@ export async function PATCH(
       ? sanitizeTranscriptText(parsed.data.notes).trim() || null
       : null;
   }
+  if (parsed.data.spokenOn !== undefined) patch.spoken_on = parsed.data.spokenOn;
+  if (parsed.data.sourceKind !== undefined) patch.source_kind = parsed.data.sourceKind;
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ ok: true, transcript: serializeTranscriptListItem(loaded.row) });
   }
@@ -125,19 +128,6 @@ export async function DELETE(
   const { error } = await auth.supabase.from("dt_meeting_transcripts").delete().eq("id", id);
   if (error) {
     return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
-  }
-
-  try {
-    await applyTranscriptExtractToOrg({
-      supabase: auth.supabase,
-      organisationId: loaded.row.organisation_id,
-      extract: { title: null, summary: "", anbieterMarkdown: "", personas: [] },
-    });
-  } catch (err) {
-    console.warn(
-      "[dt/transcripts] anbieter resync after delete:",
-      err instanceof Error ? err.message : err,
-    );
   }
 
   return NextResponse.json({ ok: true });
