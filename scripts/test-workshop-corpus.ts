@@ -5,6 +5,10 @@
 import assert from "node:assert/strict";
 
 import {
+  isMarkdownTranscriptFilename,
+  resolveTranscriptReading,
+} from "../lib/dt/transcripts/markdown-file";
+import {
   ANBIETER_POINTS,
   buildCorpusPrompt,
   buildCurrentAnbieterMarkdown,
@@ -183,6 +187,34 @@ function testCorpusPrompt() {
   ]);
   assert.ok(full.includes("ENDE"));
   assert.equal(full.includes("gekürzt"), false);
+
+  assert.equal(
+    isMarkdownTranscriptFilename("Zusammenfassung_Anbieter-Persona_IT_Problemloeser.md"),
+    true,
+  );
+  assert.equal(isMarkdownTranscriptFilename("Transcript_Teil_1.txt"), false);
+  const markdownBody = `# Anbieter\n\n${"Satz ".repeat(400)}ENDE der Zusammenfassung`;
+  const reading = resolveTranscriptReading({
+    filename: "Zusammenfassung_Anbieter-Persona_IT_Problemloeser.md",
+    sourceKind: "raw",
+    summary: null,
+    rawText: markdownBody,
+  });
+  assert.equal(reading.sourceKind, "summary");
+  assert.equal(reading.summary, markdownBody);
+  const markdownPrompt = buildCorpusPrompt([
+    source({
+      id: "md",
+      filename: "Zusammenfassung_Anbieter-Persona_IT_Problemloeser.md",
+      sourceKind: reading.sourceKind,
+      summary: reading.summary,
+      rawText: markdownBody,
+    }),
+  ]);
+  assert.ok(markdownPrompt.includes("### Zusammenfassung"));
+  assert.ok(markdownPrompt.includes("ENDE der Zusammenfassung"));
+  assert.equal(markdownPrompt.includes("### Wortlaut"), false);
+  assert.equal(markdownPrompt.includes("gekürzt"), false);
   console.log("corpus prompt: ok");
 }
 

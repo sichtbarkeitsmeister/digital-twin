@@ -25,6 +25,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isMarkdownTranscriptFilename } from "@/lib/dt/transcripts/markdown-file";
 import type { DtTranscriptListItem } from "@/lib/dt/transcripts/types";
 import { readQuestionnaireFileText } from "@/lib/surveys/read-questionnaire-file-text";
 import { cn } from "@/lib/utils";
@@ -141,7 +142,12 @@ export function TranscriptsPanel(props: {
       setDraft(text);
       setFilename(file.name);
       if (!title.trim()) setTitle(file.name.replace(/\.[^.]+$/, ""));
-      toast.success(`„${file.name}“ gelesen.`);
+      if (isMarkdownTranscriptFilename(file.name)) {
+        setSourceKind("summary");
+        toast.success(`„${file.name}“ als Zusammenfassung gelesen.`);
+      } else {
+        toast.success(`„${file.name}“ gelesen.`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Datei konnte nicht gelesen werden.");
     }
@@ -305,6 +311,7 @@ export function TranscriptsPanel(props: {
                 type="radio"
                 name="source-kind"
                 checked={sourceKind === "raw"}
+                disabled={isMarkdownTranscriptFilename(filename)}
                 onChange={() => setSourceKind("raw")}
               />
               Rohtranskript
@@ -318,6 +325,9 @@ export function TranscriptsPanel(props: {
               />
               Zusammenfassung
             </label>
+            {isMarkdownTranscriptFilename(filename) ? (
+              <p className="text-xs text-secondary">.md wird als Zusammenfassung gelesen.</p>
+            ) : null}
           </fieldset>
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="grid gap-1.5">
@@ -374,7 +384,8 @@ export function TranscriptsPanel(props: {
               <span className="text-xs text-secondary">Datei: {filename}</span>
             ) : (
               <span className="text-xs text-secondary">
-                .txt, .md, .docx, .vtt, .srt — oder Datei hierher ziehen / Text einfügen
+                .txt, .md, .docx, .vtt, .srt — .md wird als Zusammenfassung gelesen. Oder Datei
+                hierher ziehen / Text einfügen.
               </span>
             )}
           </div>
@@ -454,7 +465,9 @@ export function TranscriptsPanel(props: {
                           {formatDeDate(item.createdAt)}
                         </p>
                         {item.summary ? (
-                          <p className="text-sm text-sbkm-navy/80 dark:text-white/80">{item.summary}</p>
+                          <p className="line-clamp-6 whitespace-pre-wrap text-sm text-sbkm-navy/80 dark:text-white/80">
+                            {item.summary}
+                          </p>
                         ) : (
                           <p className="text-xs text-secondary">Noch ohne Zusammenfassung.</p>
                         )}

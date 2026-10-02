@@ -6,6 +6,7 @@ import {
   TRANSCRIPT_ANBIETER_END,
   TRANSCRIPT_ANBIETER_START,
 } from "@/lib/dt/transcripts/types";
+import { resolveTranscriptReading } from "@/lib/dt/transcripts/markdown-file";
 import {
   WORKSHOP_CORPUS_END,
   WORKSHOP_CORPUS_START,
@@ -13,7 +14,6 @@ import {
   type AvatarPlanState,
   type WorkshopAvatar,
   type WorkshopSource,
-  type WorkshopSourceKind,
   buildCurrentAnbieterMarkdown,
   corpusFingerprint,
   emptyAnbieterState,
@@ -38,16 +38,21 @@ type SourceRow = {
 };
 
 function sourceFromRow(row: SourceRow): WorkshopSource {
-  const kind: WorkshopSourceKind = row.source_kind === "summary" ? "summary" : "raw";
+  const reading = resolveTranscriptReading({
+    filename: row.filename,
+    sourceKind: row.source_kind,
+    summary: row.summary,
+    rawText: row.raw_text,
+  });
   return {
     id: row.id,
     title: row.title,
     filename: row.filename,
-    sourceKind: kind,
+    sourceKind: reading.sourceKind,
     spokenOn: row.spoken_on,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    summary: row.summary,
+    summary: reading.summary,
     rawText: row.raw_text ?? "",
   };
 }

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { resolveTranscriptReading } from "@/lib/dt/transcripts/markdown-file";
 import { personasFromJson } from "@/lib/dt/transcripts/parse-extract";
 import type {
   DtMeetingTranscriptRow,
@@ -12,6 +13,12 @@ import type {
 export function serializeTranscriptListItem(
   row: DtMeetingTranscriptRow,
 ): DtTranscriptListItem {
+  const reading = resolveTranscriptReading({
+    filename: row.filename,
+    sourceKind: row.source_kind,
+    summary: row.summary,
+    rawText: row.raw_text,
+  });
   return {
     id: row.id,
     organisationId: row.organisation_id,
@@ -19,9 +26,9 @@ export function serializeTranscriptListItem(
     mimeType: row.mime_type,
     title: row.title,
     notes: row.notes,
-    sourceKind: row.source_kind === "summary" ? "summary" : "raw",
+    sourceKind: reading.sourceKind,
     spokenOn: row.spoken_on ?? null,
-    summary: row.summary,
+    summary: reading.summary,
     anbieterMarkdown: row.anbieter_markdown,
     personas: personasFromJson(row.personas_json),
     pendingPersonas: [],

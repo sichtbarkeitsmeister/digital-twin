@@ -5,6 +5,7 @@ import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
 import { TRANSCRIPT_ROW_SELECT, serializeTranscriptListItem } from "@/lib/dt/transcripts/format-for-prompt";
 import type { DtMeetingTranscriptRow } from "@/lib/dt/transcripts/types";
+import { isMarkdownTranscriptFilename } from "@/lib/dt/transcripts/markdown-file";
 import { summarizeTranscript } from "@/lib/dt/transcripts/workshop-llm";
 
 export const maxDuration = 300;
@@ -29,7 +30,7 @@ export async function POST(
   const row = data as DtMeetingTranscriptRow;
   const gate = await requireTranscriptAccess(auth.supabase, auth.userId, row.organisation_id);
   if (!gate.ok) return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
-  if (row.source_kind === "summary") {
+  if (row.source_kind === "summary" || isMarkdownTranscriptFilename(row.filename)) {
     return NextResponse.json(
       { ok: false, message: "Das ist schon eine Zusammenfassung." },
       { status: 400 },
