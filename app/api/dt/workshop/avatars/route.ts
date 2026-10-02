@@ -79,7 +79,7 @@ export async function POST(req: Request) {
       await saveAvatarPlan(auth.supabase, organisationId, {
         status: "proposed",
         sourceFingerprint: state.fingerprint,
-        approvedFingerprint: state.avatarPlan.approvedFingerprint,
+        approvedFingerprint: null,
         notWanted: result.notWanted,
         avatars: result.avatars,
       });
@@ -185,9 +185,9 @@ export async function POST(req: Request) {
           priority: "A",
           isPrimary: true,
           description: avatar.preview.summary || avatar.title,
-          goals: null,
-          pains: null,
-          objections: null,
+          goals: avatar.dossier?.traumergebnis || null,
+          pains: avatar.dossier?.schmerz || null,
+          objections: avatar.dossier?.huerde || null,
           language: null,
           buyingTriggers: null,
           promptAppend: avatar.preview.promptAppend,

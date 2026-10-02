@@ -7,9 +7,11 @@ import {
 import { resolveSurveyActionModels } from "@/lib/ai/survey-model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
+import { AVATAR_VALUE_FIELDS } from "@/lib/dt/transcripts/avatar-value";
 import {
   ANBIETER_POINTS,
   type AnbieterItem,
+  type AvatarDossier,
   type WorkshopAvatar,
   type WorkshopSource,
   buildCorpusPrompt,
@@ -114,7 +116,10 @@ export async function evaluateAnbieterCorpus(input: {
       point.key,
       {
         type: "string",
-        description: `${point.label}. Alle belegten Fakten im Wortlaut der Gespräche, nichts kürzen. Leer nur, wenn niemand dazu etwas gesagt hat.`,
+        description:
+          point.key === "ablauf"
+            ? "Ablauf & Mitwirkung. Weg vom ersten Kontakt bis zum spürbaren Ergebnis: Schritte, genannte Dauern, was der Kunde tun muss. Eine zugesagte Nachlieferung bleibt als offener Punkt stehen. Leer nur, wenn der Ablauf nicht beschrieben wurde."
+            : `${point.label}. Alle belegten Fakten im Wortlaut der Gespräche, nichts kürzen. Leer nur, wenn niemand dazu etwas gesagt hat.`,
       },
     ]),
   );
@@ -216,8 +221,10 @@ export async function proposeAvatarPlan(input: {
 
 Du schlägst Avatare vor, legst aber keine Texte an.
 Regel: Würde das Unternehmen zu beiden Gruppen dieselben Worte sagen? Wenn ja, ein Avatar. Wenn nein, getrennte Avatare.
+Eine andere Leistung oder eine andere Größe allein erzeugt keinen zweiten Avatar.
 Fallbeispiele sind Belege unter dem Avatar, niemals eigene Avatare.
 Menschen, die sie nicht als Kunden wollen, gehören nach notWanted.
+Schmerz, Traumergebnis, Dringlichkeit, Hürde, Aufwand und Zeit schreibst du hier nicht aus.
 Höchstens sechs Avatare. Titel sind Arbeitstitel der Zielgruppe, keine Personennamen aus einem einzelnen Fall.`,
     user: [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n"),
     tool,
@@ -243,21 +250,43 @@ export async function buildAvatarDossier(input: {
     input_schema: {
       type: "object",
       properties: {
-        narrative: { type: "string" },
-        pains: { type: "string" },
-        outcome: { type: "string" },
+        narrative: {
+          type: "string",
+          description: "Alle Belege zu diesem Avatar im Wortlaut. Nichts kürzen.",
+        },
+        schmerz: { type: "string", description: "Was jetzt weh tut, in den Worten des Kunden. Leer, wenn nicht gesagt." },
+        traumergebnis: { type: "string", description: "Der Zustand danach, aus Sicht des Kunden. Leer, wenn nicht gesagt." },
+        dringlichkeit: { type: "string", description: "Warum jetzt und nicht später. Leer, wenn kein echter Zeitdruck genannt wurde." },
+        huerde: { type: "string", description: "Was vor der ersten Meldung oder vor dem Ja zurückhält. Leer, wenn nicht gesagt." },
+        aufwand: { type: "string", description: "Was der Kunde tun, zahlen oder aushalten muss. Leer, wenn nicht gesagt." },
+        zeit: { type: "string", description: "Weg vom ersten Kontakt bis zum spürbaren Ergebnis, mit den genannten Dauern. Leer, wenn nicht gesagt." },
+        wahrscheinlichkeit: { type: "string", description: "Was glauben lässt, dass es bei diesem Kunden klappt. Leer, wenn nicht gesagt." },
         quotes: { type: "array", items: { type: "string" } },
         gaps: { type: "array", items: { type: "string" } },
       },
-      required: ["narrative"],
+      required: [
+        "narrative",
+        "schmerz",
+        "traumergebnis",
+        "dringlichkeit",
+        "huerde",
+        "aufwand",
+        "zeit",
+        "wahrscheinlichkeit",
+        "quotes",
+        "gaps",
+      ],
     },
   };
   const { json, usage, model } = await callTool({
     system: `${CORPUS_RULES}
 
 Du schreibst die Akte für genau einen Avatar. Nur Belege, die zu diesem Titel gehören.
-Jede dazu gehörende Angabe und jedes wörtliche Zitat gehören in die Akte. Nichts kürzen.
-quotes sind wörtliche Sätze aus dem Wortlaut. gaps sind Punkte, die für diesen Avatar noch nicht belegt sind.
+narrative enthält jede dazu gehörende Angabe. Nichts kürzen.
+Die Wertgleichung füllst du nur mit dem, was belegt ist: schmerz, traumergebnis, dringlichkeit, huerde, aufwand, zeit, wahrscheinlichkeit.
+Was niemand gesagt hat, bleibt ein leerer String. Branchenwissen ist verboten.
+quotes sind Sätze, die so gesagt oder geschrieben wurden. Eine Übersetzung oder eine Glättung ist kein Zitat.
+gaps sind Punkte, die für diesen Avatar offen sind, auch eine zugesagte Nachlieferung.
 Nichts aus anderen Zielgruppen hinzumischen. Nichts erfinden.`,
     user: [
       `Organisation: ${input.organisationName}`,
@@ -274,6 +303,25 @@ Nichts aus anderen Zielgruppen hinzumischen. Nichts erfinden.`,
   const dossier = normalizeDossier(json);
   if (!dossier) throw new Error("Die Akte war leer.");
   return { dossier, usage, model };
+}
+
+function formatDossierForPrompt(dossier: AvatarDossier): string {
+  const valueLines = AVATAR_VALUE_FIELDS.map((field) => {
+    const text = dossier[field.key].trim();
+    return text ? `${field.label}: ${text}` : `${field.label}: offen, nicht erfinden`;
+  });
+  return [
+    dossier.narrative.trim() ? `Belege:\n${dossier.narrative.trim()}` : "",
+    ...valueLines,
+    dossier.quotes.length
+      ? `Zitate, nur diese übernehmen:\n${dossier.quotes.map((quote) => `- ${quote}`).join("\n")}`
+      : "Zitate: keine belegt, keine ergänzen",
+    dossier.gaps.length
+      ? `Offen, nicht erfinden:\n${dossier.gaps.map((gap) => `- ${gap}`).join("\n")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export async function previewAvatarFromDossier(input: {
@@ -298,21 +346,17 @@ export async function previewAvatarFromDossier(input: {
   };
   const { json, usage, model } = await callTool({
     system: `Du schreibst den avatar-spezifischen Text für einen Wunschkunden.
-Nur die Akte verwenden. Lücken nicht füllen. Ich-Perspektive des Interessenten, kein Markenbotschafter.
+Nur die Akte verwenden. Ich-Perspektive des Interessenten, kein Markenbotschafter.
 promptAppend auf Deutsch, ohne den globalen Regelblock zu wiederholen.
-Jede Angabe und jedes Zitat aus der Akte muss im Text vorkommen. Nichts streichen.`,
+Jeder belegte Punkt der Wertgleichung muss im Text vorkommen: Schmerz, Traumergebnis, Dringlichkeit, Hürde, Aufwand und Verzicht, Zeit, Wahrscheinlichkeit.
+Was als „offen, nicht erfinden“ markiert ist, darf nicht ergänzt werden.
+Zitate nur übernehmen, wenn sie in der Akte stehen.`,
     user: [
       `Organisation: ${input.organisationName}`,
       `Arbeitstitel: ${input.avatar.title}`,
       "",
-      dossier.narrative,
-      dossier.pains ? `Schmerz: ${dossier.pains}` : "",
-      dossier.outcome ? `Outcome: ${dossier.outcome}` : "",
-      dossier.quotes.length ? `Zitate:\n${dossier.quotes.map((quote) => `- ${quote}`).join("\n")}` : "",
-      dossier.gaps.length ? `Offen, nicht erfinden:\n${dossier.gaps.map((gap) => `- ${gap}`).join("\n")}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
+      formatDossierForPrompt(dossier),
+    ].join("\n"),
     tool,
     maxTokens: 32_000,
   });
