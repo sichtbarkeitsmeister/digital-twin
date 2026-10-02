@@ -30,10 +30,10 @@ export const TEXT_LIMIT = 200_000;
 export const SITEMAP_URL_LIMIT = 50_000;
 
 const COMMON_SITEMAP_PATHS = [
-  "/sitemap.xml",
   "/sitemap_index.xml",
   "/sitemap-index.xml",
   "/wp-sitemap.xml",
+  "/sitemap.xml",
 ];
 
 export type DtCrawledPage = {
@@ -54,8 +54,33 @@ type ParsedPage = {
   links: string[];
 };
 
+const SKIP_PATH =
+  /\/(wp-content|wp-includes|wp-admin|wp-json|feed|comments\/feed)(\/|$)/i;
+
+export function looksLikeSitemapXml(body: string): boolean {
+  const head = body.slice(0, 4000).toLowerCase();
+  if (head.includes("<html") || head.includes("<!doctype html")) return false;
+  return (
+    head.includes("<urlset") ||
+    head.includes("<sitemapindex") ||
+    (head.includes("<?xml") && head.includes("<loc"))
+  );
+}
+
+export function isCrawlablePageUrl(url: string, origin: string): boolean {
+  try {
+    const resolved = new URL(url);
+    return isCrawlableLink(resolved, origin);
+  } catch {
+    return false;
+  }
+}
+
 function isCrawlableLink(resolved: URL, origin: string): boolean {
   if (!isSameCrawlSite(resolved.toString(), origin)) return false;
+  if (resolved.search && resolved.search.length > 1) return false;
+  if (SKIP_PATH.test(resolved.pathname)) return false;
+  if (/xmlrpc\.php$/i.test(resolved.pathname)) return false;
   if (
     /\.(jpg|jpeg|png|gif|webp|avif|svg|ico|pdf|zip|rar|gz|mp4|mp3|wav|mov|avi|css|js|json|xml|woff2?|ttf|eot)$/i.test(
       resolved.pathname,
@@ -77,17 +102,23 @@ async function fetchSitemapBody(sitemapUrl: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`Sitemap nicht erreichbar (${res.status}).`);
 
-  const buf = Buffer.from(await res.arrayBuffer());
-  const encoding = (res.headers.get("content-encoding") ?? "").toLowerCase();
-  const isGzip =
-    encoding.includes("gzip") ||
-    sitemapUrl.toLowerCase().endsWith(".gz") ||
-    (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b);
-
-  if (isGzip) {
-    return gunzipSync(buf).toString("utf-8");
+  const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+  if (contentType.includes("text/html") || contentType.includes("application/xhtml")) {
+    throw new Error("Sitemap liefert HTML statt XML.");
   }
-  return buf.toString("utf-8");
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  return decodeSitemapBuffer(buf);
+}
+
+export function decodeSitemapBuffer(buf: Buffer): string {
+  const isGzip = buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+  if (!isGzip) return buf.toString("utf-8");
+  try {
+    return gunzipSync(buf).toString("utf-8");
+  } catch {
+    return buf.toString("utf-8");
+  }
 }
 
 /**
@@ -98,12 +129,13 @@ export async function discoverSitemaps(
   origin: string,
   configuredSitemapUrl?: string | null,
 ): Promise<string[]> {
-  const found = new Set<string>();
+  const found: string[] = [];
+  const add = (raw: string) => {
+    const value = raw.trim();
+    if (value && !found.includes(value)) found.push(value);
+  };
 
-  if (configuredSitemapUrl?.trim()) {
-    found.add(configuredSitemapUrl.trim());
-    return [...found];
-  }
+  if (configuredSitemapUrl?.trim()) add(configuredSitemapUrl.trim());
 
   try {
     const robotsRes = await fetch(`${origin}/robots.txt`, {
@@ -114,37 +146,26 @@ export async function discoverSitemaps(
       const text = await robotsRes.text();
       for (const line of text.split(/\r?\n/)) {
         const m = /^\s*sitemap:\s*(\S+)/i.exec(line);
-        if (m?.[1]) found.add(m[1].trim());
+        if (m?.[1]) add(m[1]);
       }
     }
   } catch {
     /* robots.txt optional */
   }
 
-  if (found.size > 0) return [...found];
-
   for (const path of COMMON_SITEMAP_PATHS) {
-    const url = `${origin}${path}`;
-    try {
-      const res = await fetch(url, {
-        method: "HEAD",
-        headers: { "User-Agent": USER_AGENT },
-        signal: AbortSignal.timeout(8_000),
-        redirect: "follow",
-      });
-      if (res.ok) {
-        const ct = res.headers.get("content-type") ?? "";
-        if (ct.includes("xml") || ct.includes("text") || ct.includes("octet-stream")) {
-          found.add(url);
-          break;
-        }
-      }
-    } catch {
-      /* try next path */
-    }
+    add(`${origin}${path}`);
   }
 
-  return [...found];
+  found.sort((a, b) => sitemapCandidateScore(b) - sitemapCandidateScore(a));
+  return found;
+}
+
+function sitemapCandidateScore(url: string): number {
+  if (/sitemap[_-]index\.xml/i.test(url)) return 3;
+  if (/wp-sitemap\.xml/i.test(url)) return 2;
+  if (/\.xml$/i.test(url) && !/\/sitemap\.xml$/i.test(url)) return 1;
+  return 0;
 }
 
 export async function fetchUrlsFromSitemap(
@@ -155,6 +176,7 @@ export async function fetchUrlsFromSitemap(
   if (depth > 10 || collected.length >= SITEMAP_URL_LIMIT) return collected;
 
   const xml = await fetchSitemapBody(sitemapUrl);
+  if (!looksLikeSitemapXml(xml)) return collected;
   const unique = [...new Set(extractSitemapLocs(xml))];
 
   if (xml.includes("<sitemapindex")) {
@@ -317,8 +339,9 @@ export async function expandSitemapSeeds(
       const urls = await fetchUrlsFromSitemap(sm);
       for (const u of urls) {
         const n = normaliseUrl(u);
-        if (n) seeds.add(n);
+        if (n && isCrawlablePageUrl(n, origin)) seeds.add(n);
       }
+      if (seeds.size > 0) break;
     } catch {
       /* skip broken sitemap */
     }

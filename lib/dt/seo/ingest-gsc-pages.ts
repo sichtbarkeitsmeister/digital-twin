@@ -2,6 +2,7 @@ import "server-only";
 
 import { GSC_PAGES_MAX_INGEST, mapGscAnalyticsRows } from "@/lib/dt/seo/gsc-pages";
 import { isSameCrawlSite, normaliseUrl } from "@/lib/dt/seo/crawl-url";
+import { crawlJobDedupeKey } from "@/lib/dt/seo/sync-crawl-job-health";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -125,6 +126,7 @@ export async function ingestGscPages(input: GscPageIngestInput): Promise<{
         kind: "seo.crawl",
         organisationId: input.organisationId,
         payload: { crawlId: crawl.id, organisationId: input.organisationId },
+        dedupeKey: crawlJobDedupeKey(crawl.id),
         runAfter: new Date(),
       });
       kickJobsWorker(5);
@@ -133,6 +135,7 @@ export async function ingestGscPages(input: GscPageIngestInput): Promise<{
         kind: "seo.crawl",
         organisationId: input.organisationId,
         payload: { crawlId: crawl.id, organisationId: input.organisationId },
+        dedupeKey: crawlJobDedupeKey(crawl.id),
         runAfter: new Date(),
       });
       kickJobsWorker(3);

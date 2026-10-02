@@ -91,7 +91,11 @@ export async function runDueJobs(
     try {
       const outcome = await handler({ job });
       if (outcome.ok) {
-        await markSucceeded(job, outcome.result ?? null);
+        if (outcome.reschedule) {
+          await markReschedule(job, outcome.result ?? null);
+        } else {
+          await markSucceeded(job, outcome.result ?? null);
+        }
         summary.succeeded += 1;
       } else {
         await markFailed(job, outcome.error, {
@@ -142,6 +146,26 @@ export async function runDueJobs(
 
   summary.durationMs = Date.now() - startedAt;
   return summary;
+}
+
+async function markReschedule(
+  job: JobRow,
+  result: Record<string, unknown> | null,
+) {
+  const supabase = createServiceClient();
+  await supabase
+    .from("jobs")
+    .update({
+      status: "pending",
+      result,
+      run_after: new Date().toISOString(),
+      locked_at: null,
+      locked_by: null,
+      last_error: null,
+      completed_at: null,
+    })
+    .eq("id", job.id)
+    .eq("status", "running");
 }
 
 async function markSucceeded(

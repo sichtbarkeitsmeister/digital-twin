@@ -44,7 +44,7 @@ export type JobHandlerContext = {
 };
 
 export type JobHandlerResult =
-  | { ok: true; result?: Record<string, unknown> }
+  | { ok: true; result?: Record<string, unknown>; reschedule?: boolean }
   | { ok: false; error: string; retryable?: boolean };
 
 export type JobHandler = (ctx: JobHandlerContext) => Promise<JobHandlerResult>;
