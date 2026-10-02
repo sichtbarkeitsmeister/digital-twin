@@ -7,7 +7,7 @@ import {
 import { resolveSurveyActionModels } from "@/lib/ai/survey-model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
-import { AVATAR_VALUE_FIELDS } from "@/lib/dt/transcripts/avatar-value";
+import { AVATAR_VALUE_FIELDS, avatarFirstName, buildAvatarPrompt } from "@/lib/dt/transcripts/avatar-value";
 import {
   ANBIETER_POINTS,
   type AnbieterItem,
@@ -368,22 +368,16 @@ export async function previewAvatarFromDossier(input: {
           description: "Genau ein erfundener Vorname, zum Beispiel Lea. Kein Nachname, keine Berufsbezeichnung.",
         },
         role: { type: "string", description: "Kurze Definition in höchstens sechs Wörtern, zum Beispiel Geschäftsführer ohne eigene IT." },
-        summary: { type: "string" },
-        promptAppend: { type: "string" },
+        summary: { type: "string", description: "Ein Satz, wer die Person ist. Keine neuen Fakten." },
       },
-      required: ["name", "role", "summary", "promptAppend"],
+      required: ["name", "role", "summary"],
     },
   };
   const { json, usage, model } = await callTool({
-    system: `Du schreibst den avatar-spezifischen Text für einen Wunschkunden.
-Nur die Akte verwenden. Ich-Perspektive des Interessenten, kein Markenbotschafter.
+    system: `Du benennst einen Wunschkunden. Den Prompt schreibst du nicht.
 name ist genau ein erfundener Vorname, der zur Person passt. Kein Nachname. Kein Name aus dem Bestand. Nicht der Arbeitstitel und keine Berufsbezeichnung wie Geschäftsführer.
 role ist eine kurze Definition in höchstens sechs Wörtern, ohne Satz und ohne Mitarbeiterzahl.
-Der erste Satz von promptAppend lautet exakt „Ich heiße {name}." Damit stellt sich der Avatar vor, wenn er danach gefragt wird.
-promptAppend auf Deutsch, ohne den globalen Regelblock zu wiederholen.
-Jeder belegte Punkt der Wertgleichung muss im Text vorkommen: Schmerz, Traumergebnis, Dringlichkeit, Hürde, Aufwand und Verzicht, Zeit, Wahrscheinlichkeit.
-Was als „offen, nicht erfinden“ markiert ist, darf nicht ergänzt werden.
-Zitate nur übernehmen, wenn sie in der Akte stehen.`,
+summary ist ein Satz zur Person, nur aus der Akte, ohne neue Zahlen oder Vergleiche.`,
     user: [
       `Organisation: ${input.organisationName}`,
       `Arbeitstitel: ${input.avatar.title}`,
@@ -391,9 +385,16 @@ Zitate nur übernehmen, wenn sie in der Akte stehen.`,
       formatDossierForPrompt(dossier),
     ].join("\n"),
     tool,
-    maxTokens: 32_000,
+    maxTokens: 4_000,
   });
-  const preview = normalizePreview(json);
+  const record = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
+  const name = avatarFirstName(typeof record.name === "string" ? record.name : "");
+  const preview = normalizePreview({
+    name,
+    role: record.role,
+    summary: record.summary,
+    promptAppend: name ? buildAvatarPrompt(name, dossier) : "",
+  });
   if (!preview) {
     throw new Error("Die Vorschau braucht einen erfundenen Vornamen und einen kurzen Rollentext.");
   }

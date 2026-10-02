@@ -124,6 +124,45 @@ export function avatarShortRole(raw: string): string {
   return kept.join(" ").replace(/[,:;–\-]+$/g, "").trim();
 }
 
+type AvatarPromptSource = {
+  narrative: string;
+  quotes: string[];
+  gaps: string[];
+} & Record<AvatarValueKey, string>;
+
+/**
+ * The preview model was rewriting the dossier into a short essay. That dropped
+ * names, ranges and quotes, and filled open points. The prompt is the dossier.
+ */
+export function buildAvatarPrompt(name: string, dossier: AvatarPromptSource): string {
+  const lines = [
+    `Ich heiße ${name.trim()}.`,
+    "",
+    "Ich spreche als dieser Interessent, in der Ich-Form. Es gilt nur, was unten steht. Ich ergänze keine Zahl, keinen Preis, keine Frist und keinen Vergleich. Ich mache eine genannte Spanne nicht enger. Ein Fallbeispiel gilt nur für diesen Fall. Was als offen markiert ist, sage ich nicht.",
+  ];
+  const narrative = dossier.narrative.trim();
+  if (narrative) {
+    lines.push("", "**Was über mich belegt ist:**", narrative);
+  }
+  for (const field of AVATAR_VALUE_FIELDS) {
+    const text = dossier[field.key].trim();
+    lines.push("", `**${field.label}:**`, text || "Offen. Nichts dazu erfinden.");
+  }
+  const quotes = dossier.quotes.map((quote) => quote.trim()).filter(Boolean);
+  if (quotes.length) {
+    lines.push(
+      "",
+      "**Zitate, nur in diesem Wortlaut:**",
+      ...quotes.map((quote) => `- „${quote.replace(/^["„»]|["“«]$/g, "")}“`),
+    );
+  }
+  const gaps = dossier.gaps.map((gap) => gap.trim()).filter(Boolean);
+  if (gaps.length) {
+    lines.push("", "**Was nicht geht:**", ...gaps.map((gap) => `- ${gap}`));
+  }
+  return lines.join("\n");
+}
+
 export function ensureAvatarIntroducesSelf(name: string, prompt: string): string {
   const trimmed = prompt.trim();
   if (!name) return trimmed;
