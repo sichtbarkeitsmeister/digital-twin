@@ -585,6 +585,25 @@ export function readAnbieterState(raw: unknown, fingerprint: string): AnbieterSt
   };
 }
 
+/** Drop agent links that no longer point at a live row. Same plan object when nothing changes. */
+export function forgetMissingAvatarAgents(
+  plan: AvatarPlanState,
+  liveAgentIds: ReadonlySet<string>,
+): AvatarPlanState {
+  let changed = false;
+  const avatars = plan.avatars.map((avatar) => {
+    if (!avatar.agentId || liveAgentIds.has(avatar.agentId)) return avatar;
+    changed = true;
+    return { ...avatar, agentId: null };
+  });
+  if (!changed) return plan;
+  return { ...plan, avatars };
+}
+
+export function isMissingAgentError(message: string): boolean {
+  return message.toLowerCase().includes("agent_not_found");
+}
+
 export function readAvatarPlan(raw: unknown, fingerprint: string): AvatarPlanState {
   const record = asRecord(raw);
   const avatars = normalizeAvatarPlan(record?.avatars ?? [], []);

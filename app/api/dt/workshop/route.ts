@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
 import { orderWorkshopSources } from "@/lib/dt/transcripts/workshop-model";
-import { loadWorkshopState } from "@/lib/dt/transcripts/workshop-store";
+import { loadWorkshopState, reconcileAvatarAgents } from "@/lib/dt/transcripts/workshop-store";
 
 export async function GET(req: Request) {
   const auth = await requireAuthUser();
@@ -21,6 +21,7 @@ export async function GET(req: Request) {
 
   try {
     const state = await loadWorkshopState(auth.supabase, orgId);
+    const avatarPlan = await reconcileAvatarAgents(auth.supabase, orgId, state.avatarPlan);
     return NextResponse.json({
       ok: true,
       fingerprint: state.fingerprint,
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
         hasSummary: Boolean(source.summary?.trim()),
       })),
       anbieter: state.anbieter,
-      avatarPlan: state.avatarPlan,
+      avatarPlan,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Bestand konnte nicht geladen werden.";

@@ -18,6 +18,7 @@ import {
   corpusFingerprint,
   emptyAnbieterState,
   emptyAvatarPlan,
+  forgetMissingAvatarAgents,
   readAnbieterState,
   readAvatarPlan,
 } from "@/lib/dt/transcripts/workshop-model";
@@ -114,6 +115,34 @@ export async function saveAnbieterState(
   anbieter: AnbieterState,
 ): Promise<void> {
   await saveCorpus(supabase, organisationId, { anbieter });
+}
+
+export async function reconcileAvatarAgents(
+  supabase: SupabaseClient,
+  organisationId: string,
+  plan: AvatarPlanState,
+): Promise<AvatarPlanState> {
+  const ids = [
+    ...new Set(
+      plan.avatars
+        .map((avatar) => avatar.agentId)
+        .filter((id): id is string => Boolean(id && /^[0-9a-f-]{36}$/i.test(id))),
+    ),
+  ];
+  let live = new Set<string>();
+  if (ids.length > 0) {
+    const { data, error } = await supabase
+      .from("dt_agents")
+      .select("id")
+      .eq("organisation_id", organisationId)
+      .in("id", ids);
+    if (error) return plan;
+    live = new Set((data ?? []).map((row) => String(row.id)));
+  }
+  const next = forgetMissingAvatarAgents(plan, live);
+  if (next === plan) return plan;
+  await saveAvatarPlan(supabase, organisationId, next);
+  return next;
 }
 
 export async function saveAvatarPlan(

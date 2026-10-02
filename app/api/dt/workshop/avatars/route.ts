@@ -13,7 +13,13 @@ import {
   proposeAvatarPlan,
   workshopFailureMessage,
 } from "@/lib/dt/transcripts/workshop-llm";
-import { loadWorkshopState, replaceAvatar, saveAvatarPlan } from "@/lib/dt/transcripts/workshop-store";
+import { isMissingAgentError } from "@/lib/dt/transcripts/workshop-model";
+import {
+  loadWorkshopState,
+  reconcileAvatarAgents,
+  replaceAvatar,
+  saveAvatarPlan,
+} from "@/lib/dt/transcripts/workshop-store";
 
 export const maxDuration = 300;
 
@@ -164,40 +170,47 @@ export async function POST(req: Request) {
     if (!avatar.preview) {
       return NextResponse.json({ ok: false, message: "Zuerst die Vorschau erzeugen." }, { status: 400 });
     }
-    const promptAppend = ensureAvatarGlobalPromptAnchor(avatar.preview.promptAppend);
-    if (avatar.agentId) {
+    const plan = await reconcileAvatarAgents(auth.supabase, organisationId, state.avatarPlan);
+    const current = plan.avatars.find((item) => item.key === avatar.key) ?? { ...avatar, agentId: null };
+    const preview = current.preview ?? avatar.preview;
+    const promptAppend = ensureAvatarGlobalPromptAnchor(preview.promptAppend);
+    if (current.agentId) {
       const { error } = await auth.supabase.rpc("dt_update_agent", {
-        p_agent_id: avatar.agentId,
+        p_agent_id: current.agentId,
         p_patch: {
-          name: avatar.preview.name,
-          role: avatar.preview.role,
+          name: preview.name,
+          role: preview.role,
           prompt_append: promptAppend,
           uses_global_prompt: true,
           quick_actions: [...AVATAR_QUICK_ACTIONS],
         },
       });
-      if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 400 });
-      const fresh = await loadWorkshopState(auth.supabase, organisationId);
-      return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan, updated: true });
+      if (!error) {
+        const fresh = await loadWorkshopState(auth.supabase, organisationId);
+        return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan, updated: true });
+      }
+      if (!isMissingAgentError(error.message)) {
+        return NextResponse.json({ ok: false, message: error.message }, { status: 400 });
+      }
     }
 
     const created = await createConfirmedTranscriptPersonas({
       supabase: auth.supabase,
       organisationId,
-      names: [avatar.preview.name],
+      names: [preview.name],
       personas: [
         {
-          name: avatar.preview.name,
-          role: avatar.preview.role || null,
+          name: preview.name,
+          role: preview.role || null,
           priority: "A",
           isPrimary: true,
-          description: avatar.preview.summary || avatar.title,
-          goals: avatar.dossier?.traumergebnis || null,
-          pains: avatar.dossier?.schmerz || null,
-          objections: avatar.dossier?.huerde || null,
+          description: preview.summary || current.title,
+          goals: current.dossier?.traumergebnis || null,
+          pains: current.dossier?.schmerz || null,
+          objections: current.dossier?.huerde || null,
           language: null,
           buyingTriggers: null,
-          promptAppend: avatar.preview.promptAppend,
+          promptAppend: preview.promptAppend,
         },
       ],
     });
@@ -210,8 +223,8 @@ export async function POST(req: Request) {
     await saveAvatarPlan(
       auth.supabase,
       organisationId,
-      replaceAvatar(state.avatarPlan, avatar.key, {
-        ...avatar,
+      replaceAvatar(plan, current.key, {
+        ...current,
         agentId: created.createdPersonaIds[0],
       }),
     );
