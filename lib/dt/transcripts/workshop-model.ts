@@ -264,7 +264,7 @@ function expandRow(row: unknown): unknown[] {
   for (const [key, value] of Object.entries(item)) {
     if (!pointKeyFrom(key)) continue;
     const child = asRecord(value);
-    nested.push(child ? { key, ...child, key } : { key, current: value });
+    nested.push(child ? { ...child, key } : { key, current: value });
   }
   if (nested.length > 0) return nested;
   const key = explicitPointKey(item);
@@ -293,7 +293,7 @@ function anbieterRows(raw: unknown): unknown[] {
     if (key === "items" || key === "anbieter") continue;
     if (!pointKeyFrom(key)) continue;
     const item = asRecord(value);
-    rows.push(item ? { key, ...item, key } : { key, current: value });
+    rows.push(item ? { ...item, key } : { key, current: value });
   }
   for (const key of ["content", "text", "markdown", "anbieterMarkdown", "summary"]) {
     const text = asString(record[key], POINT_TEXT_MAX);
