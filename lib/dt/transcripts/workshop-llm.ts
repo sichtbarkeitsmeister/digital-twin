@@ -7,7 +7,13 @@ import {
 import { resolveSurveyActionModels } from "@/lib/ai/survey-model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
-import { AVATAR_VALUE_FIELDS, avatarFirstName, buildAvatarPrompt } from "@/lib/dt/transcripts/avatar-value";
+import {
+  AVATAR_VALUE_FIELDS,
+  avatarFirstName,
+  buildProspectPrompt,
+  containsInternalWorkshopNotes,
+  dropInternalWorkshopParagraphs,
+} from "@/lib/dt/transcripts/avatar-value";
 import {
   ANBIETER_POINTS,
   type AnbieterItem,
@@ -351,15 +357,27 @@ function formatDossierForPrompt(dossier: AvatarDossier): string {
     .join("\n\n");
 }
 
+const PROSPECT_PREVIEW_SYSTEM = `Du schreibst den Text, den dieser Interessent im Gespräch wissen und sagen darf. Ich-Form.
+name ist genau ein erfundener Vorname, der zur Person passt. Kein Nachname. Kein Name aus dem Bestand. Nicht der Arbeitstitel und keine Berufsbezeichnung wie Geschäftsführer.
+role ist eine kurze Definition in höchstens sechs Wörtern, ohne Satz und ohne Mitarbeiterzahl.
+summary ist ein Satz zur Person, nur aus der Akte, ohne neue Zahlen oder Vergleiche.
+promptAppend beginnt mit „Ich heiße {name}." Der Arbeitstitel sagt, wer er ist. Wenn die Akte mehrere Größen nennt, beschreibt er sich nach dem Arbeitstitel. Engere Spannen bleiben Fallbeispiele, nicht seine eigene Firma.
+Jede konkrete Angabe, die er selbst erlebt, will, fürchtet, tun muss oder als Beweis kennen darf, bleibt erhalten: Zahlen, Namen von Referenzkunden, Fristen, Zitate. Nichts davon streichen.
+Ein Fallbeispiel bleibt dieser Fall. Daraus wird keine allgemeine Zusage.
+Nicht hineinschreiben: Workshop-Leitung, Nachgespräch, Fragebogen-Technik, abgebrochene Sätze, SEO, unfertige interne Dokumente, Preisstrategie, Premium-Segment, SLA-Kalkulation, Einschätzungen die ausdrücklich keine Kundenaussage sind.
+Zitate nur wortwörtlich. Eine Anweisung der prüfenden Person ersetzt den abweichenden Wortlaut aus der Akte.
+Was offen ist, kommt nicht als behauptete Tatsache vor.`;
+
 export async function previewAvatarFromDossier(input: {
   organisationName: string;
   avatar: WorkshopAvatar;
+  revisionNote?: string;
 }): Promise<{ preview: NonNullable<WorkshopAvatar["preview"]>; usage: { inputTokens: number; outputTokens: number }; model: string | null }> {
   const dossier = input.avatar.dossier;
   if (!dossier) throw new Error("Zuerst die Akte erzeugen.");
   const tool: Anthropic.Tool = {
     name: "submit_preview",
-    description: "Avatar-Vorschau aus einer freigegebenen Akte.",
+    description: "Name, Rolle und Interessententext aus einer freigegebenen Akte.",
     input_schema: {
       type: "object",
       properties: {
@@ -369,31 +387,63 @@ export async function previewAvatarFromDossier(input: {
         },
         role: { type: "string", description: "Kurze Definition in höchstens sechs Wörtern, zum Beispiel Geschäftsführer ohne eigene IT." },
         summary: { type: "string", description: "Ein Satz, wer die Person ist. Keine neuen Fakten." },
+        promptAppend: {
+          type: "string",
+          description: "Ich-Form des Interessenten. Kundenrelevante Fakten vollständig. Keine Workshop-Notizen.",
+        },
       },
-      required: ["name", "role", "summary"],
+      required: ["name", "role", "summary", "promptAppend"],
     },
   };
-  const { json, usage, model } = await callTool({
-    system: `Du benennst einen Wunschkunden. Den Prompt schreibst du nicht.
-name ist genau ein erfundener Vorname, der zur Person passt. Kein Nachname. Kein Name aus dem Bestand. Nicht der Arbeitstitel und keine Berufsbezeichnung wie Geschäftsführer.
-role ist eine kurze Definition in höchstens sechs Wörtern, ohne Satz und ohne Mitarbeiterzahl.
-summary ist ein Satz zur Person, nur aus der Akte, ohne neue Zahlen oder Vergleiche.`,
-    user: [
-      `Organisation: ${input.organisationName}`,
-      `Arbeitstitel: ${input.avatar.title}`,
-      "",
-      formatDossierForPrompt(dossier),
-    ].join("\n"),
-    tool,
-    maxTokens: 4_000,
-  });
+  const revision = input.revisionNote?.trim() ?? "";
+  const user = [
+    `Organisation: ${input.organisationName}`,
+    `Arbeitstitel, das ist der geltende Stand: ${input.avatar.title}`,
+    revision ? `Anweisung der prüfenden Person, sie gilt vor der Akte:\n${revision}` : "",
+    "",
+    formatDossierForPrompt(dossier),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const usage = { inputTokens: 0, outputTokens: 0 };
+  let model: string | null = null;
+  let json: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await callTool({
+      system: PROSPECT_PREVIEW_SYSTEM,
+      user:
+        attempt === 0
+          ? user
+          : `${user}\n\nDer letzte Text enthielt interne Notizen. Schreib promptAppend neu, nur als dieser Interessent, ohne Workshop, Fragebogen, SEO oder Preisstrategie.`,
+      tool,
+      maxTokens: 32_000,
+    });
+    usage.inputTokens += result.usage.inputTokens;
+    usage.outputTokens += result.usage.outputTokens;
+    model = result.model;
+    json = result.json;
+    const rawBody = json && typeof json === "object" ? (json as { promptAppend?: unknown }).promptAppend : "";
+    if (typeof rawBody === "string" && !containsInternalWorkshopNotes(rawBody)) break;
+  }
   const record = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
   const name = avatarFirstName(typeof record.name === "string" ? record.name : "");
+  const spoken = dropInternalWorkshopParagraphs(typeof record.promptAppend === "string" ? record.promptAppend : "");
+  if (spoken.length < 80) {
+    throw new Error("Die Vorschau hat interne Notizen statt des Interessententextes geliefert. Bitte erneut versuchen.");
+  }
   const preview = normalizePreview({
     name,
     role: record.role,
     summary: record.summary,
-    promptAppend: name ? buildAvatarPrompt(name, dossier) : "",
+    promptAppend: name
+      ? buildProspectPrompt({
+          name,
+          title: input.avatar.title,
+          body: spoken,
+          quotes: dossier.quotes,
+          gaps: dossier.gaps,
+        })
+      : "",
   });
   if (!preview) {
     throw new Error("Die Vorschau braucht einen erfundenen Vornamen und einen kurzen Rollentext.");

@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import {
   AVATAR_QUICK_ACTIONS,
   avatarFirstName,
-  buildAvatarPrompt,
+  buildProspectPrompt,
+  containsInternalWorkshopNotes,
+  dropInternalWorkshopParagraphs,
   avatarShortRole,
   ensureAvatarIntroducesSelf,
 } from "../lib/dt/transcripts/avatar-value";
@@ -464,28 +466,36 @@ testValueFields();
 testRevisionNote();
 testAvatarNameRoleAndQuickActions();
 function testAvatarPromptKeepsDossier() {
-  const prompt = buildAvatarPrompt("Bernd", {
-    narrative: "Wunschkunden haben 20 bis 100 Mitarbeiter. Fälle liegen bei 40, 50 und 90.",
-    schmerz: "Wir haben mehrere Punkte, die seit Ewigkeiten nicht gelöst sind.",
-    traumergebnis: "Ruhe, mit langer Sicht.",
-    dringlichkeit: "Jede Woche mit dem alten Problem ist eine Woche zu viel.",
-    huerde: "Ich weiß nicht, was es kostet.",
-    aufwand: "Dringende Fälle melde ich telefonisch, nicht per E-Mail.",
-    zeit: "Entscheidung in etwa 3 Wochen. Im Architekturbüro war das Sicherheitsproblem in 2 bis 3 Wochen behoben.",
-    wahrscheinlichkeit: "Red Dot seit über 10 Jahren, Bantek seit etwa 8 Jahren.",
+  const dossierDump = [
+    "Aus der Anbieter-Persona: Wunschkundengröße 20–50.",
+    "",
+    "Nachgespräch: André fasst die Traumkunden auf 50 bis 90 zusammen. Premium-Segment, obere 20 Prozent.",
+    "",
+    "Ich weiß nicht, was es kostet. Red Dot ist seit über 10 Jahren Kunde, Bantek in Mülheim seit etwa 8 Jahren. Im Architekturbüro dauerte das Sicherheitsproblem 2 bis 3 Wochen.",
+  ].join("\n");
+  assert.equal(containsInternalWorkshopNotes(dossierDump), true);
+  const spoken = dropInternalWorkshopParagraphs(dossierDump);
+  assert.equal(spoken.includes("Nachgespräch"), false);
+  assert.equal(spoken.includes("Premium-Segment"), false);
+  assert.match(spoken, /Red Dot/);
+
+  const prompt = buildProspectPrompt({
+    name: "Stefan",
+    title: "Geschäftsführer ohne eigene IT, etwa 20 bis 100 Mitarbeiter",
+    body: spoken,
     quotes: ["Als langjähriger Kunde der IT Problemlöser können wir nur bestätigen, dass der Name Programm ist."],
     gaps: ["Genaue Anzahl der Betreuungsverträge"],
   });
-  assert.match(prompt, /^Ich heiße Bernd\./);
-  assert.match(prompt, /20 bis 100/);
-  assert.match(prompt, /Red Dot seit über 10 Jahren/);
-  assert.match(prompt, /Bantek seit etwa 8 Jahren/);
-  assert.match(prompt, /telefonisch, nicht per E-Mail/);
+  assert.match(prompt, /^Ich heiße Stefan\./);
+  assert.match(prompt, /20 bis 100 Mitarbeiter/);
+  assert.match(prompt, /Red Dot/);
+  assert.match(prompt, /Mülheim/);
   assert.match(prompt, /Architekturbüro/);
-  assert.match(prompt, /Betreuungsverträge/);
   assert.match(prompt, /Name Programm ist/);
-  assert.equal(prompt.includes("50 bis 90 Mitarbeiter"), false);
-  assert.equal(prompt.includes("zwei Leute"), false);
+  assert.match(prompt, /Betreuungsverträge/);
+  assert.equal(prompt.includes("Nachgespräch"), false);
+  assert.equal(prompt.includes("Anbieter-Persona"), false);
+  assert.equal(prompt.includes("50 bis 90"), false);
   console.log("avatar prompt keeps dossier: ok");
 }
 

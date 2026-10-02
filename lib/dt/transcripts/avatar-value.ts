@@ -124,43 +124,72 @@ export function avatarShortRole(raw: string): string {
   return kept.join(" ").replace(/[,:;–\-]+$/g, "").trim();
 }
 
-type AvatarPromptSource = {
-  narrative: string;
-  quotes: string[];
-  gaps: string[];
-} & Record<AvatarValueKey, string>;
+const INTERNAL_WORKSHOP_NOTE =
+  /anbieter-persona|nachgespr[aä]ch|turboscribe|white-?paper|keywords f[uü]r seo|satz bricht im original|workshop-transcript|premium-segment/i;
+
+function looseText(text: string): string {
+  return text
+    .toLocaleLowerCase("de-DE")
+    .replace(/[„“"»«']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Workshop protocol, not something the prospect would say. */
+export function containsInternalWorkshopNotes(text: string): boolean {
+  return INTERNAL_WORKSHOP_NOTE.test(text);
+}
+
+export function dropInternalWorkshopParagraphs(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph && !containsInternalWorkshopNotes(paragraph))
+    .join("\n\n");
+}
 
 /**
- * The preview model was rewriting the dossier into a short essay. That dropped
- * names, ranges and quotes, and filled open points. The prompt is the dossier.
+ * Speaking prompt for the prospect. The dossier stays the full evidence file.
+ * This text keeps the approved title, the spoken body, missing quotes, and open points.
  */
-export function buildAvatarPrompt(name: string, dossier: AvatarPromptSource): string {
+export function buildProspectPrompt(input: {
+  name: string;
+  title: string;
+  body: string;
+  quotes: string[];
+  gaps: string[];
+}): string {
+  const name = input.name.trim();
+  const title = input.title.trim().replace(/\.+$/, "");
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const body = input.body
+    .trim()
+    .replace(new RegExp(`^ich hei(?:ß|ss)e ${escaped}\\.?\\s*`, "i"), "")
+    .trim();
   const lines = [
-    `Ich heiße ${name.trim()}.`,
+    `Ich heiße ${name}.`,
     "",
-    "Ich spreche als dieser Interessent, in der Ich-Form. Es gilt nur, was unten steht. Ich ergänze keine Zahl, keinen Preis, keine Frist und keinen Vergleich. Ich mache eine genannte Spanne nicht enger. Ein Fallbeispiel gilt nur für diesen Fall. Was als offen markiert ist, sage ich nicht.",
-  ];
-  const narrative = dossier.narrative.trim();
-  if (narrative) {
-    lines.push("", "**Was über mich belegt ist:**", narrative);
+    title ? `Ich bin ${title}.` : "",
+    "",
+    "Ich spreche als dieser Interessent, in der Ich-Form, über meine Lage. Ich erzähle nicht den Workshop, keine internen Unterlagen und keine Preisstrategie. Ich ergänze keine Zahl, keinen Preis, keine Frist und keinen Vergleich. Ich mache eine genannte Spanne nicht enger. Ein Fallbeispiel gilt nur für diesen Fall. Was unter „Was nicht geht“ steht, behaupte ich nicht.",
+    "",
+    body,
+  ].filter((line, index, all) => line !== "" || all[index - 1] !== "");
+
+  let prompt = lines.join("\n");
+  const quotes = input.quotes.map((quote) => quote.trim()).filter(Boolean);
+  const missingQuotes = quotes.filter((quote) => !looseText(prompt).includes(looseText(quote).slice(0, 80)));
+  if (missingQuotes.length) {
+    prompt += `\n\n**Zitate, nur in diesem Wortlaut:**\n${missingQuotes
+      .map((quote) => `- „${quote.replace(/^["„»]|["“«]$/g, "")}“`)
+      .join("\n")}`;
   }
-  for (const field of AVATAR_VALUE_FIELDS) {
-    const text = dossier[field.key].trim();
-    lines.push("", `**${field.label}:**`, text || "Offen. Nichts dazu erfinden.");
+  const gaps = input.gaps.map((gap) => gap.trim()).filter(Boolean);
+  const missingGaps = gaps.filter((gap) => !looseText(prompt).includes(looseText(gap).slice(0, 60)));
+  if (missingGaps.length) {
+    prompt += `\n\n**Was nicht geht:**\n${missingGaps.map((gap) => `- ${gap}`).join("\n")}`;
   }
-  const quotes = dossier.quotes.map((quote) => quote.trim()).filter(Boolean);
-  if (quotes.length) {
-    lines.push(
-      "",
-      "**Zitate, nur in diesem Wortlaut:**",
-      ...quotes.map((quote) => `- „${quote.replace(/^["„»]|["“«]$/g, "")}“`),
-    );
-  }
-  const gaps = dossier.gaps.map((gap) => gap.trim()).filter(Boolean);
-  if (gaps.length) {
-    lines.push("", "**Was nicht geht:**", ...gaps.map((gap) => `- ${gap}`));
-  }
-  return lines.join("\n");
+  return prompt.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export function ensureAvatarIntroducesSelf(name: string, prompt: string): string {
