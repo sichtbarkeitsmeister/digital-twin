@@ -33,6 +33,7 @@ const claudia = buildPersonaConfigExamQuestions({
 
 assert.ok(claudia.some((q) => q.id === "cfg_disg" && /DISG/.test(q.expectedHint)));
 assert.ok(claudia.some((q) => q.id === "cfg_pain" && /müde/.test(q.expectedHint)));
+assert.ok(claudia.some((q) => q.id === "cfg_demo_age" && /52/.test(q.expectedHint)));
 assert.ok(
   claudia.some((q) => q.id === "cfg_criteria" && /Bewertungen/.test(q.expectedHint)),
 );
@@ -45,8 +46,15 @@ assert.equal(
   false,
   "missing Hormozi effort must not be invented",
 );
-assert.ok(claudia[0]?.id === "cfg_intro");
-assert.match(claudia[0]?.expectedHint ?? "", /Claudia/);
+const claudiaIds = claudia.map((q) => q.id);
+assert.ok(claudiaIds.indexOf("cfg_pain") < claudiaIds.indexOf("cfg_disg"));
+assert.ok(claudiaIds.indexOf("cfg_demo_age") < claudiaIds.indexOf("cfg_disg"));
+assert.match(claudia.find((q) => q.id === "cfg_intro")?.expectedHint ?? "", /Claudia/);
+assert.match(claudia.find((q) => q.id === "cfg_pain")?.question ?? "", /erste[mn] Gespräch/);
+assert.equal(
+  claudia.some((q) => /was gilt bei euch/i.test(q.question)),
+  false,
+);
 
 const fromPrompt = buildPersonaConfigExamQuestions({
   name: "Claudia",
@@ -107,9 +115,44 @@ const company = buildPersonaConfigExamQuestions({
   ].join("\n"),
 });
 assert.equal(company.length, 1);
-assert.match(company[0]?.question ?? "", /Leistungen/);
+assert.match(company[0]?.question ?? "", /Leistungen bietet ihr/);
 assert.match(company[0]?.expectedHint ?? "", /Fotona/);
 assert.equal(company.some((q) => q.id === "cfg_disg"), false);
+assert.equal(company.some((q) => /was gilt bei euch/i.test(q.question)), false);
+
+const practice = buildPersonaConfigExamQuestions({
+  name: "SEO-Berater",
+  role: "Firmenwissen",
+  audience: "company",
+  promptTemplate: [
+    "## Praxis Meerbusch | Dr. Schürings, Anbieter- & Patienten-Workshop",
+    "- **Praxisname:** Praxis Meerbusch | Dr. Schürings",
+    "- **Gründung:** April 2023",
+    "- **Standort:** Meerbusch, Einzugsgebiet mind. 20 km",
+    "- **Team:** Dr. Katharina Schürings, Fachärztin für Dermatologie",
+    "",
+    "## Anbieter-Wissen (Meeting-Transkripte)",
+    "**Schmerz:** Die Haut wirkt seit zwei Jahren müde, sie will das ohne OP ändern.",
+    "**Wunsch-Outcome:** Wieder frisch wirken, ohne dass man eine Behandlung sieht.",
+    "**Hürde:** Angst, dass das Gesicht rot bleibt und es zu teuer wird.",
+    "**Alter:** Anfang 50",
+    "**DISG:** S, stetig, will Sicherheit und keine Hektik.",
+  ].join("\n"),
+});
+assert.ok(practice.length >= 8, `expected a full questionnaire, got ${practice.length}`);
+assert.equal(practice.some((q) => /was gilt bei euch/i.test(q.question)), false);
+assert.equal(practice.some((q) => /Meeting-Transkripte|Workshop/.test(q.question)), false);
+assert.ok(practice.some((q) => q.id === "cfg_pain" && /müde/.test(q.expectedHint)));
+assert.ok(practice.some((q) => q.id === "cfg_hormozi_dream" && /frisch/.test(q.expectedHint)));
+assert.ok(practice.some((q) => q.id === "cfg_hurdle" && /rot/.test(q.expectedHint)));
+assert.ok(practice.some((q) => q.id === "cfg_demo_age" && /Anfang 50/.test(q.expectedHint)));
+assert.ok(practice.some((q) => q.id === "cfg_disg" && /Sicherheit/.test(q.expectedHint)));
+assert.ok(practice.some((q) => q.id === "cfg_firm_since" && /2023/.test(q.expectedHint)));
+const practiceIds = practice.map((q) => q.id);
+assert.ok(practiceIds.indexOf("cfg_pain") < practiceIds.indexOf("cfg_demo_age"));
+assert.ok(practiceIds.indexOf("cfg_demo_age") < practiceIds.indexOf("cfg_disg"));
+assert.ok(practiceIds.indexOf("cfg_disg") < practiceIds.indexOf("cfg_firm_since"));
+assert.match(practice.find((q) => q.id === "cfg_pain")?.question ?? "", /Wunschkunde/);
 
 const source = personaConfigSourceText({
   name: "Claudia",
@@ -177,10 +220,17 @@ assert.equal(
 
 const aiPrompt = buildPersonaConfigExamAiPrompt(source, "persona");
 assert.match(aiPrompt, /DISG/);
-assert.match(aiPrompt, /Pain Points/);
-assert.match(aiPrompt, /Entscheidungskriterien/);
+assert.match(aiPrompt, /Schmerz/);
+assert.match(aiPrompt, /Hürde/);
+assert.match(aiPrompt, /Demografie/);
 assert.match(aiPrompt, /Hormozi/);
+assert.match(aiPrompt, /Was gilt bei euch/);
 assert.match(aiPrompt, /nichts erfinden|Erfinde keinen/i);
+
+const companyPrompt = buildPersonaConfigExamAiPrompt(source, "company");
+assert.match(companyPrompt, /Wunschkunde/);
+assert.match(companyPrompt, /DISG/);
+assert.doesNotMatch(companyPrompt, /Keine Fragen zu DISG/);
 
 const checkPrompt = buildExamCheckUserPrompt({
   question: "Welcher DISG-Typ bist du?",
