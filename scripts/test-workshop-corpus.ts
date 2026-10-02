@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 
+import { avatarNextAction } from "../lib/dt/transcripts/avatar-value";
 import {
   isMarkdownTranscriptFilename,
   resolveTranscriptReading,
@@ -286,6 +287,23 @@ function testAvatarRestore() {
   console.log("avatar restore: ok");
 }
 
+function testAvatarNextAction() {
+  assert.equal(avatarNextAction({ dossier: null, preview: null, agentId: null }), "dossier");
+  assert.equal(
+    avatarNextAction({ dossier: { narrative: "da" }, preview: null, agentId: null }),
+    "preview",
+  );
+  assert.equal(
+    avatarNextAction({ dossier: { narrative: "da" }, preview: { name: "A" }, agentId: null }),
+    "create",
+  );
+  assert.equal(
+    avatarNextAction({ dossier: { narrative: "da" }, preview: { name: "A" }, agentId: "agent-1" }),
+    "done",
+  );
+  console.log("avatar next action: ok");
+}
+
 function testRevisionNote() {
   const block = formatRevisionBlock(
     "Bantek liegt in Mülheim. Endphone streichen.",
@@ -362,4 +380,5 @@ testCorpusPrompt();
 testAvatarRestore();
 testValueFields();
 testRevisionNote();
+testAvatarNextAction();
 console.log("workshop corpus: all ok");
