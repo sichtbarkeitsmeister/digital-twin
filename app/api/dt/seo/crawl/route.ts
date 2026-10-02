@@ -18,7 +18,7 @@ import { startOrganisationSiteCrawl } from "@/lib/dt/seo/start-org-crawl";
 import { syncCrawlJobHealth } from "@/lib/dt/seo/sync-crawl-job-health";
 import { createServiceClient } from "@/lib/supabase/service";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),

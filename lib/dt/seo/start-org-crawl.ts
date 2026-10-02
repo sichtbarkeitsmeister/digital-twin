@@ -1,6 +1,6 @@
 import "server-only";
 
-import { syncCrawlJobHealth } from "@/lib/dt/seo/sync-crawl-job-health";
+import { crawlJobDedupeKey, syncCrawlJobHealth } from "@/lib/dt/seo/sync-crawl-job-health";
 import { triggerGscPagesSync } from "@/lib/dt/seo/trigger-gsc-pages-sync";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 import { enqueueJob } from "@/lib/jobs/queue";
@@ -171,6 +171,7 @@ export async function startOrganisationSiteCrawl(input: {
     kind: "seo.crawl",
     organisationId: input.organisationId,
     payload: { crawlId: crawl.id, organisationId: input.organisationId },
+    dedupeKey: crawlJobDedupeKey(crawl.id),
     runAfter: new Date(),
   });
 
