@@ -98,54 +98,58 @@ export async function summarizeTranscript(input: {
   return { summary, usage, model };
 }
 
+function anbieterPayloadHint(value: unknown): string {
+  if (Array.isArray(value)) return `Liste mit ${value.length} Einträgen`;
+  if (!value || typeof value !== "object") return typeof value;
+  const keys = Object.keys(value as Record<string, unknown>);
+  return keys.length > 0 ? `Felder: ${keys.slice(0, 8).join(", ")}` : "leeres Objekt";
+}
+
 export async function evaluateAnbieterCorpus(input: {
   organisationName: string;
   sources: WorkshopSource[];
 }): Promise<{ items: AnbieterItem[]; usage: { inputTokens: number; outputTokens: number }; model: string | null }> {
+  const pointProperties = Object.fromEntries(
+    ANBIETER_POINTS.map((point) => [
+      point.key,
+      {
+        type: "string",
+        description: `${point.label}. Alle belegten Fakten im Wortlaut der Gespräche, nichts kürzen. Leer nur, wenn niemand dazu etwas gesagt hat.`,
+      },
+    ]),
+  );
   const tool: Anthropic.Tool = {
     name: "submit_anbieter",
-    description: "Aktueller Anbieterstand aus allen Gesprächen.",
+    description: "Aktueller Anbieterstand aus allen Gesprächen. Ein Textfeld pro Checklistenpunkt.",
     input_schema: {
       type: "object",
-      properties: {
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              key: { type: "string", enum: ANBIETER_POINTS.map((point) => point.key) },
-              current: { type: "string" },
-              earlier: { type: "string" },
-              sources: { type: "string" },
-            },
-            required: ["key", "current"],
-          },
-        },
-      },
-      required: ["items"],
+      properties: pointProperties,
+      required: ANBIETER_POINTS.map((point) => point.key),
     },
   };
   const user = [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n");
   const system = `${CORPUS_RULES}
 
-Du füllst die Anbieter-Checkliste. current enthält alle belegten Fakten dieses Punkts, nicht nur eine Kurzfassung.
-earlier nur, wenn eine ältere Aussage zum selben Punkt später geändert oder verschärft wurde. Auch earlier bleibt vollständig.
-sources nennt die Gespräche knapp, zum Beispiel „12.03. Kick-off, verschärft 02.04. Zielgruppe“.
-Was niemand gesagt hat, bleibt ein leerer String. Erfundene Fakten sind verboten. Ein belegter Punkt darf nicht leer bleiben.
+Du füllst die Anbieter-Checkliste direkt in die Felder ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
+Jedes Feld enthält alle belegten Fakten dieses Punkts, nicht nur eine Kurzfassung.
+Was niemand gesagt hat, bleibt ein leerer String. Erfundene Fakten sind verboten.
 Eine Angabe, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.`;
   const first = await callTool({ system, user, tool, maxTokens: 32_000 });
   let items = normalizeAnbieterItems(first.json);
   let usage = first.usage;
   let model = first.model;
+  let lastPayload: unknown = first.json;
   if (!items.some((item) => item.current.trim())) {
     const second = await callTool({
-      system: `Lies die Gespräche vollständig und fülle current für diese Schlüssel: ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
-current enthält jede dazu gehörende Angabe, nicht nur einen Satz. Nicht erfinden. Unbelegte Schlüssel bleiben "".`,
+      system: `Lies die Gespräche vollständig. Schreibe für jeden dieser Schlüssel den kompletten belegten Text: ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
+Nichts kürzen. Nicht erfinden. Unbelegte Schlüssel bleiben "".`,
       user,
       tool,
       maxTokens: 32_000,
     });
-    items = normalizeAnbieterItems(second.json);
+    lastPayload = second.json;
+    const secondItems = normalizeAnbieterItems(second.json);
+    if (secondItems.some((item) => item.current.trim())) items = secondItems;
     usage = {
       inputTokens: usage.inputTokens + second.usage.inputTokens,
       outputTokens: usage.outputTokens + second.usage.outputTokens,
@@ -154,7 +158,7 @@ current enthält jede dazu gehörende Angabe, nicht nur einen Satz. Nicht erfind
   }
   if (!items.some((item) => item.current.trim())) {
     throw new Error(
-      "Die KI-Antwort enthielt keine auswertbaren Anbieter-Punkte. Bitte erneut auswerten.",
+      `Die KI-Antwort enthielt keine auswertbaren Anbieter-Punkte (${anbieterPayloadHint(lastPayload)}). Bitte erneut auswerten.`,
     );
   }
   return { items, usage, model };

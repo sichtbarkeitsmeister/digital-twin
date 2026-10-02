@@ -97,15 +97,25 @@ function asString(value: unknown, max: number): string {
   return asText(value, max);
 }
 
-function asText(value: unknown, max: number): string {
+function asText(value: unknown, max: number, depth = 0): string {
   if (typeof value === "string") return value.trim().slice(0, max);
   if (typeof value === "number" && Number.isFinite(value)) return String(value).slice(0, max);
   if (Array.isArray(value)) {
     return value
-      .map((part) => (typeof part === "string" || typeof part === "number" ? asText(part, max) : ""))
+      .map((part) => asText(part, max, depth + 1))
       .filter(Boolean)
       .join("\n")
       .slice(0, max);
+  }
+  if (depth < 4) {
+    const record = asRecord(value);
+    if (record) {
+      return Object.values(record)
+        .map((part) => asText(part, max, depth + 1))
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, max);
+    }
   }
   return "";
 }
@@ -191,11 +201,11 @@ function pointKeyFrom(value: string): AnbieterPointKey | null {
       return point.key;
     }
   }
-  const loose = ANBIETER_POINTS.filter((point) => {
-    const label = compactPointName(point.label);
-    return compact.includes(point.key) || compact.includes(label) || label.includes(compact);
-  });
-  return loose.length === 1 ? loose[0].key : null;
+  const loose = ANBIETER_POINTS.filter((point) => compact.startsWith(point.key));
+  if (loose.length !== 1) return null;
+  const only = loose[0];
+  if (!only) return null;
+  return compact.length <= only.key.length + 16 ? only.key : null;
 }
 
 function itemCurrent(item: Record<string, unknown>): string {
@@ -212,18 +222,74 @@ function itemCurrent(item: Record<string, unknown>): string {
   return best;
 }
 
+function explicitPointKey(item: Record<string, unknown>): AnbieterPointKey | null {
+  for (const field of ["key", "label", "punkt", "name", "titel", "thema", "title"]) {
+    const key = pointKeyFrom(asString(item[field], 160));
+    if (key) return key;
+  }
+  return null;
+}
+
+function markdownRows(text: string): unknown[] {
+  const parts = text.split(/\n(?=#{1,3}\s+)/);
+  const rows: unknown[] = [];
+  for (const part of parts) {
+    const match = part.match(/^#{1,3}\s+([^\n]+)\n([\s\S]*)$/);
+    if (!match) continue;
+    const key = pointKeyFrom(match[1] ?? "");
+    const current = (match[2] ?? "").trim();
+    if (!key || !current) continue;
+    rows.push({ key, current });
+  }
+  return rows;
+}
+
+function expandRow(row: unknown): unknown[] {
+  if (typeof row === "string") {
+    const fromHeadings = markdownRows(row);
+    if (fromHeadings.length > 0) return fromHeadings;
+    return row.trim() ? [{ key: "unternehmen", current: row.trim() }] : [];
+  }
+  const item = asRecord(row);
+  if (!item) return [];
+  const nested: unknown[] = [];
+  for (const [key, value] of Object.entries(item)) {
+    if (!pointKeyFrom(key)) continue;
+    const child = asRecord(value);
+    nested.push(child ? { key, ...child, key } : { key, current: value });
+  }
+  if (nested.length > 0) return nested;
+  const key = explicitPointKey(item);
+  if (key) return [{ ...item, key }];
+  const text = itemCurrent(item);
+  const fromHeadings = markdownRows(text);
+  if (fromHeadings.length > 0) return fromHeadings;
+  if (text.trim()) return [{ key: "unternehmen", current: text.trim() }];
+  return [];
+}
+
 function anbieterRows(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw)) return raw.flatMap((row) => expandRow(row));
   const record = asRecord(raw);
   if (!record) return [];
-  if (Array.isArray(record.items)) return record.items;
-  if (record.items && typeof record.items === "object") return anbieterRows(record.items);
-  if (Array.isArray(record.anbieter)) return record.anbieter;
   const rows: unknown[] = [];
+  if (Array.isArray(record.items) && record.items.length > 0) {
+    rows.push(...record.items.flatMap((row) => expandRow(row)));
+  } else if (record.items && typeof record.items === "object") {
+    rows.push(...anbieterRows(record.items));
+  }
+  if (Array.isArray(record.anbieter) && record.anbieter.length > 0) {
+    rows.push(...record.anbieter.flatMap((row) => expandRow(row)));
+  }
   for (const [key, value] of Object.entries(record)) {
+    if (key === "items" || key === "anbieter") continue;
     if (!pointKeyFrom(key)) continue;
     const item = asRecord(value);
-    rows.push(item ? { key, ...item } : { key, current: value });
+    rows.push(item ? { key, ...item, key } : { key, current: value });
+  }
+  for (const key of ["content", "text", "markdown", "anbieterMarkdown", "summary"]) {
+    const text = asString(record[key], POINT_TEXT_MAX);
+    if (text) rows.push(...expandRow(text));
   }
   return rows;
 }
@@ -238,10 +304,18 @@ export function normalizeAnbieterItems(raw: unknown): AnbieterItem[] {
     if (!key) continue;
     const current = itemCurrent(item);
     const earlier = asString(item.earlier, POINT_TEXT_MAX);
+    const existing = byKey.get(key);
+    let merged = current;
+    if (existing?.current && current && existing.current !== current && !existing.current.includes(current)) {
+      merged = `${existing.current}\n${current}`.slice(0, POINT_TEXT_MAX);
+    } else if (!current) {
+      merged = existing?.current ?? "";
+    }
+    if (!merged && !earlier) continue;
     byKey.set(key, {
-      current,
-      earlier: earlier && earlier !== current ? earlier : null,
-      sources: asString(item.sources, 2_000),
+      current: merged,
+      earlier: (earlier && earlier !== merged ? earlier : null) || existing?.earlier || null,
+      sources: asString(item.sources, 2_000) || existing?.sources || "",
     });
   }
   return ANBIETER_POINTS.map((point) => {

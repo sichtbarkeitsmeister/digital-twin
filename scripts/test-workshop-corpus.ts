@@ -108,7 +108,7 @@ function testChecklistAndSeoText() {
   assert.equal(items.length, ANBIETER_POINTS.length);
   assert.equal(items.find((item) => item.key === "leistungen")?.earlier, "nur Lohn");
   assert.equal(items.some((item) => item.key === ("erfunden" as "preis")), false);
-  assert.equal(items.find((item) => item.key === "unternehmen")?.current, "");
+  assert.equal(items.find((item) => item.key === "unternehmen")?.current, "darf nicht bleiben");
   const byLabel = normalizeAnbieterItems({
     items: [{ key: "Leistungen & Schwerpunkte", current: "Lohn" }],
   });
@@ -119,6 +119,16 @@ function testChecklistAndSeoText() {
   });
   assert.equal(flat.find((item) => item.key === "leistungen")?.current, "Lohn und Abschluss");
   assert.match(flat.find((item) => item.key === "unternehmen")?.current ?? "", /Problemlöser/);
+  const nested = normalizeAnbieterItems({
+    items: [{ punkt: "Leistungen", inhalt: { text: "Lohn und Jahresabschluss" } }],
+    markdown: "## Preis & Positionierung\nFestpreis ab 2.000 Euro.",
+  });
+  assert.match(nested.find((item) => item.key === "leistungen")?.current ?? "", /Jahresabschluss/);
+  assert.match(nested.find((item) => item.key === "preis")?.current ?? "", /2\.000 Euro/);
+  const blob = normalizeAnbieterItems({
+    content: "Die Kanzlei macht Lohn, Jahresabschluss und Beratung für Pflegeheime.",
+  });
+  assert.match(blob.find((item) => item.key === "unternehmen")?.current ?? "", /Pflegeheime/);
   const fromList = readAnbieterState(
     {
       sourceFingerprint: "abc",
@@ -138,7 +148,7 @@ function testChecklistAndSeoText() {
   assert.match(markdown, /Noch offen/);
   assert.match(markdown, /Nicht erfinden/);
   assert.match(markdown, /Unternehmen & Kern/);
-  assert.doesNotMatch(markdown, /darf nicht bleiben/);
+  assert.match(markdown, /darf nicht bleiben/);
   console.log("checklist + seo text: ok");
 }
 
