@@ -12,6 +12,7 @@ import {
   normalizeAnbieterItems,
   normalizeAvatarPlan,
   orderWorkshopSources,
+  readAnbieterState,
   readAvatarPlan,
   sectionStatus,
   type WorkshopSource,
@@ -112,6 +113,15 @@ function testChecklistAndSeoText() {
     items: [{ key: "Leistungen & Schwerpunkte", current: "Lohn" }],
   });
   assert.equal(byLabel.find((item) => item.key === "leistungen")?.current, "Lohn");
+  const fromList = readAnbieterState(
+    {
+      sourceFingerprint: "abc",
+      items: [{ key: "leistungen", current: ["Lohn", "Jahresabschluss"] }],
+    },
+    "abc",
+  );
+  assert.equal(fromList.status, "proposed");
+  assert.match(fromList.items.find((item) => item.key === "leistungen")?.current ?? "", /Jahresabschluss/);
 
   const markdown = buildCurrentAnbieterMarkdown({
     organisationName: "Westprüfung",

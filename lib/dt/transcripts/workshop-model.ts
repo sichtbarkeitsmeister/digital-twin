@@ -94,7 +94,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function asString(value: unknown, max: number): string {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
+  return asText(value, max);
+}
+
+function asText(value: unknown, max: number): string {
+  if (typeof value === "string") return value.trim().slice(0, max);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value).slice(0, max);
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => (typeof part === "string" || typeof part === "number" ? asText(part, max) : ""))
+      .filter(Boolean)
+      .join("\n")
+      .slice(0, max);
+  }
+  return "";
 }
 
 export function compareWorkshopSources(a: WorkshopSource, b: WorkshopSource): number {
