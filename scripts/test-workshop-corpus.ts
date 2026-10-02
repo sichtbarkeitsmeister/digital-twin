@@ -15,6 +15,7 @@ import {
   corpusFingerprint,
   normalizeAnbieterItems,
   normalizeAvatarPlan,
+  normalizeDossier,
   orderWorkshopSources,
   readAnbieterState,
   readAvatarPlan,
@@ -133,6 +134,10 @@ function testChecklistAndSeoText() {
     content: "Die Kanzlei macht Lohn, Jahresabschluss und Beratung für Pflegeheime.",
   });
   assert.match(blob.find((item) => item.key === "unternehmen")?.current ?? "", /Pflegeheime/);
+  const ablauf = normalizeAnbieterItems({
+    markdown: "## Ablauf & Mitwirkung\nErstgespräch in wenigen Tagen, Konzept in ein bis zwei Wochen.",
+  });
+  assert.match(ablauf.find((item) => item.key === "ablauf")?.current ?? "", /ein bis zwei Wochen/);
   const fromList = readAnbieterState(
     {
       sourceFingerprint: "abc",
@@ -227,6 +232,13 @@ function testAvatarRestore() {
     ...previous[0]!,
     dossier: {
       narrative: "Akte bleibt.",
+      schmerz: "Fristen",
+      traumergebnis: "Ruhe",
+      dringlichkeit: "",
+      huerde: "Preis unklar",
+      aufwand: "Unterlagen schicken",
+      zeit: "Erstgespräch, dann zwei Wochen",
+      wahrscheinlichkeit: "Empfehlung der Nachbarin",
       pains: "Fristen",
       outcome: "Ruhe",
       quotes: ["Bitte ohne Fachchinesisch."],
@@ -272,9 +284,46 @@ function testAvatarRestore() {
   console.log("avatar restore: ok");
 }
 
+function testValueFields() {
+  const legacy = normalizeDossier({
+    narrative: "Der Kunde will Ruhe.",
+    pains: "Nichts wird fertig.",
+    outcome: "Endlich läuft es.",
+    quotes: ["Wir sind seit Ewigkeiten unzufrieden."],
+    gaps: ["Zahl der Kunden"],
+  });
+  assert.equal(legacy?.schmerz, "Nichts wird fertig.");
+  assert.equal(legacy?.traumergebnis, "Endlich läuft es.");
+  assert.equal(legacy?.pains, legacy?.schmerz);
+  assert.equal(legacy?.dringlichkeit, "");
+  assert.equal(legacy?.huerde, "");
+  assert.deepEqual(legacy?.gaps, ["Zahl der Kunden"]);
+
+  const fresh = normalizeDossier({
+    narrative: "Belege bleiben vollständig.",
+    schmerz: "Der alte Anbieter meldet sich nicht.",
+    traumergebnis: "Ich muss nicht mehr wechseln.",
+    dringlichkeit: "",
+    huerde: "Ich weiß nicht, was es kostet.",
+    aufwand: "Ich muss die Zugänge besorgen.",
+    zeit: "Termin in wenigen Tagen, spürbar nach zwei Wochen.",
+    wahrscheinlichkeit: "Kunden bleiben länger als zehn Jahre.",
+    quotes: [],
+    gaps: ["Einstieg beim Verein"],
+  });
+  assert.equal(fresh?.aufwand, "Ich muss die Zugänge besorgen.");
+  assert.equal(fresh?.dringlichkeit, "");
+  assert.match(fresh?.narrative ?? "", /vollständig/);
+
+  const empty = normalizeDossier({ narrative: "   ", schmerz: "", quotes: [], gaps: [] });
+  assert.equal(empty, null);
+  console.log("value fields: ok");
+}
+
 testOrder();
 testFingerprintAndStatus();
 testChecklistAndSeoText();
 testCorpusPrompt();
 testAvatarRestore();
+testValueFields();
 console.log("workshop corpus: all ok");

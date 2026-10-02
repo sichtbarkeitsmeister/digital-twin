@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { AvatarValueKey } from "@/lib/dt/transcripts/avatar-value";
 import { normalizePersonaKey, slugFromPersonaName } from "@/lib/dt/transcripts/sanitize";
 
 export const WORKSHOP_CORPUS_START = "<!-- DT_WORKSHOP_CORPUS_START -->";
@@ -9,6 +10,7 @@ export const ANBIETER_POINTS = [
   { key: "unternehmen", label: "Unternehmen & Kern" },
   { key: "gruendung", label: "Gründungsgeschichte" },
   { key: "leistungen", label: "Leistungen & Schwerpunkte" },
+  { key: "ablauf", label: "Ablauf & Mitwirkung" },
   { key: "alleinstellung", label: "Alleinstellung" },
   { key: "wettbewerb", label: "Wettbewerb" },
   { key: "team", label: "Team & Partner" },
@@ -52,18 +54,20 @@ export type AvatarCase = {
   quotes: string[];
 };
 
+export type AvatarDossier = {
+  narrative: string;
+  quotes: string[];
+  gaps: string[];
+  pains: string;
+  outcome: string;
+} & Record<AvatarValueKey, string>;
+
 export type WorkshopAvatar = {
   key: string;
   title: string;
   whySeparate: string;
   cases: AvatarCase[];
-  dossier: {
-    narrative: string;
-    pains: string;
-    outcome: string;
-    quotes: string[];
-    gaps: string[];
-  } | null;
+  dossier: AvatarDossier | null;
   preview: {
     name: string;
     role: string;
@@ -424,21 +428,56 @@ export function normalizeAvatarPlan(raw: unknown, previous: WorkshopAvatar[] = [
   return avatars;
 }
 
+function dossierField(record: Record<string, unknown>, key: string, alias?: string): string {
+  const primary = asString(record[key], 8_000);
+  if (primary) return primary;
+  return alias ? asString(record[alias], 8_000) : "";
+}
+
 export function normalizeDossier(raw: unknown): WorkshopAvatar["dossier"] {
   const record = asRecord(raw);
   if (!record) return null;
   const narrative = asString(record.narrative, POINT_TEXT_MAX);
-  if (!narrative) return null;
+  const schmerz = dossierField(record, "schmerz", "pains");
+  const traumergebnis = dossierField(record, "traumergebnis", "outcome");
+  const dringlichkeit = dossierField(record, "dringlichkeit");
+  const huerde = dossierField(record, "huerde");
+  const aufwand = dossierField(record, "aufwand");
+  const zeit = dossierField(record, "zeit");
+  const wahrscheinlichkeit = dossierField(record, "wahrscheinlichkeit");
   const quotes = Array.isArray(record.quotes)
     ? record.quotes.map((quote) => asString(quote, 2_000)).filter(Boolean).slice(0, 24)
     : [];
-  const gaps = Array.isArray(record.gaps)
-    ? record.gaps.map((gap) => asString(gap, 1_000)).filter(Boolean).slice(0, 24)
-    : [];
+  const gapSource = Array.isArray(record.gaps)
+    ? record.gaps
+    : Array.isArray(record.offen)
+      ? record.offen
+      : [];
+  const gaps = gapSource.map((gap) => asString(gap, 1_000)).filter(Boolean).slice(0, 24);
+  const filled = [
+    narrative,
+    schmerz,
+    traumergebnis,
+    dringlichkeit,
+    huerde,
+    aufwand,
+    zeit,
+    wahrscheinlichkeit,
+    ...quotes,
+    ...gaps,
+  ].some((part) => part.trim());
+  if (!filled) return null;
   return {
     narrative,
-    pains: asString(record.pains, 8_000),
-    outcome: asString(record.outcome, 8_000),
+    schmerz,
+    traumergebnis,
+    dringlichkeit,
+    huerde,
+    aufwand,
+    zeit,
+    wahrscheinlichkeit,
+    pains: schmerz,
+    outcome: traumergebnis,
     quotes,
     gaps,
   };

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { AVATAR_VALUE_FIELDS, type AvatarValueKey } from "@/lib/dt/transcripts/avatar-value";
 
 export const WORKSHOP_CHANGED_EVENT = "dt-workshop-changed";
 
@@ -56,13 +57,13 @@ type WorkshopAvatar = {
   title: string;
   whySeparate: string;
   cases: AvatarCase[];
-  dossier: {
-    narrative: string;
-    pains: string;
-    outcome: string;
-    quotes: string[];
-    gaps: string[];
-  } | null;
+  dossier:
+    | ({
+        narrative: string;
+        quotes: string[];
+        gaps: string[];
+      } & Record<AvatarValueKey, string>)
+    | null;
   preview: {
     name: string;
     role: string;
@@ -318,8 +319,9 @@ export function WorkshopBoard(props: { organisationId: string }) {
             {anbieter ? statusBadge(anbieter.status) : null}
           </div>
           <CardDescription>
-            Zwölf Punkte aus dem gesamten Wortlaut. Jede Angabe bleibt erhalten. Freigabe schreibt
-            nur den aktuellen Stand in den SEO-Berater. Offene Punkte bleiben offen.
+            Jeder Punkt aus dem gesamten Wortlaut, inklusive Ablauf und Mitwirkung. Jede Angabe
+            bleibt erhalten. Freigabe schreibt nur den aktuellen Stand in den SEO-Berater. Offene
+            Punkte bleiben offen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -366,7 +368,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
           {anbieterError ? <p className="text-sm text-destructive">{anbieterError}</p> : null}
           {anbieter?.status === "empty" && busy !== "anbieter-evaluate" ? (
             <p className="text-sm text-secondary">
-              Der dunkle Freigabe-Button erscheint unter den zwölf Punkten, sobald der Vorschlag da ist.
+              Der dunkle Freigabe-Button erscheint unter den Punkten, sobald der Vorschlag da ist.
             </p>
           ) : null}
           {anbieter?.status === "stale" ? (
@@ -418,7 +420,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
           </div>
           <CardDescription>
             Wie viele Avatare, Arbeitstitel, und wen ihr nicht als Kunden wollt. Fälle sind Belege,
-            keine eigenen Avatare. Ohne freigegebenen Plan entsteht kein Avatar-Text.
+            keine eigenen Avatare. Schmerz, Traumergebnis, Hürde, Zeit und Aufwand entstehen in der
+            Akte, nachdem der Plan freigegeben ist.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -588,11 +591,24 @@ export function WorkshopBoard(props: { organisationId: string }) {
                     </div>
                   ) : null}
                   {avatar.dossier ? (
-                    <div className="grid gap-1 text-sm">
+                    <div className="grid gap-2 text-sm">
                       <p className="text-xs font-semibold uppercase tracking-wide text-secondary">Akte</p>
-                      <p className="whitespace-pre-wrap">{avatar.dossier.narrative}</p>
-                      {avatar.dossier.pains ? <p>Schmerz: {avatar.dossier.pains}</p> : null}
-                      {avatar.dossier.outcome ? <p>Ergebnis: {avatar.dossier.outcome}</p> : null}
+                      {avatar.dossier.narrative ? (
+                        <p className="whitespace-pre-wrap">{avatar.dossier.narrative}</p>
+                      ) : null}
+                      <dl className="grid gap-1.5">
+                        {AVATAR_VALUE_FIELDS.map((field) => {
+                          const text = avatar.dossier?.[field.key]?.trim() ?? "";
+                          return (
+                            <div key={field.key}>
+                              <dt className="font-medium text-primary">{field.label}</dt>
+                              <dd className={text ? "whitespace-pre-wrap" : "text-secondary"}>
+                                {text || "Noch nicht belegt."}
+                              </dd>
+                            </div>
+                          );
+                        })}
+                      </dl>
                       {avatar.dossier.quotes.length > 0 ? (
                         <p className="text-xs text-secondary">„{avatar.dossier.quotes.join("“ · „")}“</p>
                       ) : null}

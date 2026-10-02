@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       const anbieter = {
         status: "proposed" as const,
         sourceFingerprint: state.fingerprint,
-        approvedFingerprint: state.anbieter.approvedFingerprint,
+        approvedFingerprint: null,
         items: result.items,
       };
       await saveAnbieterState(auth.supabase, parsed.data.organisationId, anbieter);
