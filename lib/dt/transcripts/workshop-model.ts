@@ -149,22 +149,24 @@ export function sourceLabel(source: WorkshopSource, index: number): string {
   return `${date} · ${title}`;
 }
 
-/** Readable corpus. Later conversations come last so the model treats them as the current word. */
+const POINT_TEXT_MAX = 24_000;
+
+/** Readable corpus. Later conversations come last. The full wording is included. */
 export function buildCorpusPrompt(sources: WorkshopSource[], options?: { rawChars?: number }): string {
-  const rawChars = options?.rawChars ?? 8_000;
+  const rawChars = options?.rawChars;
   const ordered = orderWorkshopSources(sources);
   return ordered
     .map((source, index) => {
       const parts = [`## Gespräch ${index + 1}: ${sourceLabel(source, index)}`];
       const summary = source.summary?.trim() ?? "";
       const raw = source.rawText.trim();
+      const wording = (text: string) =>
+        rawChars != null && text.length > rawChars ? `${text.slice(0, rawChars)}\n…[gekürzt]` : text;
       if (summary) parts.push("", "### Zusammenfassung", summary);
       if (source.sourceKind === "raw" && raw && raw !== summary) {
-        const clipped = raw.length > rawChars ? `${raw.slice(0, rawChars)}\n…[gekürzt]` : raw;
-        parts.push("", "### Wortlaut", clipped);
+        parts.push("", "### Wortlaut", wording(raw));
       } else if (!summary && raw) {
-        const clipped = raw.length > rawChars ? `${raw.slice(0, rawChars)}\n…[gekürzt]` : raw;
-        parts.push("", clipped);
+        parts.push("", wording(raw));
       }
       return parts.join("\n");
     })
@@ -198,13 +200,13 @@ function pointKeyFrom(value: string): AnbieterPointKey | null {
 
 function itemCurrent(item: Record<string, unknown>): string {
   for (const key of ["current", "text", "stand", "inhalt", "fakt", "beschreibung", "value", "summary"]) {
-    const text = asString(item[key], 2000);
+    const text = asString(item[key], POINT_TEXT_MAX);
     if (text) return text;
   }
   let best = "";
   for (const [key, value] of Object.entries(item)) {
     if (key === "key" || key === "label" || key === "earlier" || key === "sources") continue;
-    const text = asString(value, 2000);
+    const text = asString(value, POINT_TEXT_MAX);
     if (text.length > best.length) best = text;
   }
   return best;
@@ -235,11 +237,11 @@ export function normalizeAnbieterItems(raw: unknown): AnbieterItem[] {
     const key = pointKeyFrom(asString(item.key, 120) || asString(item.label, 120));
     if (!key) continue;
     const current = itemCurrent(item);
-    const earlier = asString(item.earlier, 2000);
+    const earlier = asString(item.earlier, POINT_TEXT_MAX);
     byKey.set(key, {
       current,
       earlier: earlier && earlier !== current ? earlier : null,
-      sources: asString(item.sources, 400),
+      sources: asString(item.sources, 2_000),
     });
   }
   return ANBIETER_POINTS.map((point) => {
@@ -297,10 +299,10 @@ function normalizeCases(raw: unknown): AvatarCase[] {
   for (const row of raw) {
     const record = asRecord(row);
     if (!record) continue;
-    const summary = asString(record.summary, 1500);
+    const summary = asString(record.summary, 8_000);
     if (!summary) continue;
     const quotes = Array.isArray(record.quotes)
-      ? record.quotes.map((quote) => asString(quote, 400)).filter(Boolean).slice(0, 5)
+      ? record.quotes.map((quote) => asString(quote, 2_000)).filter(Boolean).slice(0, 12)
       : [];
     cases.push({
       service: asString(record.service, 200),
@@ -351,18 +353,18 @@ export function normalizeAvatarPlan(raw: unknown, previous: WorkshopAvatar[] = [
 export function normalizeDossier(raw: unknown): WorkshopAvatar["dossier"] {
   const record = asRecord(raw);
   if (!record) return null;
-  const narrative = asString(record.narrative, 4000);
+  const narrative = asString(record.narrative, POINT_TEXT_MAX);
   if (!narrative) return null;
   const quotes = Array.isArray(record.quotes)
-    ? record.quotes.map((quote) => asString(quote, 400)).filter(Boolean).slice(0, 8)
+    ? record.quotes.map((quote) => asString(quote, 2_000)).filter(Boolean).slice(0, 24)
     : [];
   const gaps = Array.isArray(record.gaps)
-    ? record.gaps.map((gap) => asString(gap, 300)).filter(Boolean).slice(0, 12)
+    ? record.gaps.map((gap) => asString(gap, 1_000)).filter(Boolean).slice(0, 24)
     : [];
   return {
     narrative,
-    pains: asString(record.pains, 1500),
-    outcome: asString(record.outcome, 1500),
+    pains: asString(record.pains, 8_000),
+    outcome: asString(record.outcome, 8_000),
     quotes,
     gaps,
   };
@@ -372,7 +374,7 @@ export function normalizePreview(raw: unknown): WorkshopAvatar["preview"] {
   const record = asRecord(raw);
   if (!record) return null;
   const name = asString(record.name, 120);
-  const promptAppend = asString(record.promptAppend ?? record.prompt_append, 12_000);
+  const promptAppend = asString(record.promptAppend ?? record.prompt_append, 32_000);
   if (name.length < 2 || promptAppend.length < 80) return null;
   return {
     name,
@@ -440,7 +442,7 @@ export function readAvatarPlan(raw: unknown, fingerprint: string): AvatarPlanSta
   const approvedFingerprint = asString(record?.approvedFingerprint, 40) || null;
   return {
     avatars: restored,
-    notWanted: asString(record?.notWanted, 2000),
+    notWanted: asString(record?.notWanted, 8_000),
     sourceFingerprint,
     approvedFingerprint,
     status: sectionStatus({

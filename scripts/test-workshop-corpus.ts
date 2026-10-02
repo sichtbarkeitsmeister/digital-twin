@@ -167,6 +167,12 @@ function testCorpusPrompt() {
   const late = prompt.indexOf("Folgegespräch");
   assert.ok(early >= 0 && late > early);
   assert.ok(prompt.indexOf("Zusammenfassung") < prompt.indexOf("Wir rechnen nach Stunden ab."));
+  const long = `${"Wort ".repeat(2_000)}ENDE`;
+  const full = buildCorpusPrompt([
+    source({ id: "full", spokenOn: "2026-09-01", rawText: long, summary: null }),
+  ]);
+  assert.ok(full.includes("ENDE"));
+  assert.equal(full.includes("gekürzt"), false);
   console.log("corpus prompt: ok");
 }
 

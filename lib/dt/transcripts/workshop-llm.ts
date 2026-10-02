@@ -30,12 +30,15 @@ const CORPUS_RULES = `Du liest ALLE Gespräche als einen Bestand, in der Reihenf
 Eine einzelne Stelle ist kein Ergebnis. Das Ergebnis ist, was über alle Gespräche hinweg als Letztes gilt.
 Wird derselbe Punkt später schärfer oder anders gesagt, gilt nur die spätere Aussage.
 Die frühere Aussage kommt ins Feld earlier, die geltende ins Feld current.
-Verschiedene Themen ergänzen sich. Nichts erfinden. Was nicht gesagt wurde, bleibt leer.`;
+Verschiedene Themen ergänzen sich. Nichts erfinden. Was nicht gesagt wurde, bleibt leer.
+Jede konkrete Angabe bleibt erhalten: Namen, Zahlen, Preise, Leistungen, Ausnahmen, Abläufe, Zitate.
+Nichts kürzen, nichts weglassen, weil es nebensächlich wirkt. Nichts abschneiden.`;
 
 async function callTool(input: {
   system: string;
   user: string;
   tool: Anthropic.Tool;
+  maxTokens?: number;
 }): Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string | null }> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY fehlt.");
@@ -43,8 +46,8 @@ async function callTool(input: {
   const result = await callAnthropicFirstAvailable({
     anthropic,
     models: resolveSurveyActionModels(),
-    maxTokens: 8_192,
-    timeoutMs: 180_000,
+    maxTokens: input.maxTokens ?? 16_384,
+    timeoutMs: 270_000,
     stream: true,
     system: input.system,
     tools: [input.tool],
@@ -55,6 +58,11 @@ async function callTool(input: {
   const usage = sumAnthropicUsage(result.response.usage);
   const json = extractToolUseInput(result.response, input.tool.name);
   if (!json) throw new Error("Die KI-Antwort war unvollständig.");
+  if (result.response.stop_reason === "max_tokens") {
+    throw new Error(
+      "Die KI-Antwort wurde abgeschnitten, bevor alle Angaben drin waren. Bitte erneut auswerten.",
+    );
+  }
   return { json, usage, model: result.model };
 }
 
@@ -80,9 +88,7 @@ export async function summarizeTranscript(input: {
   const { json, usage, model } = await callTool({
     system:
       "Du fasst ein Kundengespräch für das Projektteam zusammen. Nichts glätten, nichts erfinden. Wörtliche Formulierungen zu Zielgruppe, Angebot und Abgrenzung behalten.",
-    user: [`Organisation: ${input.organisationName}`, `Titel: ${input.title}`, "", input.text.slice(0, 40_000)].join(
-      "\n",
-    ),
+    user: [`Organisation: ${input.organisationName}`, `Titel: ${input.title}`, "", input.text].join("\n"),
     tool,
   });
   const summary = typeof (json as { summary?: unknown }).summary === "string"
@@ -122,20 +128,22 @@ export async function evaluateAnbieterCorpus(input: {
   const user = [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n");
   const system = `${CORPUS_RULES}
 
-Du füllst die Anbieter-Checkliste. Für jeden belegten Punkt steht in current ein bis zwei Sätze.
-earlier nur, wenn eine ältere Aussage zum selben Punkt später geändert oder verschärft wurde.
+Du füllst die Anbieter-Checkliste. current enthält alle belegten Fakten dieses Punkts, nicht nur eine Kurzfassung.
+earlier nur, wenn eine ältere Aussage zum selben Punkt später geändert oder verschärft wurde. Auch earlier bleibt vollständig.
 sources nennt die Gespräche knapp, zum Beispiel „12.03. Kick-off, verschärft 02.04. Zielgruppe“.
-Was niemand gesagt hat, bleibt ein leerer String. Erfundene Fakten sind verboten. Ein belegter Punkt darf nicht leer bleiben.`;
-  const first = await callTool({ system, user, tool });
+Was niemand gesagt hat, bleibt ein leerer String. Erfundene Fakten sind verboten. Ein belegter Punkt darf nicht leer bleiben.
+Eine Angabe, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.`;
+  const first = await callTool({ system, user, tool, maxTokens: 32_000 });
   let items = normalizeAnbieterItems(first.json);
   let usage = first.usage;
   let model = first.model;
   if (!items.some((item) => item.current.trim())) {
     const second = await callTool({
-      system: `Lies die Gespräche und fülle current für diese Schlüssel: ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
-Ein belegter Punkt ist ein deutscher Satz aus dem Text. Nicht erfinden. Unbelegte Schlüssel bleiben "".`,
+      system: `Lies die Gespräche vollständig und fülle current für diese Schlüssel: ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
+current enthält jede dazu gehörende Angabe, nicht nur einen Satz. Nicht erfinden. Unbelegte Schlüssel bleiben "".`,
       user,
       tool,
+      maxTokens: 32_000,
     });
     items = normalizeAnbieterItems(second.json);
     usage = {
@@ -209,10 +217,11 @@ Menschen, die sie nicht als Kunden wollen, gehören nach notWanted.
 Höchstens sechs Avatare. Titel sind Arbeitstitel der Zielgruppe, keine Personennamen aus einem einzelnen Fall.`,
     user: [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n"),
     tool,
+    maxTokens: 16_384,
   });
   const record = json as { notWanted?: unknown; avatars?: unknown };
   return {
-    notWanted: typeof record.notWanted === "string" ? record.notWanted.trim().slice(0, 2000) : "",
+    notWanted: typeof record.notWanted === "string" ? record.notWanted.trim().slice(0, 8_000) : "",
     avatars: normalizeAvatarPlan(record.avatars, input.previous),
     usage,
     model,
@@ -243,6 +252,7 @@ export async function buildAvatarDossier(input: {
     system: `${CORPUS_RULES}
 
 Du schreibst die Akte für genau einen Avatar. Nur Belege, die zu diesem Titel gehören.
+Jede dazu gehörende Angabe und jedes wörtliche Zitat gehören in die Akte. Nichts kürzen.
 quotes sind wörtliche Sätze aus dem Wortlaut. gaps sind Punkte, die für diesen Avatar noch nicht belegt sind.
 Nichts aus anderen Zielgruppen hinzumischen. Nichts erfinden.`,
     user: [
@@ -250,11 +260,12 @@ Nichts aus anderen Zielgruppen hinzumischen. Nichts erfinden.`,
       `Avatar: ${input.avatar.title}`,
       input.avatar.whySeparate ? `Warum getrennt: ${input.avatar.whySeparate}` : "",
       "",
-      buildCorpusPrompt(input.sources, { rawChars: 12_000 }),
+      buildCorpusPrompt(input.sources),
     ]
       .filter(Boolean)
       .join("\n"),
     tool,
+    maxTokens: 32_000,
   });
   const dossier = normalizeDossier(json);
   if (!dossier) throw new Error("Die Akte war leer.");
@@ -284,7 +295,8 @@ export async function previewAvatarFromDossier(input: {
   const { json, usage, model } = await callTool({
     system: `Du schreibst den avatar-spezifischen Text für einen Wunschkunden.
 Nur die Akte verwenden. Lücken nicht füllen. Ich-Perspektive des Interessenten, kein Markenbotschafter.
-promptAppend auf Deutsch, mindestens 400 Zeichen, ohne den globalen Regelblock zu wiederholen.`,
+promptAppend auf Deutsch, ohne den globalen Regelblock zu wiederholen.
+Jede Angabe und jedes Zitat aus der Akte muss im Text vorkommen. Nichts streichen.`,
     user: [
       `Organisation: ${input.organisationName}`,
       `Arbeitstitel: ${input.avatar.title}`,
@@ -298,6 +310,7 @@ promptAppend auf Deutsch, mindestens 400 Zeichen, ohne den globalen Regelblock z
       .filter(Boolean)
       .join("\n"),
     tool,
+    maxTokens: 32_000,
   });
   const preview = normalizePreview(json);
   if (!preview) throw new Error("Die Vorschau war unvollständig.");

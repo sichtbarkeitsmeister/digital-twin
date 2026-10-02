@@ -170,7 +170,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
     body: Record<string, unknown>,
   ): Promise<{ ok: true; json: T } | { ok: false; message: string }> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 210_000);
+    const timer = setTimeout(() => controller.abort(), 280_000);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -318,8 +318,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
             {anbieter ? statusBadge(anbieter.status) : null}
           </div>
           <CardDescription>
-            Zwölf Punkte aus dem gesamten Bestand. Freigabe schreibt nur den aktuellen Stand in den
-            SEO-Berater. Offene Punkte bleiben offen.
+            Zwölf Punkte aus dem gesamten Wortlaut. Jede Angabe bleibt erhalten. Freigabe schreibt
+            nur den aktuellen Stand in den SEO-Berater. Offene Punkte bleiben offen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
