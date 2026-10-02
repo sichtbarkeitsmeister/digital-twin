@@ -69,6 +69,24 @@ Alte Weiterleitungen, gelöschte Pfade und Fehler-URLs stehen oft nur in GSC. De
 
 Deshalb kann der Twin **mehr Indexierte** zeigen als GSC (Restimpressionen) oder **weniger** (indexiert, aber ohne Traffic).
 
+### Warum nur 90 Tage — und nicht 16 Monate?
+
+Die Search-Analytics-API speichert Daten etwa **16 Monate**. 90 Tage sind keine Google-Grenze, sondern unsere Wahl, analog zum SEO-Report („Letzte 90 Tage“) und zur GSC-Leistungsansicht.
+
+Ein **breiterer** Zeitraum würde die Lücke zur Search Console **nicht schließen**, sondern oft **vergrößern**:
+
+- URLs, die vor 8 Monaten Impressionen hatten und inzwischen **nicht mehr indexiert** sind, würden bei uns weiter als „Indexiert“ zählen. Genau das sehen wir schon bei 90 Tagen (Existenzstand: 170 vs. 150).
+- Die API liefert max. **25.000 Zeilen** pro Abfrage (`dimension=page`). Auf großen Properties füllt ein 16-Monats-Fenster dieses Limit mit alten URLs und verdrängt aktuelle.
+- Saisonale Seiten (nur im Dezember sichtbar) fehlen in 90 Tagen — das ist der einzige klare Vorteil eines längeren Fensters. Dann wären sie trotzdem nur „irgendwann gezeigt“, nicht „heute im Index“.
+
+Sinnvoller als „einfach länger ziehen“:
+
+| Ziel | Besserer Weg |
+| --- | --- |
+| Aktueller Indexstand | URL-Inspection (Stichprobe), nicht mehr Performance-Monate |
+| Alte URLs im Crawl finden | Längeres Fenster nur als **Seed**, ohne sie automatisch „Indexiert“ zu nennen |
+| Kundengespräch | 90 Tage belassen und den Unterschied zu GSC erklären |
+
 ### 3. Google liefert den Coverage-Bericht nicht per API
 
 Verfügbar in der Search-Console-API:
