@@ -119,20 +119,34 @@ export async function evaluateAnbieterCorpus(input: {
       required: ["items"],
     },
   };
-  const { json, usage, model } = await callTool({
-    system: `${CORPUS_RULES}
+  const user = [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n");
+  const system = `${CORPUS_RULES}
 
-Du füllst die Anbieter-Checkliste. current ist der geltende Stand in ganzen Sätzen.
+Du füllst die Anbieter-Checkliste. Für jeden belegten Punkt steht in current ein bis zwei Sätze.
 earlier nur, wenn eine ältere Aussage zum selben Punkt später geändert oder verschärft wurde.
 sources nennt die Gespräche knapp, zum Beispiel „12.03. Kick-off, verschärft 02.04. Zielgruppe“.
-Leer lassen, was niemand gesagt hat.`,
-    user: [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n"),
-    tool,
-  });
-  const items = normalizeAnbieterItems(json);
+Was niemand gesagt hat, bleibt ein leerer String. Erfundene Fakten sind verboten. Ein belegter Punkt darf nicht leer bleiben.`;
+  const first = await callTool({ system, user, tool });
+  let items = normalizeAnbieterItems(first.json);
+  let usage = first.usage;
+  let model = first.model;
+  if (!items.some((item) => item.current.trim())) {
+    const second = await callTool({
+      system: `Lies die Gespräche und fülle current für diese Schlüssel: ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
+Ein belegter Punkt ist ein deutscher Satz aus dem Text. Nicht erfinden. Unbelegte Schlüssel bleiben "".`,
+      user,
+      tool,
+    });
+    items = normalizeAnbieterItems(second.json);
+    usage = {
+      inputTokens: usage.inputTokens + second.usage.inputTokens,
+      outputTokens: usage.outputTokens + second.usage.outputTokens,
+    };
+    model = second.model ?? model;
+  }
   if (!items.some((item) => item.current.trim())) {
     throw new Error(
-      "Die Auswertung hat keinen belegten Anbieterpunkt geliefert. Bitte erneut versuchen.",
+      "Die KI-Antwort enthielt keine auswertbaren Anbieter-Punkte. Bitte erneut auswerten.",
     );
   }
   return { items, usage, model };

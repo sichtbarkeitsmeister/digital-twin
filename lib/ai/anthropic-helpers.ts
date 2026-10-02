@@ -443,6 +443,21 @@ export async function readAnthropicMessageStream(
   if (!message || message.role !== "assistant") {
     throw new Error("Die KI-Antwort war leer.");
   }
+
+  // Incremental parses keep the last complete object. A cut-off tool call
+  // otherwise stays at `{}` from the block start and looks like an empty answer.
+  for (let index = 0; index < message.content.length; index += 1) {
+    const block = message.content[index];
+    const rawJson = toolJson[index]?.trim();
+    if (!block || block.type !== "tool_use" || !rawJson) continue;
+    const repaired = tryParseJsonObject(rawJson);
+    if (!repaired) continue;
+    const currentSize = JSON.stringify(block.input ?? {}).length;
+    if (JSON.stringify(repaired).length > currentSize) {
+      message.content[index] = { ...block, input: repaired };
+    }
+  }
+
   return message;
 }
 
