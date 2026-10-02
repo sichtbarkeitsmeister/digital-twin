@@ -4,6 +4,7 @@ import {
   extractAnthropicText,
   isAnthropicModelNotFoundError,
 } from "@/lib/ai/anthropic-helpers";
+import { isOpenTopicSoll } from "@/lib/dt/persona-config-exam";
 
 export type ExamAnswerCheckAudience = "persona" | "company";
 
@@ -103,6 +104,22 @@ export function heuristicExamAnswerSuggestion(input: {
     };
   }
 
+  if (isOpenTopicSoll(input.expectedHint)) {
+    if (input.assistantAnswer.trim().length < 12) {
+      return {
+        suggested: "fail",
+        reason: "Die Antwort ist zu dünn für eine Frage aus dem Persona-Gespräch.",
+        confidence: "low",
+      };
+    }
+    return {
+      suggested: "pass",
+      reason:
+        "Zu diesem Punkt steht kein eigener Fakt in den Einstellungen. Die Antwort bleibt in der Rolle.",
+      confidence: "low",
+    };
+  }
+
   const tokens = examHintTokens(input.expectedHint);
   const answer = input.assistantAnswer.toLowerCase();
   if (tokens.length === 0) {
@@ -165,6 +182,7 @@ export function buildExamCheckUserPrompt(input: {
       'Antworte NUR als JSON: {"suggested":"pass"|"fail","reason":"kurzer deutscher Satz","confidence":"high"|"medium"|"low"}',
       "pass = Kerninhalt der zur Prüffrage passenden SOLL-Angaben ist sinngemäß enthalten (Paraphrase ok).",
       "fail = Kerninhalt fehlt, ist falsch oder wird durch etwas anderes ersetzt.",
+      "Beginnt der SOLL mit „Kein festes Soll“: es gibt keinen hinterlegten Fakt. pass, wenn die Antwort in der Rolle bleibt und zur Frage etwas sagt. fail nur bei leerer Antwort oder Rollenbruch.",
       "Wenn der SOLL-Block mehrere Fakten enthält: nur die zur Prüffrage relevanten bewerten.",
     ].join("\n");
   }
@@ -182,7 +200,8 @@ export function buildExamCheckUserPrompt(input: {
     'Antworte NUR als JSON: {"suggested":"pass"|"fail","reason":"kurzer deutscher Satz","confidence":"high"|"medium"|"low"}',
     "Rolle: Die Persona ist Interessent/Pre-Sale. Sie kennt das Unternehmen nur so, wie man es von außen kennt (Website kurz gesehen, Werbung, Hörensagen) — nicht alle Leistungen, Preise oder internen Details.",
     "Bei Fragen ZUR FIRMA / ZU LEISTUNGEN: pass, wenn die Antwort glaubwürdig oberflächlich bleibt. Ein fehlender vollständiger Leistungskatalog ist KEIN fail. fail nur bei erfundenem Insiderwissen, Widerspruch zu Persona-Fakten oder wenn sie plötzlich Markenbotschafter/Mitarbeiter wird.",
-    "Bei Fragen ZUR EIGENEN PERSON/SITUATION (Alter, Budget, Schmerz, Wie gefunden, …): pass, wenn die dazu passenden SOLL-Fakten sinngemäß vorkommen; fail, wenn Kerninhalt fehlt oder widerspricht.",
+      "Bei Fragen ZUR EIGENEN PERSON/SITUATION (Alter, Budget, Schmerz, Wie gefunden, …): pass, wenn die dazu passenden SOLL-Fakten sinngemäß vorkommen; fail, wenn Kerninhalt fehlt oder widerspricht.",
+    "Beginnt der SOLL mit „Kein festes Soll“: es gibt keinen hinterlegten Fakt. pass, wenn die Antwort in der Rolle bleibt und zur Frage etwas sagt. fail nur bei leerer Antwort oder Rollenbruch.",
     "Wenn der SOLL-Block mehrere Fakten enthält: nur die zur Prüffrage relevanten bewerten; Firmen-Detailkataloge nicht als Pflichtwissen der Persona behandeln.",
   ].join("\n");
 }

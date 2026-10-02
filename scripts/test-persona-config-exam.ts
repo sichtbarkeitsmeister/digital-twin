@@ -6,10 +6,12 @@ import assert from "node:assert/strict";
 
 import { buildExamCheckUserPrompt } from "../lib/dt/exam-answer-check";
 import {
+  OPEN_TOPIC_SOLL,
   buildPersonaConfigExamAiPrompt,
   buildPersonaConfigExamQuestions,
   chooseExamQuestionBank,
   filterGroundedPersonaExamQuestions,
+  isOpenTopicSoll,
   mergePersonaExamQuestions,
   parsePersonaConfigExamQuestions,
   personaConfigSourceText,
@@ -31,6 +33,7 @@ const claudia = buildPersonaConfigExamQuestions({
   },
 });
 
+assert.ok(claudia.length >= 18, `expected the full interview, got ${claudia.length}`);
 assert.ok(claudia.some((q) => q.id === "cfg_disg" && /DISG/.test(q.expectedHint)));
 assert.ok(claudia.some((q) => q.id === "cfg_pain" && /müde/.test(q.expectedHint)));
 assert.ok(claudia.some((q) => q.id === "cfg_demo_age" && /52/.test(q.expectedHint)));
@@ -41,11 +44,10 @@ assert.ok(claudia.some((q) => q.id === "cfg_hormozi_dream" && /frisch/.test(q.ex
 assert.ok(
   claudia.some((q) => q.id === "cfg_hormozi_urgency" && /Geburtstag/.test(q.expectedHint)),
 );
-assert.equal(
-  claudia.some((q) => q.id === "cfg_hormozi_effort"),
-  false,
-  "missing Hormozi effort must not be invented",
-);
+const effort = claudia.find((q) => q.id === "cfg_hormozi_effort");
+assert.ok(effort, "the effort question is part of the interview even without a label");
+assert.equal(isOpenTopicSoll(effort?.expectedHint ?? ""), true);
+assert.equal(/Aufwand|Verzicht|zu viel/.test(effort?.expectedHint ?? ""), false);
 const claudiaIds = claudia.map((q) => q.id);
 assert.ok(claudiaIds.indexOf("cfg_pain") < claudiaIds.indexOf("cfg_disg"));
 assert.ok(claudiaIds.indexOf("cfg_demo_age") < claudiaIds.indexOf("cfg_disg"));
@@ -98,10 +100,12 @@ assert.equal(
   false,
 );
 
-assert.deepEqual(
-  buildPersonaConfigExamQuestions({ name: "Leer", promptTemplate: "Avatar: Leer" }),
-  [],
-);
+const leer = buildPersonaConfigExamQuestions({ name: "Leer", promptTemplate: "Avatar: Leer" });
+assert.ok(leer.length >= 18, `expected the full interview, got ${leer.length}`);
+assert.ok(leer.some((q) => q.id === "cfg_pain" && q.expectedHint === OPEN_TOPIC_SOLL));
+assert.ok(leer.some((q) => q.id === "cfg_disg" && q.expectedHint === OPEN_TOPIC_SOLL));
+assert.ok(leer.some((q) => q.id === "cfg_demo_age" && q.expectedHint === OPEN_TOPIC_SOLL));
+assert.equal(leer.some((q) => /S, stetig|müde|Anfang 50/.test(q.expectedHint)), false);
 
 const company = buildPersonaConfigExamQuestions({
   name: "SEO-Berater",
@@ -114,10 +118,14 @@ const company = buildPersonaConfigExamQuestions({
     "Fotona 4D, Hautstraffung ohne Skalpell, Beratung mit Vorher-nachher nur auf Wunsch.",
   ].join("\n"),
 });
-assert.equal(company.length, 1);
-assert.match(company[0]?.question ?? "", /Leistungen bietet ihr/);
-assert.match(company[0]?.expectedHint ?? "", /Fotona/);
-assert.equal(company.some((q) => q.id === "cfg_disg"), false);
+assert.ok(company.length >= 18, `expected the full Wunschkunde interview, got ${company.length}`);
+const offer = company.find((q) => q.id === "cfg_firm_offer");
+assert.match(offer?.question ?? "", /Leistungen bietet ihr/);
+assert.match(offer?.expectedHint ?? "", /Fotona/);
+assert.equal(
+  company.find((q) => q.id === "cfg_disg")?.expectedHint,
+  OPEN_TOPIC_SOLL,
+);
 assert.equal(company.some((q) => /was gilt bei euch/i.test(q.question)), false);
 
 const practice = buildPersonaConfigExamQuestions({
