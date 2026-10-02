@@ -12,6 +12,7 @@ export const maxDuration = 300;
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
   action: z.enum(["evaluate", "approve"]),
+  instruction: z.string().trim().max(4_000).optional(),
 });
 
 async function organisationName(
@@ -47,9 +48,12 @@ export async function POST(req: Request) {
     const name = await organisationName(auth.supabase, parsed.data.organisationId);
 
     if (parsed.data.action === "evaluate") {
+      const instruction = parsed.data.instruction?.trim() ?? "";
       const result = await evaluateAnbieterCorpus({
         organisationName: name,
         sources: state.sources,
+        instruction,
+        currentItems: instruction ? state.anbieter.items : undefined,
       });
       await recordLlmUsageEvent(auth.supabase, {
         organisationId: parsed.data.organisationId,
@@ -64,6 +68,7 @@ export async function POST(req: Request) {
         status: "proposed" as const,
         sourceFingerprint: state.fingerprint,
         approvedFingerprint: null,
+        revisionNote: instruction || state.anbieter.revisionNote,
         items: result.items,
       };
       await saveAnbieterState(auth.supabase, parsed.data.organisationId, anbieter);

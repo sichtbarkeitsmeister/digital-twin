@@ -43,6 +43,7 @@ type AnbieterState = {
   status: SectionStatus;
   sourceFingerprint: string | null;
   approvedFingerprint: string | null;
+  revisionNote: string;
   items: AnbieterItem[];
 };
 
@@ -77,6 +78,7 @@ type AvatarPlan = {
   status: SectionStatus;
   sourceFingerprint: string | null;
   approvedFingerprint: string | null;
+  revisionNote: string;
   notWanted: string;
   avatars: WorkshopAvatar[];
 };
@@ -119,6 +121,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
   const [notWanted, setNotWanted] = useState("");
   const [anbieterError, setAnbieterError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [anbieterNote, setAnbieterNote] = useState("");
+  const [avatarNote, setAvatarNote] = useState("");
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -144,6 +148,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
         Object.fromEntries(json.avatarPlan.avatars.map((avatar) => [avatar.key, avatar.title])),
       );
       setNotWanted(json.avatarPlan.notWanted);
+      setAnbieterNote(json.anbieter.revisionNote ?? "");
+      setAvatarNote(json.avatarPlan.revisionNote ?? "");
     } catch {
       setError("Workshop konnte nicht geladen werden.");
     } finally {
@@ -197,13 +203,15 @@ export function WorkshopBoard(props: { organisationId: string }) {
     }
   }
 
-  async function postAnbieter(action: "evaluate" | "approve") {
-    setBusy(action === "evaluate" ? "anbieter-evaluate" : "anbieter-approve");
+  async function postAnbieter(action: "evaluate" | "approve", instruction?: string) {
+    const revising = action === "evaluate" && Boolean(instruction?.trim());
+    setBusy(action === "approve" ? "anbieter-approve" : revising ? "anbieter-revise" : "anbieter-evaluate");
     setAnbieterError(null);
     try {
       const result = await postJson<{ anbieter?: AnbieterState }>("/api/dt/workshop/anbieter", {
         organisationId: props.organisationId,
         action,
+        ...(instruction?.trim() ? { instruction: instruction.trim() } : {}),
       });
       if (!result.ok) {
         setAnbieterError(result.message);
@@ -224,10 +232,13 @@ export function WorkshopBoard(props: { organisationId: string }) {
         return;
       }
       setAnbieter(result.json.anbieter);
+      if (revising) setAnbieterNote(result.json.anbieter.revisionNote ?? "");
       toast.success(
-        action === "evaluate"
-          ? "Anbieterstand liegt vor. Bitte prüfen und freigeben."
-          : "Freigegeben. Der SEO-Berater hat den aktuellen Stand.",
+        revising
+          ? "Die Änderung ist eingearbeitet. Bitte prüfen und freigeben."
+          : action === "evaluate"
+            ? "Anbieterstand liegt vor. Bitte prüfen und freigeben."
+            : "Freigegeben. Der SEO-Berater hat den aktuellen Stand.",
       );
     } finally {
       setBusy(null);
@@ -258,6 +269,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
         Object.fromEntries(result.json.avatarPlan.avatars.map((avatar) => [avatar.key, avatar.title])),
       );
       setNotWanted(result.json.avatarPlan.notWanted);
+      if (body.instruction) setAvatarNote(result.json.avatarPlan.revisionNote ?? "");
       toast.success(success);
     } finally {
       setBusy(null);
@@ -341,6 +353,17 @@ export function WorkshopBoard(props: { organisationId: string }) {
                   ? "Bestand neu auswerten"
                   : "Bestand auswerten"}
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading || sources.length === 0 || busy != null || !anbieterNote.trim()}
+              onClick={() => void postAnbieter("evaluate", anbieterNote)}
+            >
+              {busy === "anbieter-revise" ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : null}
+              {busy === "anbieter-revise" ? "Passt an…" : "Änderung anwenden"}
+            </Button>
             {anbieter?.status === "proposed" ? (
               <Button
                 type="button"
@@ -359,12 +382,23 @@ export function WorkshopBoard(props: { organisationId: string }) {
               </Button>
             ) : null}
           </div>
-          {busy === "anbieter-evaluate" ? (
+          {busy === "anbieter-evaluate" || busy === "anbieter-revise" ? (
             <p className="flex items-center gap-2 text-sm text-primary">
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              Die Auswertung läuft. Das kann einige Minuten dauern. Die Buttons sind solange gesperrt.
+              {busy === "anbieter-revise"
+                ? "Die Änderung wird in den Anbieterstand eingearbeitet. Die Buttons sind solange gesperrt."
+                : "Die Auswertung läuft. Das kann einige Minuten dauern. Die Buttons sind solange gesperrt."}
             </p>
           ) : null}
+          <div className="grid gap-1.5">
+            <p className="text-sm font-medium text-primary">Änderung</p>
+            <Textarea
+              value={anbieterNote}
+              onChange={(event) => setAnbieterNote(event.target.value)}
+              placeholder="Was soll anders werden? Nur diese Punkte werden angepasst, der übrige Bestand bleibt."
+              className="min-h-[88px]"
+            />
+          </div>
           {anbieterError ? <p className="text-sm text-destructive">{anbieterError}</p> : null}
           {anbieter?.status === "empty" && busy !== "anbieter-evaluate" ? (
             <p className="text-sm text-secondary">
@@ -437,6 +471,21 @@ export function WorkshopBoard(props: { organisationId: string }) {
               {busy === "plan" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
               {busy === "plan" ? "Plan wird vorgeschlagen…" : avatarPlan && avatarPlan.avatars.length > 0 ? "Plan neu vorschlagen" : "Avatar-Plan vorschlagen"}
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading || sources.length === 0 || busy != null || !avatarNote.trim()}
+              onClick={() =>
+                void postAvatars(
+                  { action: "plan", instruction: avatarNote.trim() },
+                  "plan-revise",
+                  "Der Plan ist an die Änderung angepasst. Bitte prüfen.",
+                )
+              }
+            >
+              {busy === "plan-revise" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+              {busy === "plan-revise" ? "Passt an…" : "Änderung anwenden"}
+            </Button>
             {planEditable ? (
               <Button
                 type="button"
@@ -466,12 +515,23 @@ export function WorkshopBoard(props: { organisationId: string }) {
               </Button>
             ) : null}
           </div>
-          {busy === "plan" ? (
+          {busy === "plan" || busy === "plan-revise" ? (
             <p className="flex items-center gap-2 text-sm text-primary">
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              Der Avatar-Plan wird vorgeschlagen. Das kann einige Minuten dauern.
+              {busy === "plan-revise"
+                ? "Die Änderung wird in den Avatar-Plan eingearbeitet."
+                : "Der Avatar-Plan wird vorgeschlagen. Das kann einige Minuten dauern."}
             </p>
           ) : null}
+          <div className="grid gap-1.5">
+            <p className="text-sm font-medium text-primary">Änderung</p>
+            <Textarea
+              value={avatarNote}
+              onChange={(event) => setAvatarNote(event.target.value)}
+              placeholder="Was soll am Plan anders werden? Nur diese Punkte werden angepasst."
+              className="min-h-[88px]"
+            />
+          </div>
           {avatarError ? <p className="text-sm text-destructive">{avatarError}</p> : null}
           {(avatarPlan?.status === "empty" || avatarPlan?.status === "stale") && busy !== "plan" ? (
             <p className="text-sm text-secondary">

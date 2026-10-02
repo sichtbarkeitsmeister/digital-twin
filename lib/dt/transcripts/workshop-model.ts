@@ -77,10 +77,13 @@ export type WorkshopAvatar = {
   agentId: string | null;
 };
 
+export const REVISION_NOTE_MAX = 4_000;
+
 export type AnbieterState = {
   status: WorkshopSectionStatus;
   sourceFingerprint: string | null;
   approvedFingerprint: string | null;
+  revisionNote: string;
   items: AnbieterItem[];
 };
 
@@ -88,6 +91,7 @@ export type AvatarPlanState = {
   status: WorkshopSectionStatus;
   sourceFingerprint: string | null;
   approvedFingerprint: string | null;
+  revisionNote: string;
   notWanted: string;
   avatars: WorkshopAvatar[];
 };
@@ -497,11 +501,47 @@ export function normalizePreview(raw: unknown): WorkshopAvatar["preview"] {
   };
 }
 
+export function formatRevisionBlock(instruction: string, current: string): string {
+  const note = instruction.trim().slice(0, REVISION_NOTE_MAX);
+  if (!note) return "";
+  const parts = [
+    "Anweisung der prüfenden Person. Sie gilt für genau die Punkte, die sie nennt, auch wenn ein Gespräch anders klingt.",
+    "Nichts darüber hinaus erfinden. Alles andere bleibt aus dem Bestand.",
+    note,
+  ];
+  if (current.trim()) parts.push("", "Bisheriger Vorschlag:", current.trim());
+  return parts.join("\n");
+}
+
+export function describeAnbieterStand(items: AnbieterItem[]): string {
+  return items
+    .filter((item) => item.current.trim())
+    .map((item) => `## ${item.label}\n${item.current.trim()}`)
+    .join("\n\n");
+}
+
+export function describeAvatarStand(plan: Pick<AvatarPlanState, "notWanted" | "avatars">): string {
+  return [
+    plan.notWanted.trim() ? `Nicht als Kunden gewollt:\n${plan.notWanted.trim()}` : "",
+    ...plan.avatars.map((avatar, index) => {
+      const cases = avatar.cases
+        .map((item) => `- ${item.service ? `${item.service}: ` : ""}${item.summary}`.trim())
+        .filter((line) => line !== "-");
+      return [`Avatar ${index + 1}: ${avatar.title}`, avatar.whySeparate.trim(), ...cases]
+        .filter(Boolean)
+        .join("\n");
+    }),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function emptyAnbieterState(): AnbieterState {
   return {
     status: "empty",
     sourceFingerprint: null,
     approvedFingerprint: null,
+    revisionNote: "",
     items: normalizeAnbieterItems([]),
   };
 }
@@ -511,6 +551,7 @@ export function emptyAvatarPlan(): AvatarPlanState {
     status: "empty",
     sourceFingerprint: null,
     approvedFingerprint: null,
+    revisionNote: "",
     notWanted: "",
     avatars: [],
   };
@@ -526,6 +567,7 @@ export function readAnbieterState(raw: unknown, fingerprint: string): AnbieterSt
     items,
     sourceFingerprint,
     approvedFingerprint,
+    revisionNote: asString(record?.revisionNote, REVISION_NOTE_MAX),
     status: sectionStatus({
       fingerprint,
       sourceFingerprint,
@@ -556,6 +598,7 @@ export function readAvatarPlan(raw: unknown, fingerprint: string): AvatarPlanSta
   return {
     avatars: restored,
     notWanted: asString(record?.notWanted, 8_000),
+    revisionNote: asString(record?.revisionNote, REVISION_NOTE_MAX),
     sourceFingerprint,
     approvedFingerprint,
     status: sectionStatus({
