@@ -5,6 +5,10 @@
 import assert from "node:assert/strict";
 
 import {
+  isMarkdownTranscriptFilename,
+  resolveTranscriptReading,
+} from "../lib/dt/transcripts/markdown-file";
+import {
   ANBIETER_POINTS,
   buildCorpusPrompt,
   buildCurrentAnbieterMarkdown,
@@ -108,7 +112,7 @@ function testChecklistAndSeoText() {
   assert.equal(items.length, ANBIETER_POINTS.length);
   assert.equal(items.find((item) => item.key === "leistungen")?.earlier, "nur Lohn");
   assert.equal(items.some((item) => item.key === ("erfunden" as "preis")), false);
-  assert.equal(items.find((item) => item.key === "unternehmen")?.current, "");
+  assert.equal(items.find((item) => item.key === "unternehmen")?.current, "darf nicht bleiben");
   const byLabel = normalizeAnbieterItems({
     items: [{ key: "Leistungen & Schwerpunkte", current: "Lohn" }],
   });
@@ -119,6 +123,16 @@ function testChecklistAndSeoText() {
   });
   assert.equal(flat.find((item) => item.key === "leistungen")?.current, "Lohn und Abschluss");
   assert.match(flat.find((item) => item.key === "unternehmen")?.current ?? "", /Problemlöser/);
+  const nested = normalizeAnbieterItems({
+    items: [{ punkt: "Leistungen", inhalt: { text: "Lohn und Jahresabschluss" } }],
+    markdown: "## Preis & Positionierung\nFestpreis ab 2.000 Euro.",
+  });
+  assert.match(nested.find((item) => item.key === "leistungen")?.current ?? "", /Jahresabschluss/);
+  assert.match(nested.find((item) => item.key === "preis")?.current ?? "", /2\.000 Euro/);
+  const blob = normalizeAnbieterItems({
+    content: "Die Kanzlei macht Lohn, Jahresabschluss und Beratung für Pflegeheime.",
+  });
+  assert.match(blob.find((item) => item.key === "unternehmen")?.current ?? "", /Pflegeheime/);
   const fromList = readAnbieterState(
     {
       sourceFingerprint: "abc",
@@ -138,7 +152,7 @@ function testChecklistAndSeoText() {
   assert.match(markdown, /Noch offen/);
   assert.match(markdown, /Nicht erfinden/);
   assert.match(markdown, /Unternehmen & Kern/);
-  assert.doesNotMatch(markdown, /darf nicht bleiben/);
+  assert.match(markdown, /darf nicht bleiben/);
   console.log("checklist + seo text: ok");
 }
 
@@ -173,6 +187,34 @@ function testCorpusPrompt() {
   ]);
   assert.ok(full.includes("ENDE"));
   assert.equal(full.includes("gekürzt"), false);
+
+  assert.equal(
+    isMarkdownTranscriptFilename("Zusammenfassung_Anbieter-Persona_IT_Problemloeser.md"),
+    true,
+  );
+  assert.equal(isMarkdownTranscriptFilename("Transcript_Teil_1.txt"), false);
+  const markdownBody = `# Anbieter\n\n${"Satz ".repeat(400)}ENDE der Zusammenfassung`;
+  const reading = resolveTranscriptReading({
+    filename: "Zusammenfassung_Anbieter-Persona_IT_Problemloeser.md",
+    sourceKind: "raw",
+    summary: null,
+    rawText: markdownBody,
+  });
+  assert.equal(reading.sourceKind, "summary");
+  assert.equal(reading.summary, markdownBody);
+  const markdownPrompt = buildCorpusPrompt([
+    source({
+      id: "md",
+      filename: "Zusammenfassung_Anbieter-Persona_IT_Problemloeser.md",
+      sourceKind: reading.sourceKind,
+      summary: reading.summary,
+      rawText: markdownBody,
+    }),
+  ]);
+  assert.ok(markdownPrompt.includes("### Zusammenfassung"));
+  assert.ok(markdownPrompt.includes("ENDE der Zusammenfassung"));
+  assert.equal(markdownPrompt.includes("### Wortlaut"), false);
+  assert.equal(markdownPrompt.includes("gekürzt"), false);
   console.log("corpus prompt: ok");
 }
 

@@ -9,6 +9,7 @@ import {
   listMeetingTranscripts,
   serializeTranscriptListItem,
 } from "@/lib/dt/transcripts/format-for-prompt";
+import { isMarkdownTranscriptFilename } from "@/lib/dt/transcripts/markdown-file";
 import { clipTranscriptRaw, sanitizeTranscriptText } from "@/lib/dt/transcripts/sanitize";
 
 const postSchema = z.object({
@@ -105,7 +106,10 @@ export async function POST(req: Request) {
   const notes = parsed.data.notes
     ? sanitizeTranscriptText(parsed.data.notes).trim() || null
     : null;
-  const sourceKind = parsed.data.sourceKind === "summary" ? "summary" : "raw";
+  const sourceKind =
+    parsed.data.sourceKind === "summary" || isMarkdownTranscriptFilename(filename)
+      ? "summary"
+      : "raw";
 
   const { data, error } = await auth.supabase
     .from("dt_meeting_transcripts")
