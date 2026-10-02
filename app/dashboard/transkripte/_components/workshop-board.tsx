@@ -116,6 +116,8 @@ export function WorkshopBoard(props: { organisationId: string }) {
   const [avatarPlan, setAvatarPlan] = useState<AvatarPlan | null>(null);
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [notWanted, setNotWanted] = useState("");
+  const [anbieterError, setAnbieterError] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -163,27 +165,69 @@ export function WorkshopBoard(props: { organisationId: string }) {
     return () => window.removeEventListener(WORKSHOP_CHANGED_EVENT, onChanged);
   }, [props.organisationId, refresh]);
 
-  async function postAnbieter(action: "evaluate" | "approve") {
-    setBusy(action === "evaluate" ? "anbieter-evaluate" : "anbieter-approve");
+  async function postJson<T>(
+    url: string,
+    body: Record<string, unknown>,
+  ): Promise<{ ok: true; json: T } | { ok: false; message: string }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 210_000);
     try {
-      const res = await fetch("/api/dt/workshop/anbieter", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organisationId: props.organisationId, action }),
+        body: JSON.stringify(body),
+        signal: controller.signal,
       });
-      const json = (await res.json()) as { ok?: boolean; message?: string; anbieter?: AnbieterState };
-      if (!res.ok || !json.ok || !json.anbieter) {
-        toast.error(json.message ?? "Anbieter-Schritt fehlgeschlagen.");
+      const json = (await res.json().catch(() => null)) as (T & { ok?: boolean; message?: string }) | null;
+      if (!res.ok || !json?.ok) {
+        return { ok: false, message: json?.message ?? "Der Schritt ist fehlgeschlagen." };
+      }
+      return { ok: true, json };
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return {
+          ok: false,
+          message: "Die Anfrage hat zu lange gedauert und wurde abgebrochen. Bitte erneut versuchen.",
+        };
+      }
+      return { ok: false, message: "Der Schritt ist fehlgeschlagen. Bitte erneut versuchen." };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function postAnbieter(action: "evaluate" | "approve") {
+    setBusy(action === "evaluate" ? "anbieter-evaluate" : "anbieter-approve");
+    setAnbieterError(null);
+    try {
+      const result = await postJson<{ anbieter?: AnbieterState }>("/api/dt/workshop/anbieter", {
+        organisationId: props.organisationId,
+        action,
+      });
+      if (!result.ok) {
+        setAnbieterError(result.message);
+        toast.error(result.message);
         return;
       }
-      setAnbieter(json.anbieter);
+      if (!result.json.anbieter) {
+        const message = "Die Auswertung hat keinen Stand zurückgegeben.";
+        setAnbieterError(message);
+        toast.error(message);
+        return;
+      }
+      if (action === "evaluate" && result.json.anbieter.status === "empty") {
+        const message =
+          "Die Auswertung hat keinen belegten Punkt geliefert. Die Freigabe bleibt deshalb gesperrt.";
+        setAnbieterError(message);
+        toast.error(message);
+        return;
+      }
+      setAnbieter(result.json.anbieter);
       toast.success(
         action === "evaluate"
           ? "Anbieterstand liegt vor. Bitte prüfen und freigeben."
           : "Freigegeben. Der SEO-Berater hat den aktuellen Stand.",
       );
-    } catch {
-      toast.error("Anbieter-Schritt fehlgeschlagen.");
     } finally {
       setBusy(null);
     }
@@ -191,25 +235,29 @@ export function WorkshopBoard(props: { organisationId: string }) {
 
   async function postAvatars(body: Record<string, unknown>, busyKey: string, success: string) {
     setBusy(busyKey);
+    setAvatarError(null);
     try {
-      const res = await fetch("/api/dt/workshop/avatars", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organisationId: props.organisationId, ...body }),
+      const result = await postJson<{ avatarPlan?: AvatarPlan }>("/api/dt/workshop/avatars", {
+        organisationId: props.organisationId,
+        ...body,
       });
-      const json = (await res.json()) as { ok?: boolean; message?: string; avatarPlan?: AvatarPlan };
-      if (!res.ok || !json.ok || !json.avatarPlan) {
-        toast.error(json.message ?? "Avatar-Schritt fehlgeschlagen.");
+      if (!result.ok) {
+        setAvatarError(result.message);
+        toast.error(result.message);
         return;
       }
-      setAvatarPlan(json.avatarPlan);
+      if (!result.json.avatarPlan) {
+        const message = "Der Avatar-Schritt hat nichts zurückgegeben.";
+        setAvatarError(message);
+        toast.error(message);
+        return;
+      }
+      setAvatarPlan(result.json.avatarPlan);
       setTitles(
-        Object.fromEntries(json.avatarPlan.avatars.map((avatar) => [avatar.key, avatar.title])),
+        Object.fromEntries(result.json.avatarPlan.avatars.map((avatar) => [avatar.key, avatar.title])),
       );
-      setNotWanted(json.avatarPlan.notWanted);
+      setNotWanted(result.json.avatarPlan.notWanted);
       toast.success(success);
-    } catch {
-      toast.error("Avatar-Schritt fehlgeschlagen.");
     } finally {
       setBusy(null);
     }
@@ -285,7 +333,11 @@ export function WorkshopBoard(props: { organisationId: string }) {
               {busy === "anbieter-evaluate" ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden />
               ) : null}
-              {anbieter && anbieter.status !== "empty" ? "Bestand neu auswerten" : "Bestand auswerten"}
+              {busy === "anbieter-evaluate"
+                ? "Wertet aus…"
+                : anbieter && anbieter.status !== "empty"
+                  ? "Bestand neu auswerten"
+                  : "Bestand auswerten"}
             </Button>
             <Button
               type="button"
@@ -300,6 +352,18 @@ export function WorkshopBoard(props: { organisationId: string }) {
               {anbieter?.approvedFingerprint ? "Erneut freigeben" : "Freigeben und in den SEO-Berater schreiben"}
             </Button>
           </div>
+          {busy === "anbieter-evaluate" ? (
+            <p className="flex items-center gap-2 text-sm text-primary">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              Die Auswertung läuft. Das kann einige Minuten dauern. Die Buttons sind solange gesperrt.
+            </p>
+          ) : null}
+          {anbieterError ? <p className="text-sm text-destructive">{anbieterError}</p> : null}
+          {anbieter?.status === "empty" && busy !== "anbieter-evaluate" ? (
+            <p className="text-sm text-secondary">
+              Die Freigabe wird erst klickbar, wenn die Auswertung einen Vorschlag geliefert hat.
+            </p>
+          ) : null}
           {anbieter?.status === "stale" ? (
             <p className="text-sm text-destructive">
               Seit der letzten Auswertung ist ein Gespräch dazugekommen oder geändert worden. Der
@@ -363,7 +427,7 @@ export function WorkshopBoard(props: { organisationId: string }) {
               }
             >
               {busy === "plan" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              {avatarPlan && avatarPlan.avatars.length > 0 ? "Plan neu vorschlagen" : "Avatar-Plan vorschlagen"}
+              {busy === "plan" ? "Plan wird vorgeschlagen…" : avatarPlan && avatarPlan.avatars.length > 0 ? "Plan neu vorschlagen" : "Avatar-Plan vorschlagen"}
             </Button>
             <Button
               type="button"
@@ -391,6 +455,18 @@ export function WorkshopBoard(props: { organisationId: string }) {
               Plan freigeben
             </Button>
           </div>
+          {busy === "plan" ? (
+            <p className="flex items-center gap-2 text-sm text-primary">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              Der Avatar-Plan wird vorgeschlagen. Das kann einige Minuten dauern.
+            </p>
+          ) : null}
+          {avatarError ? <p className="text-sm text-destructive">{avatarError}</p> : null}
+          {(avatarPlan?.status === "empty" || avatarPlan?.status === "stale") && busy !== "plan" ? (
+            <p className="text-sm text-secondary">
+              „Plan freigeben“ wird erst klickbar, wenn ein Vorschlag vorliegt.
+            </p>
+          ) : null}
           {avatarPlan?.status === "stale" ? (
             <p className="text-sm text-destructive">
               Der Bestand hat sich geändert. Bereits angelegte Avatare bleiben. Nur der Punkt, den

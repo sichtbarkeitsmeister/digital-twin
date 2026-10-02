@@ -88,8 +88,6 @@ export type AvatarPlanState = {
   avatars: WorkshopAvatar[];
 };
 
-const POINT_KEYS = new Set<string>(ANBIETER_POINTS.map((point) => point.key));
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -160,20 +158,48 @@ export function buildCorpusPrompt(sources: WorkshopSource[], options?: { rawChar
     .join("\n\n");
 }
 
+function compactPointName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, "und")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function pointKeyFrom(value: string): AnbieterPointKey | null {
+  const compact = compactPointName(value);
+  if (!compact) return null;
+  for (const point of ANBIETER_POINTS) {
+    if (compact === point.key || compact === compactPointName(point.label)) {
+      return point.key;
+    }
+  }
+  return null;
+}
+
 export function normalizeAnbieterItems(raw: unknown): AnbieterItem[] {
-  const rows = Array.isArray(raw) ? raw : [];
+  const record = asRecord(raw);
+  const rows = Array.isArray(raw)
+    ? raw
+    : Array.isArray(record?.items)
+      ? record.items
+      : Array.isArray(record?.anbieter)
+        ? record.anbieter
+        : [];
   const byKey = new Map<string, { current: string; earlier: string | null; sources: string }>();
   for (const row of rows) {
-    const record = asRecord(row);
-    if (!record) continue;
-    const key = asString(record.key, 40);
-    if (!POINT_KEYS.has(key)) continue;
-    const current = asString(record.current, 2000);
-    const earlier = asString(record.earlier, 2000);
+    const item = asRecord(row);
+    if (!item) continue;
+    const key = pointKeyFrom(asString(item.key, 80) || asString(item.label, 80));
+    if (!key) continue;
+    const current = asString(item.current ?? item.text ?? item.stand, 2000);
+    const earlier = asString(item.earlier, 2000);
     byKey.set(key, {
       current,
       earlier: earlier && earlier !== current ? earlier : null,
-      sources: asString(record.sources, 400),
+      sources: asString(item.sources, 400),
     });
   }
   return ANBIETER_POINTS.map((point) => {

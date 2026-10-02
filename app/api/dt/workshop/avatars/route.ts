@@ -10,6 +10,7 @@ import {
   buildAvatarDossier,
   previewAvatarFromDossier,
   proposeAvatarPlan,
+  workshopFailureMessage,
 } from "@/lib/dt/transcripts/workshop-llm";
 import { loadWorkshopState, replaceAvatar, saveAvatarPlan } from "@/lib/dt/transcripts/workshop-store";
 
@@ -210,7 +211,10 @@ export async function POST(req: Request) {
     const fresh = await loadWorkshopState(auth.supabase, organisationId);
     return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan, created: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Avatar-Schritt fehlgeschlagen.";
-    return NextResponse.json({ ok: false, message }, { status: 500 });
+    const message = workshopFailureMessage(err, "Avatar-Schritt fehlgeschlagen.");
+    return NextResponse.json(
+      { ok: false, message: message || "Avatar-Schritt fehlgeschlagen." },
+      { status: 500 },
+    );
   }
 }

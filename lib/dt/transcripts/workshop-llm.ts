@@ -6,6 +6,7 @@ import {
 } from "@/lib/ai/anthropic-helpers";
 import { resolveSurveyActionModels } from "@/lib/ai/survey-model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
+import { dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
 import {
   ANBIETER_POINTS,
   type AnbieterItem,
@@ -17,6 +18,13 @@ import {
   normalizeDossier,
   normalizePreview,
 } from "@/lib/dt/transcripts/workshop-model";
+
+export function workshopFailureMessage(err: unknown, fallback: string): string {
+  const mapped = dtChatFailureUserMessage(err);
+  if (mapped !== "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.") return mapped;
+  if (err instanceof Error && err.message.trim()) return err.message.trim();
+  return fallback;
+}
 
 const CORPUS_RULES = `Du liest ALLE Gespräche als einen Bestand, in der Reihenfolge von alt nach neu.
 Eine einzelne Stelle ist kein Ergebnis. Das Ergebnis ist, was über alle Gespräche hinweg als Letztes gilt.
@@ -121,7 +129,13 @@ Leer lassen, was niemand gesagt hat.`,
     user: [`Organisation: ${input.organisationName}`, "", buildCorpusPrompt(input.sources)].join("\n"),
     tool,
   });
-  return { items: normalizeAnbieterItems((json as { items?: unknown }).items), usage, model };
+  const items = normalizeAnbieterItems(json);
+  if (!items.some((item) => item.current.trim())) {
+    throw new Error(
+      "Die Auswertung hat keinen belegten Anbieterpunkt geliefert. Bitte erneut versuchen.",
+    );
+  }
+  return { items, usage, model };
 }
 
 export async function proposeAvatarPlan(input: {

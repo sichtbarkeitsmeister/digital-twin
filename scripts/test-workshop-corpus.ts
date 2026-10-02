@@ -108,6 +108,10 @@ function testChecklistAndSeoText() {
   assert.equal(items.find((item) => item.key === "leistungen")?.earlier, "nur Lohn");
   assert.equal(items.some((item) => item.key === ("erfunden" as "preis")), false);
   assert.equal(items.find((item) => item.key === "unternehmen")?.current, "");
+  const byLabel = normalizeAnbieterItems({
+    items: [{ key: "Leistungen & Schwerpunkte", current: "Lohn" }],
+  });
+  assert.equal(byLabel.find((item) => item.key === "leistungen")?.current, "Lohn");
 
   const markdown = buildCurrentAnbieterMarkdown({
     organisationName: "Westprüfung",
