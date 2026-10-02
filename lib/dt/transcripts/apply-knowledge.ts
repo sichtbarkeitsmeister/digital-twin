@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureSeoAdvisorAgent } from "@/lib/dt/seo/ensure-seo-agent";
+import { AVATAR_QUICK_ACTIONS } from "@/lib/dt/transcripts/avatar-value";
 import { ensureAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
 import { isProspectPersonaKind } from "@/lib/dt/prompts/build-system-prompt";
 import {
@@ -291,7 +292,7 @@ export async function createConfirmedTranscriptPersonas(input: {
           priority: persona.priority,
           is_primary: persona.isPrimary,
         },
-        quick_actions: [],
+        quick_actions: [...AVATAR_QUICK_ACTIONS],
       },
     });
     if (error) {

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { ensureAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
+import { AVATAR_QUICK_ACTIONS } from "@/lib/dt/transcripts/avatar-value";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { createConfirmedTranscriptPersonas } from "@/lib/dt/transcripts/apply-knowledge";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
@@ -172,6 +173,7 @@ export async function POST(req: Request) {
           role: avatar.preview.role,
           prompt_append: promptAppend,
           uses_global_prompt: true,
+          quick_actions: [...AVATAR_QUICK_ACTIONS],
         },
       });
       if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 400 });
