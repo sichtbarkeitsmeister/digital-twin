@@ -30,6 +30,7 @@ import { KickMemberButton } from "@/app/dashboard/_components/kick-member-button
 import { ResendInviteButton } from "@/app/dashboard/_components/resend-invite-button";
 import { RevokeInviteButton } from "@/app/dashboard/_components/revoke-invite-button";
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
+import { OrgDetailTabs } from "@/components/dt/content/org-detail-tabs";
 
 export function OrganisationDetailFallback() {
   return (
@@ -224,6 +225,8 @@ export async function OrganisationDetailView({
             </div>
           </div>
         </div>
+
+        {platformAdmin ? <OrgDetailTabs organisationId={organisationId} active="overview" /> : null}
 
         <OrgOverviewPanel
           organisationId={organisationId}

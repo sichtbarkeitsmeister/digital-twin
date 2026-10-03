@@ -229,6 +229,13 @@ Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthrop
 | `N8N_DT_GSC_URL_INSPECTION_WEBHOOK` | Prüft, ob eine einzelne URL bei Google indexiert ist. |
 | `DT_CHAT_USE_N8N` | Nur wenn der Wert genau `1` ist, läuft der Chat über n8n. Sonst spricht der Chat direkt mit Claude. Für den normalen Betrieb leer lassen. |
 
+### Damit der Tab „Texte“ echte Seitentexte schreibt
+
+| Name | Was er bedeutet |
+|---|---|
+| `CONTENT_AGENT_URL` | Adresse des Content-Agent (eigener Python-Dienst), ohne `/api/v1` am Ende. Wenn leer, zeigt der Tab „Texte“ Beispieldaten mit dem Hinweis **Demo**, und nichts wird gespeichert. |
+| `CONTENT_AGENT_SECRET` | Gemeinsames Geheimnis mit dem Content-Agent. Die App schickt es als Header `X-Content-Agent-Secret`. Nur der Server kennt es, der Browser nie. |
+
 ### Nur für Skripte, nicht für den laufenden Betrieb
 
 | Name | Was er bedeutet |
@@ -406,6 +413,7 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/frageboegen` | Dieselbe Welt aus Sicht der Firma. |
 | `/dashboard/digital-twin` | Chat- und Agenten-Bereich, zusätzlich zur Startseite. |
 | `/dashboard/verwaltung/seo` | SEO-Arbeitsplatz der Agentur. |
+| `/dashboard/organisations/[id]/texte` | Tab „Texte“: Seitentexte mit dem Content-Agent schreiben und freigeben. Nur Plattform-Admins, wie der SEO-Modus. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
 ---
