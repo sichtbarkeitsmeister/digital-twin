@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -82,6 +83,10 @@ export function DtContentPageDrawer(props: {
   useEffect(() => {
     onChangedRef.current = props.onChanged;
   });
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const [review, setReview] = useState<ContentReview | null>(null);
   const [demo, setDemo] = useState(props.demo);
   const [loading, setLoading] = useState(false);
@@ -279,7 +284,9 @@ export function DtContentPageDrawer(props: {
     ];
   }, [blocks, highlightIds]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {open && page ? (
         <motion.div
@@ -610,6 +617,7 @@ export function DtContentPageDrawer(props: {
           </motion.aside>
         </motion.div>
       ) : null}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

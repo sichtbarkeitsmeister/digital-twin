@@ -10,7 +10,7 @@ function buildSrcDoc(html: string, highlightBlockIds: string[]): string {
     .map((id) => `[data-block-id="${id}"]`)
     .join(",");
   const css = `
-    html,body{margin:0;background:#fff}
+    html,body{margin:0;background:#fff;overflow:hidden}
     body{padding:28px 32px;font-family:'Poppins',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#2E2E50;font-size:15px;line-height:1.7}
     h1{font-size:26px;line-height:1.25;font-weight:700;margin:0 0 16px}
     h2{font-size:19px;line-height:1.35;font-weight:700;margin:28px 0 10px}
@@ -42,7 +42,8 @@ export function DtContentTextFrame(props: {
   const measure = useCallback(() => {
     const doc = ref.current?.contentDocument;
     if (!doc?.documentElement) return;
-    setHeight(Math.max(240, doc.documentElement.scrollHeight));
+    // + border: preflight makes the iframe border-box, so its 1px borders eat into the content height.
+    setHeight(Math.max(240, doc.documentElement.scrollHeight + 2));
   }, []);
 
   useEffect(() => {
