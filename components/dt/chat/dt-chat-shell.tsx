@@ -43,6 +43,12 @@ import {
   fileToDtAttachmentDraft,
   revokeDtDraftPreview,
 } from "@/lib/dt/client-attachments";
+import { materializeDtOutgoingAttachments } from "@/lib/dt/client-send-attachments";
+import {
+  decidePastedList,
+  pastedListMessagePreview,
+} from "@/lib/dt/chat-attachment-payload";
+import { readDtApiJson } from "@/lib/dt/read-api-json";
 import type { DtChatListScope } from "@/lib/dt/db";
 import { cn } from "@/components/dt/cn";
 import { useDtChatUrlWriter } from "@/lib/dt/use-dt-chat-url";
@@ -891,14 +897,40 @@ export function DtChatShell(props: {
   };
 
   const handleSend = async (overrideText?: string) => {
-    const text = (overrideText ?? prompt).trim();
+    let text = (overrideText ?? prompt).trim();
     if ((!text && attachments.length === 0) || isBusy) return;
     if (!selectedAgentId) {
       setStatus("Bitte einen Agenten wählen.");
       return;
     }
 
-    const outgoingAttachments = [...attachments];
+    const draftPrompt = prompt;
+    const originalAttachments = [...attachments];
+    let outgoingAttachments = [...attachments];
+    const pasted = decidePastedList(text);
+    if (pasted.action === "too-long") {
+      setStatus("Die Nachricht ist zu lang. Bitte kürzen oder die Liste als Excel-Datei anhängen.");
+      return;
+    }
+    if (pasted.action === "too-big") {
+      setStatus("Diese Liste ist zu groß (max. 10 MB). Bitte die Excel-Datei anhängen.");
+      return;
+    }
+    if (pasted.action === "attach") {
+      if (outgoingAttachments.length >= DT_MAX_ATTACHMENTS) {
+        setStatus(`Höchstens ${DT_MAX_ATTACHMENTS} Anhänge pro Nachricht.`);
+        return;
+      }
+      const file = new File([text], "excel-liste.csv", { type: "text/csv" });
+      const drafted = await fileToDtAttachmentDraft(file);
+      if (!drafted.ok) {
+        setStatus(drafted.message);
+        return;
+      }
+      outgoingAttachments = [...outgoingAttachments, drafted.draft];
+      text = pastedListMessagePreview(text);
+    }
+
     const previewCleanup = outgoingAttachments
       .map((a) => a.previewObjectUrl)
       .filter((u): u is string => Boolean(u));
@@ -920,14 +952,42 @@ export function DtChatShell(props: {
     };
     setMessages((prev) => [...prev, optimistic]);
     setPrompt("");
-    clearComposerAttachments();
+    setAttachments([]);
     setIsBusy(true);
     setStatus(null);
+    let sentOk = false;
 
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const dropOptimistic = () => {
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+    };
+
     try {
+      let chatId: string | null = null;
+      if (!ghostMode) {
+        chatId = await ensureChatId();
+        if (!chatId) {
+          dropOptimistic();
+          return;
+        }
+      }
+
+      const materialized = await materializeDtOutgoingAttachments({
+        drafts: outgoingAttachments,
+        content: text,
+        ghostMode,
+        organisationId: selectedOrgId,
+        chatId,
+      });
+      if (!materialized.ok) {
+        dropOptimistic();
+        setStatus(materialized.message);
+        return;
+      }
+      const attachmentPayload = materialized.attachments;
+
       if (ghostMode) {
         const history = messages
           .filter((m) => m.role === "user" || m.role === "assistant")
@@ -944,19 +1004,19 @@ export function DtChatShell(props: {
             agentId: selectedAgentId,
             content: text,
             history,
-            attachments: outgoingAttachments,
+            attachments: attachmentPayload,
             textMode,
           }),
           signal: controller.signal,
         });
-        const json = (await res.json()) as {
+        const json = await readDtApiJson<{
           ok?: boolean;
           assistantMessage?: DtChatMessageItem;
           via?: string;
           message?: string;
-        };
+        }>(res);
         if (!json.ok) {
-          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+          dropOptimistic();
           setStatus(json.message ?? "Antwort fehlgeschlagen.");
           return;
         }
@@ -966,12 +1026,13 @@ export function DtChatShell(props: {
           if (json.assistantMessage) next.push(json.assistantMessage);
           return next;
         });
+        sentOk = true;
         return;
       }
 
-      const chatId = await ensureChatId();
       if (!chatId) {
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        dropOptimistic();
+        setStatus("Chat konnte nicht erstellt werden.");
         return;
       }
 
@@ -980,13 +1041,13 @@ export function DtChatShell(props: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content: text,
-          attachments: outgoingAttachments,
+          attachments: attachmentPayload,
           ghostMode: false,
           textMode,
         }),
         signal: controller.signal,
       });
-      const json = (await res.json()) as {
+      const json = await readDtApiJson<{
         ok?: boolean;
         userMessage?: DtChatMessageItem;
         assistantMessage?: DtChatMessageItem;
@@ -994,7 +1055,7 @@ export function DtChatShell(props: {
         titleSuggestion?: string | null;
         via?: string;
         message?: string;
-      };
+      }>(res);
 
       if (!json.ok) {
         setMessages((prev) => {
@@ -1003,6 +1064,7 @@ export function DtChatShell(props: {
           return next;
         });
         setStatus(json.message ?? "Antwort fehlgeschlagen.");
+        if (json.userMessage) sentOk = true;
         return;
       }
 
@@ -1045,15 +1107,28 @@ export function DtChatShell(props: {
       void refreshChats();
       // The advisor can add, edit or delete board tasks through its tools.
       void refreshSeoTasks();
+      sentOk = true;
     } catch (err) {
       if ((err as Error).name === "AbortError") {
+        sentOk = true;
         setStatus("Antwort gestoppt.");
       } else {
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-        setStatus("Netzwerkfehler — bitte erneut versuchen.");
+        dropOptimistic();
+        const message = err instanceof Error ? err.message : "";
+        const generic =
+          !message ||
+          message === "Failed to fetch" ||
+          message === "Load failed" ||
+          message === "NetworkError when attempting to fetch resource.";
+        setStatus(generic ? "Netzwerkfehler — bitte erneut versuchen." : message);
       }
     } finally {
-      for (const u of previewCleanup) URL.revokeObjectURL(u);
+      if (sentOk) {
+        for (const u of previewCleanup) URL.revokeObjectURL(u);
+      } else {
+        setAttachments(originalAttachments);
+        setPrompt(draftPrompt);
+      }
       setIsBusy(false);
       abortRef.current = null;
     }

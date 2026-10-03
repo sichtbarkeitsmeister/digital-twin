@@ -1,9 +1,11 @@
 import {
   DT_MAX_ATTACHMENT_BYTES,
+  DT_MAX_INLINE_ATTACHMENT_BYTES,
   guessDtMimeFromName,
   isDtGenericUploadMime,
   isDtMultimodalImageMime,
   isDtMultimodalMime,
+  isDtSpreadsheetFile,
   normalizeDtMime,
 } from "@/lib/dt/attachments-shared";
 
@@ -14,6 +16,8 @@ export type DtAttachmentDraft = {
   textContent?: string;
   dataBase64?: string;
   previewObjectUrl?: string;
+  /** Original file. Not sent as JSON; used when the binary must bypass the chat POST. */
+  sourceFile?: File;
 };
 
 export function guessDtMimeFromFile(file: File): string {
@@ -55,18 +59,27 @@ export async function fileToDtAttachmentDraft(
     fileName: file.name,
     mimeType: rawMime || norm || "application/octet-stream",
     sizeBytes: file.size,
+    sourceFile: file,
   };
 
-  try {
-    draft.dataBase64 = await readFileAsBase64(file);
-    if (isDtMultimodalImageMime(norm) || isDtMultimodalImageMime(draft.mimeType)) {
-      draft.previewObjectUrl = URL.createObjectURL(file);
+  const inlineBinary = file.size <= DT_MAX_INLINE_ATTACHMENT_BYTES;
+  if (inlineBinary) {
+    try {
+      draft.dataBase64 = await readFileAsBase64(file);
+      if (isDtMultimodalImageMime(norm) || isDtMultimodalImageMime(draft.mimeType)) {
+        draft.previewObjectUrl = URL.createObjectURL(file);
+      }
+    } catch {
+      return { ok: false, message: `„${file.name}“ konnte nicht gelesen werden.` };
     }
-  } catch {
-    return { ok: false, message: `„${file.name}“ konnte nicht gelesen werden.` };
   }
 
-  if (!isDtMultimodalMime(norm) && !isDtMultimodalMime(draft.mimeType)) {
+  if (
+    inlineBinary &&
+    !isDtSpreadsheetFile(file.name, draft.mimeType) &&
+    !isDtMultimodalMime(norm) &&
+    !isDtMultimodalMime(draft.mimeType)
+  ) {
     try {
       const asText = await file.text();
       const probe = asText.slice(0, 1024);
@@ -78,7 +91,7 @@ export async function fileToDtAttachmentDraft(
         draft.textContent = asText.slice(0, 20_000);
       }
     } catch {
-      // binary — server extracts Excel/Word/etc. from dataBase64
+      // binary — server extracts Excel/Word/etc. from dataBase64 or storage
     }
   }
 
