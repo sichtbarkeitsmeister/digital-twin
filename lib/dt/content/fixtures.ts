@@ -229,11 +229,11 @@ function demoSteps(page: ContentPageSummary): ContentStep[] {
 function demoHtml(page: ContentPageSummary): string {
   const kw = page.main_keyword ?? page.name;
   return [
-    `<section data-block-id="intro"><h1>${page.name} in Düsseldorf – schnell, besenrein, zum Festpreis</h1>`,
-    `<p>Sie möchten eine ${page.name.toLowerCase()} in Düsseldorf ohne Stress erledigen? Wir übernehmen alles: von der Besichtigung über das Sortieren bis zur besenreinen Übergabe. Sie bekommen vorher einen verbindlichen Festpreis – ohne versteckte Kosten.</p></section>`,
+    `<section data-block-id="intro"><h1>${kw}: schnell, besenrein, zum Festpreis</h1>`,
+    `<p>Sie möchten in Düsseldorf Platz schaffen, ohne sich um etwas kümmern zu müssen? Wir übernehmen alles: von der Besichtigung über das Sortieren bis zur besenreinen Übergabe. Sie bekommen vorher einen verbindlichen Festpreis – ohne versteckte Kosten.</p></section>`,
     `<section data-block-id="ablauf"><h2>So läuft es ab</h2><ol><li>Kostenlose Besichtigung vor Ort oder per Video</li><li>Schriftliches Festpreisangebot innerhalb von 24 Stunden</li><li>Räumung zum Wunschtermin, auch kurzfristig</li><li>Besenreine Übergabe mit Protokoll</li></ol></section>`,
     `<section data-block-id="vorteile"><h2>Warum Kunden uns wählen</h2><p>Seit 2012 haben wir über 1.800 Aufträge in Düsseldorf und Umgebung erledigt. Gut erhaltene Möbel geben wir an soziale Einrichtungen weiter, der Rest wird fachgerecht entsorgt. Wertgegenstände rechnen wir auf Wunsch an.</p></section>`,
-    `<section data-block-id="faq"><h2>Häufige Fragen zur ${kw}</h2><h3>Wie schnell können Sie kommen?</h3><p>In der Regel innerhalb von drei Werktagen, in dringenden Fällen auch am nächsten Tag.</p><h3>Was kostet das?</h3><p>Das hängt von Menge und Zugang ab. Nach der Besichtigung nennen wir Ihnen einen Festpreis.</p></section>`,
+    `<section data-block-id="faq"><h2>Häufige Fragen</h2><h3>Wie schnell können Sie kommen?</h3><p>In der Regel innerhalb von drei Werktagen, in dringenden Fällen auch am nächsten Tag.</p><h3>Was kostet das?</h3><p>Das hängt von Menge und Zugang ab. Nach der Besichtigung nennen wir Ihnen einen Festpreis.</p></section>`,
     `<section data-block-id="cta"><h2>Jetzt unverbindlich anfragen</h2><p>Rufen Sie uns an oder schreiben Sie uns über WhatsApp – wir melden uns noch am selben Tag.</p></section>`,
   ].join("\n");
 }
