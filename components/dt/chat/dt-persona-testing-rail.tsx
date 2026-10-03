@@ -388,15 +388,17 @@ export function DtPersonaTestingRail(props: {
                   {questions.length > 0 && questionSource === "persona" ? (
                     audience === "company" ? (
                       <>
-                        Prüffragen aus dem hinterlegten Wissen, in der Sprache der Fragebögen: zuerst
-                        Schmerz, Wunsch-Ergebnis und Hürde, dann Demografie und DISG, danach die
-                        Praxisfakten. „Nächste Frage“ sendet sie, danach prüft die KI die Antwort.
+                        Das ganze Wunschkunden-Gespräch, jedes Mal: Schmerz, Wunsch-Ergebnis, Hürde,
+                        die weiteren Hormozi-Punkte, Demografie, DISG und die Entscheidungsfragen,
+                        plus die Praxisfakten, die im Wissen stehen. Fehlt ein Punkt, wird trotzdem
+                        gefragt, ohne einen Fakt zu erfinden.
                       </>
                     ) : (
                       <>
-                        Prüffragen wie im Wunschkunden-Fragebogen: zuerst Schmerz, Wunsch-Ergebnis und
-                        Hürde, dann weitere Hormozi-Punkte, demografische Merkmale und DISG. „Nächste
-                        Frage“ sendet sie, danach prüft die KI die Antwort.
+                        Das ganze Fragebogen-Gespräch, jedes Mal: Schmerz, Wunsch-Ergebnis, Hürde,
+                        die weiteren Hormozi-Punkte, Demografie, DISG und die Entscheidungsfragen.
+                        Steht ein Punkt im Prompt, ist das der Soll. Steht er nicht, wird trotzdem
+                        gefragt und nur geprüft, ob die Antwort zur Persona passt.
                       </>
                     )
                   ) : questions.length > 0 ? (

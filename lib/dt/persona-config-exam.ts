@@ -66,7 +66,43 @@ const THEME_ORDER = [
 
 type PersonaTheme = (typeof THEME_ORDER)[number];
 
-const MAX_EXAM_QUESTIONS = 16;
+const MAX_EXAM_QUESTIONS = 28;
+
+/**
+ * Spoken in every settings-based exam, even when that point is not a labeled
+ * field. The Soll is the extracted fact, or this sentence when the prompt
+ * never states one.
+ */
+export const OPEN_TOPIC_SOLL =
+  "Kein festes Soll zu diesem Punkt. Die Antwort muss zur hinterlegten Persona passen und darf nichts erfinden, was dort nicht steht.";
+
+const ALWAYS_THEMES: PersonaTheme[] = [
+  "pain",
+  "hormozi_dream",
+  "hurdle",
+  "hormozi_urgency",
+  "hormozi_effort",
+  "hormozi_likelihood",
+  "trigger",
+  "demo_age",
+  "demo_job",
+  "demo_family",
+  "demo_region",
+  "demo_budget",
+  "intro",
+  "disg",
+  "criteria",
+  "objections",
+  "experience",
+  "trust",
+  "language",
+  "decision",
+  "alternatives",
+];
+
+export function isOpenTopicSoll(hint: string): boolean {
+  return hint.trim().startsWith("Kein festes Soll zu diesem Punkt.");
+}
 
 const THEME_KEYS: Partial<Record<PersonaTheme, string[]>> = {
   pain: ["pain", "painpoints", "painpoint", "schmerz", "schmerzpunkte", "sorgen", "tiefsteangst"],
@@ -635,9 +671,11 @@ function isAwkwardExamQuestion(question: string): boolean {
 }
 
 /**
- * Spoken probes from avatar_data and prompt labels.
- * Only themes that are actually configured become questions.
- * Order: Hormozi (Schmerz, Wunsch-Ergebnis, Hürde, …), Demografie, DISG, dann der Rest.
+ * The full questionnaire interview, every time.
+ * Hormozi, demographics, DISG and the discovery questions are always asked.
+ * A labeled fact becomes the Soll. A missing label stays an open point:
+ * the question is still asked, and the checker does not invent a fact.
+ * Firm facts are extra and only appear when the company prompt states them.
  */
 export function buildPersonaConfigExamQuestions(
   input: PersonaConfigExamInput,
@@ -648,23 +686,21 @@ export function buildPersonaConfigExamQuestions(
 
   for (const theme of THEME_ORDER) {
     if (isFirmTheme(theme) && audience !== "company") continue;
+    if (theme === "intro" && audience === "company") continue;
     if (theme === "personality" && (buckets.get("disg") ?? []).length > 0) continue;
+
+    const required =
+      ALWAYS_THEMES.includes(theme) && !(theme === "intro" && audience === "company");
 
     let body = "";
     if (theme === "intro") {
-      if (audience === "company") continue;
-      const hasSituation = (buckets.get("intro") ?? []).length > 0;
-      const hasRole = Boolean(input.role?.trim() && input.role.trim().length > 8);
-      const hasOther = THEME_ORDER.some(
-        (other) => other !== "intro" && (buckets.get(other) ?? []).length > 0,
-      );
-      if (!hasSituation && !hasRole && !hasOther) continue;
       body = buildIntroHint(input, buckets);
     } else {
       body = uniqueJoin(buckets.get(theme) ?? []);
     }
-    if (!body) continue;
-    const question = toExamQuestion(theme, `${hintLabel(theme)}: ${body}`, audience);
+    if (!body && !required) continue;
+    const hint = body ? `${hintLabel(theme)}: ${body}` : OPEN_TOPIC_SOLL;
+    const question = toExamQuestion(theme, hint, audience);
     if (isAwkwardExamQuestion(question.question)) continue;
     questions.push(question);
   }
@@ -677,13 +713,15 @@ export function buildPersonaConfigExamAiPrompt(
   audience: SurveyExamAudience = "persona",
 ): string {
   const shared = [
-    "Reihenfolge, nur wenn der Inhalt im Material steht:",
+    "Das ist das ganze Fragebogen-Gespräch, nicht nur die Überschriften, die du findest.",
+    "Erzeuge für JEDES dieser Themen genau eine Frage, in dieser Reihenfolge:",
     "1. Hormozi: Schmerz, Wunsch-Ergebnis/perfekter Ausgang, Hürde (was hält vom Melden ab), Dringlichkeit (warum jetzt), Aufwand/Verzicht, Wahrscheinlichkeit, Auslöser",
     "2. Demografie: Alter, Beruf/Lebenssituation, Familie, Herkunft, Preisbereich",
-    "3. DISG-Typ und wie er sich im Gespräch zeigt",
-    "4. Danach, falls vorhanden: Entscheidungskriterien, Einwände, Vorerfahrungen, Vertrauen, Sprache im Erstkontakt, Entscheidungsprozess, Alternativen",
+    "3. Vorstellung, dann DISG-Typ und wie er sich im Gespräch zeigt",
+    "4. Entscheidungskriterien, Einwände, Vorerfahrungen, Vertrauen, Sprache im Erstkontakt, Entscheidungsprozess, Alternativen",
     "Formuliere wie im Fragebogen: eine gesprochene Frage. Nie die Überschrift zitieren. Nie „Was gilt bei euch zu …“. Nie „bitte mit den konkreten Angaben“.",
-    "Fehlende Themen weglassen. expectedHint ist der Soll-Text aus dem Material, nicht die Frage.",
+    "expectedHint ist der Soll-Text aus dem Material. Steht das Thema nicht im Material, setze expectedHint exakt auf: Kein festes Soll zu diesem Punkt. Die Antwort muss zur hinterlegten Persona passen und darf nichts erfinden, was dort nicht steht.",
+    "Erfinde keinen Schmerz, kein Wunsch-Ergebnis, kein Alter und keinen DISG-Typ.",
   ];
 
   if (audience === "company") {
