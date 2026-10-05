@@ -5,7 +5,11 @@ import { DtContentDemoBadge } from "@/components/dt/content/dt-content-status-ba
 import { DtContentWorkspace } from "@/components/dt/content/dt-content-workspace";
 import { OrgDetailTabs } from "@/components/dt/content/org-detail-tabs";
 import { contentAgentConfig } from "@/lib/dt/content/client";
-import { loadContentAvatarOptions } from "@/lib/dt/content/load-sources";
+import {
+  loadContentAvatarOptions,
+  loadContentWorkshopAnbieter,
+} from "@/lib/dt/content/load-sources";
+import { suggestTextSettings } from "@/lib/dt/content/mapping";
 import { canAccessDtSeo } from "@/lib/dt/seo/access";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
@@ -31,7 +35,7 @@ export default async function OrganisationTextePage({
     redirect(`/dashboard/organisations?org=${encodeURIComponent(organisationId)}`);
   }
 
-  const [{ data: organisation }, { data: config }, avatars] = await Promise.all([
+  const [{ data: organisation }, { data: config }, avatars, sections] = await Promise.all([
     supabase
       .from("organisations")
       .select("id, name, archived_at")
@@ -43,6 +47,7 @@ export default async function OrganisationTextePage({
       .eq("organisation_id", organisationId)
       .maybeSingle(),
     loadContentAvatarOptions(supabase, organisationId),
+    loadContentWorkshopAnbieter(supabase, organisationId).catch(() => []),
   ]);
 
   if (!organisation || organisation.archived_at) notFound();
@@ -71,6 +76,7 @@ export default async function OrganisationTextePage({
           key={organisationId}
           organisationId={organisationId}
           avatars={avatars}
+          suggestion={suggestTextSettings(sections)}
           initialDemo={demo}
         />
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, RefreshCw, Send, Sparkles } from "lucide-react";
+import { ChevronDown, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -14,7 +14,9 @@ import {
   isContentPageSelectable,
 } from "@/components/dt/content/dt-content-pages-table";
 import { DtContentReadinessCard } from "@/components/dt/content/dt-content-readiness-card";
+import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settings-card";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
+import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
 import { anyContentPageRunning, formatContentDate } from "@/lib/dt/content/presentation";
 import type {
   ContentClientPutBody,
@@ -49,6 +51,7 @@ function SummaryChip(props: { value: string | number; label: string; tone?: "ora
 export function DtContentWorkspace(props: {
   organisationId: string;
   avatars: ContentAvatarOption[];
+  suggestion: ContentTextSettingsSuggestion;
   initialDemo: boolean;
 }) {
   const { organisationId } = props;
@@ -67,7 +70,9 @@ export function DtContentWorkspace(props: {
   const [avatarId, setAvatarId] = useState(props.avatars[0]?.id ?? "");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  // Not persisted yet: confirmed once per organisation and page visit until a column/table exists.
+  const [settings, setSettings] = useState<ContentTextSettings | null>(null);
+  const [editingSettings, setEditingSettings] = useState(false);
   const [sync, setSync] = useState<{ result: ContentClientPutResult; sent: ContentClientPutBody } | null>(null);
   const [openPage, setOpenPage] = useState<{ slug: string; name: string } | null>(null);
 
@@ -138,60 +143,82 @@ export function DtContentWorkspace(props: {
   const pages = overview?.pages ?? [];
   const selectedCount = selected.size;
   const notReady = readiness ? !readiness.ready : false;
+  const settingsOpen = !settings || editingSettings;
 
-  async function startTexts() {
-    if (selectedCount === 0 || starting) return;
-    setStarting(true);
-    const res = await contentApi<ContentRunThroughResult>("/api/dt/content/run-through", {
-      method: "POST",
-      body: { organisationId, pages: [...selected] },
-    });
-    setStarting(false);
+  async function sendClientData(confirmed: ContentTextSettings): Promise<boolean> {
+    const res = await contentApi<{ result: ContentClientPutResult; sent: ContentClientPutBody }>(
+      "/api/dt/content/client",
+      { method: "PUT", body: { organisationId, agentId: avatarId || null, settings: confirmed } },
+    );
     if (!res.ok) {
       toast.error(res.message);
-      return;
+      return false;
     }
-    const started = res.data.jobs.length;
-    const skipped = res.data.skipped;
+    setSync(res.data);
+    if (res.data.result.problems.length > 0) {
+      toast.warning("Daten übertragen, aber nicht vollständig", {
+        description: res.data.result.problems.join(" · "),
+      });
+    }
+    return true;
+  }
+
+  async function startTexts() {
+    if (!settings || settingsOpen || selectedCount === 0 || starting) return;
+    setStarting(true);
+    try {
+      if (!(await sendClientData(settings))) return;
+      const res = await contentApi<ContentRunThroughResult>("/api/dt/content/run-through", {
+        method: "POST",
+        body: { organisationId, pages: [...selected] },
+      });
+      if (!res.ok) {
+        toast.error(res.message);
+        return;
+      }
+      announceRun(res.data, res.demo);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  function announceRun(data: ContentRunThroughResult, isDemo: boolean) {
+    const started = data.jobs.length;
     const head =
       started > 0
         ? `${started} ${started === 1 ? "Seite" : "Seiten"} gestartet`
         : "Keine Seite gestartet";
-    toast.success(res.demo ? `${head} (Demo – nichts wurde gestartet)` : head, {
+    toast.success(isDemo ? `${head} (Demo – nichts wurde gestartet)` : head, {
       description:
-        skipped.length > 0
-          ? skipped.map((s) => `${s.page}: ${s.reason}`).join(" · ")
+        data.skipped.length > 0
+          ? data.skipped.map((s) => `${s.page}: ${s.reason}`).join(" · ")
           : undefined,
     });
     setSelected(new Set());
     void loadOverview();
   }
 
-  async function syncSources() {
-    if (syncing) return;
-    setSyncing(true);
-    const res = await contentApi<{ result: ContentClientPutResult; sent: ContentClientPutBody }>(
-      "/api/dt/content/client",
-      { method: "PUT", body: { organisationId, agentId: avatarId || null } },
-    );
-    setSyncing(false);
-    if (!res.ok) {
-      toast.error(res.message);
-      return;
-    }
-    setSync(res.data);
-    const { result } = res.data;
-    if (result.problems.length > 0) {
-      toast.warning("Übertragen, aber nicht vollständig", { description: result.problems.join(" · ") });
-    } else {
-      toast.success(res.demo ? "Übertragen (Demo – nichts gespeichert)" : "Daten übertragen");
-    }
-    void loadReadiness();
-    void loadOverview();
-  }
+  const startHint = notReady
+    ? "Erst alle drei Voraussetzungen erfüllen."
+    : settingsOpen
+      ? "Erst die Einstellungen für Texte bestätigen."
+      : selectedCount === 0
+        ? "Seiten in der Tabelle anhaken."
+        : "Schickt Anbieterfakten, Einstellungen und Avatar mit. Der Content-Agent meldet sich, wenn er Sie braucht.";
 
   return (
     <div className="grid gap-5">
+      <DtContentSettingsCard
+        suggestion={props.suggestion}
+        confirmed={settings}
+        editing={editingSettings}
+        onConfirm={(next) => {
+          setSettings(next);
+          setEditingSettings(false);
+        }}
+        onEdit={() => setEditingSettings(true)}
+      />
+
       <DtContentReadinessCard
         organisationId={organisationId}
         readiness={readiness}
@@ -202,47 +229,27 @@ export function DtContentWorkspace(props: {
 
       <section className={cn(cardClass, "grid gap-4 p-4 sm:p-5")} aria-label="Texte erstellen">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <DtSelect
-              label="Avatar"
-              value={avatarId}
-              onValueChange={setAvatarId}
-              options={avatarOptions}
-              placeholder="Kein Avatar vorhanden"
-              disabled={avatarOptions.length === 0}
-              className="sm:w-72"
-              fullWidth
-            />
-            <DtPillButton
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-10"
-              disabled={syncing}
-              onClick={() => void syncSources()}
-              title="Anbieterfakten und den gewählten Avatar an den Content-Agent schicken"
-            >
-              {syncing ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Send className="size-3.5" aria-hidden />}
-              Daten übertragen
-            </DtPillButton>
-          </div>
+          <DtSelect
+            label="Avatar"
+            value={avatarId}
+            onValueChange={setAvatarId}
+            options={avatarOptions}
+            placeholder="Kein Avatar vorhanden"
+            disabled={avatarOptions.length === 0}
+            className="sm:w-72"
+            fullWidth
+          />
           <div className="flex flex-col items-start gap-1.5 lg:items-end">
             <DtPillButton
               type="button"
               className="h-11"
-              disabled={selectedCount === 0 || starting || notReady}
+              disabled={selectedCount === 0 || starting || notReady || settingsOpen}
               onClick={() => void startTexts()}
             >
               {starting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
               Texte erstellen ({selectedCount})
             </DtPillButton>
-            <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
-              {notReady
-                ? "Erst alle drei Voraussetzungen oben erfüllen."
-                : selectedCount === 0
-                  ? "Seiten in der Tabelle anhaken."
-                  : "Der Content-Agent meldet sich, wenn er Sie braucht."}
-            </p>
+            <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
           </div>
         </div>
 
@@ -250,7 +257,7 @@ export function DtContentWorkspace(props: {
           <details className="group rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] text-xs dark:border-white/8 dark:bg-white/[0.03]">
             <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 text-sbkm-ink-600 dark:text-white/65">
               <span>
-                Übertragen: Anbieterfakten {sync.result.anbieter ? "✓" : "—"} · Avatar{" "}
+                Zuletzt übertragen: Anbieterfakten {sync.result.anbieter ? "✓" : "—"} · Avatar{" "}
                 {sync.result.avatar ? "✓" : "—"}
                 {sync.result.problems.length > 0 ? ` · ${sync.result.problems.length} Hinweis(e)` : ""}
               </span>
