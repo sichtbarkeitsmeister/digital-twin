@@ -106,6 +106,16 @@ export const DT_ONBOARDING_MAX_COMPETITORS = 5;
 export const DT_ONBOARDING_MAX_CUSTOMER_CONTACTS = 5;
 export const DT_ONBOARDING_ADDITIONAL_INFO_MAX = 4000;
 
+export const DT_ONBOARDING_IT_CONTACT_INTRO =
+  "Für den Webspace und den E-Mail-Versand des Kontaktformulars. Wer Hoster-Login oder SMTP-Zugang nicht kennt, gibt stattdessen den IT-Kontakt an. Das Projektteam fragt die Zugangsdaten dort selbst ab.";
+
+export const DT_ONBOARDING_IT_CONTACT_SELF = "Zugangsdaten selbst eintragen";
+
+export const DT_ONBOARDING_IT_CONTACT_DELEGATE = "IT-Kontakt angeben";
+
+export const DT_ONBOARDING_IT_CONTACT_HINT =
+  "Name und E-Mail oder Telefon reichen. Hoster-Zugang und SMTP-Daten werden bei dieser Person abgefragt.";
+
 export const DT_ONBOARDING_SMTP_PROTOCOLS = ["TLS", "STARTTLS", "SSL", "Kein"] as const;
 
 export type DtOnboardingSmtpProtocol = (typeof DT_ONBOARDING_SMTP_PROTOCOLS)[number];
@@ -127,11 +137,28 @@ export const EMPTY_CUSTOMER_CONTACT: DtOnboardingCustomerContact = {
   phone: "",
 };
 
+export type DtOnboardingItContact = {
+  name: string;
+  company: string;
+  email: string;
+  phone: string;
+};
+
+export const EMPTY_IT_CONTACT: DtOnboardingItContact = {
+  name: "",
+  company: "",
+  email: "",
+  phone: "",
+};
+
 export type DtOnboardingRecord = {
   uploadToken: string;
   uploadPassword: string;
   hosterUser: string;
   hosterPassword: string;
+  /** When true, Hoster and SMTP are collected from the IT contact instead of the form fields. */
+  accessViaIt: boolean;
+  itContact: DtOnboardingItContact;
   smtpHost: string;
   smtpPort: string;
   smtpProtocol: string;
@@ -152,6 +179,8 @@ export const EMPTY_ONBOARDING_RECORD: DtOnboardingRecord = {
   uploadPassword: "",
   hosterUser: "",
   hosterPassword: "",
+  accessViaIt: false,
+  itContact: { ...EMPTY_IT_CONTACT },
   smtpHost: "",
   smtpPort: "",
   smtpProtocol: "TLS",

@@ -31,11 +31,17 @@ import {
   DT_ONBOARDING_PASSFLOW_STEPS,
   DT_ONBOARDING_PASSFLOW_TITLE,
   DT_ONBOARDING_PASSFLOW_URL,
+  DT_ONBOARDING_IT_CONTACT_DELEGATE,
+  DT_ONBOARDING_IT_CONTACT_HINT,
+  DT_ONBOARDING_IT_CONTACT_INTRO,
+  DT_ONBOARDING_IT_CONTACT_SELF,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
   DT_ONBOARDING_SMTP_PROTOCOLS,
+  EMPTY_IT_CONTACT,
   EMPTY_ONBOARDING_RECORD,
   type DtOnboardingCustomerContact,
+  type DtOnboardingItContact,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 import {
@@ -108,6 +114,10 @@ export function OnboardingForm(props: {
 
   function patch<K extends keyof DtOnboardingRecord>(key: K, value: DtOnboardingRecord[K]) {
     setRecord((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function patchItContact(key: keyof DtOnboardingItContact, value: string) {
+    patch("itContact", { ...record.itContact, [key]: value });
   }
 
   function patchContact(
@@ -224,105 +234,195 @@ export function OnboardingForm(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">2. Zugangsdaten zum Hoster</CardTitle>
-          <CardDescription>Login für den Webspace / das Hosting-Paket.</CardDescription>
+          <CardTitle className="text-base">2. Hoster und E-Mail-Versand (SMTP)</CardTitle>
+          <CardDescription>{DT_ONBOARDING_IT_CONTACT_INTRO}</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="hoster-user">User</Label>
-            <Input
-              id="hoster-user"
-              value={record.hosterUser}
-              onChange={(e) => patch("hosterUser", e.target.value)}
-              disabled={disabled}
-              autoComplete="off"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="hoster-pass">Pass</Label>
-            <SecretField
-              id="hoster-pass"
-              value={record.hosterPassword}
-              onChange={(v) => patch("hosterPassword", v)}
-              disabled={disabled}
-            />
-          </div>
+        <CardContent className="grid gap-4">
+          <fieldset className="grid gap-2 sm:grid-cols-2">
+            <legend className="sr-only">Weg für Hoster- und SMTP-Daten</legend>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-sbkm-navy/10 p-3 text-sm dark:border-white/10">
+              <input
+                type="radio"
+                name="hoster-smtp-path"
+                className="mt-1"
+                checked={!record.accessViaIt}
+                onChange={() => patch("accessViaIt", false)}
+                disabled={disabled}
+              />
+              <span>
+                <span className="font-medium text-primary">{DT_ONBOARDING_IT_CONTACT_SELF}</span>
+                <span className="mt-1 block text-xs text-secondary">
+                  Login für den Webspace und den E-Mail-Postausgangsserver.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-sbkm-navy/10 p-3 text-sm dark:border-white/10">
+              <input
+                type="radio"
+                name="hoster-smtp-path"
+                className="mt-1"
+                checked={record.accessViaIt}
+                onChange={() => patch("accessViaIt", true)}
+                disabled={disabled}
+              />
+              <span>
+                <span className="font-medium text-primary">{DT_ONBOARDING_IT_CONTACT_DELEGATE}</span>
+                <span className="mt-1 block text-xs text-secondary">
+                  Wir fragen Hoster und SMTP bei der IT selbst nach.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+
+          {record.accessViaIt ? (
+            <div className="grid gap-4">
+              <p className="text-sm text-secondary">{DT_ONBOARDING_IT_CONTACT_HINT}</p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="it-name">Name</Label>
+                  <Input
+                    id="it-name"
+                    value={record.itContact?.name ?? EMPTY_IT_CONTACT.name}
+                    onChange={(e) => patchItContact("name", e.target.value)}
+                    disabled={disabled}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="it-company">Firma</Label>
+                  <Input
+                    id="it-company"
+                    value={record.itContact?.company ?? ""}
+                    onChange={(e) => patchItContact("company", e.target.value)}
+                    placeholder="optional, z. B. IT-Dienstleister"
+                    disabled={disabled}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="it-email">E-Mail</Label>
+                  <Input
+                    id="it-email"
+                    type="email"
+                    value={record.itContact?.email ?? ""}
+                    onChange={(e) => patchItContact("email", e.target.value)}
+                    disabled={disabled}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="it-phone">Telefon</Label>
+                  <Input
+                    id="it-phone"
+                    value={record.itContact?.phone ?? ""}
+                    onChange={(e) => patchItContact("phone", e.target.value)}
+                    disabled={disabled}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-6">
+              <div className="grid gap-4">
+                <p className="text-sm font-medium text-primary">Zugangsdaten zum Hoster</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="hoster-user">User</Label>
+                    <Input
+                      id="hoster-user"
+                      value={record.hosterUser}
+                      onChange={(e) => patch("hosterUser", e.target.value)}
+                      disabled={disabled}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="hoster-pass">Pass</Label>
+                    <SecretField
+                      id="hoster-pass"
+                      value={record.hosterPassword}
+                      onChange={(v) => patch("hosterPassword", v)}
+                      disabled={disabled}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-4">
+                <p className="text-sm font-medium text-primary">SMTP-Zugang E-Mail</p>
+                <p className="text-sm text-secondary">
+                  Für das Kontaktformular auf der Webseite. Zugangsdaten vom
+                  E-Mail-Postausgangsserver.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2 sm:col-span-2">
+                    <Label htmlFor="smtp-host">Mailserver</Label>
+                    <Input
+                      id="smtp-host"
+                      value={record.smtpHost}
+                      onChange={(e) => patch("smtpHost", e.target.value)}
+                      placeholder="z. B. mail.beispiel.de"
+                      disabled={disabled}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="smtp-port">SMTP Auth Port</Label>
+                    <Input
+                      id="smtp-port"
+                      value={record.smtpPort}
+                      onChange={(e) => patch("smtpPort", e.target.value)}
+                      placeholder="Beispiel: 587"
+                      disabled={disabled}
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="smtp-protocol">SMTP Auth Protokoll</Label>
+                    <select
+                      id="smtp-protocol"
+                      value={record.smtpProtocol}
+                      onChange={(e) => patch("smtpProtocol", e.target.value)}
+                      disabled={disabled}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                    >
+                      {DT_ONBOARDING_SMTP_PROTOCOLS.map((protocol) => (
+                        <option key={protocol} value={protocol}>
+                          {protocol}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-secondary">Beispiel: TLS</p>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="smtp-user">Username / E-Mail</Label>
+                    <Input
+                      id="smtp-user"
+                      value={record.smtpUsername}
+                      onChange={(e) => patch("smtpUsername", e.target.value)}
+                      disabled={disabled}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="smtp-pass">Passwort</Label>
+                    <SecretField
+                      id="smtp-pass"
+                      value={record.smtpPassword}
+                      onChange={(v) => patch("smtpPassword", v)}
+                      disabled={disabled}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">3. SMTP-Zugang E-Mail</CardTitle>
-          <CardDescription>
-            Für das Kontaktformular auf der Webseite benötigen wir die Zugangsdaten von dem
-            E-Mail-Postausgangsserver.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-2 sm:col-span-2">
-            <Label htmlFor="smtp-host">Mailserver</Label>
-            <Input
-              id="smtp-host"
-              value={record.smtpHost}
-              onChange={(e) => patch("smtpHost", e.target.value)}
-              placeholder="z. B. mail.beispiel.de"
-              disabled={disabled}
-              autoComplete="off"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="smtp-port">SMTP Auth Port</Label>
-            <Input
-              id="smtp-port"
-              value={record.smtpPort}
-              onChange={(e) => patch("smtpPort", e.target.value)}
-              placeholder="Beispiel: 587"
-              disabled={disabled}
-              inputMode="numeric"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="smtp-protocol">SMTP Auth Protokoll</Label>
-            <select
-              id="smtp-protocol"
-              value={record.smtpProtocol}
-              onChange={(e) => patch("smtpProtocol", e.target.value)}
-              disabled={disabled}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-            >
-              {DT_ONBOARDING_SMTP_PROTOCOLS.map((protocol) => (
-                <option key={protocol} value={protocol}>
-                  {protocol}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-secondary">Beispiel: TLS</p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="smtp-user">Username / E-Mail</Label>
-            <Input
-              id="smtp-user"
-              value={record.smtpUsername}
-              onChange={(e) => patch("smtpUsername", e.target.value)}
-              disabled={disabled}
-              autoComplete="off"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="smtp-pass">Passwort</Label>
-            <SecretField
-              id="smtp-pass"
-              value={record.smtpPassword}
-              onChange={(v) => patch("smtpPassword", v)}
-              disabled={disabled}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">4. Zugang zum CMS-System der Webseite</CardTitle>
+          <CardTitle className="text-base">3. Zugang zum CMS-System der Webseite</CardTitle>
           <CardDescription>
             Wir benötigen außerdem den Zugang zum Content Management System (CMS) der Webseite.
           </CardDescription>
@@ -405,7 +505,7 @@ export function OnboardingForm(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">5. Mitbewerber</CardTitle>
+          <CardTitle className="text-base">4. Mitbewerber</CardTitle>
           <CardDescription>
             Bis zu 5 Mitbewerber für den Vergleich.
           </CardDescription>
@@ -431,7 +531,7 @@ export function OnboardingForm(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">6. E-Mail für die Buchhaltung</CardTitle>
+          <CardTitle className="text-base">5. E-Mail für die Buchhaltung</CardTitle>
           <CardDescription>
             E-Mail-Adresse für Rechnungsthemen, um die Kommunikation mit der Buchhaltung zu
             vereinfachen.
@@ -454,7 +554,7 @@ export function OnboardingForm(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">7. Direkte Ansprechpartner im Projekt</CardTitle>
+          <CardTitle className="text-base">6. Direkte Ansprechpartner im Projekt</CardTitle>
           <CardDescription>
             Kontakte auf Kundenseite für das Projekt: Name, Funktion, E-Mail und Telefon.
           </CardDescription>
@@ -525,7 +625,7 @@ export function OnboardingForm(props: {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">8. Weitere Informationen</CardTitle>
+          <CardTitle className="text-base">7. Weitere Informationen</CardTitle>
           <CardDescription>
             Optionale Hinweise, Zugänge oder Wünsche.
           </CardDescription>
