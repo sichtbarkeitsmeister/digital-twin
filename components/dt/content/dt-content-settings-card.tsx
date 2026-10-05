@@ -46,7 +46,7 @@ function SummaryChip(props: { children: React.ReactNode; className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center truncate rounded-pill border border-sbkm-navy/10 bg-white/60 px-2.5 py-0.5 text-xs text-sbkm-navy dark:border-white/10 dark:bg-white/[0.04] dark:text-white/85",
+        "inline-block max-w-full truncate rounded-pill border border-sbkm-navy/10 bg-white/60 px-2.5 py-0.5 text-xs text-sbkm-navy dark:border-white/10 dark:bg-white/[0.04] dark:text-white/85",
         props.className,
       )}
     >
@@ -63,14 +63,16 @@ function ConfirmedSettings(props: { settings: ContentTextSettings; onEdit: () =>
       aria-label="Einstellungen für Texte"
       className={cn(cardClass, "flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5")}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
         <h2 className="mr-1 text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">
           Einstellungen für Texte
         </h2>
         <SummaryChip>Anrede: {settings.anrede}</SummaryChip>
         <SummaryChip>{CONTENT_BRANCHE_LABELS[settings.branche]}</SummaryChip>
-        <SummaryChip className="max-w-[22rem]">Ton: {settings.tonalitaet}</SummaryChip>
+        <SummaryChip className="max-w-[22rem]">
+          <span title={settings.tonalitaet}>Ton: {settings.tonalitaet}</span>
+        </SummaryChip>
         <SummaryChip>
           {words === 0 ? "Keine verbotenen Wörter" : `${words} verbotene${words === 1 ? "s Wort" : " Wörter"}`}
         </SummaryChip>
@@ -78,7 +80,7 @@ function ConfirmedSettings(props: { settings: ContentTextSettings; onEdit: () =>
       <button
         type="button"
         onClick={props.onEdit}
-        className="inline-flex items-center gap-1 rounded-pill text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-sbkm-mint"
+        className="inline-flex shrink-0 items-center gap-1 rounded-pill text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-sbkm-mint"
       >
         <Pencil className="size-3" aria-hidden />
         Ändern
