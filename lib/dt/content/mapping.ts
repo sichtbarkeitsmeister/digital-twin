@@ -1,40 +1,50 @@
 /**
  * DigitalTwin data → Content-Agent payloads (`PUT /api/v1/clients/{org}`).
- * Pure functions: no Supabase, no fetch. Loading happens in `load-sources.ts`.
+ * Pure functions: no Supabase, no fetch, no Node APIs, so client components may use them too.
+ * Loading happens in `load-sources.ts`.
  *
- * ┌──────────────────────────────────────────────────────────────────────────────────────────┐
- * │ TODO(content-agent): Fragebogen-Frage → Feld. Zeilen mit GERATEN mit dem Service abstimmen │
- * ├───────────────────┬───────────────────────────────────────────────┬──────────────────────┤
- * │ Feld              │ Quelle im Anbieter-Fragebogen                 │ Status               │
- * ├───────────────────┼───────────────────────────────────────────────┼──────────────────────┤
- * │ name              │ core_company_name, sonst Organisationsname    │ sicher               │
- * │ short_name        │ core_colloquial_name                          │ sicher               │
- * │ anrede            │ core_address_form (Du/Sie), Standard "Sie"    │ sicher               │
- * │ branche           │ Frage mit „Branche“ im Titel, sonst erste     │ GERATEN: es gibt     │
- * │                   │ angekreuzte Leistung aus core_portfolio       │ keine Branchen-Frage │
- * │ tonalitaet        │ core_speaking_style (Rangfolge, oben zuerst)  │ GERATEN: Service will│
- * │                   │                                               │ evtl. Adjektive      │
- * │ verbotene_woerter │ core_forbidden_terms                          │ sicher               │
- * │ typische_woerter  │ core_typical_terms (als freier Schlüssel)     │ GERATEN: Feldname    │
- * │ übrige Antworten  │ Schlüssel = Core-Key ohne "core_", sonst Slug │ GERATEN: Service     │
- * │                   │ des Fragetitels; Listen als string[]          │ liest sie als Freitext│
- * └───────────────────┴───────────────────────────────────────────────┴──────────────────────┘
+ * Client facts are the free-text workshop sections in `dt_workshop_corpus.anbieter`
+ * (`ANBIETER_POINTS`). The four strict fields (anrede, branche, tonalitaet, verbotene_woerter)
+ * cannot be read reliably from prose: `suggestTextSettings` only pre-fills the
+ * "Einstellungen für Texte" card, and a person confirms the values.
  */
 
-import { decodeOtherValueForDisplay } from "@/lib/surveys/other-option";
-import { resolveRankingExport } from "@/lib/surveys/ranking-answer";
-import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
+import type { AnbieterItem } from "@/lib/dt/transcripts/workshop-model";
 
-export type ContentAnrede = "Sie" | "Du";
+export const CONTENT_ANREDEN = ["Sie", "Du"] as const;
+export type ContentAnrede = (typeof CONTENT_ANREDEN)[number];
 
-export type ContentAnbieter = {
-  name: string;
-  short_name?: string;
+export const CONTENT_BRANCHEN = ["handwerk", "rechtsanwalt", "arzt"] as const;
+export type ContentBranche = (typeof CONTENT_BRANCHEN)[number];
+
+export const CONTENT_BRANCHE_LABELS: Record<ContentBranche, string> = {
+  handwerk: "Handwerk & Dienstleistung",
+  rechtsanwalt: "Rechtsanwalt & Kanzlei",
+  arzt: "Arzt & Praxis",
+};
+
+export type ContentTextSettings = {
   anrede: ContentAnrede;
-  branche: string;
-  tonalitaet: string[];
+  branche: ContentBranche;
+  tonalitaet: string;
   verbotene_woerter: string[];
-  [key: string]: unknown;
+};
+
+export type ContentTextSettingsSuggestion = {
+  settings: ContentTextSettings;
+  /** Why a value was suggested, e.g. `„Kanzlei“ in „Unternehmen & Kern“`. Missing = default. */
+  reasons: Partial<Record<keyof ContentTextSettings, string>>;
+};
+
+/** One workshop section. `key` is one of `ANBIETER_POINTS`, `current` the latest free text. */
+export type WorkshopAnbieterSection = Pick<AnbieterItem, "label" | "current"> & { key: string };
+
+/** `name` plus one free-text entry per filled workshop section. */
+export type ContentAnbieter = { name: string } & Record<string, string>;
+
+export type ContentAnbieterPayload = ContentTextSettings & {
+  name: string;
+  [section: string]: unknown;
 };
 
 export type ContentAvatar = {
@@ -44,13 +54,6 @@ export type ContentAvatar = {
   [key: string]: unknown;
 };
 
-export type AnbieterSurveyInput = {
-  definition: unknown;
-  answers: Record<string, unknown>;
-  /** Fallback when the questionnaire has no company name. */
-  organisationName?: string | null;
-};
-
 export type DtAgentForContent = {
   name: string;
   role?: string | null;
@@ -58,106 +61,58 @@ export type DtAgentForContent = {
   avatar_data?: unknown;
 };
 
-type MappedField = {
-  coreKey: string;
-  titlePattern: RegExp;
-};
-
-const NAME_FIELD: MappedField = {
-  coreKey: "company_name",
-  titlePattern: /vollst[aä]ndige name der firma|firmenname|name (des|der) (unternehmens|firma)/,
-};
-const SHORT_NAME_FIELD: MappedField = {
-  coreKey: "colloquial_name",
-  titlePattern: /im alltag genannt|kurzform|spitzname/,
-};
-const ANREDE_FIELD: MappedField = {
-  coreKey: "address_form",
-  titlePattern: /\bdu oder sie\b|\bsie oder du\b|\banrede\b|duzen|siezen/,
-};
-const TONALITAET_FIELD: MappedField = {
-  coreKey: "speaking_style",
-  titlePattern: /wie wird .*mit dem kunden gesprochen|tonalit[aä]t|tonfall/,
-};
-const VERBOTEN_FIELD: MappedField = {
-  coreKey: "forbidden_terms",
-  titlePattern: /auf keinen fall verwendet|verbotene (w[oö]rter|begriffe)|no-?go/,
-};
-const BRANCHE_FIELD: MappedField = {
-  coreKey: "industry",
-  titlePattern: /\bbranche\b/,
-};
-const PORTFOLIO_FIELD: MappedField = {
-  coreKey: "portfolio",
-  titlePattern: /welche leistungen oder produkte werden .*angeboten/,
-};
-
-const RESERVED_KEYS = new Set([
-  "name",
-  "short_name",
-  "anrede",
-  "branche",
-  "tonalitaet",
-  "verbotene_woerter",
-]);
-
-const EMPTY_ANSWERS = new Set([
-  "—",
-  "-",
-  "--",
-  "–",
-  "n/a",
-  "na",
-  "k.a.",
-  "ka",
-  "nichts",
-  "keine angabe",
-  "keine antwort",
-]);
+const STRICT_KEYS = new Set<string>(["name", "anrede", "branche", "tonalitaet", "verbotene_woerter"]);
+const SECTION_KEY = /^[a-z][a-z0-9_]{0,39}$/;
+const TONALITAET_MAX = 1_000;
+const WORD_MAX = 80;
+const WORDS_MAX = 50;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-function isEmptyText(text: string): boolean {
-  const t = text.trim().toLowerCase();
-  if (!t) return true;
-  if (EMPTY_ANSWERS.has(t)) return true;
-  return /^[\s\-—–_.…]+$/.test(t);
+function sectionOf(items: readonly WorkshopAnbieterSection[], key: string) {
+  const item = items.find((i) => i.key === key);
+  const text = item?.current?.trim() ?? "";
+  return { text, label: item?.label?.trim() || key };
 }
 
-function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[„“"]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Number of workshop sections that have text. */
+export function filledWorkshopSections(items: readonly WorkshopAnbieterSection[]): number {
+  return items.filter((i) => i.current?.trim()).length;
 }
 
-function surveyFields(definition: unknown): SurveyField[] {
-  if (!isRecord(definition) || !Array.isArray(definition.steps)) return [];
-  const fields: SurveyField[] = [];
-  for (const step of definition.steps as SurveyStep[]) {
-    if (!isRecord(step) || !Array.isArray(step.fields)) continue;
-    for (const field of step.fields) {
-      if (isRecord(field) && typeof field.id === "string") fields.push(field as SurveyField);
-    }
+/**
+ * Workshop sections → Content-Agent `anbieter` object: every filled section under its key as free
+ * text, plus `name`. Empty sections are left out so the service never reads them as facts.
+ */
+export function anbieterFromWorkshop(
+  items: readonly WorkshopAnbieterSection[],
+  options: { organisationName: string },
+): ContentAnbieter {
+  const anbieter: ContentAnbieter = { name: options.organisationName.trim() };
+  for (const item of items) {
+    const key = item.key?.trim() ?? "";
+    const text = item.current?.trim() ?? "";
+    if (!text || !SECTION_KEY.test(key) || STRICT_KEYS.has(key)) continue;
+    anbieter[key] = anbieter[key] ? `${anbieter[key]}\n\n${text}` : text;
   }
-  return fields;
+  return anbieter;
 }
 
-function findField(fields: SurveyField[], mapping: MappedField): SurveyField | null {
-  const byId = fields.find((f) => f.id === `core_${mapping.coreKey}`);
-  if (byId) return byId;
-  return fields.find((f) => mapping.titlePattern.test(normalizeTitle(f.title ?? ""))) ?? null;
-}
-
-function fieldOptions(field: SurveyField): Array<{ id: string; label: string }> {
-  return "options" in field && Array.isArray(field.options) ? field.options : [];
-}
-
-function cleanListEntry(value: string): string {
-  return value.replace(/^[-•*\d.)\s]+/, "").trim();
+/** The merged object sent as `anbieter`: workshop free text plus the confirmed strict fields. */
+export function mergeContentAnbieter(
+  anbieter: ContentAnbieter,
+  settings: ContentTextSettings,
+): ContentAnbieterPayload {
+  const clean = cleanTextSettings(settings);
+  return {
+    ...anbieter,
+    anrede: clean.anrede,
+    branche: clean.branche,
+    tonalitaet: clean.tonalitaet,
+    verbotene_woerter: clean.verbotene_woerter,
+  };
 }
 
 function dedupe(values: string[]): string[] {
@@ -172,164 +127,127 @@ function dedupe(values: string[]): string[] {
   return out;
 }
 
-/** Every answer shape as a list of plain strings (no placeholders, no "(benutzererstellt)"). */
-export function surveyAnswerToList(raw: unknown, field?: SurveyField | null): string[] {
-  if (raw == null) return [];
-
-  if (field?.type === "ranking") {
-    const resolved = resolveRankingExport(raw, fieldOptions(field));
-    return dedupe((resolved?.ranked ?? []).map((s) => s.trim()).filter((s) => !isEmptyText(s)));
-  }
-
-  if (isRecord(raw) && Array.isArray(raw.entries)) {
-    return dedupe(
-      raw.entries
-        .map((e) => (isRecord(e) && typeof e.value === "string" ? cleanListEntry(e.value) : ""))
-        .filter((s) => !isEmptyText(s)),
-    );
-  }
-
-  if (Array.isArray(raw)) {
-    return dedupe(
-      raw
-        .map((x) => (typeof x === "string" ? decodeOtherValueForDisplay(x).trim() : ""))
-        .filter((s) => !isEmptyText(s)),
-    );
-  }
-
-  if (isRecord(raw)) {
-    return dedupe(
-      Object.values(raw)
-        .map((v) => (typeof v === "string" ? cleanListEntry(v) : ""))
-        .filter((s) => !isEmptyText(s)),
-    );
-  }
-
-  if (typeof raw === "string") {
-    const text = field?.type === "radio" ? decodeOtherValueForDisplay(raw) : raw;
-    return dedupe(
-      text
-        .split(/[\n;]+/)
-        .map(cleanListEntry)
-        .filter((s) => !isEmptyText(s)),
-    );
-  }
-
-  if (typeof raw === "number") return [String(raw)];
-  if (typeof raw === "boolean") return [raw ? "Ja" : "Nein"];
-  return [];
+function cleanWord(value: string): string {
+  return value
+    .trim()
+    .replace(/^[-•*\s„“"»«‚‘’']+|[\s„“"»«‚‘’'.]+$/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, WORD_MAX)
+    .trim();
 }
 
-/** Single text answer; lists are joined with ", ". */
-export function surveyAnswerToText(raw: unknown, field?: SurveyField | null): string {
-  if (typeof raw === "string") {
-    const text = (field?.type === "radio" ? decodeOtherValueForDisplay(raw) : raw).trim();
-    return isEmptyText(text) ? "" : text;
+/** Free input ("Schrott, billig\nRamsch") → word list. Commas, semicolons and line breaks separate. */
+export function parseWordList(text: string): string[] {
+  return dedupe(text.split(/[,;\n]+/).map(cleanWord).filter(Boolean)).slice(0, WORDS_MAX);
+}
+
+export function cleanTextSettings(settings: ContentTextSettings): ContentTextSettings {
+  return {
+    anrede: settings.anrede === "Du" ? "Du" : "Sie",
+    branche: (CONTENT_BRANCHEN as readonly string[]).includes(settings.branche)
+      ? settings.branche
+      : "handwerk",
+    tonalitaet: settings.tonalitaet.trim().replace(/\s+/g, " ").slice(0, TONALITAET_MAX),
+    verbotene_woerter: dedupe(settings.verbotene_woerter.map(cleanWord).filter(Boolean)).slice(
+      0,
+      WORDS_MAX,
+    ),
+  };
+}
+
+function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.replace(/^[-•*\s]+/, "").trim())
+    .filter(Boolean);
+}
+
+const DU_EXPLICIT = /\bdu(?:zen|zt)\b|\bgeduzt\b|\bper du\b|\bdu-form\b/i;
+const SIE_EXPLICIT = /\bsie(?:zen|zt)\b|\bgesiezt\b|\bper sie\b|\bsie-form\b/i;
+
+function suggestAnrede(text: string): { value: ContentAnrede; match: string | null } {
+  const du = text.match(DU_EXPLICIT);
+  const sie = text.match(SIE_EXPLICIT);
+  if (du && !sie) return { value: "Du", match: du[0] };
+  if (sie && !du) return { value: "Sie", match: sie[0] };
+  if (du && sie) return { value: "Sie", match: null };
+  const loose = text.match(/\bdu\b/i);
+  if (loose) return { value: "Du", match: loose[0] };
+  return { value: "Sie", match: null };
+}
+
+const LAW = /anw[aä]lt\w*|kanzlei\w*|jurist\w*|\bnotar(?!zt)\w*/i;
+const MEDICAL = /\w*[aä]rzt\w*|\bpraxis\b|\bpatient\w*|\bklinik\w*|zahnmedizin\w*/i;
+
+function suggestBranche(text: string): { value: ContentBranche; match: string | null } {
+  const law = text.match(LAW);
+  if (law) return { value: "rechtsanwalt", match: law[0] };
+  const medical = text.replace(/\bin der praxis\b/gi, " ").match(MEDICAL);
+  if (medical) return { value: "arzt", match: medical[0] };
+  return { value: "handwerk", match: null };
+}
+
+const TONE_WORDS =
+  /\b(ton|tonalit[aä]t|klingt|klingen|wirkt|wirken|locker\w*|sachlich\w*|freundlich\w*|herzlich\w*|nahbar\w*|seri[oö]s\w*|professionell\w*|humor\w*|direkt\w*|pers[oö]nlich\w*|bodenst[aä]ndig\w*|ehrlich\w*|warm\w*|ruhig\w*|fachlich\w*|f[oö]rmlich\w*|unkompliziert\w*|empathisch\w*|respektvoll\w*)\b/i;
+const AVOID_WORDS =
+  /\b(nicht|nie|niemals|kein\w*|vermeid\w*|verbot\w*|tabu\w*|no-?go\w*|ungern|st[oö]rt|verzicht\w*)\b/i;
+const QUOTED = /„([^“”"„]{1,60})[“”"]|"([^"]{1,60})"|»([^«]{1,60})«|‚([^‘’]{1,60})[‘’]/g;
+const ANREDE_WORD = /^(du|sie|ihr|dich|dir|ihnen)$/i;
+
+function suggestTonalitaet(text: string): string {
+  const candidates = sentences(text).filter(
+    (s) => !/[„"»‚]/.test(s) && !DU_EXPLICIT.test(s) && !SIE_EXPLICIT.test(s),
+  );
+  const tone = candidates.filter((s) => TONE_WORDS.test(s)).slice(0, 2);
+  const picked = tone.length > 0 ? tone : candidates.slice(0, 1);
+  return picked.join(" ").slice(0, 280).trim();
+}
+
+function suggestVerboteneWoerter(text: string): string[] {
+  const words: string[] = [];
+  for (const sentence of sentences(text)) {
+    if (!AVOID_WORDS.test(sentence)) continue;
+    for (const match of sentence.matchAll(QUOTED)) {
+      const word = cleanWord(match[1] ?? match[2] ?? match[3] ?? match[4] ?? "");
+      if (word && !ANREDE_WORD.test(word) && word.split(" ").length <= 4) words.push(word);
+    }
   }
-  if (typeof raw === "number") return String(raw);
-  return surveyAnswerToList(raw, field).join(", ");
-}
-
-function parseAnrede(text: string): ContentAnrede | null {
-  const t = text.trim().toLowerCase();
-  if (!t) return null;
-  if (/^du\b|\bdu\b|duzen/.test(t)) return "Du";
-  if (/^sie\b|\bsie\b|siezen/.test(t)) return "Sie";
-  return null;
-}
-
-/** Stable free key for an unmapped question. */
-export function contentKeyForField(field: Pick<SurveyField, "id" | "title">): string {
-  if (field.id.startsWith("core_")) return field.id.slice("core_".length);
-  const fromTitle = (field.title ?? "")
-    .toLowerCase()
-    .replace(/ä/g, "ae")
-    .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
-    .replace(/ß/g, "ss")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 60)
-    .replace(/_+$/g, "");
-  return fromTitle || field.id;
-}
-
-function isListField(field: SurveyField): boolean {
-  return field.type === "text_list" || field.type === "checkbox" || field.type === "ranking";
+  return dedupe(words).slice(0, WORDS_MAX);
 }
 
 /**
- * Anbieter questionnaire (purpose = 'anbieter') → Content-Agent `anbieter` object.
- * Never invents facts: missing answers stay empty, guessed mappings are listed in the TODO table above.
+ * Pre-fill for the "Einstellungen für Texte" card. Simple keyword heuristics over the
+ * "sprache" (anrede, tonalitaet, verbotene_woerter) and "unternehmen" (branche) sections.
+ * Only a suggestion: a person confirms the values before anything is sent.
  */
-export function anbieterFromSurvey(input: AnbieterSurveyInput): ContentAnbieter {
-  const fields = surveyFields(input.definition);
-  const answers = isRecord(input.answers) ? input.answers : {};
-  const consumed = new Set<string>();
+export function suggestTextSettings(
+  items: readonly WorkshopAnbieterSection[],
+): ContentTextSettingsSuggestion {
+  const sprache = sectionOf(items, "sprache");
+  const unternehmen = sectionOf(items, "unternehmen");
+  const reasons: ContentTextSettingsSuggestion["reasons"] = {};
 
-  const textOf = (mapping: MappedField): string => {
-    const field = findField(fields, mapping);
-    if (!field) return "";
-    consumed.add(field.id);
-    return surveyAnswerToText(answers[field.id], field);
+  const anrede = suggestAnrede(sprache.text);
+  if (anrede.match) reasons.anrede = `„${anrede.match}“ in „${sprache.label}“`;
+
+  const branche = suggestBranche(unternehmen.text);
+  if (branche.match) reasons.branche = `„${branche.match}“ in „${unternehmen.label}“`;
+
+  const tonalitaet = suggestTonalitaet(sprache.text);
+  if (tonalitaet) reasons.tonalitaet = `aus „${sprache.label}“`;
+
+  const verboteneWoerter = suggestVerboteneWoerter(sprache.text);
+  if (verboteneWoerter.length > 0) reasons.verbotene_woerter = `aus „${sprache.label}“`;
+
+  return {
+    settings: {
+      anrede: anrede.value,
+      branche: branche.value,
+      tonalitaet,
+      verbotene_woerter: verboteneWoerter,
+    },
+    reasons,
   };
-  const listOf = (mapping: MappedField): string[] => {
-    const field = findField(fields, mapping);
-    if (!field) return [];
-    consumed.add(field.id);
-    return surveyAnswerToList(answers[field.id], field);
-  };
-
-  const name = textOf(NAME_FIELD) || (input.organisationName ?? "").trim();
-  const shortName = textOf(SHORT_NAME_FIELD);
-  const anrede = parseAnrede(textOf(ANREDE_FIELD)) ?? "Sie";
-  const tonalitaet = listOf(TONALITAET_FIELD);
-  const verboteneWoerter = listOf(VERBOTEN_FIELD);
-
-  const brancheField = findField(fields, BRANCHE_FIELD);
-  let branche = "";
-  if (brancheField) {
-    consumed.add(brancheField.id);
-    branche = surveyAnswerToText(answers[brancheField.id], brancheField);
-  }
-  if (!branche) {
-    const portfolioField = findField(fields, PORTFOLIO_FIELD);
-    if (portfolioField) {
-      branche = surveyAnswerToList(answers[portfolioField.id], portfolioField)[0] ?? "";
-    }
-  }
-
-  const rest: Record<string, unknown> = {};
-  for (const field of fields) {
-    if (consumed.has(field.id)) continue;
-    const raw = answers[field.id];
-    let key = contentKeyForField(field);
-    if (RESERVED_KEYS.has(key)) key = `frage_${key}`;
-    if (key in rest) key = `${key}_${field.id}`;
-
-    if (field.type === "rating") {
-      if (typeof raw === "number" && Number.isFinite(raw)) rest[key] = raw;
-      continue;
-    }
-    if (isListField(field)) {
-      const list = surveyAnswerToList(raw, field);
-      if (list.length > 0) rest[key] = list;
-      continue;
-    }
-    const text = surveyAnswerToText(raw, field);
-    if (text) rest[key] = text;
-  }
-
-  const result: ContentAnbieter = {
-    ...rest,
-    name,
-    anrede,
-    branche,
-    tonalitaet,
-    verbotene_woerter: verboteneWoerter,
-  };
-  if (shortName) result.short_name = shortName;
-  return result;
 }
 
 /**

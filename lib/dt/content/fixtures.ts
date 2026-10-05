@@ -3,6 +3,11 @@
  * Shapes follow the Content-Agent contract in `types.ts`. Nothing here is persisted.
  */
 
+import {
+  CONTENT_ANREDEN,
+  CONTENT_BRANCHEN,
+  type WorkshopAnbieterSection,
+} from "@/lib/dt/content/mapping";
 import { formatEur } from "@/lib/dt/content/presentation";
 import type {
   ContentAction,
@@ -162,8 +167,8 @@ export function demoReadiness(local: ContentLocalSources): ContentReadiness {
       ok: Boolean(local.anbieter),
       label: "Anbieterfakten",
       hint: local.anbieter
-        ? `Aus „${local.anbieter.surveyTitle}“ übernommen.`
-        : "Kein abgeschlossener Anbieter-Fragebogen gefunden.",
+        ? `${local.anbieter.filled} von ${local.anbieter.total} Abschnitten aus den Gesprächen gefüllt.`
+        : "Aus den Gesprächen gibt es noch keine Anbieterfakten.",
     },
     {
       id: "avatar",
@@ -187,10 +192,75 @@ export function demoReadiness(local: ContentLocalSources): ContentReadiness {
 }
 
 const DEMO_LOCAL_SOURCES: ContentLocalSources = {
-  anbieter: { surveyTitle: "Anbieter-Fragebogen" },
+  anbieter: { filled: 11, total: 13 },
   avatarCount: 1,
   structure: { filename: "webseitenstruktur.xlsx" },
 };
+
+/** Workshop sections as `dt_workshop_corpus.anbieter` would hold them (11 of 13 filled). */
+export const DEMO_WORKSHOP_ANBIETER: WorkshopAnbieterSection[] = [
+  {
+    key: "unternehmen",
+    label: "Unternehmen & Kern",
+    current:
+      "Einfach Entrümpelung ist ein Familienbetrieb aus Düsseldorf mit 14 Mitarbeitenden. Kern ist die Räumung von Wohnungen, Häusern und Kellern zum Festpreis.",
+  },
+  {
+    key: "gruendung",
+    label: "Gründungsgeschichte",
+    current: "2012 von Markus Brandt gegründet, nachdem er die Wohnung seiner Großmutter selbst räumen musste.",
+  },
+  {
+    key: "leistungen",
+    label: "Leistungen & Schwerpunkte",
+    current:
+      "Haushaltsauflösung, Wohnungsauflösung nach Todesfall, Keller- und Dachbodenentrümpelung, Messie-Wohnungen, Gewerbe.",
+  },
+  {
+    key: "ablauf",
+    label: "Ablauf & Mitwirkung",
+    current:
+      "Kostenlose Besichtigung vor Ort oder per Video, Festpreis innerhalb von 24 Stunden, Räumung zum Wunschtermin, besenreine Übergabe mit Protokoll.",
+  },
+  {
+    key: "alleinstellung",
+    label: "Alleinstellung",
+    current: "Verbindlicher Festpreis ohne Nachforderungen. Wertgegenstände werden angerechnet.",
+  },
+  { key: "wettbewerb", label: "Wettbewerb", current: "" },
+  {
+    key: "team",
+    label: "Team & Partner",
+    current: "Feste Teams, keine Subunternehmer. Partner für Spenden: Diakonie Düsseldorf.",
+  },
+  {
+    key: "werte",
+    label: "Werte & Haltung",
+    current: "Respekt vor der Lebensgeschichte in jeder Wohnung. Gut erhaltene Möbel werden gespendet.",
+  },
+  {
+    key: "beweise",
+    label: "Beweise & Erfolge",
+    current: "Über 1.800 Aufträge laut Inhaber (Zahl noch nicht belegt). 4,9 Sterne bei Google.",
+  },
+  {
+    key: "sprache",
+    label: "Sprache & Ton",
+    current:
+      "Kunden werden gesiezt, auch in Social Media. Der Ton soll ruhig, ehrlich und bodenständig klingen, nie flapsig. Wörter wie „Schrott“, „Ramsch“ oder „Messie“ sollen nicht vorkommen.",
+  },
+  {
+    key: "preis",
+    label: "Preis & Positionierung",
+    current: "Mittleres Preissegment, Festpreis nach Besichtigung.",
+  },
+  {
+    key: "kanaele",
+    label: "Anfragen & Kanäle",
+    current: "Die meisten Anfragen kommen per Telefon und WhatsApp, einige über das Kontaktformular.",
+  },
+  { key: "ziele", label: "Ziele & Weiterentwicklung", current: "" },
+];
 
 export function demoOverview(
   local: ContentLocalSources = DEMO_LOCAL_SOURCES,
@@ -411,10 +481,12 @@ export function demoJob(): ContentJob {
 
 export function demoPutClient(clientKey: string, body: ContentClientPutBody): ContentClientPutResult {
   const problems: string[] = [];
-  if (body.anbieter && !String(body.anbieter.name ?? "").trim()) {
-    problems.push("Anbieter: Firmenname fehlt.");
+  const a = body.anbieter;
+  if (a && !String(a.name ?? "").trim()) problems.push("Anbieter: Firmenname fehlt.");
+  if (a && !(CONTENT_ANREDEN as readonly unknown[]).includes(a.anrede)) {
+    problems.push("Anbieter: Anrede muss „Sie“ oder „Du“ sein.");
   }
-  if (body.anbieter && !String(body.anbieter.branche ?? "").trim()) {
+  if (a && !(CONTENT_BRANCHEN as readonly unknown[]).includes(a.branche)) {
     problems.push("Anbieter: Branche fehlt.");
   }
   return {

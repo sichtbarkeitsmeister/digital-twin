@@ -20,7 +20,7 @@ function fixLink(id: ContentReadinessCheckId, organisationId: string) {
   const org = encodeURIComponent(organisationId);
   switch (id) {
     case "anbieter":
-      return { href: `/dashboard/frageboegen?org=${org}`, label: "Zu den Fragebögen" };
+      return { href: `/dashboard/transkripte?org=${org}`, label: "Zu den Transkripten" };
     case "avatar":
       return { href: `/dashboard/verwaltung/agents?org=${org}`, label: "Zu den Avataren" };
     case "structure":
@@ -33,8 +33,8 @@ function localNote(id: ContentReadinessCheckId, local: ContentLocalSources | nul
   switch (id) {
     case "anbieter":
       return local.anbieter
-        ? `Im DigitalTwin: „${local.anbieter.surveyTitle}“`
-        : "Im DigitalTwin: kein abgeschlossener Anbieter-Fragebogen";
+        ? `Im DigitalTwin: ${local.anbieter.filled} von ${local.anbieter.total} Abschnitten aus den Gesprächen`
+        : "Im DigitalTwin: noch keine Gespräche ausgewertet";
     case "avatar":
       return local.avatarCount > 0
         ? `Im DigitalTwin: ${local.avatarCount} Avatar${local.avatarCount === 1 ? "" : "e"}`

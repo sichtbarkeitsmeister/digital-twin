@@ -161,7 +161,8 @@ export type ContentExportFormat = "html" | "fragment" | "md";
 
 /** What DigitalTwin itself has for the three readiness checks. */
 export type ContentLocalSources = {
-  anbieter: { surveyTitle: string } | null;
+  /** Workshop sections (`dt_workshop_corpus.anbieter`) with text; null when none has text. */
+  anbieter: { filled: number; total: number } | null;
   avatarCount: number;
   structure: { filename: string | null } | null;
 };

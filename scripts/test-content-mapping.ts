@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 
 import {
+  DEMO_WORKSHOP_ANBIETER,
   demoExport,
   demoOverview,
   demoPutClient,
@@ -14,11 +15,15 @@ import {
   demoRunThrough,
 } from "../lib/dt/content/fixtures";
 import {
-  anbieterFromSurvey,
+  anbieterFromWorkshop,
   avatarFromAgent,
+  cleanTextSettings,
   contentClientKey,
-  contentKeyForField,
-  surveyAnswerToList,
+  filledWorkshopSections,
+  mergeContentAnbieter,
+  parseWordList,
+  suggestTextSettings,
+  type WorkshopAnbieterSection,
 } from "../lib/dt/content/mapping";
 import {
   anyContentPageRunning,
@@ -26,157 +31,106 @@ import {
   contentStateMeta,
   extractContentBlocks,
 } from "../lib/dt/content/presentation";
+import { normalizeAnbieterItems } from "../lib/dt/transcripts/workshop-model";
 
-const field = (id: string, type: string, title: string, options?: Array<{ id: string; label: string }>) => ({
-  id,
-  type,
-  title,
-  description: "",
-  required: false,
-  ...(options ? { options } : {}),
-});
+const sections = (texts: Record<string, string>): WorkshopAnbieterSection[] =>
+  normalizeAnbieterItems([]).map((item) => ({
+    key: item.key,
+    label: item.label,
+    current: texts[item.key] ?? "",
+  }));
 
-// --- anbieterFromSurvey: standard core questions -------------------------------------------
-const coreDefinition = {
-  steps: [
-    {
-      id: "core_company",
-      title: "Das Unternehmen",
-      description: "",
-      fields: [
-        field("core_company_name", "text", "Wie lautet der vollständige Name der Firma …?"),
-        field("core_colloquial_name", "text", "Wie wird die Firma im Alltag genannt …?"),
-        field("core_portfolio", "checkbox", "Welche Leistungen oder Produkte werden aktuell angeboten?", [
-          { id: "portfolio_1", label: "Haushaltsauflösung" },
-          { id: "portfolio_2", label: "Kellerentrümpelung" },
-        ]),
-        field("core_usp", "text", "Was macht das eigene Angebot besonders …?"),
-      ],
-    },
-    {
-      id: "core_language",
-      title: "Sprache & Wortwahl",
-      description: "",
-      fields: [
-        field("core_speaking_style", "ranking", "Wie wird normalerweise mit dem Kunden gesprochen …", [
-          { id: "speak_1", label: "persönlich und herzlich" },
-          { id: "speak_2", label: "direkt und auf den Punkt" },
-          { id: "speak_3", label: "sachlich und fachlich" },
-        ]),
-        field("core_address_form", "radio", "Wird auf der Website und in Texten „Du“ oder „Sie“ verwendet?", [
-          { id: "du", label: "Du" },
-          { id: "sie", label: "Sie" },
-        ]),
-        field("core_forbidden_terms", "text_list", "Gibt es Wörter …, die auf keinen Fall verwendet werden sollen?", [
-          { id: "forbidden_term_1", label: "" },
-          { id: "forbidden_term_2", label: "" },
-          { id: "forbidden_term_3", label: "" },
-        ]),
-        field("core_keyword_offer", "text_list", "Unter welchen Wörtern soll die Firma bei Google gefunden werden?", [
-          { id: "kw_offer_1", label: "" },
-          { id: "kw_offer_2", label: "" },
-        ]),
-        field("core_philosophy_quotes", "text", "Gibt es einen Satz …?"),
-      ],
-    },
+// --- anbieterFromWorkshop -------------------------------------------------------------------
+assert.equal(DEMO_WORKSHOP_ANBIETER.length, normalizeAnbieterItems([]).length, "fixture has all 13 sections");
+assert.deepEqual(
+  DEMO_WORKSHOP_ANBIETER.map((s) => s.key),
+  normalizeAnbieterItems([]).map((s) => s.key),
+  "fixture keys follow ANBIETER_POINTS",
+);
+assert.equal(filledWorkshopSections(DEMO_WORKSHOP_ANBIETER), 11);
+
+const anbieter = anbieterFromWorkshop(DEMO_WORKSHOP_ANBIETER, { organisationName: "  Einfach Entrümpelung " });
+assert.equal(anbieter.name, "Einfach Entrümpelung");
+assert.match(anbieter.unternehmen!, /^Einfach Entrümpelung ist ein Familienbetrieb/);
+assert.match(anbieter.leistungen!, /Haushaltsauflösung/);
+assert.match(anbieter.sprache!, /gesiezt/);
+assert.equal("wettbewerb" in anbieter, false, "empty sections are left out");
+assert.equal("ziele" in anbieter, false);
+assert.equal(Object.keys(anbieter).length, 12, "name + 11 filled sections");
+
+const guarded = anbieterFromWorkshop(
+  [
+    { key: "name", label: "x", current: "überschreibt nicht" },
+    { key: "branche", label: "x", current: "auch nicht" },
+    { key: "Böse Taste", label: "x", current: "ungültiger Schlüssel" },
+    { key: "werte", label: "Werte", current: "  Ehrlich. " },
+    { key: "werte", label: "Werte", current: "Pünktlich." },
   ],
-};
+  { organisationName: "Muster GmbH" },
+);
+assert.deepEqual(guarded, { name: "Muster GmbH", werte: "Ehrlich.\n\nPünktlich." });
+assert.deepEqual(anbieterFromWorkshop([], { organisationName: "" }), { name: "" });
 
-const anbieter = anbieterFromSurvey({
-  definition: coreDefinition,
-  organisationName: "einfach-entruempelung",
-  answers: {
-    core_company_name: "Einfach Entrümpelung GmbH",
-    core_colloquial_name: "Einfach Entrümpelung",
-    core_portfolio: ["Haushaltsauflösung", "__other__:x|Messie-Wohnungen"],
-    core_usp: "Festpreis nach Besichtigung, besenreine Übergabe.",
-    core_speaking_style: {
-      items: [
-        { kind: "preset", label: "direkt und auf den Punkt" },
-        { kind: "preset", label: "persönlich und herzlich" },
-      ],
-      excludedPresets: ["sachlich und fachlich"],
-    },
-    core_address_form: "Du",
-    core_forbidden_terms: {
-      entries: [
-        { id: "forbidden_term_1", value: "Schrott" },
-        { id: "forbidden_term_2", value: "  billig " },
-        { id: "forbidden_term_3", value: "—" },
-      ],
-    },
-    core_keyword_offer: {
-      entries: [
-        { id: "kw_offer_1", value: "Entrümpelung Düsseldorf" },
-        { id: "kw_offer_2", value: "" },
-      ],
-    },
-    core_philosophy_quotes: "k.a.",
-  },
-});
+// --- suggestTextSettings: heuristics over "sprache" and "unternehmen" ------------------------
+const demo = suggestTextSettings(DEMO_WORKSHOP_ANBIETER);
+assert.equal(demo.settings.anrede, "Sie");
+assert.equal(demo.reasons.anrede, "„gesiezt“ in „Sprache & Ton“");
+assert.equal(demo.settings.branche, "handwerk");
+assert.equal(demo.reasons.branche, undefined, "handwerk is the default, not a finding");
+assert.equal(demo.settings.tonalitaet, "Der Ton soll ruhig, ehrlich und bodenständig klingen, nie flapsig.");
+assert.deepEqual(demo.settings.verbotene_woerter, ["Schrott", "Ramsch", "Messie"]);
 
-assert.equal(anbieter.name, "Einfach Entrümpelung GmbH");
-assert.equal(anbieter.short_name, "Einfach Entrümpelung");
-assert.equal(anbieter.anrede, "Du");
-assert.equal(anbieter.branche, "Haushaltsauflösung", "branche falls back to first portfolio entry");
-assert.deepEqual(anbieter.tonalitaet, ["direkt und auf den Punkt", "persönlich und herzlich"]);
-assert.deepEqual(anbieter.verbotene_woerter, ["Schrott", "billig"]);
-assert.equal(anbieter.usp, "Festpreis nach Besichtigung, besenreine Übergabe.");
-assert.deepEqual(anbieter.keyword_offer, ["Entrümpelung Düsseldorf"]);
-assert.deepEqual(anbieter.portfolio, ["Haushaltsauflösung", "Messie-Wohnungen"]);
-assert.equal("philosophy_quotes" in anbieter, false, "placeholder answers are dropped");
-assert.equal("company_name" in anbieter, false, "mapped questions are not repeated as free keys");
-assert.equal("speaking_style" in anbieter, false);
+const du = suggestTextSettings(
+  sections({ sprache: "Wir duzen unsere Kunden. Locker und direkt, wie unter Nachbarn. Bitte nie „Sie“ oder „Kunde“ schreiben." }),
+);
+assert.equal(du.settings.anrede, "Du");
+assert.equal(du.settings.tonalitaet, "Locker und direkt, wie unter Nachbarn.");
+assert.deepEqual(du.settings.verbotene_woerter, ["Kunde"], "Du/Sie are never forbidden words");
 
-// --- fallbacks: no answers, organisation name, default Sie ---------------------------------
-const empty = anbieterFromSurvey({ definition: coreDefinition, answers: {}, organisationName: "Muster GmbH" });
-assert.equal(empty.name, "Muster GmbH");
-assert.equal(empty.anrede, "Sie");
-assert.equal(empty.branche, "");
-assert.deepEqual(empty.tonalitaet, []);
-assert.deepEqual(empty.verbotene_woerter, []);
-assert.equal("short_name" in empty, false);
+const looseDu = suggestTextSettings(sections({ sprache: "Anrede immer mit du, auch in E-Mails." }));
+assert.equal(looseDu.settings.anrede, "Du");
 
-const broken = anbieterFromSurvey({ definition: null, answers: null as never });
-assert.equal(broken.name, "");
-assert.equal(broken.anrede, "Sie");
+const both = suggestTextSettings(sections({ sprache: "Früher wurde geduzt, inzwischen wird gesiezt." }));
+assert.equal(both.settings.anrede, "Sie", "conflicting hints fall back to Sie");
+assert.equal(both.reasons.anrede, undefined);
 
-// --- legacy questionnaire: matched by title, explicit Branche question ---------------------
-const legacy = anbieterFromSurvey({
-  definition: {
-    steps: [
-      {
-        id: "s1",
-        title: "Firma",
-        description: "",
-        fields: [
-          field("f1", "text", "Firmenname"),
-          field("f2", "text", "In welcher Branche sind Sie tätig?"),
-          field("f3", "radio", "Du oder Sie?", [
-            { id: "a", label: "Du" },
-            { id: "b", label: "Sie" },
-          ]),
-          field("f4", "text", "Name"),
-          field("f5", "rating", "Wie zufrieden sind Sie?"),
-        ],
-      },
-    ],
-  },
-  answers: { f1: "Praxis Dr. Muster", f2: "Physiotherapie", f3: "Sie", f4: "Anna", f5: 4 },
-});
-assert.equal(legacy.name, "Praxis Dr. Muster");
-assert.equal(legacy.branche, "Physiotherapie");
-assert.equal(legacy.anrede, "Sie");
-assert.equal(legacy.frage_name, "Anna", "free keys never overwrite reserved fields");
-assert.equal(legacy.wie_zufrieden_sind_sie, 4);
+const law = suggestTextSettings(sections({ unternehmen: "Kanzlei Weber & Partner, Fachanwälte für Arbeitsrecht in Köln." }));
+assert.equal(law.settings.branche, "rechtsanwalt");
+assert.equal(law.reasons.branche, "„Kanzlei“ in „Unternehmen & Kern“");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Rechtsanwältin Dr. Kaya" })).settings.branche, "rechtsanwalt");
 
-assert.equal(contentKeyForField({ id: "core_usp", title: "egal" }), "usp");
-assert.equal(contentKeyForField({ id: "x1", title: "Größte Stärke (Ü-Test)?" }), "groesste_staerke_ue_test");
-assert.equal(contentKeyForField({ id: "x2", title: "???" }), "x2");
+const doctor = suggestTextSettings(sections({ unternehmen: "Zahnarztpraxis Dr. Lenz in Essen, 3 Behandlungsräume." }));
+assert.equal(doctor.settings.branche, "arzt");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Physiotherapie-Praxis am Markt" })).settings.branche, "arzt");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Hausärztin mit eigener Praxis" })).settings.branche, "arzt");
+assert.equal(
+  suggestTextSettings(sections({ unternehmen: "Malerbetrieb. In der Praxis zeigt sich: Kunden wollen Festpreise." })).settings.branche,
+  "handwerk",
+  "the idiom „in der Praxis“ is not a medical practice",
+);
+assert.equal(suggestTextSettings(sections({ unternehmen: "Notarztdienst-Zulieferer" })).settings.branche, "arzt");
 
-assert.deepEqual(surveyAnswerToList("eins\nzwei; drei"), ["eins", "zwei", "drei"]);
-assert.deepEqual(surveyAnswerToList({ a: "x", b: "" }), ["x"]);
-assert.deepEqual(surveyAnswerToList(["A", "a", "B"]), ["A", "B"], "case-insensitive dedupe");
+const empty = suggestTextSettings(sections({}));
+assert.deepEqual(empty.settings, { anrede: "Sie", branche: "handwerk", tonalitaet: "", verbotene_woerter: [] });
+assert.deepEqual(empty.reasons, {});
+assert.deepEqual(suggestTextSettings([]).settings, empty.settings);
+
+// --- settings input and merge -----------------------------------------------------------------
+assert.deepEqual(parseWordList(" Schrott, „Ramsch“;\n billig ,schrott,, "), ["Schrott", "Ramsch", "billig"]);
+assert.deepEqual(
+  cleanTextSettings({ anrede: "Du", branche: "zahnarzt" as never, tonalitaet: "  warm \n und klar ", verbotene_woerter: [" a ", "A", ""] }),
+  { anrede: "Du", branche: "handwerk", tonalitaet: "warm und klar", verbotene_woerter: ["a"] },
+);
+
+const merged = mergeContentAnbieter(
+  { ...anbieter, anrede: "aus Text", tonalitaet: "aus Text" } as typeof anbieter,
+  { anrede: "Sie", branche: "handwerk", tonalitaet: "ruhig", verbotene_woerter: ["Schrott"] },
+);
+assert.equal(merged.name, "Einfach Entrümpelung");
+assert.equal(merged.unternehmen, anbieter.unternehmen);
+assert.equal(merged.anrede, "Sie", "confirmed settings win");
+assert.equal(merged.tonalitaet, "ruhig");
+assert.deepEqual(merged.verbotene_woerter, ["Schrott"]);
 
 // --- avatarFromAgent ------------------------------------------------------------------------
 const avatar = avatarFromAgent({
@@ -257,9 +211,12 @@ const run = demoRunThrough({ pages: ["startseite", "kellerentruempelung", "messi
 assert.deepEqual(run.jobs.map((j) => j.slug), ["messie-wohnung"]);
 assert.deepEqual(run.skipped.map((s) => s.page), ["Startseite", "Kellerentrümpelung"]);
 
-const put = demoPutClient("org", { anbieter: { name: "X", branche: "" } });
+const put = demoPutClient("org", { anbieter: { name: "X", anrede: "Ihr", branche: "" } });
 assert.equal(put.complete, false);
-assert.deepEqual(put.problems, ["Anbieter: Branche fehlt."]);
+assert.deepEqual(put.problems, ["Anbieter: Anrede muss „Sie“ oder „Du“ sein.", "Anbieter: Branche fehlt."]);
+const putOk = demoPutClient("org", { anbieter: merged, avatar });
+assert.equal(putOk.complete, true);
+assert.deepEqual(putOk.problems, []);
 
 assert.match(demoExport("startseite", "html")!.body, /^<!DOCTYPE html>/);
 assert.equal(demoExport("startseite", "md")!.filename, "startseite.md");

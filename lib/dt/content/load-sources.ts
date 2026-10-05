@@ -1,17 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { listSurveyResponsesForAgentCoverage } from "@/lib/dt/agent-survey-coverage-options";
 import { isDefaultTwinAgent, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
+import { filledWorkshopSections, type WorkshopAnbieterSection } from "@/lib/dt/content/mapping";
 import type { ContentLocalSources } from "@/lib/dt/content/types";
-
-export type ContentAnbieterSource = {
-  surveyId: string;
-  surveyTitle: string;
-  responseId: string;
-  completedAt: string | null;
-  definition: unknown;
-  answers: Record<string, unknown>;
-};
+import { normalizeAnbieterItems } from "@/lib/dt/transcripts/workshop-model";
 
 export type ContentAvatarOption = {
   id: string;
@@ -33,43 +25,23 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-/** Newest completed Anbieter questionnaire linked to the organisation (same lookup as Fokus-Keywords). */
-export async function loadContentAnbieterSource(
+/** The 13 Anbieter sections from the workshop corpus (always all keys; `current` may be empty). */
+export async function loadContentWorkshopAnbieter(
   supabase: SupabaseClient,
   organisationId: string,
-): Promise<ContentAnbieterSource | null> {
-  const options = await listSurveyResponsesForAgentCoverage({
-    organisationId,
-    agentKind: "seo_advisor",
-    limit: 40,
-  });
-  const anbieter = options.find((o) => o.purpose === "anbieter" && o.responseId);
-  if (!anbieter) return null;
-
-  const [{ data: survey }, { data: response }] = await Promise.all([
-    supabase
-      .from("surveys")
-      .select("id, title, definition")
-      .eq("id", anbieter.surveyId)
-      .is("deleted_at", null)
-      .maybeSingle(),
-    supabase
-      .from("survey_responses")
-      .select("id, answers, completed_at")
-      .eq("id", anbieter.responseId)
-      .eq("survey_id", anbieter.surveyId)
-      .maybeSingle(),
-  ]);
-  if (!survey || !response) return null;
-
-  return {
-    surveyId: survey.id,
-    surveyTitle: survey.title ?? anbieter.surveyTitle,
-    responseId: response.id,
-    completedAt: response.completed_at ?? anbieter.completedAt ?? null,
-    definition: survey.definition,
-    answers: isRecord(response.answers) ? response.answers : {},
-  };
+): Promise<WorkshopAnbieterSection[]> {
+  const { data, error } = await supabase
+    .from("dt_workshop_corpus")
+    .select("anbieter")
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const anbieter = isRecord(data?.anbieter) ? data.anbieter : null;
+  return normalizeAnbieterItems(anbieter?.items).map((item) => ({
+    key: item.key,
+    label: item.label,
+    current: item.current,
+  }));
 }
 
 /** Avatars for the dropdown: enabled `dt_agents` of the org without SEO advisors, newest first. */
@@ -113,8 +85,8 @@ export async function loadContentLocalSources(
   supabase: SupabaseClient,
   organisationId: string,
 ): Promise<ContentLocalSources> {
-  const [anbieter, avatars, { data: structure }] = await Promise.all([
-    loadContentAnbieterSource(supabase, organisationId).catch(() => null),
+  const [sections, avatars, { data: structure }] = await Promise.all([
+    loadContentWorkshopAnbieter(supabase, organisationId).catch(() => []),
     loadContentAvatarOptions(supabase, organisationId),
     supabase
       .from("dt_website_structures")
@@ -122,8 +94,9 @@ export async function loadContentLocalSources(
       .eq("organisation_id", organisationId)
       .maybeSingle(),
   ]);
+  const filled = filledWorkshopSections(sections);
   return {
-    anbieter: anbieter ? { surveyTitle: anbieter.surveyTitle } : null,
+    anbieter: filled > 0 ? { filled, total: sections.length } : null,
     avatarCount: avatars.length,
     structure: structure ? { filename: (structure.filename as string | null) ?? null } : null,
   };

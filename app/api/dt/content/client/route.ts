@@ -3,11 +3,18 @@ import { z } from "zod";
 import { contentAgentJson } from "@/lib/dt/content/client";
 import { demoPutClient } from "@/lib/dt/content/fixtures";
 import {
-  loadContentAnbieterSource,
   loadContentAvatarOptions,
   loadContentAvatarRow,
+  loadContentWorkshopAnbieter,
 } from "@/lib/dt/content/load-sources";
-import { anbieterFromSurvey, avatarFromAgent } from "@/lib/dt/content/mapping";
+import {
+  CONTENT_ANREDEN,
+  CONTENT_BRANCHEN,
+  anbieterFromWorkshop,
+  avatarFromAgent,
+  filledWorkshopSections,
+  mergeContentAnbieter,
+} from "@/lib/dt/content/mapping";
 import {
   contentError,
   contentOk,
@@ -19,9 +26,18 @@ import type { ContentClientPutBody, ContentClientPutResult } from "@/lib/dt/cont
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
   agentId: z.string().uuid().nullable().optional(),
+  settings: z.object({
+    anrede: z.enum(CONTENT_ANREDEN),
+    branche: z.enum(CONTENT_BRANCHEN),
+    tonalitaet: z.string().max(2_000),
+    verbotene_woerter: z.array(z.string().max(200)).max(100),
+  }),
 });
 
-/** Builds `anbieter` + `avatar` from DigitalTwin data server-side and sends them to the Content-Agent. */
+/**
+ * Builds `anbieter` (workshop sections + confirmed text settings) and `avatar` server-side
+ * and sends them to the Content-Agent.
+ */
 export async function PUT(req: Request) {
   const parsed = bodySchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return contentError("Ungültige Anfrage.", 400);
@@ -30,13 +46,16 @@ export async function PUT(req: Request) {
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const { data: organisation } = await gate.supabase
-    .from("organisations")
-    .select("name")
-    .eq("id", gate.organisationId)
-    .maybeSingle();
-
-  const anbieterSource = await loadContentAnbieterSource(gate.supabase, gate.organisationId);
+  const [{ data: organisation }, sections] = await Promise.all([
+    gate.supabase.from("organisations").select("name").eq("id", gate.organisationId).maybeSingle(),
+    loadContentWorkshopAnbieter(gate.supabase, gate.organisationId).catch(() => []),
+  ]);
+  if (filledWorkshopSections(sections) === 0) {
+    return contentError(
+      "Noch keine Anbieterfakten aus den Gesprächen. Bitte erst unter Transkripte auswerten.",
+      400,
+    );
+  }
 
   let agentId = parsed.data.agentId ?? null;
   if (!agentId) {
@@ -46,26 +65,20 @@ export async function PUT(req: Request) {
   const avatarRow = agentId
     ? await loadContentAvatarRow(gate.supabase, gate.organisationId, agentId)
     : null;
-  if (parsed.data.agentId && !avatarRow) {
-    return contentError("Avatar gehört nicht zu dieser Organisation.", 404);
-  }
-
-  const body: ContentClientPutBody = {};
-  if (anbieterSource) {
-    body.anbieter = anbieterFromSurvey({
-      definition: anbieterSource.definition,
-      answers: anbieterSource.answers,
-      organisationName: (organisation?.name as string | undefined) ?? null,
-    });
-  }
-  if (avatarRow) body.avatar = avatarFromAgent(avatarRow);
-
-  if (!body.anbieter && !body.avatar) {
+  if (!avatarRow) {
     return contentError(
-      "Weder Anbieter-Fragebogen noch Avatar gefunden. Es gibt nichts zu übertragen.",
-      400,
+      parsed.data.agentId ? "Avatar gehört nicht zu dieser Organisation." : "Kein Avatar vorhanden.",
+      parsed.data.agentId ? 404 : 400,
     );
   }
+
+  const anbieter = anbieterFromWorkshop(sections, {
+    organisationName: (organisation?.name as string | undefined) ?? "",
+  });
+  const body: ContentClientPutBody = {
+    anbieter: mergeContentAnbieter(anbieter, parsed.data.settings),
+    avatar: avatarFromAgent(avatarRow),
+  };
 
   if (!gate.config) {
     return contentOk({ result: demoPutClient(gate.clientKey, body), sent: body }, true);
