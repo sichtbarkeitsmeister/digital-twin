@@ -26,6 +26,13 @@ const recordSchema = z.object({
   uploadPassword: z.string().max(80),
   hosterUser: z.string().max(200),
   hosterPassword: z.string().max(200),
+  accessViaIt: z.boolean(),
+  itContact: z.object({
+    name: z.string().max(120),
+    company: z.string().max(160),
+    email: z.string().max(200),
+    phone: z.string().max(80),
+  }),
   smtpHost: z.string().max(200),
   smtpPort: z.string().max(12),
   smtpProtocol: z.string().max(40),

@@ -6,6 +6,7 @@ import {
   EMPTY_CUSTOMER_CONTACT,
   type DtOnboardingChecklist,
   type DtOnboardingCustomerContact,
+  type DtOnboardingItContact,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
 
@@ -54,6 +55,25 @@ function normalizeCustomerContacts(value: unknown): DtOnboardingCustomerContact[
   }
   return padded;
 }
+function asBool(value: unknown): boolean {
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function normalizeItContact(src: Record<string, unknown>): DtOnboardingItContact {
+  const nested =
+    src.itContact && typeof src.itContact === "object"
+      ? (src.itContact as Record<string, unknown>)
+      : src.it_contact && typeof src.it_contact === "object"
+        ? (src.it_contact as Record<string, unknown>)
+        : null;
+  return {
+    name: clip(asString(nested?.name ?? src.it_contact_name), 120),
+    company: clip(asString(nested?.company ?? src.it_contact_company), 160),
+    email: clip(asString(nested?.email ?? src.it_contact_email), 200),
+    phone: clip(asString(nested?.phone ?? src.it_contact_phone), 80),
+  };
+}
+
 function normalizeProtocol(value: string): string {
   const upper = value.trim().toUpperCase();
   const match = DT_ONBOARDING_SMTP_PROTOCOLS.find((item) => item.toUpperCase() === upper);
@@ -69,6 +89,8 @@ export function normalizeOnboardingRecord(
     uploadPassword: clip(asString(src.uploadPassword ?? src.upload_password), 80),
     hosterUser: clip(asString(src.hosterUser ?? src.hoster_user), 200),
     hosterPassword: clip(asString(src.hosterPassword ?? src.hoster_password), 200),
+    accessViaIt: asBool(src.accessViaIt ?? src.access_via_it),
+    itContact: normalizeItContact(src),
     smtpHost: clip(asString(src.smtpHost ?? src.smtp_host), 200),
     smtpPort: clip(asString(src.smtpPort ?? src.smtp_port), 12),
     smtpProtocol: normalizeProtocol(asString(src.smtpProtocol ?? src.smtp_protocol)),
@@ -95,6 +117,11 @@ export function onboardingRecordFromRow(row: {
   upload_password?: string | null;
   hoster_user?: string | null;
   hoster_password?: string | null;
+  access_via_it?: boolean | null;
+  it_contact_name?: string | null;
+  it_contact_company?: string | null;
+  it_contact_email?: string | null;
+  it_contact_phone?: string | null;
   smtp_host?: string | null;
   smtp_port?: string | null;
   smtp_protocol?: string | null;
@@ -115,6 +142,13 @@ export function onboardingRecordFromRow(row: {
     uploadPassword: row.upload_password ?? "",
     hosterUser: row.hoster_user ?? "",
     hosterPassword: row.hoster_password ?? "",
+    accessViaIt: row.access_via_it === true,
+    itContact: {
+      name: row.it_contact_name ?? "",
+      company: row.it_contact_company ?? "",
+      email: row.it_contact_email ?? "",
+      phone: row.it_contact_phone ?? "",
+    },
     smtpHost: row.smtp_host ?? "",
     smtpPort: row.smtp_port ?? "",
     smtpProtocol: row.smtp_protocol ?? "TLS",
@@ -137,6 +171,11 @@ export function onboardingRowFromRecord(record: DtOnboardingRecord) {
     upload_password: record.uploadPassword,
     hoster_user: record.hosterUser || null,
     hoster_password: record.hosterPassword || null,
+    access_via_it: record.accessViaIt,
+    it_contact_name: record.itContact.name || null,
+    it_contact_company: record.itContact.company || null,
+    it_contact_email: record.itContact.email || null,
+    it_contact_phone: record.itContact.phone || null,
     smtp_host: record.smtpHost || null,
     smtp_port: record.smtpPort || null,
     smtp_protocol: record.smtpProtocol || null,
@@ -155,6 +194,19 @@ export function onboardingRowFromRecord(record: DtOnboardingRecord) {
   };
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Name plus e-mail or phone. That contact replaces hoster and SMTP credentials. */
+export function itContactCoversHosterAndSmtp(record: DtOnboardingRecord): boolean {
+  if (!record.accessViaIt) return false;
+  const name = record.itContact?.name?.trim() ?? "";
+  const email = record.itContact?.email?.trim() ?? "";
+  const phone = record.itContact?.phone?.trim() ?? "";
+  if (!name) return false;
+  if (email && EMAIL_RE.test(email)) return true;
+  return Boolean(phone);
+}
+
 export function onboardingChecklist(
   record: DtOnboardingRecord,
   fileCount = 0,
@@ -163,12 +215,13 @@ export function onboardingChecklist(
   const contactsFilled = record.customerContacts.some(
     (contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim(),
   );
+  const viaIt = itContactCoversHosterAndSmtp(record);
   return {
     mediaLink: fileCount > 0,
-    hoster: Boolean(record.hosterUser && record.hosterPassword),
-    smtp: Boolean(
-      record.smtpHost && record.smtpPort && record.smtpUsername && record.smtpPassword,
-    ),
+    hoster: viaIt || Boolean(record.hosterUser && record.hosterPassword),
+    smtp:
+      viaIt ||
+      Boolean(record.smtpHost && record.smtpPort && record.smtpUsername && record.smtpPassword),
     cms: Boolean(record.cmsLoginUrl && record.cmsUser && record.cmsPassword),
     competitors: competitorsFilled > 0,
     billingEmail: /.+@.+\..+/.test(record.billingEmail),
@@ -193,8 +246,6 @@ export function onboardingFilledCount(checklist: DtOnboardingChecklist): {
   return { filled: flags.filter(Boolean).length, total: flags.length };
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export function validateOnboardingRecord(record: DtOnboardingRecord): string | null {
   if (record.billingEmail && !EMAIL_RE.test(record.billingEmail)) {
     return "Bitte eine gültige E-Mail-Adresse für die Buchhaltung angeben.";
@@ -204,7 +255,10 @@ export function validateOnboardingRecord(record: DtOnboardingRecord): string | n
       return "Bitte gültige E-Mail-Adressen bei den Ansprechpartnern angeben.";
     }
   }
-  if (record.smtpPort && !/^\d{2,5}$/.test(record.smtpPort)) {
+  if (record.itContact.email && !EMAIL_RE.test(record.itContact.email)) {
+    return "Bitte eine gültige E-Mail-Adresse beim IT-Kontakt angeben.";
+  }
+  if (!record.accessViaIt && record.smtpPort && !/^\d{2,5}$/.test(record.smtpPort)) {
     return "SMTP-Port bitte als Zahl angeben (z. B. 587).";
   }
   if (record.cmsLoginUrl) {

@@ -19,12 +19,14 @@ import {
   generateOnboardingUploadPassword,
   generateOnboardingUploadToken,
 } from "@/lib/dt/onboarding/secrets";
+import { shouldNotifyItContact } from "@/lib/dt/onboarding/it-contact";
+import { notifyItContactDeposited } from "@/lib/dt/onboarding/notify-it-contact";
 import { notifyPassflowLinkDeposited } from "@/lib/dt/onboarding/notify-passflow";
 import { shouldNotifyPassflowLink } from "@/lib/dt/onboarding/passflow";
 import { createServiceClient } from "@/lib/supabase/service";
 
 const ONBOARDING_SELECT =
-  "organisation_id, upload_token, upload_password, hoster_user, hoster_password, smtp_host, smtp_port, smtp_protocol, smtp_username, smtp_password, cms_login_url, cms_user, cms_password, passflow_url, passflow_notified_at, competitors, billing_email, customer_contacts, additional_info, updated_at, updated_by_user_id";
+  "organisation_id, upload_token, upload_password, hoster_user, hoster_password, access_via_it, it_contact_name, it_contact_company, it_contact_email, it_contact_phone, smtp_host, smtp_port, smtp_protocol, smtp_username, smtp_password, cms_login_url, cms_user, cms_password, passflow_url, passflow_notified_at, competitors, billing_email, customer_contacts, additional_info, updated_at, updated_by_user_id";
 
 type OnboardingRow = {
   organisation_id: string;
@@ -32,6 +34,11 @@ type OnboardingRow = {
   upload_password: string;
   hoster_user: string | null;
   hoster_password: string | null;
+  access_via_it: boolean | null;
+  it_contact_name: string | null;
+  it_contact_company: string | null;
+  it_contact_email: string | null;
+  it_contact_phone: string | null;
   smtp_host: string | null;
   smtp_port: string | null;
   smtp_protocol: string | null;
@@ -198,6 +205,15 @@ export async function saveOnboarding(input: {
   const savedRecord = row
     ? decryptOnboardingRecordSecrets(onboardingRecordFromRow(row))
     : record;
+
+  if (shouldNotifyItContact({ previous: existing.record, next: savedRecord })) {
+    await notifyItContactDeposited({
+      supabase,
+      organisationId: input.organisationId,
+      record: savedRecord,
+      userId: input.userId,
+    });
+  }
 
   if (
     shouldNotifyPassflowLink({

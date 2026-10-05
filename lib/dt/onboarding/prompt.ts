@@ -7,10 +7,33 @@ import {
   type DtOnboardingCustomerContact,
   type DtOnboardingRecord,
 } from "@/lib/dt/onboarding/copy";
-import { onboardingChecklist } from "@/lib/dt/onboarding/normalize";
+import {
+  itContactCoversHosterAndSmtp,
+  onboardingChecklist,
+} from "@/lib/dt/onboarding/normalize";
 
 function statusLine(label: string, ok: boolean): string {
   return `- ${label}: ${ok ? "hinterlegt" : "noch offen"}`;
+}
+
+function accessStatus(label: string, viaIt: boolean, credentialsOk: boolean): string {
+  if (viaIt) return `- ${label}: IT-Kontakt hinterlegt, wird dort abgefragt`;
+  return statusLine(label, credentialsOk);
+}
+
+function itContactLines(record: DtOnboardingRecord): string[] {
+  const contact = record.itContact;
+  const parts = [
+    contact.name.trim(),
+    contact.company.trim(),
+    contact.email.trim(),
+    contact.phone.trim(),
+  ].filter(Boolean);
+  if (parts.length === 0) return ["Noch nicht angegeben."];
+  return [
+    `- ${parts.join(" · ")}`,
+    "Hoster-Zugang und SMTP-Daten bei dieser Person abfragen, nicht beim Kunden einfordern.",
+  ];
 }
 
 function customerContactLines(contacts: DtOnboardingCustomerContact[]): string[] {
@@ -55,6 +78,14 @@ export function formatOnboardingForPrompt(input: {
 
   const checklist = onboardingChecklist(input.record, input.fileCount);
   const competitors = input.record.competitors.map((item) => item.trim()).filter(Boolean);
+  const viaIt = itContactCoversHosterAndSmtp(input.record);
+  const credentialHoster = Boolean(input.record.hosterUser && input.record.hosterPassword);
+  const credentialSmtp = Boolean(
+    input.record.smtpHost &&
+      input.record.smtpPort &&
+      input.record.smtpUsername &&
+      input.record.smtpPassword,
+  );
 
   return [
     "## Onboarding",
@@ -63,8 +94,8 @@ export function formatOnboardingForPrompt(input: {
     "",
     "### Status",
     statusLine("Bilder und Videos", checklist.mediaLink),
-    statusLine("Hoster-Zugang", checklist.hoster),
-    statusLine("SMTP-Zugang", checklist.smtp),
+    accessStatus("Hoster-Zugang", viaIt, credentialHoster),
+    accessStatus("SMTP-Zugang", viaIt, credentialSmtp),
     statusLine("CMS-Zugang", checklist.cms),
     statusLine("Passflow-Link", Boolean(input.record.passflowUrl.trim())),
     statusLine("Mitbewerber", checklist.competitors),
@@ -80,6 +111,13 @@ export function formatOnboardingForPrompt(input: {
       ? `Mitbewerber: ${competitors.join(", ")}`
       : "Mitbewerber: noch nicht angegeben.",
     "",
+    ...(input.record.accessViaIt
+      ? [
+          "### IT-Ansprechpartner für Hoster und SMTP",
+          ...itContactLines(input.record),
+          "",
+        ]
+      : []),
     "### Ansprechpartner beim Kunden",
     ...customerContactLines(input.record.customerContacts),
     input.record.additionalInfo.trim()

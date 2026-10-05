@@ -13,6 +13,10 @@ import {
   DT_ONBOARDING_PASSFLOW_STEPS,
   DT_ONBOARDING_PASSFLOW_TITLE,
   DT_ONBOARDING_PASSFLOW_URL,
+  DT_ONBOARDING_IT_CONTACT_DELEGATE,
+  DT_ONBOARDING_IT_CONTACT_HINT,
+  DT_ONBOARDING_IT_CONTACT_INTRO,
+  DT_ONBOARDING_IT_CONTACT_SELF,
   DT_ONBOARDING_MEDIA_INTRO,
   DT_ONBOARDING_MEDIA_ITEMS,
   DT_ONBOARDING_PHONE_NOTE,
@@ -24,11 +28,17 @@ import {
 } from "../lib/dt/onboarding/copy";
 import {
   normalizeOnboardingRecord,
+  itContactCoversHosterAndSmtp,
   onboardingChecklist,
   onboardingFilledCount,
+  onboardingRowFromRecord,
   onboardingRecordFromRow,
   validateOnboardingRecord,
 } from "../lib/dt/onboarding/normalize";
+import {
+  buildItContactNotifyEmail,
+  shouldNotifyItContact,
+} from "../lib/dt/onboarding/it-contact";
 import {
   buildPassflowNotifyEmail,
   shouldNotifyPassflowLink,
@@ -81,6 +91,12 @@ assert.equal(addressingReader.test(DT_ONBOARDING_PHONE_NOTE), false);
 assert.equal(addressingReader.test(DT_ONBOARDING_MEDIA_INTRO), false);
 assert.equal(addressingReader.test(DT_ONBOARDING_PASSFLOW_INTRO), false);
 assert.equal(addressingReader.test(DT_ONBOARDING_PASSFLOW_FALLBACK), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_IT_CONTACT_INTRO), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_IT_CONTACT_HINT), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_IT_CONTACT_SELF), false);
+assert.equal(addressingReader.test(DT_ONBOARDING_IT_CONTACT_DELEGATE), false);
+assert.match(DT_ONBOARDING_IT_CONTACT_INTRO, /IT-Kontakt/);
+assert.match(DT_ONBOARDING_IT_CONTACT_HINT, /abgefragt/);
 for (const step of DT_ONBOARDING_PASSFLOW_STEPS) {
   assert.equal(addressingReader.test(step), false, step);
 }
@@ -199,6 +215,81 @@ assert.equal(onboardingFilledCount(checklist).total, 7);
 const emptyChecklist = onboardingChecklist(EMPTY_ONBOARDING_RECORD, 0);
 assert.equal(onboardingFilledCount(emptyChecklist).filled, 0);
 
+const viaIt = normalizeOnboardingRecord({
+  accessViaIt: true,
+  itContact: {
+    name: "  Kim Schulz ",
+    company: "Netzwerk GmbH",
+    email: "kim@it.example",
+    phone: "0211 999",
+  },
+});
+assert.equal(itContactCoversHosterAndSmtp(viaIt), true);
+assert.equal(onboardingChecklist(viaIt, 0).hoster, true);
+assert.equal(onboardingChecklist(viaIt, 0).smtp, true);
+assert.equal(viaIt.hosterUser, "");
+assert.equal(viaIt.itContact.company, "Netzwerk GmbH");
+
+const phoneOnly = normalizeOnboardingRecord({
+  access_via_it: true,
+  it_contact_name: "Sam IT",
+  it_contact_phone: "0171 1",
+});
+assert.equal(itContactCoversHosterAndSmtp(phoneOnly), true);
+assert.equal(onboardingChecklist(phoneOnly, 0).hoster, true);
+assert.equal(onboardingChecklist(phoneOnly, 0).smtp, true);
+
+const nameOnly = normalizeOnboardingRecord({
+  accessViaIt: true,
+  itContact: { name: "Sam", company: "", email: "", phone: "" },
+});
+assert.equal(itContactCoversHosterAndSmtp(nameOnly), false);
+assert.equal(onboardingChecklist(nameOnly, 0).hoster, false);
+assert.equal(onboardingChecklist(nameOnly, 0).smtp, false);
+
+const ignoredItContact = normalizeOnboardingRecord({
+  accessViaIt: false,
+  itContact: { name: "Sam", company: "", email: "sam@it.de", phone: "1" },
+});
+assert.equal(itContactCoversHosterAndSmtp(ignoredItContact), false);
+assert.equal(onboardingChecklist(ignoredItContact, 0).hoster, false);
+
+assert.match(
+  validateOnboardingRecord(
+    normalizeOnboardingRecord({
+      accessViaIt: true,
+      itContact: { name: "Sam", company: "", email: "nope", phone: "1" },
+    }),
+  ) ?? "",
+  /IT-Kontakt/,
+);
+assert.equal(
+  validateOnboardingRecord(
+    normalizeOnboardingRecord({
+      accessViaIt: true,
+      smtpPort: "abc",
+      itContact: { name: "Sam", company: "", email: "sam@it.de", phone: "" },
+    }),
+  ),
+  null,
+);
+
+const viaItRow = onboardingRowFromRecord(viaIt);
+assert.equal(viaItRow.access_via_it, true);
+assert.equal(viaItRow.it_contact_name, "Kim Schulz");
+assert.equal(viaItRow.it_contact_email, "kim@it.example");
+assert.equal(viaItRow.it_contact_company, "Netzwerk GmbH");
+
+const fromItColumns = onboardingRecordFromRow({
+  access_via_it: true,
+  it_contact_name: "Kim Schulz",
+  it_contact_company: "Netzwerk GmbH",
+  it_contact_email: "kim@it.example",
+  it_contact_phone: "0211 999",
+});
+assert.equal(fromItColumns.accessViaIt, true);
+assert.equal(fromItColumns.itContact.name, "Kim Schulz");
+
 const prompt = formatOnboardingForPrompt({
   record: fromRow,
   organisationId: "11111111-1111-4111-8111-111111111111",
@@ -221,6 +312,19 @@ assert.doesNotMatch(prompt, /CloudPass1/);
 assert.doesNotMatch(prompt, /passflow\.de\/share\/secret-token/);
 assert.match(prompt, /Passflow-Link: hinterlegt/);
 assert.match(prompt, /Passwörter/);
+assert.doesNotMatch(prompt, /IT-Ansprechpartner/);
+
+const itPrompt = formatOnboardingForPrompt({
+  record: viaIt,
+  organisationId: "11111111-1111-4111-8111-111111111111",
+  fileCount: 0,
+});
+assert.match(itPrompt, /Kim Schulz/);
+assert.match(itPrompt, /kim@it.example/);
+assert.match(itPrompt, /Netzwerk GmbH/);
+assert.match(itPrompt, /IT-Kontakt hinterlegt, wird dort abgefragt/);
+assert.match(itPrompt, /nicht beim Kunden einfordern/);
+assert.doesNotMatch(itPrompt, /hoster_password|smtp_password/);
 
 const staffPrompt = buildDtSystemPrompt({
   agent: {
@@ -348,5 +452,39 @@ assert.doesNotMatch(notifyMail.text, /passflow\.de\/share/);
 assert.doesNotMatch(notifyMail.html, /passflow\.de\/share/);
 assert.equal(addressingReader.test(notifyMail.text), false);
 assert.equal(addressingReader.test(notifyMail.html.replace(/<[^>]+>/g, " ")), false);
+
+assert.equal(
+  shouldNotifyItContact({ previous: EMPTY_ONBOARDING_RECORD, next: viaIt }),
+  true,
+);
+assert.equal(shouldNotifyItContact({ previous: viaIt, next: viaIt }), false);
+assert.equal(
+  shouldNotifyItContact({
+    previous: viaIt,
+    next: normalizeOnboardingRecord({
+      ...viaIt,
+      itContact: { ...viaIt.itContact, phone: "0221 1" },
+    }),
+  }),
+  true,
+);
+assert.equal(
+  shouldNotifyItContact({ previous: EMPTY_ONBOARDING_RECORD, next: nameOnly }),
+  false,
+);
+
+const itMail = buildItContactNotifyEmail({
+  orgName: "Muster GmbH",
+  dashboardUrl: "https://app.example/dashboard/onboarding?org=11111111-1111-4111-8111-111111111111",
+  contact: viaIt.itContact,
+});
+assert.match(itMail.subject, /Hoster und SMTP/);
+assert.match(itMail.subject, /Muster GmbH/);
+assert.match(itMail.text, /Kim Schulz/);
+assert.match(itMail.text, /kim@it.example/);
+assert.match(itMail.text, /0211 999/);
+assert.match(itMail.text, /selbst abfragen/);
+assert.doesNotMatch(itMail.text, /Passwort|secret/);
+assert.equal(addressingReader.test(itMail.text), false);
 
 console.log("dt-onboarding: ok");
