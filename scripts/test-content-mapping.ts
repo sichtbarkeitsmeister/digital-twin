@@ -17,8 +17,10 @@ import {
 import {
   anbieterFromWorkshop,
   avatarFromAgent,
+  CONTENT_TONALITAETEN,
   cleanTextSettings,
   contentClientKey,
+  contentTonalitaetText,
   filledWorkshopSections,
   mergeContentAnbieter,
   parseWordList,
@@ -77,14 +79,46 @@ assert.equal(demo.settings.anrede, "Sie");
 assert.equal(demo.reasons.anrede, "„gesiezt“ in „Sprache & Ton“");
 assert.equal(demo.settings.branche, "handwerk");
 assert.equal(demo.reasons.branche, undefined, "handwerk is the default, not a finding");
-assert.equal(demo.settings.tonalitaet, "Der Ton soll ruhig, ehrlich und bodenständig klingen, nie flapsig.");
+assert.equal(demo.settings.tonalitaet, "herzlich", "ehrlich + bodenständig beat the single ruhig");
+assert.equal(demo.reasons.tonalitaet, "„ehrlich“, „bodenständig“ in „Sprache & Ton“");
 assert.deepEqual(demo.settings.verbotene_woerter, ["Schrott", "Ramsch", "Messie"]);
 
+// --- tone options: distinct, complete, and the heuristic lands on each of them --------------
+assert.equal(new Set(CONTENT_TONALITAETEN.map((t) => t.key)).size, CONTENT_TONALITAETEN.length);
+assert.equal(new Set(CONTENT_TONALITAETEN.map((t) => t.label)).size, CONTENT_TONALITAETEN.length);
+for (const tone of CONTENT_TONALITAETEN) {
+  assert.ok(tone.text.length > 40 && tone.short.length > 10, `${tone.key}: has texts`);
+  assert.match(contentTonalitaetText(tone.key), new RegExp(`^${tone.label.replace(/[&]/g, "&")}: `));
+}
+const toneCases: Array<[string, string]> = [
+  ["Bitte nüchtern und fachlich, keine Werbesprache.", "sachlich"],
+  ["Seriös, kompetent, Vertrauen aufbauen.", "serioes"],
+  ["Warm und nahbar, wie der Betrieb nebenan.", "herzlich"],
+  ["Kurz, klar, auf den Punkt. Keine Floskeln.", "direkt"],
+  ["Gern locker und mit Humor, ein Augenzwinkern darf sein.", "locker"],
+  ["Behutsam und respektvoll, die Kunden sind in einer schweren Lage.", "einfuehlsam"],
+  ["Hochwertig und exklusiv, wir sprechen anspruchsvolle Kunden an.", "premium"],
+  ["Lebendig, motivierend, mit Begeisterung für den Sport.", "energisch"],
+];
+for (const [text, expected] of toneCases) {
+  assert.equal(suggestTextSettings(sections({ sprache: text })).settings.tonalitaet, expected, text);
+}
+assert.equal(
+  suggestTextSettings(sections({ sprache: "Bitte nicht locker und ohne Humor. Lieber sachlich." })).settings.tonalitaet,
+  "sachlich",
+  "negated words do not score",
+);
+assert.equal(
+  suggestTextSettings(sections({ sprache: "Kunden mögen das Wort „locker“ nicht. Ruhig und respektvoll." })).settings.tonalitaet,
+  "einfuehlsam",
+  "quoted words do not score",
+);
+
 const du = suggestTextSettings(
-  sections({ sprache: "Wir duzen unsere Kunden. Locker und direkt, wie unter Nachbarn. Bitte nie „Sie“ oder „Kunde“ schreiben." }),
+  sections({ sprache: "Wir duzen unsere Kunden. Locker und witzig, wie unter Nachbarn. Bitte nie „Sie“ oder „Kunde“ schreiben." }),
 );
 assert.equal(du.settings.anrede, "Du");
-assert.equal(du.settings.tonalitaet, "Locker und direkt, wie unter Nachbarn.");
+assert.equal(du.settings.tonalitaet, "locker");
 assert.deepEqual(du.settings.verbotene_woerter, ["Kunde"], "Du/Sie are never forbidden words");
 
 const looseDu = suggestTextSettings(sections({ sprache: "Anrede immer mit du, auch in E-Mails." }));
@@ -111,25 +145,29 @@ assert.equal(
 assert.equal(suggestTextSettings(sections({ unternehmen: "Notarztdienst-Zulieferer" })).settings.branche, "arzt");
 
 const empty = suggestTextSettings(sections({}));
-assert.deepEqual(empty.settings, { anrede: "Sie", branche: "handwerk", tonalitaet: "", verbotene_woerter: [] });
+assert.deepEqual(empty.settings, { anrede: "Sie", branche: "handwerk", tonalitaet: "herzlich", verbotene_woerter: [] });
 assert.deepEqual(empty.reasons, {});
+assert.equal(suggestTextSettings(sections({ unternehmen: "Kanzlei Weber" })).settings.tonalitaet, "serioes", "branch default");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Zahnarztpraxis" })).settings.tonalitaet, "einfuehlsam", "branch default");
 assert.deepEqual(suggestTextSettings([]).settings, empty.settings);
 
 // --- settings input and merge -----------------------------------------------------------------
 assert.deepEqual(parseWordList(" Schrott, „Ramsch“;\n billig ,schrott,, "), ["Schrott", "Ramsch", "billig"]);
 assert.deepEqual(
-  cleanTextSettings({ anrede: "Du", branche: "zahnarzt" as never, tonalitaet: "  warm \n und klar ", verbotene_woerter: [" a ", "A", ""] }),
-  { anrede: "Du", branche: "handwerk", tonalitaet: "warm und klar", verbotene_woerter: ["a"] },
+  cleanTextSettings({ anrede: "Du", branche: "zahnarzt" as never, tonalitaet: "egal" as never, verbotene_woerter: [" a ", "A", ""] }),
+  { anrede: "Du", branche: "handwerk", tonalitaet: "herzlich", verbotene_woerter: ["a"] },
+  "unknown tone falls back to the branch default",
 );
 
 const merged = mergeContentAnbieter(
   { ...anbieter, anrede: "aus Text", tonalitaet: "aus Text" } as typeof anbieter,
-  { anrede: "Sie", branche: "handwerk", tonalitaet: "ruhig", verbotene_woerter: ["Schrott"] },
+  { anrede: "Sie", branche: "handwerk", tonalitaet: "direkt", verbotene_woerter: ["Schrott"] },
 );
 assert.equal(merged.name, "Einfach Entrümpelung");
 assert.equal(merged.unternehmen, anbieter.unternehmen);
 assert.equal(merged.anrede, "Sie", "confirmed settings win");
-assert.equal(merged.tonalitaet, "ruhig");
+assert.equal(merged.tonalitaet, contentTonalitaetText("direkt"));
+assert.match(merged.tonalitaet, /^Direkt & unkompliziert: Kurz und klar\./, "the service receives the full tone text");
 assert.deepEqual(merged.verbotene_woerter, ["Schrott"]);
 
 // --- avatarFromAgent ------------------------------------------------------------------------

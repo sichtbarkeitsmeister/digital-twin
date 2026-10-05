@@ -23,10 +23,104 @@ export const CONTENT_BRANCHE_LABELS: Record<ContentBranche, string> = {
   arzt: "Arzt & Praxis",
 };
 
+/**
+ * Tone options. Each sits in a different corner of formal ↔ casual, warm ↔ sober and
+ * calm ↔ lively, so a wrong pick is obvious and every common site has a fit.
+ * `text` is what the Content-Agent receives as `tonalitaet`; `keywords` drive the suggestion.
+ */
+export const CONTENT_TONALITAETEN = [
+  {
+    key: "sachlich",
+    label: "Sachlich & präzise",
+    short: "Nüchtern, fachlich, ohne Werbesprache",
+    text: "Nüchtern und fachlich. Klare Aussagen, Fachbegriffe werden erklärt, keine Werbesprache und keine Emotionalisierung.",
+    keywords:
+      /\b(sachlich\w*|n[üu]chtern\w*|pr[äa]zise\w*|fachlich\w*|faktisch\w*|neutral\w*|informativ\w*|technisch\w*|objektiv\w*)\b/gi,
+  },
+  {
+    key: "serioes",
+    label: "Seriös & vertrauensvoll",
+    short: "Ruhig, kompetent, gibt Sicherheit",
+    text: "Ruhig und zugewandt. Vermittelt Kompetenz und Sicherheit, nimmt Sorgen ernst, ohne zu dramatisieren. Förmlich, aber nicht steif.",
+    keywords:
+      /\b(seri[öo]s\w*|vertrauen\w*|kompeten\w*|souver[äa]n\w*|professionell\w*|verl[äa]sslich\w*|zuverl[äa]ssig\w*|sicherheit|diskret\w*)\b/gi,
+  },
+  {
+    key: "herzlich",
+    label: "Herzlich & bodenständig",
+    short: "Warm, nahbar, wie aus der Nachbarschaft",
+    text: "Warm und nahbar. Spricht wie ein Mensch aus der Nachbarschaft: ehrlich, unaufgeregt, ohne Fachjargon und ohne Übertreibung.",
+    keywords:
+      /\b(herzlich\w*|warm\w*|nahbar\w*|bodenst[äa]ndig\w*|ehrlich\w*|famili[äa]r\w*|pers[öo]nlich\w*|menschlich\w*|unaufgeregt\w*|authentisch\w*|sympathisch\w*)\b/gi,
+  },
+  {
+    key: "direkt",
+    label: "Direkt & unkompliziert",
+    short: "Kurz, klar, sofort zum Punkt",
+    text: "Kurz und klar. Kommt sofort zum Punkt, nennt Preise und Abläufe offen, kurze Sätze, keine Floskeln.",
+    keywords:
+      /\b(direkt\w*|auf den punkt|klar\w*|kurz\w*|knapp\w*|unkompliziert\w*|geradeaus|offen\w*|ohne umschweife|pragmatisch\w*|schn[öo]rkellos\w*)\b/gi,
+  },
+  {
+    key: "locker",
+    label: "Locker & humorvoll",
+    short: "Leicht, mit Augenzwinkern",
+    text: "Leicht und mit Augenzwinkern. Lockere Alltagssprache, kleine Pointen erlaubt, in den Fakten trotzdem verlässlich.",
+    keywords:
+      /\b(locker\w*|humor\w*|witzig\w*|augenzwinkern\w*|l[äa]ssig\w*|frech\w*|leicht\w*|flapsig\w*|jugendlich\w*|salopp\w*|lustig\w*)\b/gi,
+  },
+  {
+    key: "einfuehlsam",
+    label: "Einfühlsam & behutsam",
+    short: "Rücksichtsvoll, für schwierige Situationen",
+    text: "Behutsam und respektvoll. Für schwierige Lebenslagen: nimmt Rücksicht, drängt nicht, erklärt Schritt für Schritt, ohne Pathos.",
+    keywords:
+      /\b(einf[üu]hlsam\w*|behutsam\w*|ruhig\w*|respektvoll\w*|sensibel\w*|r[üu]cksicht\w*|empathisch\w*|taktvoll\w*|w[üu]rdevoll\w*|piet[äa]t\w*|mitf[üu]hlend\w*)\b/gi,
+  },
+  {
+    key: "premium",
+    label: "Gehoben & anspruchsvoll",
+    short: "Elegant, betont Qualität und Sorgfalt",
+    text: "Gehoben und zurückhaltend. Betont Qualität, Sorgfalt und Erfahrung, spricht anspruchsvolle Kunden an, ohne Superlative.",
+    keywords:
+      /\b(premium|gehoben\w*|exklusiv\w*|hochwertig\w*|elegan\w*|anspruchsvoll\w*|edel\w*|stilvoll\w*|luxuri[öo]s\w*|erlesen\w*)\b/gi,
+  },
+  {
+    key: "energisch",
+    label: "Energisch & begeistert",
+    short: "Lebendig, motivierend, aktiv",
+    text: "Lebendig und motivierend. Zeigt Begeisterung für die Sache, aktive Sprache, kurze Impulse, lädt zum Mitmachen ein.",
+    keywords:
+      /\b(energisch\w*|begeister\w*|lebendig\w*|motivier\w*|dynamisch\w*|mitrei[ßs]end\w*|enthusiast\w*|schwungvoll\w*|leidenschaft\w*|inspirier\w*)\b/gi,
+  },
+] as const;
+
+export type ContentTonalitaet = (typeof CONTENT_TONALITAETEN)[number]["key"];
+export const CONTENT_TONALITAET_KEYS = CONTENT_TONALITAETEN.map((t) => t.key) as [
+  ContentTonalitaet,
+  ...ContentTonalitaet[],
+];
+
+const DEFAULT_TONALITAET: Record<ContentBranche, ContentTonalitaet> = {
+  handwerk: "herzlich",
+  rechtsanwalt: "serioes",
+  arzt: "einfuehlsam",
+};
+
+export function contentTonalitaet(key: string) {
+  return CONTENT_TONALITAETEN.find((t) => t.key === key) ?? null;
+}
+
+/** The `tonalitaet` string the Content-Agent receives. */
+export function contentTonalitaetText(key: ContentTonalitaet): string {
+  const tone = contentTonalitaet(key) ?? CONTENT_TONALITAETEN[0];
+  return `${tone.label}: ${tone.text}`;
+}
+
 export type ContentTextSettings = {
   anrede: ContentAnrede;
   branche: ContentBranche;
-  tonalitaet: string;
+  tonalitaet: ContentTonalitaet;
   verbotene_woerter: string[];
 };
 
@@ -42,8 +136,9 @@ export type WorkshopAnbieterSection = Pick<AnbieterItem, "label" | "current"> & 
 /** `name` plus one free-text entry per filled workshop section. */
 export type ContentAnbieter = { name: string } & Record<string, string>;
 
-export type ContentAnbieterPayload = ContentTextSettings & {
+export type ContentAnbieterPayload = Omit<ContentTextSettings, "tonalitaet"> & {
   name: string;
+  tonalitaet: string;
   [section: string]: unknown;
 };
 
@@ -63,7 +158,6 @@ export type DtAgentForContent = {
 
 const STRICT_KEYS = new Set<string>(["name", "anrede", "branche", "tonalitaet", "verbotene_woerter"]);
 const SECTION_KEY = /^[a-z][a-z0-9_]{0,39}$/;
-const TONALITAET_MAX = 1_000;
 const WORD_MAX = 80;
 const WORDS_MAX = 50;
 
@@ -110,7 +204,7 @@ export function mergeContentAnbieter(
     ...anbieter,
     anrede: clean.anrede,
     branche: clean.branche,
-    tonalitaet: clean.tonalitaet,
+    tonalitaet: contentTonalitaetText(clean.tonalitaet),
     verbotene_woerter: clean.verbotene_woerter,
   };
 }
@@ -142,12 +236,13 @@ export function parseWordList(text: string): string[] {
 }
 
 export function cleanTextSettings(settings: ContentTextSettings): ContentTextSettings {
+  const branche = (CONTENT_BRANCHEN as readonly string[]).includes(settings.branche)
+    ? settings.branche
+    : "handwerk";
   return {
     anrede: settings.anrede === "Du" ? "Du" : "Sie",
-    branche: (CONTENT_BRANCHEN as readonly string[]).includes(settings.branche)
-      ? settings.branche
-      : "handwerk",
-    tonalitaet: settings.tonalitaet.trim().replace(/\s+/g, " ").slice(0, TONALITAET_MAX),
+    branche,
+    tonalitaet: contentTonalitaet(settings.tonalitaet)?.key ?? DEFAULT_TONALITAET[branche],
     verbotene_woerter: dedupe(settings.verbotene_woerter.map(cleanWord).filter(Boolean)).slice(
       0,
       WORDS_MAX,
@@ -187,20 +282,26 @@ function suggestBranche(text: string): { value: ContentBranche; match: string | 
   return { value: "handwerk", match: null };
 }
 
-const TONE_WORDS =
-  /\b(ton|tonalit[aä]t|klingt|klingen|wirkt|wirken|locker\w*|sachlich\w*|freundlich\w*|herzlich\w*|nahbar\w*|seri[oö]s\w*|professionell\w*|humor\w*|direkt\w*|pers[oö]nlich\w*|bodenst[aä]ndig\w*|ehrlich\w*|warm\w*|ruhig\w*|fachlich\w*|f[oö]rmlich\w*|unkompliziert\w*|empathisch\w*|respektvoll\w*)\b/i;
 const AVOID_WORDS =
   /\b(nicht|nie|niemals|kein\w*|vermeid\w*|verbot\w*|tabu\w*|no-?go\w*|ungern|st[oö]rt|verzicht\w*)\b/i;
+/** "nie flapsig", "nicht zu locker", "keine Witze": the negated words must not score. */
+const NEGATED_PHRASE = /\b(nicht|nie|niemals|kein\w*|ohne|statt|weder)\b(\s+\w+){1,3}/gi;
 const QUOTED = /„([^“”"„]{1,60})[“”"]|"([^"]{1,60})"|»([^«]{1,60})«|‚([^‘’]{1,60})[‘’]/g;
 const ANREDE_WORD = /^(du|sie|ihr|dich|dir|ihnen)$/i;
 
-function suggestTonalitaet(text: string): string {
-  const candidates = sentences(text).filter(
-    (s) => !/[„"»‚]/.test(s) && !DU_EXPLICIT.test(s) && !SIE_EXPLICIT.test(s),
-  );
-  const tone = candidates.filter((s) => TONE_WORDS.test(s)).slice(0, 2);
-  const picked = tone.length > 0 ? tone : candidates.slice(0, 1);
-  return picked.join(" ").slice(0, 280).trim();
+function suggestTonalitaet(
+  text: string,
+  branche: ContentBranche,
+): { value: ContentTonalitaet; matches: string[] } {
+  const positive = text.replace(QUOTED, " ").replace(NEGATED_PHRASE, " ");
+  let best: { value: ContentTonalitaet; matches: string[] } | null = null;
+  for (const tone of CONTENT_TONALITAETEN) {
+    const matches = dedupe([...positive.matchAll(tone.keywords)].map((m) => m[0]));
+    if (matches.length > 0 && matches.length > (best?.matches.length ?? 0)) {
+      best = { value: tone.key, matches };
+    }
+  }
+  return best ?? { value: DEFAULT_TONALITAET[branche], matches: [] };
 }
 
 function suggestVerboteneWoerter(text: string): string[] {
@@ -233,8 +334,11 @@ export function suggestTextSettings(
   const branche = suggestBranche(unternehmen.text);
   if (branche.match) reasons.branche = `„${branche.match}“ in „${unternehmen.label}“`;
 
-  const tonalitaet = suggestTonalitaet(sprache.text);
-  if (tonalitaet) reasons.tonalitaet = `aus „${sprache.label}“`;
+  const tonalitaet = suggestTonalitaet(sprache.text, branche.value);
+  if (tonalitaet.matches.length > 0) {
+    const quoted = tonalitaet.matches.slice(0, 3).map((m) => `„${m}“`).join(", ");
+    reasons.tonalitaet = `${quoted} in „${sprache.label}“`;
+  }
 
   const verboteneWoerter = suggestVerboteneWoerter(sprache.text);
   if (verboteneWoerter.length > 0) reasons.verbotene_woerter = `aus „${sprache.label}“`;
@@ -243,7 +347,7 @@ export function suggestTextSettings(
     settings: {
       anrede: anrede.value,
       branche: branche.value,
-      tonalitaet,
+      tonalitaet: tonalitaet.value,
       verbotene_woerter: verboteneWoerter,
     },
     reasons,

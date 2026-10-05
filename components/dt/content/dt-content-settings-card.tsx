@@ -4,19 +4,22 @@ import { useId, useState } from "react";
 import { CheckCircle2, Pencil } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
-import { DtField, DtInput, DtInputWrap, DtTextarea } from "@/components/dt/dt-field";
+import { DtField, DtTextarea } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import {
   CONTENT_ANREDEN,
   CONTENT_BRANCHEN,
   CONTENT_BRANCHE_LABELS,
+  CONTENT_TONALITAETEN,
   cleanTextSettings,
+  contentTonalitaet,
   parseWordList,
   type ContentAnrede,
   type ContentBranche,
   type ContentTextSettings,
   type ContentTextSettingsSuggestion,
+  type ContentTonalitaet,
 } from "@/lib/dt/content/mapping";
 
 const cardClass =
@@ -27,10 +30,16 @@ const BRANCHE_OPTIONS = CONTENT_BRANCHEN.map((value) => ({
   label: CONTENT_BRANCHE_LABELS[value],
 }));
 
+const TONALITAET_OPTIONS = CONTENT_TONALITAETEN.map((tone) => ({
+  value: tone.key,
+  label: tone.label,
+  description: tone.short,
+}));
+
 const FALLBACK_HINTS: Record<keyof ContentTextSettings, string> = {
   anrede: "Nichts Eindeutiges in den Gesprächen, daher „Sie“.",
   branche: "Kein Hinweis auf Kanzlei oder Praxis, daher Handwerk.",
-  tonalitaet: "In den Gesprächen steht noch nichts zum Ton.",
+  tonalitaet: "In den Gesprächen steht nichts zum Ton. Vorbelegt ist, was zur Branche meist passt.",
   verbotene_woerter: "In den Gesprächen keine gefunden.",
 };
 
@@ -70,9 +79,7 @@ function ConfirmedSettings(props: { settings: ContentTextSettings; onEdit: () =>
         </h2>
         <SummaryChip>Anrede: {settings.anrede}</SummaryChip>
         <SummaryChip>{CONTENT_BRANCHE_LABELS[settings.branche]}</SummaryChip>
-        <SummaryChip className="max-w-[22rem]">
-          <span title={settings.tonalitaet}>Ton: {settings.tonalitaet}</span>
-        </SummaryChip>
+        <SummaryChip>Ton: {contentTonalitaet(settings.tonalitaet)?.label ?? settings.tonalitaet}</SummaryChip>
         <SummaryChip>
           {words === 0 ? "Keine verbotenen Wörter" : `${words} verbotene${words === 1 ? "s Wort" : " Wörter"}`}
         </SummaryChip>
@@ -97,10 +104,10 @@ function SettingsForm(props: {
   const id = useId();
   const [anrede, setAnrede] = useState<ContentAnrede>(props.initial.anrede);
   const [branche, setBranche] = useState<ContentBranche>(props.initial.branche);
-  const [tonalitaet, setTonalitaet] = useState(props.initial.tonalitaet);
+  const [tonalitaet, setTonalitaet] = useState<ContentTonalitaet>(props.initial.tonalitaet);
   const [words, setWords] = useState(props.initial.verbotene_woerter.join(", "));
   const { reasons } = props.suggestion;
-  const canConfirm = tonalitaet.trim().length > 0;
+  const tone = contentTonalitaet(tonalitaet);
 
   return (
     <section aria-label="Einstellungen für Texte" className={cardClass}>
@@ -154,16 +161,19 @@ function SettingsForm(props: {
           <Hint field="branche" reason={reasons.branche} />
         </DtField>
 
-        <DtField label="Tonalität" htmlFor={`${id}-ton`}>
-          <DtInputWrap>
-            <DtInput
-              id={`${id}-ton`}
-              value={tonalitaet}
-              maxLength={1_000}
-              onChange={(e) => setTonalitaet(e.target.value)}
-              placeholder="z. B. ruhig, ehrlich, bodenständig"
-            />
-          </DtInputWrap>
+        <DtField label="Tonalität">
+          <DtSelect
+            value={tonalitaet}
+            onValueChange={(value) => setTonalitaet(value as ContentTonalitaet)}
+            options={TONALITAET_OPTIONS}
+            srLabel="Tonalität"
+            searchable={false}
+            menuMaxHeight="max-h-[var(--radix-dropdown-menu-content-available-height)]"
+            fullWidth
+          />
+          {tone ? (
+            <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/65">{tone.text}</p>
+          ) : null}
           <Hint field="tonalitaet" reason={reasons.tonalitaet} />
         </DtField>
 
@@ -181,13 +191,9 @@ function SettingsForm(props: {
       </div>
 
       <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-sbkm-navy/8 px-4 py-3 dark:border-white/8 sm:px-5">
-        {!canConfirm ? (
-          <p className="text-xs text-sbkm-ink-600 dark:text-white/55">Bitte den Ton kurz beschreiben.</p>
-        ) : null}
         <DtPillButton
           type="button"
           size="sm"
-          disabled={!canConfirm}
           onClick={() =>
             props.onConfirm(
               cleanTextSettings({

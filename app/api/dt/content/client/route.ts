@@ -10,6 +10,7 @@ import {
 import {
   CONTENT_ANREDEN,
   CONTENT_BRANCHEN,
+  CONTENT_TONALITAET_KEYS,
   anbieterFromWorkshop,
   avatarFromAgent,
   filledWorkshopSections,
@@ -29,7 +30,7 @@ const bodySchema = z.object({
   settings: z.object({
     anrede: z.enum(CONTENT_ANREDEN),
     branche: z.enum(CONTENT_BRANCHEN),
-    tonalitaet: z.string().max(2_000),
+    tonalitaet: z.enum(CONTENT_TONALITAET_KEYS),
     verbotene_woerter: z.array(z.string().max(200)).max(100),
   }),
 });
