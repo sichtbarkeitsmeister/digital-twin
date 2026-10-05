@@ -2,6 +2,17 @@
 
 export const DT_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const DT_MAX_ATTACHMENTS = 5;
+/** Chat message body cap (route schema). Longer Excel pastes go out as a file. */
+export const DT_MAX_CHAT_MESSAGE_CHARS = 32_000;
+/**
+ * Raw size still embedded as base64 in the chat JSON.
+ * Larger files are uploaded straight to storage so the request stays under
+ * the platform body limit (~4.5 MB). Base64 would inflate them by a third.
+ */
+export const DT_MAX_INLINE_ATTACHMENT_BYTES = 1_500_000;
+/** Char budget for content + attachment text/base64 in one chat POST. */
+export const DT_MAX_CHAT_REQUEST_CHARS = 3_200_000;
+export const DT_CHAT_ATTACHMENTS_BUCKET = "dt-chat-attachments";
 /** Empty accept = every file type in the OS picker (Excel, Word, PDF, HTML, …). */
 export const DT_ATTACHMENT_ACCEPT_ATTR = "*/*";
 
@@ -35,6 +46,37 @@ export function isDtExcelMime(mimeType: string): boolean {
     m === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
     m === "application/vnd.ms-excel.sheet.macroenabled.12"
   );
+}
+
+export function isDtSpreadsheetFile(fileName: string, mimeType: string): boolean {
+  if (isDtExcelMime(mimeType)) return true;
+  const n = fileName.toLowerCase();
+  return (
+    n.endsWith(".xlsx") ||
+    n.endsWith(".xlsm") ||
+    n.endsWith(".xls") ||
+    n.endsWith(".xlsb")
+  );
+}
+
+/** Storage object uploaded for this chat (`org_…/chat_…/…`), no path traversal. */
+export function isDtChatOwnedStoragePath(
+  storagePath: string,
+  organisationId: string,
+  chatId: string,
+): boolean {
+  const path = storagePath.trim();
+  if (!path || path.length > 500) return false;
+  if (!organisationId || !chatId) return false;
+  if (organisationId.includes("/") || chatId.includes("/")) return false;
+  if (path.includes("..") || path.includes("\\") || path.includes("\0") || path.includes("//")) {
+    return false;
+  }
+  if (path.startsWith("/")) return false;
+  const prefix = `org_${organisationId}/chat_${chatId}/`;
+  if (!path.startsWith(prefix)) return false;
+  const rest = path.slice(prefix.length);
+  return rest.length > 0 && !rest.endsWith("/");
 }
 
 export function isDtTextLikeMime(mimeType: string, fileName = ""): boolean {

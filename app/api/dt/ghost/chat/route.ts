@@ -11,6 +11,7 @@ import { mergeCreatedChatFiles } from "@/lib/dt/chat-files";
 import { parseDtCreatedFilesFromText, stripDtCreatedFileFences } from "@/lib/dt/parse-chat-file-fences";
 import { assembleDtChatEphemeral } from "@/lib/dt/assemble-chat-prompt";
 import { appendEphemeralAttachmentsToMessages } from "@/lib/dt/hydrate-ephemeral-attachments";
+import { DT_MAX_CHAT_MESSAGE_CHARS } from "@/lib/dt/attachments-shared";
 import { requireAuthUser } from "@/lib/dt/db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -26,7 +27,7 @@ const bodySchema = z
   .object({
     organisationId: z.string().uuid(),
     agentId: z.string().uuid(),
-    content: z.string().max(32_000).default(""),
+    content: z.string().max(DT_MAX_CHAT_MESSAGE_CHARS).default(""),
     history: z.array(historySchema).max(80).default([]),
     attachments: z.array(dtAttachmentInboundSchema).max(5).optional().default([]),
     textMode: z.boolean().optional(),
