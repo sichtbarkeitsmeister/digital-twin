@@ -34,11 +34,16 @@ export async function POST(req: Request) {
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const settings = await loadContentSettings(gate.service, gate.organisationId);
-  if (!settings) return contentError("Bitte erst die Einstellungen für Texte bestätigen.", 400);
+  let pages;
+  try {
+    const settings = await loadContentSettings(gate.service, gate.organisationId);
+    if (!settings) return contentError("Bitte erst die Einstellungen für Texte bestätigen.", 400);
 
-  await syncContentPagesFromStructure(gate.service, gate.organisationId).catch(() => null);
-  const pages = await loadContentPages(gate.service, gate.organisationId);
+    await syncContentPagesFromStructure(gate.service, gate.organisationId).catch(() => null);
+    pages = await loadContentPages(gate.service, gate.organisationId);
+  } catch (error) {
+    return contentError(error instanceof Error ? error.message : "Seiten konnten nicht geladen werden.", 500);
+  }
   const wanted =
     "all" in parsed.data
       ? pages

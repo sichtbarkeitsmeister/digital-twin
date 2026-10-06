@@ -97,6 +97,21 @@ const STEP_COLUMNS =
 
 const MAX_PAGES = 300;
 
+export const CONTENT_MIGRATION_FILE = "database/migrations/20261006_dt_content_pipeline.sql";
+
+/** PostgREST answers PGRST205 when a table is not in its schema cache, i.e. the migration never ran. */
+export function isMissingContentTableError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return error.code === "PGRST205" || /schema cache|does not exist/i.test(error.message ?? "");
+}
+
+export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
+  if (isMissingContentTableError(error)) {
+    return `Die Datenbank ist noch nicht vorbereitet: Bitte ${CONTENT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+  }
+  return `${fallback}: ${error.message ?? "Unbekannter Fehler"}`;
+}
+
 export function num(value: number | string | null | undefined): number {
   const n = typeof value === "string" ? Number(value) : (value ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -125,11 +140,14 @@ export async function loadContentSettings(
   service: SupabaseClient,
   organisationId: string,
 ): Promise<ContentSettingsRow | null> {
-  const { data } = await service
+  const { data, error } = await service
     .from("dt_content_settings")
     .select("organisation_id, anrede, branche, tonalitaet, verbotene_woerter, avatar_agent_id, confirmed_by, confirmed_at")
     .eq("organisation_id", organisationId)
     .maybeSingle();
+  if (error && isMissingContentTableError(error)) {
+    throw new Error(contentDbErrorMessage(error, "Einstellungen konnten nicht geladen werden"));
+  }
   return (data as ContentSettingsRow | null) ?? null;
 }
 
@@ -160,7 +178,9 @@ export async function saveContentSettings(
     },
     { onConflict: "organisation_id" },
   );
-  return error ? { ok: false, error: error.message } : { ok: true };
+  return error
+    ? { ok: false, error: contentDbErrorMessage(error, "Einstellungen konnten nicht gespeichert werden") }
+    : { ok: true };
 }
 
 // --- pages ------------------------------------------------------------------------------------
@@ -199,7 +219,7 @@ export async function loadContentPages(
     .eq("organisation_id", organisationId)
     .order("position", { ascending: true })
     .limit(MAX_PAGES);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
   return ((data ?? []) as unknown as Record<string, unknown>[]).map(normalizePageRow);
 }
 
@@ -246,7 +266,7 @@ export async function syncContentPagesFromStructure(
   service: SupabaseClient,
   organisationId: string,
 ): Promise<{ synced: boolean; pages: number }> {
-  const [{ data: structure }, { data: lastSync }] = await Promise.all([
+  const [{ data: structure }, { data: lastSync, error: syncError }] = await Promise.all([
     service
       .from("dt_website_structures")
       .select("raw_text, uploaded_at")
@@ -261,6 +281,9 @@ export async function syncContentPagesFromStructure(
       .limit(1)
       .maybeSingle(),
   ]);
+  if (syncError && isMissingContentTableError(syncError)) {
+    throw new Error(contentDbErrorMessage(syncError, "Seiten konnten nicht geladen werden"));
+  }
   if (!structure?.raw_text) return { synced: false, pages: 0 };
   const uploadedAt = structure.uploaded_at as string;
   if (
@@ -282,7 +305,7 @@ export async function syncContentPagesFromStructure(
   const { error } = await service
     .from("dt_content_pages")
     .upsert(rows, { onConflict: "organisation_id,slug" });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht angelegt werden"));
   return { synced: true, pages: rows.length };
 }
 
