@@ -13,7 +13,8 @@ import {
   writeSelectedOrganisationId,
 } from "@/lib/shared/selected-organisation-storage";
 
-export function SeoTopBarOrgSelector() {
+export function SeoTopBarOrgSelector(props: { variant?: "seo" | "texte" } = {}) {
+  const variant = props.variant ?? "seo";
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -113,7 +114,7 @@ export function SeoTopBarOrgSelector() {
   if (organisations.length === 0) {
     return (
       <p className="truncate text-sm font-semibold text-sbkm-navy dark:text-white">
-        SEO
+        {variant === "texte" ? "Texte" : "SEO"}
       </p>
     );
   }
@@ -137,7 +138,7 @@ export function SeoTopBarOrgSelector() {
           value: organisation.id,
           label: organisation.name,
           description:
-            !organisation.seoEnabled && isPlatformAdmin
+            variant === "seo" && !organisation.seoEnabled && isPlatformAdmin
               ? "SEO deaktiviert"
               : organisation.slug ?? undefined,
         }))}
