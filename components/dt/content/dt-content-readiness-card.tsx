@@ -13,7 +13,7 @@ import type {
 const FALLBACK_LABELS: Record<ContentReadinessCheckId, string> = {
   anbieter: "Anbieterfakten",
   avatar: "Avatar",
-  structure: "Webseitenstruktur-Excel",
+  structure: "Seiten",
 };
 
 type FixLink = { href: string; label: string };
@@ -29,7 +29,10 @@ function fixLinks(id: ContentReadinessCheckId, organisationId: string): FixLink[
     case "avatar":
       return [{ href: `/dashboard/verwaltung/agents?org=${org}`, label: "Zu den Avataren" }];
     case "structure":
-      return [{ href: `/dashboard/verwaltung/seo?org=${org}&tab=struktur`, label: "Zur Seitenstruktur" }];
+      return [
+        { href: `/dashboard/verwaltung/seo?org=${org}&tab=struktur`, label: "Zur Seitenstruktur" },
+        { href: "#seiten-eintragen", label: "Seiten eintragen" },
+      ];
   }
 }
 
@@ -51,9 +54,7 @@ function localNote(id: ContentReadinessCheckId, local: ContentLocalSources | nul
         ? `Im DigitalTwin: ${local.avatarCount} Avatar${local.avatarCount === 1 ? "" : "e"}`
         : "Im DigitalTwin: noch kein Avatar";
     case "structure":
-      return local.structure
-        ? `Im DigitalTwin: ${local.structure.filename ?? "Struktur hinterlegt"}`
-        : "Im DigitalTwin: keine Seitenstruktur hochgeladen";
+      return null;
   }
 }
 

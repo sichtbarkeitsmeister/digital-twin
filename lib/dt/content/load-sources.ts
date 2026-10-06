@@ -8,6 +8,7 @@ import {
   type ContentFragebogenFact,
   type WorkshopAnbieterSection,
 } from "@/lib/dt/content/mapping";
+import { contentDbErrorMessage, isMissingContentTableError } from "@/lib/dt/content/store";
 import type { ContentLocalSources } from "@/lib/dt/content/types";
 import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
 import { extractSurveyFacts } from "@/lib/dt/survey-facts";
@@ -183,7 +184,7 @@ export async function loadContentLocalSources(
   supabase: SupabaseClient,
   organisationId: string,
 ): Promise<ContentLocalSources> {
-  const [anbieter, avatars, { data: structure }] = await Promise.all([
+  const [anbieter, avatars, { data: structure }, pageCount] = await Promise.all([
     loadContentAnbieterSources(supabase, organisationId),
     loadContentAvatarOptions(supabase, organisationId),
     supabase
@@ -191,10 +192,34 @@ export async function loadContentLocalSources(
       .select("filename")
       .eq("organisation_id", organisationId)
       .maybeSingle(),
+    countContentPages(supabase, organisationId),
   ]);
   return {
     anbieter: anbieterSummary(anbieter),
     avatarCount: avatars.length,
     structure: structure ? { filename: (structure.filename as string | null) ?? null } : null,
+    pages: pageCount,
+  };
+}
+
+async function countContentPages(
+  supabase: SupabaseClient,
+  organisationId: string,
+): Promise<ContentLocalSources["pages"]> {
+  const { data, error } = await supabase
+    .from("dt_content_pages")
+    .select("structure_uploaded_at")
+    .eq("organisation_id", organisationId)
+    .limit(300);
+  if (error) {
+    if (isMissingContentTableError(error)) {
+      throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
+    }
+    return { total: 0, manual: 0 };
+  }
+  const rows = data ?? [];
+  return {
+    total: rows.length,
+    manual: rows.filter((row) => row.structure_uploaded_at == null).length,
   };
 }

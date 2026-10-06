@@ -101,9 +101,25 @@ export function describeAnbieterSources(anbieter: ContentLocalSources["anbieter"
   return parts.join(" · ");
 }
 
+/** Structure upload, typed list, or neither. */
+export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "pages">): {
+  ok: boolean;
+  hint: string;
+} {
+  if (local.structure) {
+    return { ok: true, hint: `Struktur: ${local.structure.filename?.trim() || "ohne Dateiname"}` };
+  }
+  const n = local.pages.total;
+  if (n > 0) {
+    return { ok: true, hint: `${n} ${n === 1 ? "Seite" : "Seiten"} manuell angelegt` };
+  }
+  return { ok: false, hint: "Keine Seiten. Struktur hochladen oder unten eintragen." };
+}
+
 /** The three readiness checks from DigitalTwin's own tables. */
 export function readinessFromLocal(local: ContentLocalSources): ContentReadiness {
   const sources = describeAnbieterSources(local.anbieter);
+  const seiten = describeSeiten(local);
   const checks: ContentReadiness["checks"] = [
     {
       id: "anbieter",
@@ -124,11 +140,9 @@ export function readinessFromLocal(local: ContentLocalSources): ContentReadiness
     },
     {
       id: "structure",
-      ok: Boolean(local.structure),
-      label: "Webseitenstruktur",
-      hint: local.structure
-        ? `Struktur „${local.structure.filename ?? "ohne Dateiname"}“ hinterlegt.`
-        : "Die Seitenliste fehlt noch (SEO → Struktur).",
+      ok: seiten.ok,
+      label: "Seiten",
+      hint: seiten.hint,
     },
   ];
   return { ready: checks.every((c) => c.ok), checks };

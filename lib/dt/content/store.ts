@@ -10,6 +10,7 @@ import type { ContentAnrede, ContentBranche, ContentTextSettings } from "@/lib/d
 import { cleanTextSettings } from "@/lib/dt/content/mapping";
 import { CONTENT_STEPS, contentStepName } from "@/lib/dt/content/pipeline/steps";
 import { formatEur } from "@/lib/dt/content/presentation";
+import { planManualContentPages, type ManualPageDraft } from "@/lib/dt/content/manual-pages";
 import { slugify } from "@/lib/dt/content/render";
 import { parseWebsiteStructure, type WebsiteStructureNode } from "@/lib/dt/seo/website-structure";
 import type {
@@ -307,6 +308,39 @@ export async function syncContentPagesFromStructure(
     .upsert(rows, { onConflict: "organisation_id,slug" });
   if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht angelegt werden"));
   return { synced: true, pages: rows.length };
+}
+
+/**
+ * Adds pages the user typed. Inserts new slugs only: an existing page keeps its text,
+ * keyword and `structure_uploaded_at` (null on these rows, so a later Excel upload still syncs).
+ */
+export async function upsertManualContentPages(
+  service: SupabaseClient,
+  organisationId: string,
+  pages: readonly ManualPageDraft[],
+): Promise<{ inserted: number }> {
+  const { data, error } = await service
+    .from("dt_content_pages")
+    .select("slug, position")
+    .eq("organisation_id", organisationId)
+    .limit(MAX_PAGES);
+  if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
+
+  const planned = planManualContentPages((data ?? []) as { slug: string; position?: number | null }[], pages);
+  if (planned.length === 0) return { inserted: 0 };
+
+  const rows = planned.map((page) => ({
+    organisation_id: organisationId,
+    slug: page.slug,
+    name: page.name,
+    path: null,
+    level: page.level,
+    position: page.position,
+    main_keyword: page.main_keyword,
+  }));
+  const { error: insertError } = await service.from("dt_content_pages").insert(rows);
+  if (insertError) throw new Error(contentDbErrorMessage(insertError, "Seiten konnten nicht angelegt werden"));
+  return { inserted: rows.length };
 }
 
 // --- presentation -----------------------------------------------------------------------------

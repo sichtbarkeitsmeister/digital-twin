@@ -173,7 +173,10 @@ export type ContentLocalSources = {
     fragebogen: { title: string; facts: number } | null;
   } | null;
   avatarCount: number;
+  /** Uploaded website structure, when the organisation has one. */
   structure: { filename: string | null } | null;
+  /** Rows in `dt_content_pages`. `manual` counts rows that did not come from a structure upload. */
+  pages: { total: number; manual: number };
 };
 
 /** Which model the pipeline will use for the next step and where that setting comes from. */

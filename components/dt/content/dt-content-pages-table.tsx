@@ -32,7 +32,7 @@ export function DtContentPagesTable(props: {
         <FileText className="mx-auto size-5 text-sbkm-ink-500" aria-hidden />
         <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Noch keine Seiten</p>
         <p className="mx-auto max-w-sm text-xs text-sbkm-ink-600 dark:text-white/60">
-          Sobald unter SEO → Struktur eine Webseitenstruktur hochgeladen ist, erscheinen hier alle Seiten.
+          Seiten oben eintragen, oder unter SEO → Struktur eine Webseitenstruktur hochladen.
         </p>
       </div>
     );

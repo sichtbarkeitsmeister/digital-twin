@@ -20,7 +20,8 @@ import {
   type ContentFragebogenFact,
   type WorkshopAnbieterSection,
 } from "../lib/dt/content/mapping";
-import { describeAnbieterSources, readinessFromLocal } from "../lib/dt/content/route-helpers";
+import { parseManualPageLines, planManualContentPages } from "../lib/dt/content/manual-pages";
+import { describeAnbieterSources, describeSeiten, readinessFromLocal } from "../lib/dt/content/route-helpers";
 import {
   CONTENT_API_KEY_ENV,
   CONTENT_MODEL_ENV,
@@ -53,6 +54,8 @@ import {
   pageActions,
   pageSummary,
   rerunStepFor,
+  syncContentPagesFromStructure,
+  upsertManualContentPages,
   type ContentPageRow,
   type ContentStepRow,
 } from "../lib/dt/content/store";
@@ -405,9 +408,139 @@ assert.equal(
   describeAnbieterSources({ workshop: { filled: 11, total: 13 }, fragebogen: { title: "A", facts: 24 } }),
   "11 von 13 Abschnitten aus den Gesprächen · 24 Antworten aus dem Anbieter-Fragebogen „A“",
 );
-const readyFb = readinessFromLocal({ anbieter: { workshop: null, fragebogen: { title: "A", facts: 3 } }, avatarCount: 1, structure: { filename: "s.xlsx" } });
+const readyFb = readinessFromLocal({
+  anbieter: { workshop: null, fragebogen: { title: "A", facts: 3 } },
+  avatarCount: 1,
+  structure: { filename: "s.xlsx" },
+  pages: { total: 0, manual: 0 },
+});
 assert.equal(readyFb.ready, true, "Fragebogen alone satisfies the Anbieter check");
-assert.equal(readinessFromLocal({ anbieter: null, avatarCount: 1, structure: { filename: null } }).checks[0]!.ok, false);
+assert.equal(
+  readinessFromLocal({ anbieter: null, avatarCount: 1, structure: null, pages: { total: 0, manual: 0 } }).checks[0]!.ok,
+  false,
+);
+assert.equal(describeSeiten({ structure: { filename: "s.xlsx" }, pages: { total: 4, manual: 0 } }).hint, "Struktur: s.xlsx");
+const manualReady = readinessFromLocal({
+  anbieter: { workshop: null, fragebogen: { title: "A", facts: 3 } },
+  avatarCount: 1,
+  structure: null,
+  pages: { total: 2, manual: 2 },
+});
+assert.equal(manualReady.ready, true, "typed pages satisfy Seiten without a website structure");
+assert.equal(manualReady.checks.find((c) => c.id === "structure")?.hint, "2 Seiten manuell angelegt");
+assert.equal(
+  describeSeiten({ structure: null, pages: { total: 0, manual: 0 } }).hint,
+  "Keine Seiten. Struktur hochladen oder unten eintragen.",
+);
+
+// --- typed page list and structure sync --------------------------------------------------------
+const planned = planManualContentPages([], [
+  { name: "Dachsanierung", keyword: "Dachsanierung Musterstadt" },
+  { name: "Kontakt" },
+]);
+assert.deepEqual(planned.map((p) => p.slug), ["dachsanierung", "kontakt"]);
+assert.equal(planned[0]!.main_keyword, "Dachsanierung Musterstadt");
+assert.equal(planned[0]!.level, 1);
+assert.deepEqual(
+  planManualContentPages(
+    [{ slug: "dachsanierung", position: 0 }],
+    [{ name: "Dachsanierung" }, { name: "Dachsanierung" }],
+  ).map((p) => p.slug),
+  [],
+  "a name that already exists is not inserted again",
+);
+assert.deepEqual(parseManualPageLines("A | Begriff\n\n  \n| ohne Name\nB").map((p) => p.name), ["A", "B"]);
+
+type MemRow = Record<string, unknown>;
+function memoryClient() {
+  const tables = new Map<string, MemRow[]>();
+  const rowsOf = (name: string) => {
+    if (!tables.has(name)) tables.set(name, []);
+    return tables.get(name)!;
+  };
+  class Builder {
+    private filters: Array<(row: MemRow) => boolean> = [];
+    private op: "select" | "insert" | "upsert" = "select";
+    private payload: MemRow[] = [];
+    private single = false;
+    private limitN: number | null = null;
+    constructor(private name: string) {}
+    select() { return this; }
+    eq(col: string, value: unknown) { this.filters.push((row) => row[col] === value); return this; }
+    not(col: string, op: string, value: unknown) {
+      if (op === "is" && value === null) this.filters.push((row) => row[col] != null);
+      return this;
+    }
+    order() { return this; }
+    limit(n: number) { this.limitN = n; return this; }
+    maybeSingle() { this.single = true; return this; }
+    insert(rows: MemRow | MemRow[]) { this.op = "insert"; this.payload = Array.isArray(rows) ? rows : [rows]; return this; }
+    upsert(rows: MemRow | MemRow[]) { this.op = "upsert"; this.payload = Array.isArray(rows) ? rows : [rows]; return this; }
+    private execute() {
+      const table = rowsOf(this.name);
+      if (this.op === "insert") {
+        for (const row of this.payload) table.push({ html: "", structure_uploaded_at: null, ...row });
+        return { data: this.payload, error: null };
+      }
+      if (this.op === "upsert") {
+        for (const row of this.payload) {
+          const hit = table.find((existing) => existing.organisation_id === row.organisation_id && existing.slug === row.slug);
+          if (hit) Object.assign(hit, row);
+          else table.push({ html: "", structure_uploaded_at: null, ...row });
+        }
+        return { data: null, error: null };
+      }
+      let found = table.filter((row) => this.filters.every((filter) => filter(row)));
+      if (this.limitN != null) found = found.slice(0, this.limitN);
+      return { data: this.single ? (found[0] ?? null) : found, error: null };
+    }
+    then<T>(onfulfilled?: (value: { data: unknown; error: null }) => T) {
+      return Promise.resolve(this.execute()).then(onfulfilled);
+    }
+  }
+  return {
+    tables,
+    client: { from(name: string) { return new Builder(name); } } as unknown as Parameters<typeof upsertManualContentPages>[0],
+  };
+}
+
+async function runStoredPages() {
+const ORG = "00000000-0000-0000-0000-00000000aaaa";
+const mem = memoryClient();
+mem.tables.set("dt_website_structures", [{
+  organisation_id: ORG,
+  raw_text: "Startseite /\n  Kontakt /kontakt",
+  uploaded_at: "2026-03-01T00:00:00.000Z",
+}]);
+const synced = await syncContentPagesFromStructure(mem.client, ORG);
+assert.equal(synced.synced, true);
+const stored = mem.tables.get("dt_content_pages")!;
+assert.equal(stored.length, 2, "structure raw_text seeds one row per node");
+stored[0]!.html = "<p>bleibt</p>";
+const firstManual = await upsertManualContentPages(mem.client, ORG, [
+  { name: "Über uns", keyword: "Team" },
+  { name: "Kontakt" },
+]);
+assert.equal(firstManual.inserted, 1, "Kontakt already came from the structure");
+assert.equal(stored.length, 3);
+const manual = stored.find((row) => row.slug === "ueber-uns");
+assert.equal(manual?.structure_uploaded_at, null);
+assert.equal(manual?.main_keyword, "Team");
+assert.equal(manual?.level, 1);
+assert.equal(stored[0]!.html, "<p>bleibt</p>");
+const again = await upsertManualContentPages(mem.client, ORG, [{ name: "Über uns", keyword: "anderes" }]);
+assert.equal(again.inserted, 0);
+assert.equal(stored.length, 3);
+assert.equal(stored[0]!.html, "<p>bleibt</p>", "saving the same name does not clear text");
+assert.equal(manual?.main_keyword, "Team", "an existing keyword is left as it is");
+mem.tables.get("dt_website_structures")![0]!.uploaded_at = "2026-03-02T00:00:00.000Z";
+mem.tables.get("dt_website_structures")![0]!.raw_text = "Startseite /\n  Kontakt /kontakt\n  Impressum /impressum";
+const resynced = await syncContentPagesFromStructure(mem.client, ORG);
+assert.equal(resynced.synced, true);
+assert.ok(stored.some((row) => row.slug === "impressum"));
+assert.ok(stored.some((row) => row.slug === "ueber-uns"), "a later structure upload keeps manual pages");
+assert.equal(stored[0]!.html, "<p>bleibt</p>");
+}
 
 // --- model config and pricing -----------------------------------------------------------------
 const defaults = resolveContentModels({}, {});
@@ -432,4 +565,9 @@ assert.equal(estimateCostEur("claude-haiku-4-5", { inputTokens: 0, outputTokens:
 assert.equal(resolveContentApiKey({}), null, "Texte does not fall back to ANTHROPIC_API_KEY");
 assert.equal(resolveContentApiKey({ ANTHROPIC_API_KEY: "shared", [CONTENT_API_KEY_ENV]: "  content-key  " }), "content-key");
 
-console.log("OK: content tests passed");
+runStoredPages()
+  .then(() => console.log("OK: content tests passed"))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
