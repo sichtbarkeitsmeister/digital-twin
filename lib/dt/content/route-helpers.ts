@@ -87,16 +87,31 @@ export async function readJsonBody(req: Request): Promise<unknown> {
   }
 }
 
+/** „11 von 13 Abschnitten aus den Gesprächen · 24 Antworten aus dem Anbieter-Fragebogen „…““ */
+export function describeAnbieterSources(anbieter: ContentLocalSources["anbieter"]): string | null {
+  if (!anbieter) return null;
+  const parts: string[] = [];
+  if (anbieter.workshop) {
+    parts.push(`${anbieter.workshop.filled} von ${anbieter.workshop.total} Abschnitten aus den Gesprächen`);
+  }
+  if (anbieter.fragebogen) {
+    const n = anbieter.fragebogen.facts;
+    parts.push(`${n} ${n === 1 ? "Antwort" : "Antworten"} aus dem Anbieter-Fragebogen „${anbieter.fragebogen.title}“`);
+  }
+  return parts.join(" · ");
+}
+
 /** The three readiness checks from DigitalTwin's own tables. */
 export function readinessFromLocal(local: ContentLocalSources): ContentReadiness {
+  const sources = describeAnbieterSources(local.anbieter);
   const checks: ContentReadiness["checks"] = [
     {
       id: "anbieter",
       ok: Boolean(local.anbieter),
       label: "Anbieterfakten",
-      hint: local.anbieter
-        ? `${local.anbieter.filled} von ${local.anbieter.total} Abschnitten aus den Gesprächen gefüllt.`
-        : "Aus den Gesprächen gibt es noch keine Anbieterfakten.",
+      hint: sources
+        ? `${sources}.`
+        : "Noch keine Anbieterfakten: weder ein ausgefüllter Anbieter-Fragebogen noch ausgewertete Gespräche.",
     },
     {
       id: "avatar",

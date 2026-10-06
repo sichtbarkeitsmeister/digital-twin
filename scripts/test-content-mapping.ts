@@ -11,11 +11,16 @@ import {
   cleanTextSettings,
   contentTonalitaetText,
   filledWorkshopSections,
+  fragebogenSections,
+  mergeAnbieterSections,
   mergeContentAnbieter,
   parseWordList,
+  sectionsForSuggestion,
   suggestTextSettings,
+  type ContentFragebogenFact,
   type WorkshopAnbieterSection,
 } from "../lib/dt/content/mapping";
+import { describeAnbieterSources, readinessFromLocal } from "../lib/dt/content/route-helpers";
 import {
   CONTENT_MODEL_ENV,
   DEFAULT_CONTENT_MODEL,
@@ -356,6 +361,51 @@ const overview = buildOverview({ ready: true, checks: [] }, [
 ]);
 assert.deepEqual([overview.needs_you, overview.running, overview.finished, overview.cost_eur, overview.cost], [1, 1, 1, 1.75, "1,75\u00a0€"]);
 assert.equal(overview.pages[1]!.questions, 1);
+
+// --- Anbieter-Fragebogen as fact source --------------------------------------------------------
+const facts: ContentFragebogenFact[] = [
+  { label: "Wie heißt Ihr Unternehmen?", stepTitle: "Unternehmen", value: "Kanzlei Berger & Partner" },
+  { label: "Wie sprechen Sie Ihre Mandanten an?", stepTitle: "Sprache", value: "Wir siezen immer, seriös und ruhig." },
+  { label: "Leer", stepTitle: "x", value: "   " },
+  { label: "Preise", stepTitle: "Preise", value: "Erstgespräch 150 €" },
+];
+const fbSections = fragebogenSections(facts);
+assert.deepEqual(
+  fbSections.map((s) => [s.key, s.label]),
+  [
+    ["fragebogen_01", "Unternehmen – Wie heißt Ihr Unternehmen?"],
+    ["fragebogen_02", "Sprache – Wie sprechen Sie Ihre Mandanten an?"],
+    ["fragebogen_03", "Preise"],
+  ],
+  "empty answers dropped, step prefixed only when different",
+);
+const emptyWorkshop = normalizeAnbieterItems([]).map((i) => ({ key: i.key, label: i.label, current: i.current }));
+const fbMerged = mergeAnbieterSections(emptyWorkshop, fbSections);
+assert.equal(fbMerged.length, 3, "empty workshop sections are not sent");
+assert.equal(
+  mergeAnbieterSections(DEMO_WORKSHOP_ANBIETER, fbSections).length,
+  filledWorkshopSections(DEMO_WORKSHOP_ANBIETER) + 3,
+);
+const fbAnbieter = anbieterFromWorkshop(fbMerged, { organisationName: "Berger" });
+assert.equal(fbAnbieter.fragebogen_02, "Wir siezen immer, seriös und ruhig.", "fragebogen keys pass the section filter");
+const fbSuggestion = suggestTextSettings(sectionsForSuggestion(emptyWorkshop, facts));
+assert.equal(fbSuggestion.settings.branche, "rechtsanwalt", "branche from Fragebogen answers");
+assert.equal(fbSuggestion.settings.anrede, "Sie");
+assert.equal(fbSuggestion.settings.tonalitaet, "serioes");
+assert.match(fbSuggestion.reasons.branche ?? "", /Anbieter-Fragebogen/);
+const workshopWins = sectionsForSuggestion(DEMO_WORKSHOP_ANBIETER, facts);
+assert.equal(workshopWins.find((s) => s.key === "unternehmen")?.current, DEMO_WORKSHOP_ANBIETER.find((s) => s.key === "unternehmen")?.current, "filled workshop text is kept");
+assert.deepEqual(sectionsForSuggestion(DEMO_WORKSHOP_ANBIETER, []), DEMO_WORKSHOP_ANBIETER);
+
+assert.equal(describeAnbieterSources(null), null);
+assert.equal(describeAnbieterSources({ workshop: null, fragebogen: { title: "Anbieter 2026", facts: 1 } }), "1 Antwort aus dem Anbieter-Fragebogen „Anbieter 2026“");
+assert.equal(
+  describeAnbieterSources({ workshop: { filled: 11, total: 13 }, fragebogen: { title: "A", facts: 24 } }),
+  "11 von 13 Abschnitten aus den Gesprächen · 24 Antworten aus dem Anbieter-Fragebogen „A“",
+);
+const readyFb = readinessFromLocal({ anbieter: { workshop: null, fragebogen: { title: "A", facts: 3 } }, avatarCount: 1, structure: { filename: "s.xlsx" } });
+assert.equal(readyFb.ready, true, "Fragebogen alone satisfies the Anbieter check");
+assert.equal(readinessFromLocal({ anbieter: null, avatarCount: 1, structure: { filename: null } }).checks[0]!.ok, false);
 
 // --- model config and pricing -----------------------------------------------------------------
 const defaults = resolveContentModels({}, {});

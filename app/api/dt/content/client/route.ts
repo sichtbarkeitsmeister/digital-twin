@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 import {
+  loadContentAnbieterSources,
   loadContentAvatarOptions,
   loadContentAvatarRow,
-  loadContentWorkshopAnbieter,
 } from "@/lib/dt/content/load-sources";
 import {
   CONTENT_ANREDEN,
@@ -11,7 +11,6 @@ import {
   CONTENT_TONALITAET_KEYS,
   anbieterFromWorkshop,
   avatarFromAgent,
-  filledWorkshopSections,
   mergeContentAnbieter,
 } from "@/lib/dt/content/mapping";
 import { contentError, contentOk, gateContentRoute, readJsonBody } from "@/lib/dt/content/route-helpers";
@@ -41,9 +40,9 @@ export async function PUT(req: Request) {
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const [{ data: organisation }, sections, { data: structure }] = await Promise.all([
+  const [{ data: organisation }, anbieterSources, { data: structure }] = await Promise.all([
     gate.service.from("organisations").select("name").eq("id", gate.organisationId).maybeSingle(),
-    loadContentWorkshopAnbieter(gate.service, gate.organisationId).catch(() => []),
+    loadContentAnbieterSources(gate.service, gate.organisationId),
     gate.service
       .from("dt_website_structures")
       .select("filename")
@@ -69,11 +68,14 @@ export async function PUT(req: Request) {
     avatarAgentId: avatarRow?.id ?? null,
     userId: gate.userId,
   });
-  if (!saved.ok) return contentError(`Einstellungen konnten nicht gespeichert werden: ${saved.error}`, 500);
+  if (!saved.ok) return contentError(saved.error, 500);
 
+  const sections = anbieterSources.sections;
   const problems: string[] = [];
-  if (filledWorkshopSections(sections) === 0) {
-    problems.push("Noch keine Anbieterfakten aus den Gesprächen. Bitte erst unter Transkripte auswerten.");
+  if (sections.length === 0) {
+    problems.push(
+      "Noch keine Anbieterfakten: Anbieter-Fragebogen ausfüllen lassen (Fragebögen) oder Gespräche auswerten (Transkripte).",
+    );
   }
   if (!avatarRow) problems.push("Kein Avatar vorhanden.");
   if (!structure) problems.push("Keine Webseitenstruktur hochgeladen.");
@@ -87,7 +89,7 @@ export async function PUT(req: Request) {
   };
   const result: ContentClientPutResult = {
     client: gate.organisationId,
-    anbieter: filledWorkshopSections(sections) > 0,
+    anbieter: sections.length > 0,
     avatar: Boolean(avatarRow),
     structure: structure ? ((structure.filename as string | null) ?? "Struktur") : null,
     complete: problems.length === 0,

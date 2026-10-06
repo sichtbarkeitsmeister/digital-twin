@@ -176,6 +176,78 @@ export function filledWorkshopSections(items: readonly WorkshopAnbieterSection[]
   return items.filter((i) => i.current?.trim()).length;
 }
 
+/** One answered question of the completed Anbieter-Fragebogen (see `extractSurveyFacts`). */
+export type ContentFragebogenFact = {
+  label: string;
+  stepTitle: string;
+  value: string;
+};
+
+const FRAGEBOGEN_KEY_PREFIX = "fragebogen_";
+const FRAGEBOGEN_SPRACHE_RE =
+  /\b(anrede|duzen|siezen|geduzt|gesiezt|per du|per sie|ton(alit[äa]t|fall)?|sprache|sprachlich|stil|wording|ansprache|formulierung|w[öo]rter|begriffe)\b/i;
+
+/**
+ * Fragebogen answers → sections for the prompts and the `anbieter` object. Keys are
+ * `fragebogen_01` … so they pass `anbieterFromWorkshop`; the label carries step and question.
+ */
+export function fragebogenSections(facts: readonly ContentFragebogenFact[]): WorkshopAnbieterSection[] {
+  const out: WorkshopAnbieterSection[] = [];
+  for (const fact of facts) {
+    const value = fact.value.trim();
+    const label = fact.label.trim();
+    if (!value || !label) continue;
+    const step = fact.stepTitle.trim();
+    out.push({
+      key: `${FRAGEBOGEN_KEY_PREFIX}${String(out.length + 1).padStart(2, "0")}`,
+      label: step && step !== label ? `${step} – ${label}` : label,
+      current: value,
+    });
+  }
+  return out;
+}
+
+/** Workshop sections with text first (their keys drive the suggestion), then the Fragebogen. */
+export function mergeAnbieterSections(
+  workshop: readonly WorkshopAnbieterSection[],
+  fragebogen: readonly WorkshopAnbieterSection[],
+): WorkshopAnbieterSection[] {
+  return [...workshop.filter((s) => s.current?.trim()), ...fragebogen];
+}
+
+/**
+ * Sections to feed `suggestTextSettings`: the workshop as it is; where it has no
+ * `sprache` / `unternehmen` text, the Fragebogen fills in (answers about tone and address
+ * go to `sprache`, everything to `unternehmen`).
+ */
+export function sectionsForSuggestion(
+  workshop: readonly WorkshopAnbieterSection[],
+  facts: readonly ContentFragebogenFact[],
+): WorkshopAnbieterSection[] {
+  if (facts.length === 0) return [...workshop];
+  const line = (f: ContentFragebogenFact) => `${f.label.trim()}: ${f.value.trim()}`;
+  const sprache = facts.filter((f) => FRAGEBOGEN_SPRACHE_RE.test(`${f.stepTitle} ${f.label}`));
+  const fill: Record<string, WorkshopAnbieterSection> = {
+    unternehmen: { key: "unternehmen", label: "Anbieter-Fragebogen", current: facts.map(line).join("\n") },
+    ...(sprache.length > 0
+      ? {
+          sprache: {
+            key: "sprache",
+            label: "Anbieter-Fragebogen (Sprache & Ton)",
+            current: sprache.map(line).join("\n"),
+          },
+        }
+      : {}),
+  };
+
+  // Replace empty workshop entries in place (sectionOf takes the first match per key).
+  const out = workshop.map((s) => (!s.current?.trim() && fill[s.key] ? fill[s.key] : s));
+  for (const [key, section] of Object.entries(fill)) {
+    if (!out.some((s) => s.key === key)) out.push(section);
+  }
+  return out;
+}
+
 /**
  * Workshop sections → `anbieter` object: every filled section under its key as free
  * text, plus `name`. Empty sections are left out so the service never reads them as facts.

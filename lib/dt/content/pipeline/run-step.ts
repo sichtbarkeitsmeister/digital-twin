@@ -6,9 +6,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  loadContentAnbieterSources,
   loadContentAvatarOptions,
   loadContentAvatarRow,
-  loadContentWorkshopAnbieter,
 } from "@/lib/dt/content/load-sources";
 import { avatarFromAgent } from "@/lib/dt/content/mapping";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
@@ -52,17 +52,21 @@ async function loadContext(
   page: ContentPageRow,
   steps: ContentStepRow[],
 ): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, sections, { data: structure }] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, { data: structure }] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
-    loadContentWorkshopAnbieter(service, page.organisation_id).catch(() => []),
+    loadContentAnbieterSources(service, page.organisation_id),
     service.from("dt_website_structures").select("outline").eq("organisation_id", page.organisation_id).maybeSingle(),
   ]);
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind noch nicht bestätigt.", false);
   }
-  if (!sections.some((s) => s.current.trim())) {
-    throw new ContentLlmError("Keine Anbieterfakten aus den Gesprächen vorhanden.", false);
+  const sections = anbieter.sections;
+  if (sections.length === 0) {
+    throw new ContentLlmError(
+      "Keine Anbieterfakten vorhanden (weder Anbieter-Fragebogen noch ausgewertete Gespräche).",
+      false,
+    );
   }
 
   let avatarId = settingsRow.avatar_agent_id;

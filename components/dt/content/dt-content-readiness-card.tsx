@@ -16,25 +16,36 @@ const FALLBACK_LABELS: Record<ContentReadinessCheckId, string> = {
   structure: "Webseitenstruktur-Excel",
 };
 
-function fixLink(id: ContentReadinessCheckId, organisationId: string) {
+type FixLink = { href: string; label: string };
+
+function fixLinks(id: ContentReadinessCheckId, organisationId: string): FixLink[] {
   const org = encodeURIComponent(organisationId);
   switch (id) {
     case "anbieter":
-      return { href: `/dashboard/transkripte?org=${org}`, label: "Zu den Transkripten" };
+      return [
+        { href: `/dashboard/frageboegen?org=${org}`, label: "Zu den Fragebögen" },
+        { href: `/dashboard/transkripte?org=${org}`, label: "Zu den Transkripten" },
+      ];
     case "avatar":
-      return { href: `/dashboard/verwaltung/agents?org=${org}`, label: "Zu den Avataren" };
+      return [{ href: `/dashboard/verwaltung/agents?org=${org}`, label: "Zu den Avataren" }];
     case "structure":
-      return { href: `/dashboard/verwaltung/seo?org=${org}&tab=struktur`, label: "Zur Seitenstruktur" };
+      return [{ href: `/dashboard/verwaltung/seo?org=${org}&tab=struktur`, label: "Zur Seitenstruktur" }];
   }
+}
+
+function anbieterNote(anbieter: ContentLocalSources["anbieter"]): string {
+  if (!anbieter) return "Im DigitalTwin: kein ausgefüllter Anbieter-Fragebogen, keine ausgewerteten Gespräche";
+  const parts: string[] = [];
+  if (anbieter.fragebogen) parts.push(`Fragebogen „${anbieter.fragebogen.title}“ (${anbieter.fragebogen.facts} Antworten)`);
+  if (anbieter.workshop) parts.push(`Gespräche (${anbieter.workshop.filled} von ${anbieter.workshop.total} Abschnitten)`);
+  return `Im DigitalTwin: ${parts.join(" · ")}`;
 }
 
 function localNote(id: ContentReadinessCheckId, local: ContentLocalSources | null): string | null {
   if (!local) return null;
   switch (id) {
     case "anbieter":
-      return local.anbieter
-        ? `Im DigitalTwin: ${local.anbieter.filled} von ${local.anbieter.total} Abschnitten aus den Gesprächen`
-        : "Im DigitalTwin: noch keine Gespräche ausgewertet";
+      return anbieterNote(local.anbieter);
     case "avatar":
       return local.avatarCount > 0
         ? `Im DigitalTwin: ${local.avatarCount} Avatar${local.avatarCount === 1 ? "" : "e"}`
@@ -101,7 +112,7 @@ export function DtContentReadinessCard(props: {
 
       <ul className="grid gap-px bg-sbkm-navy/8 dark:bg-white/8 sm:grid-cols-3">
         {checks.map((check) => {
-          const link = fixLink(check.id, props.organisationId);
+          const links = fixLinks(check.id, props.organisationId);
           const note = localNote(check.id, props.local);
           const pending = props.loading && !props.readiness;
           return (
@@ -127,19 +138,24 @@ export function DtContentReadinessCard(props: {
               {note ? (
                 <p className="text-[11px] text-sbkm-ink-500 dark:text-white/45">{note}</p>
               ) : null}
-              {link ? (
-                <Link
-                  href={link.href}
-                  className={cn(
-                    "mt-auto inline-flex w-fit items-center gap-1 rounded-pill text-xs font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45",
-                    check.ok
-                      ? "text-sbkm-ink-600 dark:text-white/60"
-                      : "text-sbkm-navy dark:text-sbkm-mint",
-                  )}
-                >
-                  {link.label}
-                  <ArrowRight className="size-3" aria-hidden />
-                </Link>
+              {links.length > 0 ? (
+                <div className="mt-auto flex flex-wrap gap-x-3 gap-y-1">
+                  {links.map((link) => (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className={cn(
+                        "inline-flex w-fit items-center gap-1 rounded-pill text-xs font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45",
+                        check.ok
+                          ? "text-sbkm-ink-600 dark:text-white/60"
+                          : "text-sbkm-navy dark:text-sbkm-mint",
+                      )}
+                    >
+                      {link.label}
+                      <ArrowRight className="size-3" aria-hidden />
+                    </Link>
+                  ))}
+                </div>
               ) : null}
             </li>
           );
