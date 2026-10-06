@@ -17,13 +17,16 @@ import { DtContentReadinessCard } from "@/components/dt/content/dt-content-readi
 import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settings-card";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
+import { describeContentModelSource } from "@/lib/dt/content/model-config";
 import { anyContentPageRunning, formatContentDate } from "@/lib/dt/content/presentation";
 import type {
   ContentClientPutBody,
   ContentClientPutResult,
   ContentLocalSources,
   ContentOverview,
+  ContentPipelineInfo,
   ContentReadiness,
+  ContentReadinessResult,
   ContentRunThroughResult,
 } from "@/lib/dt/content/types";
 
@@ -52,13 +55,15 @@ export function DtContentWorkspace(props: {
   organisationId: string;
   avatars: ContentAvatarOption[];
   suggestion: ContentTextSettingsSuggestion;
-  initialDemo: boolean;
+  /** Confirmed settings from `dt_content_settings`; null shows the settings card open. */
+  initialSettings: ContentTextSettings | null;
+  initialAvatarId: string | null;
 }) {
   const { organisationId } = props;
-  const [demo, setDemo] = useState(props.initialDemo);
 
   const [readiness, setReadiness] = useState<ContentReadiness | null>(null);
   const [local, setLocal] = useState<ContentLocalSources | null>(null);
+  const [pipeline, setPipeline] = useState<ContentPipelineInfo | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(true);
   const [readinessError, setReadinessError] = useState<string | null>(null);
 
@@ -67,25 +72,29 @@ export function DtContentWorkspace(props: {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
 
-  const [avatarId, setAvatarId] = useState(props.avatars[0]?.id ?? "");
+  const [avatarId, setAvatarId] = useState(
+    () =>
+      (props.initialAvatarId && props.avatars.some((a) => a.id === props.initialAvatarId)
+        ? props.initialAvatarId
+        : props.avatars[0]?.id) ?? "",
+  );
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
-  // Not persisted yet: confirmed once per organisation and page visit until a column/table exists.
-  const [settings, setSettings] = useState<ContentTextSettings | null>(null);
+  const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
   const [editingSettings, setEditingSettings] = useState(false);
   const [sync, setSync] = useState<{ result: ContentClientPutResult; sent: ContentClientPutBody } | null>(null);
   const [openPage, setOpenPage] = useState<{ slug: string; name: string } | null>(null);
 
   const loadReadiness = useCallback(async () => {
     setReadinessLoading(true);
-    const res = await contentApi<{ readiness: ContentReadiness; local: ContentLocalSources }>(
+    const res = await contentApi<ContentReadinessResult>(
       `/api/dt/content/readiness?${contentQuery(organisationId)}`,
     );
     if (res.ok) {
       setReadiness(res.data.readiness);
       setLocal(res.data.local);
+      setPipeline(res.data.pipeline);
       setReadinessError(null);
-      setDemo(res.demo);
     } else {
       setReadinessError(res.message);
     }
@@ -100,7 +109,6 @@ export function DtContentWorkspace(props: {
     if (res.ok) {
       setOverview(res.data);
       setOverviewError(null);
-      setDemo(res.demo);
       setRefreshedAt(new Date().toISOString());
       setSelected((prev) => {
         const allowed = new Set(res.data.pages.filter(isContentPageSelectable).map((p) => p.slug));
@@ -156,11 +164,21 @@ export function DtContentWorkspace(props: {
     }
     setSync(res.data);
     if (res.data.result.problems.length > 0) {
-      toast.warning("Daten übertragen, aber nicht vollständig", {
+      toast.warning("Einstellungen gespeichert, aber es fehlt noch etwas", {
         description: res.data.result.problems.join(" · "),
       });
     }
     return true;
+  }
+
+  async function confirmSettings(next: ContentTextSettings) {
+    const previous = settings;
+    setSettings(next);
+    setEditingSettings(false);
+    if (!(await sendClientData(next))) {
+      setSettings(previous);
+      setEditingSettings(true);
+    }
   }
 
   async function startTexts() {
@@ -176,19 +194,19 @@ export function DtContentWorkspace(props: {
         toast.error(res.message);
         return;
       }
-      announceRun(res.data, res.demo);
+      announceRun(res.data);
     } finally {
       setStarting(false);
     }
   }
 
-  function announceRun(data: ContentRunThroughResult, isDemo: boolean) {
+  function announceRun(data: ContentRunThroughResult) {
     const started = data.jobs.length;
     const head =
       started > 0
         ? `${started} ${started === 1 ? "Seite" : "Seiten"} gestartet`
         : "Keine Seite gestartet";
-    toast.success(isDemo ? `${head} (Demo – nichts wurde gestartet)` : head, {
+    toast.success(head, {
       description:
         data.skipped.length > 0
           ? data.skipped.map((s) => `${s.page}: ${s.reason}`).join(" · ")
@@ -204,7 +222,7 @@ export function DtContentWorkspace(props: {
       ? "Erst die Einstellungen für Texte bestätigen."
       : selectedCount === 0
         ? "Seiten in der Tabelle anhaken."
-        : "Schickt Anbieterfakten, Einstellungen und Avatar mit. Der Content-Agent meldet sich, wenn er Sie braucht.";
+        : "Läuft im Hintergrund durch acht Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
 
   return (
     <div className="grid gap-5">
@@ -212,10 +230,7 @@ export function DtContentWorkspace(props: {
         suggestion={props.suggestion}
         confirmed={settings}
         editing={editingSettings}
-        onConfirm={(next) => {
-          setSettings(next);
-          setEditingSettings(false);
-        }}
+        onConfirm={(next) => void confirmSettings(next)}
         onEdit={() => setEditingSettings(true)}
       />
 
@@ -250,6 +265,20 @@ export function DtContentWorkspace(props: {
               Texte erstellen ({selectedCount})
             </DtPillButton>
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
+            {pipeline?.model ? (
+              <p
+                className="text-[11px] text-sbkm-ink-500 dark:text-white/45 lg:text-right"
+                title={`Schreibschritte: ${pipeline.model} (${describeContentModelSource(pipeline.source.write)}) · Prüfschritte: ${pipeline.check_model} (${describeContentModelSource(pipeline.source.check)})`}
+              >
+                Modell: <span className="font-mono">{pipeline.model}</span>
+                {pipeline.check_model !== pipeline.model ? (
+                  <>
+                    {" "}
+                    · Prüfung: <span className="font-mono">{pipeline.check_model}</span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -257,12 +286,12 @@ export function DtContentWorkspace(props: {
           <details className="group rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] text-xs dark:border-white/8 dark:bg-white/[0.03]">
             <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 text-sbkm-ink-600 dark:text-white/65">
               <span>
-                Zuletzt übertragen: Anbieterfakten {sync.result.anbieter ? "✓" : "—"} · Avatar{" "}
-                {sync.result.avatar ? "✓" : "—"}
+                Gespeichert: Anbieterfakten {sync.result.anbieter ? "✓" : "—"} · Avatar{" "}
+                {sync.result.avatar ? "✓" : "—"} · Struktur {sync.result.structure ? "✓" : "—"}
                 {sync.result.problems.length > 0 ? ` · ${sync.result.problems.length} Hinweis(e)` : ""}
               </span>
               <span className="inline-flex items-center gap-1 font-semibold text-sbkm-navy dark:text-white">
-                Gesendete Daten
+                Verwendete Daten
                 <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden />
               </span>
             </summary>
@@ -347,7 +376,6 @@ export function DtContentWorkspace(props: {
         organisationId={organisationId}
         page={openPage}
         open={openPage != null}
-        demo={demo}
         onClose={() => setOpenPage(null)}
         onChanged={() => void loadOverview()}
       />

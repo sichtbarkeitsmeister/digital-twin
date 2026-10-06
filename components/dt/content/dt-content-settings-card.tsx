@@ -214,7 +214,7 @@ function SettingsForm(props: {
 }
 
 /**
- * The four strict Content-Agent fields. Shown as a form until confirmed, then as one summary line.
+ * The four strict text settings. Shown as a form until confirmed, then as one summary line.
  */
 export function DtContentSettingsCard(props: {
   suggestion: ContentTextSettingsSuggestion;

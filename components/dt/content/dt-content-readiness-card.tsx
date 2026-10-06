@@ -74,7 +74,7 @@ export function DtContentReadinessCard(props: {
             Bereit für Texte?
           </h2>
           <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-            Diese drei Dinge braucht der Content-Agent, bevor er schreiben kann.
+            Diese drei Dinge braucht die Texterstellung, bevor sie schreiben kann.
           </p>
         </div>
         {props.loading ? (

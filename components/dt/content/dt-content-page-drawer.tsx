@@ -17,10 +17,7 @@ import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
-import {
-  DtContentDemoBadge,
-  DtContentStatusBadge,
-} from "@/components/dt/content/dt-content-status-badge";
+import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import {
   contentActionLabel,
@@ -74,7 +71,6 @@ export function DtContentPageDrawer(props: {
   organisationId: string;
   page: { slug: string; name: string } | null;
   open: boolean;
-  demo: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -88,7 +84,6 @@ export function DtContentPageDrawer(props: {
     setMounted(true);
   }, []);
   const [review, setReview] = useState<ContentReview | null>(null);
-  const [demo, setDemo] = useState(props.demo);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -109,7 +104,6 @@ export function DtContentPageDrawer(props: {
     const res = await contentApi<ContentReview>(`${base}/review?${contentQuery(organisationId)}`);
     if (res.ok) {
       setReview(res.data);
-      setDemo(res.demo);
     } else {
       setError(res.message);
     }
@@ -146,6 +140,16 @@ export function DtContentPageDrawer(props: {
     };
   }, [jobId, open, organisationId, loadReview]);
 
+  // Opened on a page that is already running (no job id known): refresh until it pauses.
+  const reviewRunning = review?.public.state === "laeuft";
+  useEffect(() => {
+    if (!open || jobId || !reviewRunning) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadReview();
+    }, JOB_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [open, jobId, reviewRunning, loadReview]);
+
   const handleClose = useCallback(() => {
     if (!busy) onClose();
   }, [busy, onClose]);
@@ -170,10 +174,6 @@ export function DtContentPageDrawer(props: {
     [review?.actions],
   );
 
-  function demoNotice(done: string) {
-    toast.success(demo ? `${done} (Demo – nichts gespeichert)` : done);
-  }
-
   function startEdit(action: ContentAction) {
     const first = findings.find((f) => f.block_id)?.block_id ?? blocks[0]?.id ?? "";
     setBlockId(first);
@@ -192,7 +192,7 @@ export function DtContentPageDrawer(props: {
       return;
     }
     setBusy(action.kind);
-    const res = await contentApi<unknown>(`${base}/steps/${action.step}/${path}`, {
+    const res = await contentApi<{ job_id?: string | null }>(`${base}/steps/${action.step}/${path}`, {
       method: "POST",
       body: { organisationId, ...body },
     });
@@ -201,9 +201,10 @@ export function DtContentPageDrawer(props: {
       toast.error(res.message);
       return;
     }
-    demoNotice(done);
+    toast.success(done);
     setMode(null);
     setNote("");
+    if (res.data?.job_id) setJobId(res.data.job_id);
     void loadReview();
     onChangedRef.current();
   }
@@ -220,8 +221,8 @@ export function DtContentPageDrawer(props: {
       toast.error(res.message);
       return;
     }
-    demoNotice("Läuft weiter");
-    if (!res.demo && res.data.id) setJobId(res.data.id);
+    toast.success("Läuft weiter");
+    if (res.data.id) setJobId(res.data.id);
     onChangedRef.current();
   }
 
@@ -309,12 +310,9 @@ export function DtContentPageDrawer(props: {
           >
             <header className="flex shrink-0 items-start justify-between gap-3 border-b border-sbkm-navy/10 bg-white px-4 py-4 dark:border-white/10 dark:bg-sbkm-navy sm:px-6">
               <div className="grid min-w-0 gap-1.5">
-                <div className="flex items-center gap-2">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-500 dark:text-white/45">
-                    Seite
-                  </p>
-                  {demo ? <DtContentDemoBadge /> : null}
-                </div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-500 dark:text-white/45">
+                  Seite
+                </p>
                 <h2
                   id="content-page-title"
                   className="truncate text-lg font-bold tracking-tight text-sbkm-navy dark:text-white"
@@ -381,7 +379,7 @@ export function DtContentPageDrawer(props: {
                         <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
                           {review.public.state === "laeuft"
                             ? "Die Übersicht aktualisiert sich von selbst."
-                            : "Mit „Weiterlaufen lassen“ startet der Content-Agent."}
+                            : "Mit „Weiterlaufen lassen“ startet das Schreiben."}
                         </p>
                       </div>
                     )}

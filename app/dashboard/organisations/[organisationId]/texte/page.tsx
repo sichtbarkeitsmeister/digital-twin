@@ -1,15 +1,14 @@
 import { notFound, redirect } from "next/navigation";
 
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
-import { DtContentDemoBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentWorkspace } from "@/components/dt/content/dt-content-workspace";
 import { OrgDetailTabs } from "@/components/dt/content/org-detail-tabs";
-import { contentAgentConfig } from "@/lib/dt/content/client";
 import {
   loadContentAvatarOptions,
   loadContentWorkshopAnbieter,
 } from "@/lib/dt/content/load-sources";
 import { suggestTextSettings } from "@/lib/dt/content/mapping";
+import { loadContentSettings, settingsFromRow } from "@/lib/dt/content/store";
 import { canAccessDtSeo } from "@/lib/dt/seo/access";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
@@ -35,7 +34,7 @@ export default async function OrganisationTextePage({
     redirect(`/dashboard/organisations?org=${encodeURIComponent(organisationId)}`);
   }
 
-  const [{ data: organisation }, { data: config }, avatars, sections] = await Promise.all([
+  const [{ data: organisation }, { data: config }, avatars, sections, settingsRow] = await Promise.all([
     supabase
       .from("organisations")
       .select("id, name, archived_at")
@@ -48,26 +47,23 @@ export default async function OrganisationTextePage({
       .maybeSingle(),
     loadContentAvatarOptions(supabase, organisationId),
     loadContentWorkshopAnbieter(supabase, organisationId).catch(() => []),
+    loadContentSettings(supabase, organisationId).catch(() => null),
   ]);
 
   if (!organisation || organisation.archived_at) notFound();
 
   const title = (config?.display_name as string | undefined)?.trim() || organisation.name;
-  const demo = contentAgentConfig() === null;
 
   return (
     <OrganisationPageShell>
       <div className="grid gap-5">
         <div className={cn(headerCardClass, "grid gap-4 p-4 sm:p-5")}>
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="grid gap-1">
-              <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">{title}</h1>
-              <p className="text-xs text-secondary sm:text-sm">
-                Seitentexte mit dem Content-Agent schreiben, prüfen und freigeben.
-              </p>
-            </div>
-            {demo ? <DtContentDemoBadge /> : null}
+          <div className="grid gap-1">
+            <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">{title}</h1>
+            <p className="text-xs text-secondary sm:text-sm">
+              Seitentexte in acht Schritten schreiben lassen, prüfen und freigeben.
+            </p>
           </div>
           <OrgDetailTabs organisationId={organisationId} active="texte" />
         </div>
@@ -77,7 +73,8 @@ export default async function OrganisationTextePage({
           organisationId={organisationId}
           avatars={avatars}
           suggestion={suggestTextSettings(sections)}
-          initialDemo={demo}
+          initialSettings={settingsRow ? settingsFromRow(settingsRow) : null}
+          initialAvatarId={settingsRow?.avatar_agent_id ?? null}
         />
       </div>
     </OrganisationPageShell>

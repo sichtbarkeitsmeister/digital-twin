@@ -39,18 +39,3 @@ export function DtContentStatusBadge(props: {
     </span>
   );
 }
-
-export function DtContentDemoBadge(props: { className?: string }) {
-  return (
-    <span
-      title="CONTENT_AGENT_URL ist nicht gesetzt — alle Daten sind Beispieldaten, nichts wird gespeichert."
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-pill border border-dashed border-sbkm-navy/25 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:border-white/25 dark:text-white/65",
-        props.className,
-      )}
-    >
-      <span className="size-1.5 rounded-full bg-sbkm-navy/40 dark:bg-sbkm-mint" aria-hidden />
-      Demo
-    </span>
-  );
-}
