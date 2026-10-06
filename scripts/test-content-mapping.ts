@@ -22,8 +22,10 @@ import {
 } from "../lib/dt/content/mapping";
 import { describeAnbieterSources, readinessFromLocal } from "../lib/dt/content/route-helpers";
 import {
+  CONTENT_API_KEY_ENV,
   CONTENT_MODEL_ENV,
   DEFAULT_CONTENT_MODEL,
+  resolveContentApiKey,
   resolveContentModels,
 } from "../lib/dt/content/model-config";
 import { normalizeFindings, normalizeQuestions } from "../lib/dt/content/pipeline/prompts";
@@ -427,5 +429,7 @@ assert.deepEqual([priceForModel("claude-sonnet-4-6").inputUsd, priceForModel("cl
 assert.equal(estimateCostEur("claude-sonnet-4-6", { inputTokens: 1_000_000, outputTokens: 0 }, 1), 3);
 assert.equal(estimateCostEur("claude-sonnet-4-6", { inputTokens: 10_000, outputTokens: 2_000 }, 0.92), 0.0552);
 assert.equal(estimateCostEur("claude-haiku-4-5", { inputTokens: 0, outputTokens: 0 }), 0);
+assert.equal(resolveContentApiKey({}), null, "Texte does not fall back to ANTHROPIC_API_KEY");
+assert.equal(resolveContentApiKey({ ANTHROPIC_API_KEY: "shared", [CONTENT_API_KEY_ENV]: "  content-key  " }), "content-key");
 
 console.log("OK: content tests passed");

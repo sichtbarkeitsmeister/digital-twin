@@ -231,7 +231,7 @@ Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthrop
 
 ### Damit „Texte“ Seitentexte schreibt
 
-**Texte** liegt unter **Verwaltung**, neben SEO Modus (`/dashboard/verwaltung/texte`). Die Organisation wechselt man oben in der Leiste, wie bei SEO Modus und Agenten. Es braucht **keinen eigenen Dienst und keinen eigenen Schlüssel**. Die acht Schreibschritte laufen in der App selbst, als Hintergrund-Jobs (siehe Abschnitt 10, „Jobs“). Die KI ist dieselbe wie überall: Claude über `ANTHROPIC_API_KEY`.
+**Texte** liegt unter **Verwaltung**, neben SEO Modus (`/dashboard/verwaltung/texte`). Die Organisation wechselt man oben in der Leiste, wie bei SEO Modus und Agenten. Es braucht **keinen eigenen Dienst**. Die acht Schreibschritte laufen in der App selbst, als Hintergrund-Jobs (siehe Abschnitt 10, „Jobs“). Die KI ist Claude, aber über einen **eigenen Schlüssel**, damit die Ausgaben dieses Werkzeugs in der Anthropic Console für sich stehen.
 
 **Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql` im Supabase SQL Editor ausführen. Solange die Tabellen fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ statt einer rohen Fehlermeldung.
 
@@ -244,12 +244,14 @@ Anrede, Branche und Tonalität werden daraus vorgefüllt. Was schon in den Gespr
 
 | Name | Was er bedeutet |
 |---|---|
-| `ANTHROPIC_API_KEY` | Der Schlüssel, mit dem auch die Texte geschrieben werden. Steht in Vercel unter **Settings → Environment Variables** (lokal in `.env.local`). Nur der Server kennt ihn; der Browser nie. Nie mit `NEXT_PUBLIC_` beginnen. |
+| `ANTHROPIC_DT_CONTENT_API_KEY` | Eigener Anthropic-Schlüssel nur für Texte. In der [Anthropic Console](https://console.anthropic.com/settings/keys) einen neuen Schlüssel anlegen und in Vercel unter **Settings → Environment Variables** eintragen (lokal in `.env.local`). Nur der Server kennt ihn; der Browser nie. Nie mit `NEXT_PUBLIC_` beginnen. Texte fällt nicht auf `ANTHROPIC_API_KEY` zurück, sonst liefe die Abrechnung wieder mit dem übrigen Verbrauch zusammen. |
 | `ANTHROPIC_DT_CONTENT_MODEL` | Modell für die Schreibschritte 1 Recherche, 2 Gliederung, 3 Rohtext, 5 Tonalität & Avatar, 6 SEO-Feinschliff. Standard: `claude-sonnet-4-6`. |
 | `ANTHROPIC_DT_CONTENT_CHECK_MODEL` | Modell für die Prüfschritte 4 Faktencheck, 7 Lektorat, 8 Endabnahme. Leer = wie das Schreibmodell. Hier kann ein günstigeres Modell stehen. |
 | `CONTENT_USD_EUR_RATE` | Umrechnungskurs für die Kosten-Spalte (Anthropic rechnet in US-Dollar ab). Standard `0.92`. |
 
-**Schlüssel wechseln:** in Vercel den Wert von `ANTHROPIC_API_KEY` ändern und neu deployen (Deployments → ⋯ → Redeploy). Der alte Schlüssel kann danach in der Anthropic Console gelöscht werden. Laufende Seiten machen mit dem nächsten Schritt automatisch mit dem neuen Schlüssel weiter.
+**Was das Werkzeug gekostet hat:** in der Anthropic Console unter Usage den Schlüssel `ANTHROPIC_DT_CONTENT_API_KEY` auswählen. Das ist die Abrechnung von Texte, ohne Chat, Fragebögen und SEO. In der App steht dieselbe Summe geschätzt in der Spalte Kosten und in `dt_content_steps.cost_eur` (USD umgerechnet mit `CONTENT_USD_EUR_RATE`).
+
+**Schlüssel wechseln:** in Vercel den Wert von `ANTHROPIC_DT_CONTENT_API_KEY` ändern und neu deployen (Deployments → ⋯ → Redeploy). Der alte Schlüssel kann danach in der Anthropic Console gelöscht werden. Laufende Seiten machen mit dem nächsten Schritt automatisch mit dem neuen Schlüssel weiter.
 
 **Modell wechseln, Weg 1 (ohne Deploy):** im Supabase SQL Editor einen Wert in `app_settings` setzen. Er gilt ab dem nächsten Schritt, den die Pipeline ausführt — auch für Seiten, die gerade laufen.
 

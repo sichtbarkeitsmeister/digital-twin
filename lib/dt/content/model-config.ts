@@ -6,9 +6,20 @@
  *   2. env `ANTHROPIC_DT_CONTENT_MODEL` / `ANTHROPIC_DT_CONTENT_CHECK_MODEL`
  *   3. the defaults below
  *
- * The API key is always `ANTHROPIC_API_KEY` (server env, never NEXT_PUBLIC_).
+ * The API key is `ANTHROPIC_DT_CONTENT_API_KEY` only. It does not fall back to `ANTHROPIC_API_KEY`,
+ * so Texte spend stays its own line in the Anthropic console. Server env, never NEXT_PUBLIC_.
  * Pure helpers here; `loadContentModelConfig` in `model-config-db.ts` reads `app_settings`.
  */
+
+/** Dedicated Anthropic key for the Texte pipeline. Usage of this key is the tool's spend. */
+export const CONTENT_API_KEY_ENV = "ANTHROPIC_DT_CONTENT_API_KEY";
+
+export function resolveContentApiKey(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const key = env[CONTENT_API_KEY_ENV]?.trim();
+  return key ? key : null;
+}
 
 export const DEFAULT_CONTENT_MODEL = "claude-sonnet-4-6";
 

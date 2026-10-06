@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { callAnthropicFirstAvailable, extractToolUseInput } from "@/lib/ai/anthropic-helpers";
+import { CONTENT_API_KEY_ENV, resolveContentApiKey } from "@/lib/dt/content/model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 
 /** Pipeline error with a hint whether the job runner should try again later. */
@@ -32,7 +33,9 @@ export function isRetryableLlmError(error: unknown): boolean {
 
 export function llmErrorMessage(error: unknown): string {
   const status = anthropicStatus(error);
-  if (status === 401 || status === 403) return "Anthropic lehnt den API-Schlüssel ab (ANTHROPIC_API_KEY prüfen).";
+  if (status === 401 || status === 403) {
+    return `Anthropic lehnt den API-Schlüssel ab (${CONTENT_API_KEY_ENV} prüfen).`;
+  }
   if (status === 429) return "Anthropic-Ratenlimit erreicht. Der Schritt wird später erneut versucht.";
   if (status === 529 || status === 503) return "Anthropic ist gerade überlastet. Der Schritt wird später erneut versucht.";
   if (error instanceof Error && error.message.trim()) return error.message.trim().slice(0, 500);
@@ -51,8 +54,13 @@ export async function callContentTool(input: {
   tool: Anthropic.Tool;
   maxTokens: number;
 }): Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) throw new ContentLlmError("ANTHROPIC_API_KEY fehlt in der Server-Umgebung.", false);
+  const apiKey = resolveContentApiKey();
+  if (!apiKey) {
+    throw new ContentLlmError(
+      `${CONTENT_API_KEY_ENV} fehlt in der Server-Umgebung. Texte benutzt einen eigenen Schlüssel, nicht ANTHROPIC_API_KEY.`,
+      false,
+    );
+  }
 
   const anthropic = new Anthropic({ apiKey });
   let result: Awaited<ReturnType<typeof callAnthropicFirstAvailable>>;
