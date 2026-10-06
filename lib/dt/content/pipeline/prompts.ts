@@ -168,7 +168,7 @@ function anbieterBlock(context: ContentPipelineContext): string {
   const filled = context.sections.filter((s) => s.current.trim());
   if (filled.length === 0) return "## Anbieterfakten\n(keine)";
   return [
-    "## Anbieterfakten aus den Kundengesprächen (einzige Quelle für Tatsachen)",
+    "## Anbieterfakten aus Fragebogen und Kundengesprächen (einzige Quelle für Tatsachen)",
     ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`),
   ].join("\n\n");
 }

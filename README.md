@@ -51,7 +51,7 @@ Steht in der Tabelle `profiles`, Spalte `role`.
 
 | Rolle | Wer das ist | Was die Person sieht |
 |---|---|---|
-| `admin` | Plattform-Admin. Jede Adresse mit `@sichtbarkeitsmeister.de` wird beim Anlegen automatisch Admin. | Den Bereich **Verwaltung** und **Admin**: SEO-Modus, Agent-Kontext, Transkripte, Erstgespräch, Leads, Integrationen, Token-Nutzung, alle Firmen, Team, Jobs, E-Mail-Protokoll, Agent-Anfragen. |
+| `admin` | Plattform-Admin. Jede Adresse mit `@sichtbarkeitsmeister.de` wird beim Anlegen automatisch Admin. | Den Bereich **Verwaltung** und **Admin**: SEO-Modus, Texte, Agent-Kontext, Transkripte, Erstgespräch, Leads, Integrationen, Token-Nutzung, alle Firmen, Team, Jobs, E-Mail-Protokoll, Agent-Anfragen. |
 | `customer` | Alle anderen Konten. | Nur die Firmen, in denen die Person Mitglied ist. |
 
 Ein Admin darf Agenten direkt ändern. Ein Firmeninhaber darf Änderungen nur **beantragen**. Die Anfragen landen unter **Agent-Anfragen**.
@@ -229,9 +229,18 @@ Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthrop
 | `N8N_DT_GSC_URL_INSPECTION_WEBHOOK` | Prüft, ob eine einzelne URL bei Google indexiert ist. |
 | `DT_CHAT_USE_N8N` | Nur wenn der Wert genau `1` ist, läuft der Chat über n8n. Sonst spricht der Chat direkt mit Claude. Für den normalen Betrieb leer lassen. |
 
-### Damit der Tab „Texte“ Seitentexte schreibt
+### Damit „Texte“ Seitentexte schreibt
 
-Der Tab „Texte“ braucht **keinen eigenen Dienst und keinen eigenen Schlüssel**. Die acht Schreibschritte laufen in der App selbst, als Hintergrund-Jobs (siehe Abschnitt 10, „Jobs“). Die KI ist dieselbe wie überall: Claude über `ANTHROPIC_API_KEY`.
+**Texte** liegt unter **Verwaltung**, neben SEO Modus (`/dashboard/verwaltung/texte`). Die Organisation wechselt man oben in der Leiste, wie bei SEO Modus und Agenten. Es braucht **keinen eigenen Dienst und keinen eigenen Schlüssel**. Die acht Schreibschritte laufen in der App selbst, als Hintergrund-Jobs (siehe Abschnitt 10, „Jobs“). Die KI ist dieselbe wie überall: Claude über `ANTHROPIC_API_KEY`.
+
+**Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql` im Supabase SQL Editor ausführen. Solange die Tabellen fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ statt einer rohen Fehlermeldung.
+
+**Woher die Fakten kommen.** Beides zählt, beides darf fehlen, solange das andere da ist:
+
+- der neueste **abgeschlossene Anbieter-Fragebogen** der Organisation (Fragebögen, Zweck „Anbieter“)
+- die **ausgewerteten Gespräche** unter Transkripte (`dt_workshop_corpus.anbieter`)
+
+Anrede, Branche und Tonalität werden daraus vorgefüllt. Was schon in den Gesprächen steht, bleibt; der Fragebogen füllt nur Lücken.
 
 | Name | Was er bedeutet |
 |---|---|
@@ -257,7 +266,7 @@ delete from public.app_settings where key in ('content_model', 'content_check_mo
 
 **Modell wechseln, Weg 2 (per Deploy):** `ANTHROPIC_DT_CONTENT_MODEL` bzw. `ANTHROPIC_DT_CONTENT_CHECK_MODEL` in Vercel setzen und neu deployen. Reihenfolge, wenn mehrere Stellen gesetzt sind: `app_settings` schlägt die Umgebungsvariable, die Umgebungsvariable schlägt den Standard.
 
-Welches Modell gerade aktiv ist und woher der Wert kommt, zeigt der Tab „Texte“ unter dem Knopf **Texte erstellen** („Modell: …“). Gibt es den Modellnamen bei Anthropic nicht (Tippfehler, abgekündigt), probiert die Pipeline nacheinander ältere Sonnet-Namen; schlägt auch das fehl, steht der Fehler an der Seite („Fehler in Schritt …“) und kann mit **Weiterlaufen lassen** nach der Korrektur wiederholt werden.
+Welches Modell gerade aktiv ist und woher der Wert kommt, zeigt **Texte** unter dem Knopf **Texte erstellen** („Modell: …“). Gibt es den Modellnamen bei Anthropic nicht (Tippfehler, abgekündigt), probiert die Pipeline nacheinander ältere Sonnet-Namen; schlägt auch das fehl, steht der Fehler an der Seite („Fehler in Schritt …“) und kann mit **Weiterlaufen lassen** nach der Korrektur wiederholt werden.
 
 Jeder Schritt schreibt Modell, Tokens und Kosten in `dt_content_steps` und einen Eintrag in `dt_llm_usage_events` (`mode = content.<Schritt>`), damit die Kosten pro Firma auswertbar bleiben.
 
@@ -414,6 +423,7 @@ Nach dem Login landet man auf `/dashboard/organisations`.
 | Integrationen | Anbindungen, vor allem Leadinfo. |
 | Agent-Kontext | Zeigt den zusammengebauten Auftrag an die KI. Intern, weil dort der ganze Prompt steht. |
 | SEO Modus | Crawl, Berichte, Aufgaben, Search Console, Grounding, Seitenstruktur. |
+| Texte | Seitentexte in acht Schritten schreiben lassen, prüfen und freigeben. Organisation oben in der Leiste wechseln. |
 | Token-Nutzung | Wie viel die KI verbraucht hat. Kunden sehen das nicht. |
 | Transkripte | Gesprächsmitschriften auswerten und ins Wissen der Avatare übernehmen. |
 | Erstgespräch | Erstgespräche einer Firma. |
@@ -438,7 +448,7 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/frageboegen` | Dieselbe Welt aus Sicht der Firma. |
 | `/dashboard/digital-twin` | Chat- und Agenten-Bereich, zusätzlich zur Startseite. |
 | `/dashboard/verwaltung/seo` | SEO-Arbeitsplatz der Agentur. |
-| `/dashboard/organisations/[id]/texte` | Tab „Texte“: Seitentexte in acht Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, wie der SEO-Modus. |
+| `/dashboard/verwaltung/texte` | Texte: Seitentexte in acht Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
 ---
@@ -492,7 +502,7 @@ Es gibt drei Job-Arten:
 |---|---|
 | `seo.crawl` | Arbeitet die Warteschlange der Website-Prüfung ab. |
 | `leadinfo.normalize` | Macht aus einem rohen Leadinfo-Ereignis einen lesbaren Eintrag. |
-| `content.page` | Schreibt den Text einer Seite im Tab „Texte“: pro Lauf ein Schritt (1 Recherche, 2 Gliederung, 3 Rohtext, 4 Faktencheck, 5 Tonalität & Avatar, 6 SEO-Feinschliff, 7 Lektorat, 8 Endabnahme), dann stellt er sich selbst für den nächsten Schritt wieder an. Er hält an, wenn der Faktencheck Fragen an den Kunden hat („Braucht Sie“) und nach der Endabnahme bis zur Freigabe. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. |
+| `content.page` | Schreibt den Text einer Seite unter **Verwaltung → Texte**: pro Lauf ein Schritt (1 Recherche, 2 Gliederung, 3 Rohtext, 4 Faktencheck, 5 Tonalität & Avatar, 6 SEO-Feinschliff, 7 Lektorat, 8 Endabnahme), dann stellt er sich selbst für den nächsten Schritt wieder an. Er hält an, wenn der Faktencheck Fragen an den Kunden hat („Braucht Sie“) und nach der Endabnahme bis zur Freigabe. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. Fakten kommen aus dem Anbieter-Fragebogen und aus den ausgewerteten Gesprächen. |
 
 Ein Job, der zu oft scheitert, bleibt als fehlgeschlagen liegen und ist unter **Jobs** sichtbar.
 
