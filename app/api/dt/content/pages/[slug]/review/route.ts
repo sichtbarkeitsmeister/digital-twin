@@ -1,13 +1,5 @@
-import { contentAgentJson } from "@/lib/dt/content/client";
-import { demoReview } from "@/lib/dt/content/fixtures";
-import {
-  contentError,
-  contentFromAgent,
-  contentOk,
-  gateContentRoute,
-  isValidContentSlug,
-} from "@/lib/dt/content/route-helpers";
-import type { ContentReview } from "@/lib/dt/content/types";
+import { contentError, contentOk, gateContentRoute, isValidContentSlug } from "@/lib/dt/content/route-helpers";
+import { buildReview, loadContentPage, loadContentSteps } from "@/lib/dt/content/store";
 
 export async function GET(req: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -17,15 +9,8 @@ export async function GET(req: Request, context: { params: Promise<{ slug: strin
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  if (!gate.config) {
-    const review = demoReview(slug);
-    return review ? contentOk(review, true) : contentError("Seite nicht gefunden.", 404);
-  }
-
-  return contentFromAgent(
-    await contentAgentJson<ContentReview>(
-      gate.config,
-      `/clients/${encodeURIComponent(gate.clientKey)}/pages/${encodeURIComponent(slug)}/review`,
-    ),
-  );
+  const page = await loadContentPage(gate.service, gate.organisationId, slug);
+  if (!page) return contentError("Seite nicht gefunden.", 404);
+  const steps = await loadContentSteps(gate.service, page.id);
+  return contentOk(buildReview(page, steps));
 }

@@ -1,15 +1,23 @@
 import { z } from "zod";
 
-import { contentAgentJson } from "@/lib/dt/content/client";
+import {
+  approveContentStep,
+  editContentBlock,
+  rerunContentStep,
+  type ActionResult,
+} from "@/lib/dt/content/pipeline/actions";
 import {
   contentError,
-  contentFromAgent,
   contentOk,
   gateContentRoute,
   isValidContentSlug,
   parseContentStep,
   readJsonBody,
 } from "@/lib/dt/content/route-helpers";
+import { loadContentPage } from "@/lib/dt/content/store";
+import { kickJobsWorker } from "@/lib/jobs/kick-worker";
+
+export const maxDuration = 300;
 
 const bodySchemas = {
   approve: z.object({ organisationId: z.string().uuid() }),
@@ -30,7 +38,7 @@ function isStepAction(v: string): v is StepAction {
   return v in bodySchemas;
 }
 
-/** approve | edit | run for one step; `by` is always the signed-in user, never client input. */
+/** approve | edit | run for one step; the acting user is always the signed-in one. */
 export async function POST(
   req: Request,
   context: { params: Promise<{ slug: string; step: string; action: string }> },
@@ -57,24 +65,20 @@ export async function POST(
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const by = gate.userEmail ?? gate.userId;
+  const page = await loadContentPage(gate.service, gate.organisationId, slug);
+  if (!page) return contentError("Seite nicht gefunden.", 404);
+
   const data = parsed.data as { block_id?: string; text?: string; note?: string };
-  const body =
-    action === "run"
-      ? { note: data.note }
-      : action === "edit"
-        ? { block_id: data.block_id, text: data.text, by }
-        : { by };
-
-  if (!gate.config) {
-    return contentOk({ ok: true, step, action }, true);
+  let result: ActionResult;
+  if (action === "approve") {
+    result = await approveContentStep(gate.service, page, step, gate.userId);
+  } else if (action === "edit") {
+    result = await editContentBlock(gate.service, page, data.block_id!, data.text!);
+  } else {
+    result = await rerunContentStep(gate.service, page, step, data.note!, gate.userId);
   }
+  if (!result.ok) return contentError(result.message, result.status);
 
-  return contentFromAgent(
-    await contentAgentJson<unknown>(
-      gate.config,
-      `/clients/${encodeURIComponent(gate.clientKey)}/pages/${encodeURIComponent(slug)}/steps/${step}/${action}`,
-      { method: "POST", body, timeoutMs: 60_000 },
-    ),
-  );
+  if (result.jobId) kickJobsWorker(1);
+  return contentOk({ ok: true, step, action, job_id: result.jobId });
 }

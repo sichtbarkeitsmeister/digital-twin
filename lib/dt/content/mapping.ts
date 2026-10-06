@@ -1,5 +1,5 @@
 /**
- * DigitalTwin data → Content-Agent payloads (`PUT /api/v1/clients/{org}`).
+ * DigitalTwin data → the `anbieter` / `avatar` objects the content pipeline writes from.
  * Pure functions: no Supabase, no fetch, no Node APIs, so client components may use them too.
  * Loading happens in `load-sources.ts`.
  *
@@ -26,7 +26,7 @@ export const CONTENT_BRANCHE_LABELS: Record<ContentBranche, string> = {
 /**
  * Tone options. Each sits in a different corner of formal ↔ casual, warm ↔ sober and
  * calm ↔ lively, so a wrong pick is obvious and every common site has a fit.
- * `text` is what the Content-Agent receives as `tonalitaet`; `keywords` drive the suggestion.
+ * `text` is what the pipeline receives as `tonalitaet`; `keywords` drive the suggestion.
  */
 export const CONTENT_TONALITAETEN = [
   {
@@ -111,7 +111,7 @@ export function contentTonalitaet(key: string) {
   return CONTENT_TONALITAETEN.find((t) => t.key === key) ?? null;
 }
 
-/** The `tonalitaet` string the Content-Agent receives. */
+/** The `tonalitaet` string the pipeline prompts carry. */
 export function contentTonalitaetText(key: ContentTonalitaet): string {
   const tone = contentTonalitaet(key) ?? CONTENT_TONALITAETEN[0];
   return `${tone.label}: ${tone.text}`;
@@ -177,7 +177,7 @@ export function filledWorkshopSections(items: readonly WorkshopAnbieterSection[]
 }
 
 /**
- * Workshop sections → Content-Agent `anbieter` object: every filled section under its key as free
+ * Workshop sections → `anbieter` object: every filled section under its key as free
  * text, plus `name`. Empty sections are left out so the service never reads them as facts.
  */
 export function anbieterFromWorkshop(
@@ -355,7 +355,7 @@ export function suggestTextSettings(
 }
 
 /**
- * `dt_agents` row → Content-Agent `avatar` object.
+ * `dt_agents` row → `avatar` object for the pipeline prompts.
  * Row columns win over same-named keys inside `avatar_data`.
  */
 export function avatarFromAgent(row: DtAgentForContent): ContentAvatar {
@@ -368,7 +368,3 @@ export function avatarFromAgent(row: DtAgentForContent): ContentAvatar {
   };
 }
 
-/** `{org}` path segment for the Content-Agent. */
-export function contentClientKey(organisationId: string): string {
-  return organisationId.trim().toLowerCase();
-}

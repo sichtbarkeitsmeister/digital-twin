@@ -1,16 +1,18 @@
 import { z } from "zod";
 
-import { contentAgentJson } from "@/lib/dt/content/client";
-import { demoRunThrough } from "@/lib/dt/content/fixtures";
+import { skipReason, startContentRun } from "@/lib/dt/content/pipeline/actions";
 import {
   contentError,
-  contentFromAgent,
   contentOk,
   gateContentRoute,
   isValidContentSlug,
   readJsonBody,
 } from "@/lib/dt/content/route-helpers";
+import { loadContentPages, loadContentSettings, syncContentPagesFromStructure } from "@/lib/dt/content/store";
 import type { ContentRunThroughResult } from "@/lib/dt/content/types";
+import { kickJobsWorker } from "@/lib/jobs/kick-worker";
+
+export const maxDuration = 300;
 
 const bodySchema = z.union([
   z.object({
@@ -23,6 +25,7 @@ const bodySchema = z.union([
   }),
 ]);
 
+/** "Texte erstellen": one background job per selected page. */
 export async function POST(req: Request) {
   const parsed = bodySchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return contentError("Bitte mindestens eine Seite auswählen.", 400);
@@ -31,17 +34,38 @@ export async function POST(req: Request) {
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const payload = "all" in parsed.data ? { all: true as const } : { pages: parsed.data.pages };
+  const settings = await loadContentSettings(gate.service, gate.organisationId);
+  if (!settings) return contentError("Bitte erst die Einstellungen für Texte bestätigen.", 400);
 
-  if (!gate.config) {
-    return contentOk(demoRunThrough(payload), true, 202);
+  await syncContentPagesFromStructure(gate.service, gate.organisationId).catch(() => null);
+  const pages = await loadContentPages(gate.service, gate.organisationId);
+  const wanted =
+    "all" in parsed.data
+      ? pages
+      : pages.filter((p) => (parsed.data as { pages: string[] }).pages.includes(p.slug));
+  if (wanted.length === 0) return contentError("Keine passende Seite gefunden.", 404);
+
+  const result: ContentRunThroughResult = { jobs: [], skipped: [] };
+  for (const page of wanted) {
+    const reason = skipReason(page);
+    if (reason) {
+      result.skipped.push({ page: page.name, reason });
+      continue;
+    }
+    const started = await startContentRun(gate.service, page, gate.userId);
+    if (!started.ok) {
+      result.skipped.push({ page: page.name, reason: started.message });
+      continue;
+    }
+    result.jobs.push({
+      id: started.jobId ?? page.id,
+      slug: page.slug,
+      page: page.name,
+      state: "running",
+      status_url: `/api/dt/content/jobs/${started.jobId ?? page.id}`,
+    });
   }
 
-  return contentFromAgent(
-    await contentAgentJson<ContentRunThroughResult>(
-      gate.config,
-      `/clients/${encodeURIComponent(gate.clientKey)}/run-through`,
-      { method: "POST", body: payload },
-    ),
-  );
+  if (result.jobs.length > 0) kickJobsWorker(Math.min(result.jobs.length, 3));
+  return contentOk(result, 202);
 }

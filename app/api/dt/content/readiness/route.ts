@@ -1,24 +1,30 @@
-import { contentAgentJson } from "@/lib/dt/content/client";
-import { demoReadiness } from "@/lib/dt/content/fixtures";
-import { loadContentLocalSources } from "@/lib/dt/content/load-sources";
-import { contentError, contentOk, gateContentRoute } from "@/lib/dt/content/route-helpers";
-import type { ContentReadiness } from "@/lib/dt/content/types";
+import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
+import { gateContentRoute, loadContentReadiness, contentOk } from "@/lib/dt/content/route-helpers";
+import { loadContentSettings, settingsFromRow } from "@/lib/dt/content/store";
+import type { ContentReadinessResult } from "@/lib/dt/content/types";
 
 export async function GET(req: Request) {
   const gated = await gateContentRoute(new URL(req.url).searchParams.get("org"));
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const local = await loadContentLocalSources(gate.supabase, gate.organisationId);
+  const [{ readiness, local }, models, settingsRow] = await Promise.all([
+    loadContentReadiness(gate.service, gate.organisationId),
+    loadContentModelConfig(gate.service),
+    loadContentSettings(gate.service, gate.organisationId),
+  ]);
 
-  if (!gate.config) {
-    return contentOk({ readiness: demoReadiness(local), local }, true);
-  }
-
-  const result = await contentAgentJson<ContentReadiness>(
-    gate.config,
-    `/clients/${encodeURIComponent(gate.clientKey)}/readiness`,
-  );
-  if (!result.ok) return contentError(result.message, result.status >= 400 ? result.status : 502);
-  return contentOk({ readiness: result.data, local }, false);
+  const data: ContentReadinessResult = {
+    readiness,
+    local,
+    pipeline: {
+      model: models.write[0] ?? "",
+      check_model: models.check[0] ?? "",
+      source: models.source,
+    },
+    settings: settingsRow
+      ? { ...settingsFromRow(settingsRow), avatar_agent_id: settingsRow.avatar_agent_id }
+      : null,
+  };
+  return contentOk(data);
 }

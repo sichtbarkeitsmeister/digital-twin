@@ -1,10 +1,6 @@
-import { contentAgentFile } from "@/lib/dt/content/client";
-import { demoExport } from "@/lib/dt/content/fixtures";
-import {
-  contentError,
-  gateContentRoute,
-  isValidContentSlug,
-} from "@/lib/dt/content/route-helpers";
+import { fullHtmlDocument } from "@/lib/dt/content/render";
+import { contentError, gateContentRoute, isValidContentSlug } from "@/lib/dt/content/route-helpers";
+import { loadContentPage } from "@/lib/dt/content/store";
 import type { ContentExportFormat } from "@/lib/dt/content/types";
 
 const FORMATS: ContentExportFormat[] = ["html", "fragment", "md"];
@@ -25,33 +21,25 @@ export async function GET(req: Request, context: { params: Promise<{ slug: strin
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  if (!gate.config) {
-    const file = demoExport(slug, format);
-    if (!file) return contentError("Für diese Seite gibt es noch keinen Text.", 404);
-    return new Response(file.body, {
-      headers: {
-        "Content-Type": file.contentType,
-        "Content-Disposition": attachment(file.filename),
-        "Cache-Control": "no-store",
-      },
-    });
-  }
+  const page = await loadContentPage(gate.service, gate.organisationId, slug);
+  if (!page) return contentError("Seite nicht gefunden.", 404);
+  if (!page.html) return contentError("Für diese Seite gibt es noch keinen Text.", 404);
 
-  const result = await contentAgentFile(
-    gate.config,
-    `/clients/${encodeURIComponent(gate.clientKey)}/pages/${encodeURIComponent(slug)}/export`,
-    { format },
-  );
-  if (!result.ok) return contentError(result.message, result.status >= 400 ? result.status : 502);
+  const file =
+    format === "md"
+      ? { body: page.markdown, filename: `${slug}.md`, contentType: "text/markdown; charset=utf-8" }
+      : format === "fragment"
+        ? { body: page.html, filename: `${slug}.fragment.html`, contentType: "text/html; charset=utf-8" }
+        : {
+            body: fullHtmlDocument(page.title || page.name, page.html),
+            filename: `${slug}.html`,
+            contentType: "text/html; charset=utf-8",
+          };
 
-  const ext = format === "md" ? "md" : format === "fragment" ? "fragment.html" : "html";
-  return new Response(result.response.body, {
+  return new Response(file.body, {
     headers: {
-      "Content-Type":
-        result.response.headers.get("content-type") ??
-        (format === "md" ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8"),
-      "Content-Disposition":
-        result.response.headers.get("content-disposition") ?? attachment(`${slug}.${ext}`),
+      "Content-Type": file.contentType,
+      "Content-Disposition": attachment(file.filename),
       "Cache-Control": "no-store",
     },
   });

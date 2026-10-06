@@ -1,7 +1,10 @@
 /**
- * Content-Agent API contract (Python/FastAPI service, `/api/v1/...`).
- * Shapes mirror the service JSON 1:1 (snake_case) so the proxy can pass them through.
+ * Shapes exchanged between the Texte tab and `/api/dt/content/*` (snake_case).
+ * The pipeline behind the routes runs inside DigitalTwin (`lib/dt/content/pipeline`).
  */
+
+import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
+import type { ContentTextSettings } from "@/lib/dt/content/mapping";
 
 export type ContentPageState =
   | "nicht_begonnen"
@@ -167,7 +170,20 @@ export type ContentLocalSources = {
   structure: { filename: string | null } | null;
 };
 
+/** Which model the pipeline will use for the next step and where that setting comes from. */
+export type ContentPipelineInfo = {
+  model: string;
+  check_model: string;
+  source: Record<ContentModelTier, ContentModelSource>;
+};
+
+export type ContentReadinessResult = {
+  readiness: ContentReadiness;
+  local: ContentLocalSources;
+  pipeline: ContentPipelineInfo;
+  /** Confirmed settings from `dt_content_settings`; null until confirmed once. */
+  settings: (ContentTextSettings & { avatar_agent_id: string | null }) | null;
+};
+
 /** What `/api/dt/content/*` returns to the browser. */
-export type ContentApiResponse<T> =
-  | { ok: true; demo: boolean; data: T }
-  | { ok: false; message: string };
+export type ContentApiResponse<T> = { ok: true; data: T } | { ok: false; message: string };
