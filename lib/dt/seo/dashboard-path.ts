@@ -8,6 +8,11 @@ export function isSeoDashboardPath(pathname: string): boolean {
   );
 }
 
+/** Texte tool (content pipeline) — same organisation list and access as the SEO workspace. */
+export function isTexteDashboardPath(pathname: string): boolean {
+  return pathname === "/dashboard/verwaltung/texte" || pathname.startsWith("/dashboard/verwaltung/texte/");
+}
+
 /** Organisation overview page with top-bar org selector. */
 export function isOrganisationDashboardPath(pathname: string): boolean {
   return pathname === "/dashboard/organisations";
@@ -32,6 +37,7 @@ export function isOnboardingDashboardPath(pathname: string): boolean {
 export function isDashboardOrgBarPath(pathname: string): boolean {
   return (
     isSeoDashboardPath(pathname) ||
+    isTexteDashboardPath(pathname) ||
     isManageOrgBarPath(pathname) ||
     isOrganisationDashboardPath(pathname) ||
     isOnboardingDashboardPath(pathname)

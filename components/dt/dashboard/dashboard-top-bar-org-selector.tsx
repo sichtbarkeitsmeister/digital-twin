@@ -9,6 +9,7 @@ import {
   isManageOrgBarPath,
   isOrganisationDashboardPath,
   isSeoDashboardPath,
+  isTexteDashboardPath,
 } from "@/lib/dt/seo/dashboard-path";
 import {
   organisationOptionLabel,
@@ -240,6 +241,10 @@ export function DashboardTopBarOrgSelector() {
 
   if (isSeoDashboardPath(pathname)) {
     return <SeoTopBarOrgSelector />;
+  }
+
+  if (isTexteDashboardPath(pathname)) {
+    return <SeoTopBarOrgSelector variant="texte" />;
   }
 
   if (isOrganisationDashboardPath(pathname)) {

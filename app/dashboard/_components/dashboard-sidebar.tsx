@@ -13,6 +13,7 @@ import {
   FolderUp,
   Inbox,
   MessageCircle,
+  PenLine,
   Plug,
   Shield,
   Sparkles,
@@ -145,6 +146,12 @@ export function DashboardSidebar({
             match: (pathname: string) =>
               pathname.startsWith("/dashboard/verwaltung/seo") ||
               pathname.startsWith("/dashboard/digital-twin/seo"),
+          },
+          {
+            label: "Texte",
+            href: "/dashboard/verwaltung/texte",
+            icon: PenLine,
+            match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/texte"),
           },
         ]
       : []),
