@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 
 import { runDueJobs } from "@/lib/jobs/runner";
 
@@ -21,13 +21,27 @@ export async function POST(req: Request) {
     );
   }
 
+  // The cron client stops waiting after 120s and drops the connection. Awaiting the
+  // step here killed the worker in the middle of a page, after Gliederung was saved
+  // and before Rohtext was started. Answering first lets the step use maxDuration.
+  const run = () =>
+    runDueJobs().catch((error) => {
+      console.error("[jobs/run] unexpected error", error);
+    });
+
   try {
-    const summary = await runDueJobs();
-    return NextResponse.json({ ok: true, summary });
+    after(run);
+    return NextResponse.json({ ok: true, accepted: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[jobs/run] unexpected error", error);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    console.error("[jobs/run] after() unavailable, running inline", error);
+    try {
+      const summary = await runDueJobs();
+      return NextResponse.json({ ok: true, summary });
+    } catch (inlineError) {
+      const message = inlineError instanceof Error ? inlineError.message : String(inlineError);
+      console.error("[jobs/run] unexpected error", inlineError);
+      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    }
   }
 }
 

@@ -124,6 +124,7 @@ export async function runContentStep(
   page: ContentPageRow,
   steps: ContentStepRow[],
   step: number,
+  timeoutMs?: number,
 ): Promise<StepOutcome> {
   const def = contentStepDefinition(step);
   if (!def) throw new ContentLlmError(`Unbekannter Schritt ${step}.`, false);
@@ -145,6 +146,7 @@ export async function runContentStep(
     user: spec.user,
     tool: spec.tool,
     maxTokens: spec.maxTokens,
+    timeoutMs,
   });
   const output = spec.normalize(json, context);
   const costEur = estimateCostEur(model, usage);

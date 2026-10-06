@@ -30,7 +30,8 @@ import {
   resolveContentModels,
 } from "../lib/dt/content/model-config";
 import { normalizeFindings, normalizeQuestions } from "../lib/dt/content/pipeline/prompts";
-import { CONTENT_STEPS } from "../lib/dt/content/pipeline/steps";
+import { CONTENT_STEPS, nextContentStep } from "../lib/dt/content/pipeline/steps";
+import { JOB_WORKER_BUDGET_MS, shouldClaimAnotherJob, stepBudgetMs } from "../lib/jobs/schedule";
 import {
   anyContentPageRunning,
   contentActionLabel,
@@ -357,6 +358,18 @@ assert.deepEqual(review.steps.map((s) => s.status), ["done", "done", "done", "wa
 assert.equal(review.text_step, 3, "the text on screen comes from the Rohtext");
 assert.equal(review.questions.length, 1);
 assert.equal(review.public.cost, "0,00\u00a0€");
+const betweenSteps = buildReview({ ...base, state: "laeuft", step: 2 }, [
+  { ...steps[0]!, status: "done" },
+  { ...steps[1]!, status: "done" },
+]);
+assert.equal(betweenSteps.public.detail, "Schritt 3 von 8 startet: Rohtext");
+assert.equal(nextContentStep([{ step: 1, status: "done" }, { step: 2, status: "done" }]), 3);
+assert.equal(nextContentStep([{ step: 1, status: "done" }, { step: 2, status: "running" }]), 2);
+const tickStart = 1_000_000;
+assert.equal(shouldClaimAnotherJob(tickStart, tickStart + JOB_WORKER_BUDGET_MS, 0, 5), true);
+assert.equal(shouldClaimAnotherJob(tickStart + JOB_WORKER_BUDGET_MS - 10_000, tickStart + JOB_WORKER_BUDGET_MS, 1, 5), false, "no second job when the tick is almost over");
+assert.equal(stepBudgetMs(tickStart, tickStart + 240_000, 150_000), 225_000);
+assert.equal(stepBudgetMs(tickStart, tickStart + 100_000, 150_000), null, "Rohtext waits for a tick that can finish it");
 
 const overview = buildOverview({ ready: true, checks: [] }, [
   base,

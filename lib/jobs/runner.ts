@@ -3,10 +3,10 @@ import { randomUUID } from "crypto";
 import { createServiceClient } from "@/lib/supabase/service";
 
 import { findHandler } from "./registry";
+import { JOB_LOCK_TTL_MS, JOB_WORKER_BUDGET_MS, shouldClaimAnotherJob } from "./schedule";
 import type { JobRow } from "./types";
 
 const DEFAULT_BATCH_SIZE = 5;
-const DEFAULT_LOCK_TTL_MS = 5 * 60 * 1000;
 const RETRY_BASE_MS = 30 * 1000;
 const RETRY_MAX_MS = 30 * 60 * 1000;
 
@@ -20,19 +20,19 @@ export type RunnerSummary = {
 };
 
 /**
- * Pull a batch of due jobs and execute them. Each tick is bounded — the
- * cron schedule (every 30 s) will pick up the next batch.
+ * Pull due jobs and execute them. One job is claimed at a time: claiming a whole
+ * batch up front left later jobs `running` when the tick was cut off, so they never ran.
  *
- * Concurrency is achieved via row-level locks (FOR UPDATE SKIP LOCKED)
- * inside the claim_jobs() RPC so that overlapping ticks don't double-run.
+ * Stale locks are released first. A tick that dies mid-step used to leave the job
+ * `running`, and the release lived at the end of the tick — which never ran.
  *
- * For Phase 1 we keep this single-process. Multi-instance scaling can be
- * added later by raising batch size and/or running ticks more often.
+ * Concurrency uses row locks (FOR UPDATE SKIP LOCKED) inside claim_due_jobs.
  */
 export async function runDueJobs(
   options: { batchSize?: number } = {},
 ): Promise<RunnerSummary> {
   const startedAt = Date.now();
+  const deadline = startedAt + JOB_WORKER_BUDGET_MS;
   const workerId = `worker-${randomUUID()}`;
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
   const supabase = createServiceClient();
@@ -46,106 +46,89 @@ export async function runDueJobs(
     durationMs: 0,
   };
 
-  const claimedAt = new Date().toISOString();
+  await releaseStaleLocks(supabase);
 
-  // Atomically claim a batch of due jobs by setting status='running' on
-  // the oldest pending rows whose run_after has passed. We rely on a
-  // CTE update so two concurrent ticks won't grab the same rows.
-  const { data: claimed, error: claimError } = await supabase.rpc(
-    "claim_due_jobs",
-    {
-      p_batch: batchSize,
-      p_worker: workerId,
-      p_now: claimedAt,
-    },
-  );
-
-  if (claimError) {
-    if (claimError.code === "42883") {
-      // Function doesn't exist yet (race during first deploy). Skip silently.
-      summary.durationMs = Date.now() - startedAt;
-      return summary;
-    }
-    console.error("[jobs] claim failed", claimError);
-    summary.durationMs = Date.now() - startedAt;
-    return summary;
+  while (shouldClaimAnotherJob(Date.now(), deadline, summary.picked, batchSize)) {
+    const claimed = await claimOne(supabase, workerId);
+    if (claimed === "missing") break;
+    if (!claimed) break;
+    summary.picked += 1;
+    await executeJob(claimed, deadline, summary);
   }
-
-  const jobs = (claimed ?? []) as JobRow[];
-  summary.picked = jobs.length;
-
-  for (const job of jobs) {
-    const handler = findHandler(job.kind);
-
-    if (!handler) {
-      await markFailed(job, `No handler registered for kind=${job.kind}`, {
-        force: true,
-      });
-      if (job.kind === "seo.crawl") {
-        await markSeoCrawlDead(job, `No handler registered for kind=${job.kind}`);
-      }
-      summary.dead += 1;
-      continue;
-    }
-
-    try {
-      const outcome = await handler({ job });
-      if (outcome.ok) {
-        if (outcome.reschedule) {
-          await markReschedule(job, outcome.result ?? null);
-        } else {
-          await markSucceeded(job, outcome.result ?? null);
-        }
-        summary.succeeded += 1;
-      } else {
-        await markFailed(job, outcome.error, {
-          force: outcome.retryable === false,
-        });
-        const exhausted =
-          outcome.retryable === false || job.attempts + 1 >= job.max_attempts;
-        if (exhausted && job.kind === "seo.crawl") {
-          await markSeoCrawlDead(job, outcome.error);
-        }
-        if (exhausted) {
-          summary.dead += 1;
-        } else {
-          summary.failed += 1;
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[jobs] handler ${job.kind} threw`, error);
-      await markFailed(job, message);
-      const exhausted = job.attempts + 1 >= job.max_attempts;
-      if (exhausted && job.kind === "seo.crawl") {
-        await markSeoCrawlDead(job, message);
-      }
-      if (exhausted) {
-        summary.dead += 1;
-      } else {
-        summary.failed += 1;
-      }
-    }
-  }
-
-  // Recover locks held by this worker that are older than the TTL — in case
-  // we crashed mid-run before marking the job. Status stays 'running' but
-  // we reset it to 'pending' so the next tick can retry.
-  await supabase
-    .from("jobs")
-    .update({
-      status: "pending",
-      locked_at: null,
-      locked_by: null,
-    })
-    .eq("status", "running")
-    .lt(
-      "locked_at",
-      new Date(Date.now() - DEFAULT_LOCK_TTL_MS).toISOString(),
-    );
 
   summary.durationMs = Date.now() - startedAt;
   return summary;
+}
+
+async function releaseStaleLocks(supabase: ReturnType<typeof createServiceClient>): Promise<void> {
+  const cutoff = new Date(Date.now() - JOB_LOCK_TTL_MS).toISOString();
+  const { error } = await supabase
+    .from("jobs")
+    .update({ status: "pending", locked_at: null, locked_by: null })
+    .eq("status", "running")
+    .lt("locked_at", cutoff);
+  if (error) console.error("[jobs] stale lock release failed", error);
+}
+
+async function claimOne(
+  supabase: ReturnType<typeof createServiceClient>,
+  workerId: string,
+): Promise<JobRow | null | "missing"> {
+  const { data, error } = await supabase.rpc("claim_due_jobs", {
+    p_batch: 1,
+    p_worker: workerId,
+    p_now: new Date().toISOString(),
+  });
+  if (error) {
+    if (error.code === "42883") return "missing";
+    console.error("[jobs] claim failed", error);
+    return null;
+  }
+  const rows = (data ?? []) as JobRow[];
+  return rows[0] ?? null;
+}
+
+async function executeJob(job: JobRow, deadline: number, summary: RunnerSummary): Promise<void> {
+  const handler = findHandler(job.kind);
+
+  if (!handler) {
+    await markFailed(job, `No handler registered for kind=${job.kind}`, { force: true });
+    if (job.kind === "seo.crawl") {
+      await markSeoCrawlDead(job, `No handler registered for kind=${job.kind}`);
+    }
+    summary.dead += 1;
+    return;
+  }
+
+  try {
+    const outcome = await handler({ job, deadline });
+    if (outcome.ok) {
+      if (outcome.reschedule) {
+        await markReschedule(job, outcome.result ?? null);
+      } else {
+        await markSucceeded(job, outcome.result ?? null);
+      }
+      summary.succeeded += 1;
+    } else {
+      await markFailed(job, outcome.error, { force: outcome.retryable === false });
+      const exhausted = outcome.retryable === false || job.attempts + 1 >= job.max_attempts;
+      if (exhausted && job.kind === "seo.crawl") {
+        await markSeoCrawlDead(job, outcome.error);
+      }
+      if (exhausted) summary.dead += 1;
+      else summary.failed += 1;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[jobs] handler ${job.kind} threw`, error);
+    await markFailed(job, message);
+    const exhausted = job.attempts + 1 >= job.max_attempts;
+    if (exhausted && job.kind === "seo.crawl") {
+      await markSeoCrawlDead(job, message);
+    }
+    if (exhausted) summary.dead += 1;
+    else summary.failed += 1;
+  }
 }
 
 async function markReschedule(

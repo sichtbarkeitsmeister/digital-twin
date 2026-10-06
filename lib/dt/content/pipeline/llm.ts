@@ -53,6 +53,7 @@ export async function callContentTool(input: {
   user: string;
   tool: Anthropic.Tool;
   maxTokens: number;
+  timeoutMs?: number;
 }): Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string }> {
   const apiKey = resolveContentApiKey();
   if (!apiKey) {
@@ -69,7 +70,7 @@ export async function callContentTool(input: {
       anthropic,
       models: input.models,
       maxTokens: input.maxTokens,
-      timeoutMs: STEP_TIMEOUT_MS,
+      timeoutMs: input.timeoutMs ?? STEP_TIMEOUT_MS,
       stream: true,
       system: input.system,
       tools: [input.tool],

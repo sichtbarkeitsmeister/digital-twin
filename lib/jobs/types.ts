@@ -42,6 +42,8 @@ export type EnqueueJobInput = {
 
 export type JobHandlerContext = {
   job: JobRow;
+  /** Epoch ms. Handlers should stop and reschedule instead of starting work past this. */
+  deadline?: number;
 };
 
 export type JobHandlerResult =
