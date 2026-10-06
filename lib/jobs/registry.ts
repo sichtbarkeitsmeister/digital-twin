@@ -1,3 +1,4 @@
+import { contentPageHandler } from "./handlers/content-page";
 import { leadinfoNormalizeHandler } from "./handlers/leadinfo-normalize";
 import { seoCrawlHandler } from "./handlers/seo-crawl";
 import type { JobHandler } from "./types";
@@ -8,6 +9,7 @@ import type { JobHandler } from "./types";
 export const JOB_HANDLERS: Record<string, JobHandler> = {
   "leadinfo.normalize": leadinfoNormalizeHandler,
   "seo.crawl": seoCrawlHandler,
+  "content.page": contentPageHandler,
 };
 
 export function findHandler(kind: string): JobHandler | null {
