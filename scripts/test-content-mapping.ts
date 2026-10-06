@@ -1,25 +1,14 @@
 /**
- * Tests for the Content-Agent mapping, presentation helpers and demo fixtures.
- * Run: npx tsx scripts/test-content-mapping.ts
+ * Tests for the content pipeline's pure parts: mapping, rendering, presentation,
+ * state → actions, model config and pricing. Run: npm run test:content-mapping
  */
 import assert from "node:assert/strict";
 
-import {
-  DEMO_WORKSHOP_ANBIETER,
-  demoExport,
-  demoOverview,
-  demoPutClient,
-  demoQuestions,
-  demoReadiness,
-  demoReview,
-  demoRunThrough,
-} from "../lib/dt/content/fixtures";
 import {
   anbieterFromWorkshop,
   avatarFromAgent,
   CONTENT_TONALITAETEN,
   cleanTextSettings,
-  contentClientKey,
   contentTonalitaetText,
   filledWorkshopSections,
   mergeContentAnbieter,
@@ -28,12 +17,66 @@ import {
   type WorkshopAnbieterSection,
 } from "../lib/dt/content/mapping";
 import {
+  CONTENT_MODEL_ENV,
+  DEFAULT_CONTENT_MODEL,
+  resolveContentModels,
+} from "../lib/dt/content/model-config";
+import { normalizeFindings, normalizeQuestions } from "../lib/dt/content/pipeline/prompts";
+import { CONTENT_STEPS } from "../lib/dt/content/pipeline/steps";
+import {
   anyContentPageRunning,
   contentActionLabel,
   contentStateMeta,
   extractContentBlocks,
 } from "../lib/dt/content/presentation";
+import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
+import {
+  htmlToMarkdown,
+  normalizeBlocks,
+  parseBlocksFromHtml,
+  renderBlocksHtml,
+  replaceBlockText,
+  sanitizeBlockHtml,
+  slugify,
+} from "../lib/dt/content/render";
+import {
+  buildOverview,
+  buildReview,
+  flattenStructure,
+  pageActions,
+  pageSummary,
+  rerunStepFor,
+  type ContentPageRow,
+  type ContentStepRow,
+} from "../lib/dt/content/store";
 import { normalizeAnbieterItems } from "../lib/dt/transcripts/workshop-model";
+
+/** Workshop sections as `dt_workshop_corpus.anbieter` holds them (11 of 13 filled). */
+const DEMO_WORKSHOP_ANBIETER: WorkshopAnbieterSection[] = [
+  {
+    key: "unternehmen",
+    label: "Unternehmen & Kern",
+    current:
+      "Einfach Entrümpelung ist ein Familienbetrieb aus Düsseldorf mit 14 Mitarbeitenden. Kern ist die Räumung von Wohnungen, Häusern und Kellern zum Festpreis.",
+  },
+  { key: "gruendung", label: "Gründungsgeschichte", current: "2012 von Markus Brandt gegründet." },
+  { key: "leistungen", label: "Leistungen & Schwerpunkte", current: "Haushaltsauflösung, Kellerentrümpelung, Gewerbe." },
+  { key: "ablauf", label: "Ablauf & Mitwirkung", current: "Kostenlose Besichtigung, Festpreis innerhalb von 24 Stunden." },
+  { key: "alleinstellung", label: "Alleinstellung", current: "Verbindlicher Festpreis ohne Nachforderungen." },
+  { key: "wettbewerb", label: "Wettbewerb", current: "" },
+  { key: "team", label: "Team & Partner", current: "Feste Teams, keine Subunternehmer." },
+  { key: "werte", label: "Werte & Haltung", current: "Respekt vor der Lebensgeschichte in jeder Wohnung." },
+  { key: "beweise", label: "Beweise & Erfolge", current: "Über 1.800 Aufträge laut Inhaber. 4,9 Sterne bei Google." },
+  {
+    key: "sprache",
+    label: "Sprache & Ton",
+    current:
+      "Kunden werden gesiezt, auch in Social Media. Der Ton soll ruhig, ehrlich und bodenständig klingen, nie flapsig. Wörter wie „Schrott“, „Ramsch“ oder „Messie“ sollen nicht vorkommen.",
+  },
+  { key: "preis", label: "Preis & Positionierung", current: "Mittleres Preissegment, Festpreis nach Besichtigung." },
+  { key: "kanaele", label: "Anfragen & Kanäle", current: "Die meisten Anfragen kommen per Telefon und WhatsApp." },
+  { key: "ziele", label: "Ziele & Weiterentwicklung", current: "" },
+];
 
 const sections = (texts: Record<string, string>): WorkshopAnbieterSection[] =>
   normalizeAnbieterItems([]).map((item) => ({
@@ -190,8 +233,6 @@ assert.deepEqual(avatarFromAgent({ name: "X", role: null, prompt_template: null,
   beschreibung: "",
 });
 
-assert.equal(contentClientKey(" 3F2A-ABC "), "3f2a-abc");
-
 // --- presentation ---------------------------------------------------------------------------
 assert.equal(contentStateMeta("braucht_sie").tone, "orange");
 assert.equal(contentStateMeta("laeuft").tone, "blue");
@@ -215,49 +256,126 @@ assert.deepEqual(blocks, [
   { id: "faq", text: "Frage?" },
 ]);
 
-// --- fixtures stay consistent with the contract -------------------------------------------
-const overview = demoOverview();
-assert.equal(overview.readiness.ready, true);
-assert.equal(overview.needs_you, overview.pages.filter((p) => p.state === "braucht_sie").length);
-assert.equal(overview.running, 1);
-assert.equal(overview.cost, "5,43\u00a0€");
-assert.ok(new Set(overview.pages.map((p) => p.slug)).size === overview.pages.length);
+// --- render: blocks ⇄ HTML, sanitizing, edits, markdown ------------------------------------
+assert.equal(slugify("Über uns & Team!"), "ueber-uns-team");
+assert.equal(
+  sanitizeBlockHtml('<p onclick="x()">Hi <script>evil()</script><a href="javascript:alert(1)">x</a> <a href="https://a.de">ok</a><div>d</div></p>'),
+  '<p>Hi <a>x</a> <a href="https://a.de">ok</a>d</p>',
+);
+const normalized = normalizeBlocks([
+  { id: "Intro", heading: "Entrümpelung Düsseldorf", level: 1, html: "<p>Hallo</p>" },
+  { id: "intro", heading: "Ablauf", level: 2, text: "Erst A.\n\nDann B." },
+  { id: "", heading: "", level: 2, html: "" },
+  { heading: "FAQ", level: 7, html: "<ul><li>Q</li></ul>" },
+]);
+assert.deepEqual(normalized.map((b) => [b.id, b.level]), [["intro", 1], ["intro-2", 2], ["faq", 2]]);
+assert.equal(normalized[1]!.html, "<p>Erst A.</p>\n<p>Dann B.</p>");
+const html = renderBlocksHtml(normalized);
+assert.match(html, /^<section data-block-id="intro"><h1>Entrümpelung Düsseldorf<\/h1>\n<p>Hallo<\/p><\/section>/);
+assert.deepEqual(parseBlocksFromHtml(html), normalized, "render → parse round-trips");
+assert.deepEqual(extractContentBlocks(html).map((b) => b.id), ["intro", "intro-2", "faq"], "drawer sees the same blocks");
 
-const notReady = demoReadiness({ anbieter: null, avatarCount: 0, structure: null });
-assert.equal(notReady.ready, false);
-assert.deepEqual(notReady.checks.map((c) => c.id), ["anbieter", "avatar", "structure"]);
+const edited = replaceBlockText(html, "intro-2", "Ablauf\nNur noch ein Satz.\n\nUnd <b>kein</b> HTML.")!;
+assert.match(edited, /<h2>Ablauf<\/h2>\n<p>Nur noch ein Satz.<\/p>\n<p>Und &lt;b&gt;kein&lt;\/b&gt; HTML.<\/p>/, "heading kept once, text escaped");
+assert.equal(replaceBlockText(html, "nope", "x"), null);
+assert.equal(
+  htmlToMarkdown(html),
+  "# Entrümpelung Düsseldorf\n\nHallo\n\n## Ablauf\n\nErst A.\n\nDann B.\n\n## FAQ\n\n- Q",
+);
+assert.equal(htmlToMarkdown("<ol><li>eins</li><li>zwei</li></ol><p><strong>fett</strong> &amp; <em>kursiv</em></p>"), "1. eins\n2. zwei\n\n**fett** & *kursiv*");
 
-for (const page of overview.pages) {
-  const review = demoReview(page.slug)!;
-  assert.equal(review.steps.length, 8, `${page.slug}: 8 steps`);
-  assert.equal(review.public.state, page.state);
-  for (const action of review.actions) {
-    assert.ok(contentActionLabel(action.kind), `${page.slug}: known action ${action.kind}`);
-    if (["approve", "edit", "rerun_with_note"].includes(action.kind)) {
-      assert.equal(typeof action.step, "number", `${page.slug}: ${action.kind} needs a step`);
-    }
-  }
-  if (page.state === "laeuft") assert.equal(review.actions.length, 0);
-  for (const f of review.findings) {
-    if (f.block_id) assert.ok(extractContentBlocks(review.html).some((b) => b.id === f.block_id));
+// --- prompts: findings and questions from LLM JSON ------------------------------------------
+const ids = new Set(["intro", "faq"]);
+assert.deepEqual(normalizeFindings([{ title: "Zahl", problem: "unbelegt", proposal: "streichen", severity: "high", block_id: "intro" }, { severity: "low" }, { problem: "x", severity: "weird", block_id: "nope" }], ids), [
+  { title: "Zahl", problem: "unbelegt", proposal: "streichen", severity: "high", severity_label: "Wichtig", block_id: "intro" },
+  { title: "x", problem: "x", proposal: "", severity: "medium", severity_label: "Mittel", block_id: null },
+]);
+const questions = normalizeQuestions([{ question: "Stimmt 1.800?", blocking: true, block_id: "faq", kind: "fact" }, { question: "Egal", blocking: false, kind: "other" }, { kind: "fact" }], ids);
+assert.equal(questions.length, 2);
+assert.deepEqual(questions.map((q) => [q.blocking, q.block_id, q.kind]), [[true, "faq", "fact"], [false, null, "fact"]]);
+
+// --- store: pages from the structure, state → label/actions ---------------------------------
+assert.equal(CONTENT_STEPS.length, 8);
+const flat = flattenStructure([
+  { label: "Startseite", path: "/", children: [{ label: "Leistungen", path: "/leistungen", children: [{ label: "Keller", path: "/leistungen/keller", children: [] }] }] },
+  { label: "Über uns", children: [] },
+  { label: "Über uns", children: [] },
+]);
+assert.deepEqual(flat.map((p) => [p.slug, p.level, p.position]), [["startseite", 0, 0], ["leistungen", 1, 1], ["keller", 2, 2], ["ueber-uns", 0, 3], ["ueber-uns-2", 0, 4]]);
+
+const base: ContentPageRow = {
+  id: "p1", organisation_id: "o1", slug: "keller", name: "Keller", path: "/keller", level: 1, position: 0, main_keyword: null,
+  state: "nicht_begonnen", step: null, released: false, released_at: null, title: null, meta_description: null, html: "", markdown: "",
+  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], error: null, job_id: null, cost_eur: "0", started_by: null,
+  created_at: "2026-10-06T10:00:00Z", updated_at: "2026-10-06T10:00:00Z",
+};
+const q = questions[0]!;
+const cases: Array<[Partial<ContentPageRow>, string[], string | null]> = [
+  [{}, ["run_through"], null],
+  [{ state: "laeuft", step: 3 }, [], "Schritt 3 von 8: Rohtext läuft"],
+  [{ state: "braucht_sie", step: 4, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export"], "1 Frage an den Kunden, bevor es weitergeht"],
+  [{ state: "in_arbeit", step: 3, error: "Ratenlimit" }, ["run_through", "rerun_with_note"], "Fehler in Schritt 3: Ratenlimit"],
+  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export"], "Pausiert nach Schritt 5: Tonalität & Avatar"],
+  [{ state: "fertig", step: 8, html }, ["approve", "edit", "rerun_with_note", "export"], "Wartet auf Freigabe"],
+  [{ state: "fertig", step: 8, html, released: true }, ["export"], "Freigegeben"],
+];
+for (const [patch, kinds, detail] of cases) {
+  const page = { ...base, ...patch };
+  assert.deepEqual(pageActions(page).map((a) => a.kind), kinds, `${page.state}: actions`);
+  assert.equal(pageSummary(page).detail, detail, `${page.state}: detail`);
+  for (const action of pageActions(page)) {
+    assert.ok(contentActionLabel(action.kind));
+    if (["approve", "edit", "rerun_with_note"].includes(action.kind)) assert.equal(typeof action.step, "number");
   }
 }
-assert.equal(demoReview("gibt-es-nicht"), null);
-assert.equal(demoQuestions().questions.length, 2);
+assert.equal(rerunStepFor({ ...base, state: "braucht_sie", step: 4 }), 4);
+assert.equal(rerunStepFor({ ...base, state: "fertig", step: 8 }), 7);
+assert.equal(rerunStepFor({ ...base, state: "in_arbeit", step: 6 }), 6);
+assert.equal(pageSummary({ ...base, cost_eur: "1.2345" }).cost, "1,23\u00a0€");
+assert.equal(pageSummary(base).updated_at, null, "not started → no date");
 
-const run = demoRunThrough({ pages: ["startseite", "kellerentruempelung", "messie-wohnung"] });
-assert.deepEqual(run.jobs.map((j) => j.slug), ["messie-wohnung"]);
-assert.deepEqual(run.skipped.map((s) => s.page), ["Startseite", "Kellerentrümpelung"]);
+const steps: ContentStepRow[] = [1, 2, 3].map((step) => ({
+  id: `s${step}`, page_id: "p1", organisation_id: "o1", step, name: CONTENT_STEPS[step - 1]!.name, status: "done", output: {},
+  model: "claude-sonnet-4-6", input_tokens: 1000, output_tokens: 500, cost_eur: "0.01", error: null, started_at: null, finished_at: null, approved_by: null, approved_at: null,
+}));
+const review = buildReview({ ...base, state: "braucht_sie", step: 4, html, markdown: htmlToMarkdown(html), questions: [q] }, [
+  ...steps,
+  { ...steps[0]!, id: "s4", step: 4, name: "Faktencheck", status: "waiting" },
+]);
+assert.equal(review.steps.length, 8);
+assert.deepEqual(review.steps.map((s) => s.status), ["done", "done", "done", "waiting", "pending", "pending", "pending", "pending"]);
+assert.equal(review.text_step, 3, "the text on screen comes from the Rohtext");
+assert.equal(review.questions.length, 1);
+assert.equal(review.public.cost, "0,00\u00a0€");
 
-const put = demoPutClient("org", { anbieter: { name: "X", anrede: "Ihr", branche: "" } });
-assert.equal(put.complete, false);
-assert.deepEqual(put.problems, ["Anbieter: Anrede muss „Sie“ oder „Du“ sein.", "Anbieter: Branche fehlt."]);
-const putOk = demoPutClient("org", { anbieter: merged, avatar });
-assert.equal(putOk.complete, true);
-assert.deepEqual(putOk.problems, []);
+const overview = buildOverview({ ready: true, checks: [] }, [
+  base,
+  { ...base, id: "p2", slug: "a", state: "braucht_sie", questions: [q], cost_eur: "0.5" },
+  { ...base, id: "p3", slug: "b", state: "laeuft", step: 2, cost_eur: 0.25 },
+  { ...base, id: "p4", slug: "c", state: "fertig", released: true, cost_eur: "1" },
+]);
+assert.deepEqual([overview.needs_you, overview.running, overview.finished, overview.cost_eur, overview.cost], [1, 1, 1, 1.75, "1,75\u00a0€"]);
+assert.equal(overview.pages[1]!.questions, 1);
 
-assert.match(demoExport("startseite", "html")!.body, /^<!DOCTYPE html>/);
-assert.equal(demoExport("startseite", "md")!.filename, "startseite.md");
-assert.equal(demoExport("messie-wohnung", "html"), null, "no text yet → no export");
+// --- model config and pricing -----------------------------------------------------------------
+const defaults = resolveContentModels({}, {});
+assert.equal(defaults.write[0], DEFAULT_CONTENT_MODEL);
+assert.deepEqual(defaults.check, defaults.write, "check tier follows write tier unless set");
+assert.deepEqual(defaults.source, { write: "default", check: "default" });
+const fromEnv = resolveContentModels({}, { [CONTENT_MODEL_ENV.write]: " claude-opus-4-6 ", [CONTENT_MODEL_ENV.check]: "claude-haiku-4-5" });
+assert.equal(fromEnv.write[0], "claude-opus-4-6");
+assert.equal(fromEnv.check[0], "claude-haiku-4-5");
+assert.deepEqual(fromEnv.source, { write: "env", check: "env" });
+assert.ok(fromEnv.write.includes(DEFAULT_CONTENT_MODEL), "default stays as fallback");
+const fromDb = resolveContentModels({ write: "claude-sonnet-4-6", check: null }, { [CONTENT_MODEL_ENV.write]: "claude-opus-4-6" });
+assert.equal(fromDb.write[0], "claude-sonnet-4-6", "app_settings beats env");
+assert.equal(fromDb.check[0], "claude-sonnet-4-6");
+assert.deepEqual(fromDb.source, { write: "app_settings", check: "app_settings" });
+assert.equal(new Set(fromDb.write).size, fromDb.write.length, "no duplicate candidates");
 
-console.log("OK: content-mapping tests passed");
+assert.deepEqual([priceForModel("claude-sonnet-4-6").inputUsd, priceForModel("claude-haiku-4-5-20251001").inputUsd, priceForModel("claude-opus-4-1").inputUsd, priceForModel("claude-opus-4-6").inputUsd, priceForModel(null).inputUsd], [3, 1, 15, 5, 3]);
+assert.equal(estimateCostEur("claude-sonnet-4-6", { inputTokens: 1_000_000, outputTokens: 0 }, 1), 3);
+assert.equal(estimateCostEur("claude-sonnet-4-6", { inputTokens: 10_000, outputTokens: 2_000 }, 0.92), 0.0552);
+assert.equal(estimateCostEur("claude-haiku-4-5", { inputTokens: 0, outputTokens: 0 }), 0);
+
+console.log("OK: content tests passed");
