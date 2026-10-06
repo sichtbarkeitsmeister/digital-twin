@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ContentAnrede, ContentBranche, ContentTextSettings } from "@/lib/dt/content/mapping";
 import { cleanTextSettings } from "@/lib/dt/content/mapping";
-import { CONTENT_STEPS, contentStepName } from "@/lib/dt/content/pipeline/steps";
+import { CONTENT_STEPS, contentStepName, runningPageDetail } from "@/lib/dt/content/pipeline/steps";
 import { formatEur } from "@/lib/dt/content/presentation";
 import { planManualContentPages, type ManualPageDraft } from "@/lib/dt/content/manual-pages";
 import { slugify } from "@/lib/dt/content/render";
@@ -475,7 +475,7 @@ export function buildReview(page: ContentPageRow, steps: ContentStepRow[]): Cont
     public: {
       state: page.state,
       label: summary.label,
-      detail: summary.detail,
+      detail: page.state === "laeuft" ? runningPageDetail(page.step, steps) : summary.detail,
       step: page.step,
       cost: summary.cost,
       released: page.released,
