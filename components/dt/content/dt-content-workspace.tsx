@@ -17,6 +17,7 @@ import {
 } from "@/components/dt/content/dt-content-pages-table";
 import { DtContentReadinessCard } from "@/components/dt/content/dt-content-readiness-card";
 import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settings-card";
+import { CenteredModal } from "@/components/ui/centered-modal";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
 import { describeContentModelSource } from "@/lib/dt/content/model-config";
@@ -92,6 +93,8 @@ export function DtContentWorkspace(props: {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
   const [resetting, setResetting] = useState<"reset" | "delete" | null>(null);
+  /** Which bulk action waits for the person's confirmation in the modal. */
+  const [confirmBulk, setConfirmBulk] = useState<"reset" | "delete" | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
   const [editingSettings, setEditingSettings] = useState(false);
@@ -246,16 +249,9 @@ export function DtContentWorkspace(props: {
     }
   }
 
-  /** „Auswahl zurücksetzen“ / „Auswahl löschen“ for the checked pages. */
-  async function resetSelected(modeKind: "reset" | "delete") {
+  /** „Auswahl zurücksetzen“ / „Auswahl löschen“ for the checked pages, after the modal was confirmed. */
+  async function runBulk(modeKind: "reset" | "delete") {
     if (selectedCount === 0 || resetting) return;
-    const n = `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"}`;
-    const ok = window.confirm(
-      modeKind === "reset"
-        ? `${n} wirklich komplett zurücksetzen? Texte, Schritte, Fragen, Anmerkungen und Kosten dieser Seiten werden gelöscht. Namen und Quelle bleiben.`
-        : `${n} wirklich löschen? Die Zeilen verschwinden aus der Tabelle, mit Text, Schritten und Fragen. Seiten aus der Seitenstruktur kommen beim nächsten Upload wieder, Crawl-Seiten beim nächsten „Übernehmen“.`,
-    );
-    if (!ok) return;
     setResetting(modeKind);
     try {
       const res = await contentApi<ContentResetResult>("/api/dt/content/reset", {
@@ -272,6 +268,7 @@ export function DtContentWorkspace(props: {
       });
       setSelected(new Set());
       applyOverview(res.data.overview);
+      setConfirmBulk(null);
     } finally {
       setResetting(null);
     }
@@ -355,28 +352,6 @@ export function DtContentWorkspace(props: {
               Texte erstellen ({selectedCount})
             </DtPillButton>
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <button
-                type="button"
-                onClick={() => void resetSelected("reset")}
-                disabled={selectedCount === 0 || resetting != null}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-sbkm-ink-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-40 dark:text-white/55"
-                title="Die angehakten Seiten komplett zurücksetzen (Text, Schritte, Fragen, Kosten)"
-              >
-                {resetting === "reset" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <RotateCcw className="size-3" aria-hidden />}
-                Auswahl zurücksetzen{selectedCount > 0 ? ` (${selectedCount})` : ""}
-              </button>
-              <button
-                type="button"
-                onClick={() => void resetSelected("delete")}
-                disabled={selectedCount === 0 || resetting != null}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-40 dark:text-red-300"
-                title="Die angehakten Seiten aus der Tabelle entfernen"
-              >
-                {resetting === "delete" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Trash2 className="size-3" aria-hidden />}
-                Auswahl löschen{selectedCount > 0 ? ` (${selectedCount})` : ""}
-              </button>
-            </div>
             {pipeline?.model ? (
               <p
                 className="text-[11px] text-sbkm-ink-500 dark:text-white/45 lg:text-right"
@@ -438,7 +413,31 @@ export function DtContentWorkspace(props: {
               </>
             ) : null}
           </div>
-          <div className="flex items-center gap-2 text-xs text-sbkm-ink-500 dark:text-white/45">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-sbkm-ink-500 dark:text-white/45">
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedCount === 0 || resetting != null}
+              onClick={() => setConfirmBulk("reset")}
+              className="h-8 px-3 text-xs"
+              title="Die angehakten Seiten komplett zurücksetzen (Text, Schritte, Fragen, Kosten)"
+            >
+              <RotateCcw className="size-3.5" aria-hidden />
+              Auswahl zurücksetzen{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedCount === 0 || resetting != null}
+              onClick={() => setConfirmBulk("delete")}
+              className="h-8 px-3 text-xs text-red-700 shadow-[inset_0_0_0_1.5px_#b91c1c] hover:bg-red-700 hover:text-white dark:text-red-300 dark:shadow-[inset_0_0_0_1.5px_rgba(252,165,165,0.6)] dark:hover:bg-red-700 dark:hover:text-white"
+              title="Die angehakten Seiten aus der Tabelle entfernen"
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+              Auswahl löschen{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </DtPillButton>
             {running ? <span>Aktualisiert sich alle 10 Sekunden</span> : null}
             <button
               type="button"
@@ -499,6 +498,62 @@ export function DtContentWorkspace(props: {
           )}
         </div>
       </section>
+
+      <CenteredModal
+        open={confirmBulk != null}
+        onClose={() => {
+          if (!resetting) setConfirmBulk(null);
+        }}
+        closeDisabled={resetting != null}
+        titleId="content-bulk-confirm-title"
+        title={
+          confirmBulk === "delete"
+            ? `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} löschen?`
+            : `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} zurücksetzen?`
+        }
+        description={
+          confirmBulk === "delete"
+            ? "Die Zeilen verschwinden aus der Tabelle – mit Text, Schritten, Fragen und Kosten. Laufende Schritte werden gestoppt. Seiten aus der Seitenstruktur kommen beim nächsten Upload wieder, Crawl-Seiten beim nächsten „Übernehmen“."
+            : "Text, Schritte, Fragen, Anmerkungen und Kosten dieser Seiten werden gelöscht; Name, Pfad und Quelle bleiben. Laufende Schritte werden gestoppt."
+        }
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <DtPillButton type="button" size="sm" variant="ghost" disabled={resetting != null} onClick={() => setConfirmBulk(null)}>
+              Abbrechen
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant={confirmBulk === "delete" ? "navy" : "mint"}
+              className={confirmBulk === "delete" ? "bg-red-600 text-white hover:bg-red-700 dark:hover:bg-red-700 dark:hover:text-white" : undefined}
+              disabled={resetting != null || selectedCount === 0}
+              onClick={() => {
+                if (confirmBulk) void runBulk(confirmBulk);
+              }}
+            >
+              {resetting ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : confirmBulk === "delete" ? <Trash2 className="size-3.5" aria-hidden /> : <RotateCcw className="size-3.5" aria-hidden />}
+              {confirmBulk === "delete" ? "Endgültig löschen" : "Zurücksetzen"}
+            </DtPillButton>
+          </div>
+        }
+      >
+        <ul className="grid gap-1 text-sm text-sbkm-navy dark:text-white">
+          {pages
+            .filter((p) => selected.has(p.slug))
+            .slice(0, 8)
+            .map((p) => (
+              <li key={p.slug} className="flex items-baseline gap-2">
+                <span className="font-semibold">{p.name}</span>
+                {p.source_url || p.path ? (
+                  <span className="truncate font-mono text-[11px] text-sbkm-ink-500 dark:text-white/45">{p.source_url ?? p.path}</span>
+                ) : null}
+              </li>
+            ))}
+          {selectedCount > 8 ? (
+            <li className="text-xs text-sbkm-ink-500 dark:text-white/45">… und {selectedCount - 8} weitere</li>
+          ) : null}
+        </ul>
+      </CenteredModal>
 
       <DtContentPageDrawer
         organisationId={organisationId}
