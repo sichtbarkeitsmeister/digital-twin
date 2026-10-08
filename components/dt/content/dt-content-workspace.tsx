@@ -10,6 +10,7 @@ import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
 import { DtContentPagesSourceCard } from "@/components/dt/content/dt-content-pages-source-card";
+import { DtContentPagesToolbar } from "@/components/dt/content/dt-content-pages-toolbar";
 import {
   DtContentPagesTable,
   isContentPageSelectable,
@@ -19,7 +20,14 @@ import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settin
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
 import { describeContentModelSource } from "@/lib/dt/content/model-config";
-import { anyContentPageRunning, formatContentDate } from "@/lib/dt/content/presentation";
+import {
+  EMPTY_CONTENT_PAGE_FILTER,
+  anyContentPageRunning,
+  filterContentPages,
+  formatContentDate,
+  isContentPageFilterActive,
+  type ContentPageFilter,
+} from "@/lib/dt/content/presentation";
 import type {
   ContentClientPutBody,
   ContentClientPutResult,
@@ -89,6 +97,7 @@ export function DtContentWorkspace(props: {
   const [editingSettings, setEditingSettings] = useState(false);
   const [sync, setSync] = useState<{ result: ContentClientPutResult; sent: ContentClientPutBody } | null>(null);
   const [openPage, setOpenPage] = useState<{ slug: string; name: string } | null>(null);
+  const [filter, setFilter] = useState<ContentPageFilter>(EMPTY_CONTENT_PAGE_FILTER);
 
   const loadReadiness = useCallback(async () => {
     setReadinessLoading(true);
@@ -157,7 +166,19 @@ export function DtContentWorkspace(props: {
     [props.avatars],
   );
 
-  const pages = overview?.pages ?? [];
+  const pages = useMemo(() => overview?.pages ?? [], [overview]);
+  const visible = useMemo(() => filterContentPages(pages, filter), [pages, filter]);
+  const filterActive = isContentPageFilterActive(filter);
+
+  // Pages hidden by search or status filter leave the selection: bulk actions only hit what is visible.
+  useEffect(() => {
+    setSelected((prev) => {
+      const allowed = new Set(visible.map((p) => p.slug));
+      const next = new Set([...prev].filter((slug) => allowed.has(slug)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visible]);
+
   const selectedCount = selected.size;
   const notReady = readiness ? !readiness.ready : false;
   const settingsOpen = !settings || editingSettings;
@@ -277,7 +298,9 @@ export function DtContentWorkspace(props: {
     : settingsOpen
       ? "Erst die Einstellungen für Texte bestätigen."
       : selectedCount === 0
-        ? "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
+        ? filterActive
+          ? "Seiten in der gefilterten Tabelle anhaken – nur angehakte Seiten bekommen Texte."
+          : "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
         : "Läuft im Hintergrund durch acht Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
 
   return (
@@ -429,6 +452,9 @@ export function DtContentWorkspace(props: {
             </button>
           </div>
         </header>
+        {pages.length > 0 ? (
+          <DtContentPagesToolbar pages={pages} visibleCount={visible.length} filter={filter} onChange={setFilter} />
+        ) : null}
         <div className="p-2 sm:p-3">
           {overviewError ? (
             <p className="px-2 py-3 text-sm text-red-700 dark:text-red-300">{overviewError}</p>
@@ -438,9 +464,20 @@ export function DtContentWorkspace(props: {
                 <div key={i} className="h-11 animate-pulse rounded-lg bg-sbkm-navy/[0.05] dark:bg-white/[0.05]" />
               ))}
             </div>
+          ) : pages.length > 0 && visible.length === 0 ? (
+            <div className="grid gap-2 rounded-dt border border-dashed border-sbkm-navy/15 px-4 py-8 text-center dark:border-white/15">
+              <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Keine Seite passt zu Suche und Filter</p>
+              <button
+                type="button"
+                onClick={() => setFilter(EMPTY_CONTENT_PAGE_FILTER)}
+                className="mx-auto w-fit text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
+              >
+                Filter zurücksetzen
+              </button>
+            </div>
           ) : (
             <DtContentPagesTable
-              pages={pages}
+              pages={visible}
               selected={selected}
               onToggle={(slug) =>
                 setSelected((prev) => {
@@ -452,7 +489,7 @@ export function DtContentWorkspace(props: {
               }
               onToggleAll={(checked) =>
                 setSelected(
-                  checked ? new Set(pages.filter(isContentPageSelectable).map((p) => p.slug)) : new Set(),
+                  checked ? new Set(visible.filter(isContentPageSelectable).map((p) => p.slug)) : new Set(),
                 )
               }
               onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })}

@@ -58,6 +58,70 @@ export function anyContentPageRunning(pages: Pick<ContentPageSummary, "state">[]
   return pages.some((p) => p.state === "laeuft");
 }
 
+// --- search and status filter for the pages table ---------------------------------------------
+
+export type ContentPageFilter = {
+  /** Free text; every whitespace-separated token must match name, path, live URL or keyword. */
+  query: string;
+  /** Empty = every status; otherwise a page must be in one of these. */
+  states: ContentPageState[];
+};
+
+export const EMPTY_CONTENT_PAGE_FILTER: ContentPageFilter = { query: "", states: [] };
+
+export function isContentPageFilterActive(filter: ContentPageFilter): boolean {
+  return filter.query.trim() !== "" || filter.states.length > 0;
+}
+
+/** Lowercase, umlauts as ae/oe/ue/ss, other accents dropped: „Träger“ finds „fahrradtraeger“. */
+export function normalizeSearchText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Umlauts reduced to their base letter, so „trager“ also finds „Träger“. */
+function plainSearchText(text: string): string {
+  return text.toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function decodeSafe(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+type FilterablePage = Pick<ContentPageSummary, "name" | "path" | "source_url" | "main_keyword" | "state">;
+
+/** Client-side: the overview holds every page (at most 300), so no request is needed. */
+export function filterContentPages<T extends FilterablePage>(pages: readonly T[], filter: ContentPageFilter): T[] {
+  const tokens = normalizeSearchText(filter.query).split(/\s+/).filter(Boolean);
+  const states = new Set<ContentPageState>(filter.states);
+  return pages.filter((page) => {
+    if (states.size > 0 && !states.has(page.state)) return false;
+    if (tokens.length === 0) return true;
+    const raw = [page.name, page.path, page.source_url, page.main_keyword]
+      .filter((v): v is string => Boolean(v))
+      .map(decodeSafe)
+      .join(" ");
+    const haystack = `${normalizeSearchText(raw)} ${plainSearchText(raw)}`;
+    return tokens.every((token) => haystack.includes(token));
+  });
+}
+
+export function countContentPagesByState(pages: readonly Pick<ContentPageSummary, "state">[]): Record<ContentPageState, number> {
+  const counts: Record<ContentPageState, number> = { nicht_begonnen: 0, laeuft: 0, in_arbeit: 0, braucht_sie: 0, fertig: 0 };
+  for (const page of pages) counts[page.state] = (counts[page.state] ?? 0) + 1;
+  return counts;
+}
+
 const HTML_ENTITIES: Record<string, string> = {
   "&amp;": "&",
   "&lt;": "<",

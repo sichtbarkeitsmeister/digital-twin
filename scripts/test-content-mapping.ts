@@ -48,10 +48,15 @@ import { normalizeFindings, normalizeQuestions } from "../lib/dt/content/pipelin
 import { CONTENT_STEPS, nextContentStep } from "../lib/dt/content/pipeline/steps";
 import { JOB_LOCK_TTL_MS, JOB_WORKER_BUDGET_MS, shouldClaimAnotherJob, stepBudgetMs } from "../lib/jobs/schedule";
 import {
+  EMPTY_CONTENT_PAGE_FILTER,
   anyContentPageRunning,
   contentActionLabel,
   contentStateMeta,
+  countContentPagesByState,
   extractContentBlocks,
+  filterContentPages,
+  isContentPageFilterActive,
+  normalizeSearchText,
 } from "../lib/dt/content/presentation";
 import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import {
@@ -76,6 +81,7 @@ import {
   type ContentStepRow,
 } from "../lib/dt/content/store";
 import { normalizeAnbieterItems } from "../lib/dt/transcripts/workshop-model";
+import type { ContentPageState } from "../lib/dt/content/types";
 
 /** Workshop sections as `dt_workshop_corpus.anbieter` holds them (11 of 13 filled). */
 const DEMO_WORKSHOP_ANBIETER: WorkshopAnbieterSection[] = [
@@ -297,6 +303,35 @@ assert.equal(contentActionLabel("reset"), "Zurücksetzen");
 assert.equal(contentActionLabel("delete"), "Löschen");
 assert.equal(anyContentPageRunning([{ state: "fertig" }, { state: "laeuft" }]), true);
 assert.equal(anyContentPageRunning([{ state: "fertig" }]), false);
+
+// --- search and status filter --------------------------------------------------------------
+const filterable = [
+  { name: "Fahrradträger", path: "/fahrradtraeger", source_url: "https://x.de/fahrradtraeger", main_keyword: "Fahrradträger Anhängerkupplung", state: "in_arbeit" as const },
+  { name: "Kontakt", path: "/kontakt", source_url: null, main_keyword: null, state: "fertig" as const },
+  { name: "Über uns", path: "/ueber-uns", source_url: "https://x.de/%C3%BCber-uns", main_keyword: null, state: "laeuft" as const },
+  { name: "Impressum", path: null, source_url: null, main_keyword: null, state: "nicht_begonnen" as const },
+];
+const names = (query: string, states: ContentPageState[] = []) =>
+  filterContentPages(filterable, { query, states }).map((p) => p.name);
+assert.equal(normalizeSearchText("Fahrradträger Straße"), "fahrradtraeger strasse");
+assert.equal(isContentPageFilterActive(EMPTY_CONTENT_PAGE_FILTER), false);
+assert.equal(isContentPageFilterActive({ query: " ", states: [] }), false);
+assert.equal(isContentPageFilterActive({ query: "", states: ["fertig"] }), true);
+assert.deepEqual(names(""), ["Fahrradträger", "Kontakt", "Über uns", "Impressum"], "no filter → every page");
+assert.deepEqual(names("träger"), ["Fahrradträger"], "umlaut in the query");
+assert.deepEqual(names("trager"), ["Fahrradträger"], "umlaut dropped in the query");
+assert.deepEqual(names("TRAEGER"), ["Fahrradträger"], "ae spelling, any case");
+assert.deepEqual(names("x.de/fahrrad"), ["Fahrradträger"], "the live URL counts");
+assert.deepEqual(names("/kontakt"), ["Kontakt"], "the path counts");
+assert.deepEqual(names("über"), ["Über uns"], "name and percent-encoded URL both decode");
+assert.deepEqual(names("x.de über"), ["Über uns"], "every word must match");
+assert.deepEqual(names("anhängerkupplung"), ["Fahrradträger"], "the keyword counts");
+assert.deepEqual(names("gibtsnicht"), []);
+assert.deepEqual(names("", ["fertig", "laeuft"]), ["Kontakt", "Über uns"], "several states at once");
+assert.deepEqual(names("", ["braucht_sie"]), []);
+assert.deepEqual(names("kon", ["fertig"]), ["Kontakt"], "search and status combine");
+assert.deepEqual(names("kon", ["laeuft"]), []);
+assert.deepEqual(countContentPagesByState(filterable), { nicht_begonnen: 1, laeuft: 1, in_arbeit: 1, braucht_sie: 0, fertig: 1 });
 
 const blocks = extractContentBlocks(
   `<section data-block-id="intro"><h1>Titel</h1><p>A &amp; B</p></section>` +
