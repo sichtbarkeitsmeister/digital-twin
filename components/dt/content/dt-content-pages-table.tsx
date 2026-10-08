@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, FileText } from "lucide-react";
+import { ArrowRight, FileText, Loader2 } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
@@ -20,6 +20,10 @@ export function DtContentPagesTable(props: {
   onToggle: (slug: string) => void;
   onToggleAll: (checked: boolean) => void;
   onOpen: (page: ContentPageSummary) => void;
+  /** „Stoppen“ next to the status of a running page. */
+  onStop?: (page: ContentPageSummary) => void;
+  /** Slug whose stop request is in flight. */
+  stopping?: string | null;
 }) {
   const selectable = props.pages.filter(isContentPageSelectable);
   const allSelected =
@@ -145,6 +149,17 @@ export function DtContentPagesTable(props: {
                       >
                         {page.detail}
                       </span>
+                    ) : null}
+                    {page.state === "laeuft" && props.onStop ? (
+                      <button
+                        type="button"
+                        onClick={() => props.onStop?.(page)}
+                        disabled={props.stopping === page.slug}
+                        className="inline-flex w-fit items-center gap-1 text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-50 dark:text-sbkm-mint"
+                      >
+                        {props.stopping === page.slug ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+                        Stoppen
+                      </button>
                     ) : null}
                   </div>
                 </td>

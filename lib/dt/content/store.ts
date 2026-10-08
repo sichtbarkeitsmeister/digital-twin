@@ -541,19 +541,22 @@ export function rerunStepFor(page: ContentPageRow): number {
   return page.step ?? 1;
 }
 
+/** „Zurücksetzen“ is offered on every started page; it is the way out of any state by hand. */
 export function pageActions(page: ContentPageRow): ContentAction[] {
   const exportAction: ContentAction[] = page.html ? [{ kind: "export", label: "Exportieren" }] : [];
+  const reset: ContentAction = { kind: "reset", label: "Zurücksetzen" };
   switch (page.state) {
     case "nicht_begonnen":
       return [{ kind: "run_through", label: "Weiterlaufen lassen" }];
     case "laeuft":
-      return [];
+      return [{ kind: "stop", label: "Stoppen" }, reset];
     case "braucht_sie":
       return [
         { kind: "approve", step: 4, label: "Freigeben" },
         { kind: "edit", step: 4, label: "Abschnitt ändern" },
         { kind: "rerun_with_note", step: 4, label: "Mit Anmerkung wiederholen" },
         ...exportAction,
+        reset,
       ];
     case "in_arbeit":
       return [
@@ -561,15 +564,17 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
         ...(page.html ? [{ kind: "edit" as const, step: rerunStepFor(page), label: "Abschnitt ändern" }] : []),
         { kind: "rerun_with_note", step: rerunStepFor(page), label: "Mit Anmerkung wiederholen" },
         ...exportAction,
+        reset,
       ];
     case "fertig":
       return page.released
-        ? exportAction
+        ? [...exportAction, reset]
         : [
             { kind: "approve", step: 8, label: "Freigeben" },
             { kind: "edit", step: 7, label: "Abschnitt ändern" },
             { kind: "rerun_with_note", step: 7, label: "Mit Anmerkung wiederholen" },
             ...exportAction,
+            reset,
           ];
     default:
       return [];

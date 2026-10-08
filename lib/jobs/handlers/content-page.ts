@@ -92,7 +92,10 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
       try {
         const outcome = await runContentStep(service, page, steps, next, budget);
         if (outcome.halted) {
-          return { ok: true, result: { step: next, halted: true, model: outcome.model, costEur: outcome.costEur } };
+          return {
+            ok: true,
+            result: { step: next, halted: true, discarded: outcome.discarded ?? false, model: outcome.model, costEur: outcome.costEur },
+          };
         }
         continued = { ok: true, reschedule: true, result: { step: next, model: outcome.model, costEur: outcome.costEur } };
       } catch (error) {

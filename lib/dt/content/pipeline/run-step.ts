@@ -41,8 +41,10 @@ import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
 export type StepOutcome = {
   step: number;
-  /** True when the pipeline must stop here (questions for the customer, or finished). */
+  /** True when the pipeline must stop here (questions for the customer, finished, or stopped). */
   halted: boolean;
+  /** The page was stopped or reset while the model was answering; nothing was saved. */
+  discarded?: boolean;
   model: string;
   costEur: number;
 };
@@ -183,6 +185,17 @@ export async function runContentStep(
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
   });
+
+  // „Stoppen“ or „Zurücksetzen“ while the model was answering: the cost is recorded above,
+  // the result must not land on a page that is no longer running (or no longer exists).
+  const { data: live, error: liveError } = await service
+    .from("dt_content_pages")
+    .select("state")
+    .eq("id", page.id)
+    .maybeSingle();
+  if (!liveError && live?.state !== "laeuft") {
+    return { step, halted: true, discarded: true, model, costEur };
+  }
 
   const pagePatch: Record<string, unknown> = { cost_eur: roundEur(num(page.cost_eur) + costEur) };
   let stepStatus: ContentStepRow["status"] = "done";

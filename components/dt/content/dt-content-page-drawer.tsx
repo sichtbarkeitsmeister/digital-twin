@@ -209,6 +209,35 @@ export function DtContentPageDrawer(props: {
     onChangedRef.current();
   }
 
+  /** „Stoppen“ pauses after the last finished step; „Zurücksetzen“ wipes the page. */
+  async function runReset(modeKind: "stop" | "reset") {
+    if (!base) return;
+    if (
+      modeKind === "reset" &&
+      !window.confirm(
+        "Seite wirklich komplett zurücksetzen? Text, Schritte, Fragen, Anmerkungen und Kosten dieser Seite werden gelöscht. Name und Quelle bleiben.",
+      )
+    ) {
+      return;
+    }
+    setBusy(modeKind);
+    const res = await contentApi<ContentReview>(`${base}/reset`, {
+      method: "POST",
+      body: { organisationId, mode: modeKind },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      void loadReview();
+      return;
+    }
+    toast.success(modeKind === "stop" ? "Gestoppt – die Seite ist pausiert" : "Seite zurückgesetzt");
+    setJobId(null);
+    setMode(null);
+    setReview(res.data);
+    onChangedRef.current();
+  }
+
   async function runThrough() {
     if (!base) return;
     setBusy("run_through");
@@ -268,6 +297,12 @@ export function DtContentPageDrawer(props: {
         return;
       case "export":
         void exportHtml();
+        return;
+      case "stop":
+        void runReset("stop");
+        return;
+      case "reset":
+        void runReset("reset");
         return;
     }
   }
@@ -592,13 +627,17 @@ export function DtContentPageDrawer(props: {
                         variant={
                           action.kind === "approve"
                             ? "mint"
-                            : action.kind === "export"
+                            : action.kind === "export" || action.kind === "reset"
                               ? "ghost"
                               : "outline"
                         }
-                        disabled={Boolean(busy) || Boolean(jobId)}
+                        disabled={Boolean(busy) || (Boolean(jobId) && action.kind !== "stop" && action.kind !== "reset")}
                         onClick={() => onAction(action)}
-                        className={action.kind === "export" ? "sm:ml-auto" : undefined}
+                        className={cn(
+                          action.kind === "export" && "sm:ml-auto",
+                          action.kind === "reset" && "text-red-700 dark:text-red-300",
+                          action.kind === "reset" && actions.every((a) => a.kind !== "export") && "sm:ml-auto",
+                        )}
                       >
                         {busy === action.kind ? (
                           <Loader2 className="size-3.5 animate-spin" aria-hidden />

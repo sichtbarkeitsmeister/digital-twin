@@ -34,6 +34,7 @@ import {
   judgeContentJob,
   type ContentJobState,
 } from "../lib/dt/content/job-state";
+import { resetContentPage, stopContentRun } from "../lib/dt/content/pipeline/actions";
 import { CONTENT_JOB_GONE_MESSAGE, planContentPageRepairs } from "../lib/dt/content/pipeline/health";
 import { describeAnbieterSources, describeSeiten, readinessFromLocal } from "../lib/dt/content/route-helpers";
 import {
@@ -291,6 +292,8 @@ assert.equal(contentActionLabel("edit"), "Abschnitt ändern");
 assert.equal(contentActionLabel("rerun_with_note"), "Mit Anmerkung wiederholen");
 assert.equal(contentActionLabel("run_through"), "Weiterlaufen lassen");
 assert.equal(contentActionLabel("export"), "Exportieren");
+assert.equal(contentActionLabel("stop"), "Stoppen");
+assert.equal(contentActionLabel("reset"), "Zurücksetzen");
 assert.equal(contentActionLabel("delete"), null);
 assert.equal(anyContentPageRunning([{ state: "fertig" }, { state: "laeuft" }]), true);
 assert.equal(anyContentPageRunning([{ state: "fertig" }]), false);
@@ -361,12 +364,12 @@ const base: ContentPageRow = {
 const q = questions[0]!;
 const cases: Array<[Partial<ContentPageRow>, string[], string | null]> = [
   [{}, ["run_through"], null],
-  [{ state: "laeuft", step: 3 }, [], "Schritt 3 von 8: Rohtext läuft"],
-  [{ state: "braucht_sie", step: 4, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export"], "1 Frage an den Kunden, bevor es weitergeht"],
-  [{ state: "in_arbeit", step: 3, error: "Ratenlimit" }, ["run_through", "rerun_with_note"], "Fehler in Schritt 3: Ratenlimit"],
-  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export"], "Pausiert nach Schritt 5: Tonalität & Avatar"],
-  [{ state: "fertig", step: 8, html }, ["approve", "edit", "rerun_with_note", "export"], "Wartet auf Freigabe"],
-  [{ state: "fertig", step: 8, html, released: true }, ["export"], "Freigegeben"],
+  [{ state: "laeuft", step: 3 }, ["stop", "reset"], "Schritt 3 von 8: Rohtext läuft"],
+  [{ state: "braucht_sie", step: 4, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "reset"], "1 Frage an den Kunden, bevor es weitergeht"],
+  [{ state: "in_arbeit", step: 3, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset"], "Fehler in Schritt 3: Ratenlimit"],
+  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "reset"], "Pausiert nach Schritt 5: Tonalität & Avatar"],
+  [{ state: "fertig", step: 8, html }, ["approve", "edit", "rerun_with_note", "export", "reset"], "Wartet auf Freigabe"],
+  [{ state: "fertig", step: 8, html, released: true }, ["export", "reset"], "Freigegeben"],
 ];
 for (const [patch, kinds, detail] of cases) {
   const page = { ...base, ...patch };
@@ -639,7 +642,7 @@ function memoryClient() {
   };
   class Builder {
     private filters: Array<(row: MemRow) => boolean> = [];
-    private op: "select" | "insert" | "upsert" | "update" = "select";
+    private op: "select" | "insert" | "upsert" | "update" | "delete" = "select";
     private payload: MemRow[] = [];
     private single = false;
     private limitN: number | null = null;
@@ -654,6 +657,8 @@ function memoryClient() {
       if (value === null) this.filters.push((row) => row[col] == null);
       return this;
     }
+    in(col: string, values: unknown[]) { this.filters.push((row) => values.includes(row[col])); return this; }
+    delete() { this.op = "delete"; return this; }
     or() { return this; }
     order() { return this; }
     limit(n: number) { this.limitN = n; return this; }
@@ -666,6 +671,12 @@ function memoryClient() {
       if (this.op === "update") {
         const hits = table.filter((row) => this.filters.every((filter) => filter(row)));
         for (const row of hits) Object.assign(row, this.payload[0]);
+        return { data: null, error: null };
+      }
+      if (this.op === "delete") {
+        for (let i = table.length - 1; i >= 0; i--) {
+          if (this.filters.every((filter) => filter(table[i]!))) table.splice(i, 1);
+        }
         return { data: null, error: null };
       }
       if (this.op === "insert") {
@@ -749,6 +760,48 @@ async function runStoredPages() {
   assert.equal(stored[0]!.source_url, "https://x.de/", "a structure re-sync keeps the live URL");
 }
 
+async function runStopAndReset() {
+  const ORG = "00000000-0000-0000-0000-00000000bbbb";
+  const mem = memoryClient();
+  const running: ContentPageRow = { ...base, id: "p-run", organisation_id: ORG, slug: "a", state: "laeuft", step: 3, job_id: "j1", html: "<p>x</p>", markdown: "x", cost_eur: "1.5", notes: ["kürzer"] };
+  mem.tables.set("dt_content_pages", [{ ...running }]);
+  mem.tables.set("dt_content_steps", [
+    { page_id: "p-run", step: 1, status: "done" },
+    { page_id: "p-run", step: 2, status: "done" },
+    { page_id: "p-run", step: 3, status: "running", error: null },
+  ]);
+  mem.tables.set("jobs", [
+    { id: "j0", kind: "content.page", dedupe_key: "content.page:p-run", status: "succeeded" },
+    { id: "j1", kind: "content.page", dedupe_key: "content.page:p-run", status: "running" },
+    { id: "jx", kind: "content.page", dedupe_key: "content.page:other", status: "pending" },
+  ]);
+  const client = mem.client as unknown as Parameters<typeof stopContentRun>[0];
+
+  const notRunning = await stopContentRun(client, { ...running, state: "in_arbeit" }, []);
+  assert.deepEqual(notRunning, { ok: false, status: 409, message: "Diese Seite läuft gerade nicht." });
+
+  const stopped = await stopContentRun(client, running, mem.tables.get("dt_content_steps") as { step: number; status: string }[]);
+  assert.equal(stopped.ok, true);
+  const jobs = mem.tables.get("jobs")!;
+  assert.equal(jobs.find((j) => j.id === "j1")?.status, "dead", "the live job of the page is ended");
+  assert.equal(jobs.find((j) => j.id === "j1")?.last_error, "Vom Benutzer gestoppt.");
+  assert.equal(jobs.find((j) => j.id === "j0")?.status, "succeeded", "finished jobs are left alone");
+  assert.equal(jobs.find((j) => j.id === "jx")?.status, "pending", "other pages' jobs are left alone");
+  assert.equal(mem.tables.get("dt_content_steps")!.find((s) => s.step === 3)?.status, "pending", "the interrupted step runs again on „Weiterlaufen lassen“");
+  const row = mem.tables.get("dt_content_pages")![0]!;
+  assert.deepEqual([row.state, row.step, row.job_id, row.error], ["in_arbeit", 2, null, null], "paused after the last finished step");
+  assert.equal(row.html, "<p>x</p>", "stopping keeps the text");
+
+  const reset = await resetContentPage(client, { ...running, state: "in_arbeit" });
+  assert.equal(reset.ok, true);
+  assert.equal(mem.tables.get("dt_content_steps")!.length, 0, "steps are gone");
+  assert.deepEqual(
+    [row.state, row.step, row.html, row.markdown, row.cost_eur, row.notes, row.job_id, row.released, row.main_keyword],
+    ["nicht_begonnen", null, "", "", 0, [], null, false, null],
+  );
+  assert.deepEqual([row.slug, row.name, row.source], ["a", "Keller", "structure"], "identity and source stay");
+}
+
 // --- model config and pricing -----------------------------------------------------------------
 const defaults = resolveContentModels({}, {});
 assert.equal(defaults.write[0], DEFAULT_CONTENT_MODEL);
@@ -773,6 +826,7 @@ assert.equal(resolveContentApiKey({}), null, "Texte does not fall back to ANTHRO
 assert.equal(resolveContentApiKey({ ANTHROPIC_API_KEY: "shared", [CONTENT_API_KEY_ENV]: "  content-key  " }), "content-key");
 
 runStoredPages()
+  .then(() => runStopAndReset())
   .then(() => console.log("OK: content tests passed"))
   .catch((error) => {
     console.error(error);

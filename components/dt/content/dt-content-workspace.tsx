@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { ChevronDown, Loader2, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -28,6 +28,8 @@ import type {
   ContentPipelineInfo,
   ContentReadiness,
   ContentReadinessResult,
+  ContentResetResult,
+  ContentReview,
   ContentRunThroughResult,
 } from "@/lib/dt/content/types";
 
@@ -81,6 +83,8 @@ export function DtContentWorkspace(props: {
   );
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [stopping, setStopping] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
   const [editingSettings, setEditingSettings] = useState(false);
   const [sync, setSync] = useState<{ result: ContentClientPutResult; sent: ContentClientPutBody } | null>(null);
@@ -205,6 +209,49 @@ export function DtContentWorkspace(props: {
     }
   }
 
+  /** „Stoppen“ in the table row: ends the job, the page pauses after its last finished step. */
+  async function stopPage(slug: string) {
+    setStopping(slug);
+    try {
+      const res = await contentApi<ContentReview>(`/api/dt/content/pages/${encodeURIComponent(slug)}/reset`, {
+        method: "POST",
+        body: { organisationId, mode: "stop" },
+      });
+      if (!res.ok) toast.error(res.message);
+      else toast.success("Gestoppt – die Seite ist pausiert");
+      await loadOverview();
+    } finally {
+      setStopping(null);
+    }
+  }
+
+  /** „Auswahl zurücksetzen“: the checked pages back to „Nicht begonnen“. */
+  async function resetSelected() {
+    if (selectedCount === 0 || resetting) return;
+    const ok = window.confirm(
+      `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} wirklich komplett zurücksetzen? Texte, Schritte, Fragen, Anmerkungen und Kosten dieser Seiten werden gelöscht. Namen und Quelle bleiben.`,
+    );
+    if (!ok) return;
+    setResetting(true);
+    try {
+      const res = await contentApi<ContentResetResult>("/api/dt/content/reset", {
+        method: "POST",
+        body: { organisationId, pages: [...selected] },
+      });
+      if (!res.ok) {
+        toast.error(res.message);
+        return;
+      }
+      toast.success(`${res.data.reset} ${res.data.reset === 1 ? "Seite" : "Seiten"} zurückgesetzt`, {
+        description: res.data.skipped.length > 0 ? res.data.skipped.map((s) => `${s.page}: ${s.reason}`).join(" · ") : undefined,
+      });
+      setSelected(new Set());
+      applyOverview(res.data.overview);
+    } finally {
+      setResetting(false);
+    }
+  }
+
   function announceRun(data: ContentRunThroughResult) {
     const started = data.jobs.length;
     const head =
@@ -281,6 +328,16 @@ export function DtContentWorkspace(props: {
               Texte erstellen ({selectedCount})
             </DtPillButton>
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
+            <button
+              type="button"
+              onClick={() => void resetSelected()}
+              disabled={selectedCount === 0 || resetting}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-sbkm-ink-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-40 dark:text-white/55"
+              title="Die angehakten Seiten komplett zurücksetzen (Text, Schritte, Fragen, Kosten)"
+            >
+              {resetting ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <RotateCcw className="size-3" aria-hidden />}
+              Auswahl zurücksetzen{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </button>
             {pipeline?.model ? (
               <p
                 className="text-[11px] text-sbkm-ink-500 dark:text-white/45 lg:text-right"
@@ -383,6 +440,8 @@ export function DtContentWorkspace(props: {
                 )
               }
               onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })}
+              onStop={(page) => void stopPage(page.slug)}
+              stopping={stopping}
             />
           )}
         </div>

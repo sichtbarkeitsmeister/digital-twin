@@ -26,6 +26,8 @@ export const CONTENT_ACTION_LABELS: Record<ContentActionKind, string> = {
   rerun_with_note: "Mit Anmerkung wiederholen",
   run_through: "Weiterlaufen lassen",
   export: "Exportieren",
+  stop: "Stoppen",
+  reset: "Zurücksetzen",
 };
 
 export function contentActionLabel(kind: string): string | null {

@@ -124,7 +124,14 @@ export type ContentStep = {
   cost_eur: number;
 };
 
-export type ContentActionKind = "approve" | "edit" | "rerun_with_note" | "run_through" | "export";
+export type ContentActionKind =
+  | "approve"
+  | "edit"
+  | "rerun_with_note"
+  | "run_through"
+  | "export"
+  | "stop"
+  | "reset";
 
 export type ContentAction = {
   kind: ContentActionKind;
@@ -207,6 +214,13 @@ export type ContentCrawlStatus = {
   last_crawled_at: string | null;
   /** Pages in the Texte table that came from the crawl. */
   imported: number;
+};
+
+/** `POST /api/dt/content/reset`: selected pages back to „Nicht begonnen“. */
+export type ContentResetResult = {
+  reset: number;
+  skipped: Array<{ page: string; reason: string }>;
+  overview: ContentOverview;
 };
 
 /** `POST /api/dt/content/crawl/import` */
