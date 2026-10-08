@@ -8,7 +8,7 @@ import {
   type ContentFragebogenFact,
   type WorkshopAnbieterSection,
 } from "@/lib/dt/content/mapping";
-import { contentDbErrorMessage, isMissingContentTableError } from "@/lib/dt/content/store";
+import { contentDbErrorMessage, isMissingContentColumnError, isMissingContentTableError } from "@/lib/dt/content/store";
 import type { ContentLocalSources } from "@/lib/dt/content/types";
 import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
 import { extractSurveyFacts } from "@/lib/dt/survey-facts";
@@ -180,25 +180,61 @@ export async function loadContentAvatarRow(
   return (data as ContentAvatarRow | null) ?? null;
 }
 
+/** What the crawl of the live site has for this organisation (the second „Seiten“ mode). */
+export async function loadContentCrawlSummary(
+  supabase: SupabaseClient,
+  organisationId: string,
+): Promise<ContentLocalSources["crawl"]> {
+  const [{ data: config }, { count }, { data: latest }] = await Promise.all([
+    supabase.from("dt_org_config").select("website_url").eq("organisation_id", organisationId).maybeSingle(),
+    supabase
+      .from("dt_site_pages")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", organisationId)
+      .eq("is_excluded", false),
+    supabase
+      .from("dt_site_pages")
+      .select("crawled_at")
+      .eq("organisation_id", organisationId)
+      .eq("is_excluded", false)
+      .order("crawled_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  return {
+    websiteUrl: (config?.website_url as string | null | undefined)?.trim() || null,
+    pageCount: count ?? 0,
+    lastCrawledAt: (latest?.crawled_at as string | null | undefined) ?? null,
+  };
+}
+
 export async function loadContentLocalSources(
   supabase: SupabaseClient,
   organisationId: string,
 ): Promise<ContentLocalSources> {
-  const [anbieter, avatars, { data: structure }, pageCount] = await Promise.all([
+  const [anbieter, avatars, { data: structure }, pages, crawl] = await Promise.all([
     loadContentAnbieterSources(supabase, organisationId),
     loadContentAvatarOptions(supabase, organisationId),
     supabase
       .from("dt_website_structures")
-      .select("filename")
+      .select("filename, uploaded_at, node_count")
       .eq("organisation_id", organisationId)
       .maybeSingle(),
     countContentPages(supabase, organisationId),
+    loadContentCrawlSummary(supabase, organisationId),
   ]);
   return {
     anbieter: anbieterSummary(anbieter),
     avatarCount: avatars.length,
-    structure: structure ? { filename: (structure.filename as string | null) ?? null } : null,
-    pages: pageCount,
+    structure: structure
+      ? {
+          filename: (structure.filename as string | null) ?? null,
+          uploadedAt: (structure.uploaded_at as string | null) ?? null,
+          nodeCount: Number(structure.node_count ?? 0) || 0,
+        }
+      : null,
+    crawl,
+    pages,
   };
 }
 
@@ -208,18 +244,16 @@ async function countContentPages(
 ): Promise<ContentLocalSources["pages"]> {
   const { data, error } = await supabase
     .from("dt_content_pages")
-    .select("structure_uploaded_at")
+    .select("source")
     .eq("organisation_id", organisationId)
     .limit(300);
   if (error) {
-    if (isMissingContentTableError(error)) {
+    if (isMissingContentTableError(error) || isMissingContentColumnError(error)) {
       throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
     }
-    return { total: 0, manual: 0 };
+    return { total: 0, structure: 0, crawl: 0 };
   }
   const rows = data ?? [];
-  return {
-    total: rows.length,
-    manual: rows.filter((row) => row.structure_uploaded_at == null).length,
-  };
+  const crawl = rows.filter((row) => row.source === "crawl").length;
+  return { total: rows.length, structure: rows.length - crawl, crawl };
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { skipReason, startContentRun } from "@/lib/dt/content/pipeline/actions";
+import { reconcileContentPages } from "@/lib/dt/content/pipeline/health";
 import {
   contentError,
   contentOk,
@@ -40,7 +41,9 @@ export async function POST(req: Request) {
     if (!settings) return contentError("Bitte erst die Einstellungen für Texte bestätigen.", 400);
 
     await syncContentPagesFromStructure(gate.service, gate.organisationId).catch(() => null);
-    pages = await loadContentPages(gate.service, gate.organisationId);
+    const rows = await loadContentPages(gate.service, gate.organisationId);
+    // Pages whose job died must not answer „Läuft bereits“ forever.
+    pages = (await reconcileContentPages(gate.service, rows)).pages;
   } catch (error) {
     return contentError(error instanceof Error ? error.message : "Seiten konnten nicht geladen werden.", 500);
   }

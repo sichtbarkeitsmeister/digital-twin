@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { callAnthropicFirstAvailable, extractToolUseInput } from "@/lib/ai/anthropic-helpers";
-import { CONTENT_API_KEY_ENV, resolveContentApiKey } from "@/lib/dt/content/model-config";
+import { resolveContentApiKey } from "@/lib/dt/content/model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 
 /** Pipeline error with a hint whether the job runner should try again later. */
@@ -34,10 +34,11 @@ export function isRetryableLlmError(error: unknown): boolean {
 export function llmErrorMessage(error: unknown): string {
   const status = anthropicStatus(error);
   if (status === 401 || status === 403) {
-    return `Anthropic lehnt den API-Schlüssel ab (${CONTENT_API_KEY_ENV} prüfen).`;
+    return "Der KI-Zugang für Texte wurde abgelehnt (Schlüssel ungültig). Bitte die Technik informieren.";
   }
-  if (status === 429) return "Anthropic-Ratenlimit erreicht. Der Schritt wird später erneut versucht.";
-  if (status === 529 || status === 503) return "Anthropic ist gerade überlastet. Der Schritt wird später erneut versucht.";
+  if (status === 429 || status === 529 || status === 503) {
+    return "Die KI ist gerade ausgelastet. Der Schritt wird später erneut versucht.";
+  }
   if (error instanceof Error && error.message.trim()) return error.message.trim().slice(0, 500);
   return "KI-Aufruf fehlgeschlagen.";
 }
@@ -58,7 +59,7 @@ export async function callContentTool(input: {
   const apiKey = resolveContentApiKey();
   if (!apiKey) {
     throw new ContentLlmError(
-      `${CONTENT_API_KEY_ENV} fehlt in der Server-Umgebung. Texte benutzt einen eigenen Schlüssel, nicht ANTHROPIC_API_KEY.`,
+      "Der KI-Zugang für Texte ist nicht eingerichtet (Schlüssel fehlt). Bitte die Technik informieren.",
       false,
     );
   }
@@ -82,7 +83,7 @@ export async function callContentTool(input: {
   }
   if (!result) {
     throw new ContentLlmError(
-      `Keines der Modelle ist verfügbar (${input.models.join(", ")}). Modellnamen in ANTHROPIC_DT_CONTENT_MODEL oder app_settings prüfen.`,
+      "Das KI-Modell ist nicht verfügbar. Bitte die Technik informieren.",
       false,
     );
   }

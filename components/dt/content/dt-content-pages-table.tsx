@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, FileText } from "lucide-react";
+import { ArrowRight, FileText, Loader2 } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
@@ -20,6 +20,10 @@ export function DtContentPagesTable(props: {
   onToggle: (slug: string) => void;
   onToggleAll: (checked: boolean) => void;
   onOpen: (page: ContentPageSummary) => void;
+  /** „Stoppen“ next to the status of a running page. */
+  onStop?: (page: ContentPageSummary) => void;
+  /** Slug whose stop request is in flight. */
+  stopping?: string | null;
 }) {
   const selectable = props.pages.filter(isContentPageSelectable);
   const allSelected =
@@ -32,7 +36,7 @@ export function DtContentPagesTable(props: {
         <FileText className="mx-auto size-5 text-sbkm-ink-500" aria-hidden />
         <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Noch keine Seiten</p>
         <p className="mx-auto max-w-sm text-xs text-sbkm-ink-600 dark:text-white/60">
-          Seiten oben eintragen, oder unter SEO → Struktur eine Webseitenstruktur hochladen.
+          Oben unter „Seitenquelle“ die Excel-Seitenstruktur hochladen oder die Website crawlen.
         </p>
       </div>
     );
@@ -98,13 +102,31 @@ export function DtContentPagesTable(props: {
                     className="grid min-w-0 gap-0.5"
                     style={{ paddingLeft: `${Math.min(Math.max(page.level, 0), 4) * 14}px` }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => props.onOpen(page)}
-                      className="w-fit text-left font-semibold text-sbkm-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white"
-                    >
-                      {page.name}
-                    </button>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => props.onOpen(page)}
+                        className="min-w-0 truncate text-left font-semibold text-sbkm-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white"
+                      >
+                        {page.name}
+                      </button>
+                      {page.source === "crawl" ? (
+                        <span
+                          className="shrink-0 rounded-pill bg-sbkm-navy/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60"
+                          title="Aus dem Crawl übernommen"
+                        >
+                          Crawl
+                        </span>
+                      ) : null}
+                    </span>
+                    {page.source_url || page.path ? (
+                      <span
+                        className="truncate font-mono text-[11px] text-sbkm-ink-500 dark:text-white/40"
+                        title={page.source_url ?? page.path ?? undefined}
+                      >
+                        {page.source_url ?? page.path}
+                      </span>
+                    ) : null}
                     {page.main_keyword ? (
                       <span className="truncate text-xs text-sbkm-ink-500 dark:text-white/45">
                         {page.main_keyword}
@@ -126,6 +148,17 @@ export function DtContentPagesTable(props: {
                       >
                         {page.detail}
                       </span>
+                    ) : null}
+                    {page.state === "laeuft" && props.onStop ? (
+                      <button
+                        type="button"
+                        onClick={() => props.onStop?.(page)}
+                        disabled={props.stopping === page.slug}
+                        className="inline-flex w-fit items-center gap-1 text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-50 dark:text-sbkm-mint"
+                      >
+                        {props.stopping === page.slug ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+                        Stoppen
+                      </button>
                     ) : null}
                   </div>
                 </td>

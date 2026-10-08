@@ -16,7 +16,9 @@ export const WEBSITE_STRUCTURE_MAX_RAW_CHARS = 200_000;
 export const WEBSITE_STRUCTURE_MAX_OUTLINE_CHARS = 16_000;
 export const WEBSITE_STRUCTURE_MAX_NODES = 800;
 
-const PATHISH = /^(https?:\/\/|\/)[\w\-./%?#=&]+$/i;
+/** A cell or token that is a URL or an absolute path, `/` included (shared with the Excel converter). */
+export const WEBSITE_STRUCTURE_PATH_RE = /^(https?:\/\/[\w\-./%?#=&]+|\/[\w\-./%?#=&]*)$/i;
+const PATHISH = WEBSITE_STRUCTURE_PATH_RE;
 
 /**
  * Postgres/PostgREST JSON rejects NUL (`\u0000`) with

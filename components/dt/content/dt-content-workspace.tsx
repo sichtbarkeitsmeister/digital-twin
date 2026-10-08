@@ -1,33 +1,42 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
-import { DtContentManualPages } from "@/components/dt/content/dt-content-manual-pages";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
+import { DtContentPagesSourceCard } from "@/components/dt/content/dt-content-pages-source-card";
+import { DtContentPagesToolbar } from "@/components/dt/content/dt-content-pages-toolbar";
 import {
   DtContentPagesTable,
   isContentPageSelectable,
 } from "@/components/dt/content/dt-content-pages-table";
 import { DtContentReadinessCard } from "@/components/dt/content/dt-content-readiness-card";
 import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settings-card";
+import { CenteredModal } from "@/components/ui/centered-modal";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
-import { describeContentModelSource } from "@/lib/dt/content/model-config";
-import { anyContentPageRunning, formatContentDate } from "@/lib/dt/content/presentation";
+import {
+  EMPTY_CONTENT_PAGE_FILTER,
+  anyContentPageRunning,
+  filterContentPages,
+  formatContentDate,
+  isContentPageFilterActive,
+  type ContentPageFilter,
+} from "@/lib/dt/content/presentation";
 import type {
   ContentClientPutBody,
   ContentClientPutResult,
   ContentLocalSources,
   ContentOverview,
-  ContentPipelineInfo,
   ContentReadiness,
   ContentReadinessResult,
+  ContentResetResult,
+  ContentReview,
   ContentRunThroughResult,
 } from "@/lib/dt/content/types";
 
@@ -64,7 +73,6 @@ export function DtContentWorkspace(props: {
 
   const [readiness, setReadiness] = useState<ContentReadiness | null>(null);
   const [local, setLocal] = useState<ContentLocalSources | null>(null);
-  const [pipeline, setPipeline] = useState<ContentPipelineInfo | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(true);
   const [readinessError, setReadinessError] = useState<string | null>(null);
 
@@ -81,10 +89,15 @@ export function DtContentWorkspace(props: {
   );
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
+  const [resetting, setResetting] = useState<"reset" | "delete" | null>(null);
+  /** Which bulk action waits for the person's confirmation in the modal. */
+  const [confirmBulk, setConfirmBulk] = useState<"reset" | "delete" | null>(null);
+  const [stopping, setStopping] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
   const [editingSettings, setEditingSettings] = useState(false);
   const [sync, setSync] = useState<{ result: ContentClientPutResult; sent: ContentClientPutBody } | null>(null);
   const [openPage, setOpenPage] = useState<{ slug: string; name: string } | null>(null);
+  const [filter, setFilter] = useState<ContentPageFilter>(EMPTY_CONTENT_PAGE_FILTER);
 
   const loadReadiness = useCallback(async () => {
     setReadinessLoading(true);
@@ -94,7 +107,6 @@ export function DtContentWorkspace(props: {
     if (res.ok) {
       setReadiness(res.data.readiness);
       setLocal(res.data.local);
-      setPipeline(res.data.pipeline);
       setReadinessError(null);
     } else {
       setReadinessError(res.message);
@@ -102,25 +114,29 @@ export function DtContentWorkspace(props: {
     setReadinessLoading(false);
   }, [organisationId]);
 
+  const applyOverview = useCallback((next: ContentOverview) => {
+    setOverview(next);
+    setOverviewError(null);
+    setRefreshedAt(new Date().toISOString());
+    setSelected((prev) => {
+      const allowed = new Set(next.pages.filter(isContentPageSelectable).map((p) => p.slug));
+      const kept = new Set([...prev].filter((slug) => allowed.has(slug)));
+      return kept.size === prev.size ? prev : kept;
+    });
+  }, []);
+
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     const res = await contentApi<ContentOverview>(
       `/api/dt/content/overview?${contentQuery(organisationId)}`,
     );
     if (res.ok) {
-      setOverview(res.data);
-      setOverviewError(null);
-      setRefreshedAt(new Date().toISOString());
-      setSelected((prev) => {
-        const allowed = new Set(res.data.pages.filter(isContentPageSelectable).map((p) => p.slug));
-        const next = new Set([...prev].filter((slug) => allowed.has(slug)));
-        return next.size === prev.size ? prev : next;
-      });
+      applyOverview(res.data);
     } else {
       setOverviewError(res.message);
     }
     setOverviewLoading(false);
-  }, [organisationId]);
+  }, [organisationId, applyOverview]);
 
   useEffect(() => {
     void loadReadiness();
@@ -149,7 +165,19 @@ export function DtContentWorkspace(props: {
     [props.avatars],
   );
 
-  const pages = overview?.pages ?? [];
+  const pages = useMemo(() => overview?.pages ?? [], [overview]);
+  const visible = useMemo(() => filterContentPages(pages, filter), [pages, filter]);
+  const filterActive = isContentPageFilterActive(filter);
+
+  // Pages hidden by search or status filter leave the selection: bulk actions only hit what is visible.
+  useEffect(() => {
+    setSelected((prev) => {
+      const allowed = new Set(visible.map((p) => p.slug));
+      const next = new Set([...prev].filter((slug) => allowed.has(slug)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visible]);
+
   const selectedCount = selected.size;
   const notReady = readiness ? !readiness.ready : false;
   const settingsOpen = !settings || editingSettings;
@@ -201,6 +229,47 @@ export function DtContentWorkspace(props: {
     }
   }
 
+  /** „Stoppen“ in the table row: ends the job, the page pauses after its last finished step. */
+  async function stopPage(slug: string) {
+    setStopping(slug);
+    try {
+      const res = await contentApi<ContentReview>(`/api/dt/content/pages/${encodeURIComponent(slug)}/reset`, {
+        method: "POST",
+        body: { organisationId, mode: "stop" },
+      });
+      if (!res.ok) toast.error(res.message);
+      else toast.success("Gestoppt – die Seite ist pausiert");
+      await loadOverview();
+    } finally {
+      setStopping(null);
+    }
+  }
+
+  /** „Auswahl zurücksetzen“ / „Auswahl löschen“ for the checked pages, after the modal was confirmed. */
+  async function runBulk(modeKind: "reset" | "delete") {
+    if (selectedCount === 0 || resetting) return;
+    setResetting(modeKind);
+    try {
+      const res = await contentApi<ContentResetResult>("/api/dt/content/reset", {
+        method: "POST",
+        body: { organisationId, pages: [...selected], mode: modeKind },
+      });
+      if (!res.ok) {
+        toast.error(res.message);
+        return;
+      }
+      const done = `${res.data.affected} ${res.data.affected === 1 ? "Seite" : "Seiten"}`;
+      toast.success(modeKind === "reset" ? `${done} zurückgesetzt` : `${done} gelöscht`, {
+        description: res.data.skipped.length > 0 ? res.data.skipped.map((s) => `${s.page}: ${s.reason}`).join(" · ") : undefined,
+      });
+      setSelected(new Set());
+      applyOverview(res.data.overview);
+      setConfirmBulk(null);
+    } finally {
+      setResetting(null);
+    }
+  }
+
   function announceRun(data: ContentRunThroughResult) {
     const started = data.jobs.length;
     const head =
@@ -222,7 +291,9 @@ export function DtContentWorkspace(props: {
     : settingsOpen
       ? "Erst die Einstellungen für Texte bestätigen."
       : selectedCount === 0
-        ? "Seiten in der Tabelle anhaken."
+        ? filterActive
+          ? "Seiten in der gefilterten Tabelle anhaken – nur angehakte Seiten bekommen Texte."
+          : "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
         : "Läuft im Hintergrund durch acht Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
 
   return (
@@ -238,9 +309,19 @@ export function DtContentWorkspace(props: {
       <DtContentReadinessCard
         organisationId={organisationId}
         readiness={readiness}
-        local={local}
         loading={readinessLoading}
         error={readinessError}
+      />
+
+      <DtContentPagesSourceCard
+        organisationId={organisationId}
+        local={local}
+        loading={readinessLoading}
+        onChanged={(next) => {
+          if (next) applyOverview(next);
+          void loadReadiness();
+          void loadOverview();
+        }}
       />
 
       <section className={cn(cardClass, "grid gap-4 p-4 sm:p-5")} aria-label="Texte erstellen">
@@ -266,61 +347,17 @@ export function DtContentWorkspace(props: {
               Texte erstellen ({selectedCount})
             </DtPillButton>
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
-            {pipeline?.model ? (
-              <p
-                className="text-[11px] text-sbkm-ink-500 dark:text-white/45 lg:text-right"
-                title={`Schreibschritte: ${pipeline.model} (${describeContentModelSource(pipeline.source.write)}) · Prüfschritte: ${pipeline.check_model} (${describeContentModelSource(pipeline.source.check)})`}
-              >
-                Modell: <span className="font-mono">{pipeline.model}</span>
-                {pipeline.check_model !== pipeline.model ? (
-                  <>
-                    {" "}
-                    · Prüfung: <span className="font-mono">{pipeline.check_model}</span>
-                  </>
-                ) : null}
-              </p>
-            ) : null}
           </div>
         </div>
 
-        {sync ? (
-          <details className="group rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] text-xs dark:border-white/8 dark:bg-white/[0.03]">
-            <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 text-sbkm-ink-600 dark:text-white/65">
-              <span>
-                Gespeichert: Anbieterfakten {sync.result.anbieter ? "✓" : "—"} · Avatar{" "}
-                {sync.result.avatar ? "✓" : "—"} · Struktur {sync.result.structure ? "✓" : "—"}
-                {sync.result.problems.length > 0 ? ` · ${sync.result.problems.length} Hinweis(e)` : ""}
-              </span>
-              <span className="inline-flex items-center gap-1 font-semibold text-sbkm-navy dark:text-white">
-                Verwendete Daten
-                <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden />
-              </span>
-            </summary>
-            <div className="grid gap-2 border-t border-sbkm-navy/8 px-3 py-2 dark:border-white/8">
-              {sync.result.problems.length > 0 ? (
-                <ul className="list-disc pl-4 text-orange-800 dark:text-orange-200">
-                  {sync.result.problems.map((p) => (
-                    <li key={p}>{p}</li>
-                  ))}
-                </ul>
-              ) : null}
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white/70 p-2.5 font-mono text-[11px] leading-relaxed text-sbkm-navy scrollbar-subtle dark:bg-black/20 dark:text-white/80">
-                {JSON.stringify(sync.sent, null, 2)}
-              </pre>
-            </div>
-          </details>
+        {sync && sync.result.problems.length > 0 ? (
+          <ul className="list-disc rounded-xl border border-orange-300/60 bg-orange-50 py-2 pl-7 pr-3 text-xs text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
+            {sync.result.problems.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
         ) : null}
       </section>
-
-      <DtContentManualPages
-        organisationId={organisationId}
-        onSaved={(next) => {
-          setOverview(next);
-          setOverviewError(null);
-          setRefreshedAt(new Date().toISOString());
-          void loadReadiness();
-        }}
-      />
 
       <section className={cardClass} aria-label="Seiten">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">
@@ -337,8 +374,32 @@ export function DtContentWorkspace(props: {
               </>
             ) : null}
           </div>
-          <div className="flex items-center gap-2 text-xs text-sbkm-ink-500 dark:text-white/45">
-            {running ? <span>Aktualisiert sich alle 10 Sekunden</span> : null}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-sbkm-ink-500 dark:text-white/45">
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedCount === 0 || resetting != null}
+              onClick={() => setConfirmBulk("reset")}
+              className="h-8 px-3 text-xs"
+              title="Die angehakten Seiten komplett zurücksetzen (Text, Schritte, Fragen, Kosten)"
+            >
+              <RotateCcw className="size-3.5" aria-hidden />
+              Auswahl zurücksetzen{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedCount === 0 || resetting != null}
+              onClick={() => setConfirmBulk("delete")}
+              className="h-8 px-3 text-xs text-red-700 shadow-[inset_0_0_0_1.5px_#b91c1c] hover:bg-red-700 hover:text-white dark:text-red-300 dark:shadow-[inset_0_0_0_1.5px_rgba(252,165,165,0.6)] dark:hover:bg-red-700 dark:hover:text-white"
+              title="Die angehakten Seiten aus der Tabelle entfernen"
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+              Auswahl löschen{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </DtPillButton>
+            {running ? <span>Aktualisiert sich automatisch</span> : null}
             <button
               type="button"
               onClick={() => void loadOverview()}
@@ -351,6 +412,9 @@ export function DtContentWorkspace(props: {
             </button>
           </div>
         </header>
+        {pages.length > 0 ? (
+          <DtContentPagesToolbar pages={pages} visibleCount={visible.length} filter={filter} onChange={setFilter} />
+        ) : null}
         <div className="p-2 sm:p-3">
           {overviewError ? (
             <p className="px-2 py-3 text-sm text-red-700 dark:text-red-300">{overviewError}</p>
@@ -360,9 +424,20 @@ export function DtContentWorkspace(props: {
                 <div key={i} className="h-11 animate-pulse rounded-lg bg-sbkm-navy/[0.05] dark:bg-white/[0.05]" />
               ))}
             </div>
+          ) : pages.length > 0 && visible.length === 0 ? (
+            <div className="grid gap-2 rounded-dt border border-dashed border-sbkm-navy/15 px-4 py-8 text-center dark:border-white/15">
+              <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Keine Seite passt zu Suche und Filter</p>
+              <button
+                type="button"
+                onClick={() => setFilter(EMPTY_CONTENT_PAGE_FILTER)}
+                className="mx-auto w-fit text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
+              >
+                Filter zurücksetzen
+              </button>
+            </div>
           ) : (
             <DtContentPagesTable
-              pages={pages}
+              pages={visible}
               selected={selected}
               onToggle={(slug) =>
                 setSelected((prev) => {
@@ -374,14 +449,72 @@ export function DtContentWorkspace(props: {
               }
               onToggleAll={(checked) =>
                 setSelected(
-                  checked ? new Set(pages.filter(isContentPageSelectable).map((p) => p.slug)) : new Set(),
+                  checked ? new Set(visible.filter(isContentPageSelectable).map((p) => p.slug)) : new Set(),
                 )
               }
               onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })}
+              onStop={(page) => void stopPage(page.slug)}
+              stopping={stopping}
             />
           )}
         </div>
       </section>
+
+      <CenteredModal
+        open={confirmBulk != null}
+        onClose={() => {
+          if (!resetting) setConfirmBulk(null);
+        }}
+        closeDisabled={resetting != null}
+        titleId="content-bulk-confirm-title"
+        title={
+          confirmBulk === "delete"
+            ? `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} löschen?`
+            : `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} zurücksetzen?`
+        }
+        description={
+          confirmBulk === "delete"
+            ? "Die Seiten verschwinden aus der Tabelle – mit Text, Schritten und Fragen. Laufende Schritte werden gestoppt."
+            : "Text, Schritte, Fragen und Anmerkungen gehen verloren; die Seiten bleiben in der Tabelle. Laufende Schritte werden gestoppt."
+        }
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <DtPillButton type="button" size="sm" variant="ghost" disabled={resetting != null} onClick={() => setConfirmBulk(null)}>
+              Abbrechen
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant={confirmBulk === "delete" ? "navy" : "mint"}
+              className={confirmBulk === "delete" ? "bg-red-600 text-white hover:bg-red-700 dark:hover:bg-red-700 dark:hover:text-white" : undefined}
+              disabled={resetting != null || selectedCount === 0}
+              onClick={() => {
+                if (confirmBulk) void runBulk(confirmBulk);
+              }}
+            >
+              {resetting ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : confirmBulk === "delete" ? <Trash2 className="size-3.5" aria-hidden /> : <RotateCcw className="size-3.5" aria-hidden />}
+              {confirmBulk === "delete" ? "Endgültig löschen" : "Zurücksetzen"}
+            </DtPillButton>
+          </div>
+        }
+      >
+        <ul className="grid gap-1 text-sm text-sbkm-navy dark:text-white">
+          {pages
+            .filter((p) => selected.has(p.slug))
+            .slice(0, 8)
+            .map((p) => (
+              <li key={p.slug} className="flex items-baseline gap-2">
+                <span className="font-semibold">{p.name}</span>
+                {p.source_url || p.path ? (
+                  <span className="truncate font-mono text-[11px] text-sbkm-ink-500 dark:text-white/45">{p.source_url ?? p.path}</span>
+                ) : null}
+              </li>
+            ))}
+          {selectedCount > 8 ? (
+            <li className="text-xs text-sbkm-ink-500 dark:text-white/45">… und {selectedCount - 8} weitere</li>
+          ) : null}
+        </ul>
+      </CenteredModal>
 
       <DtContentPageDrawer
         organisationId={organisationId}

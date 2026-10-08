@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { CheckCircle2, Pencil } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Pencil } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
 import { DtField, DtTextarea } from "@/components/dt/dt-field";
@@ -38,12 +38,23 @@ const TONALITAET_OPTIONS = CONTENT_TONALITAETEN.map((tone) => ({
 
 const FALLBACK_HINTS: Record<keyof ContentTextSettings, string> = {
   anrede: "Nichts Eindeutiges in den Gesprächen, daher „Sie“.",
-  branche: "Kein Hinweis auf Kanzlei oder Praxis, daher Handwerk.",
+  branche: "Kein eindeutiger Hinweis in den Anbieterfakten.",
   tonalitaet: "In den Gesprächen steht nichts zum Ton. Vorbelegt ist, was zur Branche meist passt.",
   verbotene_woerter: "In den Gesprächen keine gefunden.",
 };
 
-function Hint(props: { reason?: string; field: keyof ContentTextSettings }) {
+function Hint(props: { reason?: string; field: keyof ContentTextSettings; unclear?: boolean }) {
+  if (props.unclear) {
+    return (
+      <p
+        role="status"
+        className="flex items-start gap-1.5 rounded-lg border border-orange-300/70 bg-orange-50 px-2.5 py-2 text-[11px] leading-relaxed text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100"
+      >
+        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+        <span className="font-semibold">{props.reason ?? FALLBACK_HINTS[props.field]}</span>
+      </p>
+    );
+  }
   return (
     <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
       {props.reason ? `Vorschlag: ${props.reason}` : FALLBACK_HINTS[props.field]}
@@ -99,6 +110,8 @@ function ConfirmedSettings(props: { settings: ContentTextSettings; onEdit: () =>
 function SettingsForm(props: {
   initial: ContentTextSettings;
   suggestion: ContentTextSettingsSuggestion;
+  /** True until the settings were confirmed once: unclear suggestions then show their notice. */
+  fresh: boolean;
   onConfirm: (settings: ContentTextSettings) => void;
 }) {
   const id = useId();
@@ -117,8 +130,7 @@ function SettingsForm(props: {
           Einstellungen für Texte
         </h2>
         <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-          Diese vier Angaben lassen sich aus den Gesprächen nicht sicher ablesen. Die Vorschläge bitte
-          einmal prüfen und bestätigen.
+          Bitte kurz prüfen und bestätigen. Die Branche meint das Geschäft des Kunden, nicht den Avatar.
         </p>
       </header>
 
@@ -158,7 +170,11 @@ function SettingsForm(props: {
             srLabel="Branche"
             fullWidth
           />
-          <Hint field="branche" reason={reasons.branche} />
+          <Hint
+            field="branche"
+            reason={reasons.branche}
+            unclear={props.fresh && props.suggestion.unclear.includes("branche")}
+          />
         </DtField>
 
         <DtField label="Tonalität">
@@ -230,6 +246,7 @@ export function DtContentSettingsCard(props: {
     <SettingsForm
       initial={props.confirmed ?? props.suggestion.settings}
       suggestion={props.suggestion}
+      fresh={!props.confirmed}
       onConfirm={props.onConfirm}
     />
   );

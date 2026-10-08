@@ -8,7 +8,11 @@ import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtField } from "@/components/dt/dt-field";
 import { Textarea } from "@/components/ui/textarea";
-import { readQuestionnaireFileText } from "@/lib/surveys/read-questionnaire-file-text";
+import {
+  WEBSITE_STRUCTURE_FILE_ACCEPT,
+  WEBSITE_STRUCTURE_FILE_HINT,
+  readWebsiteStructureFile,
+} from "@/lib/dt/seo/read-website-structure-file";
 
 type StructurePayload = {
   organisationId: string;
@@ -31,19 +35,6 @@ function formatDeDate(iso: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-const FILE_ACCEPT =
-  ".txt,.md,.markdown,.csv,.json,.xml,.docx,text/plain,text/markdown,text/csv,application/json,application/xml,text/xml,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-async function readStructureFile(file: File): Promise<string> {
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".docx") || name.endsWith(".doc")) {
-    return readQuestionnaireFileText(file);
-  }
-  const text = (await file.text()).trim();
-  if (!text) throw new Error(`„${file.name}“ ist leer.`);
-  return text;
 }
 
 export function DtSeoWebsiteStructurePanel(props: {
@@ -162,7 +153,7 @@ export function DtSeoWebsiteStructurePanel(props: {
   async function onPickFile(file: File | undefined) {
     if (!file || !props.canEdit) return;
     try {
-      const text = await readStructureFile(file);
+      const { text } = await readWebsiteStructureFile(file);
       setDraft(text);
       setFilename(file.name);
       toast.success(`„${file.name}“ gelesen — bitte speichern.`);
@@ -226,7 +217,7 @@ export function DtSeoWebsiteStructurePanel(props: {
                     ref={fileRef}
                     id="dt-website-structure-file"
                     type="file"
-                    accept={FILE_ACCEPT}
+                    accept={WEBSITE_STRUCTURE_FILE_ACCEPT}
                     className="block w-full min-w-0 text-sm text-sbkm-ink-600 file:mr-3 file:rounded-pill file:border-0 file:bg-sbkm-navy file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white dark:text-white/70 dark:file:bg-sbkm-mint dark:file:text-sbkm-navy"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
@@ -235,7 +226,7 @@ export function DtSeoWebsiteStructurePanel(props: {
                     }}
                   />
                   <p className="text-[11px] text-sbkm-ink-500 dark:text-white/45">
-                    .md, .txt, Sitemap-.xml, .csv, .json oder .docx
+                    {WEBSITE_STRUCTURE_FILE_HINT}
                   </p>
                 </DtField>
 

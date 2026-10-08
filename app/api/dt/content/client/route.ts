@@ -13,7 +13,14 @@ import {
   avatarFromAgent,
   mergeContentAnbieter,
 } from "@/lib/dt/content/mapping";
-import { contentError, contentOk, gateContentRoute, readJsonBody } from "@/lib/dt/content/route-helpers";
+import {
+  contentError,
+  contentOk,
+  describeSeiten,
+  gateContentRoute,
+  loadContentReadiness,
+  readJsonBody,
+} from "@/lib/dt/content/route-helpers";
 import { saveContentSettings } from "@/lib/dt/content/store";
 import type { ContentClientPutBody, ContentClientPutResult } from "@/lib/dt/content/types";
 
@@ -40,15 +47,21 @@ export async function PUT(req: Request) {
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const [{ data: organisation }, anbieterSources, { data: structure }] = await Promise.all([
-    gate.service.from("organisations").select("name").eq("id", gate.organisationId).maybeSingle(),
-    loadContentAnbieterSources(gate.service, gate.organisationId),
-    gate.service
-      .from("dt_website_structures")
-      .select("filename")
-      .eq("organisation_id", gate.organisationId)
-      .maybeSingle(),
-  ]);
+  let organisation: { name?: unknown } | null = null;
+  let anbieterSources;
+  let seiten;
+  try {
+    const loaded = await Promise.all([
+      gate.service.from("organisations").select("name").eq("id", gate.organisationId).maybeSingle(),
+      loadContentAnbieterSources(gate.service, gate.organisationId),
+      loadContentReadiness(gate.service, gate.organisationId),
+    ]);
+    organisation = loaded[0].data;
+    anbieterSources = loaded[1];
+    seiten = describeSeiten(loaded[2].local);
+  } catch (error) {
+    return contentError(error instanceof Error ? error.message : "Daten konnten nicht geladen werden.", 500);
+  }
 
   let agentId = parsed.data.agentId ?? null;
   if (!agentId) {
@@ -78,7 +91,7 @@ export async function PUT(req: Request) {
     );
   }
   if (!avatarRow) problems.push("Kein Avatar vorhanden.");
-  if (!structure) problems.push("Keine Webseitenstruktur hochgeladen.");
+  if (!seiten.ok) problems.push(seiten.hint);
 
   const anbieter = anbieterFromWorkshop(sections, {
     organisationName: (organisation?.name as string | undefined) ?? "",
@@ -91,7 +104,7 @@ export async function PUT(req: Request) {
     client: gate.organisationId,
     anbieter: sections.length > 0,
     avatar: Boolean(avatarRow),
-    structure: structure ? ((structure.filename as string | null) ?? "Struktur") : null,
+    structure: seiten.ok ? seiten.hint.replace(/\.$/, "") : null,
     complete: problems.length === 0,
     problems,
   };

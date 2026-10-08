@@ -1,5 +1,8 @@
-import { contentError, contentOk, gateContentRoute, loadContentReadiness } from "@/lib/dt/content/route-helpers";
-import { buildOverview, loadContentPages, syncContentPagesFromStructure } from "@/lib/dt/content/store";
+import { loadContentOverview } from "@/lib/dt/content/overview";
+import { contentError, contentOk, gateContentRoute } from "@/lib/dt/content/route-helpers";
+
+/** Repairing a stale page may poke the job worker after the response (`after()`). */
+export const maxDuration = 300;
 
 export async function GET(req: Request) {
   const gated = await gateContentRoute(new URL(req.url).searchParams.get("org"));
@@ -7,12 +10,7 @@ export async function GET(req: Request) {
   const { gate } = gated;
 
   try {
-    await syncContentPagesFromStructure(gate.service, gate.organisationId);
-    const [{ readiness }, pages] = await Promise.all([
-      loadContentReadiness(gate.service, gate.organisationId),
-      loadContentPages(gate.service, gate.organisationId),
-    ]);
-    return contentOk(buildOverview(readiness, pages));
+    return contentOk(await loadContentOverview(gate.service, gate.organisationId));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Übersicht konnte nicht geladen werden.";
     return contentError(message, 500);

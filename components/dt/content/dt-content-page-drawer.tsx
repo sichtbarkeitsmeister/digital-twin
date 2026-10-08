@@ -209,6 +209,58 @@ export function DtContentPageDrawer(props: {
     onChangedRef.current();
   }
 
+  /** „Stoppen“ pauses after the last finished step; „Zurücksetzen“ wipes the page. */
+  async function runReset(modeKind: "stop" | "reset") {
+    if (!base) return;
+    if (
+      modeKind === "reset" &&
+      !window.confirm(
+        "Seite wirklich zurücksetzen? Text, Schritte, Fragen und Anmerkungen gehen verloren.",
+      )
+    ) {
+      return;
+    }
+    setBusy(modeKind);
+    const res = await contentApi<ContentReview>(`${base}/reset`, {
+      method: "POST",
+      body: { organisationId, mode: modeKind },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      void loadReview();
+      return;
+    }
+    toast.success(modeKind === "stop" ? "Gestoppt – die Seite ist pausiert" : "Seite zurückgesetzt");
+    setJobId(null);
+    setMode(null);
+    setReview(res.data);
+    onChangedRef.current();
+  }
+
+  /** „Löschen“: the page disappears from the table; the drawer closes. */
+  async function deletePage() {
+    if (!base) return;
+    if (
+      !window.confirm(
+        "Seite wirklich löschen? Text, Schritte und Fragen dieser Seite gehen verloren.",
+      )
+    ) {
+      return;
+    }
+    setBusy("delete");
+    const res = await contentApi<{ deleted: boolean }>(`${base}?${contentQuery(organisationId)}`, { method: "DELETE" });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    toast.success("Seite gelöscht");
+    setJobId(null);
+    onChangedRef.current();
+    onClose();
+  }
+
   async function runThrough() {
     if (!base) return;
     setBusy("run_through");
@@ -268,6 +320,15 @@ export function DtContentPageDrawer(props: {
         return;
       case "export":
         void exportHtml();
+        return;
+      case "stop":
+        void runReset("stop");
+        return;
+      case "reset":
+        void runReset("reset");
+        return;
+      case "delete":
+        void deletePage();
         return;
     }
   }
@@ -585,20 +646,29 @@ export function DtContentPageDrawer(props: {
 
                 {!mode ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    {actions.map((action) => (
+                    {actions.map((action, index) => (
                       <DtPillButton
                         key={`${action.kind}-${action.step ?? ""}`}
                         size="sm"
                         variant={
                           action.kind === "approve"
                             ? "mint"
-                            : action.kind === "export"
+                            : action.kind === "export" || action.kind === "reset" || action.kind === "delete"
                               ? "ghost"
                               : "outline"
                         }
-                        disabled={Boolean(busy) || Boolean(jobId)}
+                        disabled={
+                          Boolean(busy) ||
+                          (Boolean(jobId) && !["stop", "reset", "delete"].includes(action.kind))
+                        }
                         onClick={() => onAction(action)}
-                        className={action.kind === "export" ? "sm:ml-auto" : undefined}
+                        className={cn(
+                          // export / reset / delete sit on the right; the first of them takes the margin
+                          ["export", "reset", "delete"].includes(action.kind) &&
+                            actions.findIndex((a) => ["export", "reset", "delete"].includes(a.kind)) === index &&
+                            "sm:ml-auto",
+                          (action.kind === "reset" || action.kind === "delete") && "text-red-700 dark:text-red-300",
+                        )}
                       >
                         {busy === action.kind ? (
                           <Loader2 className="size-3.5 animate-spin" aria-hidden />

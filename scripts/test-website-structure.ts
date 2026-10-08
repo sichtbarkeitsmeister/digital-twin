@@ -10,6 +10,7 @@ import {
   parseWebsiteStructure,
   sanitizeWebsiteStructureText,
 } from "../lib/dt/seo/website-structure";
+import { sheetRowsToStructureText } from "../lib/dt/seo/website-structure-xlsx";
 
 function testMarkdownTree() {
   const parsed = parseWebsiteStructure(`
@@ -168,3 +169,63 @@ testProspectOmitsStructure();
 testEmptyRejected();
 testStripsNullBytes();
 console.log("ok: website structure");
+
+function testExcelTemplate() {
+  // Layout 1: the agency template — one column per level, a title row above the header.
+  const levels = sheetRowsToStructureText([
+    ["Seitenstruktur Muster GmbH", "", "", ""],
+    [],
+    ["Ebene 1", "Ebene 2", "Ebene 3", "URL"],
+    ["Startseite", "", "", "/"],
+    ["Leistungen", "", "", "/leistungen"],
+    ["", "Dachsanierung", "", "/leistungen/dachsanierung"],
+    ["", "", "Flachdach", "/leistungen/dachsanierung/flachdach"],
+    ["Kontakt", null, undefined, ""],
+  ]);
+  assert.equal(
+    levels,
+    "- Startseite /\n- Leistungen /leistungen\n  - Dachsanierung /leistungen/dachsanierung\n    - Flachdach /leistungen/dachsanierung/flachdach\n- Kontakt",
+  );
+  const parsed = parseWebsiteStructure(levels);
+  assert.equal(parsed.format, "markdown");
+  assert.equal(parsed.nodeCount, 5);
+  assert.equal(parsed.nodes[1]?.children[0]?.children[0]?.label, "Flachdach");
+  assert.equal(parsed.nodes[1]?.children[0]?.children[0]?.path, "/leistungen/dachsanierung/flachdach");
+  assert.equal(parsed.nodes[2]?.label, "Kontakt");
+
+  // Layout 2: flat list with a level column (numbers arrive as strings or numbers).
+  const withLevel = parseWebsiteStructure(
+    sheetRowsToStructureText([
+      ["Seite", "Ebene", "Pfad"],
+      ["Startseite", 1, "/"],
+      ["Leistungen", "1", "/leistungen"],
+      ["SEO", 2, "/leistungen/seo"],
+    ]),
+  );
+  assert.equal(withLevel.nodeCount, 3);
+  assert.equal(withLevel.nodes[1]?.children[0]?.label, "SEO");
+
+  // Layout 3: flat list — the depth follows the path.
+  const fromPath = parseWebsiteStructure(
+    sheetRowsToStructureText([
+      ["Titel", "URL"],
+      ["Start", "https://x.de/"],
+      ["Leistungen", "https://x.de/leistungen"],
+      ["SEO", "https://x.de/leistungen/seo"],
+      ["Kontakt", "https://x.de/kontakt"],
+    ]),
+  );
+  assert.equal(fromPath.nodeCount, 4);
+  assert.equal(fromPath.nodes[1]?.children[0]?.path, "https://x.de/leistungen/seo");
+
+  // No header: the column is the depth; a jump of two levels is clamped to one.
+  const positional = parseWebsiteStructure(sheetRowsToStructureText([["Startseite"], ["", "Über uns"], ["", "", "", "Team"], ["", "Kontakt"]]));
+  assert.equal(positional.nodeCount, 4);
+  assert.equal(positional.nodes[0]?.children[0]?.children[0]?.label, "Team");
+
+  assert.throws(() => sheetRowsToStructureText([[], ["", ""]]), /leer/);
+  assert.throws(() => sheetRowsToStructureText([["Ebene 1", "Ebene 2"]]), /keine Seitenstruktur/);
+  console.log("excel template: ok");
+}
+
+testExcelTemplate();

@@ -1,6 +1,7 @@
 /**
  * Human actions on a page: start/continue the run, approve a waiting step, edit a block,
- * rerun from a step with a note. All state transitions of `dt_content_pages` live here.
+ * rerun from a step with a note, stop the run, reset the page. All state transitions of
+ * `dt_content_pages` live here.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -174,6 +175,102 @@ export async function editContentBlock(
     })
     .eq("id", page.id);
   if (error) return { ok: false, status: 500, message: error.message };
+  return { ok: true, jobId: null };
+}
+
+const STOPPED_BY_USER = "Vom Benutzer gestoppt.";
+
+/**
+ * Ends every live job of the page (not only the one the row points to). A worker that is in
+ * the middle of a model call finishes that call, then sees the page is no longer `laeuft`
+ * and drops the result (`runContentStep`); nothing claims the job again.
+ */
+async function killPageJobs(service: SupabaseClient, pageId: string): Promise<string | null> {
+  const { error } = await service
+    .from("jobs")
+    .update({
+      status: "dead",
+      last_error: STOPPED_BY_USER,
+      locked_at: null,
+      locked_by: null,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("kind", CONTENT_JOB_KIND)
+    .eq("dedupe_key", `${CONTENT_JOB_KIND}:${pageId}`)
+    .in("status", ["pending", "running"]);
+  return error ? `Job konnte nicht gestoppt werden: ${error.message}` : null;
+}
+
+/** "Stoppen": end the background job; the page pauses after its last finished step. */
+export async function stopContentRun(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  steps: readonly { step: number; status: string }[],
+): Promise<ActionResult> {
+  if (page.state !== "laeuft") return { ok: false, status: 409, message: "Diese Seite läuft gerade nicht." };
+  const killed = await killPageJobs(service, page.id);
+  if (killed) return { ok: false, status: 500, message: killed };
+
+  await service
+    .from("dt_content_steps")
+    .update({ status: "pending", error: null, finished_at: null })
+    .eq("page_id", page.id)
+    .eq("status", "running");
+  const lastDone = steps
+    .filter((s) => s.status === "done" || s.status === "skipped")
+    .reduce((max, s) => Math.max(max, s.step), 0);
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({ state: "in_arbeit", step: lastDone || null, error: null, job_id: null })
+    .eq("id", page.id)
+    .eq("state", "laeuft");
+  if (error) return { ok: false, status: 500, message: error.message };
+  return { ok: true, jobId: null };
+}
+
+/** Everything a run produced, gone; name, path and source of the page stay. */
+const RESET_PATCH = {
+  state: "nicht_begonnen",
+  step: null,
+  released: false,
+  released_by: null,
+  released_at: null,
+  title: null,
+  meta_description: null,
+  html: "",
+  markdown: "",
+  findings: [],
+  final_findings: [],
+  unresolved: [],
+  questions: [],
+  notes: [],
+  error: null,
+  job_id: null,
+  cost_eur: 0,
+  main_keyword: null,
+  started_by: null,
+} as const;
+
+/** "Zurücksetzen": the page as if it had never been started — text, steps, questions, notes, cost. */
+export async function resetContentPage(service: SupabaseClient, page: ContentPageRow): Promise<ActionResult> {
+  const killed = await killPageJobs(service, page.id);
+  if (killed) return { ok: false, status: 500, message: killed };
+  const { error: stepsError } = await service.from("dt_content_steps").delete().eq("page_id", page.id);
+  if (stepsError) return { ok: false, status: 500, message: `Schritte konnten nicht gelöscht werden: ${stepsError.message}` };
+  const { error } = await service.from("dt_content_pages").update(RESET_PATCH).eq("id", page.id);
+  if (error) return { ok: false, status: 500, message: error.message };
+  return { ok: true, jobId: null };
+}
+
+/**
+ * "Löschen": the row and its steps are gone (cascade); live jobs end first. A page from the
+ * Seitenstruktur returns with the next upload, a crawl page with the next „übernehmen“.
+ */
+export async function deleteContentPage(service: SupabaseClient, page: ContentPageRow): Promise<ActionResult> {
+  const killed = await killPageJobs(service, page.id);
+  if (killed) return { ok: false, status: 500, message: killed };
+  const { error } = await service.from("dt_content_pages").delete().eq("id", page.id);
+  if (error) return { ok: false, status: 500, message: `Seite konnte nicht gelöscht werden: ${error.message}` };
   return { ok: true, jobId: null };
 }
 

@@ -233,7 +233,16 @@ Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthrop
 
 **Texte** liegt unter **Verwaltung**, neben SEO Modus (`/dashboard/verwaltung/texte`). Die Organisation wechselt man oben in der Leiste, wie bei SEO Modus und Agenten. Es braucht **keinen eigenen Dienst**. Die acht Schreibschritte laufen in der App selbst, als Hintergrund-Jobs (siehe Abschnitt 10, „Jobs“). Die KI ist Claude, aber über einen **eigenen Schlüssel**, damit die Ausgaben dieses Werkzeugs in der Anthropic Console für sich stehen.
 
-**Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql` im Supabase SQL Editor ausführen. Solange die Tabellen fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ statt einer rohen Fehlermeldung.
+**Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql` und `database/migrations/20261008_dt_content_pages_source.sql` im Supabase SQL Editor ausführen. Solange die Tabellen oder Spalten fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ bzw. „… noch nicht auf dem neuesten Stand“ mit dem Dateinamen statt einer rohen Fehlermeldung.
+
+**Woher die Seiten kommen.** Die Karte **Seitenquelle** bietet zwei Wege; beide füllen die Tabelle „Seiten“, und erst das Häkchen in der Tabelle entscheidet, welche Seiten Texte bekommen:
+
+- **Excel-Seitenstruktur** – für Kunden ohne (neue) Website. Die Agentur-Vorlage „Seitenstruktur“ (.xlsx, Spalten „Ebene 1 … Ebene 3“ und optional „URL“; alternativ „Seite / Ebene / Pfad“) direkt in Texte hochladen oder unter SEO → Struktur. Es ist dieselbe Ablage (`dt_website_structures`) und derselbe Parser; .csv, .md, .txt, .json, Sitemap-XML und .docx gehen weiterhin. Nach dem Upload erscheinen die Seiten von selbst in der Tabelle, vorhandene Texte bleiben.
+- **Crawler – bestehende Website** – für Kunden, die schon eine Website haben und bessere Texte wollen. „Website crawlen“ startet denselben Hintergrund-Crawl wie SEO Modus (Sitemap plus interne Links; braucht die Website-URL unter SEO → Einstellungen). „Seiten übernehmen“ legt für jede gecrawlte Seite eine Zeile an – ohne AGB/Widerruf, ohne Weiterleitungen, höchstens 300. Zeilen, die es schon gibt, behalten ihren Text und bekommen nur die Live-URL. Der bisherige Text der Live-Seite geht als Orientierung in Recherche, Gliederung und Rohtext ein; Fakten gelten trotzdem nur, wenn sie in den Anbieterfakten stehen.
+
+Das frühere Feld „Seiten eintragen“ (Seitenliste tippen) gibt es nicht mehr.
+
+**Branche.** Die Branche beschreibt das Geschäft des Kunden, nicht den Avatar. Der Vorschlag liest alle Anbieterfakten (Gesprächsabschnitte und Fragebogen-Antworten); Kanzlei- und Praxis-Wörter zählen doppelt, allgemeine Handwerks-Wörter einfach. Ist kein Signal da oder stehen zwei Branchen gleichauf, zeigt die Karte „Bitte manuell wählen“ mit der Begründung – Handwerk steht dann nur als Platzhalter im Feld. Die Branche lässt sich vor und nach dem Bestätigen jederzeit ändern („Ändern“).
 
 **Woher die Fakten kommen.** Beides zählt, beides darf fehlen, solange das andere da ist:
 
@@ -268,7 +277,23 @@ delete from public.app_settings where key in ('content_model', 'content_check_mo
 
 **Modell wechseln, Weg 2 (per Deploy):** `ANTHROPIC_DT_CONTENT_MODEL` bzw. `ANTHROPIC_DT_CONTENT_CHECK_MODEL` in Vercel setzen und neu deployen. Reihenfolge, wenn mehrere Stellen gesetzt sind: `app_settings` schlägt die Umgebungsvariable, die Umgebungsvariable schlägt den Standard.
 
-Welches Modell gerade aktiv ist und woher der Wert kommt, zeigt **Texte** unter dem Knopf **Texte erstellen** („Modell: …“). Gibt es den Modellnamen bei Anthropic nicht (Tippfehler, abgekündigt), probiert die Pipeline nacheinander ältere Sonnet-Namen; schlägt auch das fehl, steht der Fehler an der Seite („Fehler in Schritt …“) und kann mit **Weiterlaufen lassen** nach der Korrektur wiederholt werden.
+Welches Modell gerade aktiv ist, folgt aus der Reihenfolge oben (`app_settings`, dann Umgebungsvariable, dann Standard); die Oberfläche zeigt es nicht an. Gibt es den Modellnamen bei Anthropic nicht (Tippfehler, abgekündigt), probiert die Pipeline nacheinander ältere Sonnet-Namen; schlägt auch das fehl, steht der Fehler an der Seite („Fehler in Schritt …“) und kann mit **Weiterlaufen lassen** nach der Korrektur wiederholt werden.
+
+**Was die Statuszeile einer laufenden Seite bedeutet.** Die Tabelle liest nicht nur die Seite, sondern auch ihren Hintergrund-Job:
+
+| Text | Bedeutung |
+|---|---|
+| „Schritt 3 von 8: Rohtext läuft“ | Ein Worker rechnet gerade an diesem Schritt. |
+| „Schritt 4 von 8: Faktencheck startet gleich“ | Der Schritt ist fertig, der nächste wartet auf den nächsten Tick der Jobs-Uhr (alle 30 s). |
+| „… erneuter Versuch in ca. 2 Min. (Grund)“ | Anthropic hat abgelehnt (Ratenlimit, überlastet) oder der Worker wurde unterbrochen. Der Job wartet auf seinen nächsten Versuch; drei Versuche je Seite. |
+| „Wartet seit 3 Min. auf den Start“ | Der Job ist fällig, aber kein Worker holt ihn ab: `app_settings` (`app_base_url`, `jobs_worker_token`) und `JOBS_WORKER_TOKEN` prüfen. Solange die Seite offen ist, stößt sie den Worker auch selbst an. |
+| „Fehler in Schritt 3: …“ (Status In Arbeit) | Der Job ist zu Ende, ohne die Seite abzuschließen: dreimal unterbrochen, Schlüssel abgelehnt, Antwort abgeschnitten. Der Grund steht dabei, ohne technische Details („Bitte die Technik informieren“ meint: Schlüssel, Modell oder Zeitlimit in Vercel/Supabase prüfen, siehe oben); **Weiterlaufen lassen** macht an der Stelle weiter. |
+
+**Suchen und filtern.** Über der Tabelle steht ein Suchfeld (findet Name, Pfad, Live-URL und Suchbegriff; Umlaute dürfen auch als ae/oe/ue oder ohne Punkte geschrieben werden) und je ein Chip pro Status, mehrere kombinierbar. „Alle auswählen“, „Texte erstellen“ und die Sammelaktionen beziehen sich immer auf die gefilterte Liste.
+
+**Stoppen und Zurücksetzen.** Jede laufende Seite hat in der Tabelle und im Seitenfenster **Stoppen**: Der Hintergrund-Job wird beendet, die Seite pausiert nach dem letzten fertigen Schritt und läuft mit **Weiterlaufen lassen** dort weiter. **Zurücksetzen** (im Seitenfenster, oder für angehakte Seiten „Auswahl zurücksetzen“ in der Kopfzeile der Tabelle, ebenfalls mit Rückfrage) löscht Text, Schritte, Fragen, Anmerkungen und Kosten der Seite und stellt sie auf „Nicht begonnen“; Name, Pfad und Quelle bleiben. **Löschen** (im Seitenfenster, oder „Auswahl löschen“ in der Kopfzeile der Tabelle – mit Rückfrage, die die betroffenen Seiten auflistet) entfernt die Zeile ganz – zum Ausmisten einer Tabelle, etwa gecrawlte Seiten, die keine Texte brauchen; Seiten aus der Seitenstruktur kommen beim nächsten Upload wieder, Crawl-Seiten beim nächsten „Übernehmen“. Ein Schritt, der in dem Moment noch bei der KI rechnet, wird zu Ende gerechnet, aber nicht mehr gespeichert.
+
+Eine Seite bleibt also nicht mehr auf „läuft“ stehen, wenn ihr Job gestorben ist: Jedes Laden der Tabelle gleicht Seiten in „läuft“ mit der Tabelle `jobs` ab und pausiert sie mit Grund, wenn der Job fertig, tot oder verschwunden ist. Ein Schritt, der beim Aufwachen noch auf „läuft“ steht, zählt als abgebrochener Versuch (sonst liefe derselbe Schritt alle sechs Minuten neu, endlos). Der Worker hat pro Aufruf 240 Sekunden und `/api/jobs/run` 300 Sekunden (`maxDuration`); braucht ein Rohtext länger, als Vercel erlaubt, steht nach drei Abbrüchen „Vermutlich erreicht der Server sein Zeitlimit“ an der Seite – dann ein schnelleres Modell wählen oder die Function-Dauer des Vercel-Plans prüfen.
 
 Jeder Schritt schreibt Modell, Tokens und Kosten in `dt_content_steps` und einen Eintrag in `dt_llm_usage_events` (`mode = content.<Schritt>`), damit die Kosten pro Firma auswertbar bleiben.
 
@@ -301,7 +326,7 @@ Die Datenbank ist der Speicher. Tabellen sind Listen (Firmen, Nutzer, Chats, …
 1. In Supabase den **SQL Editor** öffnen.
 2. Den kompletten Inhalt von `database/schema.sql` einfügen und ausführen.  
    Das legt den Sockel an: Profile, Firmen, Mitglieder, Einladungen, Fragebögen und Antworten.
-3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 79 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
+3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 81 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
 4. In Supabase unter **Database → Extensions** prüfen, dass `pg_cron` und `pg_net` an sind. Die Job-Migration schaltet sie ein. `pg_cron` ist die Uhr, `pg_net` ist der Anruf von der Datenbank zur Website.
 5. Prüfen, dass bei den Tabellen **RLS** aktiv ist (Row Level Security).
 
@@ -504,7 +529,7 @@ Es gibt drei Job-Arten:
 |---|---|
 | `seo.crawl` | Arbeitet die Warteschlange der Website-Prüfung ab. |
 | `leadinfo.normalize` | Macht aus einem rohen Leadinfo-Ereignis einen lesbaren Eintrag. |
-| `content.page` | Schreibt den Text einer Seite unter **Verwaltung → Texte**: pro Lauf ein Schritt (1 Recherche, 2 Gliederung, 3 Rohtext, 4 Faktencheck, 5 Tonalität & Avatar, 6 SEO-Feinschliff, 7 Lektorat, 8 Endabnahme), dann stellt er sich selbst für den nächsten Schritt wieder an. Er hält an, wenn der Faktencheck Fragen an den Kunden hat („Braucht Sie“) und nach der Endabnahme bis zur Freigabe. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. Fakten kommen aus dem Anbieter-Fragebogen und aus den ausgewerteten Gesprächen. |
+| `content.page` | Schreibt den Text einer Seite unter **Verwaltung → Texte**: so viele Schritte, wie in einen Aufruf passen (1 Recherche, 2 Gliederung, 3 Rohtext, 4 Faktencheck, 5 Tonalität & Avatar, 6 SEO-Feinschliff, 7 Lektorat, 8 Endabnahme), dann stellt er sich für den Rest wieder an. Er hält an, wenn der Faktencheck Fragen an den Kunden hat („Braucht Sie“) und nach der Endabnahme bis zur Freigabe. Jeder Fehler – auch ein unterbrochener Worker – zählt als Versuch; nach drei Versuchen pausiert die Seite mit Grund. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. Fakten kommen aus dem Anbieter-Fragebogen und aus den ausgewerteten Gesprächen. |
 
 Ein Job, der zu oft scheitert, bleibt als fehlgeschlagen liegen und ist unter **Jobs** sichtbar.
 
@@ -571,6 +596,7 @@ Zuerst immer den Probelauf. Danach `OLD_SUPABASE_SERVICE_ROLE_KEY` entfernen.
 | Einladung oder Hinweis-Mail kommt nicht | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`. Bei Fragebogen-Hinweisen auch `SURVEY_NOTIFICATIONS_TO`. Danach das Protokoll unter **E-Mails**. |
 | SEO-Bericht startet nicht | `N8N_DT_SEO_REPORT_WEBHOOK`, `APP_BASE_URL` (muss aus dem Internet erreichbar sein), `DT_INTERNAL_WEBHOOK_SECRET` ist in Vercel und in n8n gleich. |
 | Crawl bleibt stehen | In Supabase `app_settings`: `app_base_url` und `jobs_worker_token`. Der Token muss `JOBS_WORKER_TOKEN` gleichen. Extensions `pg_cron` und `pg_net` müssen an sein. Danach die Seite **Jobs**. |
+| Texte-Seite steht auf „Wartet … auf den Start“ | Gleiche Ursache wie beim Crawl: `app_settings` und `JOBS_WORKER_TOKEN`. Steht dort „erneuter Versuch“ oder „Fehler in Schritt“, steht der Grund daneben (`ANTHROPIC_DT_CONTENT_API_KEY`, Ratenlimit, Zeitlimit). |
 | Jemand sieht eine Firma oder einen Bericht nicht | Plattform-Rolle und Firmen-Rolle (Abschnitt 3). SEO-Modus ist nur für Plattform-Admins. Berichte auch für den Inhaber. |
 | Upload scheitert | Die Buckets `dt-chat-attachments` und `ai-chat-attachments` existieren nur, wenn die Migrationen liefen. |
 | Änderung an der Datenbank ist im Code unbekannt | `npm run types:generate` und die neue Datei mit committen. |

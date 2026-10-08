@@ -21,8 +21,10 @@ import type { ContentFinding, ContentQuestion } from "@/lib/dt/content/types";
 
 export type ContentPipelineContext = {
   organisationName: string;
-  page: { name: string; path: string | null; level: number };
+  page: { name: string; path: string | null; level: number; url?: string | null };
   structureOutline: string;
+  /** Current text of the live page for pages taken over from the crawl; null otherwise. */
+  existingText: string | null;
   sections: WorkshopAnbieterSection[];
   settings: ContentTextSettings;
   avatar: { name: string; role: string; beschreibung: string } | null;
@@ -73,6 +75,7 @@ export type ContentStepSpec = {
 const MAX_SECTION_CHARS = 6_000;
 const MAX_AVATAR_CHARS = 5_000;
 const MAX_OUTLINE_CHARS = 5_000;
+const MAX_EXISTING_TEXT_CHARS = 6_000;
 
 const SEVERITY_LABELS: Record<string, string> = {
   high: "Wichtig",
@@ -216,8 +219,12 @@ function pageBlock(context: ContentPipelineContext): string {
     `Seite: ${context.page.name}`,
     context.page.path ? `Pfad: ${context.page.path}` : "",
     `Ebene in der Struktur: ${context.page.level} (0 = Startseite/oberste Ebene)`,
+    context.page.url ? `Live-URL: ${context.page.url}` : "",
     context.structureOutline
       ? `\n## Webseitenstruktur (zur Einordnung, keine Fakten)\n${clip(context.structureOutline, MAX_OUTLINE_CHARS)}`
+      : "",
+    context.existingText
+      ? `\n## Bisheriger Text der Seite (Live-Website, nur zur Orientierung)\nSo liest sich die Seite heute: Thema, Umfang, Begriffe. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_EXISTING_TEXT_CHARS)}`
       : "",
   ]
     .filter(Boolean)
