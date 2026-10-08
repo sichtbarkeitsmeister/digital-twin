@@ -8,8 +8,8 @@ import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
-import { DtContentManualPages } from "@/components/dt/content/dt-content-manual-pages";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
+import { DtContentPagesSourceCard } from "@/components/dt/content/dt-content-pages-source-card";
 import {
   DtContentPagesTable,
   isContentPageSelectable,
@@ -102,25 +102,29 @@ export function DtContentWorkspace(props: {
     setReadinessLoading(false);
   }, [organisationId]);
 
+  const applyOverview = useCallback((next: ContentOverview) => {
+    setOverview(next);
+    setOverviewError(null);
+    setRefreshedAt(new Date().toISOString());
+    setSelected((prev) => {
+      const allowed = new Set(next.pages.filter(isContentPageSelectable).map((p) => p.slug));
+      const kept = new Set([...prev].filter((slug) => allowed.has(slug)));
+      return kept.size === prev.size ? prev : kept;
+    });
+  }, []);
+
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     const res = await contentApi<ContentOverview>(
       `/api/dt/content/overview?${contentQuery(organisationId)}`,
     );
     if (res.ok) {
-      setOverview(res.data);
-      setOverviewError(null);
-      setRefreshedAt(new Date().toISOString());
-      setSelected((prev) => {
-        const allowed = new Set(res.data.pages.filter(isContentPageSelectable).map((p) => p.slug));
-        const next = new Set([...prev].filter((slug) => allowed.has(slug)));
-        return next.size === prev.size ? prev : next;
-      });
+      applyOverview(res.data);
     } else {
       setOverviewError(res.message);
     }
     setOverviewLoading(false);
-  }, [organisationId]);
+  }, [organisationId, applyOverview]);
 
   useEffect(() => {
     void loadReadiness();
@@ -222,7 +226,7 @@ export function DtContentWorkspace(props: {
     : settingsOpen
       ? "Erst die Einstellungen für Texte bestätigen."
       : selectedCount === 0
-        ? "Seiten in der Tabelle anhaken."
+        ? "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
         : "Läuft im Hintergrund durch acht Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
 
   return (
@@ -241,6 +245,17 @@ export function DtContentWorkspace(props: {
         local={local}
         loading={readinessLoading}
         error={readinessError}
+      />
+
+      <DtContentPagesSourceCard
+        organisationId={organisationId}
+        local={local}
+        loading={readinessLoading}
+        onChanged={(next) => {
+          if (next) applyOverview(next);
+          void loadReadiness();
+          void loadOverview();
+        }}
       />
 
       <section className={cn(cardClass, "grid gap-4 p-4 sm:p-5")} aria-label="Texte erstellen">
@@ -288,7 +303,7 @@ export function DtContentWorkspace(props: {
             <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 text-sbkm-ink-600 dark:text-white/65">
               <span>
                 Gespeichert: Anbieterfakten {sync.result.anbieter ? "✓" : "—"} · Avatar{" "}
-                {sync.result.avatar ? "✓" : "—"} · Struktur {sync.result.structure ? "✓" : "—"}
+                {sync.result.avatar ? "✓" : "—"} · Seiten {sync.result.structure ? "✓" : "—"}
                 {sync.result.problems.length > 0 ? ` · ${sync.result.problems.length} Hinweis(e)` : ""}
               </span>
               <span className="inline-flex items-center gap-1 font-semibold text-sbkm-navy dark:text-white">
@@ -311,16 +326,6 @@ export function DtContentWorkspace(props: {
           </details>
         ) : null}
       </section>
-
-      <DtContentManualPages
-        organisationId={organisationId}
-        onSaved={(next) => {
-          setOverview(next);
-          setOverviewError(null);
-          setRefreshedAt(new Date().toISOString());
-          void loadReadiness();
-        }}
-      />
 
       <section className={cardClass} aria-label="Seiten">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">

@@ -101,19 +101,54 @@ export function describeAnbieterSources(anbieter: ContentLocalSources["anbieter"
   return parts.join(" · ");
 }
 
-/** Structure upload, typed list, or neither. */
-export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "pages">): {
+function pagesWord(n: number): string {
+  return `${n} ${n === 1 ? "Seite" : "Seiten"}`;
+}
+
+function deDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" });
+}
+
+/**
+ * The „Seiten“ check has two sources: the uploaded Seitenstruktur (Excel template, for a
+ * client without a website) or the pages taken over from the crawl of the existing site.
+ */
+export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "crawl" | "pages">): {
   ok: boolean;
   hint: string;
 } {
+  const parts: string[] = [];
+  if (local.pages.structure > 0) {
+    parts.push(
+      local.structure
+        ? `${pagesWord(local.pages.structure)} aus der Seitenstruktur${local.structure.filename?.trim() ? ` „${local.structure.filename.trim()}“` : ""}`
+        : `${pagesWord(local.pages.structure)} in der Tabelle`,
+    );
+  }
+  if (local.pages.crawl > 0) {
+    const stand = deDate(local.crawl.lastCrawledAt);
+    parts.push(`${pagesWord(local.pages.crawl)} aus dem Crawl${stand ? ` (Stand ${stand})` : ""}`);
+  }
+  if (parts.length > 0) return { ok: true, hint: `${parts.join(" · ")}.` };
+
   if (local.structure) {
-    return { ok: true, hint: `Struktur: ${local.structure.filename?.trim() || "ohne Dateiname"}` };
+    return {
+      ok: true,
+      hint: `Seitenstruktur „${local.structure.filename?.trim() || "ohne Dateiname"}“ hochgeladen – die Seiten erscheinen beim nächsten Laden der Tabelle.`,
+    };
   }
-  const n = local.pages.total;
-  if (n > 0) {
-    return { ok: true, hint: `${n} ${n === 1 ? "Seite" : "Seiten"} manuell angelegt` };
+  if (local.crawl.pageCount > 0) {
+    return {
+      ok: false,
+      hint: `${pagesWord(local.crawl.pageCount)} gecrawlt, aber noch nicht übernommen – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken.`,
+    };
   }
-  return { ok: false, hint: "Keine Seiten. Struktur hochladen oder unten eintragen." };
+  return {
+    ok: false,
+    hint: "Keine Seiten. Entweder die Excel-Seitenstruktur hochladen (Kunde ohne Website) oder die bestehende Website crawlen – beides unter „Seitenquelle“.",
+  };
 }
 
 /** The three readiness checks from DigitalTwin's own tables. */

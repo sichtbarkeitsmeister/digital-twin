@@ -47,16 +47,37 @@ export type StepOutcome = {
   costEur: number;
 };
 
+/** How much of the live page's text the prompts see (pages taken over from the crawl). */
+const EXISTING_TEXT_MAX_CHARS = 6_000;
+
+/** The current text of a page taken over from the crawl, or null (structure pages, no crawl row). */
+async function loadExistingText(service: SupabaseClient, page: ContentPageRow): Promise<string | null> {
+  if (!page.source_url) return null;
+  const { data, error } = await service
+    .from("dt_site_pages")
+    .select("text_content")
+    .eq("organisation_id", page.organisation_id)
+    .eq("url", page.source_url)
+    .maybeSingle();
+  if (error) {
+    console.warn("[content] live page text not readable:", error.message);
+    return null;
+  }
+  const text = (data?.text_content as string | null | undefined)?.trim() ?? "";
+  return text ? text.slice(0, EXISTING_TEXT_MAX_CHARS) : null;
+}
+
 async function loadContext(
   service: SupabaseClient,
   page: ContentPageRow,
   steps: ContentStepRow[],
 ): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, anbieter, { data: structure }] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, { data: structure }, existingText] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
     loadContentAnbieterSources(service, page.organisation_id),
     service.from("dt_website_structures").select("outline").eq("organisation_id", page.organisation_id).maybeSingle(),
+    loadExistingText(service, page),
   ]);
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind noch nicht bestätigt.", false);
@@ -86,8 +107,9 @@ async function loadContext(
     avatarId: avatarRow?.id ?? null,
     context: {
       organisationName: (organisation?.name as string | undefined)?.trim() || "",
-      page: { name: page.name, path: page.path, level: page.level },
+      page: { name: page.name, path: page.path, level: page.level, url: page.source_url },
       structureOutline: (structure?.outline as string | undefined) ?? "",
+      existingText,
       sections,
       settings: settingsFromRow(settingsRow),
       avatar: avatar ? { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } : null,
@@ -251,4 +273,28 @@ export async function markContentStepError(
     .from("dt_content_pages")
     .update({ state: "in_arbeit", step, error: text, job_id: null })
     .eq("id", page.id);
+}
+
+/**
+ * The runner will try the step again later (rate limit, overload, interrupted worker). The
+ * page stays `laeuft`, but the step row goes back to `pending` and the reason is on the page,
+ * so the table says „wird erneut versucht“ instead of „läuft“ for minutes.
+ */
+export async function markContentStepRetry(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  step: number,
+  message: string,
+): Promise<void> {
+  const text = message.slice(0, 500);
+  await upsertStep(service, page, step, {
+    status: "pending",
+    error: text,
+    finished_at: new Date().toISOString(),
+  }).catch((err) => console.error("[content] step retry not stored", err));
+  await service
+    .from("dt_content_pages")
+    .update({ step, error: text })
+    .eq("id", page.id)
+    .eq("state", "laeuft");
 }

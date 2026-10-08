@@ -4,9 +4,11 @@
  * Loading happens in `load-sources.ts`.
  *
  * Client facts are the free-text workshop sections in `dt_workshop_corpus.anbieter`
- * (`ANBIETER_POINTS`). The four strict fields (anrede, branche, tonalitaet, verbotene_woerter)
- * cannot be read reliably from prose: `suggestTextSettings` only pre-fills the
- * "Einstellungen für Texte" card, and a person confirms the values.
+ * (`ANBIETER_POINTS`) and the answers of the Anbieter-Fragebogen. The four strict fields
+ * (anrede, branche, tonalitaet, verbotene_woerter) cannot be read reliably from prose:
+ * `suggestTextSettings` only pre-fills the "Einstellungen für Texte" card, and a person
+ * confirms the values. The avatar never feeds the suggestion: it is the reader the text is
+ * written for, not the client's business.
  */
 
 import type { AnbieterItem } from "@/lib/dt/transcripts/workshop-model";
@@ -128,7 +130,15 @@ export type ContentTextSettingsSuggestion = {
   settings: ContentTextSettings;
   /** Why a value was suggested, e.g. `„Kanzlei“ in „Unternehmen & Kern“`. Missing = default. */
   reasons: Partial<Record<keyof ContentTextSettings, string>>;
+  /**
+   * Fields the heuristic could not settle. The value is only a placeholder then; the card
+   * shows an explicit notice and the person has to pick. Today only `branche` can be here.
+   */
+  unclear: Array<keyof ContentTextSettings>;
 };
+
+/** Start of every `reasons.branche` text when the branch is a guess, not a finding. */
+export const BRANCHE_UNCLEAR_PREFIX = "Branche unklar";
 
 /** One workshop section. `key` is one of `ANBIETER_POINTS`, `current` the latest free text. */
 export type WorkshopAnbieterSection = Pick<AnbieterItem, "label" | "current"> & { key: string };
@@ -245,6 +255,11 @@ export function sectionsForSuggestion(
   for (const [key, section] of Object.entries(fill)) {
     if (!out.some((s) => s.key === key)) out.push(section);
   }
+  // The branch is read from every client section, so the answers count even when the
+  // workshop already has an `unternehmen` text (then they were not used as its fill).
+  if (!out.some((s) => s.key === "unternehmen" && s.label === "Anbieter-Fragebogen")) {
+    out.push({ key: "fragebogen", label: "Anbieter-Fragebogen", current: facts.map(line).join("\n") });
+  }
   return out;
 }
 
@@ -343,15 +358,73 @@ function suggestAnrede(text: string): { value: ContentAnrede; match: string | nu
   return { value: "Sie", match: null };
 }
 
-const LAW = /anw[aä]lt\w*|kanzlei\w*|jurist\w*|\bnotar(?!zt)\w*/i;
-const MEDICAL = /\w*[aä]rzt\w*|\bpraxis\b|\bpatient\w*|\bklinik\w*|zahnmedizin\w*/i;
+/**
+ * Words that point at the client's line of business. Law and medicine are specific and weigh
+ * double; the Handwerk list is generic trade vocabulary that shows up in most SMB texts, so a
+ * single hit there is not a finding. Avatar text is never scanned (see file comment).
+ */
+const BRANCHE_SIGNALS: Record<ContentBranche, { pattern: RegExp; weight: number }> = {
+  rechtsanwalt: {
+    pattern:
+      /\w*anw[aä]lt\w*|\bkanzlei\w*|\bjurist\w*|\bnotar(?!zt)\w*|\bmandant\w*|\brechtsberat\w*|\brechtsgebiet\w*|\bsteuerberat\w*/gi,
+    weight: 2,
+  },
+  arzt: {
+    pattern:
+      /\w*[aä]rzt\w*|\bpraxis\b|\bpraxen\b|\bpatient\w*|\bklinik\w*|\bzahnmedizin\w*|\bphysiotherap\w*|\bheilpraktik\w*|\bmvz\b|\bsprechstunde\w*|\bbehandlungsr[aä]um\w*/gi,
+    weight: 2,
+  },
+  handwerk: {
+    pattern:
+      /\bhandwerk\w*|\w*betriebe?s?\b|\bmeister\w*|\bmontage\w*|\bbaustelle\w*|\bsanierung\w*|\binstallat\w*|\bdachdeck\w*|\bmaler\w*|\belektr(?:o|ik)\w*|\bsanit[äa]r\w*|\bheizung\w*|\bschreiner\w*|\btischler\w*|\bgarten\w*|\bentr[üu]mpel\w*|\br[äa]umung\w*|\breinigung\w*|\bumz[üu]g\w*|\bwerkstatt\w*|\bdienstleist\w*|\bagentur\w*|\bhausmeister\w*|\bgeb[äa]udetechnik\w*|\bauftr[äa]ge?\b|\bkunden?\b/gi,
+    weight: 1,
+  },
+};
 
-function suggestBranche(text: string): { value: ContentBranche; match: string | null } {
-  const law = text.match(LAW);
-  if (law) return { value: "rechtsanwalt", match: law[0] };
-  const medical = text.replace(/\bin der praxis\b/gi, " ").match(MEDICAL);
-  if (medical) return { value: "arzt", match: medical[0] };
-  return { value: "handwerk", match: null };
+const BRANCHE_PRIORITY: readonly ContentBranche[] = ["rechtsanwalt", "arzt", "handwerk"];
+
+type BrancheSuggestion = {
+  value: ContentBranche;
+  /** First matching word of the winning branch and the section it was found in. */
+  hit: { match: string; section: string } | null;
+  /** Set when no branch is a safe pick: no signals, or two branches equally strong. */
+  unclear: { competing: { branche: ContentBranche; match: string; section: string } | null } | null;
+};
+
+/**
+ * Tallies the signals over every client section (workshop and Fragebogen). A clear winner
+ * needs a lead of two points over the runner-up, otherwise the branch is marked unclear and
+ * the person has to choose; `handwerk` is then only the placeholder value.
+ */
+function suggestBranche(items: readonly WorkshopAnbieterSection[]): BrancheSuggestion {
+  const scores: Record<ContentBranche, number> = { handwerk: 0, rechtsanwalt: 0, arzt: 0 };
+  const first: Partial<Record<ContentBranche, { match: string; section: string }>> = {};
+
+  for (const item of items) {
+    const text = (item.current ?? "").replace(/\bin der praxis\b/gi, " ");
+    if (!text.trim()) continue;
+    const section = item.label?.trim() || item.key;
+    for (const branche of BRANCHE_PRIORITY) {
+      const { pattern, weight } = BRANCHE_SIGNALS[branche];
+      const matches = [...text.matchAll(pattern)];
+      if (matches.length === 0) continue;
+      scores[branche] += matches.length * weight;
+      if (!first[branche]) first[branche] = { match: matches[0]![0], section };
+    }
+  }
+
+  const ranked = [...BRANCHE_PRIORITY].sort(
+    (a, b) => scores[b] - scores[a] || BRANCHE_PRIORITY.indexOf(a) - BRANCHE_PRIORITY.indexOf(b),
+  );
+  const top = ranked[0]!;
+  const second = ranked[1]!;
+  if (scores[top] === 0) return { value: "handwerk", hit: null, unclear: { competing: null } };
+  const hit = first[top] ?? null;
+  if (scores[second] > 0 && scores[top] - scores[second] < 2) {
+    const rival = first[second]!;
+    return { value: top, hit, unclear: { competing: { branche: second, ...rival } } };
+  }
+  return { value: top, hit, unclear: null };
 }
 
 const AVOID_WORDS =
@@ -389,22 +462,32 @@ function suggestVerboteneWoerter(text: string): string[] {
 }
 
 /**
- * Pre-fill for the "Einstellungen für Texte" card. Simple keyword heuristics over the
- * "sprache" (anrede, tonalitaet, verbotene_woerter) and "unternehmen" (branche) sections.
- * Only a suggestion: a person confirms the values before anything is sent.
+ * Pre-fill for the "Einstellungen für Texte" card. Simple keyword heuristics: anrede,
+ * tonalitaet and verbotene_woerter from the "sprache" section, branche from every client
+ * section (workshop and Fragebogen). Only a suggestion: a person confirms the values before
+ * anything is sent, and an unclear branch is flagged instead of silently set to Handwerk.
  */
 export function suggestTextSettings(
   items: readonly WorkshopAnbieterSection[],
 ): ContentTextSettingsSuggestion {
   const sprache = sectionOf(items, "sprache");
-  const unternehmen = sectionOf(items, "unternehmen");
   const reasons: ContentTextSettingsSuggestion["reasons"] = {};
+  const unclear: ContentTextSettingsSuggestion["unclear"] = [];
 
   const anrede = suggestAnrede(sprache.text);
   if (anrede.match) reasons.anrede = `„${anrede.match}“ in „${sprache.label}“`;
 
-  const branche = suggestBranche(unternehmen.text);
-  if (branche.match) reasons.branche = `„${branche.match}“ in „${unternehmen.label}“`;
+  const branche = suggestBranche(items);
+  if (branche.unclear) {
+    unclear.push("branche");
+    const rival = branche.unclear.competing;
+    reasons.branche =
+      rival && branche.hit
+        ? `${BRANCHE_UNCLEAR_PREFIX} – „${branche.hit.match}“ (${branche.hit.section}) spricht für ${CONTENT_BRANCHE_LABELS[branche.value]}, „${rival.match}“ (${rival.section}) für ${CONTENT_BRANCHE_LABELS[rival.branche]}. Bitte manuell wählen.`
+        : `${BRANCHE_UNCLEAR_PREFIX} – in den Anbieterfakten steht nichts zur Branche. Bitte manuell wählen.`;
+  } else if (branche.hit) {
+    reasons.branche = `„${branche.hit.match}“ in „${branche.hit.section}“`;
+  }
 
   const tonalitaet = suggestTonalitaet(sprache.text, branche.value);
   if (tonalitaet.matches.length > 0) {
@@ -423,6 +506,7 @@ export function suggestTextSettings(
       verbotene_woerter: verboteneWoerter,
     },
     reasons,
+    unclear,
   };
 }
 

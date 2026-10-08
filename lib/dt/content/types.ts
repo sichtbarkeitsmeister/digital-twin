@@ -13,6 +13,9 @@ export type ContentPageState =
   | "braucht_sie"
   | "fertig";
 
+/** Where a page row came from: the uploaded Seitenstruktur or the crawl of the live site. */
+export type ContentPageSource = "structure" | "crawl";
+
 export type ContentReadinessCheckId = "anbieter" | "avatar" | "structure";
 
 export type ContentReadinessCheck = {
@@ -31,6 +34,10 @@ export type ContentPageSummary = {
   name: string;
   slug: string;
   level: number;
+  path: string | null;
+  source: ContentPageSource;
+  /** Live URL for pages taken over from the crawl. */
+  source_url: string | null;
   main_keyword: string | null;
   started: boolean;
   state: ContentPageState;
@@ -64,6 +71,7 @@ export type ContentClientPutResult = {
   client: string;
   anbieter: boolean;
   avatar: boolean;
+  /** Short description of the page source („Struktur: datei.xlsx“, „Crawl: 24 Seiten“) or null. */
   structure: string | null;
   complete: boolean;
   problems: string[];
@@ -173,10 +181,40 @@ export type ContentLocalSources = {
     fragebogen: { title: string; facts: number } | null;
   } | null;
   avatarCount: number;
-  /** Uploaded website structure, when the organisation has one. */
-  structure: { filename: string | null } | null;
-  /** Rows in `dt_content_pages`. `manual` counts rows that did not come from a structure upload. */
-  pages: { total: number; manual: number };
+  /** Uploaded Seitenstruktur (Excel template / text), when the organisation has one. */
+  structure: { filename: string | null; uploadedAt: string | null; nodeCount: number } | null;
+  /** Crawl of the existing website: configured URL and what `dt_site_pages` holds. */
+  crawl: { websiteUrl: string | null; pageCount: number; lastCrawledAt: string | null };
+  /** Rows in `dt_content_pages`, split by where they came from. */
+  pages: { total: number; structure: number; crawl: number };
+};
+
+/** `GET /api/dt/content/crawl`: the crawler mode of „Seiten“. */
+export type ContentCrawlStatus = {
+  website_url: string | null;
+  crawl: {
+    id: string;
+    status: string;
+    pages_crawled: number;
+    pages_discovered: number;
+    max_pages: number;
+    message: string | null;
+    started_at: string | null;
+  } | null;
+  last_crawl_error: string | null;
+  /** Crawled pages of the live site that can be taken over (not excluded). */
+  page_count: number;
+  last_crawled_at: string | null;
+  /** Pages in the Texte table that came from the crawl. */
+  imported: number;
+};
+
+/** `POST /api/dt/content/crawl/import` */
+export type ContentCrawlImportResult = {
+  imported: number;
+  attached: number;
+  skipped: { excluded: number; empty: number; redirected: number; duplicate: number; over_limit: number };
+  overview: ContentOverview;
 };
 
 /** Which model the pipeline will use for the next step and where that setting comes from. */

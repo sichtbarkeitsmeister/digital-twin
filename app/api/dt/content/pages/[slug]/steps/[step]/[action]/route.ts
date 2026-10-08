@@ -65,7 +65,12 @@ export async function POST(
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const page = await loadContentPage(gate.service, gate.organisationId, slug);
+  let page;
+  try {
+    page = await loadContentPage(gate.service, gate.organisationId, slug);
+  } catch (error) {
+    return contentError(error instanceof Error ? error.message : "Seite konnte nicht geladen werden.", 500);
+  }
   if (!page) return contentError("Seite nicht gefunden.", 404);
 
   const data = parsed.data as { block_id?: string; text?: string; note?: string };

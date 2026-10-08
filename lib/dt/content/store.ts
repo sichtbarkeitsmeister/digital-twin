@@ -6,17 +6,23 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  planCrawlContentPages,
+  type CrawledSitePage,
+  type CrawlPagePlan,
+} from "@/lib/dt/content/crawl-pages";
+import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
 import type { ContentAnrede, ContentBranche, ContentTextSettings } from "@/lib/dt/content/mapping";
 import { cleanTextSettings } from "@/lib/dt/content/mapping";
-import { CONTENT_STEPS, contentStepName, runningPageDetail } from "@/lib/dt/content/pipeline/steps";
+import { CONTENT_STEPS, contentStepName } from "@/lib/dt/content/pipeline/steps";
 import { formatEur } from "@/lib/dt/content/presentation";
-import { planManualContentPages, type ManualPageDraft } from "@/lib/dt/content/manual-pages";
 import { slugify } from "@/lib/dt/content/render";
 import { parseWebsiteStructure, type WebsiteStructureNode } from "@/lib/dt/seo/website-structure";
 import type {
   ContentAction,
   ContentFinding,
   ContentOverview,
+  ContentPageSource,
   ContentPageState,
   ContentPageSummary,
   ContentQuestion,
@@ -34,6 +40,9 @@ export type ContentPageRow = {
   path: string | null;
   level: number;
   position: number;
+  source: ContentPageSource;
+  source_url: string | null;
+  crawled_at: string | null;
   main_keyword: string | null;
   state: ContentPageState;
   step: number | null;
@@ -87,26 +96,44 @@ export type ContentSettingsRow = {
 };
 
 export const PAGE_COLUMNS =
-  "id, organisation_id, slug, name, path, level, position, main_keyword, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at";
+  "id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at";
 
 /** Light projection for the overview table (no HTML). */
 const SUMMARY_COLUMNS =
-  "id, organisation_id, slug, name, path, level, position, main_keyword, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at";
+  "id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at";
 
 const STEP_COLUMNS =
   "id, page_id, organisation_id, step, name, status, output, model, input_tokens, output_tokens, cost_eur, error, started_at, finished_at, approved_by, approved_at";
 
 const MAX_PAGES = 300;
+/** How many crawled rows are read when taking pages over; the plan keeps the first MAX_PAGES. */
+const MAX_CRAWLED_ROWS = 5_000;
 
 export const CONTENT_MIGRATION_FILE = "database/migrations/20261006_dt_content_pipeline.sql";
+export const CONTENT_SOURCE_MIGRATION_FILE = "database/migrations/20261008_dt_content_pages_source.sql";
 
 /** PostgREST answers PGRST205 when a table is not in its schema cache, i.e. the migration never ran. */
 export function isMissingContentTableError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
+  if (isMissingContentColumnError(error)) return false;
   return error.code === "PGRST205" || /schema cache|does not exist/i.test(error.message ?? "");
 }
 
+/** `column dt_content_pages.source does not exist` (select) or PGRST204 (write): the source migration never ran. */
+export function isMissingContentColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    /column .+ does not exist|could not find the '.+' column/i.test(message)
+  );
+}
+
 export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
+  if (isMissingContentColumnError(error)) {
+    return `Die Datenbank ist noch nicht auf dem neuesten Stand: Bitte ${CONTENT_SOURCE_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+  }
   if (isMissingContentTableError(error)) {
     return `Die Datenbank ist noch nicht vorbereitet: Bitte ${CONTENT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
@@ -125,6 +152,9 @@ function asArray<T>(value: unknown): T[] {
 function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
   return {
     ...(raw as unknown as ContentPageRow),
+    source: raw.source === "crawl" ? "crawl" : "structure",
+    source_url: typeof raw.source_url === "string" && raw.source_url ? raw.source_url : null,
+    crawled_at: typeof raw.crawled_at === "string" ? raw.crawled_at : null,
     html: typeof raw.html === "string" ? raw.html : "",
     markdown: typeof raw.markdown === "string" ? raw.markdown : "",
     findings: asArray<ContentFinding>(raw.findings),
@@ -191,20 +221,26 @@ export async function loadContentPage(
   organisationId: string,
   slug: string,
 ): Promise<ContentPageRow | null> {
-  const { data } = await service
+  const { data, error } = await service
     .from("dt_content_pages")
     .select(PAGE_COLUMNS)
     .eq("organisation_id", organisationId)
     .eq("slug", slug)
     .maybeSingle();
+  if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht geladen werden"));
   return data ? normalizePageRow(data as Record<string, unknown>) : null;
 }
 
+/**
+ * Throws on a database error instead of answering null: the job handler must not mistake a
+ * failed read for a deleted page (that left the page on „läuft“ with a finished job).
+ */
 export async function loadContentPageById(
   service: SupabaseClient,
   pageId: string,
 ): Promise<ContentPageRow | null> {
-  const { data } = await service.from("dt_content_pages").select(PAGE_COLUMNS).eq("id", pageId).maybeSingle();
+  const { data, error } = await service.from("dt_content_pages").select(PAGE_COLUMNS).eq("id", pageId).maybeSingle();
+  if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht geladen werden"));
   return data ? normalizePageRow(data as Record<string, unknown>) : null;
 }
 
@@ -224,13 +260,36 @@ export async function loadContentPages(
   return ((data ?? []) as unknown as Record<string, unknown>[]).map(normalizePageRow);
 }
 
+/** Throws on a database error: an empty list would restart the pipeline at step 1. */
 export async function loadContentSteps(service: SupabaseClient, pageId: string): Promise<ContentStepRow[]> {
-  const { data } = await service
+  const { data, error } = await service
     .from("dt_content_steps")
     .select(STEP_COLUMNS)
     .eq("page_id", pageId)
     .order("step", { ascending: true });
+  if (error) throw new Error(contentDbErrorMessage(error, "Schritte konnten nicht geladen werden"));
   return (data ?? []) as ContentStepRow[];
+}
+
+/** Step rows of several pages at once (the overview needs them for the running ones). */
+export async function loadContentStepsForPages(
+  service: SupabaseClient,
+  pageIds: readonly string[],
+): Promise<Map<string, ContentStepRow[]>> {
+  const byPage = new Map<string, ContentStepRow[]>();
+  if (pageIds.length === 0) return byPage;
+  const { data, error } = await service
+    .from("dt_content_steps")
+    .select(STEP_COLUMNS)
+    .in("page_id", [...pageIds])
+    .order("step", { ascending: true });
+  if (error) throw new Error(contentDbErrorMessage(error, "Schritte konnten nicht geladen werden"));
+  for (const row of (data ?? []) as ContentStepRow[]) {
+    const list = byPage.get(row.page_id) ?? [];
+    list.push(row);
+    byPage.set(row.page_id, list);
+  }
+  return byPage;
 }
 
 type FlatPage = { slug: string; name: string; path: string | null; level: number; position: number };
@@ -259,8 +318,8 @@ export function flattenStructure(nodes: readonly WebsiteStructureNode[]): FlatPa
 }
 
 /**
- * Creates page rows for the uploaded structure. Runs only when the upload is newer than the
- * last sync (`structure_uploaded_at` on the rows), so polling the overview stays cheap.
+ * Creates page rows for the uploaded Seitenstruktur. Runs only when the upload is newer than
+ * the last sync (`structure_uploaded_at` on the rows), so polling the overview stays cheap.
  * Existing pages keep their text; only name/path/level/position follow the upload.
  */
 export async function syncContentPagesFromStructure(
@@ -302,7 +361,12 @@ export async function syncContentPagesFromStructure(
   }
   if (flat.length === 0) return { synced: false, pages: 0 };
 
-  const rows = flat.map((p) => ({ organisation_id: organisationId, structure_uploaded_at: uploadedAt, ...p }));
+  const rows = flat.map((p) => ({
+    organisation_id: organisationId,
+    structure_uploaded_at: uploadedAt,
+    source: "structure" as const,
+    ...p,
+  }));
   const { error } = await service
     .from("dt_content_pages")
     .upsert(rows, { onConflict: "organisation_id,slug" });
@@ -310,37 +374,85 @@ export async function syncContentPagesFromStructure(
   return { synced: true, pages: rows.length };
 }
 
+async function loadCrawledSitePages(service: SupabaseClient, organisationId: string): Promise<CrawledSitePage[]> {
+  // No text_content here (a few hundred KB per page); fetch failures have neither title nor h1.
+  const base = () =>
+    service
+      .from("dt_site_pages")
+      .select("url, title, h1, is_excluded, crawled_at, final_url")
+      .eq("organisation_id", organisationId)
+      .eq("is_excluded", false)
+      .or("title.not.is.null,h1.not.is.null")
+      .order("url", { ascending: true })
+      .limit(MAX_CRAWLED_ROWS);
+  let result: { data: unknown[] | null; error: { message: string } | null } = await base();
+  if (result.error && /final_url/i.test(result.error.message)) {
+    // Older databases without migration 20260929: no redirect information, every page counts.
+    result = await service
+      .from("dt_site_pages")
+      .select("url, title, h1, is_excluded, crawled_at")
+      .eq("organisation_id", organisationId)
+      .eq("is_excluded", false)
+      .or("title.not.is.null,h1.not.is.null")
+      .order("url", { ascending: true })
+      .limit(MAX_CRAWLED_ROWS);
+  }
+  if (result.error) {
+    if (/does not exist|schema cache/i.test(result.error.message)) return [];
+    throw new Error(`Crawl-Seiten konnten nicht geladen werden: ${result.error.message}`);
+  }
+  return ((result.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    url: String(row.url ?? ""),
+    title: (row.title as string | null) ?? null,
+    h1: (row.h1 as string | null) ?? null,
+    text_content: null,
+    is_excluded: Boolean(row.is_excluded),
+    crawled_at: String(row.crawled_at ?? ""),
+    final_url: (row.final_url as string | null | undefined) ?? null,
+  }));
+}
+
 /**
- * Adds pages the user typed. Inserts new slugs only: an existing page keeps its text,
- * keyword and `structure_uploaded_at` (null on these rows, so a later Excel upload still syncs).
+ * „Seiten aus dem Crawl übernehmen“: one row per crawled page of the live site. Explicit, not
+ * on every poll — the SEO crawl also serves other purposes, and nobody wants 300 rows to
+ * appear because a crawl ran months ago. Existing slugs keep their text and only get the
+ * live URL attached.
  */
-export async function upsertManualContentPages(
+export async function syncContentPagesFromCrawl(
   service: SupabaseClient,
   organisationId: string,
-  pages: readonly ManualPageDraft[],
-): Promise<{ inserted: number }> {
-  const { data, error } = await service
-    .from("dt_content_pages")
-    .select("slug, position")
-    .eq("organisation_id", organisationId)
-    .limit(MAX_PAGES);
+): Promise<{ imported: number; attached: number; skipped: CrawlPagePlan["skipped"] }> {
+  const [{ data: existing, error }, crawled] = await Promise.all([
+    service
+      .from("dt_content_pages")
+      .select("slug, path, position, source_url")
+      .eq("organisation_id", organisationId)
+      .limit(MAX_PAGES),
+    loadCrawledSitePages(service, organisationId),
+  ]);
   if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
 
-  const planned = planManualContentPages((data ?? []) as { slug: string; position?: number | null }[], pages);
-  if (planned.length === 0) return { inserted: 0 };
+  const plan = planCrawlContentPages(
+    (existing ?? []) as { slug: string; path?: string | null; position?: number | null; source_url?: string | null }[],
+    crawled,
+    { limit: MAX_PAGES },
+  );
 
-  const rows = planned.map((page) => ({
-    organisation_id: organisationId,
-    slug: page.slug,
-    name: page.name,
-    path: null,
-    level: page.level,
-    position: page.position,
-    main_keyword: page.main_keyword,
-  }));
-  const { error: insertError } = await service.from("dt_content_pages").insert(rows);
-  if (insertError) throw new Error(contentDbErrorMessage(insertError, "Seiten konnten nicht angelegt werden"));
-  return { inserted: rows.length };
+  if (plan.inserts.length > 0) {
+    const rows = plan.inserts.map((page) => ({ organisation_id: organisationId, source: "crawl" as const, ...page }));
+    const { error: insertError } = await service.from("dt_content_pages").insert(rows);
+    if (insertError) throw new Error(contentDbErrorMessage(insertError, "Seiten konnten nicht angelegt werden"));
+  }
+  for (const item of plan.attach) {
+    const { error: attachError } = await service
+      .from("dt_content_pages")
+      .update({ source_url: item.source_url, crawled_at: item.crawled_at })
+      .eq("organisation_id", organisationId)
+      .eq("slug", item.slug)
+      .is("source_url", null);
+    if (attachError) throw new Error(contentDbErrorMessage(attachError, "Seiten konnten nicht aktualisiert werden"));
+  }
+  return { imported: plan.inserts.length, attached: plan.attach.length, skipped: plan.skipped };
 }
 
 // --- presentation -----------------------------------------------------------------------------
@@ -353,11 +465,17 @@ const STATE_LABELS: Record<ContentPageState, string> = {
   fertig: "Fertig",
 };
 
-export function pageDetail(page: ContentPageRow): string | null {
+/** Step rows and the job verdict of a page, when the caller loaded them (running pages). */
+export type ContentPageExtra = {
+  steps?: readonly ContentStepRow[] | null;
+  verdict?: ContentJobVerdict | null;
+};
+
+export function pageDetail(page: ContentPageRow, extra: ContentPageExtra = {}): string | null {
   const stepName = contentStepName(page.step);
   switch (page.state) {
     case "laeuft":
-      return page.step ? `Schritt ${page.step} von ${CONTENT_STEPS.length}: ${stepName} läuft` : "Startet …";
+      return describeRunningPage(page, extra.steps ?? null, extra.verdict ?? null);
     case "braucht_sie": {
       const blocking = page.questions.filter((q) => q.blocking).length;
       const n = blocking || page.questions.length;
@@ -375,17 +493,20 @@ export function pageDetail(page: ContentPageRow): string | null {
   }
 }
 
-export function pageSummary(page: ContentPageRow): ContentPageSummary {
+export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}): ContentPageSummary {
   const cost = num(page.cost_eur);
   return {
     name: page.name,
     slug: page.slug,
     level: page.level,
+    path: page.path,
+    source: page.source,
+    source_url: page.source_url,
     main_keyword: page.main_keyword,
     started: page.state !== "nicht_begonnen",
     state: page.state,
     label: STATE_LABELS[page.state] ?? page.state,
-    detail: pageDetail(page),
+    detail: pageDetail(page, extra),
     step: page.step,
     cost_eur: cost,
     cost: formatEur(cost),
@@ -395,8 +516,12 @@ export function pageSummary(page: ContentPageRow): ContentPageSummary {
   };
 }
 
-export function buildOverview(readiness: ContentReadiness, rows: ContentPageRow[]): ContentOverview {
-  const pages = rows.map(pageSummary);
+export function buildOverview(
+  readiness: ContentReadiness,
+  rows: ContentPageRow[],
+  extras: ReadonlyMap<string, ContentPageExtra> = new Map(),
+): ContentOverview {
+  const pages = rows.map((row) => pageSummary(row, extras.get(row.id) ?? {}));
   const costEur = Math.round(pages.reduce((sum, p) => sum + p.cost_eur, 0) * 100) / 100;
   return {
     readiness,
@@ -465,17 +590,21 @@ export function stepList(steps: ContentStepRow[]): ContentStep[] {
   });
 }
 
-export function buildReview(page: ContentPageRow, steps: ContentStepRow[]): ContentReview {
+export function buildReview(
+  page: ContentPageRow,
+  steps: ContentStepRow[],
+  verdict: ContentJobVerdict | null = null,
+): ContentReview {
   const textSteps = steps
     .filter((s) => s.status === "done" && CONTENT_STEPS.find((d) => d.step === s.step)?.writesText)
     .map((s) => s.step);
-  const summary = pageSummary(page);
+  const summary = pageSummary(page, { steps, verdict });
   return {
     name: page.name,
     public: {
       state: page.state,
       label: summary.label,
-      detail: page.state === "laeuft" ? runningPageDetail(page.step, steps) : summary.detail,
+      detail: summary.detail,
       step: page.step,
       cost: summary.cost,
       released: page.released,

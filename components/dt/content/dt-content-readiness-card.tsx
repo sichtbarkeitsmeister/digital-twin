@@ -30,8 +30,8 @@ function fixLinks(id: ContentReadinessCheckId, organisationId: string): FixLink[
       return [{ href: `/dashboard/verwaltung/agents?org=${org}`, label: "Zu den Avataren" }];
     case "structure":
       return [
-        { href: `/dashboard/verwaltung/seo?org=${org}&tab=struktur`, label: "Zur Seitenstruktur" },
-        { href: "#seiten-eintragen", label: "Seiten eintragen" },
+        { href: "#seitenquelle", label: "Seitenquelle wählen" },
+        { href: `/dashboard/verwaltung/seo?org=${org}&tab=struktur`, label: "SEO → Struktur" },
       ];
   }
 }
@@ -44,6 +44,19 @@ function anbieterNote(anbieter: ContentLocalSources["anbieter"]): string {
   return `Im DigitalTwin: ${parts.join(" · ")}`;
 }
 
+function seitenNote(local: ContentLocalSources): string {
+  const structure = local.structure
+    ? `Seitenstruktur „${local.structure.filename?.trim() || "ohne Dateiname"}“ (${local.structure.nodeCount} Einträge)`
+    : "keine Seitenstruktur";
+  const crawl =
+    local.crawl.pageCount > 0
+      ? `Crawl: ${local.crawl.pageCount} ${local.crawl.pageCount === 1 ? "Seite" : "Seiten"}`
+      : local.crawl.websiteUrl
+        ? "noch kein Crawl"
+        : "keine Website-URL für den Crawler";
+  return `Im DigitalTwin: ${structure} · ${crawl}`;
+}
+
 function localNote(id: ContentReadinessCheckId, local: ContentLocalSources | null): string | null {
   if (!local) return null;
   switch (id) {
@@ -54,7 +67,7 @@ function localNote(id: ContentReadinessCheckId, local: ContentLocalSources | nul
         ? `Im DigitalTwin: ${local.avatarCount} Avatar${local.avatarCount === 1 ? "" : "e"}`
         : "Im DigitalTwin: noch kein Avatar";
     case "structure":
-      return null;
+      return seitenNote(local);
   }
 }
 
@@ -86,7 +99,8 @@ export function DtContentReadinessCard(props: {
             Bereit für Texte?
           </h2>
           <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-            Diese drei Dinge braucht die Texterstellung, bevor sie schreiben kann.
+            Diese drei Dinge braucht die Texterstellung, bevor sie schreiben kann. Seiten kommen aus der
+            Excel-Seitenstruktur oder aus dem Crawl der bestehenden Website.
           </p>
         </div>
         {props.loading ? (

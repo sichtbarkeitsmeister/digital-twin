@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { startContentRun } from "@/lib/dt/content/pipeline/actions";
+import { reconcileContentPages } from "@/lib/dt/content/pipeline/health";
 import {
   contentError,
   contentOk,
@@ -31,12 +32,20 @@ export async function POST(req: Request, context: { params: Promise<{ slug: stri
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const [page, settings] = await Promise.all([
-    loadContentPage(gate.service, gate.organisationId, slug),
-    loadContentSettings(gate.service, gate.organisationId),
-  ]);
-  if (!page) return contentError("Seite nicht gefunden.", 404);
-  if (!settings) return contentError("Bitte erst die Einstellungen für Texte bestätigen.", 400);
+  let page;
+  let settings;
+  try {
+    [page, settings] = await Promise.all([
+      loadContentPage(gate.service, gate.organisationId, slug),
+      loadContentSettings(gate.service, gate.organisationId),
+    ]);
+    if (!page) return contentError("Seite nicht gefunden.", 404);
+    if (!settings) return contentError("Bitte erst die Einstellungen für Texte bestätigen.", 400);
+    // A page whose job died stays „läuft“ only until someone looks: repair before deciding.
+    page = (await reconcileContentPages(gate.service, [page])).pages[0] ?? page;
+  } catch (error) {
+    return contentError(error instanceof Error ? error.message : "Seite konnte nicht geladen werden.", 500);
+  }
 
   const started = await startContentRun(gate.service, page, gate.userId);
   if (!started.ok) return contentError(started.message, started.status);
