@@ -524,10 +524,10 @@ assert.deepEqual(
 );
 const justUploaded = describeSeiten({ structure: { filename: "s.xlsx", uploadedAt: null, nodeCount: 3 }, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0 } });
 assert.equal(justUploaded.ok, true, "an upload counts before the table synced it");
-assert.match(justUploaded.hint, /erscheinen beim nächsten Laden/);
+assert.match(justUploaded.hint, /Seiten werden übernommen/);
 const crawledOnly = describeSeiten({ ...crawlLocal, pages: { total: 0, structure: 0, crawl: 0 } });
 assert.equal(crawledOnly.ok, false, "a crawl is not a page list until it is taken over");
-assert.equal(crawledOnly.hint, "40 Seiten gecrawlt, aber noch nicht übernommen – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken.");
+assert.equal(crawledOnly.hint, "40 Seiten gecrawlt – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken.");
 const nothing = describeSeiten({ structure: null, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0 } });
 assert.equal(nothing.ok, false);
 assert.match(nothing.hint, /Excel-Seitenstruktur hochladen/);
@@ -624,7 +624,7 @@ assert.equal(
 );
 assert.equal(describeRunningPage({ step: 2, error: null }, runningSteps, { kind: "queued", waitMs: 5_000, error: null }), "Schritt 3 von 8: Rohtext startet gleich");
 assert.equal(describeRunningPage({ step: null, error: null }, [], { kind: "queued", waitMs: 5_000, error: null }), "Schritt 1 von 8: Recherche startet gleich");
-assert.match(describeRunningPage({ step: null, error: null }, [], { kind: "queued", waitMs: 200_000, error: null }), /^Wartet seit 3 Min\. auf den Hintergrund-Dienst/);
+assert.match(describeRunningPage({ step: null, error: null }, [], { kind: "queued", waitMs: 200_000, error: null }), /^Wartet seit 3 Min\. auf den Start/);
 assert.equal(describeRunningPage({ step: 3, error: null }, runningSteps, { kind: "stale_lock", sinceMs: 1 }), "Schritt 3 von 8: Rohtext wurde unterbrochen – wird fortgesetzt");
 assert.match(describeRunningPage({ step: 3, error: null }, runningSteps, { kind: "gone", status: "dead", error: null }), /Weiterlaufen lassen/);
 assert.match(interruptedStepMessage(3, iso(-7 * 60_000), { attempts: 0, max_attempts: 3 }, now), /^Schritt 3 \(Rohtext\) wurde unterbrochen.*gestartet vor 7 Min\..*Versuch 1 von 3/);

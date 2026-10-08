@@ -36,8 +36,7 @@ export function DtContentPagesTable(props: {
         <FileText className="mx-auto size-5 text-sbkm-ink-500" aria-hidden />
         <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Noch keine Seiten</p>
         <p className="mx-auto max-w-sm text-xs text-sbkm-ink-600 dark:text-white/60">
-          Oben unter „Seitenquelle“ die Excel-Seitenstruktur hochladen oder die bestehende Website crawlen und
-          die Seiten übernehmen.
+          Oben unter „Seitenquelle“ die Excel-Seitenstruktur hochladen oder die Website crawlen.
         </p>
       </div>
     );
@@ -114,7 +113,7 @@ export function DtContentPagesTable(props: {
                       {page.source === "crawl" ? (
                         <span
                           className="shrink-0 rounded-pill bg-sbkm-navy/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60"
-                          title="Aus dem Crawl der bestehenden Website übernommen"
+                          title="Aus dem Crawl übernommen"
                         >
                           Crawl
                         </span>

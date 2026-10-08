@@ -51,10 +51,7 @@ function Hint(props: { reason?: string; field: keyof ContentTextSettings; unclea
         className="flex items-start gap-1.5 rounded-lg border border-orange-300/70 bg-orange-50 px-2.5 py-2 text-[11px] leading-relaxed text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100"
       >
         <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-        <span>
-          <span className="font-semibold">{props.reason ?? FALLBACK_HINTS[props.field]}</span> Der vorbelegte Wert
-          ist nur ein Platzhalter – bitte prüfen, auch nach dem Bestätigen bleibt das Feld änderbar.
-        </span>
+        <span className="font-semibold">{props.reason ?? FALLBACK_HINTS[props.field]}</span>
       </p>
     );
   }
@@ -133,8 +130,7 @@ function SettingsForm(props: {
           Einstellungen für Texte
         </h2>
         <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-          Diese vier Angaben lassen sich aus den Gesprächen nicht sicher ablesen. Die Vorschläge bitte
-          einmal prüfen und bestätigen. Die Branche beschreibt das Geschäft des Kunden, nicht den Avatar.
+          Bitte kurz prüfen und bestätigen. Die Branche meint das Geschäft des Kunden, nicht den Avatar.
         </p>
       </header>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -20,7 +20,6 @@ import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settin
 import { CenteredModal } from "@/components/ui/centered-modal";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
-import { describeContentModelSource } from "@/lib/dt/content/model-config";
 import {
   EMPTY_CONTENT_PAGE_FILTER,
   anyContentPageRunning,
@@ -34,7 +33,6 @@ import type {
   ContentClientPutResult,
   ContentLocalSources,
   ContentOverview,
-  ContentPipelineInfo,
   ContentReadiness,
   ContentReadinessResult,
   ContentResetResult,
@@ -75,7 +73,6 @@ export function DtContentWorkspace(props: {
 
   const [readiness, setReadiness] = useState<ContentReadiness | null>(null);
   const [local, setLocal] = useState<ContentLocalSources | null>(null);
-  const [pipeline, setPipeline] = useState<ContentPipelineInfo | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(true);
   const [readinessError, setReadinessError] = useState<string | null>(null);
 
@@ -110,7 +107,6 @@ export function DtContentWorkspace(props: {
     if (res.ok) {
       setReadiness(res.data.readiness);
       setLocal(res.data.local);
-      setPipeline(res.data.pipeline);
       setReadinessError(null);
     } else {
       setReadinessError(res.message);
@@ -313,7 +309,6 @@ export function DtContentWorkspace(props: {
       <DtContentReadinessCard
         organisationId={organisationId}
         readiness={readiness}
-        local={local}
         loading={readinessLoading}
         error={readinessError}
       />
@@ -352,49 +347,15 @@ export function DtContentWorkspace(props: {
               Texte erstellen ({selectedCount})
             </DtPillButton>
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
-            {pipeline?.model ? (
-              <p
-                className="text-[11px] text-sbkm-ink-500 dark:text-white/45 lg:text-right"
-                title={`Schreibschritte: ${pipeline.model} (${describeContentModelSource(pipeline.source.write)}) · Prüfschritte: ${pipeline.check_model} (${describeContentModelSource(pipeline.source.check)})`}
-              >
-                Modell: <span className="font-mono">{pipeline.model}</span>
-                {pipeline.check_model !== pipeline.model ? (
-                  <>
-                    {" "}
-                    · Prüfung: <span className="font-mono">{pipeline.check_model}</span>
-                  </>
-                ) : null}
-              </p>
-            ) : null}
           </div>
         </div>
 
-        {sync ? (
-          <details className="group rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] text-xs dark:border-white/8 dark:bg-white/[0.03]">
-            <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2 text-sbkm-ink-600 dark:text-white/65">
-              <span>
-                Gespeichert: Anbieterfakten {sync.result.anbieter ? "✓" : "—"} · Avatar{" "}
-                {sync.result.avatar ? "✓" : "—"} · Seiten {sync.result.structure ? "✓" : "—"}
-                {sync.result.problems.length > 0 ? ` · ${sync.result.problems.length} Hinweis(e)` : ""}
-              </span>
-              <span className="inline-flex items-center gap-1 font-semibold text-sbkm-navy dark:text-white">
-                Verwendete Daten
-                <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden />
-              </span>
-            </summary>
-            <div className="grid gap-2 border-t border-sbkm-navy/8 px-3 py-2 dark:border-white/8">
-              {sync.result.problems.length > 0 ? (
-                <ul className="list-disc pl-4 text-orange-800 dark:text-orange-200">
-                  {sync.result.problems.map((p) => (
-                    <li key={p}>{p}</li>
-                  ))}
-                </ul>
-              ) : null}
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white/70 p-2.5 font-mono text-[11px] leading-relaxed text-sbkm-navy scrollbar-subtle dark:bg-black/20 dark:text-white/80">
-                {JSON.stringify(sync.sent, null, 2)}
-              </pre>
-            </div>
-          </details>
+        {sync && sync.result.problems.length > 0 ? (
+          <ul className="list-disc rounded-xl border border-orange-300/60 bg-orange-50 py-2 pl-7 pr-3 text-xs text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
+            {sync.result.problems.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
         ) : null}
       </section>
 
@@ -438,7 +399,7 @@ export function DtContentWorkspace(props: {
               <Trash2 className="size-3.5" aria-hidden />
               Auswahl löschen{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </DtPillButton>
-            {running ? <span>Aktualisiert sich alle 10 Sekunden</span> : null}
+            {running ? <span>Aktualisiert sich automatisch</span> : null}
             <button
               type="button"
               onClick={() => void loadOverview()}
@@ -513,8 +474,8 @@ export function DtContentWorkspace(props: {
         }
         description={
           confirmBulk === "delete"
-            ? "Die Zeilen verschwinden aus der Tabelle – mit Text, Schritten, Fragen und Kosten. Laufende Schritte werden gestoppt. Seiten aus der Seitenstruktur kommen beim nächsten Upload wieder, Crawl-Seiten beim nächsten „Übernehmen“."
-            : "Text, Schritte, Fragen, Anmerkungen und Kosten dieser Seiten werden gelöscht; Name, Pfad und Quelle bleiben. Laufende Schritte werden gestoppt."
+            ? "Die Seiten verschwinden aus der Tabelle – mit Text, Schritten und Fragen. Laufende Schritte werden gestoppt."
+            : "Text, Schritte, Fragen und Anmerkungen gehen verloren; die Seiten bleiben in der Tabelle. Laufende Schritte werden gestoppt."
         }
         footer={
           <div className="flex flex-wrap justify-end gap-2">

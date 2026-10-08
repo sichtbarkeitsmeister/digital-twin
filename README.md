@@ -277,7 +277,7 @@ delete from public.app_settings where key in ('content_model', 'content_check_mo
 
 **Modell wechseln, Weg 2 (per Deploy):** `ANTHROPIC_DT_CONTENT_MODEL` bzw. `ANTHROPIC_DT_CONTENT_CHECK_MODEL` in Vercel setzen und neu deployen. Reihenfolge, wenn mehrere Stellen gesetzt sind: `app_settings` schlägt die Umgebungsvariable, die Umgebungsvariable schlägt den Standard.
 
-Welches Modell gerade aktiv ist und woher der Wert kommt, zeigt **Texte** unter dem Knopf **Texte erstellen** („Modell: …“). Gibt es den Modellnamen bei Anthropic nicht (Tippfehler, abgekündigt), probiert die Pipeline nacheinander ältere Sonnet-Namen; schlägt auch das fehl, steht der Fehler an der Seite („Fehler in Schritt …“) und kann mit **Weiterlaufen lassen** nach der Korrektur wiederholt werden.
+Welches Modell gerade aktiv ist, folgt aus der Reihenfolge oben (`app_settings`, dann Umgebungsvariable, dann Standard); die Oberfläche zeigt es nicht an. Gibt es den Modellnamen bei Anthropic nicht (Tippfehler, abgekündigt), probiert die Pipeline nacheinander ältere Sonnet-Namen; schlägt auch das fehl, steht der Fehler an der Seite („Fehler in Schritt …“) und kann mit **Weiterlaufen lassen** nach der Korrektur wiederholt werden.
 
 **Was die Statuszeile einer laufenden Seite bedeutet.** Die Tabelle liest nicht nur die Seite, sondern auch ihren Hintergrund-Job:
 
@@ -286,8 +286,8 @@ Welches Modell gerade aktiv ist und woher der Wert kommt, zeigt **Texte** unter 
 | „Schritt 3 von 8: Rohtext läuft“ | Ein Worker rechnet gerade an diesem Schritt. |
 | „Schritt 4 von 8: Faktencheck startet gleich“ | Der Schritt ist fertig, der nächste wartet auf den nächsten Tick der Jobs-Uhr (alle 30 s). |
 | „… erneuter Versuch in ca. 2 Min. (Grund)“ | Anthropic hat abgelehnt (Ratenlimit, überlastet) oder der Worker wurde unterbrochen. Der Job wartet auf seinen nächsten Versuch; drei Versuche je Seite. |
-| „Wartet seit 3 Min. auf den Hintergrund-Dienst“ | Der Job ist fällig, aber kein Worker holt ihn ab: `app_settings` (`app_base_url`, `jobs_worker_token`) und `JOBS_WORKER_TOKEN` prüfen. Solange die Seite offen ist, stößt sie den Worker auch selbst an. |
-| „Fehler in Schritt 3: …“ (Status In Arbeit) | Der Job ist zu Ende, ohne die Seite abzuschließen: dreimal unterbrochen, Schlüssel abgelehnt, Antwort abgeschnitten. Der Grund steht dabei; **Weiterlaufen lassen** macht an der Stelle weiter. |
+| „Wartet seit 3 Min. auf den Start“ | Der Job ist fällig, aber kein Worker holt ihn ab: `app_settings` (`app_base_url`, `jobs_worker_token`) und `JOBS_WORKER_TOKEN` prüfen. Solange die Seite offen ist, stößt sie den Worker auch selbst an. |
+| „Fehler in Schritt 3: …“ (Status In Arbeit) | Der Job ist zu Ende, ohne die Seite abzuschließen: dreimal unterbrochen, Schlüssel abgelehnt, Antwort abgeschnitten. Der Grund steht dabei, ohne technische Details („Bitte die Technik informieren“ meint: Schlüssel, Modell oder Zeitlimit in Vercel/Supabase prüfen, siehe oben); **Weiterlaufen lassen** macht an der Stelle weiter. |
 
 **Suchen und filtern.** Über der Tabelle steht ein Suchfeld (findet Name, Pfad, Live-URL und Suchbegriff; Umlaute dürfen auch als ae/oe/ue oder ohne Punkte geschrieben werden) und je ein Chip pro Status, mehrere kombinierbar. „Alle auswählen“, „Texte erstellen“ und die Sammelaktionen beziehen sich immer auf die gefilterte Liste.
 
@@ -596,7 +596,7 @@ Zuerst immer den Probelauf. Danach `OLD_SUPABASE_SERVICE_ROLE_KEY` entfernen.
 | Einladung oder Hinweis-Mail kommt nicht | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`. Bei Fragebogen-Hinweisen auch `SURVEY_NOTIFICATIONS_TO`. Danach das Protokoll unter **E-Mails**. |
 | SEO-Bericht startet nicht | `N8N_DT_SEO_REPORT_WEBHOOK`, `APP_BASE_URL` (muss aus dem Internet erreichbar sein), `DT_INTERNAL_WEBHOOK_SECRET` ist in Vercel und in n8n gleich. |
 | Crawl bleibt stehen | In Supabase `app_settings`: `app_base_url` und `jobs_worker_token`. Der Token muss `JOBS_WORKER_TOKEN` gleichen. Extensions `pg_cron` und `pg_net` müssen an sein. Danach die Seite **Jobs**. |
-| Texte-Seite steht auf „Wartet … auf den Hintergrund-Dienst“ | Gleiche Ursache wie beim Crawl: `app_settings` und `JOBS_WORKER_TOKEN`. Steht dort „erneuter Versuch“ oder „Fehler in Schritt“, steht der Grund daneben (`ANTHROPIC_DT_CONTENT_API_KEY`, Ratenlimit, Zeitlimit). |
+| Texte-Seite steht auf „Wartet … auf den Start“ | Gleiche Ursache wie beim Crawl: `app_settings` und `JOBS_WORKER_TOKEN`. Steht dort „erneuter Versuch“ oder „Fehler in Schritt“, steht der Grund daneben (`ANTHROPIC_DT_CONTENT_API_KEY`, Ratenlimit, Zeitlimit). |
 | Jemand sieht eine Firma oder einen Bericht nicht | Plattform-Rolle und Firmen-Rolle (Abschnitt 3). SEO-Modus ist nur für Plattform-Admins. Berichte auch für den Inhaber. |
 | Upload scheitert | Die Buckets `dt-chat-attachments` und `ai-chat-attachments` existieren nur, wenn die Migrationen liefen. |
 | Änderung an der Datenbank ist im Code unbekannt | `npm run types:generate` und die neue Datei mit committen. |

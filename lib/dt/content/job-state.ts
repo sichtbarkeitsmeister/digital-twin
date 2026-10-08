@@ -104,7 +104,7 @@ export function describeRunningPage(
     case "queued": {
       if (verdict.waitMs > CONTENT_WORKER_WAIT_WARN_MS) {
         const minutes = Math.max(1, Math.floor(verdict.waitMs / 60_000));
-        return `Wartet seit ${minutes} Min. auf den Hintergrund-Dienst – Jobs-Uhr prüfen (app_settings: app_base_url, jobs_worker_token)`;
+        return `Wartet seit ${minutes} Min. auf den Start – bleibt es dabei, bitte die Technik informieren`;
       }
       if (verdict.error) return `${label} – wird gleich erneut versucht${shortError(verdict.error)}`;
       return upcoming ? `${label} startet gleich` : "Startet …";
@@ -112,7 +112,7 @@ export function describeRunningPage(
     case "stale_lock":
       return `${label} wurde unterbrochen – wird fortgesetzt`;
     case "gone":
-      return "Hintergrund-Job beendet – bitte „Weiterlaufen lassen“";
+      return "Unterbrochen – bitte „Weiterlaufen lassen“";
   }
 }
 
@@ -138,7 +138,7 @@ export function interruptedStepMessage(
   const ago = since != null ? ` (gestartet vor ${since} Min.)` : "";
   const attempt = job.attempts + 1;
   if (attempt >= job.max_attempts) {
-    return `${label} wurde ${attempt}-mal abgebrochen, bevor die KI fertig war${ago}. Vermutlich erreicht der Server sein Zeitlimit (Vercel maxDuration / Jobs-Budget, siehe README „Texte“). Mit „Weiterlaufen lassen“ noch einmal versuchen oder das Modell wechseln.`;
+    return `${label} wurde ${attempt}-mal abgebrochen, bevor die KI fertig war${ago} – vermutlich ein Zeitlimit. Mit „Weiterlaufen lassen“ noch einmal versuchen; bleibt es dabei, bitte die Technik informieren.`;
   }
   return `${label} wurde unterbrochen, bevor die KI fertig war${ago}. Versuch ${attempt} von ${job.max_attempts} – wird gleich wiederholt.`;
 }

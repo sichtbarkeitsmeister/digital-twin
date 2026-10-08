@@ -10,11 +10,7 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { formatContentDate } from "@/lib/dt/content/presentation";
 import type { ContentCrawlImportResult, ContentCrawlStatus, ContentLocalSources, ContentOverview } from "@/lib/dt/content/types";
-import {
-  WEBSITE_STRUCTURE_FILE_ACCEPT,
-  WEBSITE_STRUCTURE_FILE_HINT,
-  readWebsiteStructureFile,
-} from "@/lib/dt/seo/read-website-structure-file";
+import { WEBSITE_STRUCTURE_FILE_ACCEPT, readWebsiteStructureFile } from "@/lib/dt/seo/read-website-structure-file";
 
 export type ContentPagesMode = "structure" | "crawl";
 
@@ -34,14 +30,14 @@ const MODES: Array<{
     id: "structure",
     title: "Excel-Seitenstruktur",
     when: "Kunde ohne Website oder vor dem Relaunch",
-    text: "Die Agentur-Vorlage „Seitenstruktur“ ausfüllen und hier hochladen. Jede Zeile wird eine Seite in der Tabelle.",
+    text: "Vorlage „Seitenstruktur“ ausfüllen und hochladen. Jede Zeile wird eine Seite.",
     icon: FileSpreadsheet,
   },
   {
     id: "crawl",
     title: "Crawler – bestehende Website",
-    when: "Kunde hat eine Website und will bessere Texte",
-    text: "Wir lesen alle Seiten der Live-Website ein (Sitemap und interne Links). Danach wählen Sie in der Tabelle, welche Seiten neue Texte bekommen.",
+    when: "Kunde hat eine Website",
+    text: "Alle Seiten der Website einlesen und in die Tabelle übernehmen.",
     icon: Globe,
   },
 ];
@@ -191,7 +187,6 @@ export function DtContentPagesSourceCard(props: {
       const parts = [
         imported > 0 ? `${pagesWord(imported)} neu in der Tabelle` : "Keine neue Seite",
         attached > 0 ? `${attached} vorhandene mit der Live-URL verknüpft` : "",
-        skipped.redirected > 0 ? `${skipped.redirected} Weiterleitungen übersprungen` : "",
         skipped.over_limit > 0 ? `${skipped.over_limit} über dem Limit von 300` : "",
       ].filter(Boolean);
       toast.success("Seiten aus dem Crawl übernommen", { description: parts.join(" · ") });
@@ -209,10 +204,9 @@ export function DtContentPagesSourceCard(props: {
     <section id="seitenquelle" aria-label="Seitenquelle" className={cn(cardClass, "scroll-mt-24")}>
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10" />
       <header className="border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">
-        <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Seitenquelle: Woher kommen die Seiten?</h2>
+        <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Seitenquelle</h2>
         <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-          Zwei Wege, je nachdem, ob der Kunde schon eine Website hat. Beide füllen die Tabelle unten; dort haken Sie
-          an, welche Seiten Texte bekommen.
+          Woher die Seiten kommen. Welche davon Texte bekommen, haken Sie unten in der Tabelle an.
         </p>
       </header>
 
@@ -298,13 +292,12 @@ export function DtContentPagesSourceCard(props: {
                 href={`/dashboard/verwaltung/seo?org=${org}&tab=struktur`}
                 className="inline-flex items-center gap-1 text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
               >
-                Als Text bearbeiten (SEO → Struktur)
+                In SEO → Struktur bearbeiten
                 <ArrowRight className="size-3" aria-hidden />
               </Link>
             </div>
             <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-              {WEBSITE_STRUCTURE_FILE_HINT}. Die Vorlage: eine Zeile pro Seite, Spalten „Ebene 1 … Ebene 3“ (oder „Seite“ und „Pfad“).
-              Nach dem Upload erscheinen die Seiten von selbst in der Tabelle; Seiten mit Text bleiben erhalten.
+              Excel-Vorlage „Seitenstruktur“ (.xlsx), auch .csv, .txt oder .docx. Seiten mit Text bleiben erhalten.
             </p>
           </div>
         ) : null}
@@ -321,7 +314,7 @@ export function DtContentPagesSourceCard(props: {
             ) : !crawl.website_url ? (
               <div className="grid gap-2">
                 <p className="text-xs text-sbkm-ink-600 dark:text-white/65">
-                  Für den Crawler braucht die Organisation eine Website-URL. Bitte unter SEO → Einstellungen hinterlegen.
+                  Dafür braucht es die Website-URL des Kunden – unter SEO → Einstellungen eintragen.
                 </p>
                 <Link
                   href={`/dashboard/verwaltung/seo?org=${org}&tab=settings`}
@@ -350,9 +343,8 @@ export function DtContentPagesSourceCard(props: {
                   <p className="flex items-center gap-2 text-xs text-sky-800 dark:text-sky-200">
                     <Loader2 className="size-3.5 animate-spin" aria-hidden />
                     {crawl.crawl.status === "queued"
-                      ? "Crawl in der Warteschlange …"
+                      ? "Crawl startet …"
                       : `${crawl.crawl.pages_crawled} von ${crawl.crawl.pages_discovered} Seiten gelesen`}
-                    {crawl.crawl.message ? ` – ${crawl.crawl.message}` : ""}
                   </p>
                 ) : null}
                 {!crawlActive && crawl.last_crawl_error ? (
@@ -380,10 +372,8 @@ export function DtContentPagesSourceCard(props: {
                   </DtPillButton>
                 </div>
                 <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-                  Der Crawl läuft im Hintergrund (wie in SEO Modus). „Übernehmen“ legt für jede gecrawlte Seite eine Zeile an –
-                  ohne AGB/Widerruf und Weiterleitungen, höchstens 300. Vorhandene Zeilen behalten ihren Text und bekommen nur die
-                  Live-URL; der bisherige Seitentext fließt als Orientierung in die Schritte ein. Welche Seiten Texte bekommen,
-                  wählen Sie unten per Häkchen.
+                  „Übernehmen“ legt für jede gecrawlte Seite eine Zeile an (ohne AGB/Widerruf, höchstens 300). Seiten mit Text
+                  bleiben erhalten.
                 </p>
               </>
             )}

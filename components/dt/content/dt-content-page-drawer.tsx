@@ -215,7 +215,7 @@ export function DtContentPageDrawer(props: {
     if (
       modeKind === "reset" &&
       !window.confirm(
-        "Seite wirklich komplett zurücksetzen? Text, Schritte, Fragen, Anmerkungen und Kosten dieser Seite werden gelöscht. Name und Quelle bleiben.",
+        "Seite wirklich zurücksetzen? Text, Schritte, Fragen und Anmerkungen gehen verloren.",
       )
     ) {
       return;
@@ -243,7 +243,7 @@ export function DtContentPageDrawer(props: {
     if (!base) return;
     if (
       !window.confirm(
-        "Seite wirklich löschen? Die Zeile verschwindet aus der Tabelle, mit Text, Schritten und Fragen. Aus der Seitenstruktur kommt sie beim nächsten Upload wieder, aus dem Crawl beim nächsten „Übernehmen“.",
+        "Seite wirklich löschen? Text, Schritte und Fragen dieser Seite gehen verloren.",
       )
     ) {
       return;

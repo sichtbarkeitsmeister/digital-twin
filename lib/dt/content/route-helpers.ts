@@ -136,18 +136,18 @@ export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "c
   if (local.structure) {
     return {
       ok: true,
-      hint: `Seitenstruktur „${local.structure.filename?.trim() || "ohne Dateiname"}“ hochgeladen – die Seiten erscheinen beim nächsten Laden der Tabelle.`,
+      hint: `Seitenstruktur „${local.structure.filename?.trim() || "ohne Dateiname"}“ hochgeladen – Seiten werden übernommen.`,
     };
   }
   if (local.crawl.pageCount > 0) {
     return {
       ok: false,
-      hint: `${pagesWord(local.crawl.pageCount)} gecrawlt, aber noch nicht übernommen – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken.`,
+      hint: `${pagesWord(local.crawl.pageCount)} gecrawlt – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken.`,
     };
   }
   return {
     ok: false,
-    hint: "Keine Seiten. Entweder die Excel-Seitenstruktur hochladen (Kunde ohne Website) oder die bestehende Website crawlen – beides unter „Seitenquelle“.",
+    hint: "Noch keine Seiten – unter „Seitenquelle“ die Excel-Seitenstruktur hochladen oder die Website crawlen.",
   };
 }
 

@@ -4,11 +4,7 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, Loader2, XCircle } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
-import type {
-  ContentLocalSources,
-  ContentReadiness,
-  ContentReadinessCheckId,
-} from "@/lib/dt/content/types";
+import type { ContentReadiness, ContentReadinessCheckId } from "@/lib/dt/content/types";
 
 const FALLBACK_LABELS: Record<ContentReadinessCheckId, string> = {
   anbieter: "Anbieterfakten",
@@ -29,52 +25,13 @@ function fixLinks(id: ContentReadinessCheckId, organisationId: string): FixLink[
     case "avatar":
       return [{ href: `/dashboard/verwaltung/agents?org=${org}`, label: "Zu den Avataren" }];
     case "structure":
-      return [
-        { href: "#seitenquelle", label: "Seitenquelle wählen" },
-        { href: `/dashboard/verwaltung/seo?org=${org}&tab=struktur`, label: "SEO → Struktur" },
-      ];
-  }
-}
-
-function anbieterNote(anbieter: ContentLocalSources["anbieter"]): string {
-  if (!anbieter) return "Im DigitalTwin: kein ausgefüllter Anbieter-Fragebogen, keine ausgewerteten Gespräche";
-  const parts: string[] = [];
-  if (anbieter.fragebogen) parts.push(`Fragebogen „${anbieter.fragebogen.title}“ (${anbieter.fragebogen.facts} Antworten)`);
-  if (anbieter.workshop) parts.push(`Gespräche (${anbieter.workshop.filled} von ${anbieter.workshop.total} Abschnitten)`);
-  return `Im DigitalTwin: ${parts.join(" · ")}`;
-}
-
-function seitenNote(local: ContentLocalSources): string {
-  const structure = local.structure
-    ? `Seitenstruktur „${local.structure.filename?.trim() || "ohne Dateiname"}“ (${local.structure.nodeCount} Einträge)`
-    : "keine Seitenstruktur";
-  const crawl =
-    local.crawl.pageCount > 0
-      ? `Crawl: ${local.crawl.pageCount} ${local.crawl.pageCount === 1 ? "Seite" : "Seiten"}`
-      : local.crawl.websiteUrl
-        ? "noch kein Crawl"
-        : "keine Website-URL für den Crawler";
-  return `Im DigitalTwin: ${structure} · ${crawl}`;
-}
-
-function localNote(id: ContentReadinessCheckId, local: ContentLocalSources | null): string | null {
-  if (!local) return null;
-  switch (id) {
-    case "anbieter":
-      return anbieterNote(local.anbieter);
-    case "avatar":
-      return local.avatarCount > 0
-        ? `Im DigitalTwin: ${local.avatarCount} Avatar${local.avatarCount === 1 ? "" : "e"}`
-        : "Im DigitalTwin: noch kein Avatar";
-    case "structure":
-      return seitenNote(local);
+      return [{ href: "#seitenquelle", label: "Zur Seitenquelle" }];
   }
 }
 
 export function DtContentReadinessCard(props: {
   organisationId: string;
   readiness: ContentReadiness | null;
-  local: ContentLocalSources | null;
   loading: boolean;
   error: string | null;
 }) {
@@ -99,8 +56,7 @@ export function DtContentReadinessCard(props: {
             Bereit für Texte?
           </h2>
           <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-            Diese drei Dinge braucht die Texterstellung, bevor sie schreiben kann. Seiten kommen aus der
-            Excel-Seitenstruktur oder aus dem Crawl der bestehenden Website.
+            Das braucht die Texterstellung, bevor sie schreiben kann.
           </p>
         </div>
         {props.loading ? (
@@ -128,7 +84,6 @@ export function DtContentReadinessCard(props: {
       <ul className="grid gap-px bg-sbkm-navy/8 dark:bg-white/8 sm:grid-cols-3">
         {checks.map((check) => {
           const links = fixLinks(check.id, props.organisationId);
-          const note = localNote(check.id, props.local);
           const pending = props.loading && !props.readiness;
           return (
             <li
@@ -149,9 +104,6 @@ export function DtContentReadinessCard(props: {
               </div>
               {check.hint ? (
                 <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/65">{check.hint}</p>
-              ) : null}
-              {note ? (
-                <p className="text-[11px] text-sbkm-ink-500 dark:text-white/45">{note}</p>
               ) : null}
               {links.length > 0 ? (
                 <div className="mt-auto flex flex-wrap gap-x-3 gap-y-1">

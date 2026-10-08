@@ -19,7 +19,7 @@ import type { ContentPageRow } from "@/lib/dt/content/store";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 
 export const CONTENT_JOB_GONE_MESSAGE =
-  "Der Hintergrund-Job ist beendet, ohne die Seite abzuschließen. Mit „Weiterlaufen lassen“ geht es an dieser Stelle weiter.";
+  "Der Durchlauf wurde unterbrochen. Mit „Weiterlaufen lassen“ geht es an dieser Stelle weiter.";
 
 export type ContentPageRepair = {
   pageId: string;
@@ -56,7 +56,7 @@ export function planContentPageRepairs(
         const reason = verdict.error?.trim();
         const error =
           verdict.status === "dead" || verdict.status === "failed"
-            ? `Abgebrochen: ${reason || "Der Hintergrund-Job ist fehlgeschlagen."}`
+            ? `Abgebrochen: ${reason || "Der Durchlauf ist fehlgeschlagen."}`
             : CONTENT_JOB_GONE_MESSAGE;
         plan.repairs.push({ pageId: page.id, step: page.step, error });
         break;
