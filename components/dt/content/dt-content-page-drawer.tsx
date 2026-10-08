@@ -238,6 +238,29 @@ export function DtContentPageDrawer(props: {
     onChangedRef.current();
   }
 
+  /** „Löschen“: the page disappears from the table; the drawer closes. */
+  async function deletePage() {
+    if (!base) return;
+    if (
+      !window.confirm(
+        "Seite wirklich löschen? Die Zeile verschwindet aus der Tabelle, mit Text, Schritten und Fragen. Aus der Seitenstruktur kommt sie beim nächsten Upload wieder, aus dem Crawl beim nächsten „Übernehmen“.",
+      )
+    ) {
+      return;
+    }
+    setBusy("delete");
+    const res = await contentApi<{ deleted: boolean }>(`${base}?${contentQuery(organisationId)}`, { method: "DELETE" });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    toast.success("Seite gelöscht");
+    setJobId(null);
+    onChangedRef.current();
+    onClose();
+  }
+
   async function runThrough() {
     if (!base) return;
     setBusy("run_through");
@@ -303,6 +326,9 @@ export function DtContentPageDrawer(props: {
         return;
       case "reset":
         void runReset("reset");
+        return;
+      case "delete":
+        void deletePage();
         return;
     }
   }
@@ -620,23 +646,28 @@ export function DtContentPageDrawer(props: {
 
                 {!mode ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    {actions.map((action) => (
+                    {actions.map((action, index) => (
                       <DtPillButton
                         key={`${action.kind}-${action.step ?? ""}`}
                         size="sm"
                         variant={
                           action.kind === "approve"
                             ? "mint"
-                            : action.kind === "export" || action.kind === "reset"
+                            : action.kind === "export" || action.kind === "reset" || action.kind === "delete"
                               ? "ghost"
                               : "outline"
                         }
-                        disabled={Boolean(busy) || (Boolean(jobId) && action.kind !== "stop" && action.kind !== "reset")}
+                        disabled={
+                          Boolean(busy) ||
+                          (Boolean(jobId) && !["stop", "reset", "delete"].includes(action.kind))
+                        }
                         onClick={() => onAction(action)}
                         className={cn(
-                          action.kind === "export" && "sm:ml-auto",
-                          action.kind === "reset" && "text-red-700 dark:text-red-300",
-                          action.kind === "reset" && actions.every((a) => a.kind !== "export") && "sm:ml-auto",
+                          // export / reset / delete sit on the right; the first of them takes the margin
+                          ["export", "reset", "delete"].includes(action.kind) &&
+                            actions.findIndex((a) => ["export", "reset", "delete"].includes(a.kind)) === index &&
+                            "sm:ml-auto",
+                          (action.kind === "reset" || action.kind === "delete") && "text-red-700 dark:text-red-300",
                         )}
                       >
                         {busy === action.kind ? (

@@ -34,7 +34,7 @@ import {
   judgeContentJob,
   type ContentJobState,
 } from "../lib/dt/content/job-state";
-import { resetContentPage, stopContentRun } from "../lib/dt/content/pipeline/actions";
+import { deleteContentPage, resetContentPage, stopContentRun } from "../lib/dt/content/pipeline/actions";
 import { CONTENT_JOB_GONE_MESSAGE, planContentPageRepairs } from "../lib/dt/content/pipeline/health";
 import { describeAnbieterSources, describeSeiten, readinessFromLocal } from "../lib/dt/content/route-helpers";
 import {
@@ -294,7 +294,7 @@ assert.equal(contentActionLabel("run_through"), "Weiterlaufen lassen");
 assert.equal(contentActionLabel("export"), "Exportieren");
 assert.equal(contentActionLabel("stop"), "Stoppen");
 assert.equal(contentActionLabel("reset"), "Zurücksetzen");
-assert.equal(contentActionLabel("delete"), null);
+assert.equal(contentActionLabel("delete"), "Löschen");
 assert.equal(anyContentPageRunning([{ state: "fertig" }, { state: "laeuft" }]), true);
 assert.equal(anyContentPageRunning([{ state: "fertig" }]), false);
 
@@ -363,13 +363,13 @@ const base: ContentPageRow = {
 };
 const q = questions[0]!;
 const cases: Array<[Partial<ContentPageRow>, string[], string | null]> = [
-  [{}, ["run_through"], null],
-  [{ state: "laeuft", step: 3 }, ["stop", "reset"], "Schritt 3 von 8: Rohtext läuft"],
-  [{ state: "braucht_sie", step: 4, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "reset"], "1 Frage an den Kunden, bevor es weitergeht"],
-  [{ state: "in_arbeit", step: 3, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset"], "Fehler in Schritt 3: Ratenlimit"],
-  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "reset"], "Pausiert nach Schritt 5: Tonalität & Avatar"],
-  [{ state: "fertig", step: 8, html }, ["approve", "edit", "rerun_with_note", "export", "reset"], "Wartet auf Freigabe"],
-  [{ state: "fertig", step: 8, html, released: true }, ["export", "reset"], "Freigegeben"],
+  [{}, ["run_through", "delete"], null],
+  [{ state: "laeuft", step: 3 }, ["stop", "reset", "delete"], "Schritt 3 von 8: Rohtext läuft"],
+  [{ state: "braucht_sie", step: 4, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
+  [{ state: "in_arbeit", step: 3, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset", "delete"], "Fehler in Schritt 3: Ratenlimit"],
+  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "reset", "delete"], "Pausiert nach Schritt 5: Tonalität & Avatar"],
+  [{ state: "fertig", step: 8, html }, ["approve", "edit", "rerun_with_note", "export", "reset", "delete"], "Wartet auf Freigabe"],
+  [{ state: "fertig", step: 8, html, released: true }, ["export", "reset", "delete"], "Freigegeben"],
 ];
 for (const [patch, kinds, detail] of cases) {
   const page = { ...base, ...patch };
@@ -800,6 +800,13 @@ async function runStopAndReset() {
     ["nicht_begonnen", null, "", "", 0, [], null, false, null],
   );
   assert.deepEqual([row.slug, row.name, row.source], ["a", "Keller", "structure"], "identity and source stay");
+
+  jobs.push({ id: "j2", kind: "content.page", dedupe_key: "content.page:p-run", status: "pending" });
+  const deleted = await deleteContentPage(client, { ...running, state: "nicht_begonnen" });
+  assert.equal(deleted.ok, true);
+  assert.equal(mem.tables.get("dt_content_pages")!.length, 0, "the row is gone");
+  assert.equal(jobs.find((j) => j.id === "j2")?.status, "dead", "a queued job of a deleted page is ended");
+  assert.equal(jobs.find((j) => j.id === "jx")?.status, "pending");
 }
 
 // --- model config and pricing -----------------------------------------------------------------

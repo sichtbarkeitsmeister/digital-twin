@@ -541,15 +541,19 @@ export function rerunStepFor(page: ContentPageRow): number {
   return page.step ?? 1;
 }
 
-/** „Zurücksetzen“ is offered on every started page; it is the way out of any state by hand. */
+/**
+ * „Zurücksetzen“ is offered on every started page and „Löschen“ on every page: the way out
+ * of any state, and the way to prune a table, by hand.
+ */
 export function pageActions(page: ContentPageRow): ContentAction[] {
   const exportAction: ContentAction[] = page.html ? [{ kind: "export", label: "Exportieren" }] : [];
   const reset: ContentAction = { kind: "reset", label: "Zurücksetzen" };
+  const remove: ContentAction = { kind: "delete", label: "Löschen" };
   switch (page.state) {
     case "nicht_begonnen":
-      return [{ kind: "run_through", label: "Weiterlaufen lassen" }];
+      return [{ kind: "run_through", label: "Weiterlaufen lassen" }, remove];
     case "laeuft":
-      return [{ kind: "stop", label: "Stoppen" }, reset];
+      return [{ kind: "stop", label: "Stoppen" }, reset, remove];
     case "braucht_sie":
       return [
         { kind: "approve", step: 4, label: "Freigeben" },
@@ -557,6 +561,7 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
         { kind: "rerun_with_note", step: 4, label: "Mit Anmerkung wiederholen" },
         ...exportAction,
         reset,
+        remove,
       ];
     case "in_arbeit":
       return [
@@ -565,16 +570,18 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
         { kind: "rerun_with_note", step: rerunStepFor(page), label: "Mit Anmerkung wiederholen" },
         ...exportAction,
         reset,
+        remove,
       ];
     case "fertig":
       return page.released
-        ? [...exportAction, reset]
+        ? [...exportAction, reset, remove]
         : [
             { kind: "approve", step: 8, label: "Freigeben" },
             { kind: "edit", step: 7, label: "Abschnitt ändern" },
             { kind: "rerun_with_note", step: 7, label: "Mit Anmerkung wiederholen" },
             ...exportAction,
             reset,
+            remove,
           ];
     default:
       return [];

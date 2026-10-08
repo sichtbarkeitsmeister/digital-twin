@@ -262,6 +262,18 @@ export async function resetContentPage(service: SupabaseClient, page: ContentPag
   return { ok: true, jobId: null };
 }
 
+/**
+ * "Löschen": the row and its steps are gone (cascade); live jobs end first. A page from the
+ * Seitenstruktur returns with the next upload, a crawl page with the next „übernehmen“.
+ */
+export async function deleteContentPage(service: SupabaseClient, page: ContentPageRow): Promise<ActionResult> {
+  const killed = await killPageJobs(service, page.id);
+  if (killed) return { ok: false, status: 500, message: killed };
+  const { error } = await service.from("dt_content_pages").delete().eq("id", page.id);
+  if (error) return { ok: false, status: 500, message: `Seite konnte nicht gelöscht werden: ${error.message}` };
+  return { ok: true, jobId: null };
+}
+
 /** "Mit Anmerkung wiederholen": note becomes a standing instruction, pipeline restarts at `step`. */
 export async function rerunContentStep(
   service: SupabaseClient,

@@ -131,7 +131,8 @@ export type ContentActionKind =
   | "run_through"
   | "export"
   | "stop"
-  | "reset";
+  | "reset"
+  | "delete";
 
 export type ContentAction = {
   kind: ContentActionKind;
@@ -216,9 +217,10 @@ export type ContentCrawlStatus = {
   imported: number;
 };
 
-/** `POST /api/dt/content/reset`: selected pages back to „Nicht begonnen“. */
+/** `POST /api/dt/content/reset`: selected pages back to „Nicht begonnen“ (reset) or removed (delete). */
 export type ContentResetResult = {
-  reset: number;
+  mode: "reset" | "delete";
+  affected: number;
   skipped: Array<{ page: string; reason: string }>;
   overview: ContentOverview;
 };

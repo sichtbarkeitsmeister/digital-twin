@@ -28,6 +28,7 @@ export const CONTENT_ACTION_LABELS: Record<ContentActionKind, string> = {
   export: "Exportieren",
   stop: "Stoppen",
   reset: "Zurücksetzen",
+  delete: "Löschen",
 };
 
 export function contentActionLabel(kind: string): string | null {

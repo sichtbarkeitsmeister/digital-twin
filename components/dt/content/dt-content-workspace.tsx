@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
+import { ChevronDown, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -83,7 +83,7 @@ export function DtContentWorkspace(props: {
   );
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
-  const [resetting, setResetting] = useState(false);
+  const [resetting, setResetting] = useState<"reset" | "delete" | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
   const [editingSettings, setEditingSettings] = useState(false);
@@ -225,30 +225,34 @@ export function DtContentWorkspace(props: {
     }
   }
 
-  /** „Auswahl zurücksetzen“: the checked pages back to „Nicht begonnen“. */
-  async function resetSelected() {
+  /** „Auswahl zurücksetzen“ / „Auswahl löschen“ for the checked pages. */
+  async function resetSelected(modeKind: "reset" | "delete") {
     if (selectedCount === 0 || resetting) return;
+    const n = `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"}`;
     const ok = window.confirm(
-      `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} wirklich komplett zurücksetzen? Texte, Schritte, Fragen, Anmerkungen und Kosten dieser Seiten werden gelöscht. Namen und Quelle bleiben.`,
+      modeKind === "reset"
+        ? `${n} wirklich komplett zurücksetzen? Texte, Schritte, Fragen, Anmerkungen und Kosten dieser Seiten werden gelöscht. Namen und Quelle bleiben.`
+        : `${n} wirklich löschen? Die Zeilen verschwinden aus der Tabelle, mit Text, Schritten und Fragen. Seiten aus der Seitenstruktur kommen beim nächsten Upload wieder, Crawl-Seiten beim nächsten „Übernehmen“.`,
     );
     if (!ok) return;
-    setResetting(true);
+    setResetting(modeKind);
     try {
       const res = await contentApi<ContentResetResult>("/api/dt/content/reset", {
         method: "POST",
-        body: { organisationId, pages: [...selected] },
+        body: { organisationId, pages: [...selected], mode: modeKind },
       });
       if (!res.ok) {
         toast.error(res.message);
         return;
       }
-      toast.success(`${res.data.reset} ${res.data.reset === 1 ? "Seite" : "Seiten"} zurückgesetzt`, {
+      const done = `${res.data.affected} ${res.data.affected === 1 ? "Seite" : "Seiten"}`;
+      toast.success(modeKind === "reset" ? `${done} zurückgesetzt` : `${done} gelöscht`, {
         description: res.data.skipped.length > 0 ? res.data.skipped.map((s) => `${s.page}: ${s.reason}`).join(" · ") : undefined,
       });
       setSelected(new Set());
       applyOverview(res.data.overview);
     } finally {
-      setResetting(false);
+      setResetting(null);
     }
   }
 
@@ -328,16 +332,28 @@ export function DtContentWorkspace(props: {
               Texte erstellen ({selectedCount})
             </DtPillButton>
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
-            <button
-              type="button"
-              onClick={() => void resetSelected()}
-              disabled={selectedCount === 0 || resetting}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-sbkm-ink-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-40 dark:text-white/55"
-              title="Die angehakten Seiten komplett zurücksetzen (Text, Schritte, Fragen, Kosten)"
-            >
-              {resetting ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <RotateCcw className="size-3" aria-hidden />}
-              Auswahl zurücksetzen{selectedCount > 0 ? ` (${selectedCount})` : ""}
-            </button>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <button
+                type="button"
+                onClick={() => void resetSelected("reset")}
+                disabled={selectedCount === 0 || resetting != null}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-sbkm-ink-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-40 dark:text-white/55"
+                title="Die angehakten Seiten komplett zurücksetzen (Text, Schritte, Fragen, Kosten)"
+              >
+                {resetting === "reset" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <RotateCcw className="size-3" aria-hidden />}
+                Auswahl zurücksetzen{selectedCount > 0 ? ` (${selectedCount})` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => void resetSelected("delete")}
+                disabled={selectedCount === 0 || resetting != null}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-40 dark:text-red-300"
+                title="Die angehakten Seiten aus der Tabelle entfernen"
+              >
+                {resetting === "delete" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Trash2 className="size-3" aria-hidden />}
+                Auswahl löschen{selectedCount > 0 ? ` (${selectedCount})` : ""}
+              </button>
+            </div>
             {pipeline?.model ? (
               <p
                 className="text-[11px] text-sbkm-ink-500 dark:text-white/45 lg:text-right"
