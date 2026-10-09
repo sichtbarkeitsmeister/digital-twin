@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { loadContentAnbieterSources, loadContentLocalSources } from "@/lib/dt/content/load-sources";
 import { extractCityCandidates } from "@/lib/dt/content/page-types";
+import { CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import type { ContentLocalSources, ContentReadiness } from "@/lib/dt/content/types";
@@ -25,7 +26,7 @@ export function isValidContentJobId(id: string): boolean {
 
 export function parseContentStep(raw: string): number | null {
   const n = Number(raw);
-  return Number.isInteger(n) && n >= 1 && n <= 8 ? n : null;
+  return Number.isInteger(n) && n >= 1 && n <= CONTENT_STEP_COUNT ? n : null;
 }
 
 export type ContentGate = {

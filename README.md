@@ -233,11 +233,11 @@ Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthrop
 
 **Texte** liegt unter **Verwaltung**, neben SEO Modus (`/dashboard/verwaltung/texte`). Die Organisation wechselt man oben in der Leiste, wie bei SEO Modus und Agenten. Es braucht **keinen eigenen Dienst**. Die acht Schreibschritte laufen in der App selbst, als Hintergrund-Jobs (siehe Abschnitt 10, „Jobs“). Die KI ist Claude, aber über einen **eigenen Schlüssel**, damit die Ausgaben dieses Werkzeugs in der Anthropic Console für sich stehen.
 
-**Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql`, `database/migrations/20261008_dt_content_pages_source.sql` und `database/migrations/20261009_dt_content_excel_briefing.sql` im Supabase SQL Editor ausführen (in dieser Reihenfolge). Solange die Tabellen oder Spalten fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ bzw. „… noch nicht auf dem neuesten Stand“ mit dem Dateinamen statt einer rohen Fehlermeldung.
+**Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql`, `database/migrations/20261008_dt_content_pages_source.sql`, `database/migrations/20261009_dt_content_excel_briefing.sql`, `database/migrations/20261010_dt_content_type_prompts.sql` und `database/migrations/20261011_dt_content_nine_steps.sql` im Supabase SQL Editor ausführen (in dieser Reihenfolge; die letzte erlaubt Schritt 9, vorher kannten die Tabellen nur acht Schritte). Solange die Tabellen oder Spalten fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ bzw. „… noch nicht auf dem neuesten Stand“ mit dem Dateinamen statt einer rohen Fehlermeldung.
 
-**Die acht Schritte** (einer je Hintergrund-Job): 1 Analyse (Suchintention, Keywords, Fragen, Hormozi-Bausteine, Faktenlage – schreibt noch nicht), 2 SEO (schreibt die ganze Seite), 3 Faktencheck (hält an, wenn nur der Kunde eine Frage beantworten kann), 4 GEO (für KI-Zitate: Kernantwort vorn, jeder Abschnitt für sich verständlich, „Zuletzt aktualisiert: [DATUM]“), 5 Hormozi (Hero-Satz, Value Equation, Handlungsaufforderungen – nur mit belegten Beweisen), 6 Vermenschlichung (nur Formulierung: kurze Sätze, keine Floskeln, bewertet sich selbst und versucht es bei schwacher Note einmal erneut), 7 Lektorat, 8 Endabnahme (hält für die Freigabe an). Jeder Schritt bekommt Anbieterfakten, Einstellungen, Avatar, Anmerkungen und das Briefing der Seite mit. Der SEO-Schritt lässt unter der H1 den Platzhalter „[HERO – wird in Schritt 5 gefuellt]“ stehen; Hormozi füllt ihn. Interne Links stehen als Marker `[LINK: Seitenname]` im Text, fehlende Zahlen als `[BITTE PRÜFEN: …]`.
+**Die neun Schritte** (einer je Hintergrund-Job): 1 Analyse (Suchintention, Keywords, Fragen, Hormozi-Bausteine, Faktenlage – schreibt noch nicht), 2 SEO (schreibt die ganze Seite), 3 Faktencheck (hält an, wenn nur der Kunde eine Frage beantworten kann), 4 GEO (für KI-Zitate: Kernantwort vorn, jeder Abschnitt für sich verständlich, „Zuletzt aktualisiert: [DATUM]“), 5 Hormozi (Hero-Satz, Value Equation, Handlungsaufforderungen – nur mit belegten Beweisen), 6 Vermenschlichung (nur Formulierung: kurze Sätze, keine Floskeln, bewertet sich selbst und versucht es bei schwacher Note einmal erneut), 7 Lektorat, 8 Watermark Entfernung (läuft als einziger Schritt auf Grok von xAI, mit eigenem Schlüssel `XAI_API_KEY`: formuliert jeden Satz neu; Überschriften, Abschnitts-ids, Fakten, Zahlen, Marker und Handlungsaufforderungen bleiben, dafür sorgt die App nach der Antwort), 9 Endabnahme (hält für die Freigabe an, schreibt nichts). Jeder Schritt bekommt Anbieterfakten, Einstellungen, Avatar, Anmerkungen und das Briefing der Seite mit. Der SEO-Schritt lässt unter der H1 den Platzhalter „[HERO – wird in Schritt 5 gefuellt]“ stehen; Hormozi füllt ihn. Interne Links stehen als Marker `[LINK: Seitenname]` im Text, fehlende Zahlen als `[BITTE PRÜFEN: …]`.
 
-**Seiten, die vor dieser Schrittfolge begonnen wurden** (Recherche, Gliederung, Rohtext …), passen nicht mehr zu den neuen Schritten. Das Seitenfenster zeigt dann einen Hinweis: **Zurücksetzen** und neu starten.
+**Seiten, die vor dieser Schrittfolge begonnen wurden** (Recherche, Gliederung, Rohtext …, oder die Endabnahme noch als Schritt 8), passen nicht mehr zu den neuen Schritten. Das Seitenfenster zeigt dann einen Hinweis: **Zurücksetzen** und neu starten.
 
 **Woher die Seiten kommen.** Die Karte **Seitenquelle** bietet zwei Wege; beide füllen die Tabelle „Seiten“, und erst das Häkchen in der Tabelle entscheidet, welche Seiten Texte bekommen:
 
@@ -263,8 +263,10 @@ Anrede, Branche und Tonalität werden daraus vorgefüllt. Was schon in den Gespr
 |---|---|
 | `ANTHROPIC_DT_CONTENT_API_KEY` | Eigener Anthropic-Schlüssel nur für Texte. In der [Anthropic Console](https://console.anthropic.com/settings/keys) einen neuen Schlüssel anlegen und in Vercel unter **Settings → Environment Variables** eintragen (lokal in `.env.local`). Nur der Server kennt ihn; der Browser nie. Nie mit `NEXT_PUBLIC_` beginnen. Texte fällt nicht auf `ANTHROPIC_API_KEY` zurück, sonst liefe die Abrechnung wieder mit dem übrigen Verbrauch zusammen. |
 | `ANTHROPIC_DT_CONTENT_MODEL` | Modell für die Schreibschritte 1 Analyse, 2 SEO, 4 GEO, 5 Hormozi, 6 Vermenschlichung. Standard: `claude-sonnet-4-6`. |
-| `ANTHROPIC_DT_CONTENT_CHECK_MODEL` | Modell für die Prüfschritte 3 Faktencheck, 7 Lektorat, 8 Endabnahme. Leer = wie das Schreibmodell. Hier kann ein günstigeres Modell stehen. |
-| `CONTENT_USD_EUR_RATE` | Umrechnungskurs für die Kosten-Spalte (Anthropic rechnet in US-Dollar ab). Standard `0.92`. |
+| `ANTHROPIC_DT_CONTENT_CHECK_MODEL` | Modell für die Prüfschritte 3 Faktencheck, 7 Lektorat, 9 Endabnahme. Leer = wie das Schreibmodell. Hier kann ein günstigeres Modell stehen. |
+| `XAI_API_KEY` | Schlüssel für Grok (xAI), nur für Schritt 8 Watermark Entfernung. In der xAI Console anlegen und in Vercel unter **Settings → Environment Variables** eintragen (lokal in `.env.local`); nur der Server kennt ihn. Fehlt er, bleibt die Seite in Schritt 8 mit „Der Grok-Zugang für Texte ist nicht eingerichtet (XAI_API_KEY fehlt)“ stehen – der Schritt wird nicht übersprungen und läuft nie über Claude. |
+| `XAI_DT_CONTENT_MODEL` | Grok-Modell für Schritt 8. Standard `grok-4.7`; antwortet xAI mit 404, versucht die Pipeline `grok-4`. |
+| `CONTENT_USD_EUR_RATE` | Umrechnungskurs für die Kosten-Spalte (Anthropic und xAI rechnen in US-Dollar ab). Standard `0.92`. |
 
 **Was das Werkzeug gekostet hat:** in der Anthropic Console unter Usage den Schlüssel `ANTHROPIC_DT_CONTENT_API_KEY` auswählen. Das ist die Abrechnung von Texte, ohne Chat, Fragebögen und SEO. In der App steht dieselbe Summe geschätzt in der Spalte Kosten und in `dt_content_steps.cost_eur` (USD umgerechnet mit `CONTENT_USD_EUR_RATE`).
 
@@ -291,8 +293,8 @@ Welches Modell gerade aktiv ist, folgt aus der Reihenfolge oben (`app_settings`,
 
 | Text | Bedeutung |
 |---|---|
-| „Schritt 2 von 8: SEO läuft“ | Ein Worker rechnet gerade an diesem Schritt. |
-| „Schritt 3 von 8: Faktencheck startet gleich“ | Der Schritt ist fertig, der nächste wartet auf den nächsten Tick der Jobs-Uhr (alle 30 s). |
+| „Schritt 2 von 9: SEO läuft“ | Ein Worker rechnet gerade an diesem Schritt. |
+| „Schritt 3 von 9: Faktencheck startet gleich“ | Der Schritt ist fertig, der nächste wartet auf den nächsten Tick der Jobs-Uhr (alle 30 s). |
 | „… erneuter Versuch in ca. 2 Min. (Grund)“ | Anthropic hat abgelehnt (Ratenlimit, überlastet) oder der Worker wurde unterbrochen. Der Job wartet auf seinen nächsten Versuch; drei Versuche je Seite. |
 | „Wartet seit 3 Min. auf den Start“ | Der Job ist fällig, aber kein Worker holt ihn ab: `app_settings` (`app_base_url`, `jobs_worker_token`) und `JOBS_WORKER_TOKEN` prüfen. Solange die Seite offen ist, stößt sie den Worker auch selbst an. |
 | „Fehler in Schritt 2: …“ (Status In Arbeit) | Der Job ist zu Ende, ohne die Seite abzuschließen: dreimal unterbrochen, Schlüssel abgelehnt, Antwort abgeschnitten. Der Grund steht dabei, ohne technische Details („Bitte die Technik informieren“ meint: Schlüssel, Modell oder Zeitlimit in Vercel/Supabase prüfen, siehe oben); **Weiterlaufen lassen** macht an der Stelle weiter. |
@@ -460,7 +462,7 @@ Nach dem Login landet man auf `/dashboard/organisations`.
 | Integrationen | Anbindungen, vor allem Leadinfo. |
 | Agent-Kontext | Zeigt den zusammengebauten Auftrag an die KI. Intern, weil dort der ganze Prompt steht. |
 | SEO Modus | Crawl, Berichte, Aufgaben, Search Console, Grounding, Seitenstruktur. |
-| Texte | Seitentexte in acht Schritten schreiben lassen, prüfen und freigeben. Organisation oben in der Leiste wechseln. |
+| Texte | Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Organisation oben in der Leiste wechseln. |
 | Token-Nutzung | Wie viel die KI verbraucht hat. Kunden sehen das nicht. |
 | Transkripte | Gesprächsmitschriften auswerten und ins Wissen der Avatare übernehmen. |
 | Erstgespräch | Erstgespräche einer Firma. |
@@ -485,7 +487,7 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/frageboegen` | Dieselbe Welt aus Sicht der Firma. |
 | `/dashboard/digital-twin` | Chat- und Agenten-Bereich, zusätzlich zur Startseite. |
 | `/dashboard/verwaltung/seo` | SEO-Arbeitsplatz der Agentur. |
-| `/dashboard/verwaltung/texte` | Texte: Seitentexte in acht Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, Organisation über `?org=`. |
+| `/dashboard/verwaltung/texte` | Texte: Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
 ---

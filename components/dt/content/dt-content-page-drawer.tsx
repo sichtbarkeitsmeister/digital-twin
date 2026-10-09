@@ -464,13 +464,13 @@ export function DtContentPageDrawer(props: {
               ) : review ? (
                 <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
                   <div className="grid min-w-0 gap-4">
-                    {review.legacy_steps ? (
+                    {review.legacy_steps && !review.public.released ? (
                       <div className="flex gap-2 rounded-dt border border-orange-300/70 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
                         <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                         <p>
-                          Diese Seite wurde mit der alten Schrittfolge (Recherche, Gliederung, Rohtext …) begonnen. Die neuen
-                          Schritte Analyse, SEO, GEO, Hormozi und Vermenschlichung passen nicht dazu: bitte „Zurücksetzen“ und
-                          neu starten.
+                          Diese Seite wurde mit einer älteren Schrittfolge begonnen (Recherche, Gliederung, Rohtext … oder
+                          die Endabnahme als Schritt 8). Die aktuellen neun Schritte passen nicht dazu: bitte „Zurücksetzen“
+                          und neu starten.
                         </p>
                       </div>
                     ) : null}

@@ -20,10 +20,12 @@ import {
   type ContentStepSpec,
 } from "@/lib/dt/content/pipeline/prompts";
 import { stepPatchFor } from "@/lib/dt/content/pipeline/step-patch";
-import { contentStepDefinition } from "@/lib/dt/content/pipeline/steps";
+import { contentStepDefinition, type ContentStepDefinition } from "@/lib/dt/content/pipeline/steps";
+import { callXaiTool } from "@/lib/dt/content/pipeline/xai";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
+  contentDbErrorMessage,
   contentStructureOutline,
   loadContentPageOutline,
   loadContentSettings,
@@ -151,24 +153,30 @@ async function upsertStep(
     { page_id: page.id, organisation_id: page.organisation_id, step, name: def?.name ?? `Schritt ${step}`, ...patch },
     { onConflict: "page_id,step" },
   );
-  if (error) throw new Error(`Schritt konnte nicht gespeichert werden: ${error.message}`);
+  if (error) throw new Error(contentDbErrorMessage(error, "Schritt konnte nicht gespeichert werden"));
 }
 
 type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string };
 
 /**
- * One tool call, plus the step's own second attempt when its `retryHint` asks for one and
- * enough of the budget is left. Both calls are billed; the better-scored output is kept.
+ * One tool call on the step's provider (Claude for every step but 8, Grok for step 8), plus
+ * the step's own second attempt when its `retryHint` asks for one and enough of the budget
+ * is left. Both calls are billed; the better-scored output is kept.
  */
 async function callStep(
   spec: ContentStepSpec,
   context: ContentPipelineContext,
+  def: ContentStepDefinition,
   models: string[],
   timeoutMs: number | undefined,
 ): Promise<{ output: unknown; calls: ModelCall[] }> {
   const budget = timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const started = Date.now();
-  const first = await callContentTool({ models, system: spec.system, user: spec.user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs });
+  const invoke = (user: string, timeout: number | undefined): Promise<ModelCall> =>
+    def.provider === "xai"
+      ? callXaiTool({ system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout })
+      : callContentTool({ models, system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout });
+  const first = await invoke(spec.user, timeoutMs);
   let output = spec.normalize(first.json, context);
   const calls: ModelCall[] = [first];
 
@@ -176,14 +184,7 @@ async function callStep(
   const remaining = budget - (Date.now() - started);
   if (hint && remaining >= MIN_RETRY_MS) {
     try {
-      const second = await callContentTool({
-        models,
-        system: spec.system,
-        user: `${spec.user}\n\n${hint}`,
-        tool: spec.tool,
-        maxTokens: spec.maxTokens,
-        timeoutMs: remaining,
-      });
+      const second = await invoke(`${spec.user}\n\n${hint}`, remaining);
       calls.push(second);
       const retried = spec.normalize(second.json, context);
       const better = spec.score ? spec.score(retried) >= spec.score(output) : true;
@@ -217,7 +218,7 @@ export async function runContentStep(
   const { context, avatarId } = await loadContext(service, page, steps);
   const models = await loadContentModelConfig(service);
   const spec = contentStepSpec(step, context);
-  const { output, calls } = await callStep(spec, context, models[def.tier], timeoutMs);
+  const { output, calls } = await callStep(spec, context, def, models[def.tier], timeoutMs);
   const model = calls[calls.length - 1]!.model;
   const usage = calls.reduce(
     (sum, call) => ({ inputTokens: sum.inputTokens + call.usage.inputTokens, outputTokens: sum.outputTokens + call.usage.outputTokens }),
@@ -281,10 +282,18 @@ export async function markContentStepError(
     error: text,
     finished_at: new Date().toISOString(),
   }).catch((err) => console.error("[content] step error not stored", err));
-  await service
+  const { error } = await service
     .from("dt_content_pages")
     .update({ state: "in_arbeit", step, error: text, job_id: null })
     .eq("id", page.id);
+  if (error) {
+    // The step number itself may be what the database rejects (steps 1 … 8 only, migration
+    // 20261011 not run): pause the page anyway, with the reason, on its last stored step.
+    await service
+      .from("dt_content_pages")
+      .update({ state: "in_arbeit", error: contentDbErrorMessage(error, text).slice(0, 500), job_id: null })
+      .eq("id", page.id);
+  }
 }
 
 /**

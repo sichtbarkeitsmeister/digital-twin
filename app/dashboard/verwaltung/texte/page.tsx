@@ -58,7 +58,7 @@ async function TextePageContent({ searchParams }: { searchParams: { org?: string
         <div className="grid gap-1">
           <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">Texte</h1>
           <p className="text-xs text-secondary sm:text-sm">
-            Seitentexte für <span className="font-semibold">{organisation.name}</span> in acht Schritten
+            Seitentexte für <span className="font-semibold">{organisation.name}</span> in neun Schritten
             schreiben lassen, prüfen und freigeben.
           </p>
         </div>
