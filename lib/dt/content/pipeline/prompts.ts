@@ -1030,7 +1030,7 @@ function endabnahme(context: ContentPipelineContext): ContentStepSpec {
     maxTokens: 3_000,
     system: `${BASE_RULES}
 
-Schritt 8 Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
+Schritt 9 Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
 unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein nicht gefüllter Hero („${CONTENT_HERO_PLACEHOLDER}“), eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und „Zuletzt aktualisiert: [DATUM]“.
 summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.`,
     user: join([
@@ -1061,6 +1061,61 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
   };
 }
 
+// --- step 8: every sentence rephrased, on Grok ------------------------------------------------
+
+/**
+ * Step 8 runs on Grok (xAI, see `xai.ts`), not on Claude. The prompt describes a plain
+ * language pass over the finished text; the step's UI name stays out of it on purpose,
+ * since the model refuses some framings. Facts, headings, ids and markers are not the
+ * model's to change, and `mergeRewrittenBlocks` enforces that afterwards.
+ */
+const REPHRASE_SYSTEM = `Du überarbeitest den fertigen Seitentext sprachlich.
+Schreibe jeden Satz neu. Kopiere keinen Satz wörtlich.
+Behalte unverändert: HTML-Blöcke und ids, H1, alle Überschriften (auch Fragen-Überschriften), alle Fakten, Namen, Zahlen, [LINK: …], [BITTE PRÜFEN: …], [DATUM], Handlungsaufforderungen (Termin, Telefon, DrFlex).
+Natürliches Deutsch: Satzlängen mischen, keine Werbe-Floskeln (Endlich, wirklich, nicht nur eine Floskel, sprechen eine klare Sprache, Machen Sie noch heute den ersten Schritt).
+Erfinde nichts. Keine neuen Leistungen, Zahlen oder Bewertungen.
+Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten weiter.
+Antworte mit dem Werkzeug submit_text: dieselben Abschnitte in derselben Reihenfolge, mit denselben ids, headings und levels; nur das html jedes Abschnitts ist neu formuliert.`;
+
+/**
+ * The rephrased blocks over the previous ones: ids, headings, levels and order come from the
+ * previous text (a question heading stays a question, a dropped block comes back), only the
+ * body HTML is taken from the answer. Blocks are matched by id, or by position when the
+ * answer renamed them but kept the count.
+ */
+export function mergeRewrittenBlocks(previous: readonly ContentTextBlock[], output: readonly ContentTextBlock[]): ContentTextBlock[] {
+  if (previous.length === 0) return [...output];
+  const byId = new Map(output.map((b) => [b.id, b]));
+  const positional = output.length === previous.length;
+  return previous.map((prev, index) => {
+    const candidate = byId.get(prev.id) ?? (positional ? output[index] : undefined);
+    const html = candidate?.html.trim() ? candidate.html : prev.html;
+    return { ...prev, html };
+  });
+}
+
+function rephrase(context: ContentPipelineContext): ContentStepSpec {
+  return {
+    maxTokens: 12_000,
+    system: REPHRASE_SYSTEM,
+    user: join([currentTextBlock(context), settingsBlock(context.settings), notesBlock(context)]),
+    tool: {
+      name: "submit_text",
+      description: "Die sprachlich überarbeiteten Abschnitte, in derselben Reihenfolge mit denselben ids.",
+      input_schema: {
+        type: "object",
+        properties: { blocks: BLOCKS_SCHEMA },
+        required: ["blocks"],
+      },
+    },
+    normalize: (json, ctx): TextOutput => {
+      const answered = normalizeBlocks(rec(json).blocks);
+      if (answered.length === 0) throw new Error("Die Antwort enthielt keinen Text.");
+      return { blocks: mergeRewrittenBlocks(ctx.blocks, answered), title: ctx.title, meta_description: ctx.metaDescription };
+    },
+  };
+}
+
 const SPECS: Record<number, (context: ContentPipelineContext) => ContentStepSpec> = {
   1: analyse,
   2: seo,
@@ -1069,7 +1124,8 @@ const SPECS: Record<number, (context: ContentPipelineContext) => ContentStepSpec
   5: hormozi,
   6: vermenschlichung,
   7: lektorat,
-  8: endabnahme,
+  8: rephrase,
+  9: endabnahme,
 };
 
 export function contentStepSpec(step: number, context: ContentPipelineContext): ContentStepSpec {

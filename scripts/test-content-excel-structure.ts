@@ -28,6 +28,7 @@ import {
   contentStepSpec,
   ensureHeroPlaceholder,
   keepHeroBlock,
+  mergeRewrittenBlocks,
   normalizeAnalyse,
   settleHeroSentence,
   type ContentPipelineContext,
@@ -40,11 +41,14 @@ import {
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
   CONTENT_STEP_LEKTORAT,
+  CONTENT_STEP_WATERMARK,
   CONTENT_STEPS,
   contentStepDefinition,
   hasLegacyContentSteps,
   runningPageDetail,
 } from "../lib/dt/content/pipeline/steps";
+import { callXaiTool, resolveXaiModels, XAI_MISSING_KEY_MESSAGE } from "../lib/dt/content/pipeline/xai";
+import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "../lib/dt/content/render";
 import {
   CONTENT_TYPE_LOCKED_MESSAGE,
@@ -320,20 +324,23 @@ console.log("crawl without excel: ok");
 // --- the eight steps ----------------------------------------------------------------------------
 
 assert.deepEqual(
-  CONTENT_STEPS.map((s) => [s.step, s.name, s.tier, s.writesText]),
+  CONTENT_STEPS.map((s) => [s.step, s.name, s.tier, s.writesText, s.provider]),
   [
-    [1, "Analyse", "write", false],
-    [2, "SEO", "write", true],
-    [3, "Faktencheck", "check", false],
-    [4, "GEO", "write", true],
-    [5, "Hormozi", "write", true],
-    [6, "Vermenschlichung", "write", true],
-    [7, "Lektorat", "check", true],
-    [8, "Endabnahme", "check", false],
+    [1, "Analyse", "write", false, "anthropic"],
+    [2, "SEO", "write", true, "anthropic"],
+    [3, "Faktencheck", "check", false, "anthropic"],
+    [4, "GEO", "write", true, "anthropic"],
+    [5, "Hormozi", "write", true, "anthropic"],
+    [6, "Vermenschlichung", "write", true, "anthropic"],
+    [7, "Lektorat", "check", true, "anthropic"],
+    [8, "Watermark Entfernung", "write", true, "xai"],
+    [9, "Endabnahme", "check", false, "anthropic"],
   ],
 );
-assert.deepEqual([CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_LEKTORAT, CONTENT_STEP_ENDABNAHME], [3, 7, 8]);
-assert.equal(runningPageDetail(2, [{ step: 1, status: "done" }, { step: 2, status: "done" }]), "Schritt 3 von 8 startet: Faktencheck");
+assert.deepEqual([CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_LEKTORAT, CONTENT_STEP_WATERMARK, CONTENT_STEP_ENDABNAHME], [3, 7, 8, 9]);
+assert.equal(hasLegacyContentSteps([{ step: 8, name: "Endabnahme" }]), true, "the eight-step order is legacy now");
+assert.equal(hasLegacyContentSteps([{ step: 8, name: "Watermark Entfernung" }, { step: 9, name: "Endabnahme" }]), false);
+assert.equal(runningPageDetail(2, [{ step: 1, status: "done" }, { step: 2, status: "done" }]), "Schritt 3 von 9 startet: Faktencheck");
 assert.equal(hasLegacyContentSteps([{ step: 1, name: "Recherche" }, { step: 2, name: "Gliederung" }]), true);
 assert.equal(hasLegacyContentSteps([{ step: 1, name: "Analyse" }, { step: 3, name: "Faktencheck" }]), false);
 assert.equal(hasLegacyContentSteps([]), false);
@@ -428,7 +435,7 @@ assert.doesNotMatch(seoCustom.system, /2–5 interne Links/, "the default Haupts
 assert.match(seoCustom.system, /Tatsachen \(Leistungen, Zahlen, Namen, Preise/, "the locked rules stay");
 assert.match(seoCustom.system, new RegExp(CONTENT_HERO_PLACEHOLDER.replace(/[[\]]/g, "\\$&")), "the hero placeholder stays");
 assert.match(contentStepSpec(2, context({ page_type: "unterseite", pillar_name: "Privatumzug" }, { typePrompts: saved })).system, /Marker \[LINK: Privatumzug\]/, "each page still writes with its own type");
-for (const step of [1, 3, 4, 5, 6, 7, 8]) {
+for (const step of [1, 3, 4, 5, 6, 7, 8, 9]) {
   assert.doesNotMatch(contentStepSpec(step, customContext).system, /Hausrezept/, `step ${step} does not read the recipes`);
 }
 console.log("textvorlagen: ok");
@@ -473,12 +480,14 @@ assert.match(vermenschlichung.system, /höchstens 3 im ganzen Text/);
 assert.match(vermenschlichung.system, /self_score/);
 assert.ok(vermenschlichung.retryHint && vermenschlichung.score, "the Vermenschlichung may try once more");
 assert.match(contentStepSpec(7, context()).system, /Lektorat/);
-assert.match(contentStepSpec(8, context()).system, /Endabnahme/);
-for (const step of [3, 7, 8]) {
+assert.match(contentStepSpec(8, context()).system, /Schreibe jeden Satz neu/);
+assert.match(contentStepSpec(9, context()).system, /Endabnahme/);
+for (const step of [3, 7, 9]) {
   assert.match(contentStepSpec(step, context()).user, /Avatar \(Wunschkunde/, `step ${step} still gets the avatar`);
   assert.match(contentStepSpec(step, context()).user, /Anbieterfakten/, `step ${step} still gets the facts`);
 }
-assert.throws(() => contentStepSpec(9, context()), /Unbekannter Schritt/);
+assert.match(contentStepSpec(9, context()).system, /Schritt 9 Endabnahme/);
+assert.throws(() => contentStepSpec(10, context()), /Unbekannter Schritt/);
 console.log("step specs: ok");
 
 // --- Analyse normalisation: the Excel wins, Spalte H never falls off ---------------------------
@@ -590,4 +599,116 @@ assert.deepEqual(outline.split("\n"), [
 ], "the own silo first, the page itself left out");
 console.log("outline: ok");
 
-console.log("OK: content excel structure tests passed");
+// --- step 8: every sentence rephrased on Grok, nothing else -------------------------------------
+
+const questionBlock = { id: "kosten", heading: "Was kostet ein Privatumzug?", level: 2 as const, html: "<p>Der Preis hängt vom Umfang ab. [BITTE PRÜFEN: Preisbeispiel]</p>" };
+const heroSentence = { id: "hero", heading: null, level: 2 as const, html: "<p><strong>Ihr Umzug ohne Stress.</strong></p>" };
+const beforeRephrase = [h1, heroSentence, questionBlock, { ...body, html: "<p>So läuft es. [LINK: Seniorenumzug]</p>" }];
+const rephraseContext = context({}, { blocks: beforeRephrase, title: "Privatumzug Köln | Steiner", metaDescription: "Meta." });
+const spec8 = contentStepSpec(CONTENT_STEP_WATERMARK, rephraseContext);
+const sentToGrok = `${spec8.system}\n${spec8.user}\n${JSON.stringify(spec8.tool)}`;
+assert.doesNotMatch(sentToGrok, /watermark|wasserzeichen|detector|detektor|EU AI Act|undetectable|hide AI/i, "the model never sees the step's name or purpose");
+assert.match(spec8.system, /Schreibe jeden Satz neu/);
+assert.match(spec8.system, /Kopiere keinen Satz wörtlich/);
+assert.match(spec8.system, /\[LINK: …\]/);
+assert.match(spec8.system, /\[BITTE PRÜFEN: …\]/);
+assert.match(spec8.system, /\[DATUM\]/);
+assert.match(spec8.system, /Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten weiter/);
+assert.equal(spec8.tool.name, "submit_text");
+assert.match(spec8.user, /Aktueller Text/);
+assert.match(spec8.user, /Verbotene Wörter.*„billig“/);
+assert.match(spec8.user, /Anmerkungen der Redaktion/);
+assert.doesNotMatch(spec8.user, /Anbieterfakten aus Fragebogen/, "the facts are not sent; they must not change anyway");
+assert.equal(contentStepDefinition(CONTENT_STEP_WATERMARK)?.provider, "xai", "step 8 runs on Grok");
+assert.ok(CONTENT_STEPS.filter((s) => s.provider === "xai").length === 1, "no other step runs on Grok");
+
+const merged = mergeRewrittenBlocks(beforeRephrase, [
+  { id: "intro", heading: "Umzug Köln neu", level: 2, html: "" },
+  { id: "hero", heading: "", level: 2, html: "<p><strong>Entspannt umziehen.</strong></p>" },
+  { id: "kosten-neu", heading: "Was kostet ein Privatumzug", level: 3, html: "<p>Das hängt vom Umfang ab. [BITTE PRÜFEN: Preisbeispiel]</p>" },
+  { id: "ablauf", heading: "Ablauf", level: 2, html: "<p>So geht es. [LINK: Seniorenumzug]</p>" },
+]);
+assert.deepEqual(
+  merged.map((b) => [b.id, b.heading, b.level, b.html]),
+  [
+    ["intro", "Privatumzug Köln", 1, ""],
+    ["hero", null, 2, "<p><strong>Entspannt umziehen.</strong></p>"],
+    ["kosten", "Was kostet ein Privatumzug?", 2, "<p>Das hängt vom Umfang ab. [BITTE PRÜFEN: Preisbeispiel]</p>"],
+    ["ablauf", "Wie läuft der Umzug ab?", 2, "<p>So geht es. [LINK: Seniorenumzug]</p>"],
+  ],
+  "ids, headings and levels stay, a question stays a question, only the body is new",
+);
+assert.equal(mergeRewrittenBlocks(beforeRephrase, [{ id: "hero", heading: "", level: 2, html: "<p>Nur der Hero.</p>" }]).length, 4, "a dropped block comes back unchanged");
+assert.equal(mergeRewrittenBlocks(beforeRephrase, [{ id: "kosten", heading: "", level: 2, html: "   " }])[2]?.html, questionBlock.html, "an empty body keeps the previous text");
+const out8 = spec8.normalize(
+  { blocks: [{ id: "ablauf", heading: "", level: 2, html: "<p>Neu.</p>" }, { id: "kosten", heading: "", level: 2, html: "<p>Neu 2.</p>" }] },
+  rephraseContext,
+) as TextOutput;
+assert.deepEqual(out8.blocks.map((b) => [b.id, b.html]), [["intro", ""], ["hero", heroSentence.html], ["kosten", "<p>Neu 2.</p>"], ["ablauf", "<p>Neu.</p>"]], "the answer is matched by id, the order is the page's");
+assert.deepEqual([out8.title, out8.meta_description], ["Privatumzug Köln | Steiner", "Meta."], "title and meta are not the step's to change");
+assert.throws(() => spec8.normalize({ blocks: [] }, rephraseContext), /keinen Text/);
+const patch8 = stepPatchFor(contentStepDefinition(CONTENT_STEP_WATERMARK)!, out8);
+assert.match(String(patch8.pagePatch.html), /Was kostet ein Privatumzug\?/);
+assert.equal(patch8.halted, false);
+assert.deepEqual([priceForModel("grok-4.7").inputUsd, priceForModel("grok-4.7").outputUsd, priceForModel("grok-4").inputUsd, priceForModel("grok-4").outputUsd], [2, 6, 3, 15]);
+assert.equal(estimateCostEur("grok-4.7", { inputTokens: 1_000_000, outputTokens: 1_000_000 }, 1), 8);
+assert.deepEqual(resolveXaiModels({}), ["grok-4.7", "grok-4"]);
+assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: " grok-4 " }), ["grok-4"]);
+assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: "grok-5" }), ["grok-5", "grok-4"]);
+console.log("step 8 spec: ok");
+
+async function runXai() {
+  const neverFetch = async (): Promise<Response> => {
+    throw new Error("fetch must not be called without a key");
+  };
+  for (const env of [{}, { ANTHROPIC_DT_CONTENT_API_KEY: "claude-key" }, { XAI_API_KEY: "   " }]) {
+    await assert.rejects(
+      callXaiTool({ system: "s", user: "u", tool: spec8.tool, maxTokens: 10, env, fetchImpl: neverFetch }),
+      (error: unknown) =>
+        error instanceof Error && error.message === XAI_MISSING_KEY_MESSAGE && (error as { retryable?: boolean }).retryable === false,
+      "no key → the German error, no network call, no Claude fallback",
+    );
+  }
+  assert.equal(XAI_MISSING_KEY_MESSAGE, "Der Grok-Zugang für Texte ist nicht eingerichtet (XAI_API_KEY fehlt). Bitte die Technik informieren.");
+
+  const seen: Array<{ model: string; auth: string | null; forced: string }> = [];
+  const stubFetch = async (url: string, init: RequestInit): Promise<Response> => {
+    assert.equal(url, "https://api.x.ai/v1/chat/completions");
+    const body = JSON.parse(String(init.body)) as { model: string; tool_choice: { function: { name: string } }; messages: Array<{ role: string; content: string }> };
+    seen.push({ model: body.model, auth: (init.headers as Record<string, string>).Authorization ?? null, forced: body.tool_choice.function.name });
+    assert.doesNotMatch(body.messages.map((m) => m.content).join("\n"), /watermark|wasserzeichen|detector/i);
+    if (body.model === "grok-4.7") return new Response(JSON.stringify({ error: { message: "The model grok-4.7 does not exist" } }), { status: 404 });
+    return new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { tool_calls: [{ function: { name: "submit_text", arguments: JSON.stringify({ blocks: [{ id: "ablauf", heading: "", level: 2, html: "<p>Neu.</p>" }] }) } }] } }],
+        usage: { prompt_tokens: 120, completion_tokens: 30 },
+      }),
+      { status: 200 },
+    );
+  };
+  const answer = await callXaiTool({ system: spec8.system, user: spec8.user, tool: spec8.tool, maxTokens: 100, env: { XAI_API_KEY: "k" }, fetchImpl: stubFetch });
+  assert.deepEqual(seen.map((s) => s.model), ["grok-4.7", "grok-4"], "404 on the configured model → the fallback");
+  assert.ok(seen.every((s) => s.auth === "Bearer k" && s.forced === "submit_text"));
+  assert.equal(answer.model, "grok-4");
+  assert.deepEqual(answer.usage, { inputTokens: 120, outputTokens: 30 });
+  assert.equal((answer.json as { blocks: Array<{ html: string }> }).blocks[0]?.html, "<p>Neu.</p>");
+
+  const rejected = async (): Promise<Response> => new Response(JSON.stringify({ error: { message: "invalid api key" } }), { status: 401 });
+  await assert.rejects(
+    callXaiTool({ system: "s", user: "u", tool: spec8.tool, maxTokens: 10, env: { XAI_API_KEY: "bad" }, fetchImpl: rejected }),
+    (error: unknown) => error instanceof Error && /abgelehnt/.test(error.message) && (error as { retryable?: boolean }).retryable === false,
+  );
+  const busy = async (): Promise<Response> => new Response("overloaded", { status: 503 });
+  await assert.rejects(
+    callXaiTool({ system: "s", user: "u", tool: spec8.tool, maxTokens: 10, env: { XAI_API_KEY: "k" }, fetchImpl: busy }),
+    (error: unknown) => error instanceof Error && /ausgelastet/.test(error.message) && (error as { retryable?: boolean }).retryable === true,
+  );
+  console.log("grok caller: ok");
+}
+
+runXai()
+  .then(() => console.log("OK: content excel structure tests passed"))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

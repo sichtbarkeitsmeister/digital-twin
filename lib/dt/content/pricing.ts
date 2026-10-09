@@ -1,7 +1,8 @@
 /**
- * Token prices for the cost column. Anthropic bills in USD per million tokens; the Texte tab
- * shows EUR, converted with `CONTENT_USD_EUR_RATE` (default 0.92). Unknown models are priced
- * like Sonnet so the column never shows 0 for a real call. Update when Anthropic changes prices.
+ * Token prices for the cost column. Anthropic and xAI bill in USD per million tokens; the
+ * Texte tab shows EUR, converted with `CONTENT_USD_EUR_RATE` (default 0.92). Unknown models
+ * are priced like Sonnet so the column never shows 0 for a real call. Update when a
+ * provider changes prices.
  */
 
 type Price = { match: RegExp; inputUsd: number; outputUsd: number };
@@ -12,6 +13,9 @@ const PRICES_USD_PER_MTOK: Price[] = [
   { match: /haiku-4|haiku-[5-9]/i, inputUsd: 1, outputUsd: 5 },
   { match: /3-5-haiku|haiku-3/i, inputUsd: 0.8, outputUsd: 4 },
   { match: /sonnet/i, inputUsd: 3, outputUsd: 15 },
+  // xAI (step 8 Watermark Entfernung): grok-4.7 per the xAI price list; other Grok models like grok-4.
+  { match: /grok-4[.-]7/i, inputUsd: 2, outputUsd: 6 },
+  { match: /grok/i, inputUsd: 3, outputUsd: 15 },
 ];
 
 const DEFAULT_PRICE: Price = { match: /.*/, inputUsd: 3, outputUsd: 15 };

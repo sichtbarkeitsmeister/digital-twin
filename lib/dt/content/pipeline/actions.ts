@@ -368,6 +368,7 @@ export async function rerunContentStep(
     step,
     released: false,
     ...(step <= CONTENT_STEP_FAKTENCHECK ? { questions: [], findings: [] } : {}),
-    ...(step <= CONTENT_STEP_LEKTORAT ? { final_findings: [], unresolved: [] } : {}),
+    ...(step <= CONTENT_STEP_LEKTORAT ? { final_findings: [] } : {}),
+    ...(step < CONTENT_STEP_ENDABNAHME ? { unresolved: [] } : {}),
   });
 }
