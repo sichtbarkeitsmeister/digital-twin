@@ -6,7 +6,12 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { CONTENT_STEP_ENDABNAHME, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
+import {
+  CONTENT_STEP_COUNT,
+  CONTENT_STEP_ENDABNAHME,
+  CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_LEKTORAT,
+} from "@/lib/dt/content/pipeline/steps";
 import { htmlToMarkdown, replaceBlockText } from "@/lib/dt/content/render";
 import { rerunStepFor, type ContentPageRow } from "@/lib/dt/content/store";
 import { enqueueJob } from "@/lib/jobs/queue";
@@ -18,6 +23,9 @@ export type ActionResult =
   | { ok: true; jobId: string | null }
   | { ok: false; status: number; message: string };
 
+export const NICHT_BEARBEITEN_REASON =
+  "Seitentyp „Nicht bearbeiten“ (Impressum, Datenschutz, Kontakt …) – im Seitenfenster einen anderen Seitentyp wählen, wenn die Seite doch Text bekommen soll";
+
 export function skipReason(page: ContentPageRow): string | null {
   switch (page.state) {
     case "laeuft":
@@ -27,7 +35,7 @@ export function skipReason(page: ContentPageRow): string | null {
     case "fertig":
       return page.released ? "Bereits freigegeben" : "Fertig – wartet auf Freigabe";
     default:
-      return null;
+      return page.state === "nicht_begonnen" && page.page_type === "nicht_bearbeiten" ? NICHT_BEARBEITEN_REASON : null;
   }
 }
 
@@ -110,7 +118,7 @@ export async function startContentRun(
   return enqueuePageJob(service, page, userId);
 }
 
-/** Step 4: accept the text despite open questions and continue. Step 8: release the page. */
+/** Step 3 (Faktencheck): accept the text despite open questions and continue. Step 8: release the page. */
 export async function approveContentStep(
   service: SupabaseClient,
   page: ContentPageRow,
@@ -251,13 +259,20 @@ const RESET_PATCH = {
   started_by: null,
 } as const;
 
-/** "Zurücksetzen": the page as if it had never been started — text, steps, questions, notes, cost. */
+/**
+ * "Zurücksetzen": the page as if it had never been started — text, steps, questions, notes,
+ * cost. The Excel briefing (keywords, questions, page type) stays; the main keyword from the
+ * Excel comes back, one the Analyse found goes.
+ */
 export async function resetContentPage(service: SupabaseClient, page: ContentPageRow): Promise<ActionResult> {
   const killed = await killPageJobs(service, page.id);
   if (killed) return { ok: false, status: 500, message: killed };
   const { error: stepsError } = await service.from("dt_content_steps").delete().eq("page_id", page.id);
   if (stepsError) return { ok: false, status: 500, message: `Schritte konnten nicht gelöscht werden: ${stepsError.message}` };
-  const { error } = await service.from("dt_content_pages").update(RESET_PATCH).eq("id", page.id);
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({ ...RESET_PATCH, main_keyword: page.keywords?.main.text ?? null })
+    .eq("id", page.id);
   if (error) return { ok: false, status: 500, message: error.message };
   return { ok: true, jobId: null };
 }
@@ -295,6 +310,6 @@ export async function rerunContentStep(
     step,
     released: false,
     ...(step <= CONTENT_STEP_FAKTENCHECK ? { questions: [], findings: [] } : {}),
-    ...(step <= 7 ? { final_findings: [], unresolved: [] } : {}),
+    ...(step <= CONTENT_STEP_LEKTORAT ? { final_findings: [], unresolved: [] } : {}),
   });
 }

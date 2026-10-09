@@ -392,6 +392,7 @@ assert.deepEqual(flat.map((p) => [p.slug, p.level, p.position]), [["startseite",
 
 const base: ContentPageRow = {
   id: "p1", organisation_id: "o1", slug: "keller", name: "Keller", path: "/keller", level: 1, position: 0, source: "structure", source_url: null, crawled_at: null, main_keyword: null,
+  page_role: "pillar", page_type: "hauptsilo", pillar_name: null, estimated_traffic: null, keywords: null, h1_options: [], user_questions: [], ki_prompt: null, internal_link_targets: [],
   state: "nicht_begonnen", step: null, released: false, released_at: null, title: null, meta_description: null, html: "", markdown: "",
   findings: [], final_findings: [], unresolved: [], questions: [], notes: [], error: null, job_id: null, cost_eur: "0", started_by: null,
   created_at: "2026-10-06T10:00:00Z", updated_at: "2026-10-06T10:00:00Z",
@@ -399,10 +400,11 @@ const base: ContentPageRow = {
 const q = questions[0]!;
 const cases: Array<[Partial<ContentPageRow>, string[], string | null]> = [
   [{}, ["run_through", "delete"], null],
-  [{ state: "laeuft", step: 3 }, ["stop", "reset", "delete"], "Schritt 3 von 8: Rohtext läuft"],
-  [{ state: "braucht_sie", step: 4, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
-  [{ state: "in_arbeit", step: 3, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset", "delete"], "Fehler in Schritt 3: Ratenlimit"],
-  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "reset", "delete"], "Pausiert nach Schritt 5: Tonalität & Avatar"],
+  [{ page_type: "nicht_bearbeiten" }, ["delete"], null],
+  [{ state: "laeuft", step: 2 }, ["stop", "reset", "delete"], "Schritt 2 von 8: SEO läuft"],
+  [{ state: "braucht_sie", step: 3, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
+  [{ state: "in_arbeit", step: 2, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset", "delete"], "Fehler in Schritt 2: Ratenlimit"],
+  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "reset", "delete"], "Pausiert nach Schritt 5: Hormozi"],
   [{ state: "fertig", step: 8, html }, ["approve", "edit", "rerun_with_note", "export", "reset", "delete"], "Wartet auf Freigabe"],
   [{ state: "fertig", step: 8, html, released: true }, ["export", "reset", "delete"], "Freigegeben"],
 ];
@@ -415,37 +417,49 @@ for (const [patch, kinds, detail] of cases) {
     if (["approve", "edit", "rerun_with_note"].includes(action.kind)) assert.equal(typeof action.step, "number");
   }
 }
-assert.equal(rerunStepFor({ ...base, state: "braucht_sie", step: 4 }), 4);
+assert.deepEqual(pageActions({ ...base, state: "braucht_sie", step: 3, html, questions: [q] }).find((a) => a.kind === "approve")?.step, 3, "Freigeben after the Faktencheck (step 3)");
+assert.deepEqual(pageActions({ ...base, state: "fertig", step: 8, html }).find((a) => a.kind === "approve")?.step, 8);
+assert.equal(rerunStepFor({ ...base, state: "braucht_sie", step: 3 }), 3);
 assert.equal(rerunStepFor({ ...base, state: "fertig", step: 8 }), 7);
 assert.equal(rerunStepFor({ ...base, state: "in_arbeit", step: 6 }), 6);
+assert.equal(pageSummary({ ...base, keywords: { main: { text: "Kellerentrümpelung", volume: 90 }, secondary: [] }, user_questions: ["Was kostet das?"] }).main_keyword, "Kellerentrümpelung", "the Excel keyword shows before the Analyse ran");
+assert.equal(pageSummary({ ...base, user_questions: ["Was kostet das?"] }).user_questions, 1);
 assert.equal(pageSummary({ ...base, cost_eur: "1.2345" }).cost, "1,23\u00a0€");
 assert.equal(pageSummary(base).updated_at, null, "not started → no date");
 
-const steps: ContentStepRow[] = [1, 2, 3].map((step) => ({
+const steps: ContentStepRow[] = [1, 2].map((step) => ({
   id: `s${step}`, page_id: "p1", organisation_id: "o1", step, name: CONTENT_STEPS[step - 1]!.name, status: "done", output: {},
   model: "claude-sonnet-4-6", input_tokens: 1000, output_tokens: 500, cost_eur: "0.01", error: null, started_at: null, finished_at: null, approved_by: null, approved_at: null,
 }));
-const review = buildReview({ ...base, state: "braucht_sie", step: 4, html, markdown: htmlToMarkdown(html), questions: [q] }, [
+const review = buildReview({ ...base, state: "braucht_sie", step: 3, html, markdown: htmlToMarkdown(html), questions: [q] }, [
   ...steps,
-  { ...steps[0]!, id: "s4", step: 4, name: "Faktencheck", status: "waiting" },
+  { ...steps[0]!, id: "s3", step: 3, name: "Faktencheck", status: "waiting" },
 ]);
 assert.equal(review.steps.length, 8);
-assert.deepEqual(review.steps.map((s) => s.status), ["done", "done", "done", "waiting", "pending", "pending", "pending", "pending"]);
-assert.equal(review.text_step, 3, "the text on screen comes from the Rohtext");
+assert.deepEqual(review.steps.map((s) => s.status), ["done", "done", "waiting", "pending", "pending", "pending", "pending", "pending"]);
+assert.equal(review.text_step, 2, "the text on screen comes from the SEO step");
 assert.equal(review.questions.length, 1);
 assert.equal(review.public.cost, "0,00\u00a0€");
+assert.equal(review.legacy_steps, false);
+assert.deepEqual([review.briefing.page_type, review.briefing.page_role, review.briefing.main_keyword, review.briefing.user_questions], ["hauptsilo", "pillar", null, []]);
+const legacy = buildReview({ ...base, state: "in_arbeit", step: 3, html }, [
+  { ...steps[0]!, name: "Recherche" },
+  { ...steps[1]!, name: "Gliederung" },
+  { ...steps[0]!, id: "s3", step: 3, name: "Rohtext" },
+]);
+assert.equal(legacy.legacy_steps, true, "a page from the old step order asks for a reset");
 const betweenSteps = buildReview({ ...base, state: "laeuft", step: 2 }, [
   { ...steps[0]!, status: "done" },
   { ...steps[1]!, status: "done" },
 ]);
-assert.equal(betweenSteps.public.detail, "Schritt 3 von 8 startet: Rohtext");
+assert.equal(betweenSteps.public.detail, "Schritt 3 von 8 startet: Faktencheck");
 assert.equal(nextContentStep([{ step: 1, status: "done" }, { step: 2, status: "done" }]), 3);
 assert.equal(nextContentStep([{ step: 1, status: "done" }, { step: 2, status: "running" }]), 2);
 const tickStart = 1_000_000;
 assert.equal(shouldClaimAnotherJob(tickStart, tickStart + JOB_WORKER_BUDGET_MS, 0, 5), true);
 assert.equal(shouldClaimAnotherJob(tickStart + JOB_WORKER_BUDGET_MS - 10_000, tickStart + JOB_WORKER_BUDGET_MS, 1, 5), false, "no second job when the tick is almost over");
 assert.equal(stepBudgetMs(tickStart, tickStart + 240_000, 150_000), 225_000);
-assert.equal(stepBudgetMs(tickStart, tickStart + 100_000, 150_000), null, "Rohtext waits for a tick that can finish it");
+assert.equal(stepBudgetMs(tickStart, tickStart + 100_000, 150_000), null, "a text step waits for a tick that can finish it");
 
 const overview = buildOverview({ ready: true, checks: [] }, [
   base,
@@ -615,20 +629,20 @@ assert.deepEqual(judgeContentJob(jobRow({ status: "succeeded" }), now), { kind: 
 assert.deepEqual(judgeContentJob(null, now), { kind: "gone", status: null, error: null });
 
 const runningSteps = [{ step: 1, status: "done" }, { step: 2, status: "done" }, { step: 3, status: "pending" }];
-assert.equal(describeRunningPage({ step: 3, error: null }, null, null), "Schritt 3 von 8: Rohtext läuft", "no job info → old text");
-assert.equal(describeRunningPage({ step: 2, error: null }, runningSteps, { kind: "running" }), "Schritt 3 von 8 startet: Rohtext");
-assert.equal(describeRunningPage({ step: 3, error: null }, [{ step: 3, status: "running" }], { kind: "running" }), "Schritt 3 von 8: Rohtext läuft");
+assert.equal(describeRunningPage({ step: 3, error: null }, null, null), "Schritt 3 von 8: Faktencheck läuft", "no job info → old text");
+assert.equal(describeRunningPage({ step: 2, error: null }, runningSteps, { kind: "running" }), "Schritt 3 von 8 startet: Faktencheck");
+assert.equal(describeRunningPage({ step: 3, error: null }, [{ step: 3, status: "running" }], { kind: "running" }), "Schritt 3 von 8: Faktencheck läuft");
 assert.equal(
   describeRunningPage({ step: 3, error: "Ratenlimit" }, runningSteps, { kind: "retry", inMs: 90_000, error: "Ratenlimit" }),
-  "Schritt 3 von 8: Rohtext – erneuter Versuch in ca. 2 Min. (Ratenlimit)",
+  "Schritt 3 von 8: Faktencheck – erneuter Versuch in ca. 2 Min. (Ratenlimit)",
 );
-assert.equal(describeRunningPage({ step: 2, error: null }, runningSteps, { kind: "queued", waitMs: 5_000, error: null }), "Schritt 3 von 8: Rohtext startet gleich");
-assert.equal(describeRunningPage({ step: null, error: null }, [], { kind: "queued", waitMs: 5_000, error: null }), "Schritt 1 von 8: Recherche startet gleich");
+assert.equal(describeRunningPage({ step: 2, error: null }, runningSteps, { kind: "queued", waitMs: 5_000, error: null }), "Schritt 3 von 8: Faktencheck startet gleich");
+assert.equal(describeRunningPage({ step: null, error: null }, [], { kind: "queued", waitMs: 5_000, error: null }), "Schritt 1 von 8: Analyse startet gleich");
 assert.match(describeRunningPage({ step: null, error: null }, [], { kind: "queued", waitMs: 200_000, error: null }), /^Wartet seit 3 Min\. auf den Start/);
-assert.equal(describeRunningPage({ step: 3, error: null }, runningSteps, { kind: "stale_lock", sinceMs: 1 }), "Schritt 3 von 8: Rohtext wurde unterbrochen – wird fortgesetzt");
+assert.equal(describeRunningPage({ step: 3, error: null }, runningSteps, { kind: "stale_lock", sinceMs: 1 }), "Schritt 3 von 8: Faktencheck wurde unterbrochen – wird fortgesetzt");
 assert.match(describeRunningPage({ step: 3, error: null }, runningSteps, { kind: "gone", status: "dead", error: null }), /Weiterlaufen lassen/);
-assert.match(interruptedStepMessage(3, iso(-7 * 60_000), { attempts: 0, max_attempts: 3 }, now), /^Schritt 3 \(Rohtext\) wurde unterbrochen.*gestartet vor 7 Min\..*Versuch 1 von 3/);
-assert.match(interruptedStepMessage(3, null, { attempts: 2, max_attempts: 3 }, now), /3-mal abgebrochen.*Zeitlimit/);
+assert.match(interruptedStepMessage(2, iso(-7 * 60_000), { attempts: 0, max_attempts: 3 }, now), /^Schritt 2 \(SEO\) wurde unterbrochen.*gestartet vor 7 Min\..*Versuch 1 von 3/);
+assert.match(interruptedStepMessage(2, null, { attempts: 2, max_attempts: 3 }, now), /3-mal abgebrochen.*Zeitlimit/);
 
 const runningPage = (patch: Partial<ContentPageRow>): ContentPageRow => ({ ...base, state: "laeuft", step: 3, ...patch });
 const health = planContentPageRepairs(

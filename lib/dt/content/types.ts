@@ -5,6 +5,7 @@
 
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
+import type { ContentPageRole, ContentPageType } from "@/lib/dt/content/page-types";
 
 export type ContentPageState =
   | "nicht_begonnen"
@@ -39,6 +40,11 @@ export type ContentPageSummary = {
   /** Live URL for pages taken over from the crawl. */
   source_url: string | null;
   main_keyword: string | null;
+  /** Which writing variant the SEO step uses; null for rows from before the briefing migration. */
+  page_type: ContentPageType | null;
+  page_role: ContentPageRole | null;
+  /** Real Google questions from the Excel (Spalte H). */
+  user_questions: number;
   started: boolean;
   state: ContentPageState;
   label: string;
@@ -140,8 +146,31 @@ export type ContentAction = {
   label: string;
 };
 
+/** What the Excel briefing (or the crawl guess) knows about a page; shown compactly in the drawer. */
+export type ContentPageBriefing = {
+  source: ContentPageSource;
+  page_type: ContentPageType | null;
+  page_role: ContentPageRole | null;
+  pillar_name: string | null;
+  main_keyword: string | null;
+  /** Monthly search volume of the main keyword when the Excel had one. */
+  main_keyword_volume: number | null;
+  secondary_keywords: string[];
+  h1_options: string[];
+  user_questions: string[];
+  ki_prompt: string | null;
+  internal_link_targets: string[];
+  estimated_traffic: number | null;
+};
+
 export type ContentReview = {
   name: string;
+  briefing: ContentPageBriefing;
+  /**
+   * The page was started with the previous step order (Recherche, Gliederung, Rohtext …).
+   * Its outputs do not fit today's steps: the editor resets it.
+   */
+  legacy_steps: boolean;
   public: {
     state: ContentPageState;
     label: string;
@@ -224,6 +253,26 @@ export type ContentResetResult = {
   skipped: Array<{ page: string; reason: string }>;
   overview: ContentOverview;
 };
+
+/** `POST /api/dt/content/structure`: the Excel briefing (or a structure text) became page rows. */
+export type ContentStructureUploadResult = {
+  filename: string | null;
+  /** Which layout was read: the old briefing (A–H), the DT template (Ebene 1 … n) or a plain structure text. */
+  layout: "briefing" | "template" | "text";
+  sheet: string | null;
+  pages: number;
+  /** How many pages carry keywords, real user questions, H1 options; how many are „nicht bearbeiten“. */
+  keywords: number;
+  questions: number;
+  h1_options: number;
+  skipped: number;
+  /** Whether SEO → Struktur received the same pages as an outline. */
+  seo_synced: boolean;
+  overview: ContentOverview;
+};
+
+/** `PATCH /api/dt/content/pages/[slug]`: the editor changed the page type. */
+export type ContentPagePatchResult = { review: ContentReview; overview: ContentOverview };
 
 /** `POST /api/dt/content/crawl/import` */
 export type ContentCrawlImportResult = {

@@ -3,7 +3,7 @@ import type { ContentApiResponse } from "@/lib/dt/content/types";
 /** Browser → `/api/dt/content/*`. Never throws; network errors become `{ ok: false }`. */
 export async function contentApi<T>(
   url: string,
-  init?: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown },
+  init?: { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: unknown },
 ): Promise<ContentApiResponse<T>> {
   try {
     const res = await fetch(url, {

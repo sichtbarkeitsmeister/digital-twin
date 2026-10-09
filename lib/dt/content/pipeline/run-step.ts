@@ -12,25 +12,20 @@ import {
 } from "@/lib/dt/content/load-sources";
 import { avatarFromAgent } from "@/lib/dt/content/mapping";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
+import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import {
   contentStepSpec,
   type ContentPipelineContext,
-  type EndabnahmeOutput,
-  type FaktencheckOutput,
-  type GliederungOutput,
-  type LektoratOutput,
-  type RechercheOutput,
-  type TextOutput,
+  type ContentStepSpec,
 } from "@/lib/dt/content/pipeline/prompts";
-import {
-  CONTENT_STEP_ENDABNAHME,
-  CONTENT_STEP_FAKTENCHECK,
-  contentStepDefinition,
-} from "@/lib/dt/content/pipeline/steps";
+import { stepPatchFor } from "@/lib/dt/content/pipeline/step-patch";
+import { contentStepDefinition } from "@/lib/dt/content/pipeline/steps";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/content/render";
+import { parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
+  contentStructureOutline,
+  loadContentPageOutline,
   loadContentSettings,
   num,
   settingsFromRow,
@@ -51,6 +46,9 @@ export type StepOutcome = {
 
 /** How much of the live page's text the prompts see (pages taken over from the crawl). */
 const EXISTING_TEXT_MAX_CHARS = 6_000;
+/** A second attempt inside one step (Vermenschlichung) needs this much of the budget left. */
+const MIN_RETRY_MS = 60_000;
+const DEFAULT_STEP_TIMEOUT_MS = 240_000;
 
 /** The current text of a page taken over from the crawl, or null (structure pages, no crawl row). */
 async function loadExistingText(service: SupabaseClient, page: ContentPageRow): Promise<string | null> {
@@ -74,11 +72,11 @@ async function loadContext(
   page: ContentPageRow,
   steps: ContentStepRow[],
 ): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, anbieter, { data: structure }, existingText] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
     loadContentAnbieterSources(service, page.organisation_id),
-    service.from("dt_website_structures").select("outline").eq("organisation_id", page.organisation_id).maybeSingle(),
+    loadContentPageOutline(service, page.organisation_id),
     loadExistingText(service, page),
   ]);
   if (!settingsRow) {
@@ -109,8 +107,23 @@ async function loadContext(
     avatarId: avatarRow?.id ?? null,
     context: {
       organisationName: (organisation?.name as string | undefined)?.trim() || "",
-      page: { name: page.name, path: page.path, level: page.level, url: page.source_url },
-      structureOutline: (structure?.outline as string | undefined) ?? "",
+      page: {
+        name: page.name,
+        path: page.path,
+        level: page.level,
+        url: page.source_url,
+        source: page.source,
+        page_role: page.page_role,
+        page_type: effectiveContentPageType(page),
+        pillar_name: page.pillar_name,
+        estimated_traffic: page.estimated_traffic,
+        keywords: page.keywords,
+        h1_options: page.h1_options,
+        user_questions: page.user_questions,
+        ki_prompt: page.ki_prompt,
+        internal_link_targets: page.internal_link_targets,
+      },
+      structureOutline: contentStructureOutline(outlinePages, page),
       existingText,
       sections,
       settings: settingsFromRow(settingsRow),
@@ -138,9 +151,46 @@ async function upsertStep(
   if (error) throw new Error(`Schritt konnte nicht gespeichert werden: ${error.message}`);
 }
 
-function textPatch(out: TextOutput): Record<string, unknown> {
-  const html = renderBlocksHtml(out.blocks);
-  return { html, markdown: htmlToMarkdown(html), title: out.title, meta_description: out.meta_description };
+type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string };
+
+/**
+ * One tool call, plus the step's own second attempt when its `retryHint` asks for one and
+ * enough of the budget is left. Both calls are billed; the better-scored output is kept.
+ */
+async function callStep(
+  spec: ContentStepSpec,
+  context: ContentPipelineContext,
+  models: string[],
+  timeoutMs: number | undefined,
+): Promise<{ output: unknown; calls: ModelCall[] }> {
+  const budget = timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
+  const started = Date.now();
+  const first = await callContentTool({ models, system: spec.system, user: spec.user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs });
+  let output = spec.normalize(first.json, context);
+  const calls: ModelCall[] = [first];
+
+  const hint = spec.retryHint?.(output) ?? null;
+  const remaining = budget - (Date.now() - started);
+  if (hint && remaining >= MIN_RETRY_MS) {
+    try {
+      const second = await callContentTool({
+        models,
+        system: spec.system,
+        user: `${spec.user}\n\n${hint}`,
+        tool: spec.tool,
+        maxTokens: spec.maxTokens,
+        timeoutMs: remaining,
+      });
+      calls.push(second);
+      const retried = spec.normalize(second.json, context);
+      const better = spec.score ? spec.score(retried) >= spec.score(output) : true;
+      if (better) output = retried;
+    } catch (error) {
+      // The first attempt stands; a failed retry must not cost the step.
+      console.warn("[content] retry inside step failed:", error instanceof Error ? error.message : error);
+    }
+  }
+  return { output, calls };
 }
 
 export async function runContentStep(
@@ -164,27 +214,26 @@ export async function runContentStep(
   const { context, avatarId } = await loadContext(service, page, steps);
   const models = await loadContentModelConfig(service);
   const spec = contentStepSpec(step, context);
-  const { json, usage, model } = await callContentTool({
-    models: models[def.tier],
-    system: spec.system,
-    user: spec.user,
-    tool: spec.tool,
-    maxTokens: spec.maxTokens,
-    timeoutMs,
-  });
-  const output = spec.normalize(json, context);
-  const costEur = estimateCostEur(model, usage);
+  const { output, calls } = await callStep(spec, context, models[def.tier], timeoutMs);
+  const model = calls[calls.length - 1]!.model;
+  const usage = calls.reduce(
+    (sum, call) => ({ inputTokens: sum.inputTokens + call.usage.inputTokens, outputTokens: sum.outputTokens + call.usage.outputTokens }),
+    { inputTokens: 0, outputTokens: 0 },
+  );
+  const costEur = calls.reduce((sum, call) => sum + estimateCostEur(call.model, call.usage), 0);
 
-  await recordLlmUsageEvent(service, {
-    organisationId: page.organisation_id,
-    userId: page.started_by,
-    agentId: avatarId,
-    mode: `content.${step}`,
-    via: "direct",
-    model,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-  });
+  for (const call of calls) {
+    await recordLlmUsageEvent(service, {
+      organisationId: page.organisation_id,
+      userId: page.started_by,
+      agentId: avatarId,
+      mode: `content.${step}`,
+      via: "direct",
+      model: call.model,
+      inputTokens: call.usage.inputTokens,
+      outputTokens: call.usage.outputTokens,
+    });
+  }
 
   // „Stoppen“ or „Zurücksetzen“ while the model was answering: the cost is recorded above,
   // the result must not land on a page that is no longer running (or no longer exists).
@@ -197,61 +246,8 @@ export async function runContentStep(
     return { step, halted: true, discarded: true, model, costEur };
   }
 
-  const pagePatch: Record<string, unknown> = { cost_eur: roundEur(num(page.cost_eur) + costEur) };
-  let stepStatus: ContentStepRow["status"] = "done";
-  let halted = false;
-
-  switch (step) {
-    case 1: {
-      const out = output as RechercheOutput;
-      if (out.main_keyword) pagePatch.main_keyword = out.main_keyword;
-      break;
-    }
-    case 2: {
-      const out = output as GliederungOutput;
-      if (out.outline.length === 0) throw new ContentLlmError("Die Gliederung war leer.", true);
-      if (out.title) pagePatch.title = out.title;
-      if (out.meta_description) pagePatch.meta_description = out.meta_description;
-      break;
-    }
-    case CONTENT_STEP_FAKTENCHECK: {
-      const out = output as FaktencheckOutput;
-      pagePatch.findings = out.findings;
-      pagePatch.questions = out.questions;
-      if (out.questions.some((q) => q.blocking)) {
-        pagePatch.state = "braucht_sie";
-        pagePatch.job_id = null;
-        stepStatus = "waiting";
-        halted = true;
-      }
-      break;
-    }
-    case 7: {
-      const out = output as LektoratOutput;
-      if (out.blocks.length === 0) throw new ContentLlmError("Das Lektorat lieferte keinen Text.", true);
-      Object.assign(pagePatch, textPatch(out));
-      pagePatch.final_findings = out.final_findings;
-      break;
-    }
-    case CONTENT_STEP_ENDABNAHME: {
-      const out = output as EndabnahmeOutput;
-      pagePatch.unresolved = out.unresolved;
-      pagePatch.state = "fertig";
-      pagePatch.released = false;
-      pagePatch.job_id = null;
-      stepStatus = "waiting";
-      halted = true;
-      break;
-    }
-    default: {
-      if (def.writesText) {
-        const out = output as TextOutput;
-        if (out.blocks.length === 0) throw new ContentLlmError("Die KI hat keinen Text geliefert.", true);
-        Object.assign(pagePatch, textPatch(out));
-        if (step > CONTENT_STEP_FAKTENCHECK) pagePatch.findings = [];
-      }
-    }
-  }
+  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output);
+  pagePatch.cost_eur = roundEur(num(page.cost_eur) + costEur);
 
   await upsertStep(service, page, step, {
     status: stepStatus,
@@ -259,7 +255,7 @@ export async function runContentStep(
     model,
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
-    cost_eur: costEur,
+    cost_eur: roundEur(costEur),
     error: null,
     finished_at: new Date().toISOString(),
   });
