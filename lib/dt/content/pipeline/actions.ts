@@ -289,6 +289,64 @@ export async function deleteContentPage(service: SupabaseClient, page: ContentPa
   return { ok: true, jobId: null };
 }
 
+export type ContentToolResetCounts = { pages: number; steps: number; jobs: number; settings: boolean; structure: boolean };
+
+/**
+ * „Texte komplett zurücksetzen“ for one organisation: every page (steps cascade), every open
+ * content job, and on request the confirmed settings and the uploaded Seitenstruktur — the
+ * last one has to go, or the next overview load would recreate the pages from it. The crawl
+ * of the website (`dt_site_pages`), avatars and Anbieterfakten stay.
+ */
+export async function resetContentTool(
+  service: SupabaseClient,
+  organisationId: string,
+  options: { settings: boolean; structure: boolean },
+): Promise<{ ok: true; counts: ContentToolResetCounts } | { ok: false; status: number; message: string }> {
+  const { data: killed, error: jobsError } = await service
+    .from("jobs")
+    .update({
+      status: "dead",
+      last_error: STOPPED_BY_USER,
+      locked_at: null,
+      locked_by: null,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("kind", CONTENT_JOB_KIND)
+    .eq("organisation_id", organisationId)
+    .in("status", ["pending", "running"])
+    .select("id");
+  if (jobsError) return { ok: false, status: 500, message: `Jobs konnten nicht gestoppt werden: ${jobsError.message}` };
+
+  const [{ count: pages, error: pagesError }, { count: steps, error: stepsError }] = await Promise.all([
+    service.from("dt_content_pages").select("id", { count: "exact", head: true }).eq("organisation_id", organisationId),
+    service.from("dt_content_steps").select("id", { count: "exact", head: true }).eq("organisation_id", organisationId),
+  ]);
+  if (pagesError) return { ok: false, status: 500, message: `Seiten konnten nicht gezählt werden: ${pagesError.message}` };
+  if (stepsError) return { ok: false, status: 500, message: `Schritte konnten nicht gezählt werden: ${stepsError.message}` };
+
+  const { error: deleteError } = await service.from("dt_content_pages").delete().eq("organisation_id", organisationId);
+  if (deleteError) return { ok: false, status: 500, message: `Seiten konnten nicht gelöscht werden: ${deleteError.message}` };
+
+  if (options.settings) {
+    const { error } = await service.from("dt_content_settings").delete().eq("organisation_id", organisationId);
+    if (error) return { ok: false, status: 500, message: `Einstellungen konnten nicht gelöscht werden: ${error.message}` };
+  }
+  if (options.structure) {
+    const { error } = await service.from("dt_website_structures").delete().eq("organisation_id", organisationId);
+    if (error) return { ok: false, status: 500, message: `Seitenstruktur konnte nicht gelöscht werden: ${error.message}` };
+  }
+  return {
+    ok: true,
+    counts: {
+      pages: pages ?? 0,
+      steps: steps ?? 0,
+      jobs: killed?.length ?? 0,
+      settings: options.settings,
+      structure: options.structure,
+    },
+  };
+}
+
 /** "Mit Anmerkung wiederholen": note becomes a standing instruction, pipeline restarts at `step`. */
 export async function rerunContentStep(
   service: SupabaseClient,

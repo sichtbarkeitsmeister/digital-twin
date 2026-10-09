@@ -271,6 +271,21 @@ export type ContentStructureUploadResult = {
   overview: ContentOverview;
 };
 
+/**
+ * `POST /api/dt/content/reset-all`: Texte of one organisation back to an empty start — pages
+ * with steps, questions and cost, open jobs, the confirmed settings and the uploaded
+ * Seitenstruktur. Crawl data, avatars and Anbieterfakten are not touched.
+ */
+export type ContentToolResetResult = {
+  pages: number;
+  steps: number;
+  /** Open content jobs that were ended. */
+  jobs: number;
+  settings: boolean;
+  structure: boolean;
+  overview: ContentOverview;
+};
+
 /** `PATCH /api/dt/content/pages/[slug]`: the editor changed the page type. */
 export type ContentPagePatchResult = { review: ContentReview; overview: ContentOverview };
 

@@ -34,7 +34,7 @@ import {
   judgeContentJob,
   type ContentJobState,
 } from "../lib/dt/content/job-state";
-import { deleteContentPage, resetContentPage, stopContentRun } from "../lib/dt/content/pipeline/actions";
+import { deleteContentPage, resetContentPage, resetContentTool, stopContentRun } from "../lib/dt/content/pipeline/actions";
 import { CONTENT_JOB_GONE_MESSAGE, planContentPageRepairs } from "../lib/dt/content/pipeline/health";
 import { describeAnbieterSources, describeSeiten, readinessFromLocal } from "../lib/dt/content/route-helpers";
 import {
@@ -858,6 +858,48 @@ async function runStopAndReset() {
   assert.equal(jobs.find((j) => j.id === "jx")?.status, "pending");
 }
 
+/** „Alles zurücksetzen“: the tool of one organisation is empty afterwards, other organisations untouched. */
+async function runResetTool() {
+  const ORG = "00000000-0000-0000-0000-00000000cccc";
+  const OTHER = "00000000-0000-0000-0000-00000000dddd";
+  const mem = memoryClient();
+  mem.tables.set("dt_content_pages", [
+    { ...base, id: "p-a", organisation_id: ORG, slug: "a", state: "laeuft", step: 2, job_id: "j-a", html: "<p>a</p>" },
+    { ...base, id: "p-b", organisation_id: ORG, slug: "b", state: "fertig", released: true, html: "<p>b</p>" },
+    { ...base, id: "p-o", organisation_id: OTHER, slug: "o", state: "in_arbeit", html: "<p>o</p>" },
+  ]);
+  mem.tables.set("dt_content_steps", [
+    { page_id: "p-a", organisation_id: ORG, step: 1, status: "done" },
+    { page_id: "p-o", organisation_id: OTHER, step: 1, status: "done" },
+  ]);
+  mem.tables.set("dt_content_settings", [{ organisation_id: ORG, anrede: "Sie" }, { organisation_id: OTHER, anrede: "Du" }]);
+  mem.tables.set("dt_website_structures", [{ organisation_id: ORG, raw_text: "- A /a" }, { organisation_id: OTHER, raw_text: "- O /o" }]);
+  mem.tables.set("jobs", [
+    { id: "j-a", kind: "content.page", organisation_id: ORG, dedupe_key: "content.page:p-a", status: "running" },
+    { id: "j-done", kind: "content.page", organisation_id: ORG, dedupe_key: "content.page:p-b", status: "succeeded" },
+    { id: "j-o", kind: "content.page", organisation_id: OTHER, dedupe_key: "content.page:p-o", status: "pending" },
+    { id: "j-crawl", kind: "seo.crawl", organisation_id: ORG, dedupe_key: null, status: "pending" },
+  ]);
+  const client = mem.client as unknown as Parameters<typeof resetContentTool>[0];
+
+  const result = await resetContentTool(client, ORG, { settings: true, structure: true });
+  assert.equal(result.ok, true);
+  assert.deepEqual(mem.tables.get("dt_content_pages")!.map((r) => r.organisation_id), [OTHER], "only this organisation's pages go");
+  assert.deepEqual(mem.tables.get("dt_content_settings")!.map((r) => r.organisation_id), [OTHER], "the confirmed settings are forgotten");
+  assert.deepEqual(mem.tables.get("dt_website_structures")!.map((r) => r.organisation_id), [OTHER], "the structure goes, so no page comes back on the next load");
+  const jobs = mem.tables.get("jobs")!;
+  assert.equal(jobs.find((j) => j.id === "j-a")?.status, "dead", "the running content job is ended");
+  assert.equal(jobs.find((j) => j.id === "j-done")?.status, "succeeded", "finished jobs stay as history");
+  assert.equal(jobs.find((j) => j.id === "j-o")?.status, "pending", "another organisation's job is left alone");
+  assert.equal(jobs.find((j) => j.id === "j-crawl")?.status, "pending", "a crawl job is not a content job");
+
+  const keep = await resetContentTool(client, OTHER, { settings: false, structure: false });
+  assert.equal(keep.ok, true);
+  assert.equal(mem.tables.get("dt_content_pages")!.length, 0);
+  assert.equal(mem.tables.get("dt_content_settings")!.length, 1, "settings kept on request");
+  assert.equal(mem.tables.get("dt_website_structures")!.length, 1, "structure kept on request");
+}
+
 // --- model config and pricing -----------------------------------------------------------------
 const defaults = resolveContentModels({}, {});
 assert.equal(defaults.write[0], DEFAULT_CONTENT_MODEL);
@@ -883,6 +925,7 @@ assert.equal(resolveContentApiKey({ ANTHROPIC_API_KEY: "shared", [CONTENT_API_KE
 
 runStoredPages()
   .then(() => runStopAndReset())
+  .then(() => runResetTool())
   .then(() => console.log("OK: content tests passed"))
   .catch((error) => {
     console.error(error);
