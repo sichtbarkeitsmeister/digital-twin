@@ -32,6 +32,7 @@ import {
   type ContentPageRow,
   type ContentStepRow,
 } from "@/lib/dt/content/store";
+import { loadContentTypePromptsForRun } from "@/lib/dt/content/type-prompts-db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
 export type StepOutcome = {
@@ -72,12 +73,13 @@ async function loadContext(
   page: ContentPageRow,
   steps: ContentStepRow[],
 ): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
     loadContentAnbieterSources(service, page.organisation_id),
     loadContentPageOutline(service, page.organisation_id),
     loadExistingText(service, page),
+    loadContentTypePromptsForRun(service),
   ]);
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind noch nicht bestätigt.", false);
@@ -128,6 +130,7 @@ async function loadContext(
       sections,
       settings: settingsFromRow(settingsRow),
       avatar: avatar ? { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } : null,
+      typePrompts,
       notes: page.notes,
       outputs,
       blocks: parseBlocksFromHtml(page.html),

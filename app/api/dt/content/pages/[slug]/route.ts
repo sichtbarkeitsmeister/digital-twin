@@ -10,7 +10,13 @@ import {
   isValidContentSlug,
   readJsonBody,
 } from "@/lib/dt/content/route-helpers";
-import { buildReview, loadContentPage, loadContentSteps, updateContentPageType } from "@/lib/dt/content/store";
+import {
+  buildReview,
+  contentPageTypeChangeBlocker,
+  loadContentPage,
+  loadContentSteps,
+  updateContentPageType,
+} from "@/lib/dt/content/store";
 import type { ContentPagePatchResult } from "@/lib/dt/content/types";
 
 const patchSchema = z.object({
@@ -18,7 +24,11 @@ const patchSchema = z.object({
   page_type: z.enum(CONTENT_PAGE_TYPES),
 });
 
-/** „Seitentyp“ in the drawer: the editor overrides what the Excel or the crawl guess derived. */
+/**
+ * „Seitentyp“ in the drawer. Only crawl pages: their type is a guess from name and depth and
+ * the editor corrects it by hand (not while the page runs). Pages from the Excel keep the
+ * type the Excel gave them; a corrected Excel is the way to change it.
+ */
 export async function PATCH(req: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   if (!isValidContentSlug(slug)) return contentError("Ungültige Seite.", 400);
@@ -33,10 +43,11 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
   try {
     const page = await loadContentPage(gate.service, gate.organisationId, slug);
     if (!page) return contentError("Seite nicht gefunden.", 404);
-    if (page.state === "laeuft") return contentError("Die Seite läuft gerade – erst stoppen, dann den Seitentyp ändern.", 409);
+    const blocker = contentPageTypeChangeBlocker(page);
+    if (blocker) return contentError(blocker.message, blocker.status);
 
     const saved = await updateContentPageType(gate.service, page, parsed.data.page_type);
-    if (!saved.ok) return contentError(saved.error, 500);
+    if (!saved.ok) return contentError(saved.error, saved.status);
 
     const [fresh, steps, overview] = await Promise.all([
       loadContentPage(gate.service, gate.organisationId, slug),
