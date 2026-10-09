@@ -1,7 +1,13 @@
 import { z } from "zod";
 
 import { loadContentOverview } from "@/lib/dt/content/overview";
-import { contentError, contentOk, gateContentRoute, readJsonBody } from "@/lib/dt/content/route-helpers";
+import {
+  contentError,
+  contentOk,
+  gateContentRoute,
+  loadContentCityCandidates,
+  readJsonBody,
+} from "@/lib/dt/content/route-helpers";
 import { syncContentPagesFromCrawl } from "@/lib/dt/content/store";
 import type { ContentCrawlImportResult } from "@/lib/dt/content/types";
 
@@ -19,7 +25,8 @@ export async function POST(req: Request) {
   const { gate } = gated;
 
   try {
-    const synced = await syncContentPagesFromCrawl(gate.service, gate.organisationId);
+    const cities = await loadContentCityCandidates(gate.service, gate.organisationId);
+    const synced = await syncContentPagesFromCrawl(gate.service, gate.organisationId, { cities });
     const overview = await loadContentOverview(gate.service, gate.organisationId);
     const data: ContentCrawlImportResult = { ...synced, overview };
     return contentOk(data);

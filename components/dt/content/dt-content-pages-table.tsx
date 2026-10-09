@@ -4,6 +4,7 @@ import { ArrowRight, FileText, Loader2 } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
+import { CONTENT_PAGE_TYPE_LABELS } from "@/lib/dt/content/page-types";
 import { formatContentDate } from "@/lib/dt/content/presentation";
 import type { ContentPageSummary } from "@/lib/dt/content/types";
 
@@ -118,6 +119,23 @@ export function DtContentPagesTable(props: {
                           Crawl
                         </span>
                       ) : null}
+                      {page.page_type === "nicht_bearbeiten" || page.page_type === "ratgeber" ? (
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-pill px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                            page.page_type === "nicht_bearbeiten"
+                              ? "bg-sbkm-navy/[0.06] text-sbkm-ink-500 dark:bg-white/10 dark:text-white/45"
+                              : "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-200",
+                          )}
+                          title={
+                            page.page_type === "nicht_bearbeiten"
+                              ? "Impressum, Datenschutz, Kontakt und Co. bekommen keinen Text. Der Seitentyp lässt sich im Seitenfenster ändern."
+                              : "Ratgeberartikel: informationell, ohne harten Verkauf"
+                          }
+                        >
+                          {CONTENT_PAGE_TYPE_LABELS[page.page_type]}
+                        </span>
+                      ) : null}
                     </span>
                     {page.source_url || page.path ? (
                       <span
@@ -127,9 +145,11 @@ export function DtContentPagesTable(props: {
                         {page.source_url ?? page.path}
                       </span>
                     ) : null}
-                    {page.main_keyword ? (
+                    {page.main_keyword || page.user_questions > 0 ? (
                       <span className="truncate text-xs text-sbkm-ink-500 dark:text-white/45">
-                        {page.main_keyword}
+                        {[page.main_keyword, page.user_questions > 0 ? `${page.user_questions} Nutzerfragen` : ""]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     ) : null}
                   </div>

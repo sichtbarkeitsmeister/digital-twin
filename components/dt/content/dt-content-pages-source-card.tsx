@@ -9,8 +9,18 @@ import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { formatContentDate } from "@/lib/dt/content/presentation";
-import type { ContentCrawlImportResult, ContentCrawlStatus, ContentLocalSources, ContentOverview } from "@/lib/dt/content/types";
-import { WEBSITE_STRUCTURE_FILE_ACCEPT, readWebsiteStructureFile } from "@/lib/dt/seo/read-website-structure-file";
+import {
+  CONTENT_STRUCTURE_FILE_ACCEPT,
+  CONTENT_STRUCTURE_FILE_HINT,
+  readContentStructureFile,
+} from "@/lib/dt/content/read-content-structure-file";
+import type {
+  ContentCrawlImportResult,
+  ContentCrawlStatus,
+  ContentLocalSources,
+  ContentOverview,
+  ContentStructureUploadResult,
+} from "@/lib/dt/content/types";
 
 export type ContentPagesMode = "structure" | "crawl";
 
@@ -30,7 +40,7 @@ const MODES: Array<{
     id: "structure",
     title: "Excel-Seitenstruktur",
     when: "Kunde ohne Website oder vor dem Relaunch",
-    text: "Vorlage „Seitenstruktur“ ausfüllen und hochladen. Jede Zeile wird eine Seite.",
+    text: "Briefing-Excel hochladen: je Seite URL, Ebene, Keywords, H1-Optionen und Nutzerfragen. Jede Zeile wird eine Seite.",
     icon: FileSpreadsheet,
   },
   {
@@ -125,28 +135,36 @@ export function DtContentPagesSourceCard(props: {
     return () => window.clearInterval(timer);
   }, [mode, crawlActive, loadCrawl]);
 
+  /**
+   * Excel rows go to `/api/dt/content/structure`, which keeps every briefing column on the
+   * page rows and hands SEO → Struktur the same pages as an outline.
+   */
   async function uploadStructure(file: File | undefined) {
     if (!file) return;
     setUploading(true);
     try {
-      const { text, filename, mimeType } = await readWebsiteStructureFile(file);
-      const res = await fetch("/api/dt/seo/website-structure", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organisationId, text, filename, mimeType }),
+      const payload = await readContentStructureFile(file);
+      const res = await contentApi<ContentStructureUploadResult>("/api/dt/content/structure", {
+        method: "POST",
+        body: { organisationId, ...payload },
       });
-      const json = (await res.json().catch(() => null)) as
-        | { ok?: boolean; message?: string; structure?: { nodeCount?: number } }
-        | null;
-      if (!res.ok || !json?.ok) {
-        toast.error(json?.message ?? "Seitenstruktur konnte nicht gespeichert werden.");
+      if (!res.ok) {
+        toast.error(res.message);
         return;
       }
-      const n = json.structure?.nodeCount ?? 0;
-      toast.success(`Seitenstruktur „${filename}“ gespeichert`, {
-        description: n > 0 ? `${n} Einträge erkannt – die Seiten erscheinen jetzt in der Tabelle.` : undefined,
-      });
-      props.onChanged();
+      const d = res.data;
+      const parts = [
+        `${pagesWord(d.pages)} in der Tabelle`,
+        d.keywords > 0 ? `${d.keywords} mit Keywords` : "",
+        d.questions > 0 ? `${d.questions} mit Nutzerfragen` : "",
+        d.h1_options > 0 ? `${d.h1_options} mit H1-Optionen` : "",
+        d.skipped > 0 ? `${d.skipped} nicht zu bearbeiten (Impressum, Kontakt …)` : "",
+        d.layout === "text" || (d.layout === "template" && d.keywords === 0 && d.questions === 0)
+          ? "ohne Briefing-Spalten – Keywords und Fragen erarbeitet die Analyse"
+          : "",
+      ].filter(Boolean);
+      toast.success(`Seitenstruktur „${payload.filename}“ gespeichert`, { description: parts.join(" · ") });
+      props.onChanged(d.overview);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Datei konnte nicht gelesen werden.");
     } finally {
@@ -275,7 +293,7 @@ export function DtContentPagesSourceCard(props: {
               <input
                 ref={fileRef}
                 type="file"
-                accept={WEBSITE_STRUCTURE_FILE_ACCEPT}
+                accept={CONTENT_STRUCTURE_FILE_ACCEPT}
                 className="sr-only"
                 aria-label="Seitenstruktur-Datei wählen"
                 onChange={(event) => {
@@ -297,7 +315,8 @@ export function DtContentPagesSourceCard(props: {
               </Link>
             </div>
             <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-              Excel-Vorlage „Seitenstruktur“ (.xlsx), auch .csv, .txt oder .docx. Seiten mit Text bleiben erhalten.
+              {CONTENT_STRUCTURE_FILE_HINT} Seiten mit Text bleiben erhalten; Keywords, Fragen und Seitentyp folgen der
+              neuen Datei. Impressum, Datenschutz, Kontakt und Co. werden als „Nicht bearbeiten“ angelegt.
             </p>
           </div>
         ) : null}
