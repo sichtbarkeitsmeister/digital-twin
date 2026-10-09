@@ -6,6 +6,7 @@
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
 import type { ContentPageRole, ContentPageType } from "@/lib/dt/content/page-types";
+import type { ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 
 export type ContentPageState =
   | "nicht_begonnen"
@@ -150,6 +151,11 @@ export type ContentAction = {
 export type ContentPageBriefing = {
   source: ContentPageSource;
   page_type: ContentPageType | null;
+  /**
+   * Crawl pages: the editor may change the type (the guess from name and depth can be wrong).
+   * Excel pages: locked, the Excel is the briefing; a corrected Excel changes the type.
+   */
+  type_editable: boolean;
   page_role: ContentPageRole | null;
   pillar_name: string | null;
   main_keyword: string | null;
@@ -284,6 +290,17 @@ export type ContentToolResetResult = {
   settings: boolean;
   structure: boolean;
   overview: ContentOverview;
+};
+
+/** `GET` / `PUT /api/dt/content/type-prompts`: the agency's writing recipes per page type. */
+export type ContentTypePromptsResult = {
+  prompts: ContentTypePrompts;
+  defaults: ContentTypePrompts;
+  storage: "db" | "defaults" | "missing_table";
+  updated_at: string | null;
+  updated_by_email: string | null;
+  /** Set when the table is missing: which migration to run. */
+  hint: string | null;
 };
 
 /** `PATCH /api/dt/content/pages/[slug]`: the editor changed the page type. */

@@ -19,7 +19,12 @@ import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
-import { CONTENT_PAGE_TYPE_LABELS, CONTENT_PAGE_TYPES, type ContentPageType } from "@/lib/dt/content/page-types";
+import {
+  CONTENT_PAGE_TYPE_LABELS,
+  CONTENT_PAGE_TYPES,
+  contentPageTypeLabel,
+  type ContentPageType,
+} from "@/lib/dt/content/page-types";
 import {
   contentActionLabel,
   contentStepStatusLabel,
@@ -540,17 +545,36 @@ export function DtContentPageDrawer(props: {
                           {review.briefing.source === "crawl" ? "aus dem Crawl" : "aus der Excel"}
                         </span>
                       </h3>
-                      <DtSelect
-                        label="Seitentyp"
-                        value={review.briefing.page_type ?? ""}
-                        onValueChange={(next) => void changePageType(next)}
-                        options={PAGE_TYPE_OPTIONS}
-                        placeholder="Noch nicht bestimmt"
-                        disabled={Boolean(busy) || review.public.state === "laeuft"}
-                        elevated
-                        size="sm"
-                        fullWidth
-                      />
+                      {review.briefing.type_editable ? (
+                        <DtSelect
+                          label="Seitentyp"
+                          value={review.briefing.page_type ?? ""}
+                          onValueChange={(next) => void changePageType(next)}
+                          options={PAGE_TYPE_OPTIONS}
+                          placeholder="Noch nicht bestimmt"
+                          disabled={Boolean(busy) || review.public.state === "laeuft"}
+                          elevated
+                          size="sm"
+                          fullWidth
+                        />
+                      ) : (
+                        <div className="grid gap-1">
+                          <span className="text-[11px] font-semibold uppercase tracking-wider text-sbkm-ink-500 dark:text-white/45">
+                            Seitentyp
+                          </span>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span
+                              className="inline-flex rounded-pill bg-sbkm-navy/[0.06] px-2.5 py-1 text-xs font-bold text-sbkm-navy dark:bg-white/10 dark:text-white"
+                              data-testid="content-page-type-locked"
+                            >
+                              {contentPageTypeLabel(review.briefing.page_type)}
+                            </span>
+                            <span className="text-[11px] text-sbkm-ink-500 dark:text-white/45">
+                              aus der Excel – zum Ändern eine korrigierte Excel hochladen
+                            </span>
+                          </span>
+                        </div>
+                      )}
                       <dl className="grid gap-1 text-xs text-sbkm-ink-600 dark:text-white/65">
                         <div className="flex gap-2">
                           <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Hauptkeyword</dt>
