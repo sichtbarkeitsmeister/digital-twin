@@ -17,6 +17,7 @@ import {
 } from "@/components/dt/content/dt-content-pages-table";
 import { DtContentReadinessCard } from "@/components/dt/content/dt-content-readiness-card";
 import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settings-card";
+import { DtContentTypePromptsCard } from "@/components/dt/content/dt-content-type-prompts-card";
 import { CenteredModal } from "@/components/ui/centered-modal";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
@@ -512,6 +513,8 @@ export function DtContentWorkspace(props: {
           )}
         </div>
       </section>
+
+      <DtContentTypePromptsCard />
 
       <CenteredModal
         open={confirmBulk != null}

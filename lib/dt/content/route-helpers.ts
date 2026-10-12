@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { loadContentAnbieterSources, loadContentLocalSources } from "@/lib/dt/content/load-sources";
 import { extractCityCandidates } from "@/lib/dt/content/page-types";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import type { ContentLocalSources, ContentReadiness } from "@/lib/dt/content/types";
 import { createClient } from "@/lib/supabase/server";
@@ -77,6 +78,32 @@ export async function gateContentRoute(
       userEmail: user.email ?? null,
       organisationId: parsed.data,
     },
+  };
+}
+
+export type ContentAgencyGate = Omit<ContentGate, "organisationId">;
+
+/**
+ * Access for agency-wide Texte data (the writing recipes): the same people as every Texte
+ * route, platform administrators, without naming an organisation.
+ */
+export async function gateContentAgencyRoute(): Promise<
+  { ok: true; gate: ContentAgencyGate } | { ok: false; response: NextResponse }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user?.id) {
+    return { ok: false, response: contentError("Nicht angemeldet.", 401) };
+  }
+  if (!(await isPlatformAdmin(supabase, user.id))) {
+    return { ok: false, response: contentError("Texte sind nur für Plattform-Administratoren verfügbar.", 403) };
+  }
+  return {
+    ok: true,
+    gate: { supabase, service: createServiceClient(), userId: user.id, userEmail: user.email ?? null },
   };
 }
 

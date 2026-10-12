@@ -25,6 +25,7 @@ import {
 } from "@/lib/dt/content/page-types";
 import { CONTENT_STEP_ANALYSE, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_LEKTORAT } from "@/lib/dt/content/pipeline/steps";
 import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
+import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
 
 export type ContentPipelinePage = {
@@ -55,6 +56,8 @@ export type ContentPipelineContext = {
   sections: WorkshopAnbieterSection[];
   settings: ContentTextSettings;
   avatar: { name: string; role: string; beschreibung: string } | null;
+  /** The agency's writing recipes per page type („Textvorlagen“); only the SEO step reads them. */
+  typePrompts: ContentTypePrompts;
   /** Human notes from "Mit Anmerkung wiederholen", oldest first. */
   notes: string[];
   /** Normalised outputs of earlier steps, by step number. */
@@ -516,18 +519,12 @@ const TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
 
 // --- page type variants of the SEO step --------------------------------------------------------
 
-function pageTypeRules(page: ContentPipelinePage): string {
-  const pillar = page.pillar_name ? `„${page.pillar_name}“` : "ihr Hauptsilo";
-  switch (page.page_type) {
-    case "hauptsilo":
-      return `Seitentyp Hauptsilo-Seite: Die Seite deckt das Thema in der Breite ab. Unterthemen, die eine eigene Unterseite haben, werden nur angerissen und verlinkt (2–5 interne Links, nur auf erlaubte Linkziele), nicht ausführlich behandelt. Suchintention meist transaktional oder kommerziell-vergleichend: die Seite führt zur Anfrage. Mindestens 3 Frage-Überschriften.`;
-    case "ratgeber":
-      return `Seitentyp Ratgeberartikel: informationell. Aufbau Problem → Lösung → Vertrauen → nächster Schritt. Kein harter Verkauf, keine drängenden Handlungsaufforderungen (Schritt 5 nutzt den Ratgeber-Zyklus). Mindestens 5 Frage-Überschriften. Am Ende ein Abschnitt id „autor“ mit Autor- oder Prüfhinweis: nur mit einem Namen, der in den Anbieterfakten steht; sonst der Platzhalter [BITTE PRÜFEN: Autor oder fachliche Prüfung ergänzen]. Kein erfundener Autor.`;
-    case "standort":
-      return `Seitentyp Standortseite: wie eine Unterseite, Fokus ist die Leistung an diesem Ort. Verlinkt auf ${pillar} ([LINK: …]), wenn ein Hauptsilo angegeben ist. Lokaler Bezug nur aus den Anbieterfakten (Einzugsgebiet, Anfahrt, Besonderheiten, Ansprechpartner); keine erfundenen Ortsangaben, den Ortsnamen nicht stapeln. Mindestens 3 Frage-Überschriften.`;
-    default:
-      return `Seitentyp Unterseite innerhalb eines Hauptsilos: Die Seite geht bei EINEM Unterthema in die Tiefe und verlinkt IMMER auf ${pillar} (Marker [LINK: ${page.pillar_name ?? "Hauptsilo"}]). Das ganze Silo wird nicht noch einmal aufgerollt: gleiches Gerüst, engerer Fokus. Mindestens 3 Frage-Überschriften.`;
-  }
+/**
+ * The recipe („Textvorlage“) for this page's type, from the agency's editable set; the
+ * defaults are the rules that used to be fixed here. Each page writes with its own type.
+ */
+function pageTypeRules(context: ContentPipelineContext): string {
+  return renderContentTypePrompt(context.typePrompts, context.page.page_type, context.page.pillar_name);
 }
 
 // --- the eight steps ---------------------------------------------------------------------------
@@ -737,7 +734,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
     system: `${BASE_RULES}
 
 Schritt 2 SEO: Du schreibst den vollständigen Seitentext auf Basis der Analyse (Schritt 1) und der belegten Fakten.
-${pageTypeRules(page)}
+${pageTypeRules(context)}
 
 Festes Gerüst, in dieser Reihenfolge:
 1. H1 (erster Abschnitt, level 1): kurz, das Hauptkeyword steht vorn. Enthält eine H1-Option aus der Excel das Hauptkeyword, nimm sie wörtlich; sonst formulierst du selbst.

@@ -490,14 +490,38 @@ export async function syncContentPagesFromStructure(
   return { synced: true, pages: written };
 }
 
-/** „Seitentyp“ changed by hand in the drawer. */
+export const CONTENT_TYPE_LOCKED_MESSAGE = "Der Seitentyp kommt aus der Excel und kann hier nicht geändert werden.";
+export const CONTENT_TYPE_RUNNING_MESSAGE = "Die Seite läuft gerade – erst stoppen, dann den Seitentyp ändern.";
+
+/**
+ * Who may change „Seitentyp“: only crawl pages. The Excel is the briefing; a wrong type there
+ * is fixed with a corrected Excel, never by hand in the drawer.
+ */
+export function canEditContentPageType(page: Pick<ContentPageRow, "source">): boolean {
+  return page.source === "crawl";
+}
+
+/** Why the type cannot be changed right now (status and German message), or null when it can. */
+export function contentPageTypeChangeBlocker(
+  page: Pick<ContentPageRow, "source" | "state"> & Partial<ContentPageRow>,
+): { status: number; message: string } | null {
+  if (!canEditContentPageType(page)) return { status: 409, message: CONTENT_TYPE_LOCKED_MESSAGE };
+  if (page.state === "laeuft") return { status: 409, message: CONTENT_TYPE_RUNNING_MESSAGE };
+  return null;
+}
+
+/** „Seitentyp“ changed by hand in the drawer (crawl pages only; a running page waits). */
 export async function updateContentPageType(
   service: SupabaseClient,
   page: ContentPageRow,
   pageType: ContentPageType,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const blocker = contentPageTypeChangeBlocker(page);
+  if (blocker) return { ok: false, status: blocker.status, error: blocker.message };
   const { error } = await service.from("dt_content_pages").update({ page_type: pageType }).eq("id", page.id);
-  return error ? { ok: false, error: contentDbErrorMessage(error, "Seitentyp konnte nicht gespeichert werden") } : { ok: true };
+  return error
+    ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Seitentyp konnte nicht gespeichert werden") }
+    : { ok: true };
 }
 
 export type ContentOutlinePage = Pick<
@@ -794,6 +818,7 @@ export function pageBriefing(page: ContentPageRow): ContentPageBriefing {
   return {
     source: page.source,
     page_type: page.page_type ?? effectiveContentPageType(page),
+    type_editable: canEditContentPageType(page),
     page_role: page.page_role,
     pillar_name: page.pillar_name,
     main_keyword: page.keywords?.main.text ?? page.main_keyword,

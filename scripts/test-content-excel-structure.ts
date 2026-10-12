@@ -46,7 +46,22 @@ import {
   runningPageDetail,
 } from "../lib/dt/content/pipeline/steps";
 import { parseBlocksFromHtml } from "../lib/dt/content/render";
-import { contentStructureOutline } from "../lib/dt/content/store";
+import {
+  CONTENT_TYPE_LOCKED_MESSAGE,
+  canEditContentPageType,
+  contentPageTypeChangeBlocker,
+  contentStructureOutline,
+  pageBriefing,
+  type ContentPageRow,
+} from "../lib/dt/content/store";
+import {
+  CONTENT_TYPE_PROMPT_KEYS,
+  CONTENT_TYPE_PROMPT_MAX_CHARS,
+  DEFAULT_CONTENT_TYPE_PROMPTS,
+  hasCustomContentTypePrompts,
+  normalizeContentTypePrompts,
+  renderContentTypePrompt,
+} from "../lib/dt/content/type-prompts";
 import { parseWebsiteStructure } from "../lib/dt/seo/website-structure";
 
 // --- cells ------------------------------------------------------------------------------------
@@ -347,6 +362,7 @@ const context = (patch: Partial<ContentPipelineContext["page"]> = {}, extra: Par
   sections: [{ key: "unternehmen", label: "Unternehmen & Kern", current: "Steiner Umzüge aus Köln, Festpreis nach Besichtigung." }],
   settings: { anrede: "Sie", branche: "handwerk", tonalitaet: "herzlich", verbotene_woerter: ["billig"] },
   avatar: { name: "Familie Berg", role: "Privatkunde", beschreibung: "Zieht mit zwei Kindern innerhalb Kölns um." },
+  typePrompts: { ...DEFAULT_CONTENT_TYPE_PROMPTS },
   notes: ["Keine Preise nennen."],
   outputs: {},
   blocks: [],
@@ -388,8 +404,57 @@ assert.match(seoRatgeber.system, /Ratgeberartikel/);
 assert.match(seoRatgeber.system, /Mindestens 5 Frage-Überschriften/);
 assert.match(seoRatgeber.system, /Kein erfundener Autor/);
 const seoUnterseite = contentStepSpec(2, context({ page_type: "unterseite", page_role: "supporting", pillar_name: "Privatumzug", name: "Seniorenumzug" }));
-assert.match(seoUnterseite.system, /verlinkt IMMER auf „Privatumzug“/);
+assert.match(seoUnterseite.system, /verlinkt IMMER auf ihr Hauptsilo „Privatumzug“ \(Marker \[LINK: Privatumzug\]\)/, "[Hauptsilo] becomes the pillar name");
 assert.match(contentStepSpec(2, context({ page_type: "standort" })).system, /Standortseite/);
+
+// --- Textvorlagen: the agency's recipes feed the SEO step, and only the SEO step --------------
+
+assert.deepEqual(normalizeContentTypePrompts(null), DEFAULT_CONTENT_TYPE_PROMPTS, "no row → the defaults");
+assert.deepEqual(normalizeContentTypePrompts({ hauptsilo: "   ", ratgeber: "" }), DEFAULT_CONTENT_TYPE_PROMPTS, "blank recipes are never stored");
+const saved = normalizeContentTypePrompts({ hauptsilo: "  Hauptsilo nach Hausrezept: nur drei Abschnitte.  ", standort: "x".repeat(CONTENT_TYPE_PROMPT_MAX_CHARS + 50) });
+assert.equal(saved.hauptsilo, "Hauptsilo nach Hausrezept: nur drei Abschnitte.");
+assert.equal(saved.standort.length, CONTENT_TYPE_PROMPT_MAX_CHARS, "capped at the maximum");
+assert.equal(saved.unterseite, DEFAULT_CONTENT_TYPE_PROMPTS.unterseite, "untouched recipes keep the default");
+assert.equal(hasCustomContentTypePrompts(DEFAULT_CONTENT_TYPE_PROMPTS), false);
+assert.equal(hasCustomContentTypePrompts(saved), true);
+assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "unterseite", "ratgeber", "standort"], "nicht_bearbeiten has no recipe");
+assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "nicht_bearbeiten", null), renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "unterseite", null));
+assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "unterseite", null), /auf ihr Hauptsilo „Hauptsilo“/, "without a pillar the word stays");
+
+const customContext = context({ page_type: "hauptsilo" }, { typePrompts: saved });
+const seoCustom = contentStepSpec(2, customContext);
+assert.match(seoCustom.system, /Hauptsilo nach Hausrezept: nur drei Abschnitte\./, "the saved Hauptsilo recipe is in the SEO system prompt");
+assert.doesNotMatch(seoCustom.system, /2–5 interne Links/, "the default Hauptsilo rule is replaced, not appended");
+assert.match(seoCustom.system, /Tatsachen \(Leistungen, Zahlen, Namen, Preise/, "the locked rules stay");
+assert.match(seoCustom.system, new RegExp(CONTENT_HERO_PLACEHOLDER.replace(/[[\]]/g, "\\$&")), "the hero placeholder stays");
+assert.match(contentStepSpec(2, context({ page_type: "unterseite", pillar_name: "Privatumzug" }, { typePrompts: saved })).system, /Marker \[LINK: Privatumzug\]/, "each page still writes with its own type");
+for (const step of [1, 3, 4, 5, 6, 7, 8]) {
+  assert.doesNotMatch(contentStepSpec(step, customContext).system, /Hausrezept/, `step ${step} does not read the recipes`);
+}
+console.log("textvorlagen: ok");
+
+// --- who may change the Seitentyp ---------------------------------------------------------------
+
+const excelPage: ContentPageRow = {
+  id: "p1", organisation_id: "o1", slug: "privatumzug", name: "Privatumzug", path: "/privatumzug", level: 1, position: 1, source: "structure", source_url: null, crawled_at: null,
+  main_keyword: null, page_role: "pillar", page_type: "hauptsilo", pillar_name: null, estimated_traffic: null, keywords: null, h1_options: [], user_questions: [], ki_prompt: null, internal_link_targets: [],
+  state: "nicht_begonnen", step: null, released: false, released_at: null, title: null, meta_description: null, html: "", markdown: "",
+  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], error: null, job_id: null, cost_eur: 0, started_by: null, created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:00:00Z",
+};
+const crawlPage: ContentPageRow = { ...excelPage, id: "p2", slug: "dach", source: "crawl", source_url: "https://x.de/dach", page_role: null, page_type: "unterseite" };
+assert.deepEqual(contentPageTypeChangeBlocker(excelPage), { status: 409, message: CONTENT_TYPE_LOCKED_MESSAGE });
+assert.equal(CONTENT_TYPE_LOCKED_MESSAGE, "Der Seitentyp kommt aus der Excel und kann hier nicht geändert werden.");
+assert.deepEqual(contentPageTypeChangeBlocker({ ...excelPage, page_type: "nicht_bearbeiten" })?.message, CONTENT_TYPE_LOCKED_MESSAGE, "nicht_bearbeiten from the Excel stays locked");
+assert.deepEqual(contentPageTypeChangeBlocker({ ...excelPage, state: "fertig" })?.message, CONTENT_TYPE_LOCKED_MESSAGE);
+assert.equal(contentPageTypeChangeBlocker(crawlPage), null, "a crawl page may be changed");
+assert.equal(contentPageTypeChangeBlocker({ ...crawlPage, page_type: "nicht_bearbeiten" }), null, "a wrongly guessed Kontakt can be corrected");
+assert.equal(contentPageTypeChangeBlocker({ ...crawlPage, state: "fertig" }), null, "also after a run");
+assert.match(contentPageTypeChangeBlocker({ ...crawlPage, state: "laeuft" })?.message ?? "", /läuft gerade/, "not while it runs");
+assert.equal(canEditContentPageType(excelPage), false);
+assert.equal(canEditContentPageType(crawlPage), true);
+assert.equal(pageBriefing(excelPage).type_editable, false, "the drawer shows a label for Excel pages");
+assert.equal(pageBriefing(crawlPage).type_editable, true, "the drawer shows the select for crawl pages");
+console.log("seitentyp lock: ok");
 
 const geo = contentStepSpec(4, context());
 assert.match(geo.system, /GEO/);
