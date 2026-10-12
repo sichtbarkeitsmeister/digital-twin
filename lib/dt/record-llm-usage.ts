@@ -13,6 +13,10 @@ export type RecordLlmUsageInput = {
   model?: string | null;
   inputTokens: number;
   outputTokens: number;
+  /** Websuchen (Anthropic server tool) in dieser Antwort. */
+  webSearchRequests?: number;
+  /** Web-Abrufe (Anthropic server tool) in dieser Antwort. */
+  webFetchRequests?: number;
 };
 
 export async function recordLlmUsageEvent(
@@ -21,7 +25,9 @@ export async function recordLlmUsageEvent(
 ): Promise<void> {
   const inputTokens = Math.max(0, Math.floor(input.inputTokens));
   const outputTokens = Math.max(0, Math.floor(input.outputTokens));
-  if (inputTokens === 0 && outputTokens === 0) return;
+  const webSearchRequests = Math.max(0, Math.floor(input.webSearchRequests ?? 0));
+  const webFetchRequests = Math.max(0, Math.floor(input.webFetchRequests ?? 0));
+  if (inputTokens === 0 && outputTokens === 0 && webSearchRequests === 0) return;
 
   const { error } = await supabase.from("dt_llm_usage_events").insert({
     organisation_id: input.organisationId,
@@ -34,6 +40,8 @@ export async function recordLlmUsageEvent(
     model: input.model ?? null,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    web_search_requests: webSearchRequests,
+    web_fetch_requests: webFetchRequests,
   });
 
   if (error) {

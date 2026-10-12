@@ -22,6 +22,14 @@ import {
 import { formatSerpSnippetCheckForTool } from "@/lib/dt/seo/serp-pixel";
 import { updateGroundingPageForTool } from "@/lib/dt/seo/grounding-tools";
 import {
+  appendWebResearchNotes,
+  DT_WEB_RESEARCH_TOOLS,
+  inspectWebResearchBlocks,
+  mergeWebResearchUsage,
+  sumServerToolUsage,
+  type DtWebResearchUsage,
+} from "@/lib/dt/seo/web-research";
+import {
   deleteSeoTaskForTool,
   updateSeoTaskForTool,
 } from "@/lib/dt/seo/task-tools";
@@ -47,6 +55,10 @@ const MAX_TRUNCATION_RECOVERIES = 2;
 export type DtAnthropicUsage = {
   inputTokens: number;
   outputTokens: number;
+  /** Websuchen (Anthropic server tool) in dieser Antwort — kostet extra. */
+  webSearchRequests?: number;
+  /** Web-Abrufe (Anthropic server tool) in dieser Antwort — nur Tokens. */
+  webFetchRequests?: number;
 };
 
 export type DtAnthropicChatResult = {
@@ -640,14 +652,15 @@ export async function callDtAnthropicChat(params: {
   const roundTimeoutMs = params.mode === "seo" ? 180_000 : 120_000;
 
   const retrievalOrgId = params.mode === "seo" ? params.retrieval?.organisationId : undefined;
-  const tools: Anthropic.Tool[] = retrievalOrgId
-    ? [...DT_SEO_RETRIEVAL_TOOLS, DT_CREATE_FILE_TOOL]
+  // SEO mode also gets Anthropic's server-side web search + web fetch (max uses per answer).
+  const tools: Anthropic.ToolUnion[] = retrievalOrgId
+    ? [...DT_SEO_RETRIEVAL_TOOLS, DT_CREATE_FILE_TOOL, ...DT_WEB_RESEARCH_TOOLS]
     : [DT_CREATE_FILE_TOOL];
   const createdFiles: DtCreatedChatFile[] = [];
 
   const createRound = async (input: {
     convo: Anthropic.MessageParam[];
-    tools?: Anthropic.Tool[];
+    tools?: Anthropic.ToolUnion[];
   }): Promise<{ response: Anthropic.Message; model: string }> => {
     const result = await callAnthropicFirstAvailable({
       anthropic: client,
@@ -692,15 +705,21 @@ export async function callDtAnthropicChat(params: {
   const answer = new DtAnswerAccumulator();
   let usedModel = models[0] ?? resolveDtAnthropicModel(params.mode);
   let totalUsage: DtAnthropicUsage = { inputTokens: 0, outputTokens: 0 };
+  let webUsage: DtWebResearchUsage = { webSearchRequests: 0, webFetchRequests: 0 };
+  /** Every content block seen across rounds: web-search limit errors + citations live here. */
+  const seenBlocks: unknown[] = [];
   let recoveries = 0;
   // True while the current round continues text that the limit cut off.
   let continuing = false;
 
   const finish = (resp: Anthropic.Message): DtAnthropicChatResult => ({
-    text: answer.finish(resp, continuing),
+    text: appendWebResearchNotes(
+      answer.finish(resp, continuing),
+      inspectWebResearchBlocks(seenBlocks),
+    ),
     model: usedModel,
     stopReason: resp.stop_reason ?? null,
-    usage: totalUsage,
+    usage: { ...totalUsage, ...webUsage },
     createdFiles,
   });
 
@@ -712,6 +731,17 @@ export async function callDtAnthropicChat(params: {
     const resp = roundResult.response;
     usedModel = roundResult.model;
     totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(resp.usage));
+    webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(resp.usage));
+    seenBlocks.push(...resp.content);
+
+    // Server tools (web search / fetch) may pause a long turn: keep the text so far,
+    // hand the content back unchanged and let the model continue.
+    if (resp.stop_reason === "pause_turn") {
+      answer.add(extractAnthropicText(resp), continuing);
+      continuing = false;
+      convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
+      continue;
+    }
 
     const toolUses = resp.content.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
@@ -770,6 +800,8 @@ export async function callDtAnthropicChat(params: {
   usedModel = finalRound.model;
   const finalResp = finalRound.response;
   totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(finalResp.usage));
+  webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(finalResp.usage));
+  seenBlocks.push(...finalResp.content);
 
   return finish(finalResp);
 }
