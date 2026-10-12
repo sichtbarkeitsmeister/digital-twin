@@ -16,12 +16,25 @@ import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import {
   contentStepSpec,
+  rephraseChunkPrompt,
   type ContentPipelineContext,
   type ContentStepSpec,
+  type TextOutput,
 } from "@/lib/dt/content/pipeline/prompts";
+import {
+  REPHRASE_CHUNK_TIMEOUT_MS,
+  REPHRASE_MIN_REMAINING_MS,
+  needsRephrase,
+  parseRephrasedChunk,
+  planRephraseChunks,
+  readRephraseProgress,
+  rephraseChunkMaxTokens,
+  rephrasedBlocks,
+  type RephraseProgress,
+} from "@/lib/dt/content/pipeline/rephrase";
 import { stepPatchFor } from "@/lib/dt/content/pipeline/step-patch";
 import { contentStepDefinition, type ContentStepDefinition } from "@/lib/dt/content/pipeline/steps";
-import { callXaiTool } from "@/lib/dt/content/pipeline/xai";
+import { callXaiText, resolveXaiModels } from "@/lib/dt/content/pipeline/xai";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
@@ -43,6 +56,11 @@ export type StepOutcome = {
   halted: boolean;
   /** The page was stopped or reset while the model was answering; nothing was saved. */
   discarded?: boolean;
+  /**
+   * The step saved its progress but is not done (step 8 ran out of job budget between two
+   * chunks): the job continues it in the next tick, without counting a failed attempt.
+   */
+  partial?: boolean;
   model: string;
   costEur: number;
 };
@@ -159,23 +177,20 @@ async function upsertStep(
 type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string };
 
 /**
- * One tool call on the step's provider (Claude for every step but 8, Grok for step 8), plus
- * the step's own second attempt when its `retryHint` asks for one and enough of the budget
- * is left. Both calls are billed; the better-scored output is kept.
+ * One tool call on Claude, plus the step's own second attempt when its `retryHint` asks for
+ * one and enough of the budget is left. Both calls are billed; the better-scored output is
+ * kept. Step 8 does not come through here (see `runRephraseStep`).
  */
 async function callStep(
   spec: ContentStepSpec,
   context: ContentPipelineContext,
-  def: ContentStepDefinition,
   models: string[],
   timeoutMs: number | undefined,
 ): Promise<{ output: unknown; calls: ModelCall[] }> {
   const budget = timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const started = Date.now();
   const invoke = (user: string, timeout: number | undefined): Promise<ModelCall> =>
-    def.provider === "xai"
-      ? callXaiTool({ system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout })
-      : callContentTool({ models, system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout });
+    callContentTool({ models, system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout });
   const first = await invoke(spec.user, timeoutMs);
   let output = spec.normalize(first.json, context);
   const calls: ModelCall[] = [first];
@@ -216,9 +231,12 @@ export async function runContentStep(
   await service.from("dt_content_pages").update({ step, error: null }).eq("id", page.id);
 
   const { context, avatarId } = await loadContext(service, page, steps);
+  if (def.provider === "xai") {
+    return runRephraseStep({ service, page, def, steps, context, avatarId, timeoutMs });
+  }
   const models = await loadContentModelConfig(service);
   const spec = contentStepSpec(step, context);
-  const { output, calls } = await callStep(spec, context, def, models[def.tier], timeoutMs);
+  const { output, calls } = await callStep(spec, context, models[def.tier], timeoutMs);
   const model = calls[calls.length - 1]!.model;
   const usage = calls.reduce(
     (sum, call) => ({ inputTokens: sum.inputTokens + call.usage.inputTokens, outputTokens: sum.outputTokens + call.usage.outputTokens }),
@@ -267,6 +285,97 @@ export async function runContentStep(
   if (error) throw new Error(`Seite konnte nicht gespeichert werden: ${error.message}`);
 
   return { step, halted, model, costEur };
+}
+
+/** Stopped or reset while the model was answering? Then nothing more is saved for this page. */
+async function pageStillRunning(service: SupabaseClient, pageId: string): Promise<boolean> {
+  const { data, error } = await service.from("dt_content_pages").select("state").eq("id", pageId).maybeSingle();
+  return Boolean(error) || data?.state === "laeuft";
+}
+
+/**
+ * Step 8 on Grok, in chunks. Each group of sections is one short call; the rewritten HTML
+ * lands in the step row's output after every call, so a worker that dies or a job budget
+ * that runs out loses at most one chunk. With little budget left the step hands back
+ * `partial`, the job reschedules without a failed attempt, and the next tick resumes with
+ * the chunks still open. Every call is billed on the page like the Claude steps.
+ */
+async function runRephraseStep(input: {
+  service: SupabaseClient;
+  page: ContentPageRow;
+  def: ContentStepDefinition;
+  steps: ContentStepRow[];
+  context: ContentPipelineContext;
+  avatarId: string | null;
+  timeoutMs: number | undefined;
+}): Promise<StepOutcome> {
+  const { service, page, def, context } = input;
+  const deadline = Date.now() + (input.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS);
+  const total = context.blocks.filter(needsRephrase).length;
+  const progress: RephraseProgress = readRephraseProgress(input.steps.find((s) => s.step === def.step)?.output, total);
+  let model = progress.models[progress.models.length - 1] ?? resolveXaiModels()[0]!;
+
+  const saveProgress = (patch: Partial<ContentStepRow>) =>
+    upsertStep(service, page, def.step, {
+      output: progress as unknown as Record<string, unknown>,
+      model,
+      input_tokens: progress.input_tokens,
+      output_tokens: progress.output_tokens,
+      cost_eur: progress.cost_eur,
+      error: null,
+      ...patch,
+    });
+
+  for (const chunk of planRephraseChunks(context.blocks, progress.rewritten)) {
+    const remaining = deadline - Date.now();
+    if (remaining < REPHRASE_MIN_REMAINING_MS) {
+      await saveProgress({ status: "pending", finished_at: null });
+      return { step: def.step, halted: false, partial: true, model, costEur: 0 };
+    }
+
+    const prompt = rephraseChunkPrompt(context, chunk);
+    const answer = await callXaiText({
+      system: prompt.system,
+      user: prompt.user,
+      maxTokens: rephraseChunkMaxTokens(chunk),
+      timeoutMs: Math.min(remaining, REPHRASE_CHUNK_TIMEOUT_MS),
+    });
+    model = answer.model;
+    const costEur = estimateCostEur(answer.model, answer.usage);
+    await recordLlmUsageEvent(service, {
+      organisationId: page.organisation_id,
+      userId: page.started_by,
+      agentId: input.avatarId,
+      mode: `content.${def.step}`,
+      via: "direct",
+      model: answer.model,
+      inputTokens: answer.usage.inputTokens,
+      outputTokens: answer.usage.outputTokens,
+    });
+    for (const block of parseRephrasedChunk(answer.text, chunk)) progress.rewritten[block.id] = block.html;
+    progress.calls += 1;
+    progress.input_tokens += answer.usage.inputTokens;
+    progress.output_tokens += answer.usage.outputTokens;
+    progress.cost_eur = roundEur(progress.cost_eur + costEur);
+    if (!progress.models.includes(model)) progress.models.push(model);
+
+    if (!(await pageStillRunning(service, page.id))) {
+      return { step: def.step, halted: true, discarded: true, model, costEur: progress.cost_eur };
+    }
+    await saveProgress({ status: "running" });
+  }
+
+  const output: TextOutput = {
+    blocks: rephrasedBlocks(context.blocks, progress.rewritten),
+    title: context.title,
+    meta_description: context.metaDescription,
+  };
+  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output);
+  pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
+  await saveProgress({ status: stepStatus, finished_at: new Date().toISOString() });
+  const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
+  if (error) throw new Error(`Seite konnte nicht gespeichert werden: ${error.message}`);
+  return { step: def.step, halted, model, costEur: progress.cost_eur };
 }
 
 /** Pause the page with the error visible in the table and drawer. */

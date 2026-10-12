@@ -1,11 +1,10 @@
 /**
  * Grok (xAI) for the one Texte step that runs on it. OpenAI-compatible chat completions
- * against https://api.x.ai/v1 with a forced function call, so the step gets the same
- * block JSON the Anthropic steps return. Own key (`XAI_API_KEY`), never the Anthropic key,
- * no fallback to Claude: without the key the step fails with a German message.
+ * against https://api.x.ai/v1, plain text in, plain text out: the step sends sections as
+ * HTML and reads sections back, so no function calling and no JSON is involved. Own key
+ * (`XAI_API_KEY`), never the Anthropic key, no fallback to Claude: without the key the step
+ * fails with a German message.
  */
-
-import type Anthropic from "@anthropic-ai/sdk";
 
 import { tryParseJsonObject } from "@/lib/ai/anthropic-helpers";
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
@@ -21,7 +20,7 @@ export const XAI_BASE_URL = "https://api.x.ai/v1";
 export const XAI_MISSING_KEY_MESSAGE =
   "Der Grok-Zugang für Texte ist nicht eingerichtet (XAI_API_KEY fehlt). Bitte die Technik informieren.";
 
-const STEP_TIMEOUT_MS = 240_000;
+const DEFAULT_TIMEOUT_MS = 240_000;
 
 type Env = Record<string, string | undefined>;
 
@@ -38,10 +37,9 @@ export function resolveXaiModels(env: Env = process.env): string[] {
 
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
-export type XaiToolCall = {
+export type XaiTextCall = {
   system: string;
   user: string;
-  tool: Anthropic.Tool;
   maxTokens: number;
   timeoutMs?: number;
   /** Tests pass their own environment and fetch; production uses process.env and global fetch. */
@@ -49,18 +47,19 @@ export type XaiToolCall = {
   fetchImpl?: FetchLike;
 };
 
-export type XaiToolResult = {
-  json: unknown;
+export type XaiTextResult = {
+  text: string;
   usage: { inputTokens: number; outputTokens: number };
   model: string;
+  finishReason: string | null;
 };
 
 type ChatCompletion = {
   choices?: Array<{
     finish_reason?: string | null;
     message?: {
-      content?: string | null;
-      tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+      content?: string | Array<{ type?: string; text?: string }> | null;
+      refusal?: string | null;
     };
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -81,14 +80,33 @@ function isModelNotFound(status: number, body: string): boolean {
   return status === 404 || (status === 400 && /model/i.test(body) && /not found|does not exist|unknown|invalid/i.test(body));
 }
 
+type ChatMessage = NonNullable<NonNullable<ChatCompletion["choices"]>[number]["message"]>;
+
+function messageText(message: ChatMessage | null | undefined): string {
+  const raw = message?.content;
+  if (typeof raw === "string") return raw.trim();
+  if (Array.isArray(raw)) {
+    return raw
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("")
+      .trim();
+  }
+  return "";
+}
+
+function snippet(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > 160 ? `${clean.slice(0, 157)}…` : clean;
+}
+
 async function completeOnce(
   model: string,
-  input: XaiToolCall,
+  input: XaiTextCall,
   apiKey: string,
   fetchImpl: FetchLike,
-): Promise<{ ok: true; result: XaiToolResult } | { ok: false; modelNotFound: boolean; error: ContentLlmError }> {
+): Promise<{ ok: true; result: XaiTextResult } | { ok: false; modelNotFound: boolean; error: ContentLlmError }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? STEP_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetchImpl(`${XAI_BASE_URL}/chat/completions`, {
@@ -101,13 +119,6 @@ async function completeOnce(
           { role: "system", content: input.system },
           { role: "user", content: input.user },
         ],
-        tools: [
-          {
-            type: "function",
-            function: { name: input.tool.name, description: input.tool.description ?? "", parameters: input.tool.input_schema },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: input.tool.name } },
         max_tokens: input.maxTokens,
         temperature: 0.7,
       }),
@@ -119,7 +130,9 @@ async function completeOnce(
       ok: false,
       modelNotFound: false,
       error: new ContentLlmError(
-        aborted ? "Grok hat nicht rechtzeitig geantwortet (Zeitlimit). Der Schritt wird später erneut versucht." : `Grok ist nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`,
+        aborted
+          ? "Grok hat nicht rechtzeitig geantwortet (Zeitlimit). Der Schritt wird später erneut versucht."
+          : `Grok ist nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`,
         true,
       ),
     };
@@ -151,34 +164,36 @@ async function completeOnce(
 
   const completion = (tryParseJsonObject(body) ?? {}) as ChatCompletion;
   const choice = completion.choices?.[0];
-  const call = choice?.message?.tool_calls?.find((c) => c.function?.name === input.tool.name) ?? choice?.message?.tool_calls?.[0];
-  let json: Record<string, unknown> | null = call?.function?.arguments ? tryParseJsonObject(call.function.arguments) : null;
-  if (!json && typeof choice?.message?.content === "string") json = tryParseJsonObject(choice.message.content);
-  if (choice?.finish_reason === "length") {
-    return { ok: false, modelNotFound: false, error: new ContentLlmError("Die Antwort von Grok wurde abgeschnitten. Bitte den Schritt wiederholen.", false) };
+  const text = messageText(choice?.message);
+  const finishReason = choice?.finish_reason ?? null;
+  if (!text) {
+    const refusal = typeof choice?.message?.refusal === "string" ? choice.message.refusal : "";
+    const detail = refusal ? ` Grok: „${snippet(refusal)}“` : finishReason ? ` (finish_reason: ${finishReason})` : "";
+    return { ok: false, modelNotFound: false, error: new ContentLlmError(`Die Antwort von Grok enthielt keinen Text.${detail}`, true) };
   }
-  if (!json) {
-    return { ok: false, modelNotFound: false, error: new ContentLlmError("Die Antwort von Grok enthielt kein Ergebnis.", true) };
+  if (finishReason === "length") {
+    return { ok: false, modelNotFound: false, error: new ContentLlmError("Die Antwort von Grok wurde abgeschnitten. Bitte den Schritt wiederholen.", false) };
   }
   return {
     ok: true,
     result: {
-      json,
+      text,
       usage: {
         inputTokens: Math.max(0, Number(completion.usage?.prompt_tokens ?? 0) || 0),
         outputTokens: Math.max(0, Number(completion.usage?.completion_tokens ?? 0) || 0),
       },
       model,
+      finishReason,
     },
   };
 }
 
 /**
- * One forced tool call on Grok. The configured model answers; a 404 moves on to the next
+ * One chat completion on Grok. The configured model answers; a 404 moves on to the next
  * candidate. Every failure is a `ContentLlmError` with a German message and a retry hint,
  * like the Anthropic caller, so the job runner treats both the same.
  */
-export async function callXaiTool(input: XaiToolCall): Promise<XaiToolResult> {
+export async function callXaiText(input: XaiTextCall): Promise<XaiTextResult> {
   const env = input.env ?? process.env;
   const apiKey = resolveXaiApiKey(env);
   if (!apiKey) throw new ContentLlmError(XAI_MISSING_KEY_MESSAGE, false);

@@ -23,7 +23,13 @@ import {
   type ContentPageRole,
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
-import { CONTENT_STEP_ANALYSE, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_LEKTORAT } from "@/lib/dt/content/pipeline/steps";
+import { REPHRASE_SYSTEM, rephraseChunkHtml } from "@/lib/dt/content/pipeline/rephrase";
+import {
+  CONTENT_STEP_ANALYSE,
+  CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_LEKTORAT,
+  CONTENT_STEP_WATERMARK,
+} from "@/lib/dt/content/pipeline/steps";
 import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
@@ -1064,55 +1070,18 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
 // --- step 8: every sentence rephrased, on Grok ------------------------------------------------
 
 /**
- * Step 8 runs on Grok (xAI, see `xai.ts`), not on Claude. The prompt describes a plain
- * language pass over the finished text; the step's UI name stays out of it on purpose,
- * since the model refuses some framings. Facts, headings, ids and markers are not the
- * model's to change, and `mergeRewrittenBlocks` enforces that afterwards.
+ * Step 8 runs on Grok (xAI, see `xai.ts` and `rephrase.ts`), not on Claude, and not through
+ * a tool-forced JSON answer: one chunk of sections goes in as HTML and comes back as HTML.
+ * This builds the prompt for one chunk; the same settings and notes as every other step.
  */
-const REPHRASE_SYSTEM = `Du überarbeitest den fertigen Seitentext sprachlich.
-Schreibe jeden Satz neu. Kopiere keinen Satz wörtlich.
-Behalte unverändert: HTML-Blöcke und ids, H1, alle Überschriften (auch Fragen-Überschriften), alle Fakten, Namen, Zahlen, [LINK: …], [BITTE PRÜFEN: …], [DATUM], Handlungsaufforderungen (Termin, Telefon, DrFlex).
-Natürliches Deutsch: Satzlängen mischen, keine Werbe-Floskeln (Endlich, wirklich, nicht nur eine Floskel, sprechen eine klare Sprache, Machen Sie noch heute den ersten Schritt).
-Erfinde nichts. Keine neuen Leistungen, Zahlen oder Bewertungen.
-Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten weiter.
-Antworte mit dem Werkzeug submit_text: dieselben Abschnitte in derselben Reihenfolge, mit denselben ids, headings und levels; nur das html jedes Abschnitts ist neu formuliert.`;
-
-/**
- * The rephrased blocks over the previous ones: ids, headings, levels and order come from the
- * previous text (a question heading stays a question, a dropped block comes back), only the
- * body HTML is taken from the answer. Blocks are matched by id, or by position when the
- * answer renamed them but kept the count.
- */
-export function mergeRewrittenBlocks(previous: readonly ContentTextBlock[], output: readonly ContentTextBlock[]): ContentTextBlock[] {
-  if (previous.length === 0) return [...output];
-  const byId = new Map(output.map((b) => [b.id, b]));
-  const positional = output.length === previous.length;
-  return previous.map((prev, index) => {
-    const candidate = byId.get(prev.id) ?? (positional ? output[index] : undefined);
-    const html = candidate?.html.trim() ? candidate.html : prev.html;
-    return { ...prev, html };
-  });
-}
-
-function rephrase(context: ContentPipelineContext): ContentStepSpec {
+export function rephraseChunkPrompt(context: ContentPipelineContext, chunk: readonly ContentTextBlock[]): { system: string; user: string } {
   return {
-    maxTokens: 12_000,
     system: REPHRASE_SYSTEM,
-    user: join([currentTextBlock(context), settingsBlock(context.settings), notesBlock(context)]),
-    tool: {
-      name: "submit_text",
-      description: "Die sprachlich überarbeiteten Abschnitte, in derselben Reihenfolge mit denselben ids.",
-      input_schema: {
-        type: "object",
-        properties: { blocks: BLOCKS_SCHEMA },
-        required: ["blocks"],
-      },
-    },
-    normalize: (json, ctx): TextOutput => {
-      const answered = normalizeBlocks(rec(json).blocks);
-      if (answered.length === 0) throw new Error("Die Antwort enthielt keinen Text.");
-      return { blocks: mergeRewrittenBlocks(ctx.blocks, answered), title: ctx.title, meta_description: ctx.metaDescription };
-    },
+    user: join([
+      `## Abschnitte (bitte in derselben Form zurückgeben, nur der Text darin neu formuliert)\n${rephraseChunkHtml(chunk)}`,
+      settingsBlock(context.settings),
+      notesBlock(context),
+    ]),
   };
 }
 
@@ -1124,11 +1093,13 @@ const SPECS: Record<number, (context: ContentPipelineContext) => ContentStepSpec
   5: hormozi,
   6: vermenschlichung,
   7: lektorat,
-  8: rephrase,
   9: endabnahme,
 };
 
 export function contentStepSpec(step: number, context: ContentPipelineContext): ContentStepSpec {
+  if (step === CONTENT_STEP_WATERMARK) {
+    throw new Error(`Schritt ${step} läuft in Abschnittsgruppen auf Grok (rephraseChunkPrompt), nicht als Tool-Aufruf.`);
+  }
   const build = SPECS[step];
   if (!build) throw new Error(`Unbekannter Schritt ${step}.`);
   return build(context);

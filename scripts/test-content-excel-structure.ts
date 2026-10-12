@@ -28,14 +28,25 @@ import {
   contentStepSpec,
   ensureHeroPlaceholder,
   keepHeroBlock,
-  mergeRewrittenBlocks,
   normalizeAnalyse,
+  rephraseChunkPrompt,
   settleHeroSentence,
   type ContentPipelineContext,
   type FaktencheckOutput,
   type TextOutput,
   type VermenschlichungOutput,
 } from "../lib/dt/content/pipeline/prompts";
+import { describeRunningPage } from "../lib/dt/content/job-state";
+import {
+  emptyRephraseProgress,
+  mergeRewrittenBlocks,
+  parseRephrasedChunk,
+  planRephraseChunks,
+  readRephraseProgress,
+  rephraseChunkMaxTokens,
+  rephraseProgressLabel,
+  rephrasedBlocks,
+} from "../lib/dt/content/pipeline/rephrase";
 import { stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
 import {
   CONTENT_STEP_ENDABNAHME,
@@ -47,7 +58,7 @@ import {
   hasLegacyContentSteps,
   runningPageDetail,
 } from "../lib/dt/content/pipeline/steps";
-import { callXaiTool, resolveXaiModels, XAI_MISSING_KEY_MESSAGE } from "../lib/dt/content/pipeline/xai";
+import { callXaiText, resolveXaiModels, XAI_MISSING_KEY_MESSAGE } from "../lib/dt/content/pipeline/xai";
 import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "../lib/dt/content/render";
 import {
@@ -435,7 +446,7 @@ assert.doesNotMatch(seoCustom.system, /2–5 interne Links/, "the default Haupts
 assert.match(seoCustom.system, /Tatsachen \(Leistungen, Zahlen, Namen, Preise/, "the locked rules stay");
 assert.match(seoCustom.system, new RegExp(CONTENT_HERO_PLACEHOLDER.replace(/[[\]]/g, "\\$&")), "the hero placeholder stays");
 assert.match(contentStepSpec(2, context({ page_type: "unterseite", pillar_name: "Privatumzug" }, { typePrompts: saved })).system, /Marker \[LINK: Privatumzug\]/, "each page still writes with its own type");
-for (const step of [1, 3, 4, 5, 6, 7, 8, 9]) {
+for (const step of [1, 3, 4, 5, 6, 7, 9]) {
   assert.doesNotMatch(contentStepSpec(step, customContext).system, /Hausrezept/, `step ${step} does not read the recipes`);
 }
 console.log("textvorlagen: ok");
@@ -480,7 +491,7 @@ assert.match(vermenschlichung.system, /höchstens 3 im ganzen Text/);
 assert.match(vermenschlichung.system, /self_score/);
 assert.ok(vermenschlichung.retryHint && vermenschlichung.score, "the Vermenschlichung may try once more");
 assert.match(contentStepSpec(7, context()).system, /Lektorat/);
-assert.match(contentStepSpec(8, context()).system, /Schreibe jeden Satz neu/);
+assert.throws(() => contentStepSpec(8, context()), /Grok/, "step 8 has no tool spec");
 assert.match(contentStepSpec(9, context()).system, /Endabnahme/);
 for (const step of [3, 7, 9]) {
   assert.match(contentStepSpec(step, context()).user, /Avatar \(Wunschkunde/, `step ${step} still gets the avatar`);
@@ -599,63 +610,93 @@ assert.deepEqual(outline.split("\n"), [
 ], "the own silo first, the page itself left out");
 console.log("outline: ok");
 
-// --- step 8: every sentence rephrased on Grok, nothing else -------------------------------------
+// --- step 8: every sentence rephrased on Grok, in chunks, nothing else ---------------------------
 
-const questionBlock = { id: "kosten", heading: "Was kostet ein Privatumzug?", level: 2 as const, html: "<p>Der Preis hängt vom Umfang ab. [BITTE PRÜFEN: Preisbeispiel]</p>" };
+const questionBlock = { id: "kosten", heading: "Was kostet ein Privatumzug?", level: 2 as const, html: "<p>Der Preis hängt vom Umfang ab und richtet sich nach Volumen und Weg. [BITTE PRÜFEN: Preisbeispiel]</p>" };
 const heroSentence = { id: "hero", heading: null, level: 2 as const, html: "<p><strong>Ihr Umzug ohne Stress.</strong></p>" };
-const beforeRephrase = [h1, heroSentence, questionBlock, { ...body, html: "<p>So läuft es. [LINK: Seniorenumzug]</p>" }];
+const longBody = { ...body, html: `<p>${"So läuft der Umzug ab, Schritt für Schritt und ohne Überraschungen. ".repeat(12)}[LINK: Seniorenumzug]</p>` };
+const stand = { id: "stand", heading: null, level: 2 as const, html: "<p>Zuletzt aktualisiert: [DATUM]</p>" };
+const beforeRephrase = [h1, heroSentence, questionBlock, longBody, stand];
 const rephraseContext = context({}, { blocks: beforeRephrase, title: "Privatumzug Köln | Steiner", metaDescription: "Meta." });
-const spec8 = contentStepSpec(CONTENT_STEP_WATERMARK, rephraseContext);
-const sentToGrok = `${spec8.system}\n${spec8.user}\n${JSON.stringify(spec8.tool)}`;
-assert.doesNotMatch(sentToGrok, /watermark|wasserzeichen|detector|detektor|EU AI Act|undetectable|hide AI/i, "the model never sees the step's name or purpose");
-assert.match(spec8.system, /Schreibe jeden Satz neu/);
-assert.match(spec8.system, /Kopiere keinen Satz wörtlich/);
-assert.match(spec8.system, /\[LINK: …\]/);
-assert.match(spec8.system, /\[BITTE PRÜFEN: …\]/);
-assert.match(spec8.system, /\[DATUM\]/);
-assert.match(spec8.system, /Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten weiter/);
-assert.equal(spec8.tool.name, "submit_text");
-assert.match(spec8.user, /Aktueller Text/);
-assert.match(spec8.user, /Verbotene Wörter.*„billig“/);
-assert.match(spec8.user, /Anmerkungen der Redaktion/);
-assert.doesNotMatch(spec8.user, /Anbieterfakten aus Fragebogen/, "the facts are not sent; they must not change anyway");
+
+assert.throws(() => contentStepSpec(CONTENT_STEP_WATERMARK, rephraseContext), /Grok/, "step 8 is not a tool-forced spec");
 assert.equal(contentStepDefinition(CONTENT_STEP_WATERMARK)?.provider, "xai", "step 8 runs on Grok");
-assert.ok(CONTENT_STEPS.filter((s) => s.provider === "xai").length === 1, "no other step runs on Grok");
+assert.equal(CONTENT_STEPS.filter((s) => s.provider === "xai").length, 1, "no other step runs on Grok");
+
+const chunks = planRephraseChunks(beforeRephrase);
+assert.deepEqual(chunks.map((c) => c.map((b) => b.id)), [["kosten", "ablauf"]], "the H1, the hero sentence and the date line are not worth a call");
+assert.deepEqual(planRephraseChunks(beforeRephrase, { kosten: "<p>schon neu</p>" }).map((c) => c.map((b) => b.id)), [["ablauf"]], "a resumed run skips what is done");
+const many = Array.from({ length: 9 }, (_, i) => ({ id: `s${i}`, heading: `Frage ${i}?`, level: 2 as const, html: `<p>${"Text ".repeat(120)}</p>` }));
+const manyChunks = planRephraseChunks(many);
+assert.ok(manyChunks.length >= 3 && manyChunks.every((c) => c.length <= 4), "long pages are split into several small calls");
+assert.deepEqual(manyChunks.flat().map((b) => b.id), many.map((b) => b.id), "every block exactly once, in order");
+
+const prompt8 = rephraseChunkPrompt(rephraseContext, chunks[0]!);
+const sentToGrok = `${prompt8.system}\n${prompt8.user}`;
+assert.doesNotMatch(sentToGrok, /watermark|wasserzeichen|detector|detektor|EU AI Act|undetectable|hide AI/i, "the model never sees the step's name or purpose");
+assert.match(prompt8.system, /Schreibe jeden Satz neu/);
+assert.match(prompt8.system, /Kopiere keinen Satz wörtlich/);
+assert.match(prompt8.system, /\[LINK: …\]/);
+assert.match(prompt8.system, /\[BITTE PRÜFEN: …\]/);
+assert.match(prompt8.system, /\[DATUM\]/);
+assert.match(prompt8.system, /Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten weiter/);
+assert.match(prompt8.user, /<section data-block-id="kosten"><h2>Was kostet ein Privatumzug\?<\/h2>/, "the chunk goes in as the stored section HTML");
+assert.match(prompt8.user, /Verbotene Wörter.*„billig“/);
+assert.match(prompt8.user, /Anmerkungen der Redaktion/);
+assert.doesNotMatch(prompt8.user, /Anbieterfakten aus Fragebogen/, "the facts are not sent; they must not change anyway");
+assert.doesNotMatch(prompt8.user, /data-block-id="hero"/, "only the chunk's sections are sent");
+assert.ok(rephraseChunkMaxTokens(chunks[0]!) >= 1_000);
+
+const grokAnswer = `Gerne:\n\`\`\`html\n<section data-block-id="kosten"><h2>Was kostet ein Privatumzug</h2>\n<p>Was ein Privatumzug kostet, richtet sich nach Volumen und Weg. [BITTE PRÜFEN: Preisbeispiel]</p><script>alert(1)</script></section>\n<section data-block-id="ablauf"><h3>Anders</h3>\n<p>Schritt für Schritt, ohne Überraschungen. [LINK: Seniorenumzug]</p></section>\n\`\`\``;
+const parsed = parseRephrasedChunk(grokAnswer, chunks[0]!);
+assert.deepEqual(
+  parsed.map((b) => [b.id, b.heading, b.level, b.html]),
+  [
+    ["kosten", "Was kostet ein Privatumzug?", 2, "<p>Was ein Privatumzug kostet, richtet sich nach Volumen und Weg. [BITTE PRÜFEN: Preisbeispiel]</p>"],
+    ["ablauf", "Wie läuft der Umzug ab?", 2, "<p>Schritt für Schritt, ohne Überraschungen. [LINK: Seniorenumzug]</p>"],
+  ],
+  "ids, headings and levels stay, a question stays a question, scripts and fences go, only the body is new",
+);
+assert.equal(parseRephrasedChunk('<section data-block-id="ablauf"><p>Nur einer.</p></section>', chunks[0]!)[0]?.html, questionBlock.html, "a section the answer lost keeps its text");
+assert.equal(parseRephrasedChunk("<p>Nur der Text, ohne section.</p>", [questionBlock])[0]?.html, "<p>Nur der Text, ohne section.</p>", "a single block may come back as bare paragraphs");
+assert.equal(parseRephrasedChunk("Ich kann dabei nicht helfen.", [questionBlock])[0]?.html, questionBlock.html, "prose without HTML changes nothing");
 
 const merged = mergeRewrittenBlocks(beforeRephrase, [
   { id: "intro", heading: "Umzug Köln neu", level: 2, html: "" },
   { id: "hero", heading: "", level: 2, html: "<p><strong>Entspannt umziehen.</strong></p>" },
-  { id: "kosten-neu", heading: "Was kostet ein Privatumzug", level: 3, html: "<p>Das hängt vom Umfang ab. [BITTE PRÜFEN: Preisbeispiel]</p>" },
-  { id: "ablauf", heading: "Ablauf", level: 2, html: "<p>So geht es. [LINK: Seniorenumzug]</p>" },
+  { id: "kosten-neu", heading: "Was kostet ein Privatumzug", level: 3, html: "<p>Neu.</p>" },
+  { id: "ablauf", heading: "Ablauf", level: 2, html: "<p>Neu 2.</p>" },
+  { id: "stand", heading: "", level: 2, html: "<p>Zuletzt aktualisiert: [DATUM]</p>" },
 ]);
-assert.deepEqual(
-  merged.map((b) => [b.id, b.heading, b.level, b.html]),
-  [
-    ["intro", "Privatumzug Köln", 1, ""],
-    ["hero", null, 2, "<p><strong>Entspannt umziehen.</strong></p>"],
-    ["kosten", "Was kostet ein Privatumzug?", 2, "<p>Das hängt vom Umfang ab. [BITTE PRÜFEN: Preisbeispiel]</p>"],
-    ["ablauf", "Wie läuft der Umzug ab?", 2, "<p>So geht es. [LINK: Seniorenumzug]</p>"],
-  ],
-  "ids, headings and levels stay, a question stays a question, only the body is new",
-);
-assert.equal(mergeRewrittenBlocks(beforeRephrase, [{ id: "hero", heading: "", level: 2, html: "<p>Nur der Hero.</p>" }]).length, 4, "a dropped block comes back unchanged");
-assert.equal(mergeRewrittenBlocks(beforeRephrase, [{ id: "kosten", heading: "", level: 2, html: "   " }])[2]?.html, questionBlock.html, "an empty body keeps the previous text");
-const out8 = spec8.normalize(
-  { blocks: [{ id: "ablauf", heading: "", level: 2, html: "<p>Neu.</p>" }, { id: "kosten", heading: "", level: 2, html: "<p>Neu 2.</p>" }] },
-  rephraseContext,
-) as TextOutput;
-assert.deepEqual(out8.blocks.map((b) => [b.id, b.html]), [["intro", ""], ["hero", heroSentence.html], ["kosten", "<p>Neu 2.</p>"], ["ablauf", "<p>Neu.</p>"]], "the answer is matched by id, the order is the page's");
-assert.deepEqual([out8.title, out8.meta_description], ["Privatumzug Köln | Steiner", "Meta."], "title and meta are not the step's to change");
-assert.throws(() => spec8.normalize({ blocks: [] }, rephraseContext), /keinen Text/);
-const patch8 = stepPatchFor(contentStepDefinition(CONTENT_STEP_WATERMARK)!, out8);
+assert.deepEqual(merged.map((b) => [b.id, b.heading, b.level, b.html]), [
+  ["intro", "Privatumzug Köln", 1, ""],
+  ["hero", null, 2, "<p><strong>Entspannt umziehen.</strong></p>"],
+  ["kosten", "Was kostet ein Privatumzug?", 2, "<p>Neu.</p>"],
+  ["ablauf", "Wie läuft der Umzug ab?", 2, "<p>Neu 2.</p>"],
+  ["stand", null, 2, "<p>Zuletzt aktualisiert: [DATUM]</p>"],
+]);
+
+const progress = readRephraseProgress({ version: 1, rewritten: { kosten: "<p>Neu.</p>", leer: "  " }, calls: "2", input_tokens: 300, output_tokens: 120, cost_eur: 0.01, models: ["grok-4.7"] }, 2);
+assert.deepEqual(progress, { version: 1, rewritten: { kosten: "<p>Neu.</p>" }, total: 2, calls: 2, input_tokens: 300, output_tokens: 120, cost_eur: 0.01, models: ["grok-4.7"] });
+assert.deepEqual(readRephraseProgress({ something: "else" }, 3), emptyRephraseProgress(3), "an old or odd output counts as nothing done");
+assert.equal(rephraseProgressLabel(progress), "1 von 2 Abschnitten");
+assert.equal(rephraseProgressLabel({ findings: [] }), null);
+const finished = rephrasedBlocks(beforeRephrase, { kosten: "<p>Neu.</p>", ablauf: "<p>Neu 2.</p>" });
+assert.deepEqual(finished.map((b) => b.html), ["", heroSentence.html, "<p>Neu.</p>", "<p>Neu 2.</p>", stand.html]);
+const patch8 = stepPatchFor(contentStepDefinition(CONTENT_STEP_WATERMARK)!, { blocks: finished, title: "T", meta_description: "M" });
 assert.match(String(patch8.pagePatch.html), /Was kostet ein Privatumzug\?/);
-assert.equal(patch8.halted, false);
+assert.deepEqual([patch8.halted, patch8.pagePatch.findings], [false, []]);
+assert.equal(
+  describeRunningPage({ step: 8, error: null }, [{ step: 7, status: "done" }, { step: 8, status: "running", output: progress }], { kind: "running" }),
+  "Schritt 8 von 9: Watermark Entfernung läuft (1 von 2 Abschnitten)",
+  "the status line shows the chunk progress",
+);
 assert.deepEqual([priceForModel("grok-4.7").inputUsd, priceForModel("grok-4.7").outputUsd, priceForModel("grok-4").inputUsd, priceForModel("grok-4").outputUsd], [2, 6, 3, 15]);
 assert.equal(estimateCostEur("grok-4.7", { inputTokens: 1_000_000, outputTokens: 1_000_000 }, 1), 8);
 assert.deepEqual(resolveXaiModels({}), ["grok-4.7", "grok-4"]);
 assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: " grok-4 " }), ["grok-4"]);
 assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: "grok-5" }), ["grok-5", "grok-4"]);
-console.log("step 8 spec: ok");
+console.log("step 8: ok");
 
 async function runXai() {
   const neverFetch = async (): Promise<Response> => {
@@ -663,7 +704,7 @@ async function runXai() {
   };
   for (const env of [{}, { ANTHROPIC_DT_CONTENT_API_KEY: "claude-key" }, { XAI_API_KEY: "   " }]) {
     await assert.rejects(
-      callXaiTool({ system: "s", user: "u", tool: spec8.tool, maxTokens: 10, env, fetchImpl: neverFetch }),
+      callXaiText({ system: "s", user: "u", maxTokens: 10, env, fetchImpl: neverFetch }),
       (error: unknown) =>
         error instanceof Error && error.message === XAI_MISSING_KEY_MESSAGE && (error as { retryable?: boolean }).retryable === false,
       "no key → the German error, no network call, no Claude fallback",
@@ -671,36 +712,44 @@ async function runXai() {
   }
   assert.equal(XAI_MISSING_KEY_MESSAGE, "Der Grok-Zugang für Texte ist nicht eingerichtet (XAI_API_KEY fehlt). Bitte die Technik informieren.");
 
-  const seen: Array<{ model: string; auth: string | null; forced: string }> = [];
+  const seen: Array<{ model: string; auth: string | null; tools: unknown }> = [];
   const stubFetch = async (url: string, init: RequestInit): Promise<Response> => {
     assert.equal(url, "https://api.x.ai/v1/chat/completions");
-    const body = JSON.parse(String(init.body)) as { model: string; tool_choice: { function: { name: string } }; messages: Array<{ role: string; content: string }> };
-    seen.push({ model: body.model, auth: (init.headers as Record<string, string>).Authorization ?? null, forced: body.tool_choice.function.name });
+    const body = JSON.parse(String(init.body)) as { model: string; tools?: unknown; messages: Array<{ role: string; content: string }> };
+    seen.push({ model: body.model, auth: (init.headers as Record<string, string>).Authorization ?? null, tools: body.tools });
     assert.doesNotMatch(body.messages.map((m) => m.content).join("\n"), /watermark|wasserzeichen|detector/i);
     if (body.model === "grok-4.7") return new Response(JSON.stringify({ error: { message: "The model grok-4.7 does not exist" } }), { status: 404 });
     return new Response(
       JSON.stringify({
-        choices: [{ finish_reason: "stop", message: { tool_calls: [{ function: { name: "submit_text", arguments: JSON.stringify({ blocks: [{ id: "ablauf", heading: "", level: 2, html: "<p>Neu.</p>" }] }) } }] } }],
+        choices: [{ finish_reason: "stop", message: { content: '<section data-block-id="ablauf"><p>Neu.</p></section>' } }],
         usage: { prompt_tokens: 120, completion_tokens: 30 },
       }),
       { status: 200 },
     );
   };
-  const answer = await callXaiTool({ system: spec8.system, user: spec8.user, tool: spec8.tool, maxTokens: 100, env: { XAI_API_KEY: "k" }, fetchImpl: stubFetch });
+  const reply = await callXaiText({ system: prompt8.system, user: prompt8.user, maxTokens: 100, env: { XAI_API_KEY: "k" }, fetchImpl: stubFetch });
   assert.deepEqual(seen.map((s) => s.model), ["grok-4.7", "grok-4"], "404 on the configured model → the fallback");
-  assert.ok(seen.every((s) => s.auth === "Bearer k" && s.forced === "submit_text"));
-  assert.equal(answer.model, "grok-4");
-  assert.deepEqual(answer.usage, { inputTokens: 120, outputTokens: 30 });
-  assert.equal((answer.json as { blocks: Array<{ html: string }> }).blocks[0]?.html, "<p>Neu.</p>");
+  assert.ok(seen.every((s) => s.auth === "Bearer k" && s.tools === undefined), "plain chat, no function calling");
+  assert.equal(reply.model, "grok-4");
+  assert.deepEqual(reply.usage, { inputTokens: 120, outputTokens: 30 });
+  assert.equal(parseRephrasedChunk(reply.text, [longBody])[0]?.html, "<p>Neu.</p>");
 
+  const empty = async (): Promise<Response> =>
+    new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "", refusal: "Das kann ich nicht." } }] }), { status: 200 });
+  await assert.rejects(
+    callXaiText({ system: "s", user: "u", maxTokens: 10, env: { XAI_API_KEY: "k" }, fetchImpl: empty }),
+    (error: unknown) =>
+      error instanceof Error && /keinen Text/.test(error.message) && /Das kann ich nicht/.test(error.message) && (error as { retryable?: boolean }).retryable === true,
+    "an empty answer names what Grok said",
+  );
   const rejected = async (): Promise<Response> => new Response(JSON.stringify({ error: { message: "invalid api key" } }), { status: 401 });
   await assert.rejects(
-    callXaiTool({ system: "s", user: "u", tool: spec8.tool, maxTokens: 10, env: { XAI_API_KEY: "bad" }, fetchImpl: rejected }),
+    callXaiText({ system: "s", user: "u", maxTokens: 10, env: { XAI_API_KEY: "bad" }, fetchImpl: rejected }),
     (error: unknown) => error instanceof Error && /abgelehnt/.test(error.message) && (error as { retryable?: boolean }).retryable === false,
   );
   const busy = async (): Promise<Response> => new Response("overloaded", { status: 503 });
   await assert.rejects(
-    callXaiTool({ system: "s", user: "u", tool: spec8.tool, maxTokens: 10, env: { XAI_API_KEY: "k" }, fetchImpl: busy }),
+    callXaiText({ system: "s", user: "u", maxTokens: 10, env: { XAI_API_KEY: "k" }, fetchImpl: busy }),
     (error: unknown) => error instanceof Error && /ausgelastet/.test(error.message) && (error as { retryable?: boolean }).retryable === true,
   );
   console.log("grok caller: ok");

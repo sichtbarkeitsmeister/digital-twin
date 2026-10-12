@@ -83,7 +83,9 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
         return { ok: false, error: message, retryable: true };
       }
 
-      const needed = contentStepDefinition(next)?.writesText ? LONG_STEP_MS : SHORT_STEP_MS;
+      // Step 8 works in chunks and resumes where it stopped, so a short remainder is enough for it.
+      const def = contentStepDefinition(next);
+      const needed = def?.provider === "xai" ? SHORT_STEP_MS : def?.writesText ? LONG_STEP_MS : SHORT_STEP_MS;
       const budget = stepBudgetMs(Date.now(), limit, needed);
       if (budget == null) {
         return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true } };
@@ -96,6 +98,11 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
             ok: true,
             result: { step: next, halted: true, discarded: outcome.discarded ?? false, model: outcome.model, costEur: outcome.costEur },
           };
+        }
+        if (outcome.partial) {
+          // Progress is saved; the next loop turn or the next tick continues the same step.
+          continued = { ok: true, reschedule: true, result: { step: next, partial: true, model: outcome.model } };
+          continue;
         }
         continued = { ok: true, reschedule: true, result: { step: next, model: outcome.model, costEur: outcome.costEur } };
       } catch (error) {
