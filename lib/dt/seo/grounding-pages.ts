@@ -289,6 +289,16 @@ export type DtGroundingPageUpdateResult =
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Homepage (`https://example.de/`): never a grounding page, whatever a redirect says. */
+function isGroundingSiteRootUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.pathname === "/" || u.pathname === "") && !u.search;
+  } catch {
+    return false;
+  }
+}
+
 /** Accepts ISO datetime or YYYY-MM-DD; returns ISO or null. Undefined = untouched. */
 export function normalizeGroundingDate(
   raw: string | null | undefined,
@@ -338,6 +348,13 @@ export function buildGroundingPageUpdate(
     const url = patch.url.trim();
     if (!/^https?:\/\//i.test(url) || url.length < 8 || url.length > 2000) {
       return { ok: false, message: "URL ungültig (http/https, max. 2000 Zeichen)." };
+    }
+    if (isGroundingSiteRootUrl(url)) {
+      return {
+        ok: false,
+        message:
+          "Die Startseite ist keine Grounding Page. Bitte die URL der eigentlichen Grounding Page eintragen (z. B. …/grounding/ oder …/fakten/).",
+      };
     }
     update.url = url;
   }

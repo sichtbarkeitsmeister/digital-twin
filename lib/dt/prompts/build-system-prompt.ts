@@ -8,6 +8,7 @@ import { PASTED_URL_PROMPT_HINT_DE } from "@/lib/shared/pasted-url-context";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
 import { formatSeoChecklist } from "@/lib/dt/seo/seo-checklist";
 import { resolveTextModeInstructions } from "@/lib/dt/prompts/text-mode";
+import { DT_GROUNDING_MODE_INSTRUCTIONS } from "@/lib/dt/prompts/grounding-mode";
 import { DT_WEB_RESEARCH_INSTRUCTIONS } from "@/lib/dt/seo/web-research";
 import type { DtSitePageRow } from "@/lib/dt/types";
 
@@ -66,6 +67,8 @@ export function buildDtSystemPrompt(input: {
   textMode?: boolean;
   /** Override for the Text-Modus block (platform setting). Falls back to the code default. */
   textModePrompt?: string;
+  /** Chat switch „Grounding Page“: work the Grounding Pages per Standard v1.7, deliver HTML files. */
+  groundingMode?: boolean;
 }): string {
   const prospect = isProspectPersonaKind(input.agent.kind, input.agent.slug);
 
@@ -200,6 +203,10 @@ export function buildDtSystemPrompt(input: {
 
   if (input.textMode) {
     blocks.push("", resolveTextModeInstructions(input.textModePrompt));
+  }
+
+  if (input.groundingMode) {
+    blocks.push("", DT_GROUNDING_MODE_INSTRUCTIONS);
   }
 
   if (input.pastedUrlsText?.trim()) {

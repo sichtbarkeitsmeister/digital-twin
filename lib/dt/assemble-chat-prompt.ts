@@ -138,6 +138,7 @@ export async function assembleDtChatFromDb(input: {
   userId: string;
   ghostMode?: boolean;
   textMode?: boolean;
+  groundingMode?: boolean;
   supabase?: SupabaseClient;
 }): Promise<DtAssembledChat> {
   const supabase = input.supabase ?? createServiceClient();
@@ -290,6 +291,7 @@ export async function assembleDtChatFromDb(input: {
     ghostMode: input.ghostMode ?? mode === "ghost",
     textMode: input.textMode,
     textModePrompt,
+    groundingMode: input.groundingMode && (promptMode === "seo" || agent.kind === "geo_advisor"),
     sitePages,
     latestSeoReportText:
       promptMode === "seo" ? formatDtSeoReportForPrompt(latestSeoReport) : undefined,
@@ -330,6 +332,7 @@ export async function assembleDtChatEphemeral(input: {
   history: Array<{ role: "user" | "assistant"; content: string }>;
   content?: string;
   textMode?: boolean;
+  groundingMode?: boolean;
 }): Promise<DtAssembledChat> {
   await assertUserInOrganisation(input.userId, input.organisationId);
   const supabase = createServiceClient();
@@ -416,6 +419,8 @@ export async function assembleDtChatEphemeral(input: {
     ghostMode: true,
     textMode: input.textMode,
     textModePrompt,
+    groundingMode:
+      input.groundingMode && (agent.kind === "geo_advisor" || agent.kind === "seo_advisor"),
     wunschkundenKnowledgeText,
     websiteStructureText,
     transcriptKnowledgeText,

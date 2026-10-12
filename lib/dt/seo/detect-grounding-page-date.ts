@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 
 import { USER_AGENT } from "@/lib/dt/seo/crawl-sitemap";
+import { redirectedToSiteRoot } from "@/lib/dt/seo/discover-grounding-page-url";
 import { checkSafePublicUrl } from "@/lib/shared/safe-fetch-url";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -405,6 +406,13 @@ export async function detectGroundingPageUploadedAt(
     return {
       ok: false,
       message: `HTTP ${res.status} beim Abruf von ${safe.url.toString()}`,
+    };
+  }
+
+  if (res.url && redirectedToSiteRoot(safe.url.toString(), res.url)) {
+    return {
+      ok: false,
+      message: `${safe.url.toString()} leitet auf die Startseite weiter — dort gibt es keine Grounding Page. Datum nicht übernommen; Seite zuerst veröffentlichen.`,
     };
   }
 

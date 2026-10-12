@@ -30,6 +30,7 @@ const bodySchema = z
     history: z.array(historySchema).max(80).default([]),
     attachments: z.array(dtAttachmentInboundSchema).max(5).optional().default([]),
     textMode: z.boolean().optional(),
+    groundingMode: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     const hasText = data.content.trim().length > 0;
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
       history: parsed.data.history,
       content: parsed.data.content,
       textMode: parsed.data.textMode,
+      groundingMode: parsed.data.groundingMode,
     });
 
     const messages = appendEphemeralAttachmentsToMessages(

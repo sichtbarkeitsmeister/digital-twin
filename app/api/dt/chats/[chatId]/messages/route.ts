@@ -183,6 +183,8 @@ const bodySchema = z
     content: z.string().max(32_000).default(""),
     ghostMode: z.boolean().optional(),
     textMode: z.boolean().optional(),
+    /** Chat switch „Grounding Page“ (SEO chats only). */
+    groundingMode: z.boolean().optional(),
     attachments: z.array(dtAttachmentInboundSchema).max(5).optional().default([]),
   })
   .superRefine((data, ctx) => {
@@ -232,6 +234,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
   const ghostMode = parsed.data.ghostMode ?? chat.mode === "ghost";
   const textMode = parsed.data.textMode ?? false;
+  const groundingMode = (parsed.data.groundingMode ?? false) && chat.mode === "seo";
   const content = parsed.data.content.trim() || "(Anhang)";
   const attachmentMeta = buildAttachmentMetadataForMessage(prepared.items);
   const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId);
@@ -311,6 +314,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         userMessageId: userRow?.id ?? null,
         ghostMode,
         textMode,
+        groundingMode,
       });
 
       let assistantRow = mapN8nResultToAssistantRow(chatId, n8n, n8n.model);
@@ -479,6 +483,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       userId: auth.userId,
       ghostMode,
       textMode,
+      groundingMode,
       supabase: auth.supabase,
     });
     direct = await callDtAnthropicChat({

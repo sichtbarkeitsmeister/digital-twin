@@ -74,6 +74,8 @@ export async function loadDtAgentContextBundle(input: {
   agentId: string;
   mode: DtAgentContextMode;
   textMode?: boolean;
+  /** Chat switch „Grounding Page“ (SEO/GEO): include the Grounding-Modus block. */
+  groundingMode?: boolean;
   supabase?: SupabaseClient;
 }): Promise<DtAgentContextBundle> {
   const supabase = input.supabase ?? createServiceClient();
@@ -634,6 +636,7 @@ export async function loadDtAgentContextBundle(input: {
     groundingPagesText: groundingPagesText || undefined,
     textMode: includeTextMode,
     textModePrompt: textModeLoaded.prompt,
+    groundingMode: Boolean(input.groundingMode) && isSeoOrGeo,
   });
 
   return {

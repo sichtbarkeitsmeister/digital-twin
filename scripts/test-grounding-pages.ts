@@ -171,6 +171,30 @@ assert.equal(keepsVersion.ok && keepsVersion.update.standard_version, "1.8");
 const badUrl = buildGroundingPageUpdate({ url: "ftp://nope" }, null, new Date(NOW));
 assert.equal(badUrl.ok, false);
 
+// The homepage is never a grounding page (soft-404 redirects used to land here).
+const rootUrl = buildGroundingPageUpdate({ url: "https://existenzstand.de/" }, null, new Date(NOW));
+assert.equal(rootUrl.ok, false);
+assert.ok(!rootUrl.ok && rootUrl.message.includes("Startseite"));
+const pathUrl = buildGroundingPageUpdate(
+  { url: "https://existenzstand.de/grounding/" },
+  null,
+  new Date(NOW),
+);
+assert.ok(pathUrl.ok);
+
+// --- Grounding-Modus (chat switch) ------------------------------------------
+const groundingPrompt = buildDtSystemPrompt({
+  agent: { ...baseAgent, kind: "seo_advisor" },
+  org: { display_name: "Example" },
+  mode: "seo",
+  groundingPagesText: text,
+  groundingMode: true,
+});
+assert.ok(groundingPrompt.includes("## Grounding-Modus (hat Vorrang)"));
+assert.ok(groundingPrompt.includes("update_grounding_page"));
+assert.ok(groundingPrompt.includes("Fakten geprüft von [Prüfer]"));
+assert.ok(!seoPrompt.includes("## Grounding-Modus"));
+
 // --- live facts → patch -----------------------------------------------------
 const livePatch = patchFromLiveFacts(
   draft,
