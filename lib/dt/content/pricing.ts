@@ -13,7 +13,8 @@ const PRICES_USD_PER_MTOK: Price[] = [
   { match: /haiku-4|haiku-[5-9]/i, inputUsd: 1, outputUsd: 5 },
   { match: /3-5-haiku|haiku-3/i, inputUsd: 0.8, outputUsd: 4 },
   { match: /sonnet/i, inputUsd: 3, outputUsd: 15 },
-  // xAI (step 8 Watermark Entfernung): grok-4.7 per the xAI price list; other Grok models like grok-4.
+  // xAI (step 8 Watermark Entfernung) per the xAI price list: the fast models, grok-4.7, other Grok models like grok-4.
+  { match: /grok-4(-1)?-fast/i, inputUsd: 0.2, outputUsd: 0.5 },
   { match: /grok-4[.-]7/i, inputUsd: 2, outputUsd: 6 },
   { match: /grok/i, inputUsd: 3, outputUsd: 15 },
 ];

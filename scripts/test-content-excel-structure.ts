@@ -59,7 +59,7 @@ import {
   hasLegacyContentSteps,
   runningPageDetail,
 } from "../lib/dt/content/pipeline/steps";
-import { callXaiText, resolveXaiModels, XAI_MISSING_KEY_MESSAGE, XAI_MODEL_FALLBACKS, XaiTimeoutError } from "../lib/dt/content/pipeline/xai";
+import { callXaiText, DEFAULT_XAI_MODEL, resolveXaiModels, XAI_MISSING_KEY_MESSAGE, XAI_MODEL_FALLBACKS, XaiTimeoutError } from "../lib/dt/content/pipeline/xai";
 import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "../lib/dt/content/render";
 import {
@@ -693,9 +693,19 @@ assert.equal(
   "the status line shows the chunk progress",
 );
 assert.deepEqual([priceForModel("grok-4.7").inputUsd, priceForModel("grok-4.7").outputUsd, priceForModel("grok-4").inputUsd, priceForModel("grok-4").outputUsd], [2, 6, 3, 15]);
+assert.deepEqual([priceForModel("grok-4-1-fast-non-reasoning").inputUsd, priceForModel("grok-4-fast-non-reasoning").outputUsd], [0.2, 0.5]);
 assert.equal(estimateCostEur("grok-4.7", { inputTokens: 1_000_000, outputTokens: 1_000_000 }, 1), 8);
-assert.deepEqual(resolveXaiModels({}), ["grok-4.7", ...XAI_MODEL_FALLBACKS]);
-assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: " grok-4 " }), ["grok-4", "grok-4-1-fast-non-reasoning", "grok-4-fast-non-reasoning", "grok-3"], "no duplicate, configured first");
+assert.deepEqual(
+  resolveXaiModels({}),
+  ["grok-4-1-fast-non-reasoning", "grok-4-fast-non-reasoning", "grok-3", "grok-4.7", "grok-4"],
+  "the fast model first, the reasoning models last",
+);
+assert.deepEqual(resolveXaiModels({}), [DEFAULT_XAI_MODEL, ...XAI_MODEL_FALLBACKS]);
+assert.deepEqual(
+  resolveXaiModels({ XAI_DT_CONTENT_MODEL: " grok-4 " }),
+  ["grok-4", "grok-4-1-fast-non-reasoning", "grok-4-fast-non-reasoning", "grok-3", "grok-4.7"],
+  "no duplicate, configured first",
+);
 assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: "grok-5" })[0], "grok-5");
 assert.deepEqual(rephraseModelOrder(["a", "b", "c"], ["a"]), ["b", "c", "a"], "a slow model goes last");
 assert.deepEqual(rephraseModelOrder(["a", "b"], ["a", "b"]), ["a", "b"], "never no candidate");
@@ -731,7 +741,13 @@ async function runXai() {
       { status: 200 },
     );
   };
-  const reply = await callXaiText({ system: prompt8.system, user: prompt8.user, maxTokens: 100, env: { XAI_API_KEY: "k" }, fetchImpl: stubFetch });
+  const reply = await callXaiText({
+    system: prompt8.system,
+    user: prompt8.user,
+    maxTokens: 100,
+    env: { XAI_API_KEY: "k", XAI_DT_CONTENT_MODEL: "grok-4.7" },
+    fetchImpl: stubFetch,
+  });
   assert.deepEqual(seen.map((s) => s.model), ["grok-4.7", "grok-4-1-fast-non-reasoning"], "404 on the configured model → the first fallback");
   assert.ok(seen.every((s) => s.auth === "Bearer k" && s.tools === undefined), "plain chat, no function calling");
   assert.equal(reply.model, "grok-4-1-fast-non-reasoning");

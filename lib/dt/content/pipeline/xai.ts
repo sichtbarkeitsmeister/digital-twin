@@ -12,13 +12,17 @@ import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 /** Official xAI variable name; server only, never NEXT_PUBLIC_. */
 export const XAI_API_KEY_ENV = "XAI_API_KEY";
 export const XAI_MODEL_ENV = "XAI_DT_CONTENT_MODEL";
-export const DEFAULT_XAI_MODEL = "grok-4.7";
+/**
+ * The rewrite is plain language work, so the default is the fast non-reasoning model: it
+ * answers a section group in a few seconds, where the reasoning model grok-4.7 did not
+ * answer a 1 800-character group within two minutes in production.
+ */
+export const DEFAULT_XAI_MODEL = "grok-4-1-fast-non-reasoning";
 /**
  * Tried in this order when the configured model answers 404 (retired or mistyped name) or
- * proved too slow for a chunk (see `XaiTimeoutError`). The rewrite is plain language work,
- * so the fast non-reasoning models come first; the reasoning model is the last resort.
+ * proved too slow for a chunk (see `XaiTimeoutError`); the reasoning models are the last resort.
  */
-export const XAI_MODEL_FALLBACKS = ["grok-4-1-fast-non-reasoning", "grok-4-fast-non-reasoning", "grok-3", "grok-4"] as const;
+export const XAI_MODEL_FALLBACKS = ["grok-4-fast-non-reasoning", "grok-3", "grok-4.7", "grok-4"] as const;
 export const XAI_BASE_URL = "https://api.x.ai/v1";
 
 export const XAI_MISSING_KEY_MESSAGE =
@@ -33,10 +37,10 @@ export function resolveXaiApiKey(env: Env = process.env): string | null {
   return key ? key : null;
 }
 
-/** Configured model first, then the fallbacks, without duplicates. */
+/** Configured model first, then the fast default, then the fallbacks, without duplicates. */
 export function resolveXaiModels(env: Env = process.env): string[] {
   const configured = env[XAI_MODEL_ENV]?.trim() || DEFAULT_XAI_MODEL;
-  return Array.from(new Set([configured, ...XAI_MODEL_FALLBACKS]));
+  return Array.from(new Set([configured, DEFAULT_XAI_MODEL, ...XAI_MODEL_FALLBACKS]));
 }
 
 /**
