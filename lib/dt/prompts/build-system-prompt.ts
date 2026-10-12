@@ -8,6 +8,7 @@ import { PASTED_URL_PROMPT_HINT_DE } from "@/lib/shared/pasted-url-context";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
 import { formatSeoChecklist } from "@/lib/dt/seo/seo-checklist";
 import { resolveTextModeInstructions } from "@/lib/dt/prompts/text-mode";
+import { DT_WEB_RESEARCH_INSTRUCTIONS } from "@/lib/dt/seo/web-research";
 import type { DtSitePageRow } from "@/lib/dt/types";
 
 export type DtPromptAgent = {
@@ -152,6 +153,7 @@ export function buildDtSystemPrompt(input: {
     }
     if (input.mode === "seo") {
       blocks.push("", DT_SEO_MODE_INSTRUCTIONS);
+      blocks.push("", DT_WEB_RESEARCH_INSTRUCTIONS);
       blocks.push(
         "",
         "## Prüfbare Unterseiten",

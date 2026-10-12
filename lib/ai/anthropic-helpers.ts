@@ -340,6 +340,8 @@ type AnthropicStreamDelta = {
   partial_json?: string;
   thinking?: string;
   signature?: string;
+  /** citations_delta (web search / document citations on a text block). */
+  citation?: Anthropic.TextCitation;
   stop_reason?: Anthropic.Message["stop_reason"];
   stop_sequence?: string | null;
 };
@@ -353,6 +355,7 @@ type AnthropicStreamEvent = {
   usage?: {
     input_tokens?: number | null;
     output_tokens?: number | null;
+    server_tool_use?: Anthropic.ServerToolUsage | null;
   };
 };
 
@@ -394,9 +397,14 @@ export async function readAnthropicMessageStream(
       if (!block) continue;
       if (delta.type === "text_delta" && block.type === "text" && typeof delta.text === "string") {
         message.content[event.index] = { ...block, text: `${block.text}${delta.text}` };
+      } else if (delta.type === "citations_delta" && block.type === "text" && delta.citation) {
+        message.content[event.index] = {
+          ...block,
+          citations: [...(block.citations ?? []), delta.citation],
+        };
       } else if (
         delta.type === "input_json_delta" &&
-        block.type === "tool_use" &&
+        (block.type === "tool_use" || block.type === "server_tool_use") &&
         typeof delta.partial_json === "string"
       ) {
         toolJson[event.index] = `${toolJson[event.index] ?? ""}${delta.partial_json}`;
@@ -436,6 +444,9 @@ export async function readAnthropicMessageStream(
         if (typeof usage.input_tokens === "number") {
           message.usage.input_tokens = usage.input_tokens;
         }
+        if (usage.server_tool_use) {
+          message.usage.server_tool_use = usage.server_tool_use;
+        }
       }
     }
   }
@@ -449,7 +460,7 @@ export async function readAnthropicMessageStream(
   for (let index = 0; index < message.content.length; index += 1) {
     const block = message.content[index];
     const rawJson = toolJson[index]?.trim();
-    if (!block || block.type !== "tool_use" || !rawJson) continue;
+    if (!block || (block.type !== "tool_use" && block.type !== "server_tool_use") || !rawJson) continue;
     const repaired = tryParseJsonObject(rawJson);
     if (!repaired) continue;
     const currentSize = JSON.stringify(block.input ?? {}).length;
@@ -471,8 +482,8 @@ export async function callAnthropicFirstAvailable(input: {
   stream?: boolean;
   /** Abort the request after this many ms (prevents hung UI when platform kills the route). */
   timeoutMs?: number;
-  /** Optional Anthropic tools (Survey KI workspace retrieval). */
-  tools?: Anthropic.Tool[];
+  /** Optional Anthropic tools (client tools and server tools such as web search). */
+  tools?: Anthropic.ToolUnion[];
   /** Optional tool_choice (e.g. force a JSON submit tool). */
   toolChoice?: Anthropic.Messages.ToolChoice;
   /** Extra request headers (PDF document blocks need pdfs-2024-09-25). */

@@ -54,6 +54,8 @@ async function trackLlmUsage(input: {
   model: string | null;
   inputTokens: number;
   outputTokens: number;
+  webSearchRequests?: number;
+  webFetchRequests?: number;
 }) {
   const service = createServiceClient();
   await recordLlmUsageEvent(service, {
@@ -67,6 +69,8 @@ async function trackLlmUsage(input: {
     model: input.model,
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
+    webSearchRequests: input.webSearchRequests,
+    webFetchRequests: input.webFetchRequests,
   });
 }
 
@@ -578,6 +582,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         model: direct.model,
         inputTokens: direct.usage.inputTokens,
         outputTokens: direct.usage.outputTokens,
+        webSearchRequests: direct.usage.webSearchRequests,
+        webFetchRequests: direct.usage.webFetchRequests,
       });
     }
   } else {

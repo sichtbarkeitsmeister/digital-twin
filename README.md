@@ -338,7 +338,7 @@ Die Datenbank ist der Speicher. Tabellen sind Listen (Firmen, Nutzer, Chats, …
 1. In Supabase den **SQL Editor** öffnen.
 2. Den kompletten Inhalt von `database/schema.sql` einfügen und ausführen.  
    Das legt den Sockel an: Profile, Firmen, Mitglieder, Einladungen, Fragebögen und Antworten.
-3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 85 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
+3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 86 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
 4. In Supabase unter **Database → Extensions** prüfen, dass `pg_cron` und `pg_net` an sind. Die Job-Migration schaltet sie ein. `pg_cron` ist die Uhr, `pg_net` ist der Anruf von der Datenbank zur Website.
 5. Prüfen, dass bei den Tabellen **RLS** aktiv ist (Row Level Security).
 
@@ -522,6 +522,14 @@ Der Tab **Grounding** im SEO-Modus verwaltet je Firma die Grounding Pages nach d
 - **Von Seite lesen** holt die Werte von der Live-Seite in dieser Reihenfolge: JSON-LD `lastReviewed`, JSON-LD `dateModified`, sichtbarer Prüfhinweis („Fakten geprüft von … · Zuletzt von einem Menschen geprüft: …“), Meta-Tags, HTTP `Last-Modified`. Weichen Prüfhinweis und JSON-LD ab, landet das als Befund in der Notiz.
 - **Freigabe dokumentieren** setzt Prüfer und Prüfdatum; die Seite gilt dann als freigegeben (v1.7). Ein Prüfdatum in der Zukunft wird abgelehnt. Wird `dateModified` später neuer als `lastReviewed`, zeigt die Karte „nach Prüfung geändert“.
 - **Agent**: Im SEO-Chat und beim `geo_advisor` steht der Block „Grounding Pages (Tool-Kontext)“ im System-Prompt (auch im Agent-Kontext sichtbar). Mit dem Werkzeug `update_grounding_page` meldet der Agent je Seite URL, Status, `dateModified`, `lastReviewed`, Prüfer und Version zurück ins Tool.
+
+### Websuche im SEO-Chat
+
+Der SEO-Chat hat Anthropics serverseitige **Websuche** und **Web-Abruf** (`lib/dt/seo/web-research.ts`). Sie laufen bei Anthropic, es gibt keinen eigenen Such-Loop. Gedacht für Nachfrage außerhalb der Avatare, Mitbewerber, die aktuelle Version des Grounding Page Standards und Branchenrecht; für die eigene Website bleiben die Crawl-Werkzeuge zuständig.
+
+- **Limit**: höchstens 10 Websuchen und 5 Web-Abrufe pro KI-Antwort. Ist das Limit erreicht, hängt der Chat einen festen Hinweis an die Antwort, dass weitere Suchen in dieser Antwort nicht möglich waren und eine neue Nachricht das Limit zurücksetzt. Der Hinweis kommt aus dem Code, nicht vom Modell.
+- **Quellen**: Zitierte Treffer erscheinen als Liste „Quellen (Websuche)“ unter der Antwort.
+- **Kosten**: 10 $ je 1.000 Suchen zusätzlich zu den Tokens, also höchstens 0,10 $ Suchgebühr pro Antwort; Web-Abruf kostet nur Tokens. Die Anzahl steht je KI-Antwort in `dt_llm_usage_events` (Migration `database/migrations/20261013_dt_llm_usage_web_search.sql`) und unter Token-Nutzung als eigene Kachel, in der Kostenschätzung und im Tages-Tooltip.
 
 ### Leadinfo
 

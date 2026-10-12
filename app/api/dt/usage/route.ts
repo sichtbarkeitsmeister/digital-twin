@@ -47,7 +47,7 @@ export async function GET(req: Request) {
   const { data: events, error } = await service
     .from("dt_llm_usage_events")
     .select(
-      "id,user_id,chat_id,agent_id,mode,via,model,input_tokens,output_tokens,created_at",
+      "id,user_id,chat_id,agent_id,mode,via,model,input_tokens,output_tokens,web_search_requests,web_fetch_requests,created_at",
     )
     .eq("organisation_id", orgId)
     .gte("created_at", since)
@@ -86,6 +86,8 @@ export async function GET(req: Request) {
 
   let totalInput = 0;
   let totalOutput = 0;
+  let totalWebSearch = 0;
+  let totalWebFetch = 0;
   const byUser = new Map<
     string,
     { userId: string; messages: number; inputTokens: number; outputTokens: number; chats: Set<string> }
@@ -94,12 +96,14 @@ export async function GET(req: Request) {
   const byMode = new Map<string, { mode: string; messages: number; inputTokens: number; outputTokens: number }>();
   const byDay = new Map<
     string,
-    { date: string; messages: number; inputTokens: number; outputTokens: number }
+    { date: string; messages: number; inputTokens: number; outputTokens: number; webSearches: number }
   >();
 
   for (const row of rows) {
     totalInput += row.input_tokens ?? 0;
     totalOutput += row.output_tokens ?? 0;
+    totalWebSearch += row.web_search_requests ?? 0;
+    totalWebFetch += row.web_fetch_requests ?? 0;
 
     const dayKey = row.created_at.slice(0, 10);
     const day = byDay.get(dayKey) ?? {
@@ -107,10 +111,12 @@ export async function GET(req: Request) {
       messages: 0,
       inputTokens: 0,
       outputTokens: 0,
+      webSearches: 0,
     };
     day.messages += 1;
     day.inputTokens += row.input_tokens ?? 0;
     day.outputTokens += row.output_tokens ?? 0;
+    day.webSearches += row.web_search_requests ?? 0;
     byDay.set(dayKey, day);
 
     if (row.user_id) {
@@ -166,6 +172,8 @@ export async function GET(req: Request) {
       model: row.model,
       inputTokens: row.input_tokens ?? 0,
       outputTokens: row.output_tokens ?? 0,
+      webSearches: row.web_search_requests ?? 0,
+      webFetches: row.web_fetch_requests ?? 0,
     };
   });
 
@@ -179,6 +187,8 @@ export async function GET(req: Request) {
       totalTokens: totalInput + totalOutput,
       avgTokensPerMessage:
         rows.length > 0 ? Math.round((totalInput + totalOutput) / rows.length) : 0,
+      webSearches: totalWebSearch,
+      webFetches: totalWebFetch,
     },
     byUser: [...byUser.values()]
       .map((u) => {
