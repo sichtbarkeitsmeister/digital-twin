@@ -53,6 +53,12 @@ import {
   SURVEY_AI_MAX_ATTACHMENTS,
   SURVEY_AI_MAX_MESSAGE_CHARS,
 } from "@/lib/ai/survey-ai-attachments-shared";
+import {
+  describeDashboardLocation,
+  type DashboardLocation,
+  type HelpRecentError,
+} from "@/lib/help/handbook";
+import { getRecentHelpErrors } from "@/lib/help/recent-errors";
 
 type PageContext = {
   page:
@@ -69,6 +75,9 @@ type PageContext = {
   agentId?: string | null;
   liveWizardDraft?: boolean;
   currentSurvey?: Survey;
+  /** DigitalTwin-Hilfe: current dashboard location. */
+  location?: DashboardLocation | null;
+  recentErrors?: HelpRecentError[];
 };
 
 type AttachmentDraft = {
@@ -222,6 +231,10 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   }, [chats, selectedChatId]);
 
   const contextSummary = useMemo(() => {
+    if (props.pageContext.location) {
+      const info = describeDashboardLocation(props.pageContext.location);
+      return info.detail ? `${info.label} · ${info.detail}` : info.label;
+    }
     const pageLabel =
       props.pageContext.page === "survey_list"
         ? "Du bist gerade in der Umfrage-Liste."
@@ -668,7 +681,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content: promptText,
-          pageContext: props.pageContext,
+          pageContext: { ...props.pageContext, recentErrors: getRecentHelpErrors() },
           attachments: outgoingAttachments,
         }),
       });
@@ -947,7 +960,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
                     ?.scrollIntoView({ behavior: "smooth" });
                 });
               }}
-              aria-label="Survey-KI-Einstellungen öffnen"
+              aria-label="Einstellungen der DigitalTwin-Hilfe öffnen"
             >
               <Settings className="h-4 w-4" />
             </Button>
@@ -1011,9 +1024,9 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
           <div className="min-w-0 shrink">
             <p
               className="truncate text-sm font-semibold"
-              title={headerChatTitle ?? "Survey KI"}
+              title={headerChatTitle ?? "DigitalTwin-Hilfe"}
             >
-              {headerChatTitle ?? "Survey KI"}
+              {headerChatTitle ?? "DigitalTwin-Hilfe"}
             </p>
             <p className="truncate text-xs text-secondary">{contextSummary}</p>
             {status ? (
@@ -1037,8 +1050,8 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
               size="icon"
               variant="outline"
               className="h-8 w-8 shrink-0"
-              title="Survey-KI-Einstellungen"
-              aria-label="Survey-KI-Einstellungen"
+              title="Einstellungen der DigitalTwin-Hilfe"
+              aria-label="Einstellungen der DigitalTwin-Hilfe"
               onClick={() => {
                 router.push("/settings#survey-ai-settings");
                 window.requestAnimationFrame(() => {
@@ -1236,7 +1249,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
                       }
                     }
                   }}
-                  placeholder="Nachricht an den KI-Assistenten…"
+                  placeholder="Frag die DigitalTwin-Hilfe: Wo finde ich …? Warum geht …?"
                   className="min-h-[40px] max-h-[120px] flex-1 resize-none border-0 bg-transparent px-1 py-2.5 leading-5 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0"
                 />
                 <Button

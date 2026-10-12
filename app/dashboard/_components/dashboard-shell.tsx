@@ -64,11 +64,9 @@ export function DashboardShell({
 
       <DashboardPrefetcher isPlatformAdmin={isPlatformAdmin} />
 
-      {isPlatformAdmin ? (
-        <Suspense fallback={null}>
-          <DashboardStickySurveyAiAssistant />
-        </Suspense>
-      ) : null}
+      <Suspense fallback={null}>
+        <DashboardStickySurveyAiAssistant />
+      </Suspense>
     </DtPageShell>
   );
 }

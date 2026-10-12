@@ -43,6 +43,7 @@ import { extractDashboardSurveyIdsFromText } from "@/lib/surveys/dashboard-surve
 import {
   isLargeSurveyCreationIntent,
   resolveSurveyActionModels,
+  resolveSurveyChatModels,
   resolveSurveyUtilityModels,
   selectSurveyModelsForMessage,
 } from "@/lib/ai/survey-model-config";
@@ -57,7 +58,7 @@ import {
   normalizeSurveyAiProposalInput,
   parseSurveyAiProposal,
 } from "@/lib/ai/survey-assistant-types";
-import { isPlatformAdmin } from "@/lib/dt/org-access";
+import { isPlatformAdmin, userCanManageAnyDtAgents } from "@/lib/dt/org-access";
 import { ensureSurveyAiUserPreferences } from "@/lib/settings/survey-ai-server";
 import { surveySchema } from "@/lib/surveys/schema";
 
@@ -114,6 +115,19 @@ const requestSchema = z
       agentId: z.string().uuid().nullable().optional(),
       liveWizardDraft: z.boolean().optional(),
       currentSurvey: surveySchema.optional(),
+      /** DigitalTwin-Hilfe: where the user is right now. */
+      location: z
+        .object({
+          pathname: z.string().max(500),
+          search: z.string().max(2000).optional().default(""),
+        })
+        .nullable()
+        .optional(),
+      /** DigitalTwin-Hilfe: last error messages of the browser session. */
+      recentErrors: z
+        .array(z.object({ at: z.string().max(40), message: z.string().max(300) }))
+        .max(5)
+        .optional(),
     }),
     attachments: z.array(attachmentInboundSchema).optional().default([]),
   })
@@ -165,7 +179,9 @@ type InboundAttachment = z.infer<typeof attachmentInboundSchema>;
 type RequestPageContext = z.infer<typeof requestSchema>["pageContext"];
 
 function persistablePageContext(pageContext: RequestPageContext) {
-  const { currentSurvey: _currentSurvey, ...rest } = pageContext;
+  const { currentSurvey: _currentSurvey, recentErrors: _recentErrors, ...rest } = pageContext;
+  void _currentSurvey;
+  void _recentErrors;
   return {
     ...rest,
     surveyId: pageContext.liveWizardDraft
@@ -1072,11 +1088,17 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     const recentAssistantWasAction = lastAssistantMsg
       ? hasActionJsonIntent(lastAssistantMsg.content)
       : false;
-    const modelSelection = selectSurveyModelsForMessage({
-      userMessage: parsed.data.content,
-      page: parsed.data.pageContext.page,
-      recentAssistantWasAction,
-    });
+    const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId);
+    const canManageAgents = platformAdmin || (await userCanManageAnyDtAgents(auth.userId));
+    const helpRole = { isPlatformAdmin: platformAdmin, canManageDtAgents: canManageAgents };
+    // Customers get the help-only assistant: chat tier, no survey/agent actions, no workspace tools.
+    const modelSelection = platformAdmin
+      ? selectSurveyModelsForMessage({
+          userMessage: parsed.data.content,
+          page: parsed.data.pageContext.page,
+          recentAssistantWasAction,
+        })
+      : { tier: "chat" as const, modelsToTry: resolveSurveyChatModels(), maxTokens: 4096 };
 
     emit("status", { message: "Ich bereite den Kontext vor..." });
     const pastedWebsiteContent = await buildPastedUrlContextText(parsed.data.content);
@@ -1096,7 +1118,6 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       activeSurveyOrgId = activeSurveyOrgId ?? activeSurveyRow?.organisation_id ?? null;
     }
 
-    const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId);
     let workspace: SurveyAssistantWorkspace | null = null;
     if (platformAdmin) {
       emit("status", { message: "Ich lade Organisationen, Crawl und offene Aufgaben..." });
@@ -1122,14 +1143,16 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       ...(activeSurveyOrgId ? [activeSurveyOrgId] : []),
     ];
 
-    const { knownAgents, focusedAgentPrompts, focusedAgentSurveyFacts } =
-      await loadDtAgentsForSurveyAssistant({
-      supabase: auth.supabase,
-      organisationId: parsed.data.pageContext.organisationId ?? activeSurveyOrgId,
-      agentId: parsed.data.pageContext.agentId ?? null,
-      surveyOrganisationIds: surveyOrgIds,
-      userMessage: parsed.data.content,
-    });
+    // Agent prompts are internal: only Plattform-Admins get them in context.
+    const { knownAgents, focusedAgentPrompts, focusedAgentSurveyFacts } = platformAdmin
+      ? await loadDtAgentsForSurveyAssistant({
+          supabase: auth.supabase,
+          organisationId: parsed.data.pageContext.organisationId ?? activeSurveyOrgId,
+          agentId: parsed.data.pageContext.agentId ?? null,
+          surveyOrganisationIds: surveyOrgIds,
+          userMessage: parsed.data.content,
+        })
+      : { knownAgents: [], focusedAgentPrompts: [], focusedAgentSurveyFacts: [] };
 
     const resolvedOrganisationId =
       parsed.data.pageContext.organisationId ??
@@ -1138,9 +1161,12 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       null;
 
     const systemPromptInput: SurveyChatSystemPromptInput = {
+      helpRole,
       globalUserRules: globalAssistantRules,
       chatUserRules: assistantRulesFromChat,
       pageContext: {
+        location: parsed.data.pageContext.location ?? null,
+        recentErrors: parsed.data.pageContext.recentErrors ?? [],
         page: parsed.data.pageContext.page,
         surveyId: activeSurveyId,
         liveWizardDraft,
@@ -1236,6 +1262,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     const systemBlocks = buildCachedSurveyChatSystem(systemPromptInput);
 
     const useMultiPhase =
+      platformAdmin &&
       isMultiPhaseSurveyCreationEnabled() &&
       modelSelection.tier === "action" &&
       isLargeSurveyCreationIntent(parsed.data.content);
@@ -1302,8 +1329,9 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
             system: systemBlocks,
             messages: anthropicHistory,
             timeoutMs: 240_000,
+            enableTools: platformAdmin,
             organisations: workspace?.organisations ?? [],
-            defaultOrganisationId: resolvedOrganisationId,
+            defaultOrganisationId: platformAdmin ? resolvedOrganisationId : null,
             loadSurveyById: async (surveyId) => {
               const { data } = await auth.supabase
                 .from("surveys")
@@ -1355,13 +1383,16 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     }
 
     emit("status", { message: "Ich prüfe das Format für dich..." });
-    const ensuredAssistant = await ensureValidAssistantOutput({
-      anthropic,
-      utilityModels: resolveSurveyUtilityModels(),
-      system: systemBlocks,
-      baseMessages: anthropicHistory,
-      assistantText: rawAssistantText,
-    });
+    // Customers never get action proposals: keep the prose as is.
+    const ensuredAssistant = platformAdmin
+      ? await ensureValidAssistantOutput({
+          anthropic,
+          utilityModels: resolveSurveyUtilityModels(),
+          system: systemBlocks,
+          baseMessages: anthropicHistory,
+          assistantText: rawAssistantText,
+        })
+      : { assistantText: rawAssistantText, parsedJson: null };
     const assistantText = ensuredAssistant.assistantText;
     emit("status", { message: "Ich finalisiere die Antwort..." });
 
@@ -1393,7 +1424,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     }
 
     let actionId: string | null = null;
-    const parsedJson = ensuredAssistant.parsedJson;
+    const parsedJson = platformAdmin ? ensuredAssistant.parsedJson : null;
     if (parsedJson) {
       const proposal = parseSurveyAiProposal(parsedJson);
       if (proposal.success) {
