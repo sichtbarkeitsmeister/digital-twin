@@ -336,7 +336,7 @@ export function DtContentWorkspace(props: {
         ? filterActive
           ? "Seiten in der gefilterten Tabelle anhaken – nur angehakte Seiten bekommen Texte."
           : "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
-        : "Läuft im Hintergrund durch acht Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
+        : "Läuft im Hintergrund durch neun Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
 
   return (
     <div className="grid gap-5">

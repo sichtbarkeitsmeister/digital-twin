@@ -4,6 +4,7 @@
  * rows and repairs pages whose job will never come back.
  */
 
+import { rephraseProgressLabel } from "@/lib/dt/content/pipeline/rephrase";
 import {
   CONTENT_STEP_COUNT,
   contentStepName,
@@ -82,7 +83,7 @@ function shortError(error: string | null): string {
  */
 export function describeRunningPage(
   page: { step: number | null; error: string | null },
-  steps: readonly { step: number; status: string }[] | null,
+  steps: readonly { step: number; status: string; output?: unknown }[] | null,
   verdict: ContentJobVerdict | null,
 ): string {
   const current = page.step;
@@ -93,7 +94,12 @@ export function describeRunningPage(
       ? `${stepLabel(current)} läuft`
       : "Startet …";
 
-  if (!verdict || verdict.kind === "running") return plain;
+  if (!verdict || verdict.kind === "running") {
+    // Step 8 reports how many sections are rewritten, so a long page does not look stuck.
+    const row = steps?.find((s) => s.step === current && (s.status === "running" || s.status === "pending"));
+    const progress = row ? rephraseProgressLabel(row.output) : null;
+    return progress && plain.endsWith("läuft") ? `${plain} (${progress})` : plain;
+  }
 
   const label = stepLabel(upcoming ?? 1) ?? "Start";
   switch (verdict.kind) {
