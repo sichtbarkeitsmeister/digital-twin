@@ -28,6 +28,7 @@ import {
 } from "@/lib/dt/seo/load-website-structure";
 import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
 import { loadOnboardingPromptText } from "@/lib/dt/onboarding/load-prompt";
+import { loadGroundingPromptText } from "@/lib/dt/seo/grounding-prompt-context";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import { buildDtSystemPrompt, isProspectPersonaKind } from "@/lib/dt/prompts/build-system-prompt";
 import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
@@ -255,6 +256,10 @@ export async function assembleDtChatFromDb(input: {
   const onboardingText = !isProspectPersonaKind(agent.kind, agent.slug)
     ? await loadOnboardingPromptText(chat.organisation_id)
     : undefined;
+  const groundingPagesText =
+    promptMode === "seo" || agent.kind === "geo_advisor"
+      ? await loadGroundingPromptText(supabase, chat.organisation_id)
+      : undefined;
   const textModePrompt = input.textMode
     ? (await loadTextModeInstructions(supabase)).prompt
     : undefined;
@@ -299,6 +304,7 @@ export async function assembleDtChatFromDb(input: {
     websiteStructureText,
     transcriptKnowledgeText,
     onboardingText,
+    groundingPagesText,
     pastedUrlsText,
   });
 
@@ -381,6 +387,10 @@ export async function assembleDtChatEphemeral(input: {
   const onboardingText = !isProspectPersonaKind(agent.kind, agent.slug)
     ? await loadOnboardingPromptText(input.organisationId)
     : undefined;
+  const groundingPagesText =
+    agent.kind === "geo_advisor"
+      ? await loadGroundingPromptText(supabase, input.organisationId)
+      : undefined;
   const textModePrompt = input.textMode
     ? (await loadTextModeInstructions(supabase)).prompt
     : undefined;
@@ -410,6 +420,7 @@ export async function assembleDtChatEphemeral(input: {
     websiteStructureText,
     transcriptKnowledgeText,
     onboardingText,
+    groundingPagesText,
     pastedUrlsText,
   });
 

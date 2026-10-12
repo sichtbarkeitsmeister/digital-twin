@@ -59,6 +59,8 @@ export function buildDtSystemPrompt(input: {
   transcriptKnowledgeText?: string;
   /** Customer onboarding (contacts, competitors, status). Never includes passwords. */
   onboardingText?: string;
+  /** Grounding Pages tool context (Hub, Entitätsseiten, llms.txt, Prüfdaten). SEO/GEO only. */
+  groundingPagesText?: string;
   pastedUrlsText?: string;
   textMode?: boolean;
   /** Override for the Text-Modus block (platform setting). Falls back to the code default. */
@@ -140,6 +142,9 @@ export function buildDtSystemPrompt(input: {
 
   if (input.mode === "seo" || input.agent.kind === "geo_advisor") {
     blocks.push("", buildDtGeoGroundingText());
+    if (input.groundingPagesText?.trim()) {
+      blocks.push("", input.groundingPagesText.trim());
+    }
     const checklist = formatSeoChecklist(input.org.seo_checklist);
     if (checklist) blocks.push("", "## SEO-Checkliste", checklist);
     if (input.org.sitemap_url) {
