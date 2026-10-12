@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { SurveyAiAssistant } from "@/components/surveys/survey-ai-assistant";
+import { installHelpErrorCapture } from "@/lib/help/recent-errors";
 import { surveySchema } from "@/lib/surveys/schema";
 import { surveyFromReviewOrNull } from "@/lib/surveys/fragebogen-review-draft";
 import { useFragebogenWizardDraft } from "@/lib/surveys/fragebogen-wizard-draft-store";
@@ -113,6 +114,8 @@ export function buildStickySurveyAiAssistantContext(input: {
   resolved: DashboardSurveyAiPageContext;
   wizardSurvey: Survey | null;
   builderSurvey: Survey | null;
+  /** Current dashboard URL for the DigitalTwin-Hilfe. */
+  location?: { pathname: string; search: string } | null;
 }) {
   const wizardId = uuidOrNull(input.wizardSurvey?.id);
   const onWizard =
@@ -129,6 +132,7 @@ export function buildStickySurveyAiAssistantContext(input: {
     surveyId: onWizard ? wizardId : input.resolved.surveyId,
     organisationId: input.resolved.organisationId ?? null,
     agentId: input.resolved.agentId ?? null,
+    location: input.location ?? null,
     liveWizardDraft: onWizard,
     currentSurvey: onWizard
       ? input.wizardSurvey ?? undefined
@@ -139,13 +143,20 @@ export function buildStickySurveyAiAssistantContext(input: {
 }
 
 /**
- * Platform-admin floating Survey KI — one instance for the whole dashboard.
+ * Floating DigitalTwin-Hilfe — one instance for the whole dashboard, for every user.
+ * Plattform-Admins additionally keep the survey / agent / workspace actions.
  */
 export function DashboardStickySurveyAiAssistant() {
   const pathname = usePathname() || "/dashboard";
   const searchParams = useSearchParams();
   const liveDraft = useFragebogenWizardDraft();
   const builderSurvey = useSurveyBuilderLiveSurvey();
+
+  useEffect(() => {
+    installHelpErrorCapture();
+  }, []);
+
+  const search = searchParams.toString();
 
   const resolved = useMemo(
     () => resolveDashboardSurveyAiPageContext(pathname, searchParams),
@@ -163,11 +174,10 @@ export function DashboardStickySurveyAiAssistant() {
         resolved,
         wizardSurvey: liveSurvey,
         builderSurvey,
+        location: { pathname, search },
       }),
-    [resolved, liveSurvey, builderSurvey],
+    [resolved, liveSurvey, builderSurvey, pathname, search],
   );
 
-  return (
-    <SurveyAiAssistant title="KI Survey Assistant" buildContext={buildContext} />
-  );
+  return <SurveyAiAssistant title="DigitalTwin-Hilfe" buildContext={buildContext} />;
 }

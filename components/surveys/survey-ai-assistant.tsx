@@ -6,6 +6,7 @@ import { Bot, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SurveyAiChatShell } from "@/components/surveys/survey-ai-chat-shell";
+import type { DashboardLocation, HelpRecentError } from "@/lib/help/handbook";
 import type { Survey } from "@/lib/surveys/types";
 
 type PageContext = {
@@ -23,6 +24,8 @@ type PageContext = {
   agentId?: string | null;
   liveWizardDraft?: boolean;
   currentSurvey?: Survey;
+  location?: DashboardLocation | null;
+  recentErrors?: HelpRecentError[];
 };
 
 type Props<TContext extends PageContext> = {
@@ -32,7 +35,7 @@ type Props<TContext extends PageContext> = {
 };
 
 export function SurveyAiAssistant<TContext extends PageContext>({
-  title = "KI-Assistent",
+  title = "DigitalTwin-Hilfe",
   buildContext,
 }: Props<TContext>) {
   const [open, setOpen] = useState(false);
@@ -86,7 +89,7 @@ export function SurveyAiAssistant<TContext extends PageContext>({
             return next;
           });
         }}
-        aria-label={open ? "KI-Assistent schließen" : "KI-Assistent öffnen"}
+        aria-label={open ? "DigitalTwin-Hilfe schließen" : "DigitalTwin-Hilfe öffnen"}
       >
         <Bot className="h-5 w-5" />
       </Button>

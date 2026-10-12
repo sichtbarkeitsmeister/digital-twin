@@ -190,7 +190,7 @@ Jede Zeile ist eine **Umgebungsvariable**: ein Name und ein geheimer Wert. Lokal
 | `ANTHROPIC_DT_TITLE_MODEL` | Optionales günstigeres Modell für automatische Chat-Titel. |
 | `ANTHROPIC_DT_SURVEY_MODEL` | Modell, das aus einem Fragebogen einen Avatar schreibt. Standard: Sonnet. |
 | `ANTHROPIC_DT_SURVEY_MAX_TOKENS` | Wie lang diese Antwort werden darf. Standard ist hoch angesetzt, weil die Texte lang sind. |
-| `ANTHROPIC_SURVEY_CHAT_MODEL` | Modell für den Fragebogen-Assistenten im Gespräch. |
+| `ANTHROPIC_SURVEY_CHAT_MODEL` | Modell für die DigitalTwin-Hilfe im Gespräch (früher Fragebogen-Assistent). |
 | `ANTHROPIC_SURVEY_ACTION_MODEL` | Modell, wenn der Assistent den Fragebogen wirklich ändert. |
 | `ANTHROPIC_SURVEY_MODEL` | Älterer Ersatz nur für das Aktions-Modell. |
 | `ANTHROPIC_SURVEY_PROMPT_CACHE` | `1` lässt wiederkehrende Anweisungen zwischenspeichern. `0` schaltet das aus. |
@@ -368,7 +368,7 @@ Die Uhr heißt `jobs_runner_tick_30s` und läuft alle 30 Sekunden. Sie ruft `POS
 Die Migrationen legen private Ablage-Eimer an, **Buckets** genannt:
 
 - `dt-chat-attachments` für Dateien im DigitalTwin-Chat
-- `ai-chat-attachments` für Dateien im Fragebogen-Assistenten
+- `ai-chat-attachments` für Dateien in der DigitalTwin-Hilfe (früher Fragebogen-Assistent)
 
 Ohne diese Buckets scheitert der Upload.
 
@@ -493,6 +493,15 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 ---
 
 ## 10. Was im Hintergrund passiert
+
+### DigitalTwin-Hilfe
+
+Unten rechts im Dashboard sitzt für alle eingeloggten Nutzer die **DigitalTwin-Hilfe** (`app/dashboard/_components/dashboard-sticky-survey-ai-assistant.tsx`). Sie beantwortet „Wo finde ich …“, „Was macht diese Seite“ und „Warum geht … nicht“.
+
+- **Wissen**: das Handbuch in `lib/help/handbook.ts`, eine kurze, rollengefilterte Fassung dieses READMEs. Mitglieder sehen Menü, Wege, Fehlerhilfe und Support-Kontakt; Inhaber zusätzlich Agenten; Plattform-Admins den SEO-Modus, Grounding, Texte und die Admin-Fehlerhilfe. Neue Seiten oder geänderte Wege dort nachpflegen.
+- **Kontext**: Rolle, aktuelle Seite (Pfad, Firma, SEO-Tab) und die letzten fünf Fehlermeldungen der Browser-Sitzung (Fehler-Toasts und unbehandelte Fehler, nur der Text). Links auf App-Seiten öffnen im selben Tab.
+- **Rollen**: Kunden bekommen nur Hilfe im Gespräch, keine Aktionen, keine Werkzeuge, keine Agenten-Prompts und keine Daten anderer Firmen. Für Plattform-Admins bleibt der Assistent zusätzlich der Fragebogen- und Workspace-Assistent mit Aktionen (Fragebögen, Ordner, Agenten-Prompts) und Crawl-Werkzeugen.
+- **Einstellungen**: unter `/settings` eigene Regeln für den Assistenten, pro Nutzer.
 
 ### Chat
 
@@ -678,7 +687,7 @@ Man muss sie nicht auswendig lernen. Sie sind nach Thema sortiert.
 | `app/api/dt/internal/` | Nur für n8n. Verlangt `DT_INTERNAL_WEBHOOK_SECRET`. |
 | `app/api/dt/onboarding/` | Onboarding-Dateien. |
 | `app/api/dt/transcripts/` und `app/api/dt/workshop/` | Mitschriften und Workshop. |
-| `app/api/ai/` | Fragebogen-Assistent. |
+| `app/api/ai/` | DigitalTwin-Hilfe (Chat-Routen, früher Fragebogen-Assistent). |
 | `app/api/surveys/` | Aus einer Antwort einen Avatar machen, nachschärfen, auf SEO anwenden. |
 | `app/api/notifications/` | Die zwei Fragebogen-Mails. |
 | `app/api/jobs/run` | Nimmt den Anruf der Datenbank-Uhr entgegen. |
@@ -692,7 +701,7 @@ Man muss sie nicht auswendig lernen. Sie sind nach Thema sortiert.
 | `lib/dt/` | DigitalTwin: Chat, Avatare, Prompts, Onboarding, SEO, Transkripte. |
 | `lib/dt/seo/` | SEO-Berichte, Crawl, Search Console, Aufgaben. |
 | `lib/dt/onboarding/` | Onboarding inklusive Verschlüsselung der Zugangsdaten. |
-| `lib/ai/` | Fragebogen-Assistent und Claude-Helfer. |
+| `lib/ai/` | DigitalTwin-Hilfe, Fragebogen-Aktionen und Claude-Helfer. `lib/help/` hält das Handbuch des Assistenten. |
 | `lib/surveys/` | Fragebogen-Regeln, Typen, Speichern. |
 | `lib/email/` | SMTP, Vorlagen, Einladung, Willkommen, Versand-Protokoll. |
 | `lib/jobs/` | Die zwei Hintergrund-Jobs und die Warteschlange. |

@@ -67,6 +67,7 @@
     "test:discover-grounding-page-url": "tsx scripts/test-discover-grounding-page-url.ts",
     "test:grounding-pages": "tsx scripts/test-grounding-pages.ts",
     "test:web-research": "tsx scripts/test-web-research.ts",
+    "test:help-assistant": "tsx scripts/test-help-assistant.ts",
     "test:website-structure": "tsx scripts/test-website-structure.ts",
     "test:meeting-transcripts": "tsx scripts/test-meeting-transcripts.ts",
     "test:workshop-corpus": "tsx scripts/test-workshop-corpus.ts",
