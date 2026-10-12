@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { loadContentLocalSources } from "@/lib/dt/content/load-sources";
+import { loadContentAnbieterSources, loadContentLocalSources } from "@/lib/dt/content/load-sources";
+import { extractCityCandidates } from "@/lib/dt/content/page-types";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import type { ContentLocalSources, ContentReadiness } from "@/lib/dt/content/types";
 import { createClient } from "@/lib/supabase/server";
@@ -181,6 +182,19 @@ export function readinessFromLocal(local: ContentLocalSources): ContentReadiness
     },
   ];
   return { ready: checks.every((c) => c.ok), checks };
+}
+
+/**
+ * Places the Anbieterfakten mention, so a page named after one becomes a Standortseite.
+ * A failing read counts as „no cities“: the page type is a guess the editor can change.
+ */
+export async function loadContentCityCandidates(service: SupabaseClient, organisationId: string): Promise<string[]> {
+  try {
+    const sources = await loadContentAnbieterSources(service, organisationId);
+    return extractCityCandidates(sources.sections.map((s) => s.current).join("\n"));
+  } catch {
+    return [];
+  }
 }
 
 export async function loadContentReadiness(

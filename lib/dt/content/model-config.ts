@@ -44,7 +44,7 @@ export type ContentModelTier = keyof typeof CONTENT_MODEL_ENV;
 export type ContentModelSource = "app_settings" | "env" | "default";
 
 export type ContentModelConfig = {
-  /** Writing steps: Recherche, Gliederung, Rohtext, Tonalität & Avatar, SEO-Feinschliff. */
+  /** Writing steps: Analyse, SEO, GEO, Hormozi, Vermenschlichung. */
   write: string[];
   /** Checking steps: Faktencheck, Lektorat, Endabnahme. Same as `write` unless set. */
   check: string[];

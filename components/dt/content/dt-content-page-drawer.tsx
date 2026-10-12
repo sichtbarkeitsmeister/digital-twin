@@ -19,6 +19,7 @@ import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
+import { CONTENT_PAGE_TYPE_LABELS, CONTENT_PAGE_TYPES, type ContentPageType } from "@/lib/dt/content/page-types";
 import {
   contentActionLabel,
   contentStepStatusLabel,
@@ -29,6 +30,7 @@ import type {
   ContentAction,
   ContentFinding,
   ContentJob,
+  ContentPagePatchResult,
   ContentPageRunThroughResult,
   ContentReview,
 } from "@/lib/dt/content/types";
@@ -40,6 +42,21 @@ const sectionTitleClass =
   "flex items-center justify-between gap-2 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55";
 
 const JOB_POLL_MS = 4_000;
+
+const PAGE_TYPE_OPTIONS = CONTENT_PAGE_TYPES.map((value) => ({
+  value,
+  label: CONTENT_PAGE_TYPE_LABELS[value],
+  description:
+    value === "hauptsilo"
+      ? "Breit, verlinkt auf Unterseiten"
+      : value === "unterseite"
+        ? "Ein Unterthema, verlinkt aufs Hauptsilo"
+        : value === "ratgeber"
+          ? "Informationell, kein harter Verkauf"
+          : value === "standort"
+            ? "Leistung an einem Ort"
+            : "Bekommt keinen Text",
+}));
 
 function severityClass(severity: string): string {
   switch (severity) {
@@ -261,6 +278,24 @@ export function DtContentPageDrawer(props: {
     onClose();
   }
 
+  /** „Seitentyp“: the editor overrides what the Excel or the crawl guess derived. */
+  async function changePageType(next: string) {
+    if (!base || !review) return;
+    setBusy("page_type");
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, {
+      method: "PATCH",
+      body: { organisationId, page_type: next },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    toast.success(`Seitentyp: ${CONTENT_PAGE_TYPE_LABELS[next as ContentPageType] ?? next}`);
+    onChangedRef.current();
+  }
+
   async function runThrough() {
     if (!base) return;
     setBusy("run_through");
@@ -424,6 +459,16 @@ export function DtContentPageDrawer(props: {
               ) : review ? (
                 <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
                   <div className="grid min-w-0 gap-4">
+                    {review.legacy_steps ? (
+                      <div className="flex gap-2 rounded-dt border border-orange-300/70 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                        <p>
+                          Diese Seite wurde mit der alten Schrittfolge (Recherche, Gliederung, Rohtext …) begonnen. Die neuen
+                          Schritte Analyse, SEO, GEO, Hormozi und Vermenschlichung passen nicht dazu: bitte „Zurücksetzen“ und
+                          neu starten.
+                        </p>
+                      </div>
+                    ) : null}
                     {review.html ? (
                       <DtContentTextFrame
                         html={review.html}
@@ -488,6 +533,63 @@ export function DtContentPageDrawer(props: {
                   </div>
 
                   <aside className="grid gap-4 lg:sticky lg:top-0">
+                    <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
+                      <h3 className={sectionTitleClass}>
+                        Briefing
+                        <span className="font-semibold normal-case tracking-normal">
+                          {review.briefing.source === "crawl" ? "aus dem Crawl" : "aus der Excel"}
+                        </span>
+                      </h3>
+                      <DtSelect
+                        label="Seitentyp"
+                        value={review.briefing.page_type ?? ""}
+                        onValueChange={(next) => void changePageType(next)}
+                        options={PAGE_TYPE_OPTIONS}
+                        placeholder="Noch nicht bestimmt"
+                        disabled={Boolean(busy) || review.public.state === "laeuft"}
+                        elevated
+                        size="sm"
+                        fullWidth
+                      />
+                      <dl className="grid gap-1 text-xs text-sbkm-ink-600 dark:text-white/65">
+                        <div className="flex gap-2">
+                          <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Hauptkeyword</dt>
+                          <dd className="min-w-0 truncate">
+                            {review.briefing.main_keyword
+                              ? `${review.briefing.main_keyword}${review.briefing.main_keyword_volume != null ? ` (${review.briefing.main_keyword_volume}/Monat)` : ""}`
+                              : "kommt aus der Analyse"}
+                          </dd>
+                        </div>
+                        <div className="flex gap-2">
+                          <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Nutzerfragen</dt>
+                          <dd>
+                            {review.briefing.user_questions.length > 0
+                              ? `${review.briefing.user_questions.length} aus der Excel (Spalte H)`
+                              : "keine vorgegeben"}
+                          </dd>
+                        </div>
+                        {review.briefing.pillar_name ? (
+                          <div className="flex gap-2">
+                            <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Hauptsilo</dt>
+                            <dd className="min-w-0 truncate">{review.briefing.pillar_name}</dd>
+                          </div>
+                        ) : null}
+                        {review.briefing.h1_options.length > 0 || review.briefing.ki_prompt ? (
+                          <div className="flex gap-2">
+                            <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Außerdem</dt>
+                            <dd>
+                              {[
+                                review.briefing.h1_options.length > 0 ? `${review.briefing.h1_options.length} H1-Optionen` : "",
+                                review.briefing.ki_prompt ? "KI-Prompt" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </section>
+
                     <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <h3 className={sectionTitleClass}>
                         Offene Punkte

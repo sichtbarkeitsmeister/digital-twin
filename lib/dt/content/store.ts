@@ -11,10 +11,30 @@ import {
   type CrawledSitePage,
   type CrawlPagePlan,
 } from "@/lib/dt/content/crawl-pages";
+import {
+  briefingFromStructureTree,
+  type ContentBriefingPage,
+  type ContentPageKeywords,
+} from "@/lib/dt/content/excel-structure";
 import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
 import type { ContentAnrede, ContentBranche, ContentTextSettings } from "@/lib/dt/content/mapping";
 import { cleanTextSettings } from "@/lib/dt/content/mapping";
-import { CONTENT_STEPS, contentStepName } from "@/lib/dt/content/pipeline/steps";
+import {
+  CONTENT_PAGE_TYPE_LABELS,
+  effectiveContentPageType,
+  isContentPageRole,
+  isContentPageType,
+  type ContentPageRole,
+  type ContentPageType,
+} from "@/lib/dt/content/page-types";
+import {
+  CONTENT_STEP_ENDABNAHME,
+  CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_LEKTORAT,
+  CONTENT_STEPS,
+  contentStepName,
+  hasLegacyContentSteps,
+} from "@/lib/dt/content/pipeline/steps";
 import { formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
 import { parseWebsiteStructure, type WebsiteStructureNode } from "@/lib/dt/seo/website-structure";
@@ -22,6 +42,7 @@ import type {
   ContentAction,
   ContentFinding,
   ContentOverview,
+  ContentPageBriefing,
   ContentPageSource,
   ContentPageState,
   ContentPageSummary,
@@ -44,6 +65,16 @@ export type ContentPageRow = {
   source_url: string | null;
   crawled_at: string | null;
   main_keyword: string | null;
+  /** Excel briefing (structure pages) or a guess from name and depth (crawl pages). */
+  page_role: ContentPageRole | null;
+  page_type: ContentPageType | null;
+  pillar_name: string | null;
+  estimated_traffic: number | null;
+  keywords: ContentPageKeywords | null;
+  h1_options: string[];
+  user_questions: string[];
+  ki_prompt: string | null;
+  internal_link_targets: string[];
   state: ContentPageState;
   step: number | null;
   released: boolean;
@@ -95,12 +126,16 @@ export type ContentSettingsRow = {
   confirmed_at: string;
 };
 
-export const PAGE_COLUMNS =
-  "id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at";
+const BRIEFING_COLUMNS =
+  "page_role, page_type, pillar_name, estimated_traffic, keywords, h1_options, user_questions, ki_prompt, internal_link_targets";
+
+export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** Light projection for the overview table (no HTML). */
-const SUMMARY_COLUMNS =
-  "id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at";
+const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at`;
+
+/** What the prompts see of the other pages (cannibalisation, deferred questions). */
+const OUTLINE_COLUMNS = "slug, name, path, level, source, page_role, page_type, pillar_name, main_keyword, keywords";
 
 const STEP_COLUMNS =
   "id, page_id, organisation_id, step, name, status, output, model, input_tokens, output_tokens, cost_eur, error, started_at, finished_at, approved_by, approved_at";
@@ -111,6 +146,7 @@ const MAX_CRAWLED_ROWS = 5_000;
 
 export const CONTENT_MIGRATION_FILE = "database/migrations/20261006_dt_content_pipeline.sql";
 export const CONTENT_SOURCE_MIGRATION_FILE = "database/migrations/20261008_dt_content_pages_source.sql";
+export const CONTENT_BRIEFING_MIGRATION_FILE = "database/migrations/20261009_dt_content_excel_briefing.sql";
 
 /** PostgREST answers PGRST205 when a table is not in its schema cache, i.e. the migration never ran. */
 export function isMissingContentTableError(error: { code?: string; message?: string } | null | undefined): boolean {
@@ -132,7 +168,7 @@ export function isMissingContentColumnError(error: { code?: string; message?: st
 
 export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
   if (isMissingContentColumnError(error)) {
-    return `Die Datenbank ist noch nicht auf dem neuesten Stand: Bitte ${CONTENT_SOURCE_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+    return `Die Datenbank ist noch nicht auf dem neuesten Stand: Bitte ${CONTENT_BRIEFING_MIGRATION_FILE} (und, falls noch nicht geschehen, ${CONTENT_SOURCE_MIGRATION_FILE}) einmal im Supabase SQL Editor ausführen.`;
   }
   if (isMissingContentTableError(error)) {
     return `Die Datenbank ist noch nicht vorbereitet: Bitte ${CONTENT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
@@ -149,12 +185,46 @@ function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+function stringList(value: unknown): string[] {
+  return asArray<unknown>(value).filter((v): v is string => typeof v === "string" && v.trim() !== "");
+}
+
+function nullableText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/** `keywords` as stored: `{ main: { text, volume? }, secondary: [...] }`; anything else counts as none. */
+export function normalizeKeywords(value: unknown): ContentPageKeywords | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as { main?: unknown; secondary?: unknown };
+  const keyword = (k: unknown) => {
+    if (!k || typeof k !== "object") return null;
+    const r = k as { text?: unknown; volume?: unknown };
+    const text = typeof r.text === "string" ? r.text.trim() : "";
+    if (!text) return null;
+    const volume = typeof r.volume === "number" && Number.isFinite(r.volume) ? r.volume : undefined;
+    return volume != null ? { text, volume } : { text };
+  };
+  const main = keyword(raw.main);
+  if (!main) return null;
+  return { main, secondary: asArray<unknown>(raw.secondary).map(keyword).filter((k): k is NonNullable<typeof k> => Boolean(k)) };
+}
+
 function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
   return {
     ...(raw as unknown as ContentPageRow),
     source: raw.source === "crawl" ? "crawl" : "structure",
     source_url: typeof raw.source_url === "string" && raw.source_url ? raw.source_url : null,
     crawled_at: typeof raw.crawled_at === "string" ? raw.crawled_at : null,
+    page_role: isContentPageRole(raw.page_role) ? raw.page_role : null,
+    page_type: isContentPageType(raw.page_type) ? raw.page_type : null,
+    pillar_name: nullableText(raw.pillar_name),
+    estimated_traffic: typeof raw.estimated_traffic === "number" && Number.isFinite(raw.estimated_traffic) ? raw.estimated_traffic : null,
+    keywords: normalizeKeywords(raw.keywords),
+    h1_options: stringList(raw.h1_options),
+    user_questions: stringList(raw.user_questions),
+    ki_prompt: nullableText(raw.ki_prompt),
+    internal_link_targets: stringList(raw.internal_link_targets),
     html: typeof raw.html === "string" ? raw.html : "",
     markdown: typeof raw.markdown === "string" ? raw.markdown : "",
     findings: asArray<ContentFinding>(raw.findings),
@@ -317,10 +387,66 @@ export function flattenStructure(nodes: readonly WebsiteStructureNode[]): FlatPa
   return out;
 }
 
+/** Which columns an upload may overwrite on an existing row (text, state and cost never). */
+export type BriefingUpsertMode =
+  /** The Excel briefing from Texte: every briefing column follows the file. */
+  | "briefing"
+  /**
+   * A structure without briefing columns (SEO → Struktur, markdown, sitemap …): only name,
+   * path, role, type and link targets follow it; keywords, questions, H1 options and the
+   * KI-Prompt of an earlier Excel upload stay.
+   */
+  | "structure";
+
 /**
- * Creates page rows for the uploaded Seitenstruktur. Runs only when the upload is newer than
- * the last sync (`structure_uploaded_at` on the rows), so polling the overview stays cheap.
- * Existing pages keep their text; only name/path/level/position follow the upload.
+ * Writes briefing pages onto `dt_content_pages`. Existing slugs keep their text, state,
+ * steps and cost; `structure_uploaded_at` marks the upload the row was last matched with.
+ */
+export async function upsertContentPagesFromBriefing(
+  service: SupabaseClient,
+  organisationId: string,
+  pages: readonly ContentBriefingPage[],
+  uploadedAt: string,
+  mode: BriefingUpsertMode,
+): Promise<number> {
+  if (pages.length === 0) return 0;
+  const rows = pages.slice(0, MAX_PAGES).map((p) => ({
+    organisation_id: organisationId,
+    structure_uploaded_at: uploadedAt,
+    source: "structure" as const,
+    slug: p.slug,
+    name: p.name,
+    path: p.path,
+    level: p.level,
+    position: p.position,
+    page_role: p.page_role,
+    page_type: p.page_type,
+    pillar_name: p.pillar_name,
+    internal_link_targets: p.internal_link_targets,
+    ...(mode === "briefing"
+      ? {
+          estimated_traffic: p.estimated_traffic,
+          keywords: p.keywords,
+          h1_options: p.h1_options,
+          user_questions: p.user_questions,
+          ki_prompt: p.ki_prompt,
+          // A keyword the Analyse found stays when the Excel has none for the page.
+          ...(p.keywords ? { main_keyword: p.keywords.main.text } : {}),
+          ...(p.source_url ? { source_url: p.source_url } : {}),
+        }
+      : {}),
+  }));
+  const { error } = await service.from("dt_content_pages").upsert(rows, { onConflict: "organisation_id,slug" });
+  if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht angelegt werden"));
+  return rows.length;
+}
+
+/**
+ * Creates page rows for the Seitenstruktur stored under SEO → Struktur. Runs only when that
+ * upload is newer than the last sync (`structure_uploaded_at` on the rows), so polling the
+ * overview stays cheap. An Excel uploaded in Texte (`/api/dt/content/structure`) writes its
+ * rows itself and stores the same outline with the same timestamp, so nothing runs here.
+ * Existing pages keep their text; name, path, role and type follow the upload.
  */
 export async function syncContentPagesFromStructure(
   service: SupabaseClient,
@@ -353,25 +479,79 @@ export async function syncContentPagesFromStructure(
     return { synced: false, pages: 0 };
   }
 
-  let flat: FlatPage[];
+  let pages: ContentBriefingPage[];
   try {
-    flat = flattenStructure(parseWebsiteStructure(structure.raw_text as string).nodes);
+    pages = briefingFromStructureTree(parseWebsiteStructure(structure.raw_text as string).nodes);
   } catch {
     return { synced: false, pages: 0 };
   }
-  if (flat.length === 0) return { synced: false, pages: 0 };
+  if (pages.length === 0) return { synced: false, pages: 0 };
+  const written = await upsertContentPagesFromBriefing(service, organisationId, pages, uploadedAt, "structure");
+  return { synced: true, pages: written };
+}
 
-  const rows = flat.map((p) => ({
-    organisation_id: organisationId,
-    structure_uploaded_at: uploadedAt,
-    source: "structure" as const,
-    ...p,
-  }));
-  const { error } = await service
+/** „Seitentyp“ changed by hand in the drawer. */
+export async function updateContentPageType(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  pageType: ContentPageType,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = await service.from("dt_content_pages").update({ page_type: pageType }).eq("id", page.id);
+  return error ? { ok: false, error: contentDbErrorMessage(error, "Seitentyp konnte nicht gespeichert werden") } : { ok: true };
+}
+
+export type ContentOutlinePage = Pick<
+  ContentPageRow,
+  "slug" | "name" | "path" | "level" | "source" | "page_role" | "page_type" | "pillar_name" | "main_keyword" | "keywords"
+>;
+
+/**
+ * The other pages of the organisation, as the prompts see them: the current page's own silo
+ * first (its Hauptsilo and siblings decide which questions belong elsewhere), then the rest.
+ */
+export function contentStructureOutline(pages: readonly ContentOutlinePage[], current: Pick<ContentOutlinePage, "slug" | "pillar_name" | "name">): string {
+  const silo = new Set<string>([current.pillar_name ?? "", current.name].filter(Boolean));
+  const inSilo = (p: ContentOutlinePage) => silo.has(p.name) || (p.pillar_name != null && silo.has(p.pillar_name));
+  const line = (p: ContentOutlinePage) => {
+    const keyword = p.keywords?.main.text ?? p.main_keyword;
+    const type = p.page_type ? CONTENT_PAGE_TYPE_LABELS[p.page_type] : p.source === "crawl" ? "Crawl-Seite" : "Seite";
+    return [
+      `- ${p.name}${p.path ? ` (${p.path})` : ""}`,
+      type,
+      p.pillar_name ? `Hauptsilo: ${p.pillar_name}` : "",
+      keyword ? `Keyword: ${keyword}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+  const others = pages.filter((p) => p.slug !== current.slug);
+  const ordered = [...others.filter(inSilo), ...others.filter((p) => !inSilo(p))];
+  return ordered.map(line).join("\n");
+}
+
+export async function loadContentPageOutline(service: SupabaseClient, organisationId: string): Promise<ContentOutlinePage[]> {
+  const { data, error } = await service
     .from("dt_content_pages")
-    .upsert(rows, { onConflict: "organisation_id,slug" });
-  if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht angelegt werden"));
-  return { synced: true, pages: rows.length };
+    .select(OUTLINE_COLUMNS)
+    .eq("organisation_id", organisationId)
+    .order("position", { ascending: true })
+    .limit(MAX_PAGES);
+  if (error) {
+    console.warn("[content] page outline not readable:", error.message);
+    return [];
+  }
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => ({
+    slug: String(raw.slug ?? ""),
+    name: String(raw.name ?? ""),
+    path: nullableText(raw.path),
+    level: Number(raw.level ?? 0) || 0,
+    source: raw.source === "crawl" ? "crawl" : "structure",
+    page_role: isContentPageRole(raw.page_role) ? raw.page_role : null,
+    page_type: isContentPageType(raw.page_type) ? raw.page_type : null,
+    pillar_name: nullableText(raw.pillar_name),
+    main_keyword: nullableText(raw.main_keyword),
+    keywords: normalizeKeywords(raw.keywords),
+  }));
 }
 
 async function loadCrawledSitePages(service: SupabaseClient, organisationId: string): Promise<CrawledSitePage[]> {
@@ -421,6 +601,7 @@ async function loadCrawledSitePages(service: SupabaseClient, organisationId: str
 export async function syncContentPagesFromCrawl(
   service: SupabaseClient,
   organisationId: string,
+  options: { cities?: readonly string[] } = {},
 ): Promise<{ imported: number; attached: number; skipped: CrawlPagePlan["skipped"] }> {
   const [{ data: existing, error }, crawled] = await Promise.all([
     service
@@ -435,7 +616,7 @@ export async function syncContentPagesFromCrawl(
   const plan = planCrawlContentPages(
     (existing ?? []) as { slug: string; path?: string | null; position?: number | null; source_url?: string | null }[],
     crawled,
-    { limit: MAX_PAGES },
+    { limit: MAX_PAGES, cities: options.cities },
   );
 
   if (plan.inserts.length > 0) {
@@ -502,7 +683,10 @@ export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}):
     path: page.path,
     source: page.source,
     source_url: page.source_url,
-    main_keyword: page.main_keyword,
+    main_keyword: page.keywords?.main.text ?? page.main_keyword,
+    page_type: page.page_type,
+    page_role: page.page_role,
+    user_questions: page.user_questions.length,
     started: page.state !== "nicht_begonnen",
     state: page.state,
     label: STATE_LABELS[page.state] ?? page.state,
@@ -536,8 +720,8 @@ export function buildOverview(
 
 /** Which step a rerun-with-note restarts at for the current state. */
 export function rerunStepFor(page: ContentPageRow): number {
-  if (page.state === "braucht_sie") return 4;
-  if (page.state === "fertig") return 7;
+  if (page.state === "braucht_sie") return CONTENT_STEP_FAKTENCHECK;
+  if (page.state === "fertig") return CONTENT_STEP_LEKTORAT;
   return page.step ?? 1;
 }
 
@@ -551,14 +735,17 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
   const remove: ContentAction = { kind: "delete", label: "Löschen" };
   switch (page.state) {
     case "nicht_begonnen":
-      return [{ kind: "run_through", label: "Weiterlaufen lassen" }, remove];
+      // „Nicht bearbeiten“ (Impressum, Kontakt …) gets no start button; the type select in the drawer frees it.
+      return page.page_type === "nicht_bearbeiten"
+        ? [remove]
+        : [{ kind: "run_through", label: "Weiterlaufen lassen" }, remove];
     case "laeuft":
       return [{ kind: "stop", label: "Stoppen" }, reset, remove];
     case "braucht_sie":
       return [
-        { kind: "approve", step: 4, label: "Freigeben" },
-        { kind: "edit", step: 4, label: "Abschnitt ändern" },
-        { kind: "rerun_with_note", step: 4, label: "Mit Anmerkung wiederholen" },
+        { kind: "approve", step: CONTENT_STEP_FAKTENCHECK, label: "Freigeben" },
+        { kind: "edit", step: CONTENT_STEP_FAKTENCHECK, label: "Abschnitt ändern" },
+        { kind: "rerun_with_note", step: CONTENT_STEP_FAKTENCHECK, label: "Mit Anmerkung wiederholen" },
         ...exportAction,
         reset,
         remove,
@@ -576,9 +763,9 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
       return page.released
         ? [...exportAction, reset, remove]
         : [
-            { kind: "approve", step: 8, label: "Freigeben" },
-            { kind: "edit", step: 7, label: "Abschnitt ändern" },
-            { kind: "rerun_with_note", step: 7, label: "Mit Anmerkung wiederholen" },
+            { kind: "approve", step: CONTENT_STEP_ENDABNAHME, label: "Freigeben" },
+            { kind: "edit", step: CONTENT_STEP_LEKTORAT, label: "Abschnitt ändern" },
+            { kind: "rerun_with_note", step: CONTENT_STEP_LEKTORAT, label: "Mit Anmerkung wiederholen" },
             ...exportAction,
             reset,
             remove,
@@ -602,6 +789,24 @@ export function stepList(steps: ContentStepRow[]): ContentStep[] {
   });
 }
 
+/** The compact briefing line of the drawer: type, keyword, questions, silo. */
+export function pageBriefing(page: ContentPageRow): ContentPageBriefing {
+  return {
+    source: page.source,
+    page_type: page.page_type ?? effectiveContentPageType(page),
+    page_role: page.page_role,
+    pillar_name: page.pillar_name,
+    main_keyword: page.keywords?.main.text ?? page.main_keyword,
+    main_keyword_volume: page.keywords?.main.volume ?? null,
+    secondary_keywords: page.keywords?.secondary.map((k) => k.text) ?? [],
+    h1_options: page.h1_options,
+    user_questions: page.user_questions,
+    ki_prompt: page.ki_prompt,
+    internal_link_targets: page.internal_link_targets,
+    estimated_traffic: page.estimated_traffic,
+  };
+}
+
 export function buildReview(
   page: ContentPageRow,
   steps: ContentStepRow[],
@@ -613,6 +818,8 @@ export function buildReview(
   const summary = pageSummary(page, { steps, verdict });
   return {
     name: page.name,
+    briefing: pageBriefing(page),
+    legacy_steps: hasLegacyContentSteps(steps),
     public: {
       state: page.state,
       label: summary.label,

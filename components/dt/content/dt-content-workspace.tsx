@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Eraser, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -38,6 +38,7 @@ import type {
   ContentResetResult,
   ContentReview,
   ContentRunThroughResult,
+  ContentToolResetResult,
 } from "@/lib/dt/content/types";
 
 const POLL_MS = 10_000;
@@ -89,9 +90,9 @@ export function DtContentWorkspace(props: {
   );
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
-  const [resetting, setResetting] = useState<"reset" | "delete" | null>(null);
-  /** Which bulk action waits for the person's confirmation in the modal. */
-  const [confirmBulk, setConfirmBulk] = useState<"reset" | "delete" | null>(null);
+  const [resetting, setResetting] = useState<"reset" | "delete" | "all" | null>(null);
+  /** Which bulk action waits for the person's confirmation in the modal; „all“ is the whole tool. */
+  const [confirmBulk, setConfirmBulk] = useState<"reset" | "delete" | "all" | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
   const [editingSettings, setEditingSettings] = useState(false);
@@ -242,6 +243,46 @@ export function DtContentWorkspace(props: {
       await loadOverview();
     } finally {
       setStopping(null);
+    }
+  }
+
+  /**
+   * „Texte komplett zurücksetzen“: every page, open job, the settings and the uploaded
+   * Seitenstruktur of this organisation go; the table is empty and the settings card opens again.
+   */
+  async function resetTool() {
+    if (resetting) return;
+    setResetting("all");
+    try {
+      const res = await contentApi<ContentToolResetResult>("/api/dt/content/reset-all", {
+        method: "POST",
+        body: { organisationId },
+      });
+      if (!res.ok) {
+        toast.error(res.message);
+        return;
+      }
+      const d = res.data;
+      toast.success("Texte zurückgesetzt – bereit für einen neuen Start", {
+        description: [
+          `${d.pages} ${d.pages === 1 ? "Seite" : "Seiten"} gelöscht`,
+          d.jobs > 0 ? `${d.jobs} laufende ${d.jobs === 1 ? "Schritt" : "Schritte"} gestoppt` : "",
+          d.settings ? "Einstellungen verworfen" : "",
+          d.structure ? "Seitenstruktur entfernt" : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+      setSelected(new Set());
+      setFilter(EMPTY_CONTENT_PAGE_FILTER);
+      setSync(null);
+      setSettings(null);
+      setEditingSettings(false);
+      applyOverview(d.overview);
+      setConfirmBulk(null);
+      void loadReadiness();
+    } finally {
+      setResetting(null);
     }
   }
 
@@ -399,6 +440,18 @@ export function DtContentWorkspace(props: {
               <Trash2 className="size-3.5" aria-hidden />
               Auswahl löschen{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </DtPillButton>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={resetting != null}
+              onClick={() => setConfirmBulk("all")}
+              className="h-8 px-3 text-xs text-red-700 dark:text-red-300"
+              title="Texte für diese Organisation komplett leeren: alle Seiten, Einstellungen und die hochgeladene Seitenstruktur"
+            >
+              <Eraser className="size-3.5" aria-hidden />
+              Alles zurücksetzen
+            </DtPillButton>
             {running ? <span>Aktualisiert sich automatisch</span> : null}
             <button
               type="button"
@@ -468,14 +521,18 @@ export function DtContentWorkspace(props: {
         closeDisabled={resetting != null}
         titleId="content-bulk-confirm-title"
         title={
-          confirmBulk === "delete"
-            ? `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} löschen?`
-            : `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} zurücksetzen?`
+          confirmBulk === "all"
+            ? "Texte komplett zurücksetzen?"
+            : confirmBulk === "delete"
+              ? `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} löschen?`
+              : `${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} zurücksetzen?`
         }
         description={
-          confirmBulk === "delete"
-            ? "Die Seiten verschwinden aus der Tabelle – mit Text, Schritten und Fragen. Laufende Schritte werden gestoppt."
-            : "Text, Schritte, Fragen und Anmerkungen gehen verloren; die Seiten bleiben in der Tabelle. Laufende Schritte werden gestoppt."
+          confirmBulk === "all"
+            ? "Alle Seiten dieser Organisation mit Texten, Schritten, Fragen und Kosten, die bestätigten Einstellungen und die hochgeladene Seitenstruktur werden gelöscht. Laufende Schritte werden gestoppt. Der Crawl der Website, Avatare und Anbieterfakten bleiben."
+            : confirmBulk === "delete"
+              ? "Die Seiten verschwinden aus der Tabelle – mit Text, Schritten und Fragen. Laufende Schritte werden gestoppt."
+              : "Text, Schritte, Fragen und Anmerkungen gehen verloren; die Seiten bleiben in der Tabelle. Laufende Schritte werden gestoppt."
         }
         footer={
           <div className="flex flex-wrap justify-end gap-2">
@@ -485,21 +542,37 @@ export function DtContentWorkspace(props: {
             <DtPillButton
               type="button"
               size="sm"
-              variant={confirmBulk === "delete" ? "navy" : "mint"}
-              className={confirmBulk === "delete" ? "bg-red-600 text-white hover:bg-red-700 dark:hover:bg-red-700 dark:hover:text-white" : undefined}
-              disabled={resetting != null || selectedCount === 0}
+              variant={confirmBulk === "delete" || confirmBulk === "all" ? "navy" : "mint"}
+              className={confirmBulk === "delete" || confirmBulk === "all" ? "bg-red-600 text-white hover:bg-red-700 dark:hover:bg-red-700 dark:hover:text-white" : undefined}
+              disabled={resetting != null || (confirmBulk !== "all" && selectedCount === 0)}
               onClick={() => {
-                if (confirmBulk) void runBulk(confirmBulk);
+                if (confirmBulk === "all") void resetTool();
+                else if (confirmBulk) void runBulk(confirmBulk);
               }}
             >
-              {resetting ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : confirmBulk === "delete" ? <Trash2 className="size-3.5" aria-hidden /> : <RotateCcw className="size-3.5" aria-hidden />}
-              {confirmBulk === "delete" ? "Endgültig löschen" : "Zurücksetzen"}
+              {resetting ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              ) : confirmBulk === "all" ? (
+                <Eraser className="size-3.5" aria-hidden />
+              ) : confirmBulk === "delete" ? (
+                <Trash2 className="size-3.5" aria-hidden />
+              ) : (
+                <RotateCcw className="size-3.5" aria-hidden />
+              )}
+              {confirmBulk === "all" ? "Alles löschen" : confirmBulk === "delete" ? "Endgültig löschen" : "Zurücksetzen"}
             </DtPillButton>
           </div>
         }
       >
         <ul className="grid gap-1 text-sm text-sbkm-navy dark:text-white">
-          {pages
+          {confirmBulk === "all" ? (
+            <>
+              <li>{pages.length} {pages.length === 1 ? "Seite" : "Seiten"} in der Tabelle</li>
+              {settings ? <li>Bestätigte Einstellungen für Texte</li> : null}
+              {local?.structure ? <li>Seitenstruktur „{local.structure.filename?.trim() || "ohne Dateiname"}“</li> : null}
+            </>
+          ) : null}
+          {(confirmBulk === "all" ? [] : pages)
             .filter((p) => selected.has(p.slug))
             .slice(0, 8)
             .map((p) => (
@@ -510,7 +583,7 @@ export function DtContentWorkspace(props: {
                 ) : null}
               </li>
             ))}
-          {selectedCount > 8 ? (
+          {confirmBulk !== "all" && selectedCount > 8 ? (
             <li className="text-xs text-sbkm-ink-500 dark:text-white/45">… und {selectedCount - 8} weitere</li>
           ) : null}
         </ul>

@@ -4,6 +4,7 @@
  * in the store applies the plan. Mirrors `flattenStructure` for the Excel structure.
  */
 
+import { guessCrawlPageType, type ContentPageType } from "@/lib/dt/content/page-types";
 import { slugify } from "@/lib/dt/content/render";
 import { crawlHostKey, normaliseUrl } from "@/lib/dt/seo/crawl-url";
 
@@ -37,6 +38,10 @@ export type PlannedCrawlPage = {
   position: number;
   source_url: string;
   crawled_at: string;
+  /** Guessed from name and depth (no Excel briefing for crawl pages); the editor may change it. */
+  page_type: ContentPageType;
+  /** Name of the top-level page above a nested one, when the crawl has it. */
+  pillar_name: string | null;
 };
 
 export type CrawlPagePlan = {
@@ -141,7 +146,7 @@ function hasContent(page: CrawledSitePage): boolean {
 export function planCrawlContentPages(
   existing: readonly ExistingContentPage[],
   crawled: readonly CrawledSitePage[],
-  options: { limit?: number } = {},
+  options: { limit?: number; cities?: readonly string[] } = {},
 ): CrawlPagePlan {
   const limit = options.limit ?? CRAWL_PAGE_LIMIT;
   const skipped: CrawlPagePlan["skipped"] = { excluded: 0, empty: 0, redirected: 0, duplicate: 0, over_limit: 0 };
@@ -173,6 +178,12 @@ export function planCrawlContentPages(
 
   candidates.sort((a, b) => a.level - b.level || a.path.localeCompare(b.path, "de"));
 
+  // Top-level pages by their first path segment: a nested page's Hauptsilo, when the crawl has it.
+  const topLevelNames = new Map<string, string>();
+  for (const { page, path, level } of candidates) {
+    if (level === 1) topLevelNames.set(pathSegments(path)[0]!.toLowerCase(), pageNameFromCrawl(page, path));
+  }
+
   const existingBySlug = new Map(existing.map((row) => [row.slug, row]));
   const used = new Set(existingBySlug.keys());
   let nextPosition = existing.reduce((max, row) => Math.max(max, row.position ?? -1), -1) + 1;
@@ -200,6 +211,7 @@ export function planCrawlContentPages(
     while (used.has(slug)) slug = `${base}-${n++}`;
     used.add(slug);
     room -= 1;
+    const pillar = level >= 2 ? (topLevelNames.get(pathSegments(path)[0]!.toLowerCase()) ?? null) : null;
     inserts.push({
       slug,
       name,
@@ -208,6 +220,8 @@ export function planCrawlContentPages(
       position: nextPosition++,
       source_url: page.url,
       crawled_at: page.crawled_at,
+      page_type: guessCrawlPageType({ name, path, level, cities: options.cities }),
+      pillar_name: pillar,
     });
   }
 
