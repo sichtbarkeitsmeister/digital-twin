@@ -34,11 +34,14 @@ import type { DtChatMode } from "@/lib/dt/types";
 import {
   buildCreatedChatFile,
   createdFileToolResultMessage,
+  DT_MAX_CREATED_FILE_CHARS,
   DT_MAX_CREATED_FILES,
   type DtCreatedChatFile,
 } from "@/lib/dt/chat-files";
 
 const MAX_TOOL_ROUNDS = 6;
+/** How often one chat turn may recover from an output cut off at `max_tokens`. */
+const MAX_TRUNCATION_RECOVERIES = 2;
 
 export type DtAnthropicUsage = {
   inputTokens: number;
@@ -56,7 +59,7 @@ export type DtAnthropicChatResult = {
 const DT_CREATE_FILE_TOOL: Anthropic.Tool = {
   name: "create_file",
   description:
-    "Erzeugt eine echte Datei, die der Nutzer im Chat öffnen, anschauen und herunterladen kann (HTML-Vorschau, PDF, Excel, CSV, Markdown, Text, JSON). Nutze dies, sobald der Nutzer eine Datei, ein Dokument, eine Tabelle oder ein Artefakt braucht — nicht nur Code in der Antwort zeigen.",
+    `Erzeugt eine echte Datei, die der Nutzer im Chat öffnen, anschauen und herunterladen kann (HTML-Vorschau, PDF, Excel, CSV, Markdown, Text, JSON). Nutze dies, sobald der Nutzer eine Datei, ein Dokument, eine Tabelle oder ein Artefakt braucht — nicht nur Code in der Antwort zeigen. Maximal ${DT_MAX_CREATED_FILE_CHARS} Zeichen je Datei — längere Inhalte auf mehrere Dateien oder mehrere Antworten aufteilen.`,
   input_schema: {
     type: "object",
     properties: {
@@ -518,19 +521,55 @@ export function dtChatFailureUserMessage(err: unknown): string {
   return "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.";
 }
 
-function resultFromResponse(
-  resp: Anthropic.Message,
-  model: string,
-  usage: DtAnthropicUsage,
-  createdFiles: DtCreatedChatFile[],
-): DtAnthropicChatResult {
-  return {
-    text: extractAnthropicText(resp) || "Keine Antwort erhalten.",
-    model,
-    stopReason: resp.stop_reason ?? null,
-    usage,
-    createdFiles,
-  };
+const DT_TRUNCATED_ANSWER_NOTE =
+  "(Die Antwort wurde am Längenlimit abgeschnitten. Bitte um Fortsetzung bitten oder in kleineren Schritten fragen, z. B. eine Aufgabe nach der anderen.)";
+
+const DT_CONTINUE_TRUNCATED_TEXT_PROMPT =
+  "Deine Antwort wurde am Ausgabelimit abgeschnitten. Setze exakt an der Stelle fort, an der du aufgehört hast — ohne Wiederholung und ohne Einleitung.";
+
+function truncatedToolCallResult(toolName: string, maxTokens: number): string {
+  return (
+    `Der Aufruf von ${toolName} wurde abgebrochen: Die Antwort hat das Ausgabelimit von ${maxTokens} Tokens überschritten, bevor der Aufruf vollständig war. Es wurde nichts erstellt oder geändert. ` +
+    `Antworte stattdessen direkt im Chat in kompakter Form — oder teile den Inhalt auf mehrere kleinere Dateien (max. ${DT_MAX_CREATED_FILE_CHARS} Zeichen je Datei) bzw. auf mehrere Antworten auf (z. B. Aufgabe für Aufgabe) und biete dem Nutzer die Fortsetzung an.`
+  );
+}
+
+/** Anthropic rejects empty text blocks in history; a stream cut off at a block start leaves one. */
+function assistantContentForHistory(resp: Anthropic.Message): Anthropic.ContentBlock[] {
+  return resp.content.filter((block) => block.type !== "text" || block.text.trim().length > 0);
+}
+
+/** Collects what the model wrote across tool rounds and continuation rounds of one turn. */
+class DtAnswerAccumulator {
+  private text = "";
+
+  /** Text written before a tool call or before the limit cut it off. */
+  append(part: string): void {
+    const trimmed = part.trim();
+    if (!trimmed) return;
+    this.text = this.text ? `${this.text}\n\n${trimmed}` : trimmed;
+  }
+
+  /** The model picked up mid-sentence, so no separator. */
+  appendContinuation(part: string): void {
+    if (!part.trim()) return;
+    if (!this.text) {
+      this.text = part.trim();
+      return;
+    }
+    this.text = `${this.text.replace(/\s+$/, "")}${part.replace(/^\s+/, " ")}`;
+  }
+
+  add(part: string, continuation: boolean): void {
+    if (continuation) this.appendContinuation(part);
+    else this.append(part);
+  }
+
+  finish(resp: Anthropic.Message, continuation: boolean): string {
+    this.add(extractAnthropicText(resp), continuation);
+    if (resp.stop_reason === "max_tokens") this.append(DT_TRUNCATED_ANSWER_NOTE);
+    return this.text || "Keine Antwort erhalten.";
+  }
 }
 
 export async function callDtAnthropicChat(params: {
@@ -610,9 +649,20 @@ export async function callDtAnthropicChat(params: {
   };
 
   const convo: Anthropic.MessageParam[] = [...messages];
-  let lastResp: Anthropic.Message | null = null;
+  const answer = new DtAnswerAccumulator();
   let usedModel = models[0] ?? resolveDtAnthropicModel(params.mode);
   let totalUsage: DtAnthropicUsage = { inputTokens: 0, outputTokens: 0 };
+  let recoveries = 0;
+  // True while the current round continues text that the limit cut off.
+  let continuing = false;
+
+  const finish = (resp: Anthropic.Message): DtAnthropicChatResult => ({
+    text: answer.finish(resp, continuing),
+    model: usedModel,
+    stopReason: resp.stop_reason ?? null,
+    usage: totalUsage,
+    createdFiles,
+  });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const roundResult = await createRound({
@@ -621,18 +671,52 @@ export async function callDtAnthropicChat(params: {
     });
     const resp = roundResult.response;
     usedModel = roundResult.model;
-    lastResp = resp;
     totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(resp.usage));
-
-    if (resp.stop_reason !== "tool_use") {
-      return resultFromResponse(resp, usedModel, totalUsage, createdFiles);
-    }
 
     const toolUses = resp.content.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
     );
 
-    convo.push({ role: "assistant", content: resp.content });
+    if (resp.stop_reason === "max_tokens" && recoveries < MAX_TRUNCATION_RECOVERIES) {
+      recoveries += 1;
+      const roundText = extractAnthropicText(resp);
+      answer.add(roundText, continuing);
+      continuing = false;
+
+      if (toolUses.length > 0) {
+        // The limit cut a tool call off mid-JSON (typically one huge create_file).
+        // Running the fragment would produce a broken file; let the model answer
+        // compactly or split the work instead of returning an empty turn.
+        convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
+        convo.push({
+          role: "user",
+          content: toolUses.map((tu) => ({
+            type: "tool_result" as const,
+            tool_use_id: tu.id,
+            is_error: true,
+            content: truncatedToolCallResult(tu.name, max_tokens),
+          })),
+        });
+        continue;
+      }
+
+      if (roundText) {
+        convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
+        convo.push({ role: "user", content: DT_CONTINUE_TRUNCATED_TEXT_PROMPT });
+        continuing = true;
+        continue;
+      }
+    }
+
+    if (resp.stop_reason !== "tool_use") {
+      return finish(resp);
+    }
+
+    // Keep what the model said before calling tools; it is part of the answer.
+    answer.add(extractAnthropicText(resp), continuing);
+    continuing = false;
+
+    convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const tu of toolUses) {
@@ -647,16 +731,7 @@ export async function callDtAnthropicChat(params: {
   const finalResp = finalRound.response;
   totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(finalResp.usage));
 
-  return {
-    text:
-      extractAnthropicText(finalResp) ||
-      (lastResp ? extractAnthropicText(lastResp) : "") ||
-      "Keine Antwort erhalten.",
-    model: usedModel,
-    stopReason: finalResp.stop_reason ?? null,
-    usage: totalUsage,
-    createdFiles,
-  };
+  return finish(finalResp);
 }
 
 /** Sync truncation fallback (migration / callers without Anthropic). Prefer `resolveDtAutoTitleAfterTurn`. */
