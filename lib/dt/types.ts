@@ -37,11 +37,35 @@ export type DtOrgConfigRow = {
   seo_checklist?: unknown;
   seo_checklist_personalized?: boolean;
   videos?: unknown;
-  /** Last grounding-page upload (LLM/GEO); refresh every 3 months. */
+  /** @deprecated Hub lives in dt_grounding_pages (kind = hub); kept for legacy reads. */
   grounding_page_url?: string | null;
   grounding_page_uploaded_at?: string | null;
   grounding_page_notes?: string | null;
+  /** Optional override URL for llms.txt (domain-level, not per page). */
   grounding_llms_txt_url?: string | null;
+};
+
+export type DtGroundingPageKind = "hub" | "entity";
+export type DtGroundingReviewStatus = "draft" | "approved";
+
+/** One Grounding Page (Hub or Entitätsseite) — Grounding Page Standard v1.7 facts. */
+export type DtGroundingPageRow = {
+  id: string;
+  organisation_id: string;
+  kind: DtGroundingPageKind;
+  url: string;
+  entity_name: string | null;
+  slug: string | null;
+  standard_version: string | null;
+  review_status: DtGroundingReviewStatus;
+  uploaded_at: string | null;
+  date_modified: string | null;
+  last_reviewed: string | null;
+  reviewed_by: string | null;
+  notes: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type DtSeoTaskRow = {

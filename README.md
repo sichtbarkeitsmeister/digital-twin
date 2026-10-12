@@ -338,7 +338,7 @@ Die Datenbank ist der Speicher. Tabellen sind Listen (Firmen, Nutzer, Chats, …
 1. In Supabase den **SQL Editor** öffnen.
 2. Den kompletten Inhalt von `database/schema.sql` einfügen und ausführen.  
    Das legt den Sockel an: Profile, Firmen, Mitglieder, Einladungen, Fragebögen und Antworten.
-3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 81 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
+3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 85 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
 4. In Supabase unter **Database → Extensions** prüfen, dass `pg_cron` und `pg_net` an sind. Die Job-Migration schaltet sie ein. `pg_cron` ist die Uhr, `pg_net` ist der Anruf von der Datenbank zur Website.
 5. Prüfen, dass bei den Tabellen **RLS** aktiv ist (Row Level Security).
 
@@ -513,6 +513,15 @@ Ein ausgefüllter Fragebogen kann einen Avatar erzeugen. Das läuft über Claude
 3. n8n ruft die App wieder auf und weist sich mit `DT_INTERNAL_WEBHOOK_SECRET` aus.
 4. Lange Website-Prüfungen laufen als Job `seo.crawl`. Die Datenbank-Uhr stößt `/api/jobs/run` an.
 5. Fertige Berichte kann der Firmeninhaber lesen. Die Bearbeitung bleibt bei der Agentur.
+
+### Grounding Pages
+
+Der Tab **Grounding** im SEO-Modus verwaltet je Firma die Grounding Pages nach dem Grounding Page Standard v1.7: einen **Hub** (Haupt-Grounding-Page) und beliebig viele **Entitätsseiten**, dazu die `llms.txt` der Domain. Je Seite stehen Upload-Datum, `dateModified`, `lastReviewed` (letzte menschliche Faktenprüfung), Prüfer, Standardversion und Status (Entwurf oder freigegeben) in `dt_grounding_pages` (Migration `database/migrations/20261012_dt_grounding_pages.sql`; sie übernimmt den bisherigen Hub aus `dt_org_config`).
+
+- **Fälligkeit**: drei Monate nach `lastReviewed`, Frühwarnung 14 Tage vorher. Ohne dokumentierte Prüfung gilt vorläufig das Upload-Datum.
+- **Von Seite lesen** holt die Werte von der Live-Seite in dieser Reihenfolge: JSON-LD `lastReviewed`, JSON-LD `dateModified`, sichtbarer Prüfhinweis („Fakten geprüft von … · Zuletzt von einem Menschen geprüft: …“), Meta-Tags, HTTP `Last-Modified`. Weichen Prüfhinweis und JSON-LD ab, landet das als Befund in der Notiz.
+- **Freigabe dokumentieren** setzt Prüfer und Prüfdatum; die Seite gilt dann als freigegeben (v1.7). Ein Prüfdatum in der Zukunft wird abgelehnt. Wird `dateModified` später neuer als `lastReviewed`, zeigt die Karte „nach Prüfung geändert“.
+- **Agent**: Im SEO-Chat und beim `geo_advisor` steht der Block „Grounding Pages (Tool-Kontext)“ im System-Prompt (auch im Agent-Kontext sichtbar). Mit dem Werkzeug `update_grounding_page` meldet der Agent je Seite URL, Status, `dateModified`, `lastReviewed`, Prüfer und Version zurück ins Tool.
 
 ### Leadinfo
 

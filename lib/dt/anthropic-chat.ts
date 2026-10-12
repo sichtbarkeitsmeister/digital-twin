@@ -20,6 +20,7 @@ import {
   loadLatestDtSeoReportRawForOrg,
 } from "@/lib/dt/seo/report-detail-tool";
 import { formatSerpSnippetCheckForTool } from "@/lib/dt/seo/serp-pixel";
+import { updateGroundingPageForTool } from "@/lib/dt/seo/grounding-tools";
 import {
   deleteSeoTaskForTool,
   updateSeoTaskForTool,
@@ -251,6 +252,28 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "update_grounding_page",
+    description:
+      "Rückgabe an das Tool (Grounding-Tab): meldet je Grounding Page (Hub oder Entitätsseite) URL, Art, Status (Entwurf/freigegeben), dateModified, lastReviewed, Prüfer und Standardversion. Upsert per URL. lastReviewed und Prüfer nur nach dokumentierter Freigabe durch den Nutzer setzen — nie bei Entwürfen, nie ein Zukunftsdatum. Nach „prüfe“, „aktualisiere“ oder einem Neubau für jede Seite einmal aufrufen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Live-URL der Grounding Page (bestehende URLs haben Vorrang vor /grounding/)." },
+        kind: { type: "string", enum: ["hub", "entity"], description: "hub = Haupt-Grounding-Page, entity = Entitätsseite." },
+        entityName: { type: "string", description: "Entitätsname (nur Entitätsseiten)." },
+        slug: { type: "string", description: "Slug der Entitätsseite, ohne Orts-/Keyword-Zusätze." },
+        status: { type: "string", enum: ["draft", "approved"], description: "draft = Entwurf (v1.6), approved = menschlich geprüft und freigegeben (v1.7)." },
+        dateModified: { type: "string", description: "dateModified der Seite (YYYY-MM-DD)." },
+        lastReviewed: { type: "string", description: "Tatsächliches Prüfdatum (YYYY-MM-DD), nur nach Freigabe." },
+        reviewedBy: { type: "string", description: "Prüfer (Person oder Organisation), nur nach Freigabe." },
+        standardVersion: { type: "string", description: "Standardversion, die die Seite ausweist (z. B. 1.6 oder 1.7)." },
+        uploadedAt: { type: "string", description: "Upload-/Veröffentlichungsdatum (YYYY-MM-DD), falls bekannt." },
+        note: { type: "string", description: "Kurze Notiz (z. B. Befund: llms.txt neuer als Grounding Page)." },
+      },
+      required: ["url"],
+    },
+  },
+  {
     name: "check_serp_snippet",
     description:
       "Misst Title und/oder Meta-Description in Pixeln (Google-SERP-Schätzung mit Arial). Limits: Title Desktop ~600px, Mobile ~440px, Description ~920px. Zeichenzahl nur Zusatz. Nutze dies bei Title-/Meta-Vorschlägen.",
@@ -352,6 +375,23 @@ async function runDtRetrievalTool(
     if (name === "delete_seo_task") {
       const taskId = String(args.taskId ?? "").trim();
       return deleteSeoTaskForTool(organisationId, taskId);
+    }
+    if (name === "update_grounding_page") {
+      const str = (v: unknown) => (v === undefined || v === null ? undefined : String(v));
+      return updateGroundingPageForTool(organisationId, {
+        url: String(args.url ?? ""),
+        kind: args.kind === "hub" || args.kind === "entity" ? args.kind : undefined,
+        entityName: str(args.entityName),
+        slug: str(args.slug),
+        status:
+          args.status === "approved" || args.status === "draft" ? args.status : undefined,
+        dateModified: str(args.dateModified),
+        lastReviewed: str(args.lastReviewed),
+        reviewedBy: str(args.reviewedBy),
+        standardVersion: str(args.standardVersion),
+        uploadedAt: str(args.uploadedAt),
+        note: str(args.note),
+      });
     }
     if (name === "check_serp_snippet") {
       return formatSerpSnippetCheckForTool({

@@ -65,6 +65,7 @@
     "test:grounding-page-schedule": "tsx scripts/test-grounding-page-schedule.ts",
     "test:detect-grounding-page-date": "tsx scripts/test-detect-grounding-page-date.ts",
     "test:discover-grounding-page-url": "tsx scripts/test-discover-grounding-page-url.ts",
+    "test:grounding-pages": "tsx scripts/test-grounding-pages.ts",
     "test:website-structure": "tsx scripts/test-website-structure.ts",
     "test:meeting-transcripts": "tsx scripts/test-meeting-transcripts.ts",
     "test:workshop-corpus": "tsx scripts/test-workshop-corpus.ts",

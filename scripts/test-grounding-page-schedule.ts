@@ -60,3 +60,32 @@ assert.equal(beforeWarn.status, "ok");
 assert.equal(beforeWarn.daysUntilDue, 15);
 
 console.log("grounding-page-schedule tests: ok");
+
+// Standard v1.7: lastReviewed wins over uploadedAt as the cadence basis.
+const reviewedBasis = evaluateGroundingPageSchedule({
+  uploadedAt: "2026-01-15T12:00:00.000Z",
+  lastReviewed: "2026-06-01T12:00:00.000Z",
+  now: "2026-07-01T12:00:00.000Z",
+});
+assert.equal(reviewedBasis.basis, "last_reviewed");
+assert.equal(reviewedBasis.nextDueAt?.slice(0, 10), "2026-09-01");
+assert.equal(reviewedBasis.status, "ok");
+
+// Without a documented review the upload date is the fallback basis.
+const uploadBasis = evaluateGroundingPageSchedule({
+  uploadedAt: "2026-01-15T12:00:00.000Z",
+  lastReviewed: null,
+  now: "2026-07-01T12:00:00.000Z",
+});
+assert.equal(uploadBasis.basis, "uploaded_at");
+assert.equal(uploadBasis.status, "overdue");
+
+// Invalid lastReviewed falls back to uploadedAt instead of failing.
+const invalidReviewed = evaluateGroundingPageSchedule({
+  uploadedAt: "2026-06-15T12:00:00.000Z",
+  lastReviewed: "kein Datum",
+  now: "2026-07-01T12:00:00.000Z",
+});
+assert.equal(invalidReviewed.basis, "uploaded_at");
+
+console.log("grounding-page-schedule v1.7 basis tests: ok");

@@ -39,6 +39,7 @@ import {
 } from "@/lib/dt/seo/load-website-structure";
 import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
 import { loadOnboardingPromptText } from "@/lib/dt/onboarding/load-prompt";
+import { loadGroundingPromptText } from "@/lib/dt/seo/grounding-prompt-context";
 import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
 import {
   formatSeoChecklist,
@@ -168,6 +169,10 @@ export async function loadDtAgentContextBundle(input: {
   const onboardingText = !isProspectPersonaKind(agent.kind, agent.slug)
     ? await loadOnboardingPromptText(input.organisationId)
     : "";
+  const groundingPagesText =
+    promptMode === "seo" || agent.kind === "geo_advisor"
+      ? await loadGroundingPromptText(supabase, input.organisationId)
+      : "";
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
   const textModeLoaded = await loadTextModeInstructions(supabase);
@@ -382,6 +387,21 @@ export async function loadDtAgentContextBundle(input: {
         content: buildDtGeoGroundingText(),
       }),
     );
+
+    if (groundingPagesText) {
+      sections.push(
+        section({
+          id: "grounding_pages",
+          title: "Grounding Pages (Tool-Kontext)",
+          sourceLabel: "Organisation",
+          sourceType: "organisation",
+          description:
+            "Hub, Entitätsseiten, llms.txt und Prüfdaten aus dem Grounding-Tab. Fälligkeit nach lastReviewed. Im Grounding-Tab pflegen.",
+          content: groundingPagesText,
+          editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=grounding`,
+        }),
+      );
+    }
 
     if (checklistText) {
       sections.push(
@@ -611,6 +631,7 @@ export async function loadDtAgentContextBundle(input: {
       ? transcriptKnowledgeText
       : undefined,
     onboardingText: onboardingText || undefined,
+    groundingPagesText: groundingPagesText || undefined,
     textMode: includeTextMode,
     textModePrompt: textModeLoaded.prompt,
   });
