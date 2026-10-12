@@ -13,8 +13,12 @@ import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 export const XAI_API_KEY_ENV = "XAI_API_KEY";
 export const XAI_MODEL_ENV = "XAI_DT_CONTENT_MODEL";
 export const DEFAULT_XAI_MODEL = "grok-4.7";
-/** Tried when the configured model answers 404 (retired or mistyped name). */
-const XAI_MODEL_FALLBACKS = ["grok-4"] as const;
+/**
+ * Tried in this order when the configured model answers 404 (retired or mistyped name) or
+ * proved too slow for a chunk (see `XaiTimeoutError`). The rewrite is plain language work,
+ * so the fast non-reasoning models come first; the reasoning model is the last resort.
+ */
+export const XAI_MODEL_FALLBACKS = ["grok-4-1-fast-non-reasoning", "grok-4-fast-non-reasoning", "grok-3", "grok-4"] as const;
 export const XAI_BASE_URL = "https://api.x.ai/v1";
 
 export const XAI_MISSING_KEY_MESSAGE =
@@ -35,6 +39,22 @@ export function resolveXaiModels(env: Env = process.env): string[] {
   return Array.from(new Set([configured, ...XAI_MODEL_FALLBACKS]));
 }
 
+/**
+ * A model did not answer within the chunk's time. Carries the model and how long it took,
+ * so the step can leave that model out next time instead of failing the same way thrice.
+ */
+export class XaiTimeoutError extends ContentLlmError {
+  readonly model: string;
+  readonly elapsedMs: number;
+
+  constructor(model: string, elapsedMs: number) {
+    super(`Grok (${model}) hat nicht rechtzeitig geantwortet (Zeitlimit). Der Schritt wird später erneut versucht.`, true);
+    this.name = "XaiTimeoutError";
+    this.model = model;
+    this.elapsedMs = elapsedMs;
+  }
+}
+
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 export type XaiTextCall = {
@@ -42,6 +62,8 @@ export type XaiTextCall = {
   user: string;
   maxTokens: number;
   timeoutMs?: number;
+  /** Candidate models in order; defaults to `resolveXaiModels()`. */
+  models?: readonly string[];
   /** Tests pass their own environment and fetch; production uses process.env and global fetch. */
   env?: Env;
   fetchImpl?: FetchLike;
@@ -107,6 +129,7 @@ async function completeOnce(
 ): Promise<{ ok: true; result: XaiTextResult } | { ok: false; modelNotFound: boolean; error: ContentLlmError }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const started = Date.now();
   let response: Response;
   try {
     response = await fetchImpl(`${XAI_BASE_URL}/chat/completions`, {
@@ -129,12 +152,9 @@ async function completeOnce(
     return {
       ok: false,
       modelNotFound: false,
-      error: new ContentLlmError(
-        aborted
-          ? "Grok hat nicht rechtzeitig geantwortet (Zeitlimit). Der Schritt wird später erneut versucht."
-          : `Grok ist nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`,
-        true,
-      ),
+      error: aborted
+        ? new XaiTimeoutError(model, Date.now() - started)
+        : new ContentLlmError(`Grok ist nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`, true),
     };
   }
   clearTimeout(timer);
@@ -189,18 +209,19 @@ async function completeOnce(
 }
 
 /**
- * One chat completion on Grok. The configured model answers; a 404 moves on to the next
- * candidate. Every failure is a `ContentLlmError` with a German message and a retry hint,
- * like the Anthropic caller, so the job runner treats both the same.
+ * One chat completion on Grok. The first candidate answers; a 404 moves on to the next.
+ * Every failure is a `ContentLlmError` with a German message and a retry hint, like the
+ * Anthropic caller, so the job runner treats both the same; a timeout is an `XaiTimeoutError`.
  */
 export async function callXaiText(input: XaiTextCall): Promise<XaiTextResult> {
   const env = input.env ?? process.env;
   const apiKey = resolveXaiApiKey(env);
   if (!apiKey) throw new ContentLlmError(XAI_MISSING_KEY_MESSAGE, false);
   const fetchImpl: FetchLike = input.fetchImpl ?? ((url, init) => fetch(url, init));
+  const candidates = input.models && input.models.length > 0 ? input.models : resolveXaiModels(env);
 
   let lastError: ContentLlmError | null = null;
-  for (const model of resolveXaiModels(env)) {
+  for (const model of candidates) {
     const attempt = await completeOnce(model, input, apiKey, fetchImpl);
     if (attempt.ok) return attempt.result;
     lastError = attempt.error;

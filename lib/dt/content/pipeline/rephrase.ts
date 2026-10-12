@@ -43,10 +43,21 @@ export type RephraseProgress = {
   output_tokens: number;
   cost_eur: number;
   models: string[];
+  /** Models that ran into the chunk time limit; later chunks and attempts leave them out. */
+  slow_models: string[];
 };
 
+/** A model that took at least this long before the time limit hit counts as too slow for this page. */
+export const REPHRASE_SLOW_MODEL_MS = 60_000;
+
 export function emptyRephraseProgress(total: number): RephraseProgress {
-  return { version: 1, rewritten: {}, total, calls: 0, input_tokens: 0, output_tokens: 0, cost_eur: 0, models: [] };
+  return { version: 1, rewritten: {}, total, calls: 0, input_tokens: 0, output_tokens: 0, cost_eur: 0, models: [], slow_models: [] };
+}
+
+/** The candidates for the next call: the slow ones last, never none. */
+export function rephraseModelOrder(candidates: readonly string[], slowModels: readonly string[]): string[] {
+  const fast = candidates.filter((m) => !slowModels.includes(m));
+  return fast.length > 0 ? [...fast, ...candidates.filter((m) => slowModels.includes(m))] : [...candidates];
 }
 
 function num(value: unknown): number {
@@ -73,6 +84,7 @@ export function readRephraseProgress(output: unknown, total: number): RephrasePr
     output_tokens: Math.round(num(r.output_tokens)),
     cost_eur: num(r.cost_eur),
     models: Array.isArray(r.models) ? r.models.filter((m): m is string => typeof m === "string") : [],
+    slow_models: Array.isArray(r.slow_models) ? r.slow_models.filter((m): m is string => typeof m === "string") : [],
   };
 }
 

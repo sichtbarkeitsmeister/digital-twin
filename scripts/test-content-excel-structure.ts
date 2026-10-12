@@ -44,6 +44,7 @@ import {
   planRephraseChunks,
   readRephraseProgress,
   rephraseChunkMaxTokens,
+  rephraseModelOrder,
   rephraseProgressLabel,
   rephrasedBlocks,
 } from "../lib/dt/content/pipeline/rephrase";
@@ -58,7 +59,7 @@ import {
   hasLegacyContentSteps,
   runningPageDetail,
 } from "../lib/dt/content/pipeline/steps";
-import { callXaiText, resolveXaiModels, XAI_MISSING_KEY_MESSAGE } from "../lib/dt/content/pipeline/xai";
+import { callXaiText, resolveXaiModels, XAI_MISSING_KEY_MESSAGE, XAI_MODEL_FALLBACKS, XaiTimeoutError } from "../lib/dt/content/pipeline/xai";
 import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "../lib/dt/content/render";
 import {
@@ -677,7 +678,7 @@ assert.deepEqual(merged.map((b) => [b.id, b.heading, b.level, b.html]), [
 ]);
 
 const progress = readRephraseProgress({ version: 1, rewritten: { kosten: "<p>Neu.</p>", leer: "  " }, calls: "2", input_tokens: 300, output_tokens: 120, cost_eur: 0.01, models: ["grok-4.7"] }, 2);
-assert.deepEqual(progress, { version: 1, rewritten: { kosten: "<p>Neu.</p>" }, total: 2, calls: 2, input_tokens: 300, output_tokens: 120, cost_eur: 0.01, models: ["grok-4.7"] });
+assert.deepEqual(progress, { version: 1, rewritten: { kosten: "<p>Neu.</p>" }, total: 2, calls: 2, input_tokens: 300, output_tokens: 120, cost_eur: 0.01, models: ["grok-4.7"], slow_models: [] });
 assert.deepEqual(readRephraseProgress({ something: "else" }, 3), emptyRephraseProgress(3), "an old or odd output counts as nothing done");
 assert.equal(rephraseProgressLabel(progress), "1 von 2 Abschnitten");
 assert.equal(rephraseProgressLabel({ findings: [] }), null);
@@ -693,9 +694,12 @@ assert.equal(
 );
 assert.deepEqual([priceForModel("grok-4.7").inputUsd, priceForModel("grok-4.7").outputUsd, priceForModel("grok-4").inputUsd, priceForModel("grok-4").outputUsd], [2, 6, 3, 15]);
 assert.equal(estimateCostEur("grok-4.7", { inputTokens: 1_000_000, outputTokens: 1_000_000 }, 1), 8);
-assert.deepEqual(resolveXaiModels({}), ["grok-4.7", "grok-4"]);
-assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: " grok-4 " }), ["grok-4"]);
-assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: "grok-5" }), ["grok-5", "grok-4"]);
+assert.deepEqual(resolveXaiModels({}), ["grok-4.7", ...XAI_MODEL_FALLBACKS]);
+assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: " grok-4 " }), ["grok-4", "grok-4-1-fast-non-reasoning", "grok-4-fast-non-reasoning", "grok-3"], "no duplicate, configured first");
+assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: "grok-5" })[0], "grok-5");
+assert.deepEqual(rephraseModelOrder(["a", "b", "c"], ["a"]), ["b", "c", "a"], "a slow model goes last");
+assert.deepEqual(rephraseModelOrder(["a", "b"], ["a", "b"]), ["a", "b"], "never no candidate");
+assert.deepEqual(readRephraseProgress({ version: 1, rewritten: {}, slow_models: ["grok-4", 3] }, 1).slow_models, ["grok-4"]);
 console.log("step 8: ok");
 
 async function runXai() {
@@ -728,11 +732,29 @@ async function runXai() {
     );
   };
   const reply = await callXaiText({ system: prompt8.system, user: prompt8.user, maxTokens: 100, env: { XAI_API_KEY: "k" }, fetchImpl: stubFetch });
-  assert.deepEqual(seen.map((s) => s.model), ["grok-4.7", "grok-4"], "404 on the configured model → the fallback");
+  assert.deepEqual(seen.map((s) => s.model), ["grok-4.7", "grok-4-1-fast-non-reasoning"], "404 on the configured model → the first fallback");
   assert.ok(seen.every((s) => s.auth === "Bearer k" && s.tools === undefined), "plain chat, no function calling");
-  assert.equal(reply.model, "grok-4");
+  assert.equal(reply.model, "grok-4-1-fast-non-reasoning");
   assert.deepEqual(reply.usage, { inputTokens: 120, outputTokens: 30 });
   assert.equal(parseRephrasedChunk(reply.text, [longBody])[0]?.html, "<p>Neu.</p>");
+  seen.length = 0;
+  const ordered = await callXaiText({ system: "s", user: "u", maxTokens: 10, env: { XAI_API_KEY: "k" }, fetchImpl: stubFetch, models: ["grok-3", "grok-4.7"] });
+  assert.deepEqual([ordered.model, seen.map((s) => s.model)], ["grok-3", ["grok-3"]], "the caller may hand in its own order");
+
+  const slow = async (url: string, init: RequestInit): Promise<Response> =>
+    new Promise((_, reject) => {
+      init.signal?.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    });
+  await assert.rejects(
+    callXaiText({ system: "s", user: "u", maxTokens: 10, timeoutMs: 20, env: { XAI_API_KEY: "k" }, fetchImpl: slow, models: ["grok-4"] }),
+    (error: unknown) =>
+      error instanceof XaiTimeoutError && error.model === "grok-4" && error.retryable === true && /Zeitlimit/.test(error.message),
+    "a model that does not answer in time is reported with its name",
+  );
 
   const empty = async (): Promise<Response> =>
     new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "", refusal: "Das kann ich nicht." } }] }), { status: 200 });

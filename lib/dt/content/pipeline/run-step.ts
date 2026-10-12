@@ -24,17 +24,19 @@ import {
 import {
   REPHRASE_CHUNK_TIMEOUT_MS,
   REPHRASE_MIN_REMAINING_MS,
+  REPHRASE_SLOW_MODEL_MS,
   needsRephrase,
   parseRephrasedChunk,
   planRephraseChunks,
   readRephraseProgress,
   rephraseChunkMaxTokens,
+  rephraseModelOrder,
   rephrasedBlocks,
   type RephraseProgress,
 } from "@/lib/dt/content/pipeline/rephrase";
 import { stepPatchFor } from "@/lib/dt/content/pipeline/step-patch";
 import { contentStepDefinition, type ContentStepDefinition } from "@/lib/dt/content/pipeline/steps";
-import { callXaiText, resolveXaiModels } from "@/lib/dt/content/pipeline/xai";
+import { XaiTimeoutError, callXaiText, resolveXaiModels } from "@/lib/dt/content/pipeline/xai";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
@@ -334,12 +336,24 @@ async function runRephraseStep(input: {
     }
 
     const prompt = rephraseChunkPrompt(context, chunk);
-    const answer = await callXaiText({
-      system: prompt.system,
-      user: prompt.user,
-      maxTokens: rephraseChunkMaxTokens(chunk),
-      timeoutMs: Math.min(remaining, REPHRASE_CHUNK_TIMEOUT_MS),
-    });
+    let answer;
+    try {
+      answer = await callXaiText({
+        system: prompt.system,
+        user: prompt.user,
+        maxTokens: rephraseChunkMaxTokens(chunk),
+        timeoutMs: Math.min(remaining, REPHRASE_CHUNK_TIMEOUT_MS),
+        models: rephraseModelOrder(resolveXaiModels(), progress.slow_models),
+      });
+    } catch (error) {
+      // A model that needs more than a minute for one small chunk is the wrong model for this
+      // page: remember it, so the retry starts with the next candidate instead of failing again.
+      if (error instanceof XaiTimeoutError && error.elapsedMs >= REPHRASE_SLOW_MODEL_MS && !progress.slow_models.includes(error.model)) {
+        progress.slow_models.push(error.model);
+        await saveProgress({ status: "pending", finished_at: null }).catch(() => undefined);
+      }
+      throw error;
+    }
     model = answer.model;
     const costEur = estimateCostEur(answer.model, answer.usage);
     await recordLlmUsageEvent(service, {
