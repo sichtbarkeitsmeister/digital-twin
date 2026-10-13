@@ -255,6 +255,7 @@ export function formatGroundingPagesForPrompt(input: {
   lines.push("### Regeln");
   lines.push(
     "- Entwürfe baut der Grounding-Agent im Hintergrund: mit start_grounding_draft starten (nach Bestätigung des Nutzers), Antworten auf Faktencheck-Fragen mit answer_grounding_draft weitergeben. Den Stand liest du oben je Seite unter „Entwurf“.",
+    "- Entitätsseiten: Eine eigene Seite nur bei eigener Nachfrage UND Faktendichte. Die Nachfrage prüfst du je Wunschkunde aus „Wunschkunden-Wissen (Zielgruppen)“: Welche Fragen stellt jeder einzelne Zielkunde vor seiner Entscheidung, welche Begriffe nutzt er? Alle Wunschkunden nennen, nicht nur einen; Zielkunden suchen Begriffe aus ihrem Alltag, keine Dienstleistungskategorien.",
     "- Bestehende URLs haben Vorrang vor der Standard-URL /grounding/. Bestehende Grounding Pages werden nicht auf eine neue URL umgezogen.",
     "- Es gibt bereits eine Grounding Page: jeder Auftrag ist ein „aktualisiere“, kein Neubau (außer der Nutzer verlangt ausdrücklich einen Neubau).",
     "- Die Fälligkeit richtet sich nach lastReviewed (letzte menschliche Prüfung), nicht nach dem Upload-Datum oder dateModified.",
