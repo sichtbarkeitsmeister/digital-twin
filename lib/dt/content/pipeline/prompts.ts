@@ -455,9 +455,20 @@ export function editorNotesBlock(notes: readonly string[]): string {
   return formatNotes(notes.map((n) => clip(n, 2_000)).filter(Boolean));
 }
 
-function notesBlock(context: ContentPipelineContext): string {
+/**
+ * What the notes block and the step-8 chunk prompt need: the Vorgaben, the editor's notes
+ * and, for a page of the pipeline, the KI-Prompt of the structure. The standalone
+ * Watermark tool (lib/dt/text-tools/watermark.ts) has no page and passes settings and notes.
+ */
+export type RephrasePromptContext = {
+  settings: ContentTextSettings;
+  notes: readonly string[];
+  page?: { ki_prompt: string | null } | null;
+};
+
+function notesBlock(context: RephrasePromptContext): string {
   return formatNotes([
-    ...(context.page.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
+    ...(context.page?.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
     ...context.notes.map((n) => clip(n, 2_000)),
   ]);
 }
@@ -1106,8 +1117,10 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
  * Step 8 runs on Grok (xAI, see `xai.ts` and `rephrase.ts`), not on Claude, and not through
  * a tool-forced JSON answer: one chunk of sections goes in as HTML and comes back as HTML.
  * This builds the prompt for one chunk; the same settings and notes as every other step.
+ * The Watermark tool under Verwaltung builds its chunks with this very function, so the
+ * two never drift apart.
  */
-export function rephraseChunkPrompt(context: ContentPipelineContext, chunk: readonly ContentTextBlock[]): { system: string; user: string } {
+export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: readonly ContentTextBlock[]): { system: string; user: string } {
   return {
     system: REPHRASE_SYSTEM,
     user: join([
