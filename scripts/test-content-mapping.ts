@@ -8,12 +8,16 @@ import {
   anbieterFromWorkshop,
   avatarFromAgent,
   CONTENT_TONALITAETEN,
+  CONTENT_WORDS_MAX,
+  brancheRuleGroup,
+  cleanBranche,
   cleanTextSettings,
   contentTonalitaetText,
   filledWorkshopSections,
   fragebogenSections,
   mergeAnbieterSections,
   mergeContentAnbieter,
+  parseWordFile,
   parseWordList,
   sectionsForSuggestion,
   suggestTextSettings,
@@ -61,6 +65,7 @@ import {
 import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import {
   htmlToMarkdown,
+  htmlToPlainText,
   normalizeBlocks,
   parseBlocksFromHtml,
   renderBlocksHtml,
@@ -152,7 +157,7 @@ assert.deepEqual(anbieterFromWorkshop([], { organisationName: "" }), { name: "" 
 const demo = suggestTextSettings(DEMO_WORKSHOP_ANBIETER);
 assert.equal(demo.settings.anrede, "Sie");
 assert.equal(demo.reasons.anrede, "„gesiezt“ in „Sprache & Ton“");
-assert.equal(demo.settings.branche, "handwerk");
+assert.equal(demo.settings.branche, "Handwerk & Dienstleistung", "keyword signals pre-fill the group label");
 assert.equal(demo.reasons.branche, "„Entrümpelung“ in „Unternehmen & Kern“", "trade words are a finding, not a silent default");
 assert.deepEqual(demo.unclear, []);
 assert.equal(demo.settings.tonalitaet, "herzlich", "ehrlich + bodenständig beat the single ruhig");
@@ -205,23 +210,23 @@ assert.equal(both.settings.anrede, "Sie", "conflicting hints fall back to Sie");
 assert.equal(both.reasons.anrede, undefined);
 
 const law = suggestTextSettings(sections({ unternehmen: "Kanzlei Weber & Partner, Fachanwälte für Arbeitsrecht in Köln." }));
-assert.equal(law.settings.branche, "rechtsanwalt");
+assert.equal(law.settings.branche, "Rechtsanwalt & Kanzlei");
 assert.equal(law.reasons.branche, "„Kanzlei“ in „Unternehmen & Kern“");
-assert.equal(suggestTextSettings(sections({ unternehmen: "Rechtsanwältin Dr. Kaya" })).settings.branche, "rechtsanwalt");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Rechtsanwältin Dr. Kaya" })).settings.branche, "Rechtsanwalt & Kanzlei");
 
 const doctor = suggestTextSettings(sections({ unternehmen: "Zahnarztpraxis Dr. Lenz in Essen, 3 Behandlungsräume." }));
-assert.equal(doctor.settings.branche, "arzt");
-assert.equal(suggestTextSettings(sections({ unternehmen: "Physiotherapie-Praxis am Markt" })).settings.branche, "arzt");
-assert.equal(suggestTextSettings(sections({ unternehmen: "Hausärztin mit eigener Praxis" })).settings.branche, "arzt");
+assert.equal(doctor.settings.branche, "Arzt & Praxis");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Physiotherapie-Praxis am Markt" })).settings.branche, "Arzt & Praxis");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Hausärztin mit eigener Praxis" })).settings.branche, "Arzt & Praxis");
 assert.equal(
   suggestTextSettings(sections({ unternehmen: "Malerbetrieb. In der Praxis zeigt sich: Kunden wollen Festpreise." })).settings.branche,
-  "handwerk",
+  "Handwerk & Dienstleistung",
   "the idiom „in der Praxis“ is not a medical practice",
 );
-assert.equal(suggestTextSettings(sections({ unternehmen: "Notarztdienst-Zulieferer" })).settings.branche, "arzt");
+assert.equal(suggestTextSettings(sections({ unternehmen: "Notarztdienst-Zulieferer" })).settings.branche, "Arzt & Praxis");
 
 const empty = suggestTextSettings(sections({}));
-assert.deepEqual(empty.settings, { anrede: "Sie", branche: "handwerk", tonalitaet: "herzlich", verbotene_woerter: [] });
+assert.deepEqual(empty.settings, { anrede: "Sie", branche: "", tonalitaet: "herzlich", verbotene_woerter: [] }, "no signal → the field stays empty for the specialist");
 assert.deepEqual(empty.unclear, ["branche"], "no signal at all → the person has to pick");
 assert.match(empty.reasons.branche ?? "", /^Branche unklar – in den Anbieterfakten steht nichts zur Branche/);
 assert.deepEqual(Object.keys(empty.reasons), ["branche"]);
@@ -229,22 +234,22 @@ assert.deepEqual(Object.keys(empty.reasons), ["branche"]);
 // Branche: every client section counts, specific words beat generic trade vocabulary, ties are flagged.
 const mixed = suggestTextSettings(sections({ unternehmen: "Kanzlei am Markt. Unser Betrieb versteht sich als Dienstleister." }));
 assert.deepEqual(mixed.unclear, ["branche"]);
-assert.equal(mixed.settings.branche, "rechtsanwalt", "on a tie the specific branch is the placeholder");
+assert.equal(mixed.settings.branche, "", "on a tie the field stays empty");
 assert.equal(
   mixed.reasons.branche,
-  "Branche unklar – „Kanzlei“ (Unternehmen & Kern) spricht für Rechtsanwalt & Kanzlei, „Betrieb“ (Unternehmen & Kern) für Handwerk & Dienstleistung. Bitte manuell wählen.",
+  "Branche unklar – „Kanzlei“ (Unternehmen & Kern) spricht für Rechtsanwalt & Kanzlei, „Betrieb“ (Unternehmen & Kern) für Handwerk & Dienstleistung. Bitte eintragen.",
 );
 const clearLaw = suggestTextSettings(sections({ unternehmen: "Kanzlei am Markt für unsere Mandanten.", kanaele: "Kunden rufen meist an." }));
-assert.equal(clearLaw.settings.branche, "rechtsanwalt");
+assert.equal(clearLaw.settings.branche, "Rechtsanwalt & Kanzlei");
 assert.deepEqual(clearLaw.unclear, [], "a lead of two points is a finding despite a generic hit elsewhere");
 const fromOtherSection = suggestTextSettings(sections({ unternehmen: "Wir sind ein kleines Team in Essen.", leistungen: "Physiotherapie für Patienten nach Sportverletzungen." }));
-assert.equal(fromOtherSection.settings.branche, "arzt");
+assert.equal(fromOtherSection.settings.branche, "Arzt & Praxis");
 assert.equal(fromOtherSection.reasons.branche, "„Physiotherapie“ in „Leistungen & Schwerpunkte“", "not only „unternehmen“ is read");
 const facts2: ContentFragebogenFact[] = [
   { label: "Wen behandeln Sie?", stepTitle: "Leistungen", value: "Patienten mit Rückenschmerzen, Physiotherapie und Reha." },
 ];
 const fromFragebogen = suggestTextSettings(sectionsForSuggestion(sections({ unternehmen: "Wir sind ein kleines Team in Essen." }), facts2));
-assert.equal(fromFragebogen.settings.branche, "arzt", "Fragebogen answers count even when the workshop has an unternehmen text");
+assert.equal(fromFragebogen.settings.branche, "Arzt & Praxis", "Fragebogen answers count even when the workshop has an unternehmen text");
 assert.equal(fromFragebogen.reasons.branche, "„Patienten“ in „Anbieter-Fragebogen“");
 assert.equal(suggestTextSettings(sections({ unternehmen: "Kanzlei Weber" })).settings.tonalitaet, "serioes", "branch default");
 assert.equal(suggestTextSettings(sections({ unternehmen: "Zahnarztpraxis" })).settings.tonalitaet, "einfuehlsam", "branch default");
@@ -253,10 +258,41 @@ assert.deepEqual(suggestTextSettings([]).settings, empty.settings);
 // --- settings input and merge -----------------------------------------------------------------
 assert.deepEqual(parseWordList(" Schrott, „Ramsch“;\n billig ,schrott,, "), ["Schrott", "Ramsch", "billig"]);
 assert.deepEqual(
-  cleanTextSettings({ anrede: "Du", branche: "zahnarzt" as never, tonalitaet: "egal" as never, verbotene_woerter: [" a ", "A", ""] }),
-  { anrede: "Du", branche: "handwerk", tonalitaet: "herzlich", verbotene_woerter: ["a"] },
-  "unknown tone falls back to the branch default",
+  cleanTextSettings({ anrede: "Du", branche: "  Zahnarzt-Praxis  ", tonalitaet: "egal" as never, verbotene_woerter: [" a ", "A", ""] }),
+  { anrede: "Du", branche: "Zahnarzt-Praxis", tonalitaet: "einfuehlsam", verbotene_woerter: ["a"] },
+  "free text stays; an unknown tone falls back to the default of the branch's rule group",
 );
+
+// Branche as free text: an outright answer wins, legacy keys become labels, the rule group follows the text.
+const answered = suggestTextSettings(
+  sectionsForSuggestion(sections({ unternehmen: "Wir sind ein Team von zwölf Leuten." }), [
+    { label: "In welcher Branche sind Sie tätig?", stepTitle: "Unternehmen", value: " Steuerberatung " },
+  ]),
+);
+assert.equal(answered.settings.branche, "Steuerberatung", "the Fragebogen answer is taken as typed");
+assert.equal(answered.reasons.branche, "Antwort „Steuerberatung“ in „Anbieter-Fragebogen“");
+assert.deepEqual(answered.unclear, []);
+assert.equal(answered.settings.tonalitaet, "serioes", "the tone default follows the rule group of the answer");
+assert.equal(
+  suggestTextSettings(sections({ unternehmen: "Familienbetrieb seit 1980.\nBranche: Dachdeckerei" })).settings.branche,
+  "Dachdeckerei",
+  "a „Branche:“ line in a workshop section counts too",
+);
+assert.equal(suggestTextSettings(sections({ unternehmen: "Die Branche: hart umkämpft?" })).settings.branche, "", "a question is no answer");
+assert.deepEqual(
+  ["Zahnarztpraxis", "Physiotherapie", "Pflegedienst", "Rechtsanwalt & Kanzlei", "Steuerberatung", "Notariat", "Umzugsunternehmen", "Gebäudepflege", "IT-Beratung", "arzt", "handwerk", ""].map(brancheRuleGroup),
+  ["arzt", "arzt", "arzt", "rechtsanwalt", "rechtsanwalt", "rechtsanwalt", "handwerk", "handwerk", "handwerk", "arzt", "handwerk", "handwerk"],
+  "the Branchenregel group is read from the text",
+);
+assert.equal(cleanBranche("handwerk"), "Handwerk & Dienstleistung", "rows from before the migration show their label");
+assert.equal(cleanBranche("  „Zahnarzt-Praxis“. "), "Zahnarzt-Praxis");
+assert.equal(cleanBranche("x".repeat(100)).length, 80);
+assert.deepEqual(
+  parseWordFile("\uFEFFSchrott\r\n- Ramsch\n\n  billig, aber gut \nschrott\n„Messie“\n"),
+  ["Schrott", "Ramsch", "billig, aber gut", "Messie"],
+  "one word per line, bullets and quotes stripped, a comma inside a line stays",
+);
+assert.equal(parseWordFile(Array.from({ length: 250 }, (_, i) => `w${i}`).join("\n")).length, CONTENT_WORDS_MAX);
 
 const merged = mergeContentAnbieter(
   { ...anbieter, anrede: "aus Text", tonalitaet: "aus Text" } as typeof anbieter,
@@ -268,6 +304,7 @@ assert.equal(merged.anrede, "Sie", "confirmed settings win");
 assert.equal(merged.tonalitaet, contentTonalitaetText("direkt"));
 assert.match(merged.tonalitaet, /^Direkt & unkompliziert: Kurz und klar\./, "the service receives the full tone text");
 assert.deepEqual(merged.verbotene_woerter, ["Schrott"]);
+assert.equal(merged.branche, "Handwerk & Dienstleistung", "a legacy key is sent as its label");
 
 // --- avatarFromAgent ------------------------------------------------------------------------
 const avatar = avatarFromAgent({
@@ -297,7 +334,8 @@ assert.equal(contentActionLabel("approve"), "Freigeben");
 assert.equal(contentActionLabel("edit"), "Abschnitt ändern");
 assert.equal(contentActionLabel("rerun_with_note"), "Mit Anmerkung wiederholen");
 assert.equal(contentActionLabel("run_through"), "Weiterlaufen lassen");
-assert.equal(contentActionLabel("export"), "Exportieren");
+assert.equal(contentActionLabel("export"), "HTML exportieren");
+assert.equal(contentActionLabel("export_txt"), "Text exportieren (.txt)");
 assert.equal(contentActionLabel("stop"), "Stoppen");
 assert.equal(contentActionLabel("reset"), "Zurücksetzen");
 assert.equal(contentActionLabel("delete"), "Löschen");
@@ -370,6 +408,13 @@ assert.equal(
   "# Entrümpelung Düsseldorf\n\nHallo\n\n## Ablauf\n\nErst A.\n\nDann B.\n\n## FAQ\n\n- Q",
 );
 assert.equal(htmlToMarkdown("<ol><li>eins</li><li>zwei</li></ol><p><strong>fett</strong> &amp; <em>kursiv</em></p>"), "1. eins\n2. zwei\n\n**fett** & *kursiv*");
+assert.equal(
+  htmlToPlainText(
+    '<section data-block-id="h"><h1>Titel</h1>\n<p>Erster <strong>Absatz</strong> &amp; mehr.</p></section>\n<section data-block-id="l"><h2>Liste</h2>\n<ul><li>eins</li><li>zwei</li></ul><ol><li>drei</li></ol><p>Siehe <a href="https://x.de/a">Seite</a>.<br>Ende</p></section>',
+  ),
+  "Titel\n\nErster Absatz & mehr.\n\nListe\n\n- eins\n- zwei\n\n1. drei\n\nSiehe Seite (https://x.de/a).\nEnde\n",
+  "plain text: headings as lines, dashes for list items, links with their address, no markup",
+);
 
 // --- prompts: findings and questions from LLM JSON ------------------------------------------
 const ids = new Set(["intro", "faq"]);
@@ -402,11 +447,11 @@ const cases: Array<[Partial<ContentPageRow>, string[], string | null]> = [
   [{}, ["run_through", "delete"], null],
   [{ page_type: "nicht_bearbeiten" }, ["delete"], null],
   [{ state: "laeuft", step: 2 }, ["stop", "reset", "delete"], "Schritt 2 von 9: SEO läuft"],
-  [{ state: "braucht_sie", step: 3, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
+  [{ state: "braucht_sie", step: 3, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
   [{ state: "in_arbeit", step: 2, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset", "delete"], "Fehler in Schritt 2: Ratenlimit"],
-  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "reset", "delete"], "Pausiert nach Schritt 5: Hormozi"],
-  [{ state: "fertig", step: 9, html }, ["approve", "edit", "rerun_with_note", "export", "reset", "delete"], "Wartet auf Freigabe"],
-  [{ state: "fertig", step: 9, html, released: true }, ["export", "reset", "delete"], "Freigegeben"],
+  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Pausiert nach Schritt 5: Hormozi"],
+  [{ state: "fertig", step: 9, html }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Wartet auf Freigabe"],
+  [{ state: "fertig", step: 9, html, released: true }, ["export", "export_txt", "reset", "delete"], "Freigegeben"],
 ];
 for (const [patch, kinds, detail] of cases) {
   const page = { ...base, ...patch };
@@ -497,7 +542,7 @@ assert.equal(
 const fbAnbieter = anbieterFromWorkshop(fbMerged, { organisationName: "Berger" });
 assert.equal(fbAnbieter.fragebogen_02, "Wir siezen immer, seriös und ruhig.", "fragebogen keys pass the section filter");
 const fbSuggestion = suggestTextSettings(sectionsForSuggestion(emptyWorkshop, facts));
-assert.equal(fbSuggestion.settings.branche, "rechtsanwalt", "branche from Fragebogen answers");
+assert.equal(fbSuggestion.settings.branche, "Rechtsanwalt & Kanzlei", "branche from Fragebogen answers");
 assert.equal(fbSuggestion.settings.anrede, "Sie");
 assert.equal(fbSuggestion.settings.tonalitaet, "serioes");
 assert.match(fbSuggestion.reasons.branche ?? "", /Anbieter-Fragebogen/);

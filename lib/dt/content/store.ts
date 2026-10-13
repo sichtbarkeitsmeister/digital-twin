@@ -17,7 +17,7 @@ import {
   type ContentPageKeywords,
 } from "@/lib/dt/content/excel-structure";
 import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
-import type { ContentAnrede, ContentBranche, ContentTextSettings } from "@/lib/dt/content/mapping";
+import type { ContentAnrede, ContentTextSettings } from "@/lib/dt/content/mapping";
 import { cleanTextSettings } from "@/lib/dt/content/mapping";
 import {
   CONTENT_PAGE_TYPE_LABELS,
@@ -35,7 +35,7 @@ import {
   contentStepName,
   hasLegacyContentSteps,
 } from "@/lib/dt/content/pipeline/steps";
-import { formatEur } from "@/lib/dt/content/presentation";
+import { CONTENT_ACTION_LABELS, formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
 import { parseWebsiteStructure, type WebsiteStructureNode } from "@/lib/dt/seo/website-structure";
 import type {
@@ -118,7 +118,8 @@ export type ContentStepRow = {
 export type ContentSettingsRow = {
   organisation_id: string;
   anrede: ContentAnrede;
-  branche: ContentBranche;
+  /** Free text since migration 20261013; older rows hold one of the three former keys. */
+  branche: string;
   tonalitaet: string;
   verbotene_woerter: string[];
   avatar_agent_id: string | null;
@@ -148,11 +149,18 @@ export const CONTENT_MIGRATION_FILE = "database/migrations/20261006_dt_content_p
 export const CONTENT_SOURCE_MIGRATION_FILE = "database/migrations/20261008_dt_content_pages_source.sql";
 export const CONTENT_BRIEFING_MIGRATION_FILE = "database/migrations/20261009_dt_content_excel_briefing.sql";
 export const CONTENT_NINE_STEPS_MIGRATION_FILE = "database/migrations/20261011_dt_content_nine_steps.sql";
+export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
 
 /** 23514 on the step CHECK: the database still allows steps 1 … 8 only (migration 20261011 never ran). */
 export function isContentStepRangeError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   return error.code === "23514" && /step_check|\bstep\b/i.test(error.message ?? "");
+}
+
+/** 23514 on the branche CHECK: the database still allows the three former fixed values only (migration 20261013 never ran). */
+export function isContentBrancheCheckError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return error.code === "23514" && /branche_check/i.test(error.message ?? "");
 }
 
 /** PostgREST answers PGRST205 when a table is not in its schema cache, i.e. the migration never ran. */
@@ -176,6 +184,9 @@ export function isMissingContentColumnError(error: { code?: string; message?: st
 export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
   if (isContentStepRangeError(error)) {
     return `Die Datenbank kennt nur acht Schritte: Bitte ${CONTENT_NINE_STEPS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+  }
+  if (isContentBrancheCheckError(error)) {
+    return `Die Datenbank erlaubt für die Branche noch nur drei feste Werte: Bitte ${CONTENT_BRANCHE_TEXT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
   if (isMissingContentColumnError(error)) {
     return `Die Datenbank ist noch nicht auf dem neuesten Stand: Bitte ${CONTENT_BRIEFING_MIGRATION_FILE} (und, falls noch nicht geschehen, ${CONTENT_SOURCE_MIGRATION_FILE}) einmal im Supabase SQL Editor ausführen.`;
@@ -764,7 +775,12 @@ export function rerunStepFor(page: ContentPageRow): number {
  * of any state, and the way to prune a table, by hand.
  */
 export function pageActions(page: ContentPageRow): ContentAction[] {
-  const exportAction: ContentAction[] = page.html ? [{ kind: "export", label: "Exportieren" }] : [];
+  const exportAction: ContentAction[] = page.html
+    ? [
+        { kind: "export", label: CONTENT_ACTION_LABELS.export },
+        { kind: "export_txt", label: CONTENT_ACTION_LABELS.export_txt },
+      ]
+    : [];
   const reset: ContentAction = { kind: "reset", label: "Zurücksetzen" };
   const remove: ContentAction = { kind: "delete", label: "Löschen" };
   switch (page.state) {
