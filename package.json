@@ -63,6 +63,7 @@
     "test:agent-survey-coverage": "tsx scripts/test-agent-survey-coverage.ts",
     "test:organisation-survey-open-href": "tsx scripts/test-organisation-survey-open-href.ts",
     "test:grounding-page-schedule": "tsx scripts/test-grounding-page-schedule.ts",
+    "test:grounding-pages-prompt": "tsx scripts/test-grounding-pages-prompt.ts",
     "test:detect-grounding-page-date": "tsx scripts/test-detect-grounding-page-date.ts",
     "test:discover-grounding-page-url": "tsx scripts/test-discover-grounding-page-url.ts",
     "test:website-structure": "tsx scripts/test-website-structure.ts",

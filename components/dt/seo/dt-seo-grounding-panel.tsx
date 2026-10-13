@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, Loader2, Radar } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarClock,
+  CheckCircle2,
+  ExternalLink,
+  FilePlus2,
+  Loader2,
+  Radar,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
@@ -16,6 +26,8 @@ import {
   GROUNDING_PAGE_INTERVAL_MONTHS,
   GROUNDING_PAGE_WARN_DAYS,
 } from "@/lib/dt/seo/grounding-page-schedule";
+import type { GroundingCommand, GroundingEntityPage, GroundingReleaseStatus } from "@/lib/dt/seo/grounding-pages";
+import { DtSeoGroundingEntities } from "@/components/dt/seo/dt-seo-grounding-entities";
 
 type LlmsTxtStatus =
   | {
@@ -34,8 +46,15 @@ type GroundingPayload = {
   organisationId: string;
   url: string | null;
   uploadedAt: string | null;
+  dateModified?: string | null;
+  lastReviewed?: string | null;
+  reviewedBy?: string | null;
+  releaseStatus?: GroundingReleaseStatus | null;
+  standardVersion?: string | null;
+  customerSlug?: string | null;
   notes: string | null;
   llmsTxtUrl?: string | null;
+  entities?: GroundingEntityPage[];
   schedule: GroundingPageSchedule;
 };
 
@@ -65,12 +84,19 @@ function statusBadge(status: GroundingPageStatus): {
   if (status === "missing") {
     return { label: "Nicht erfasst", variant: "outline" };
   }
+  if (status === "review_missing") {
+    return {
+      label: "Prüfung offen",
+      variant: "outline",
+      className: "border-amber-500/50 bg-amber-500/10 text-amber-900 dark:text-amber-100",
+    };
+  }
   if (status === "overdue") {
     return { label: "Überfällig", variant: "destructive" };
   }
   if (status === "due_soon") {
     return {
-      label: "Bald fällig",
+      label: "Frühwarnung",
       variant: "outline",
       className: "border-amber-500/50 bg-amber-500/10 text-amber-900 dark:text-amber-100",
     };
@@ -85,6 +111,7 @@ function statusBadge(status: GroundingPageStatus): {
 export function DtSeoGroundingPanel(props: {
   organisationId: string;
   canEdit: boolean;
+  onOpenChat?: (chatId: string, draft: string) => void;
 }) {
   const [data, setData] = useState<GroundingPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,10 +119,33 @@ export function DtSeoGroundingPanel(props: {
   const [detecting, setDetecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadedAt, setUploadedAt] = useState("");
+  const [dateModified, setDateModified] = useState("");
+  const [lastReviewed, setLastReviewed] = useState("");
+  const [reviewedBy, setReviewedBy] = useState("");
+  const [releaseStatus, setReleaseStatus] = useState<"" | GroundingReleaseStatus>("");
+  const [standardVersion, setStandardVersion] = useState("");
+  const [customerSlug, setCustomerSlug] = useState("");
   const [url, setUrl] = useState("");
   const [llmsTxtUrl, setLlmsTxtUrl] = useState("");
   const [notes, setNotes] = useState("");
+  const [entities, setEntities] = useState<GroundingEntityPage[]>([]);
   const [lastDetection, setLastDetection] = useState<string | null>(null);
+  const [starting, setStarting] = useState<GroundingCommand | null>(null);
+
+  function applyGrounding(grounding: GroundingPayload) {
+    setData(grounding);
+    setUploadedAt(toDateInputValue(grounding.uploadedAt));
+    setDateModified(toDateInputValue(grounding.dateModified));
+    setLastReviewed(toDateInputValue(grounding.lastReviewed));
+    setReviewedBy(grounding.reviewedBy ?? "");
+    setReleaseStatus(grounding.releaseStatus ?? "");
+    setStandardVersion(grounding.standardVersion ?? "");
+    setCustomerSlug(grounding.customerSlug ?? "");
+    setUrl(grounding.url ?? "");
+    setLlmsTxtUrl(grounding.llmsTxtUrl ?? "");
+    setNotes(grounding.notes ?? "");
+    setEntities(grounding.entities ?? []);
+  }
   const [llmsTxt, setLlmsTxt] = useState<LlmsTxtStatus | null>(null);
 
   const refresh = useCallback(async () => {
@@ -121,15 +171,14 @@ export function DtSeoGroundingPanel(props: {
         setData(null);
         return;
       }
-      setData(json.grounding);
-      setUploadedAt(toDateInputValue(json.grounding.uploadedAt));
-      setUrl(json.grounding.url ?? json.discoveredUrl ?? "");
-      setLlmsTxtUrl(
-        json.grounding.llmsTxtUrl ??
-          (json.llmsTxt?.found ? json.llmsTxt.url : "") ??
-          "",
-      );
-      setNotes(json.grounding.notes ?? "");
+      applyGrounding({
+        ...json.grounding,
+        url: json.grounding.url ?? json.discoveredUrl ?? null,
+        llmsTxtUrl:
+          json.grounding.llmsTxtUrl ??
+          (json.llmsTxt?.found ? json.llmsTxt.url : null) ??
+          null,
+      });
       setLlmsTxt(json.llmsTxt ?? null);
       if (json.autoApplied && json.grounding.uploadedAt) {
         const via =
@@ -169,6 +218,12 @@ export function DtSeoGroundingPanel(props: {
         body: JSON.stringify({
           organisationId: props.organisationId,
           uploadedAt: uploadedAt ? uploadedAt : null,
+          dateModified: dateModified ? dateModified : null,
+          lastReviewed: lastReviewed ? lastReviewed : null,
+          reviewedBy: reviewedBy.trim() || null,
+          releaseStatus: releaseStatus || null,
+          standardVersion: standardVersion.trim() || null,
+          customerSlug: customerSlug.trim() || null,
           url: url.trim() || null,
           llmsTxtUrl: llmsTxtUrl.trim() || null,
           notes: notes.trim() || null,
@@ -184,15 +239,13 @@ export function DtSeoGroundingPanel(props: {
         toast.error(json.message ?? "Speichern fehlgeschlagen.");
         return;
       }
-      setData(json.grounding);
-      setUploadedAt(toDateInputValue(json.grounding.uploadedAt));
-      setUrl(json.grounding.url ?? "");
-      setLlmsTxtUrl(
-        json.grounding.llmsTxtUrl ??
-          (json.llmsTxt?.found ? json.llmsTxt.url : "") ??
-          "",
-      );
-      setNotes(json.grounding.notes ?? "");
+      applyGrounding({
+        ...json.grounding,
+        llmsTxtUrl:
+          json.grounding.llmsTxtUrl ??
+          (json.llmsTxt?.found ? json.llmsTxt.url : null) ??
+          null,
+      });
       if (json.llmsTxt) setLlmsTxt(json.llmsTxt);
       toast.success("Grounding-Page aktualisiert.");
     } catch {
@@ -225,9 +278,13 @@ export function DtSeoGroundingPanel(props: {
         ok?: boolean;
         message?: string;
         detection?: {
-          detectedAt: string;
+          detectedAt: string | null;
+          appliesToUpload?: boolean;
           sourceLabel: string;
           finalUrl?: string;
+          lastReviewed?: { at: string; sourceLabel: string } | null;
+          dateModified?: { at: string; sourceLabel: string } | null;
+          reviewedBy?: { name: string; sourceLabel: string } | null;
         };
         grounding?: GroundingPayload;
       };
@@ -235,18 +292,29 @@ export function DtSeoGroundingPanel(props: {
         toast.error(json.message ?? "Datum konnte nicht gelesen werden.");
         return;
       }
-      const detectedDay = toDateInputValue(json.detection.detectedAt);
-      setUploadedAt(detectedDay);
+      const parts = [json.detection.sourceLabel];
+      if (json.detection.appliesToUpload && json.detection.detectedAt) {
+        setUploadedAt(toDateInputValue(json.detection.detectedAt));
+      }
+      if (json.detection.dateModified?.at) {
+        setDateModified(toDateInputValue(json.detection.dateModified.at));
+        parts.push(`dateModified: ${json.detection.dateModified.sourceLabel}`);
+      }
+      if (json.detection.lastReviewed?.at) {
+        setLastReviewed(toDateInputValue(json.detection.lastReviewed.at));
+        parts.push(`Prüfung: ${json.detection.lastReviewed.sourceLabel}`);
+      }
+      if (json.detection.reviewedBy?.name) {
+        setReviewedBy(json.detection.reviewedBy.name);
+        parts.push(`Prüfer: ${json.detection.reviewedBy.sourceLabel}`);
+      }
       if (json.detection.finalUrl) setUrl(json.detection.finalUrl);
-      setLastDetection(
-        `${formatDeDate(json.detection.detectedAt)} · ${json.detection.sourceLabel}`,
-      );
+      setLastDetection(parts.join(" · "));
       if (json.grounding) {
-        setData(json.grounding);
-        setNotes(json.grounding.notes ?? "");
-        toast.success("Datum von der Seite gelesen und gespeichert.");
+        applyGrounding(json.grounding);
+        toast.success("Daten von der Seite gelesen und gespeichert.");
       } else {
-        toast.success("Datum von der Seite gelesen — bitte Speichern.");
+        toast.success("Daten von der Seite gelesen — bitte Speichern.");
       }
     } catch {
       toast.error("Datum konnte nicht gelesen werden.");
@@ -259,17 +327,74 @@ export function DtSeoGroundingPanel(props: {
     setUploadedAt(new Date().toISOString().slice(0, 10));
   }
 
+  async function startCommand(command: GroundingCommand) {
+    if (!props.canEdit) return;
+    setStarting(command);
+    try {
+      const res = await fetch("/api/dt/seo/grounding/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ organisationId: props.organisationId, command }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        chatId?: string;
+        draft?: string;
+      };
+      if (!res.ok || !json.ok || !json.chatId) {
+        toast.error(json.message ?? "Auftrag konnte nicht gestartet werden.");
+        return;
+      }
+      props.onOpenChat?.(json.chatId, json.draft ?? "");
+    } catch {
+      toast.error("Auftrag konnte nicht gestartet werden.");
+    } finally {
+      setStarting(null);
+    }
+  }
+
+  async function saveEntities(next: GroundingEntityPage[]) {
+    if (!props.canEdit) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/dt/seo/grounding", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          organisationId: props.organisationId,
+          entityPages: next,
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        grounding?: GroundingPayload;
+      };
+      if (!res.ok || !json.ok || !json.grounding) {
+        toast.error(json.message ?? "Entitätsseiten konnten nicht gespeichert werden.");
+        return;
+      }
+      applyGrounding(json.grounding);
+      toast.success("Entitätsseiten gespeichert.");
+    } catch {
+      toast.error("Entitätsseiten konnten nicht gespeichert werden.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4 pb-8">
       <div>
         <h2 className="text-lg font-bold tracking-tight text-sbkm-navy dark:text-white">
-          Grounding Page
+          Grounding Pages
         </h2>
         <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
-          Alle {GROUNDING_PAGE_INTERVAL_MONTHS} Monate aktualisieren. Ab{" "}
-          {GROUNDING_PAGE_WARN_DAYS} Tage vor Fälligkeit erscheint ein Hinweis. Der Twin sucht den
-          Grounding-Link im Footer (neben Impressum/Datenschutz), prüft zusätzlich{" "}
-          <code className="text-[0.85em]">llms.txt</code> und liest das Datum von der Live-Seite.
+          Hub und Entitätsseiten. Die Fälligkeit liegt {GROUNDING_PAGE_INTERVAL_MONTHS} Monate nach
+          der letzten menschlichen Prüfung (lastReviewed), nicht nach dem Upload. Ab{" "}
+          {GROUNDING_PAGE_WARN_DAYS} Tage vorher gilt die Frühwarnung. Der Auftrag schreibt jede
+          Zielgruppe einzeln in „Anfragen & Lösungen“.
         </p>
       </div>
 
@@ -299,7 +424,15 @@ export function DtSeoGroundingPanel(props: {
               </Badge>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-sbkm-navy/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/45">
+                  Zuletzt geprüft
+                </p>
+                <p className="mt-1 text-sm font-semibold text-sbkm-navy dark:text-white">
+                  {formatDeDate(schedule?.lastReviewed ?? data?.lastReviewed)}
+                </p>
+              </div>
               <div className="rounded-xl border border-sbkm-navy/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.04]">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/45">
                   Hochgeladen
@@ -310,7 +443,7 @@ export function DtSeoGroundingPanel(props: {
               </div>
               <div className="rounded-xl border border-sbkm-navy/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.04]">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/45">
-                  Nächste Aktualisierung
+                  Nächste Prüfung
                 </p>
                 <p className="mt-1 text-sm font-semibold text-sbkm-navy dark:text-white">
                   {formatDeDate(schedule?.nextDueAt)}
@@ -338,8 +471,8 @@ export function DtSeoGroundingPanel(props: {
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                 <p>
                   {schedule.status === "overdue"
-                    ? "Die Grounding Page ist älter als drei Monate — bitte aktualisieren und das Upload-Datum hier setzen."
-                    : "In weniger als zwei Wochen ist die dreimonatige Aktualisierung fällig."}
+                    ? "Die letzte menschliche Prüfung liegt mehr als drei Monate zurück."
+                    : "Frühwarnung: die nächste Prüfung ist in weniger als zwei Wochen fällig."}
                 </p>
               </div>
             ) : schedule?.status === "ok" ? (
@@ -347,12 +480,20 @@ export function DtSeoGroundingPanel(props: {
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
                 <p>Im Rhythmus — keine Aktion nötig.</p>
               </div>
+            ) : schedule?.status === "review_missing" ? (
+              <div className="flex gap-2 rounded-xl bg-amber-500/10 px-3 py-2.5 text-sm text-amber-900 dark:text-amber-100">
+                <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden />
+                <p>
+                  Prüfung offen. Das Upload-Datum startet die Fälligkeit nicht. lastReviewed setzen,
+                  sobald ein Mensch die Fakten freigegeben hat.
+                </p>
+              </div>
             ) : (
               <div className="flex gap-2 rounded-xl bg-sbkm-navy/5 px-3 py-2.5 text-sm text-sbkm-ink-600 dark:bg-white/5 dark:text-white/60">
                 <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden />
                 <p>
-                  Noch kein Upload-Datum hinterlegt. URL eintragen und „Von Seite lesen“ nutzen —
-                  oder Datum manuell setzen.
+                  Noch keine Grounding Page erfasst. URL eintragen und „Von Seite lesen“ nutzen —
+                  oder den Auftrag „Erstellen“ starten.
                 </p>
               </div>
             )}
@@ -369,6 +510,67 @@ export function DtSeoGroundingPanel(props: {
               </a>
             ) : null}
           </DtGlassCard>
+
+          {props.canEdit ? (
+            <DtGlassCard variant="subtle" className="grid gap-3 p-4 sm:p-5">
+              <div>
+                <h3 className="text-sm font-bold text-sbkm-navy dark:text-white">
+                  Grounding Page erstellen
+                </h3>
+                <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
+                  Startet einen SEO-Chat mit dem Grounding-Prompt. Wunschkunden-Profile liegen dem
+                  Auftrag bei. Unterlagen kannst du an die erste Nachricht hängen. „Erstellen“ ist
+                  ein Neubau, auch wenn schon eine URL hinterlegt ist.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <DtPillButton
+                  type="button"
+                  size="sm"
+                  disabled={Boolean(starting) || saving}
+                  onClick={() => void startCommand("erstelle")}
+                  className="gap-1.5"
+                >
+                  {starting === "erstelle" ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <FilePlus2 className="size-4" aria-hidden />
+                  )}
+                  Erstellen
+                </DtPillButton>
+                <DtPillButton
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={Boolean(starting) || saving}
+                  onClick={() => void startCommand("aktualisiere")}
+                  className="gap-1.5"
+                >
+                  {starting === "aktualisiere" ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <RefreshCw className="size-4" aria-hidden />
+                  )}
+                  Aktualisieren
+                </DtPillButton>
+                <DtPillButton
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={Boolean(starting) || saving}
+                  onClick={() => void startCommand("pruefe")}
+                  className="gap-1.5"
+                >
+                  {starting === "pruefe" ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Search className="size-4" aria-hidden />
+                  )}
+                  Prüfen
+                </DtPillButton>
+              </div>
+            </DtGlassCard>
+          ) : null}
 
           <DtGlassCard variant="subtle" className="grid gap-3 p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -477,6 +679,91 @@ export function DtSeoGroundingPanel(props: {
                 ) : null}
               </div>
             </label>
+
+            <label className="grid gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                Kurzname für Dateien
+              </span>
+              <input
+                value={customerSlug}
+                disabled={!props.canEdit || saving || detecting}
+                placeholder="z. B. existenzstand"
+                onChange={(e) => setCustomerSlug(e.target.value.toLowerCase())}
+                className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+              />
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                  Zuletzt geprüft
+                </span>
+                <input
+                  type="date"
+                  value={lastReviewed}
+                  disabled={!props.canEdit || saving || detecting}
+                  onChange={(e) => setLastReviewed(e.target.value)}
+                  className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm font-semibold text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                  dateModified
+                </span>
+                <input
+                  type="date"
+                  value={dateModified}
+                  disabled={!props.canEdit || saving || detecting}
+                  onChange={(e) => setDateModified(e.target.value)}
+                  className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm font-semibold text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                />
+              </label>
+            </div>
+
+            <label className="grid gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                Prüfer
+              </span>
+              <input
+                value={reviewedBy}
+                disabled={!props.canEdit || saving || detecting}
+                placeholder="Person oder Organisation"
+                onChange={(e) => setReviewedBy(e.target.value)}
+                className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+              />
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                  Freigabe
+                </span>
+                <select
+                  value={releaseStatus}
+                  disabled={!props.canEdit || saving || detecting}
+                  onChange={(e) =>
+                    setReleaseStatus(e.target.value as "" | GroundingReleaseStatus)
+                  }
+                  className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                >
+                  <option value="">Nicht gesetzt</option>
+                  <option value="draft">Entwurf</option>
+                  <option value="released">Freigegeben</option>
+                </select>
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
+                  Standardversion
+                </span>
+                <input
+                  value={standardVersion}
+                  disabled={!props.canEdit || saving || detecting}
+                  placeholder="z. B. v1.6"
+                  onChange={(e) => setStandardVersion(e.target.value)}
+                  className="h-10 rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                />
+              </label>
+            </div>
 
             <label className="grid gap-1.5">
               <span className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/50">
@@ -603,6 +890,13 @@ export function DtSeoGroundingPanel(props: {
               </p>
             )}
           </DtGlassCard>
+
+          <DtSeoGroundingEntities
+            canEdit={props.canEdit}
+            saving={saving || detecting}
+            entities={entities}
+            onSave={(next) => void saveEntities(next)}
+          />
         </>
       )}
     </div>

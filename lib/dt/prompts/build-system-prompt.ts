@@ -63,6 +63,8 @@ export function buildDtSystemPrompt(input: {
   textMode?: boolean;
   /** Override for the Text-Modus block (platform setting). Falls back to the code default. */
   textModePrompt?: string;
+  /** Full grounding-page prompt for chats started from SEO → Grounding. */
+  groundingPagesText?: string;
 }): string {
   const prospect = isProspectPersonaKind(input.agent.kind, input.agent.slug);
 
@@ -197,6 +199,15 @@ export function buildDtSystemPrompt(input: {
 
   if (input.pastedUrlsText?.trim()) {
     blocks.push("", "## Eingefügte Webseiten", input.pastedUrlsText.trim());
+  }
+
+  if (input.groundingPagesText?.trim()) {
+    blocks.push(
+      "",
+      "## Grounding Pages und Entitätsseiten (dieser Chat)",
+      "Dieser Auftrag hat Vorrang vor dem kurzen GEO-Abschnitt, soweit er Grounding Pages, Entitätsseiten oder llms.txt betrifft. Die Textpipeline ist davon nicht berührt.",
+      input.groundingPagesText.trim(),
+    );
   }
 
   blocks.push("", DT_CHAT_FILE_INSTRUCTIONS);

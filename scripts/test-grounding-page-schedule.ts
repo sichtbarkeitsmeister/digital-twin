@@ -18,42 +18,57 @@ assert.equal(due.toISOString().slice(0, 10), "2026-04-15");
 const jan31 = addUtcMonths("2026-01-31T12:00:00.000Z", 1);
 assert.equal(jan31.toISOString().slice(0, 10), "2026-02-28");
 
-const missing = evaluateGroundingPageSchedule({ uploadedAt: null });
+const missing = evaluateGroundingPageSchedule({ uploadedAt: null, lastReviewed: null });
 assert.equal(missing.status, "missing");
 assert.equal(missing.nextDueAt, null);
+assert.equal(missing.toolStatus, "nicht erfasst");
 
-const ok = evaluateGroundingPageSchedule({
+const uploadOnly = evaluateGroundingPageSchedule({
   uploadedAt: uploaded,
   now: "2026-02-01T12:00:00.000Z",
 });
+assert.equal(uploadOnly.status, "review_missing");
+assert.equal(uploadOnly.toolStatus, "Prüfung offen");
+assert.equal(uploadOnly.nextDueAt, null);
+assert.equal(uploadOnly.basis, "none");
+
+const reviewed = uploaded;
+const ok = evaluateGroundingPageSchedule({
+  lastReviewed: reviewed,
+  now: "2026-02-01T12:00:00.000Z",
+});
 assert.equal(ok.status, "ok");
+assert.equal(ok.toolStatus, "aktuell");
+assert.equal(ok.basis, "last_reviewed");
 assert.ok((ok.daysUntilDue ?? 0) > GROUNDING_PAGE_WARN_DAYS);
 
 const dueSoon = evaluateGroundingPageSchedule({
-  uploadedAt: uploaded,
+  lastReviewed: reviewed,
   now: "2026-04-05T12:00:00.000Z",
 });
 assert.equal(dueSoon.status, "due_soon");
+assert.equal(dueSoon.toolStatus, "Frühwarnung");
 assert.ok((dueSoon.daysUntilDue ?? 99) <= GROUNDING_PAGE_WARN_DAYS);
 assert.ok((dueSoon.daysUntilDue ?? -1) >= 0);
 
 const overdue = evaluateGroundingPageSchedule({
-  uploadedAt: uploaded,
+  lastReviewed: reviewed,
   now: "2026-04-20T12:00:00.000Z",
 });
 assert.equal(overdue.status, "overdue");
+assert.equal(overdue.toolStatus, "überfällig");
 assert.ok((overdue.daysUntilDue ?? 1) < 0);
 
 // Warn window starts exactly 14 days before due (Apr 1 for Apr 15)
 const warnEdge = evaluateGroundingPageSchedule({
-  uploadedAt: uploaded,
+  lastReviewed: reviewed,
   now: "2026-04-01T12:00:00.000Z",
 });
 assert.equal(warnEdge.status, "due_soon");
 assert.equal(warnEdge.daysUntilDue, 14);
 
 const beforeWarn = evaluateGroundingPageSchedule({
-  uploadedAt: uploaded,
+  lastReviewed: reviewed,
   now: "2026-03-31T12:00:00.000Z",
 });
 assert.equal(beforeWarn.status, "ok");

@@ -50,6 +50,7 @@ export function useDtSeoWorkspaceUrl() {
       tab?: DtSeoTabId | null;
       taskStatus?: DtTaskStatus | null;
       taskFocus?: boolean | null;
+      draft?: string | null;
     }) => {
       const params = new URLSearchParams(searchParams.toString());
 
@@ -80,6 +81,13 @@ export function useDtSeoWorkspaceUrl() {
       if ("taskFocus" in next) {
         if (next.taskFocus) params.set("focus", "1");
         else params.delete("focus");
+      }
+      if ("draft" in next) {
+        if (next.draft) params.set("draft", next.draft);
+        else params.delete("draft");
+      }
+      if ("tab" in next && next.tab && next.tab !== "chat") {
+        params.delete("draft");
       }
 
       const qs = params.toString();

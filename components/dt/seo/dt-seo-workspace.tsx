@@ -177,6 +177,7 @@ export function DtSeoWorkspace(props: {
             currentUserId={props.currentUserId}
             initialOrgId={orgId}
             initialChatId={initialChatId}
+            initialDraft={searchParams.get("draft")}
             initialScope="all"
             embedded
             seoMode
@@ -275,7 +276,13 @@ export function DtSeoWorkspace(props: {
 
       {tab === "grounding" && seoEnabled ? (
         <div className="min-h-0 flex-1">
-          <DtSeoGroundingPanel organisationId={orgId} canEdit={canManage} />
+          <DtSeoGroundingPanel
+            organisationId={orgId}
+            canEdit={canManage}
+            onOpenChat={(chatId, draft) =>
+              writeUrl({ org: orgId, tab: "chat", chat: chatId, draft })
+            }
+          />
         </div>
       ) : null}
 

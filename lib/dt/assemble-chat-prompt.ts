@@ -28,6 +28,7 @@ import {
 } from "@/lib/dt/seo/load-website-structure";
 import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
 import { loadOnboardingPromptText } from "@/lib/dt/onboarding/load-prompt";
+import { loadGroundingPagesInstructions } from "@/lib/dt/seo/load-grounding-pages-prompt";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import { buildDtSystemPrompt, isProspectPersonaKind } from "@/lib/dt/prompts/build-system-prompt";
 import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
@@ -259,6 +260,20 @@ export async function assembleDtChatFromDb(input: {
     ? (await loadTextModeInstructions(supabase)).prompt
     : undefined;
 
+  let groundingPagesText: string | undefined;
+  try {
+    groundingPagesText =
+      (await loadGroundingPagesInstructions(supabase, {
+        chatId: chat.id,
+        organisationId: chat.organisation_id,
+      })) ?? undefined;
+  } catch (err) {
+    console.error(
+      "[grounding-pages] prompt:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const lastUserMessage = [...prefixed].reverse().find((m) => m.role === "user");
   const pastedUrlsText = lastUserMessage?.content
     ? ((await buildPastedUrlContextText(lastUserMessage.content)) ?? undefined)
@@ -300,6 +315,7 @@ export async function assembleDtChatFromDb(input: {
     transcriptKnowledgeText,
     onboardingText,
     pastedUrlsText,
+    groundingPagesText,
   });
 
   const messages = await hydrateDtHistoryForAnthropic({

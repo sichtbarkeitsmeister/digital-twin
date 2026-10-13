@@ -3,15 +3,22 @@ import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
-import { detectGroundingPageUploadedAt } from "@/lib/dt/seo/detect-grounding-page-date";
+import {
+  detectGroundingPageUploadedAt,
+  groundingDateColumnsFromDetection,
+} from "@/lib/dt/seo/detect-grounding-page-date";
 import {
   checkLlmsTxt,
   discoverGroundingPageUrl,
 } from "@/lib/dt/seo/discover-grounding-page-url";
-import { evaluateGroundingPageSchedule } from "@/lib/dt/seo/grounding-page-schedule";
+import {
+  GROUNDING_CONFIG_SELECT,
+  serializeGroundingRow,
+  validateGroundingEntityPages,
+  type GroundingConfigRow,
+} from "@/lib/dt/seo/grounding-pages";
 
-const SELECT =
-  "organisation_id,website_url,grounding_page_url,grounding_page_uploaded_at,grounding_page_notes,grounding_llms_txt_url";
+const SELECT = GROUNDING_CONFIG_SELECT;
 
 const optionalUrl = z
   .union([z.string().trim().url().max(2000), z.literal(""), z.null()])
@@ -36,26 +43,44 @@ const patchSchema = z.object({
   url: optionalUrl,
   llmsTxtUrl: optionalUrl,
   notes: z.string().trim().max(2000).nullable().optional(),
+  dateModified: z
+    .union([
+      z.string().datetime({ offset: true }),
+      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum ungültig"),
+      z.null(),
+    ])
+    .optional(),
+  lastReviewed: z
+    .union([
+      z.string().datetime({ offset: true }),
+      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum ungültig"),
+      z.null(),
+    ])
+    .optional(),
+  reviewedBy: z.string().trim().max(160).nullable().optional(),
+  releaseStatus: z.enum(["draft", "released"]).nullable().optional(),
+  standardVersion: z.string().trim().max(40).nullable().optional(),
+  customerSlug: z
+    .union([
+      z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Kurzname ungültig").max(40),
+      z.literal(""),
+      z.null(),
+    ])
+    .optional(),
+  entityPages: z.array(z.unknown()).max(30).optional(),
 });
 
-function serialize(row: {
-  organisation_id: string;
-  grounding_page_url: string | null;
-  grounding_page_uploaded_at: string | null;
-  grounding_page_notes: string | null;
-  grounding_llms_txt_url?: string | null;
-}) {
-  const schedule = evaluateGroundingPageSchedule({
-    uploadedAt: row.grounding_page_uploaded_at,
-  });
-  return {
-    organisationId: row.organisation_id,
-    url: row.grounding_page_url,
-    uploadedAt: row.grounding_page_uploaded_at,
-    notes: row.grounding_page_notes,
-    llmsTxtUrl: row.grounding_llms_txt_url ?? null,
-    schedule,
-  };
+function toStoredDate(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value == null) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T12:00:00.000Z`;
+  return value;
+}
+
+function blankToNull(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value?.trim() ?? "";
+  return trimmed ? trimmed : null;
 }
 
 export async function GET(req: Request) {
@@ -124,7 +149,7 @@ export async function GET(req: Request) {
       patch.grounding_page_url = detected.ok
         ? detected.finalUrl || discoveredUrl
         : discoveredUrl;
-      if (detected.ok) patch.grounding_page_uploaded_at = detected.detectedAt;
+      if (detected.ok) Object.assign(patch, groundingDateColumnsFromDetection(detected));
       if (!row.grounding_page_notes?.trim()) patch.grounding_page_notes = noteLine;
     }
 
@@ -151,7 +176,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    grounding: serialize(row),
+    grounding: serializeGroundingRow(row as GroundingConfigRow),
     websiteUrl: row.website_url ?? null,
     discoveredUrl: row.grounding_page_url ?? discoveredUrl,
     discoveryMessage,
@@ -196,6 +221,31 @@ export async function PATCH(req: Request) {
   if (parsed.data.uploadedAt !== undefined) {
     patch.grounding_page_uploaded_at = parsed.data.uploadedAt;
   }
+  if (parsed.data.dateModified !== undefined) {
+    patch.grounding_page_date_modified = toStoredDate(parsed.data.dateModified);
+  }
+  if (parsed.data.lastReviewed !== undefined) {
+    patch.grounding_page_last_reviewed = toStoredDate(parsed.data.lastReviewed);
+  }
+  if (parsed.data.reviewedBy !== undefined) {
+    patch.grounding_page_reviewed_by = blankToNull(parsed.data.reviewedBy);
+  }
+  if (parsed.data.releaseStatus !== undefined) {
+    patch.grounding_page_release_status = parsed.data.releaseStatus;
+  }
+  if (parsed.data.standardVersion !== undefined) {
+    patch.grounding_page_standard_version = blankToNull(parsed.data.standardVersion);
+  }
+  if (parsed.data.customerSlug !== undefined) {
+    patch.grounding_customer_slug = blankToNull(parsed.data.customerSlug);
+  }
+  if (parsed.data.entityPages !== undefined) {
+    const entities = validateGroundingEntityPages(parsed.data.entityPages);
+    if (!entities.ok) {
+      return NextResponse.json({ ok: false, message: entities.message }, { status: 400 });
+    }
+    patch.grounding_entity_pages = entities.pages;
+  }
   if (parsed.data.url !== undefined) patch.grounding_page_url = parsed.data.url;
   if (parsed.data.llmsTxtUrl !== undefined) {
     patch.grounding_llms_txt_url = parsed.data.llmsTxtUrl;
@@ -226,7 +276,7 @@ export async function PATCH(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    grounding: serialize(data),
+    grounding: serializeGroundingRow(data as GroundingConfigRow),
     llmsTxt: llmsTxt.ok
       ? {
           found: true as const,
