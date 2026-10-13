@@ -946,6 +946,7 @@ export function DtChatShell(props: {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    let persistedChatId: string | null = ghostMode ? null : selectedChatId;
 
     try {
       if (ghostMode) {
@@ -991,6 +992,7 @@ export function DtChatShell(props: {
       }
 
       const chatId = await ensureChatId();
+      persistedChatId = chatId;
       if (!chatId) {
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         return;
@@ -1071,10 +1073,18 @@ export function DtChatShell(props: {
       if ((err as Error).name === "AbortError") {
         setStatus("Antwort gestoppt.");
       } else {
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        let kept = false;
+        if (persistedChatId) {
+          kept = await loadChat(persistedChatId).catch(() => false);
+        }
+        if (!kept) {
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        }
         setStatus(
           groundingActive
-            ? "Die Verbindung ist abgebrochen. Den Entwurf und die HTML-Datei findest du im Tab Grounding."
+            ? kept
+              ? "Die Verbindung ist abgebrochen. Die Nachricht bleibt im Chat. Entwurf und HTML-Datei liegen im Tab Grounding."
+              : "Die Verbindung ist abgebrochen. Entwurf und HTML-Datei liegen im Tab Grounding."
             : "Netzwerkfehler — bitte erneut versuchen.",
         );
       }

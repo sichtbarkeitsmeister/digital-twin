@@ -172,6 +172,49 @@ export function summarizeGroundingPages(pages: DtGroundingPageView[]): DtGroundi
   };
 }
 
+function groundingDraftSentence(run: DtGroundingPageView["run"]): string {
+  if (!run || run.state === "nicht_begonnen") return "Entwurf noch nicht gestartet";
+  if (run.state === "laeuft") return run.detail ? `${run.label}: ${run.detail}` : run.label;
+  if (run.state === "braucht_sie") {
+    const n = run.questions.length;
+    if (n === 0) return "wartet auf Antworten";
+    return `wartet auf ${n} ${n === 1 ? "Antwort" : "Antworten"}`;
+  }
+  if (run.state === "fertig") {
+    return run.hasHtml
+      ? "HTML-Datei fertig, Download im Tab Grounding"
+      : "Entwurf fertig";
+  }
+  if (run.state === "in_arbeit") return "pausiert und läuft beim nächsten Anstoß weiter";
+  return run.label;
+}
+
+/**
+ * Short German status for the SEO chat. The full page is still built by the
+ * background agent; this text only reports what is already stored.
+ */
+export function formatGroundingChatStatus(pages: readonly DtGroundingPageView[], tabHref: string): string {
+  const link = `[Grounding öffnen](${tabHref})`;
+  if (pages.length === 0) {
+    return `Im Tool ist noch keine Grounding Page hinterlegt. Im Tab Grounding die Hub-URL anlegen, dann startet der Entwurf. ${link}`;
+  }
+
+  const summary = summarizeGroundingPages([...pages]);
+  const lines = [`${summary.statusLabel}.`, ""];
+  for (const page of sortGroundingPages([...pages])) {
+    const name =
+      page.kind === "hub"
+        ? "Hub"
+        : `Entitätsseite „${page.entityName ?? page.slug ?? page.url}“`;
+    lines.push(`- ${name} (${page.url}): ${groundingDraftSentence(page.run)}. ${page.schedule.statusLabel}.`);
+    if (page.run?.state === "braucht_sie") {
+      page.run.questions.forEach((q, i) => lines.push(`  ${i + 1}. ${q.question}`));
+    }
+  }
+  lines.push("", `Download und Freigabe: ${link}`);
+  return lines.join("\n");
+}
+
 function fmtDay(iso: string | null): string {
   return dayOf(iso) ?? "—";
 }

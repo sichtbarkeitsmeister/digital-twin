@@ -34,8 +34,15 @@ import {
 } from "@/lib/dt/n8n-chat";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
-import { isGroundingHtmlBuildRequest } from "@/lib/dt/seo/grounding-html-request";
-import { answerGroundingHtmlRequest } from "@/lib/dt/seo/grounding-tools";
+import { jsonKeepaliveResponse } from "@/lib/dt/json-keepalive";
+import {
+  isGroundingHtmlBuildRequest,
+  isGroundingStatusRequest,
+} from "@/lib/dt/seo/grounding-html-request";
+import {
+  answerGroundingHtmlRequest,
+  answerGroundingStatusRequest,
+} from "@/lib/dt/seo/grounding-tools";
 import {
   buildDtSeoTaskProposalMetadata,
   parseDtSeoTaskProposalsFromText,
@@ -45,6 +52,57 @@ import type { DtChatMode } from "@/lib/dt/types";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export const maxDuration = 300;
+
+async function storedGroundingTurn(
+  supabase: SupabaseClient,
+  chatId: string,
+  ghostMode: boolean,
+  userRow: { id: string } | null,
+  reply: string,
+  via: string,
+): Promise<NextResponse> {
+  if (ghostMode || !userRow) {
+    return NextResponse.json({
+      ok: true,
+      userMessage: userRow,
+      assistantMessage: {
+        id: `grounding-${Date.now()}`,
+        chat_id: chatId,
+        role: "assistant",
+        content: reply,
+        metadata: { via },
+        author_user_id: null,
+        stopped: false,
+        created_at: new Date().toISOString(),
+      },
+      via: "grounding",
+    });
+  }
+  const { data: assistantRow, error: assistantError } = await supabase
+    .from("dt_chat_messages")
+    .insert({
+      chat_id: chatId,
+      role: "assistant",
+      content: reply,
+      metadata: { via },
+      author_user_id: null,
+      stopped: false,
+    })
+    .select("id,chat_id,role,content,metadata,author_user_id,stopped,created_at")
+    .single();
+  if (assistantError || !assistantRow) {
+    return NextResponse.json(
+      { ok: false, message: "Antwort konnte nicht gespeichert werden.", userMessage: userRow },
+      { status: 500 },
+    );
+  }
+  return NextResponse.json({
+    ok: true,
+    userMessage: userRow,
+    assistantMessage: assistantRow,
+    via: "grounding",
+  });
+}
 
 async function trackLlmUsage(input: {
   organisationId: string;
@@ -316,49 +374,37 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     } catch (err) {
       console.error("[dt/chat/messages] grounding html:", err);
     }
-    if (ghostMode || !userRow) {
-      return NextResponse.json({
-        ok: true,
-        userMessage: userRow,
-        assistantMessage: {
-          id: `grounding-${Date.now()}`,
-          chat_id: chatId,
-          role: "assistant",
-          content: reply,
-          metadata: { via: "grounding_html_request" },
-          author_user_id: null,
-          stopped: false,
-          created_at: new Date().toISOString(),
-        },
-        via: "grounding",
-      });
-    }
-    const { data: assistantRow, error: assistantError } = await auth.supabase
-      .from("dt_chat_messages")
-      .insert({
-        chat_id: chatId,
-        role: "assistant",
-        content: reply,
-        metadata: { via: "grounding_html_request" },
-        author_user_id: null,
-        stopped: false,
-      })
-      .select("id,chat_id,role,content,metadata,author_user_id,stopped,created_at")
-      .single();
-    if (assistantError || !assistantRow) {
-      return NextResponse.json(
-        { ok: false, message: "Antwort konnte nicht gespeichert werden.", userMessage: userRow },
-        { status: 500 },
-      );
-    }
-    return NextResponse.json({
-      ok: true,
-      userMessage: userRow,
-      assistantMessage: assistantRow,
-      via: "grounding",
-    });
+    return storedGroundingTurn(
+      auth.supabase,
+      chatId,
+      ghostMode,
+      userRow,
+      reply,
+      "grounding_html_request",
+    );
   }
 
+  // Status starters would otherwise wait on a long model call and drop the connection.
+  if (groundingMode && isGroundingStatusRequest(content)) {
+    let reply = "Der Stand konnte gerade nicht geladen werden. Im Tab Grounding nachsehen.";
+    try {
+      reply = await answerGroundingStatusRequest(auth.supabase, chat.organisation_id);
+    } catch (err) {
+      console.error("[dt/chat/messages] grounding status:", err);
+    }
+    return storedGroundingTurn(
+      auth.supabase,
+      chatId,
+      ghostMode,
+      userRow,
+      reply,
+      "grounding_status_request",
+    );
+  }
+
+  // n8n and Anthropic can stay quiet for minutes. Padding keeps the client connection open;
+  // the body is still one JSON object.
+  return jsonKeepaliveResponse(async () => {
   const n8nWebhook = process.env.N8N_DT_CHAT_WEBHOOK?.trim();
   const session = (await auth.supabase.auth.getSession()).data.session;
   const accessToken = session?.access_token?.trim();
@@ -471,13 +517,13 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           })
         : null;
 
-      return NextResponse.json({
+      return {
         ok: true,
         userMessage: userRow,
         assistantMessage: assistantRow,
         titleSuggestion,
         via: "n8n",
-      });
+      };
     } catch (err) {
       console.warn("[dt] n8n chat failed, falling back to direct Anthropic:", err);
 
@@ -527,13 +573,13 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
             assistantText: recoveredRow.content,
             clearPrematureExternalTitle: true,
           });
-          return NextResponse.json({
+          return {
             ok: true,
             userMessage: userRow,
             assistantMessage: recoveredRow,
             titleSuggestion,
             via: "n8n",
-          });
+          };
         }
       }
     }
@@ -558,14 +604,11 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
     });
   } catch (err) {
     console.error("[dt/chat/messages] Anthropic failed:", err);
-    return NextResponse.json(
-      {
-        ok: false,
-        message: dtChatFailureUserMessage(err),
-        userMessage: userRow,
-      },
-      { status: 500 },
-    );
+    return {
+      ok: false,
+      message: dtChatFailureUserMessage(err),
+      userMessage: userRow,
+    };
   }
 
   let assistantRow: {
@@ -613,10 +656,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       .single();
 
     if (error || !data) {
-      return NextResponse.json(
-        { ok: false, message: "Antwort konnte nicht gespeichert werden." },
-        { status: 500 },
-      );
+      return { ok: false, message: "Antwort konnte nicht gespeichert werden." };
     }
     assistantRow = data;
 
@@ -696,12 +736,13 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       })
     : null;
 
-  return NextResponse.json({
+  return {
     ok: true,
     userMessage: userRow,
     assistantMessage: assistantRow,
     attachments: [...userAttachmentRows, ...createdAttachmentRows],
     titleSuggestion,
     via: hasAttachments ? "anthropic_direct_attachments" : "anthropic_direct",
+  };
   });
 }
