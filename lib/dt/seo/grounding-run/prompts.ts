@@ -62,6 +62,22 @@ export type GroundingEntityCandidate = {
   priority: "hoch" | "mittel" | "niedrig";
 };
 
+/** One Zielgruppe (Wunschkunde) with the questions she asks before deciding. */
+export type GroundingAudienceQuestion = {
+  question: string;
+  answer: string;
+  source: string;
+  basis: "genannt" | "hergeleitet";
+};
+export type GroundingAudience = {
+  /** Avatar name (internal only, never on the page). */
+  name: string;
+  /** Sachliche Bezeichnung für die Seite, z. B. „Gründer mit ALG-Bezug“. */
+  label: string;
+  situation: string;
+  questions: GroundingAudienceQuestion[];
+};
+
 export type GroundingFacts = {
   entity: {
     name: string;
@@ -74,6 +90,8 @@ export type GroundingFacts = {
   core_facts: GroundingCoreFact[];
   sections: GroundingSection[];
   faq: Array<{ question: string; answer: string }>;
+  /** Cluster „<Name>: Anfragen & Lösungen“ — one entry per Wunschkunde. */
+  audiences: GroundingAudience[];
   sources: Array<{ label: string; url: string }>;
   related: Array<{ name: string; url: string }>;
   open_questions: GroundingOpenQuestion[];
@@ -207,6 +225,23 @@ export function normalizeGroundingFacts(raw: unknown, context: Pick<GroundingRun
       .map((f) => ({ question: str(f.question, 300), answer: str(f.answer, 1_200) }))
       .filter((f) => f.question && f.answer)
       .slice(0, 10),
+    audiences: list(r.audiences)
+      .map((a) => ({
+        name: str(a.name, 120),
+        label: str(a.label, 160) || str(a.name, 120),
+        situation: str(a.situation, 800),
+        questions: list(a.questions)
+          .map((q) => ({
+            question: str(q.question, 300),
+            answer: str(q.answer, 1_200),
+            source: str(q.source, 300),
+            basis: (q.basis === "genannt" ? "genannt" : "hergeleitet") as GroundingAudienceQuestion["basis"],
+          }))
+          .filter((q) => q.question && q.answer)
+          .slice(0, 8),
+      }))
+      .filter((a) => a.name || a.label)
+      .slice(0, 8),
     sources: list(r.sources)
       .map((s) => ({ label: str(s.label, 200), url: str(s.url, 500) }))
       .filter((s) => s.label || s.url)
@@ -346,6 +381,16 @@ export function factsText(facts: GroundingFacts): string {
     lines.push("\nFAQ:");
     for (const f of facts.faq) lines.push(`- ${f.question} — ${f.answer}`);
   }
+  if (facts.audiences.length > 0) {
+    lines.push("\nZielgruppen – Anfragen & Lösungen (Avatar-Name nur intern, auf der Seite die sachliche Bezeichnung):");
+    for (const a of facts.audiences) {
+      lines.push(`- ${a.label}${a.name && a.name !== a.label ? ` (Avatar: ${a.name})` : ""}${a.situation ? `: ${a.situation}` : ""}`);
+      if (a.questions.length === 0) lines.push("  (noch keine belegbar beantwortbare Frage)");
+      for (const q of a.questions) {
+        lines.push(`  - ${q.question} [${q.basis}] — ${q.answer}${q.source ? ` [Quelle: ${q.source}]` : ""}`);
+      }
+    }
+  }
   if (facts.sources.length > 0) {
     lines.push("\nQuellen:");
     for (const s of facts.sources) lines.push(`- ${s.label}${s.url ? ` ${s.url}` : ""}`);
@@ -395,7 +440,8 @@ Eiserne Regeln:
 - Was du nicht belegen kannst, lässt du weg oder stellst eine Frage. Raten ist verboten – bei Rechtsform, Gründung, Inhabern, Standorten, Preisen, Zahlen, Zertifikaten, Partnern.
 - Die Antworten und Anmerkungen der Redaktion haben Vorrang vor allen anderen Quellen.
 - Stil: ruhig, enzyklopädisch, ein Fakt pro Satz, keine Adjektive, kein Marketing, keine Superlative, kein „wir“. Vollständige Sätze mit dem Namen der Entität, damit jeder Abschnitt allein zitierbar bleibt. Deutsch; Eigennamen unverändert; Begriffe so, wie die Zielkunden sie verwenden.
-- Kein Satz über KI, LLMs, Retrieval oder „Grounding“ im sichtbaren Text. Die Seite muss ohne jede solche Erwähnung vollen Wert für Menschen haben.`;
+- Kein Satz über KI, LLMs, Retrieval oder „Grounding“ im sichtbaren Text. Die Seite muss ohne jede solche Erwähnung vollen Wert für Menschen haben.
+- Zielgruppen: Der Block „Zielkunden“ nennt die Wunschkunden der Organisation. Jede Seite wird für diese Menschen geschrieben: ihre Fragen vor der Entscheidung, ihre Begriffe, ihre Sorgen. Du gehst JEDEN Wunschkunden einzeln durch und lässt keinen aus. Avatar-Namen, fiktive Personendetails und Persona-Beschreibungen erscheinen nie in der Datei; Zielgruppen werden sachlich beschrieben (z. B. „Gründungsinteressierte mit Bezug von Arbeitslosengeld“).`;
 
 const STANDARD_RULES = `Pflichtblöcke je Seite (Standard v1.7):
 - Genau eine Hauptentität. H1 = Name der Entität (kein Slogan, nicht „Grounding Page“).
@@ -407,7 +453,17 @@ const STANDARD_RULES = `Pflichtblöcke je Seite (Standard v1.7):
 - Interne Verlinkung: Hub ↔ Entitätsseiten, verwandte Entitäten im Fließtext, Footer-Link site-weit („Fakten“).
 - JSON-LD spiegelt nur sichtbare Inhalte: passender Schema.org-Typ für die Entität plus ein WebPage-Objekt mit @id (Live-URL), mainEntity, datePublished, dateModified. FAQPage nur bei sichtbarer FAQ. Nichts im JSON-LD, was nicht auf der Seite steht.
 - Entwurf: Standard-Hinweis als HTML-Kommentar und Footer-Zeile „Grounding Page Standard v1.6“ (v1.7 erst nach dokumentierter Prüfung). KEIN Prüfhinweis, kein „Prüfung ausstehend“, kein Human-Verified-Badge, kein lastReviewed/reviewedBy.
-- Seite indexierbar, kanonische URL, eine Sprache.`;
+- Seite indexierbar, kanonische URL, eine Sprache.
+
+Hausregeln von Sichtbarkeitsmeister (gelten zusätzlich):
+- Abschnitt „<Name>: Anfragen & Lösungen“ (Pflicht, sobald Zielgruppen in der Faktenbasis stehen): je Zielgruppe eine H3 mit der sachlichen Bezeichnung, darunter Frage-Antwort-Paare als <p class="anfrage-q"> und <p class="anfrage-a">. Die Antwort nennt den Fakt und die Lösung der Organisation. Keine Avatar-Namen, keine Persona-Details. Der Abschnitt heißt nicht „KI-Fragen“.
+- Abschnitt „Weiterführende Informationen“ am Ende: Hub bzw. Entitätsseiten, passende Seiten der Website, externe Primärquellen (Behörden, Verbände, Normen) – nur URLs aus der Faktenbasis.
+- Hub: Abschnitt „Weitere Grounding Pages“ mit Links auf alle Entitätsseiten (sobald es welche gibt). Entitätsseite: Firmenname mit Link zum Hub; Adresse, Telefon und Öffnungszeiten stehen nur im Hub.
+- Stammdaten-Bereich am Seitenende: „Erstellt“, „Zuletzt aktualisiert“, „Standardversion“ und ein Changelog mit Datum und Entitätenzählung (z. B. „1 Organisation, 4 Leistungen, 2 Zielgruppen“). Datumsangaben nur dort.
+- Telefonnummern im internationalen Format (+49 …), sichtbar und im JSON-LD.
+- Kein Firmenlogo: kein <img>, keine logo-Eigenschaft im JSON-LD. Kurzbezeichnung/alternateName nur, wenn die Organisation sie belegt selbst verwendet.
+- Nie Hinweise auf offene Punkte in der Datei: keine HTML-Kommentare wie „ergänzen“, „folgt“, „prüfen“, keine Platzhalter, kein „ausstehend“. Offenes gehört in die Zusammenfassung für die Redaktion.
+- Mitbewerber, Preispositionierung, Margen, Personalthemen und Interna aus Gesprächen erscheinen nie auf der Seite.`;
 
 // --- step specs ------------------------------------------------------------------------------
 
@@ -465,6 +521,32 @@ const FACTS_SCHEMA: Anthropic.Tool["input_schema"] = {
       type: "array",
       items: { type: "object", properties: { question: { type: "string" }, answer: { type: "string" } }, required: ["question", "answer"] },
     },
+    audiences: {
+      type: "array",
+      description: "Ein Eintrag je Wunschkunde aus dem Block „Zielkunden“ – keiner darf fehlen. Fragen nur, wenn sie mit belegten Fakten beantwortbar sind; sonst open_questions.",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Avatar-Name, wie im Block „Zielkunden“ (nur intern)." },
+          label: { type: "string", description: "Sachliche Bezeichnung für die Seite, z. B. „Gründungsinteressierte mit Bezug von Arbeitslosengeld“." },
+          situation: { type: "string", description: "Ein Satz: Situation und Anlass dieser Zielgruppe." },
+          questions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string", description: "In den Worten der Zielgruppe." },
+                answer: { type: "string", description: "Fakt plus Lösung der Organisation, belegt." },
+                source: { type: "string" },
+                basis: { type: "string", enum: ["genannt", "hergeleitet"], description: "genannt = steht so im Profil; hergeleitet = aus Situation und Problem abgeleitet." },
+              },
+              required: ["question", "answer", "source", "basis"],
+            },
+          },
+        },
+        required: ["name", "label", "situation", "questions"],
+      },
+    },
     sources: {
       type: "array",
       items: { type: "object", properties: { label: { type: "string" }, url: { type: "string" } }, required: ["label", "url"] },
@@ -501,7 +583,7 @@ const FACTS_SCHEMA: Anthropic.Tool["input_schema"] = {
       },
     },
   },
-  required: ["entity", "classification", "core_facts", "sections", "faq", "sources", "related", "open_questions", "entity_candidates"],
+  required: ["entity", "classification", "core_facts", "sections", "faq", "audiences", "sources", "related", "open_questions", "entity_candidates"],
 };
 
 function faktenSpec(context: GroundingRunContext): GroundingStepSpec {
@@ -516,10 +598,11 @@ Schritt 1 Fakten sammeln: Du legst die Faktenbasis für die Seite an. Noch kein 
 - Kerndaten nur, wenn sie belegt sind (Rechtsform, Gründung, Sitz, Inhaber, Leistungen, Einzugsgebiet, Kontaktwege, Zertifikate). Zeitabhängige Werte mit as_of.
 - Abschnitte (H2 mit Entitätsnamen) mit belegten Absätzen: Leistungen, Geschichte, Standort/Einzugsgebiet, Arbeitsweise, Abgrenzung – nur, was die Quellen hergeben. Lieber vier belegte Abschnitte als acht dünne.
 - FAQ nur mit Fragen, die die Zielkunden wirklich stellen und die belegt beantwortbar sind.
+- audiences: Für JEDEN Wunschkunden im Block „Zielkunden“ ein Eintrag – auch wenn sein Profil dünn ist (dann mit leerer Fragenliste und einer open_question dazu). Sachliche Bezeichnung statt Avatar-Name. Je Wunschkunde die Fragen, die er vor seiner Entscheidung zu dieser Entität stellt: genannt (steht so im Profil) oder hergeleitet (aus Situation und Problem). Eine Frage kommt nur hinein, wenn die Quellen sie belegt beantworten; sonst open_questions. Keine Zielgruppe weglassen, keinen Durchschnittskunden bilden.
 - open_questions: alles, was nur der Kunde beantworten kann. blocking = true, wenn es um Kerndaten geht (Rechtsform, Gründung, Inhaber, Standort, Kernleistungen) und die Quellen widersprüchlich oder leer sind. Höchstens 8 Fragen, die wichtigsten zuerst.
 ${
   hub
-    ? `- entity_candidates: Eigene Entitätsseite nur für Entitäten, nach denen Zielkunden gezielt fragen UND für die genug belegbare Fakten vorliegen (Leistungen oder Produkte mit eigenem Namen, Standorte, Schlüsselpersonen, Marken, Methoden). Kleine Organisationen: meist 1–5 Seiten. Alles andere bleibt eine entity-card im Hub. URL unter dem Hub (${context.page.url}<slug>/).`
+    ? `- entity_candidates: Eigene Entitätsseite nur für Entitäten, nach denen Zielkunden gezielt fragen UND für die genug belegbare Fakten vorliegen (Leistungen oder Produkte mit eigenem Namen, Standorte, Schlüsselpersonen, Marken, Methoden). reason nennt, WELCHE Zielgruppe danach fragt und mit welchen Worten – alle Wunschkunden prüfen, nicht nur den ersten; Begriffe aus dem Alltag der Zielkunden, keine Dienstleistungskategorien. Kleine Organisationen: meist 1–5 Seiten. Alles andere bleibt eine entity-card im Hub. URL unter dem Hub (${context.page.url}<slug>/).`
     : `- Diese Seite beschreibt genau die Entität „${context.page.entityName}“ – nicht die Organisation insgesamt. Die Organisation wird nur eingeordnet und auf den Hub verlinkt. Widerspricht etwas der Faktenbasis des Hubs, nimm die Hub-Fassung und melde den Widerspruch als offene Frage.`
 }
 ${context.livePageText ? "- Es gibt bereits eine Live-Seite: Übernimm ihre belegten Fakten, markiere Veraltetes als offene Frage. Dieser Auftrag ist ein „aktualisiere“, kein Neubau." : ""}`,
@@ -559,6 +642,7 @@ function faktencheckSpec(context: GroundingRunContext): GroundingStepSpec {
 
 Schritt 2 Faktencheck: Du prüfst jeden Fakt der Faktenbasis (Schritt 1) gegen die Quellen.
 Ein finding ist jeder Fakt, der in keiner Quelle steht, den Quellen widerspricht, eine gerundete oder erfundene Zahl enthält, einen Superlativ oder ein Versprechen enthält, eine falsche Entität beschreibt oder einen zeitabhängigen Wert ohne Stand nennt. severity high = falsch oder rechtlich riskant, medium = unbelegt, low = unscharf. Vorschlag: streichen, korrigieren, „Stand“ ergänzen.
+Zielgruppen: Vergleiche die Einträge unter „Zielgruppen – Anfragen & Lösungen“ mit dem Block „Zielkunden“. Fehlt ein Wunschkunde, ist das ein finding (severity medium, Titel „Zielgruppe fehlt: <Name>“). Eine Antwort ohne Beleg in den Quellen ist ein finding wie jeder andere Fakt. Steht ein Avatar-Name als Bezeichnung, ist das ein finding (sachliche Bezeichnung vorschlagen).
 Eine question stellst du nur, wenn allein der Kunde die Antwort kennt. Übernimm die offenen Fragen aus Schritt 1, wenn sie berechtigt sind, und ergänze eigene. blocking = true, wenn die Seite ohne die Antwort nicht gebaut werden darf (Kerndaten, Entitätszuordnung). Was durch Streichen lösbar ist, ist keine Frage, sondern ein finding.
 Beantwortet eine Anmerkung der Redaktion eine Frage bereits, stellst du sie nicht noch einmal. Höchstens 8 Fragen.
 summary: zwei Sätze zur Faktenlage (wie belastbar, was fehlt).`,
@@ -571,6 +655,7 @@ summary: zwei Sätze zur Faktenlage (wie belastbar, was fehlt).`,
       anbieterBlock(context),
       onboardingBlock(context),
       sitePagesBlock(context),
+      wunschkundenBlock(context),
     ]),
     tool: {
       name: "submit_faktencheck",
@@ -622,7 +707,8 @@ Technik:
 - Ausschließlich belegte Fakten aus der Faktenbasis. Fakten mit Befund „streichen“ fehlen. Unbeantwortete Fragen: den betroffenen Fakt weglassen – keine Platzhalter wie [prüfen] im sichtbaren Text.
 - JSON-LD: ein Skript mit dem Entitätstyp (Name, Beschreibung = Definition, url, address/areaServed/contactPoint nur wenn sichtbar), ein Skript mit WebPage (@id ${page.url}, name, inLanguage "de", datePublished und dateModified ${context.today}, mainEntity → die Entität${context.hub ? `, isPartOf ${context.hub.url}` : ""}), FAQPage nur bei sichtbarer FAQ.
 - Verlinkung: ${context.hub ? `zurück zum Hub ${context.hub.url}` : "zu den Entitätsseiten, sobald es welche gibt"}; verwandte Entitäten aus der Faktenbasis im Fließtext verlinken, wenn eine URL bekannt ist.
-- Am Ende der Seite: Abschnitt „Quellen und Stand“ (sichtbare Quellen, „Zuletzt aktualisiert: ${context.today}“) und die Footer-Zeile <p class="standard-notice">Grounding Page Standard v1.6</p>. Kein Prüfhinweis.
+- Reihenfolge der Abschnitte: Lead, Kerndaten, fachliche Abschnitte, „<Name>: Anfragen & Lösungen“ (je Zielgruppe aus der Faktenbasis, sachliche Bezeichnung, class anfrage-q / anfrage-a), FAQ, ${context.page.kind === "hub" ? "„Weitere Grounding Pages“" : "Link zum Hub"}, „Weiterführende Informationen“, Stammdaten-Bereich (Erstellt ${context.today}, Zuletzt aktualisiert ${context.today}, Standardversion 1.6, Changelog „${context.today}: Erstfassung“ mit Entitätenzählung) und die Footer-Zeile <p class="standard-notice">Grounding Page Standard v1.6</p>. Kein Prüfhinweis, kein Kommentar über offene Punkte.
+- Telefon als +49 …, kein Logo, kein alternateName ohne Beleg.
 - Zielgröße unter ${GROUNDING_HTML_TARGET_CHARS.toLocaleString("de-DE")} Zeichen. Zu lang? Abschnitte kürzen, nicht Fakten erfinden.
 - Keine Marketing-Floskeln, keine Handlungsaufforderungen, kein „Jetzt anfragen“. Kontaktwege nur als Fakt in den Kerndaten.`,
     user: join([
@@ -674,6 +760,8 @@ Checkliste:
 5. Haben zeitabhängige Werte einen Stand, sind Quellen sichtbar?
 6. Keine Sätze über KI/LLM/Grounding im sichtbaren Text, keine Floskeln, keine Superlative, kein „wir“.
 7. Technik: gültiges Dokument, lang="de", canonical, title, description, Standard-Zeile v1.6, Größe unter ${GROUNDING_HTML_TARGET_CHARS.toLocaleString("de-DE")} Zeichen.
+8. Zielgruppen: Gibt es den Abschnitt „<Name>: Anfragen & Lösungen“ mit jeder Zielgruppe aus der Faktenbasis? Fehlt eine, ist das ein issue mit severity high. Steht ein Avatar-Name oder eine Persona-Beschreibung auf der Seite: severity high, ersetzen.
+9. Hausregeln: Stammdaten-Bereich mit Changelog und Entitätenzählung, „Weiterführende Informationen“, Telefon als +49, kein <img>/logo, kein alternateName ohne Beleg, keine HTML-Kommentare oder Platzhalter zu offenen Punkten, keine Interna (Mitbewerber, Preise intern, Personal).
 
 Ergebnis:
 - issues: jede Abweichung mit Vorschlag (severity high = Fakt falsch/unbelegt oder Pflichtblock fehlt, medium = Struktur/JSON-LD, low = Stil).
