@@ -18,6 +18,7 @@ import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
+import { downloadContentExport } from "@/components/dt/content/download";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import {
@@ -327,27 +328,12 @@ export function DtContentPageDrawer(props: {
     if (!base || !page) return;
     const format = kind === "export_txt" ? "txt" : "html";
     setBusy(kind);
-    try {
-      const res = await fetch(`${base}/export?${contentQuery(organisationId)}&format=${format}`);
-      if (!res.ok) {
-        const json = (await res.json().catch(() => null)) as { message?: string } | null;
-        toast.error(json?.message ?? "Export fehlgeschlagen.");
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${page.slug}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch {
-      toast.error("Export fehlgeschlagen.");
-    } finally {
-      setBusy(null);
-    }
+    const res = await downloadContentExport(
+      `${base}/export?${contentQuery(organisationId)}&format=${format}`,
+      `${page.slug}.${format}`,
+    );
+    if (!res.ok) toast.error(res.message);
+    setBusy(null);
   }
 
   function onAction(action: ContentAction) {

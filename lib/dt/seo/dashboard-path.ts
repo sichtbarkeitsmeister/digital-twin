@@ -13,6 +13,11 @@ export function isTexteDashboardPath(pathname: string): boolean {
   return pathname === "/dashboard/verwaltung/texte" || pathname.startsWith("/dashboard/verwaltung/texte/");
 }
 
+/** GEO tool (one Texte step on an uploaded file) — same organisation list and access as Texte. */
+export function isGeoDashboardPath(pathname: string): boolean {
+  return pathname === "/dashboard/verwaltung/geo" || pathname.startsWith("/dashboard/verwaltung/geo/");
+}
+
 /** Organisation overview page with top-bar org selector. */
 export function isOrganisationDashboardPath(pathname: string): boolean {
   return pathname === "/dashboard/organisations";
@@ -38,6 +43,7 @@ export function isDashboardOrgBarPath(pathname: string): boolean {
   return (
     isSeoDashboardPath(pathname) ||
     isTexteDashboardPath(pathname) ||
+    isGeoDashboardPath(pathname) ||
     isManageOrgBarPath(pathname) ||
     isOrganisationDashboardPath(pathname) ||
     isOnboardingDashboardPath(pathname)

@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SeoTopBarOrgSelector } from "@/components/dt/seo/seo-top-bar-org-selector";
 import { DtSelect } from "@/components/dt/dt-select";
 import {
+  isGeoDashboardPath,
   isManageOrgBarPath,
   isOrganisationDashboardPath,
   isSeoDashboardPath,
@@ -245,6 +246,10 @@ export function DashboardTopBarOrgSelector() {
 
   if (isTexteDashboardPath(pathname)) {
     return <SeoTopBarOrgSelector variant="texte" />;
+  }
+
+  if (isGeoDashboardPath(pathname)) {
+    return <SeoTopBarOrgSelector variant="geo" />;
   }
 
   if (isOrganisationDashboardPath(pathname)) {
