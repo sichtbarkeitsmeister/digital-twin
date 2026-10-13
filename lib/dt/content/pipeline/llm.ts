@@ -55,11 +55,15 @@ export async function callContentTool(input: {
   tool: Anthropic.Tool;
   maxTokens: number;
   timeoutMs?: number;
+  /** Another tool's key (the Grounding agent); defaults to the Texte key. */
+  apiKey?: string | null;
+  /** Name of the tool in error messages („Texte“, „Grounding“). */
+  toolLabel?: string;
 }): Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string }> {
-  const apiKey = resolveContentApiKey();
+  const apiKey = input.apiKey ?? resolveContentApiKey();
   if (!apiKey) {
     throw new ContentLlmError(
-      "Der KI-Zugang für Texte ist nicht eingerichtet (Schlüssel fehlt). Bitte die Technik informieren.",
+      `Der KI-Zugang für ${input.toolLabel ?? "Texte"} ist nicht eingerichtet (Schlüssel fehlt). Bitte die Technik informieren.`,
       false,
     );
   }

@@ -4,6 +4,7 @@ export type JobKind =
   | "leadinfo.normalize"
   | "seo.crawl"
   | "content.page"
+  | "grounding.page"
   | "apollo.enrich"
   | "outreach.draft"
   | "outreach.send"
