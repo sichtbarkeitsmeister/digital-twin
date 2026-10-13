@@ -2,6 +2,7 @@ import { contentPageHandler } from "./handlers/content-page";
 import { groundingPageHandler } from "./handlers/grounding-page";
 import { leadinfoNormalizeHandler } from "./handlers/leadinfo-normalize";
 import { seoCrawlHandler } from "./handlers/seo-crawl";
+import { textToolGeoHandler } from "./handlers/text-tool-geo";
 import type { JobHandler } from "./types";
 
 /**
@@ -12,6 +13,7 @@ export const JOB_HANDLERS: Record<string, JobHandler> = {
   "seo.crawl": seoCrawlHandler,
   "content.page": contentPageHandler,
   "grounding.page": groundingPageHandler,
+  "text-tool.geo": textToolGeoHandler,
 };
 
 export function findHandler(kind: string): JobHandler | null {

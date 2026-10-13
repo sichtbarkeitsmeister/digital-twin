@@ -21,6 +21,7 @@ import {
   Workflow,
   Mail,
   Phone,
+  ScanSearch,
 } from "lucide-react";
 
 import { ZumChatButton } from "@/components/zum-chat-button";
@@ -152,6 +153,12 @@ export function DashboardSidebar({
             href: "/dashboard/verwaltung/texte",
             icon: PenLine,
             match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/texte"),
+          },
+          {
+            label: "GEO",
+            href: "/dashboard/verwaltung/geo",
+            icon: ScanSearch,
+            match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/geo"),
           },
         ]
       : []),

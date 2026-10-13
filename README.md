@@ -256,6 +256,20 @@ Das frühere Feld „Seiten eintragen“ (Seitenliste tippen) gibt es nicht mehr
 
 **Export.** Im Seitenfenster hat jede Seite mit Text zwei Knöpfe: **HTML exportieren** (vollständige HTML-Datei mit Titel) und **Text exportieren (.txt)** (nur der Text: Überschriften als Zeilen, Absätze, Listen mit Spiegelstrich, Links mit Adresse, ohne Auszeichnung).
 
+### GEO: ein Texte-Schritt auf eine hochgeladene Datei
+
+**GEO** liegt unter **Verwaltung**, direkt neben Texte (`/dashboard/verwaltung/geo`, Organisation wie bei Texte oben in der Leiste oder über `?org=`). Es ist das eigenständige Textwerkzeug für fertige Texte, die nicht durch die neun Schritte sollen: eine Datei hochladen (`.txt`, `.html`, `.pdf`, `.docx`; das alte `.doc` bitte als `.docx` speichern; höchstens 10 MB, 60.000 Zeichen, 40 Abschnitte), optional Seitenname, redaktionelle Anmerkungen, Hauptfrage und Fan-out-Fragen (eine je Zeile) und ein Faktencheck-JSON aus Texte, dann **Verarbeiten**. Es läuft genau einmal Schritt 4 „GEO“ mit demselben Prompt, demselben Modell (Schreibmodell von Texte) und denselben Anbieterfakten, Einstellungen und Avatar der Organisation; Analyse, Faktencheck und die anderen Schritte laufen nicht. Ohne Fragen wird der Text nur nach den GEO-Regeln umgebaut, ohne Faktencheck wird Unbelegtes nur mit „[BITTE PRÜFEN: …]“ markiert, nicht gestrichen. Die bestätigten **Einstellungen für Texte** sind Voraussetzung; fehlen die Anbieterfakten, sagt die Seite das und läuft trotzdem.
+
+Die Datei wird auf dem Server gelesen (PDF mit `unpdf`, Word mit `mammoth`, beides schon für Chat-Anhänge im Einsatz) und in Abschnitte zerlegt: H1/H2/H3 aus HTML und Word werden Überschriften, bei reinem Text (auch PDF) gelten kurze Zeilen zwischen Leerzeilen, `#`-Zeilen und unterstrichene Zeilen als Überschrift, Zeilen mit `-`, `•` oder `1.` als Liste (die Regeln stehen in `lib/dt/text-tools/ingest.ts`). Die Abschnitte heißen `abschnitt-1`, `abschnitt-2` …; ein HTML-Export aus Texte kommt mit seinen eigenen Abschnitts-ids zurück. Der Durchlauf ist ein Hintergrund-Job (`text-tool.geo`, siehe Abschnitt 10), die Seite fragt alle paar Sekunden nach; das Ergebnis steht als Vorschau da und lässt sich wie in Texte als **HTML** (vollständige Datei) oder **Text (.txt)** herunterladen. Verbrauch und Kosten landen in der Token-Nutzung unter dem Modus `text-tool.geo`. Es braucht keine neue Tabelle und keine weiteren Umgebungsvariablen: Schlüssel und Modell sind die von Texte (`ANTHROPIC_DT_CONTENT_API_KEY`, `ANTHROPIC_DT_CONTENT_MODEL`).
+
+Die drei Textwerkzeuge im Überblick:
+
+| Werkzeug | Adresse | Was es tut |
+|---|---|---|
+| Texte | `/dashboard/verwaltung/texte` | Seitentexte aus Briefing und Anbieterfakten in neun Schritten schreiben, prüfen, freigeben, exportieren. |
+| GEO | `/dashboard/verwaltung/geo` | Einen hochgeladenen Text einmal durch Schritt 4 „GEO“ schicken und als HTML oder .txt herunterladen. |
+| Text-Modus im Chat | DigitalTwin-Chat, Schalter „Text-Modus“ | Freie Texte (Flyer, Posts, Mails) im Gespräch mit einem Avatar schreiben lassen. |
+
 **Woher die Fakten kommen.** Beides zählt, beides darf fehlen, solange das andere da ist:
 
 - der neueste **abgeschlossene Anbieter-Fragebogen** der Organisation (Fragebögen, Zweck „Anbieter“)
@@ -467,6 +481,7 @@ Nach dem Login landet man auf `/dashboard/organisations`.
 | Agent-Kontext | Zeigt den zusammengebauten Auftrag an die KI. Intern, weil dort der ganze Prompt steht. |
 | SEO Modus | Crawl, Berichte, Aufgaben, Search Console, Grounding, Seitenstruktur. |
 | Texte | Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Organisation oben in der Leiste wechseln. |
+| GEO | Eine hochgeladene Datei einmal durch den GEO-Schritt aus Texte schicken und als HTML oder .txt herunterladen. |
 | Token-Nutzung | Wie viel die KI verbraucht hat. Kunden sehen das nicht. |
 | Transkripte | Gesprächsmitschriften auswerten und ins Wissen der Avatare übernehmen. |
 | Erstgespräch | Erstgespräche einer Firma. |
@@ -492,6 +507,7 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/digital-twin` | Chat- und Agenten-Bereich, zusätzlich zur Startseite. |
 | `/dashboard/verwaltung/seo` | SEO-Arbeitsplatz der Agentur. |
 | `/dashboard/verwaltung/texte` | Texte: Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, Organisation über `?org=`. |
+| `/dashboard/verwaltung/geo` | GEO: eine Datei hochladen, Schritt 4 „GEO“ aus Texte einmal darauf laufen lassen, Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
 ---

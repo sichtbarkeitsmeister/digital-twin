@@ -284,7 +284,10 @@ function blockIds(blocks: readonly ContentTextBlock[]): Set<string> {
   return new Set(blocks.map((b) => b.id));
 }
 
-function normalizeTextOutput(json: unknown, context: ContentPipelineContext): TextOutput {
+/** The text a rewriting step starts from; the whole pipeline context or the GEO tool's. */
+export type ContentCurrentText = Pick<ContentPipelineContext, "blocks" | "title" | "metaDescription">;
+
+export function normalizeTextOutput(json: unknown, context: ContentCurrentText): TextOutput {
   const r = rec(json);
   const blocks = normalizeBlocks(r.blocks);
   return {
@@ -344,8 +347,10 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 }
 
 // --- shared prompt parts ----------------------------------------------------------------------
+// Exported for the standalone GEO tool (lib/dt/text-tools/geo.ts), which builds the same
+// blocks around an uploaded text instead of a page of the pipeline.
 
-function anbieterBlock(context: ContentPipelineContext): string {
+export function anbieterBlock(context: Pick<ContentPipelineContext, "sections">): string {
   const filled = context.sections.filter((s) => s.current.trim());
   if (filled.length === 0) return "## Anbieterfakten\n(keine)";
   return [
@@ -354,7 +359,7 @@ function anbieterBlock(context: ContentPipelineContext): string {
   ].join("\n\n");
 }
 
-function settingsBlock(settings: ContentTextSettings): string {
+export function settingsBlock(settings: ContentTextSettings): string {
   const forbidden = settings.verbotene_woerter.length
     ? settings.verbotene_woerter.map((w) => `„${w}“`).join(", ")
     : "keine";
@@ -368,7 +373,7 @@ function settingsBlock(settings: ContentTextSettings): string {
 }
 
 /** The free-text branch picks one of three rule groups; the text itself is in the Vorgaben block. */
-function brancheRules(settings: ContentTextSettings): string {
+export function brancheRules(settings: ContentTextSettings): string {
   switch (brancheRuleGroup(settings.branche)) {
     case "rechtsanwalt":
       return "Branchenregel Kanzlei: keine Erfolgsversprechen, keine Garantien zum Ausgang eines Verfahrens, keine Superlative wie „der beste Anwalt“. Fachgebiete nur nennen, wenn sie in den Anbieterfakten stehen.";
@@ -379,7 +384,7 @@ function brancheRules(settings: ContentTextSettings): string {
   }
 }
 
-function avatarBlock(context: ContentPipelineContext): string {
+export function avatarBlock(context: Pick<ContentPipelineContext, "avatar">): string {
   if (!context.avatar) return "## Avatar (Wunschkunde)\n(kein Avatar hinterlegt)";
   return [
     "## Avatar (Wunschkunde, für den der Text geschrieben wird)",
@@ -437,16 +442,24 @@ function pageBlock(context: ContentPipelineContext): string {
   return lines.filter(Boolean).join("\n");
 }
 
-function notesBlock(context: ContentPipelineContext): string {
-  const notes = [
-    ...(context.page.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
-    ...context.notes.map((n) => clip(n, 2_000)),
-  ];
+function formatNotes(notes: readonly string[]): string {
   if (notes.length === 0) return "";
   return [
     "## Anmerkungen der Redaktion (gelten vor allem anderen; Antworten darin sind bestätigte Fakten)",
     ...notes.map((n, i) => `${i + 1}. ${n}`),
   ].join("\n");
+}
+
+/** The editor's notes as a numbered list (each clipped); empty string without notes. */
+export function editorNotesBlock(notes: readonly string[]): string {
+  return formatNotes(notes.map((n) => clip(n, 2_000)).filter(Boolean));
+}
+
+function notesBlock(context: ContentPipelineContext): string {
+  return formatNotes([
+    ...(context.page.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
+    ...context.notes.map((n) => clip(n, 2_000)),
+  ]);
 }
 
 function outputBlock(context: ContentPipelineContext, step: number, title: string, max = MAX_OUTPUT_CHARS): string {
@@ -455,7 +468,7 @@ function outputBlock(context: ContentPipelineContext, step: number, title: strin
   return `## ${title}\n${JSON.stringify(output, null, 1).slice(0, max)}`;
 }
 
-function currentTextBlock(context: ContentPipelineContext): string {
+export function currentTextBlock(context: ContentCurrentText): string {
   if (context.blocks.length === 0) return "## Aktueller Text\n(noch keiner)";
   return [
     "## Aktueller Text (Abschnitte mit ihrer id)",
@@ -467,15 +480,18 @@ function currentTextBlock(context: ContentPipelineContext): string {
     .join("\n");
 }
 
-function join(parts: readonly string[]): string {
+/** Prompt blocks separated by a blank line; empty blocks (optional parts) fall out. */
+export function joinPromptParts(parts: readonly string[]): string {
   return parts.filter(Boolean).join("\n\n");
 }
 
-const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte für kleine Unternehmen schreibt. Sprache: Deutsch.
+const join = joinPromptParts;
+
+export const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte für kleine Unternehmen schreibt. Sprache: Deutsch.
 Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`;
 
-const KEEP_RULES =
+export const KEEP_RULES =
   "Unverändert bleiben: die H1, der Abschnitt „hero“, Frage-Überschriften (bleiben Fragen), Haupt- und Nebenkeywords, Platzhalter wie [BITTE PRÜFEN: …] und [QUELLE BITTE ERGÄNZEN], [LINK: …]-Marker, die ids der Abschnitte und alle Fakten.";
 
 const BLOCKS_SCHEMA = {
@@ -518,7 +534,7 @@ const TEXT_PROPERTIES = {
   blocks: BLOCKS_SCHEMA,
 };
 
-const TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
+export const TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
   type: "object",
   properties: TEXT_PROPERTIES,
   required: ["title", "meta_description", "blocks"],
@@ -838,10 +854,15 @@ ${brancheRules(context.settings)}`,
   };
 }
 
-function geo(context: ContentPipelineContext): ContentStepSpec {
-  return {
-    maxTokens: 12_000,
-    system: `${BASE_RULES}
+/** Output size of the GEO rewrite; the standalone GEO tool uses the same budget. */
+export const GEO_MAX_TOKENS = 12_000;
+
+/**
+ * System prompt of step 4. The standalone GEO tool (Verwaltung → GEO) sends exactly this
+ * prompt, so an uploaded text is reworked by the same rules as a page of the pipeline.
+ */
+export function geoSystemPrompt(settings: ContentTextSettings): string {
+  return `${BASE_RULES}
 
 Schritt 4 GEO (Generative Engine Optimization): Du überarbeitest den Text so, dass KI-Suchsysteme ihn verstehen und zitieren können. Du erfindest keine Fakten und fügst keine hinzu.
 Zuerst setzt du die Befunde des Faktenchecks um: Unbelegtes streichen oder durch [BITTE PRÜFEN: …] ersetzen; offene Fragen so umschreiben, dass der Text ohne die Antwort auskommt. Antworten in den Anmerkungen der Redaktion sind bestätigte Fakten und werden eingearbeitet.
@@ -853,7 +874,25 @@ Dann:
 - Rechtliches, Medizinisches, Fristen und Zahlen brauchen eine Quelle aus den Fakten oder den Marker [QUELLE BITTE ERGÄNZEN].
 - Als letzter Abschnitt id „stand“ ohne Überschrift: „Zuletzt aktualisiert: [DATUM]“ als <p>.
 ${KEEP_RULES} Title und Meta-Description nur ändern, wenn der Faktencheck es verlangt.
-${brancheRules(context.settings)}`,
+${brancheRules(settings)}`;
+}
+
+export const GEO_TOOL: Anthropic.Tool = {
+  name: "submit_geo_text",
+  description: "Der für KI-Zitate überarbeitete Seitentext in Abschnitten.",
+  input_schema: TEXT_TOOL_SCHEMA,
+};
+
+/** Step 4's answer → text; a dropped hero block comes back from the previous text. */
+export function normalizeGeoOutput(json: unknown, context: ContentCurrentText): TextOutput {
+  const out = normalizeTextOutput(json, context);
+  return { ...out, blocks: keepHeroBlock(out.blocks, context.blocks) };
+}
+
+function geo(context: ContentPipelineContext): ContentStepSpec {
+  return {
+    maxTokens: GEO_MAX_TOKENS,
+    system: geoSystemPrompt(context.settings),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -864,15 +903,8 @@ ${brancheRules(context.settings)}`,
       avatarBlock(context),
       notesBlock(context),
     ]),
-    tool: {
-      name: "submit_geo_text",
-      description: "Der für KI-Zitate überarbeitete Seitentext in Abschnitten.",
-      input_schema: TEXT_TOOL_SCHEMA,
-    },
-    normalize: (json, ctx): TextOutput => {
-      const out = normalizeTextOutput(json, ctx);
-      return { ...out, blocks: keepHeroBlock(out.blocks, ctx.blocks) };
-    },
+    tool: GEO_TOOL,
+    normalize: normalizeGeoOutput,
   };
 }
 
