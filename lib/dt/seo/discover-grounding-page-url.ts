@@ -48,6 +48,24 @@ export function buildLlmsTxtUrlCandidates(websiteUrl: string): string[] {
   return LLMS_TXT_PATH_CANDIDATES.map((path) => new URL(path, `${origin}/`).toString());
 }
 
+/** `https://example.de/` (no path, no query) — the homepage, never a grounding page. */
+export function isSiteRootUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.pathname === "/" || u.pathname === "") && !u.search;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Many sites answer unknown paths with a 200 redirect to the homepage (soft 404).
+ * A probe for /grounding/ that lands on `/` found nothing — not the homepage.
+ */
+export function redirectedToSiteRoot(requestedUrl: string, finalUrl: string): boolean {
+  return !isSiteRootUrl(requestedUrl) && isSiteRootUrl(finalUrl);
+}
+
 function normalizeLinkText(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -223,7 +241,7 @@ export async function discoverGroundingPageUrl(
         fromFooter,
         "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
       );
-      if (page?.ok) {
+      if (page?.ok && !redirectedToSiteRoot(fromFooter, page.finalUrl)) {
         const titleMatch = page.body.match(/<title[^>]*>([^<]*)<\/title>/i);
         return {
           ok: true,
@@ -235,14 +253,17 @@ export async function discoverGroundingPageUrl(
           source: "footer",
         };
       }
-      // Footer link exists even if follow-up fetch fails — still return it.
-      return {
-        ok: true,
-        url: fromFooter,
-        status: 200,
-        title: null,
-        source: "footer",
-      };
+      if (!page) {
+        // Footer link exists even if the follow-up fetch fails — still return it.
+        return {
+          ok: true,
+          url: fromFooter,
+          status: 200,
+          title: null,
+          source: "footer",
+        };
+      }
+      // Footer link answers with an error or bounces to the homepage: fall through to path probes.
     }
   }
 
@@ -255,6 +276,7 @@ export async function discoverGroundingPageUrl(
       "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
     );
     if (!page?.ok) continue;
+    if (redirectedToSiteRoot(candidate, page.finalUrl)) continue;
     const ct = (page.contentType ?? "").toLowerCase();
     if (!ct.includes("html") && !ct.includes("text/")) continue;
     if (!looksLikeGroundingHtml(page.body, page.finalUrl)) continue;
@@ -302,6 +324,7 @@ export async function checkLlmsTxt(
   for (const candidate of tried) {
     const page = await fetchText(candidate, "text/plain,*/*;q=0.8");
     if (!page?.ok) continue;
+    if (redirectedToSiteRoot(candidate, page.finalUrl)) continue;
     const ct = (page.contentType ?? "").toLowerCase();
     // Accept text/plain or generic; reject obvious HTML soft-404s.
     if (ct.includes("html") && !page.body.trimStart().startsWith("#")) continue;

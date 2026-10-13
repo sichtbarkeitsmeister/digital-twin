@@ -7,7 +7,7 @@ import {
   CheckCircle2,
   ExternalLink,
   Loader2,
-  Plus,
+  MessagesSquare,
   Radar,
   ShieldCheck,
   Trash2,
@@ -27,6 +27,14 @@ import type {
   DtGroundingPageView,
   DtGroundingSummary,
 } from "@/lib/dt/seo/grounding-pages";
+
+/**
+ * Overview of the organisation's Grounding Pages (Hub + Entitätsseiten + llms.txt).
+ * Pages are planned, created and updated in the SEO chat with the „Grounding Page“
+ * switch on; the agent reports them back here via update_grounding_page. What stays
+ * here is what only a person can do: read the live page, document the human fact
+ * review (Standard v1.7) and remove a page from the tool.
+ */
 
 type LlmsTxtStatus =
   | { found: true; url: string; lastModified: string | null; bytes: number }
@@ -128,12 +136,27 @@ function FactTile(props: { label: string; value: string; hint?: string }) {
   );
 }
 
+function OpenChatButton(props: { onClick?: () => void; label: string; size?: "sm" | "md" }) {
+  if (!props.onClick) return null;
+  return (
+    <DtPillButton
+      type="button"
+      size={props.size ?? "sm"}
+      onClick={props.onClick}
+      className="gap-1.5"
+    >
+      <MessagesSquare className="size-4" aria-hidden />
+      {props.label}
+    </DtPillButton>
+  );
+}
+
 async function readJson(res: Response): Promise<PagesResponse> {
   return (await res.json().catch(() => ({}))) as PagesResponse;
 }
 
 // ---------------------------------------------------------------------------
-// Page card
+// Page card (overview + the human-only actions)
 // ---------------------------------------------------------------------------
 
 function GroundingPageCard(props: {
@@ -143,34 +166,21 @@ function GroundingPageCard(props: {
   onPages: (pages: DtGroundingPageView[], summary: DtGroundingSummary) => void;
 }) {
   const { page } = props;
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<"save" | "detect" | "approve" | "delete" | null>(null);
-  const [url, setUrl] = useState(page.url);
-  const [entityName, setEntityName] = useState(page.entityName ?? "");
-  const [slug, setSlug] = useState(page.slug ?? "");
-  const [uploadedAt, setUploadedAt] = useState(toDateInputValue(page.uploadedAt));
-  const [dateModified, setDateModified] = useState(toDateInputValue(page.dateModified));
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [busy, setBusy] = useState<"detect" | "approve" | "reset" | "delete" | null>(null);
   const [lastReviewed, setLastReviewed] = useState(toDateInputValue(page.lastReviewed));
   const [reviewedBy, setReviewedBy] = useState(page.reviewedBy ?? "");
-  const [standardVersion, setStandardVersion] = useState(page.standardVersion ?? "");
-  const [notes, setNotes] = useState(page.notes ?? "");
   const [lastDetection, setLastDetection] = useState<string | null>(null);
 
   useEffect(() => {
-    setUrl(page.url);
-    setEntityName(page.entityName ?? "");
-    setSlug(page.slug ?? "");
-    setUploadedAt(toDateInputValue(page.uploadedAt));
-    setDateModified(toDateInputValue(page.dateModified));
     setLastReviewed(toDateInputValue(page.lastReviewed));
     setReviewedBy(page.reviewedBy ?? "");
-    setStandardVersion(page.standardVersion ?? "");
-    setNotes(page.notes ?? "");
   }, [page]);
 
   const badge = statusBadge(page.schedule.status);
   const title =
     page.kind === "hub" ? "Hub · Haupt-Grounding-Page" : page.entityName || page.slug || "Entitätsseite";
+  const noteLine = page.notes?.trim().split("\n").filter(Boolean).at(-1) ?? null;
 
   async function patch(body: Record<string, unknown>, kind: typeof busy, successMessage: string) {
     setBusy(kind);
@@ -196,37 +206,20 @@ function GroundingPageCard(props: {
     }
   }
 
-  function save() {
-    void patch(
-      {
-        url: url.trim(),
-        entityName: page.kind === "hub" ? undefined : entityName.trim() || null,
-        slug: page.kind === "hub" ? undefined : slug.trim() || null,
-        uploadedAt: uploadedAt || null,
-        dateModified: dateModified || null,
-        lastReviewed: lastReviewed || null,
-        reviewedBy: reviewedBy.trim() || null,
-        standardVersion: standardVersion.trim() || null,
-        notes: notes.trim() || null,
-      },
-      "save",
-      "Grounding Page gespeichert.",
-    );
-  }
-
-  function approve() {
+  async function approve() {
     const reviewer = reviewedBy.trim();
     if (!reviewer) {
-      toast.error("Bitte zuerst den Prüfer (Person oder Organisation) eintragen.");
+      toast.error("Bitte den Prüfer (Person oder Organisation) eintragen.");
       return;
     }
     const day = lastReviewed || todayInputValue();
     setLastReviewed(day);
-    void patch(
+    const ok = await patch(
       { reviewedBy: reviewer, lastReviewed: day },
       "approve",
       "Freigabe dokumentiert — Seite gilt als geprüft (v1.7).",
     );
+    if (ok) setReviewOpen(false);
   }
 
   async function detect() {
@@ -239,7 +232,6 @@ function GroundingPageCard(props: {
         body: JSON.stringify({
           organisationId: props.organisationId,
           pageId: page.id,
-          url: url.trim() || undefined,
           apply: true,
         }),
       });
@@ -348,14 +340,14 @@ function GroundingPageCard(props: {
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
           <p>
             {page.schedule.status === "overdue"
-              ? "Die letzte Prüfung liegt mehr als drei Monate zurück — „aktualisiere“ im Chat starten, dann Prüfung dokumentieren."
+              ? "Die letzte Prüfung liegt mehr als drei Monate zurück — im SEO-Chat „aktualisiere“ starten, dann die Prüfung hier dokumentieren."
               : "In weniger als zwei Wochen ist die dreimonatige Aktualisierung fällig."}
           </p>
         </div>
       ) : page.schedule.status === "missing" ? (
         <div className="flex gap-2 rounded-xl bg-sbkm-navy/5 px-3 py-2.5 text-sm text-sbkm-ink-600 dark:bg-white/5 dark:text-white/60">
           <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <p>Noch kein Prüf- oder Upload-Datum. „Von Seite lesen“ nutzen oder manuell setzen.</p>
+          <p>Noch kein Prüf- oder Upload-Datum. „Von Seite lesen“ holt es von der Live-Seite.</p>
         </div>
       ) : null}
 
@@ -366,6 +358,12 @@ function GroundingPageCard(props: {
         </a>
         <span className="truncate text-xs text-sbkm-ink-600 dark:text-white/50">{page.url}</span>
       </div>
+
+      {noteLine ? (
+        <p className="line-clamp-2 text-xs text-sbkm-ink-600 dark:text-white/50" title={page.notes ?? undefined}>
+          {noteLine}
+        </p>
+      ) : null}
 
       {props.canEdit ? (
         <div className="flex flex-wrap gap-2">
@@ -387,196 +385,96 @@ function GroundingPageCard(props: {
           <DtPillButton
             type="button"
             size="sm"
-            variant="ghost"
+            variant="outline"
             disabled={busy != null}
-            onClick={() => setOpen((v) => !v)}
+            onClick={() => setReviewOpen((v) => !v)}
+            className="gap-1.5"
           >
-            {open ? "Bearbeiten schließen" : "Bearbeiten"}
+            <ShieldCheck className="size-4" aria-hidden />
+            {reviewOpen ? "Freigabe schließen" : "Freigabe dokumentieren"}
+          </DtPillButton>
+          <DtPillButton
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={disabled}
+            onClick={() => void remove()}
+            className="gap-1.5 text-destructive"
+          >
+            <Trash2 className="size-4" aria-hidden />
+            Entfernen
           </DtPillButton>
         </div>
       ) : null}
       {lastDetection ? <p className="text-xs text-sbkm-mint">Erkannt: {lastDetection}</p> : null}
 
-      {open && props.canEdit ? (
-        <div className="grid gap-3 border-t border-sbkm-navy/10 pt-4 dark:border-white/10">
-          <label className="grid gap-1.5">
-            <span className={LABEL_CLASS}>URL</span>
-            <div className="flex items-center gap-2">
-              <input
-                type="url"
-                value={url}
-                disabled={disabled}
-                onChange={(e) => setUrl(e.target.value)}
-                className={cn(INPUT_CLASS, "flex-1")}
-              />
-              {url.trim() ? <ExternalIconLink href={url.trim()} title="Seite öffnen" /> : null}
-            </div>
-          </label>
-
-          {page.kind !== "hub" ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5">
-                <span className={LABEL_CLASS}>Entitätsname</span>
-                <input
-                  type="text"
-                  value={entityName}
-                  disabled={disabled}
-                  placeholder="z. B. Veneers"
-                  onChange={(e) => setEntityName(e.target.value)}
-                  className={INPUT_CLASS}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className={LABEL_CLASS}>Slug</span>
-                <input
-                  type="text"
-                  value={slug}
-                  disabled={disabled}
-                  placeholder="z. B. veneers"
-                  onChange={(e) => setSlug(e.target.value)}
-                  className={INPUT_CLASS}
-                />
-              </label>
-            </div>
-          ) : null}
-
-          <div className="grid gap-3 sm:grid-cols-3">
+      {reviewOpen && props.canEdit ? (
+        <div className="rounded-xl border border-sbkm-navy/10 bg-white/50 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+          <p className="text-xs font-bold text-sbkm-navy dark:text-white">
+            Menschliche Faktenprüfung (Standard v1.7)
+          </p>
+          <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
+            Erst nach der Prüfung eintragen. Prüfer und Datum müssen mit dem sichtbaren Prüfhinweis
+            und reviewedBy / lastReviewed im JSON-LD der Seite übereinstimmen. Das Prüfdatum ist nie
+            in der Zukunft.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <label className="grid gap-1.5">
-              <span className={LABEL_CLASS}>Hochgeladen am</span>
-              <input
-                type="date"
-                value={uploadedAt}
-                disabled={disabled}
-                onChange={(e) => setUploadedAt(e.target.value)}
-                className={INPUT_CLASS}
-              />
-            </label>
-            <label className="grid gap-1.5">
-              <span className={LABEL_CLASS}>dateModified</span>
-              <input
-                type="date"
-                value={dateModified}
-                disabled={disabled}
-                onChange={(e) => setDateModified(e.target.value)}
-                className={INPUT_CLASS}
-              />
-            </label>
-            <label className="grid gap-1.5">
-              <span className={LABEL_CLASS}>Standardversion</span>
+              <span className={LABEL_CLASS}>Prüfer (reviewedBy)</span>
               <input
                 type="text"
-                value={standardVersion}
+                value={reviewedBy}
                 disabled={disabled}
-                placeholder="1.7"
-                onChange={(e) => setStandardVersion(e.target.value)}
+                placeholder="Person oder Organisation"
+                onChange={(e) => setReviewedBy(e.target.value)}
+                className={INPUT_CLASS}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className={LABEL_CLASS}>Geprüft am (lastReviewed)</span>
+              <input
+                type="date"
+                value={lastReviewed}
+                max={todayInputValue()}
+                disabled={disabled}
+                onChange={(e) => setLastReviewed(e.target.value)}
                 className={INPUT_CLASS}
               />
             </label>
           </div>
-
-          <div className="rounded-xl border border-sbkm-navy/10 bg-white/50 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-            <p className="text-xs font-bold text-sbkm-navy dark:text-white">
-              Menschliche Faktenprüfung (Standard v1.7)
-            </p>
-            <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
-              Prüfer und Datum müssen mit dem sichtbaren Prüfhinweis und reviewedBy / lastReviewed
-              im JSON-LD der Seite übereinstimmen. Das Prüfdatum ist nie in der Zukunft.
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5">
-                <span className={LABEL_CLASS}>Prüfer (reviewedBy)</span>
-                <input
-                  type="text"
-                  value={reviewedBy}
-                  disabled={disabled}
-                  placeholder="Person oder Organisation"
-                  onChange={(e) => setReviewedBy(e.target.value)}
-                  className={INPUT_CLASS}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className={LABEL_CLASS}>Geprüft am (lastReviewed)</span>
-                <input
-                  type="date"
-                  value={lastReviewed}
-                  max={todayInputValue()}
-                  disabled={disabled}
-                  onChange={(e) => setLastReviewed(e.target.value)}
-                  className={INPUT_CLASS}
-                />
-              </label>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <DtPillButton
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={disabled}
-                onClick={approve}
-                className="gap-1.5"
-              >
-                {busy === "approve" ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden />
-                ) : (
-                  <ShieldCheck className="size-4" aria-hidden />
-                )}
-                Freigabe dokumentieren
-              </DtPillButton>
-              {lastReviewed ? (
-                <DtPillButton
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() => {
-                    setLastReviewed("");
-                    void patch(
-                      { lastReviewed: null },
-                      "save",
-                      "Prüfdatum entfernt — Seite ist wieder Entwurf.",
-                    );
-                  }}
-                >
-                  Prüfung zurücksetzen
-                </DtPillButton>
-              ) : null}
-            </div>
-          </div>
-
-          <label className="grid gap-1.5">
-            <span className={LABEL_CLASS}>Notiz (optional)</span>
-            <textarea
-              value={notes}
-              disabled={disabled}
-              rows={3}
-              placeholder="z. B. was geändert wurde, Befunde…"
-              onChange={(e) => setNotes(e.target.value)}
-              className="rounded-xl border border-sbkm-navy/15 bg-white/80 px-3 py-2 text-sm text-sbkm-navy outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-white"
-            />
-          </label>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <DtPillButton type="button" size="sm" disabled={disabled} onClick={save}>
-              {busy === "save" ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" aria-hidden />
-                  Speichern…
-                </>
-              ) : (
-                "Speichern"
-              )}
-            </DtPillButton>
+          <div className="mt-3 flex flex-wrap gap-2">
             <DtPillButton
               type="button"
               size="sm"
-              variant="ghost"
               disabled={disabled}
-              onClick={() => void remove()}
-              className="gap-1.5 text-destructive"
+              onClick={() => void approve()}
+              className="gap-1.5"
             >
-              <Trash2 className="size-4" aria-hidden />
-              Aus dem Tool entfernen
+              {busy === "approve" ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <ShieldCheck className="size-4" aria-hidden />
+              )}
+              Freigabe speichern
             </DtPillButton>
+            {page.lastReviewed ? (
+              <DtPillButton
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={disabled}
+                onClick={() => {
+                  setLastReviewed("");
+                  void patch(
+                    { lastReviewed: null },
+                    "reset",
+                    "Prüfdatum entfernt — Seite ist wieder Entwurf.",
+                  );
+                }}
+              >
+                Prüfung zurücksetzen
+              </DtPillButton>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -585,131 +483,20 @@ function GroundingPageCard(props: {
 }
 
 // ---------------------------------------------------------------------------
-// Add page form
-// ---------------------------------------------------------------------------
-
-function AddGroundingPageForm(props: {
-  organisationId: string;
-  kind: "hub" | "entity";
-  initialUrl?: string;
-  onPages: (pages: DtGroundingPageView[], summary: DtGroundingSummary) => void;
-  onDone?: () => void;
-}) {
-  const [url, setUrl] = useState(props.initialUrl ?? "");
-  const [entityName, setEntityName] = useState("");
-  const [detect, setDetect] = useState(true);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (props.initialUrl) setUrl(props.initialUrl);
-  }, [props.initialUrl]);
-
-  async function submit() {
-    const target = url.trim();
-    if (!target) {
-      toast.error("Bitte die URL der Seite eintragen.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await fetch("/api/dt/seo/grounding/pages", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          organisationId: props.organisationId,
-          kind: props.kind,
-          url: target,
-          entityName: props.kind === "entity" ? entityName.trim() || null : undefined,
-          detect,
-        }),
-      });
-      const json = await readJson(res);
-      if (!res.ok || !json.ok || !json.pages || !json.summary) {
-        toast.error(json.message ?? "Anlegen fehlgeschlagen.");
-        return;
-      }
-      props.onPages(json.pages, json.summary);
-      if (json.detectionMessage) {
-        toast.warning(`Seite angelegt. ${json.detectionMessage}`);
-      } else {
-        toast.success(props.kind === "hub" ? "Hub angelegt." : "Entitätsseite angelegt.");
-      }
-      setUrl("");
-      setEntityName("");
-      props.onDone?.();
-    } catch {
-      toast.error("Anlegen fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className={cn("grid gap-3", props.kind === "entity" && "sm:grid-cols-[1fr_minmax(0,220px)]")}>
-        <label className="grid gap-1.5">
-          <span className={LABEL_CLASS}>
-            {props.kind === "hub" ? "URL des Hubs" : "URL der Entitätsseite"}
-          </span>
-          <input
-            type="url"
-            value={url}
-            disabled={busy}
-            placeholder={props.kind === "hub" ? "https://…/grounding/" : "https://…/grounding/leistung/"}
-            onChange={(e) => setUrl(e.target.value)}
-            className={INPUT_CLASS}
-          />
-        </label>
-        {props.kind === "entity" ? (
-          <label className="grid gap-1.5">
-            <span className={LABEL_CLASS}>Entitätsname</span>
-            <input
-              type="text"
-              value={entityName}
-              disabled={busy}
-              placeholder="z. B. Veneers"
-              onChange={(e) => setEntityName(e.target.value)}
-              className={INPUT_CLASS}
-            />
-          </label>
-        ) : null}
-      </div>
-      <label className="flex items-center gap-2 text-sm text-sbkm-navy dark:text-white">
-        <input
-          type="checkbox"
-          checked={detect}
-          disabled={busy}
-          onChange={(e) => setDetect(e.target.checked)}
-          className="size-4 accent-sbkm-mint"
-        />
-        Daten direkt von der Live-Seite lesen (lastReviewed, Prüfer, dateModified, Version)
-      </label>
-      <div className="flex flex-wrap gap-2">
-        <DtPillButton type="button" size="sm" disabled={busy} onClick={() => void submit()} className="gap-1.5">
-          {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Plus className="size-4" aria-hidden />}
-          {props.kind === "hub" ? "Hub anlegen" : "Entitätsseite anlegen"}
-        </DtPillButton>
-        {props.onDone ? (
-          <DtPillButton type="button" size="sm" variant="ghost" disabled={busy} onClick={props.onDone}>
-            Abbrechen
-          </DtPillButton>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
 
-export function DtSeoGroundingPanel(props: { organisationId: string; canEdit: boolean }) {
+export function DtSeoGroundingPanel(props: {
+  organisationId: string;
+  canEdit: boolean;
+  /** Opens the SEO chat with the „Grounding Page“ switch on. */
+  onOpenChat?: () => void;
+}) {
   const [data, setData] = useState<GroundingPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [llmsTxtUrl, setLlmsTxtUrl] = useState("");
   const [savingLlms, setSavingLlms] = useState(false);
-  const [addingEntity, setAddingEntity] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -750,6 +537,7 @@ export function DtSeoGroundingPanel(props: { organisationId: string; canEdit: bo
   const badge = useMemo(() => statusBadge(summary?.status ?? "missing"), [summary?.status]);
   const hub = data?.pages.find((p) => p.kind === "hub") ?? null;
   const entities = data?.pages.filter((p) => p.kind !== "hub") ?? [];
+  const chatAvailable = props.canEdit && Boolean(props.onOpenChat);
 
   async function saveLlmsTxtUrl() {
     if (!props.canEdit) return;
@@ -794,17 +582,23 @@ export function DtSeoGroundingPanel(props: { organisationId: string; canEdit: bo
 
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4 pb-8">
-      <div>
-        <h2 className="text-lg font-bold tracking-tight text-sbkm-navy dark:text-white">
-          Grounding Pages
-        </h2>
-        <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
-          Hub und Entitätsseiten nach Grounding Page Standard v1.7. Fällig ist jede Seite{" "}
-          {GROUNDING_PAGE_INTERVAL_MONTHS} Monate nach der letzten menschlichen Faktenprüfung
-          (lastReviewed), Frühwarnung {GROUNDING_PAGE_WARN_DAYS} Tage vorher. Der Twin sucht den
-          Grounding-Link im Footer, prüft <code className="text-[0.85em]">llms.txt</code> und liest
-          Prüfer, Prüfdatum und dateModified von der Live-Seite.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold tracking-tight text-sbkm-navy dark:text-white">
+            Grounding Pages
+          </h2>
+          <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
+            Übersicht nach Grounding Page Standard v1.7: Hub, Entitätsseiten und{" "}
+            <code className="text-[0.85em]">llms.txt</code>. Fällig ist jede Seite{" "}
+            {GROUNDING_PAGE_INTERVAL_MONTHS} Monate nach der letzten menschlichen Faktenprüfung
+            (lastReviewed), Frühwarnung {GROUNDING_PAGE_WARN_DAYS} Tage vorher. Erstellt und
+            aktualisiert werden die Seiten im SEO-Chat mit dem Schalter „Grounding Page“; die
+            fertige HTML-Datei kommt aus dem Chat.
+          </p>
+        </div>
+        {chatAvailable ? (
+          <OpenChatButton onClick={props.onOpenChat} label="Im SEO-Chat bearbeiten" size="md" />
+        ) : null}
       </div>
 
       {loading ? (
@@ -863,25 +657,27 @@ export function DtSeoGroundingPanel(props: { organisationId: string; canEdit: bo
           ) : (
             <DtGlassCard variant="subtle" className="grid gap-3 p-4 sm:p-5">
               <div>
-                <h3 className="text-sm font-bold text-sbkm-navy dark:text-white">Hub anlegen</h3>
-                <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
+                <h3 className="text-sm font-bold text-sbkm-navy dark:text-white">
+                  Noch kein Hub erfasst
+                </h3>
+                <p className="mt-0.5 text-sm text-sbkm-ink-600 dark:text-white/60">
                   {data.discoveredUrl
-                    ? `Im ${data.discoverySource === "footer" ? "Footer" : "Standardpfad"} gefunden: ${data.discoveredUrl}`
-                    : (data.discoveryMessage ?? "Noch keine Haupt-Grounding-Page erfasst.")}
+                    ? `Im ${data.discoverySource === "footer" ? "Footer" : "Standardpfad"} gefunden: ${data.discoveredUrl}. Beim nächsten Laden wird die Seite übernommen.`
+                    : (data.discoveryMessage ??
+                      "Auf der Website wurde keine Grounding Page gefunden.")}{" "}
+                  Der SEO-Chat prüft den Bestand, sammelt die Fakten und liefert die
+                  Haupt-Grounding-Page als HTML-Datei zum Einfügen auf der Website.
                 </p>
               </div>
-              {props.canEdit ? (
-                <AddGroundingPageForm
-                  organisationId={props.organisationId}
-                  kind="hub"
-                  initialUrl={data.discoveredUrl ?? ""}
-                  onPages={onPages}
-                />
-              ) : (
+              {chatAvailable ? (
+                <div>
+                  <OpenChatButton onClick={props.onOpenChat} label="Grounding Page im Chat erstellen" />
+                </div>
+              ) : !props.canEdit ? (
                 <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
                   Nur Plattform-Admins können Grounding Pages erfassen.
                 </p>
-              )}
+              ) : null}
             </DtGlassCard>
           )}
 
@@ -889,36 +685,16 @@ export function DtSeoGroundingPanel(props: { organisationId: string; canEdit: bo
             <h3 className="text-sm font-bold text-sbkm-navy dark:text-white">
               Entitätsseiten ({entities.length})
             </h3>
-            {props.canEdit && !addingEntity ? (
-              <DtPillButton
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setAddingEntity(true)}
-                className="gap-1.5"
-              >
-                <Plus className="size-4" aria-hidden />
-                Entitätsseite hinzufügen
-              </DtPillButton>
+            {chatAvailable ? (
+              <OpenChatButton onClick={props.onOpenChat} label="Entitätsseiten im Chat planen" />
             ) : null}
           </div>
 
-          {addingEntity && props.canEdit ? (
-            <DtGlassCard variant="subtle" className="p-4 sm:p-5">
-              <AddGroundingPageForm
-                organisationId={props.organisationId}
-                kind="entity"
-                onPages={onPages}
-                onDone={() => setAddingEntity(false)}
-              />
-            </DtGlassCard>
-          ) : null}
-
-          {entities.length === 0 && !addingEntity ? (
+          {entities.length === 0 ? (
             <DtGlassCard variant="subtle" className="p-4 text-sm text-sbkm-ink-600 dark:text-white/55">
               Keine Entitätsseiten erfasst. Eine eigene Seite entsteht nur, wenn Zielkunden gezielt
               nach der Entität fragen und genug belegbare Fakten vorliegen — sonst bleibt sie eine
-              entity-card im Hub.
+              entity-card im Hub. Der SEO-Chat schlägt passende Entitätsseiten vor.
             </DtGlassCard>
           ) : null}
 

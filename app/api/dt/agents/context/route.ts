@@ -14,6 +14,7 @@ const querySchema = z.object({
   agent: z.string().uuid(),
   mode: z.enum(["default", "seo", "team"]).default("default"),
   textMode: z.enum(["0", "1", "true", "false"]).optional(),
+  groundingMode: z.enum(["0", "1", "true", "false"]).optional(),
 });
 
 export async function GET(req: Request) {
@@ -36,6 +37,7 @@ export async function GET(req: Request) {
     agent: url.searchParams.get("agent"),
     mode: url.searchParams.get("mode") ?? "default",
     textMode: url.searchParams.get("textMode") ?? undefined,
+    groundingMode: url.searchParams.get("groundingMode") ?? undefined,
   });
 
   if (!parsed.success) {
@@ -86,6 +88,8 @@ export async function GET(req: Request) {
       agentId: parsed.data.agent,
       mode: parsed.data.mode as DtAgentContextMode,
       textMode: parsed.data.textMode === "1" || parsed.data.textMode === "true",
+      groundingMode:
+        parsed.data.groundingMode === "1" || parsed.data.groundingMode === "true",
     });
 
     return NextResponse.json({ ok: true, bundle });

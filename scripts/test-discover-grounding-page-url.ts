@@ -8,7 +8,24 @@ import {
   buildGroundingPageUrlCandidates,
   buildLlmsTxtUrlCandidates,
   extractGroundingUrlFromFooterHtml,
+  isSiteRootUrl,
+  redirectedToSiteRoot,
 } from "../lib/dt/seo/discover-grounding-page-url";
+
+// Soft 404: a probe for /grounding/ that lands on the homepage found nothing.
+assert.equal(isSiteRootUrl("https://existenzstand.de/"), true);
+assert.equal(isSiteRootUrl("https://existenzstand.de"), true);
+assert.equal(isSiteRootUrl("https://existenzstand.de/grounding/"), false);
+assert.equal(isSiteRootUrl("https://existenzstand.de/?p=1"), false);
+assert.equal(
+  redirectedToSiteRoot("https://existenzstand.de/grounding/", "https://existenzstand.de/"),
+  true,
+);
+assert.equal(
+  redirectedToSiteRoot("https://existenzstand.de/grounding/", "https://existenzstand.de/grounding/"),
+  false,
+);
+assert.equal(redirectedToSiteRoot("https://existenzstand.de/", "https://existenzstand.de/"), false);
 
 const candidates = buildGroundingPageUrlCandidates("https://freiraumvier.de");
 assert.ok(candidates.includes("https://freiraumvier.de/grounding/"));
