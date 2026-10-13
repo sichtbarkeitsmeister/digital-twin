@@ -14,6 +14,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { DtAgentQuickActionsField } from "@/components/dt/agents/dt-agent-quick-actions-field";
 import { DtAttachmentChips } from "@/components/dt/chat/dt-attachment-chips";
+import { DtDictationButton } from "@/components/dt/chat/dt-dictation-button";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { cn } from "@/components/dt/cn";
 import {
@@ -361,6 +362,14 @@ export function DtChatComposer(props: {
               >
                 <Paperclip className="h-4 w-4" aria-hidden />
               </button>
+
+              <DtDictationButton
+                value={props.value}
+                onChange={props.onChange}
+                disabled={props.isBusy || props.disabled}
+                showLabel
+                className={cn(iconBtn, "w-auto gap-1.5 px-2.5")}
+              />
 
               <button
                 type="button"

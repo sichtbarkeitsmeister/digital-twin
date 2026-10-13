@@ -532,6 +532,10 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 
 ## 10. Was im Hintergrund passiert
 
+### Diktieren im Chat
+
+Im DigitalTwin-Chat, im SEO-Chat und in der DigitalTwin-Hilfe gibt es im Eingabefeld ein Mikrofon. Ein Klick startet die **Spracherkennung des Browsers** (Web Speech API, Deutsch), der gesprochene Text erscheint live im Eingabefeld und lässt sich vor dem Senden korrigieren. Ein zweiter Klick beendet das Diktat. Chrome, Edge und Safari können das; in Firefox fehlt der Knopf. In Chrome geht die Tonspur zur Erkennung an Google, das gehört in die Datenschutzerklärung. Es gibt keinen Server-Anteil und keine Kosten; die Logik liegt in `lib/shared/speech-dictation.ts` und `components/dt/chat/use-speech-dictation.ts`.
+
 ### DigitalTwin-Hilfe
 
 Unten rechts im Dashboard sitzt für alle eingeloggten Nutzer die **DigitalTwin-Hilfe** (`app/dashboard/_components/dashboard-sticky-survey-ai-assistant.tsx`). Sie beantwortet „Wo finde ich …“, „Was macht diese Seite“ und „Warum geht … nicht“.
