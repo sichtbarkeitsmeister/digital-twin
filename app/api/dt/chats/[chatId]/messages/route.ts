@@ -34,6 +34,8 @@ import {
 } from "@/lib/dt/n8n-chat";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { isGroundingHtmlBuildRequest } from "@/lib/dt/seo/grounding-html-request";
+import { answerGroundingHtmlRequest } from "@/lib/dt/seo/grounding-tools";
 import {
   buildDtSeoTaskProposalMetadata,
   parseDtSeoTaskProposalsFromText,
@@ -304,6 +306,59 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
   }
 
   const hasAttachments = prepared.items.length > 0;
+
+  // A full Grounding HTML file in this request runs past the connection limit and
+  // the client only shows a network error. Answer from the draft and let the agent build it.
+  if (groundingMode && isGroundingHtmlBuildRequest(content)) {
+    let reply = "Der Entwurf konnte gerade nicht gestartet werden. Im Tab Grounding erneut anstoßen.";
+    try {
+      reply = await answerGroundingHtmlRequest(chat.organisation_id, auth.userId, content);
+    } catch (err) {
+      console.error("[dt/chat/messages] grounding html:", err);
+    }
+    if (ghostMode || !userRow) {
+      return NextResponse.json({
+        ok: true,
+        userMessage: userRow,
+        assistantMessage: {
+          id: `grounding-${Date.now()}`,
+          chat_id: chatId,
+          role: "assistant",
+          content: reply,
+          metadata: { via: "grounding_html_request" },
+          author_user_id: null,
+          stopped: false,
+          created_at: new Date().toISOString(),
+        },
+        via: "grounding",
+      });
+    }
+    const { data: assistantRow, error: assistantError } = await auth.supabase
+      .from("dt_chat_messages")
+      .insert({
+        chat_id: chatId,
+        role: "assistant",
+        content: reply,
+        metadata: { via: "grounding_html_request" },
+        author_user_id: null,
+        stopped: false,
+      })
+      .select("id,chat_id,role,content,metadata,author_user_id,stopped,created_at")
+      .single();
+    if (assistantError || !assistantRow) {
+      return NextResponse.json(
+        { ok: false, message: "Antwort konnte nicht gespeichert werden.", userMessage: userRow },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      userMessage: userRow,
+      assistantMessage: assistantRow,
+      via: "grounding",
+    });
+  }
+
   const n8nWebhook = process.env.N8N_DT_CHAT_WEBHOOK?.trim();
   const session = (await auth.supabase.auth.getSession()).data.session;
   const accessToken = session?.access_token?.trim();

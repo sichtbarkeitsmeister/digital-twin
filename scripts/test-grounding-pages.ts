@@ -15,6 +15,7 @@ import {
   summarizeGroundingPages,
 } from "../lib/dt/seo/grounding-pages";
 import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
+import { isGroundingHtmlBuildRequest } from "../lib/dt/seo/grounding-html-request";
 import type { DtGroundingPageRow } from "../lib/dt/types";
 
 const NOW = "2026-10-12T12:00:00.000Z";
@@ -238,5 +239,13 @@ const firstPatch = patchFromLiveFacts(null, {
 });
 assert.equal(firstPatch.uploadedAt, "2026-10-02T12:00:00.000Z");
 assert.ok(firstPatch.notes?.includes("Befund"));
+
+assert.equal(
+  isGroundingHtmlBuildRequest("Ja, erstelle die HTML-Datei jetzt direkt hier im Chat."),
+  true,
+);
+assert.equal(isGroundingHtmlBuildRequest("HTML-Datei jetzt erstellen"), true);
+assert.equal(isGroundingHtmlBuildRequest("Agent-Stand neu prüfen"), false);
+assert.equal(isGroundingHtmlBuildRequest("Prüfe, ob die HTML-Datei schon fertig ist."), false);
 
 console.log("grounding-pages tests: ok");

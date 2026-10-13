@@ -1072,7 +1072,11 @@ export function DtChatShell(props: {
         setStatus("Antwort gestoppt.");
       } else {
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-        setStatus("Netzwerkfehler — bitte erneut versuchen.");
+        setStatus(
+          groundingActive
+            ? "Die Verbindung ist abgebrochen. Den Entwurf und die HTML-Datei findest du im Tab Grounding."
+            : "Netzwerkfehler — bitte erneut versuchen.",
+        );
       }
     } finally {
       for (const u of previewCleanup) URL.revokeObjectURL(u);
