@@ -34,12 +34,19 @@ import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock 
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
 
+/**
+ * Where a page of the prompt comes from: the Excel structure, the crawl, or — only in the
+ * standalone SEO tool (lib/dt/text-tools/seo.ts) — an upload with a briefing form. The
+ * third value never reaches `dt_content_pages`; it is a prompt-time label.
+ */
+export type ContentPipelinePageSource = ContentPageSource | "standalone";
+
 export type ContentPipelinePage = {
   name: string;
   path: string | null;
   level: number;
   url?: string | null;
-  source: ContentPageSource;
+  source: ContentPipelinePageSource;
   page_role: ContentPageRole | null;
   /** Effective type (a row without one gets a guess before the prompt is built). */
   page_type: ContentPageType;
@@ -57,7 +64,10 @@ export type ContentPipelineContext = {
   page: ContentPipelinePage;
   /** The other pages of the organisation (name, type, keyword) for cannibalisation and deferred questions. */
   structureOutline: string;
-  /** Current text of the live page for pages taken over from the crawl; null otherwise. */
+  /**
+   * Current text of the live page for pages taken over from the crawl; for a standalone
+   * page the uploaded material (briefing or old text); null otherwise.
+   */
   existingText: string | null;
   sections: WorkshopAnbieterSection[];
   settings: ContentTextSettings;
@@ -187,6 +197,8 @@ const MAX_SECTION_CHARS = 6_000;
 const MAX_AVATAR_CHARS = 5_000;
 const MAX_OUTLINE_CHARS = 5_000;
 const MAX_EXISTING_TEXT_CHARS = 6_000;
+/** An upload in the standalone SEO tool is the whole briefing, so it may be longer than a crawl excerpt. */
+export const MAX_STANDALONE_MATERIAL_CHARS = 30_000;
 const MAX_OUTPUT_CHARS = 12_000;
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -404,29 +416,43 @@ function list(items: readonly string[]): string {
   return items.map((i) => `- ${i}`).join("\n");
 }
 
+/** Which briefing the page's keywords, H1 options and questions come from, as the prompt names it. */
+function briefingLabel(page: ContentPipelinePage): string {
+  return page.source === "standalone" ? "aus dem Briefing" : "aus der Excel";
+}
+
+function sourceLine(page: ContentPipelinePage): string {
+  if (page.source === "structure") return "Excel-Seitenstruktur (Briefing der Redaktion)";
+  if (page.source === "standalone") {
+    return "eigenständiges SEO-Werkzeug (Briefing-Formular und ggf. hochgeladenes Material; keine Seitenstruktur, keine anderen Seiten bekannt)";
+  }
+  return "Crawl der bestehenden Website (kein Briefing, Keywords und Fragen werden hier erarbeitet)";
+}
+
 function pageBlock(context: ContentPipelineContext): string {
   const { page } = context;
-  const structure = page.source === "structure";
+  const standalone = page.source === "standalone";
+  const briefing = briefingLabel(page);
   const lines = [
     "## Seite",
     `Organisation: ${context.organisationName}`,
     `Seite: ${page.name}`,
     page.path ? `Pfad: ${page.path}` : "",
     page.url ? `Live-URL: ${page.url}` : "",
-    `Quelle: ${structure ? "Excel-Seitenstruktur (Briefing der Redaktion)" : "Crawl der bestehenden Website (kein Briefing, Keywords und Fragen werden hier erarbeitet)"}`,
-    `Rolle in der Struktur: ${page.page_role ? CONTENT_PAGE_ROLE_LABELS[page.page_role] : "keine (Crawl-Seite)"} · Ebene ${page.level} (0 = Startseite)`,
+    `Quelle: ${sourceLine(page)}`,
+    `Rolle in der Struktur: ${page.page_role ? CONTENT_PAGE_ROLE_LABELS[page.page_role] : standalone ? "keine (eigenständige Seite)" : "keine (Crawl-Seite)"} · Ebene ${page.level} (0 = Startseite)`,
     `Seitentyp: ${CONTENT_PAGE_TYPE_LABELS[page.page_type]}`,
     page.pillar_name ? `Hauptsilo (übergeordnete Seite): ${page.pillar_name}` : "",
     page.estimated_traffic != null ? `Geschätzter Traffic laut Excel: ${page.estimated_traffic}` : "",
     page.keywords
-      ? `Hauptkeyword aus der Excel (gesetzt, nicht ersetzen): ${keywordText(page.keywords.main)}`
+      ? `Hauptkeyword ${briefing} (gesetzt, nicht ersetzen): ${keywordText(page.keywords.main)}`
       : "Hauptkeyword: nicht vorgegeben",
     page.keywords && page.keywords.secondary.length > 0
-      ? `Nebenkeywords aus der Excel: ${page.keywords.secondary.map(keywordText).join(", ")}`
+      ? `Nebenkeywords ${briefing}: ${page.keywords.secondary.map(keywordText).join(", ")}`
       : "",
-    page.h1_options.length > 0 ? `H1-Optionen aus der Excel:\n${list(page.h1_options)}` : "",
+    page.h1_options.length > 0 ? `H1-Optionen ${briefing}:\n${list(page.h1_options)}` : "",
     page.user_questions.length > 0
-      ? `Nutzerfragen aus Spalte H (echte Google-Fragen, haben Vorrang vor erfundenen Fragen):\n${list(page.user_questions)}`
+      ? `Nutzerfragen ${standalone ? "aus dem Briefing (zählen wie Spalte H: echte Google-Fragen" : "aus Spalte H (echte Google-Fragen"}, haben Vorrang vor erfundenen Fragen):\n${list(page.user_questions)}`
       : "",
     page.ki_prompt ? `KI-Prompt der Redaktion für diese Seite (stehende Anweisung):\n${clip(page.ki_prompt, 2_000)}` : "",
     page.internal_link_targets.length > 0
@@ -436,7 +462,9 @@ function pageBlock(context: ContentPipelineContext): string {
       ? `\n## Weitere Seiten der Website (zur Abgrenzung: welche Fragen gehören auf eine andere Seite; keine Fakten)\n${clip(context.structureOutline, MAX_OUTLINE_CHARS)}`
       : "",
     context.existingText
-      ? `\n## Bisheriger Text der Seite (Live-Website, nur zur Orientierung)\nSo liest sich die Seite heute: Thema, Umfang, Begriffe. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_EXISTING_TEXT_CHARS)}`
+      ? standalone
+        ? `\n## Hochgeladenes Material (Briefing oder bisheriger Text, nur zur Orientierung)\nThema, Umfang, Begriffe, Aufbau. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten oder den Anmerkungen der Redaktion stehen – sonst sind sie unbelegt und bekommen [BITTE PRÜFEN: …].\n${clip(context.existingText, MAX_STANDALONE_MATERIAL_CHARS)}`
+        : `\n## Bisheriger Text der Seite (Live-Website, nur zur Orientierung)\nSo liest sich die Seite heute: Thema, Umfang, Begriffe. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_EXISTING_TEXT_CHARS)}`
       : "",
   ];
   return lines.filter(Boolean).join("\n");
@@ -566,6 +594,7 @@ function pageTypeRules(context: ContentPipelineContext): string {
 function analyse(context: ContentPipelineContext): ContentStepSpec {
   const { page } = context;
   const crawl = page.source === "crawl";
+  const standalone = page.source === "standalone";
   return {
     maxTokens: 6_000,
     system: `${BASE_RULES}
@@ -575,15 +604,17 @@ Schritt 1 Analyse: Du legst fest, wonach Menschen suchen, wenn sie diese Seite b
 Suchintention: intent.primary ist genau einer von ${CONTENT_INTENTS.join(" | ")}; modifiers aus ${CONTENT_INTENT_MODIFIERS.join(" | ")} (mehrere möglich, ymyl = Gesundheit, Recht, Geld). journey_phase: ${CONTENT_JOURNEY_PHASES.join(" | ")}. conversion_goal: ${CONTENT_CONVERSION_GOALS.join(" | ")}. content_angle: ${CONTENT_ANGLES.join(" | ")}. Nur diese Werte.
 Keywords: ${
       page.keywords
-        ? "Das Hauptkeyword aus der Excel ist gesetzt – übernimm es wörtlich als main_keyword, nicht ersetzen, nicht umformulieren. Nebenkeywords aus der Excel übernehmen und um 2–5 passende Varianten ergänzen; kein Suchvolumen erfinden."
+        ? `Das Hauptkeyword ${briefingLabel(page)} ist gesetzt – übernimm es wörtlich als main_keyword, nicht ersetzen, nicht umformulieren. Nebenkeywords ${briefingLabel(page)} übernehmen und um 2–5 passende Varianten ergänzen; kein Suchvolumen erfinden.`
         : crawl
           ? "Diese Seite kommt aus dem Crawl, ohne Briefing: Leite Haupt- und Nebenkeywords aus Seite, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab. Der bisherige Text ist nur Orientierung für Thema und Begriffe."
-          : "Es gibt kein Hauptkeyword aus der Excel: leite es aus Seite, Leistung und Ort (nur aus den Fakten) ab, 2–5 Wörter."
+          : standalone
+            ? "Das Briefing nennt kein Hauptkeyword: Leite Haupt- und Nebenkeywords aus Seitenname, hochgeladenem Material, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab, 2–5 Wörter. Das Material ist nur Orientierung für Thema und Begriffe."
+            : "Es gibt kein Hauptkeyword aus der Excel: leite es aus Seite, Leistung und Ort (nur aus den Fakten) ab, 2–5 Wörter."
     }
 main_question: die eine Frage, die der Suchende sich selbst stellt. Nie eine Frage AN den Kunden („Welche Leistungen bieten Sie?“ ist falsch), nie mit Firmenname.
 fanout_questions: mindestens 8 Fragen, die eine vollständige Antwort auf main_question abdecken muss (KI-Suchen fächern so auf). ${
       page.user_questions.length > 0
-        ? "Die Nutzerfragen aus Spalte H sind echte Google-Fragen: alle übernehmen, Wortlaut beibehalten, source „Spalte H“. Weitere Fragen ergänzen mit source „Recherche“, „Avatar“ oder „Anbieterfakten“."
+        ? `Die Nutzerfragen ${standalone ? "aus dem Briefing" : "aus Spalte H"} sind echte Google-Fragen: alle übernehmen, Wortlaut beibehalten, source „Spalte H“. Weitere Fragen ergänzen mit source „Recherche“, „Avatar“ oder „Anbieterfakten“.`
         : "source je Frage: „Recherche“ (aus der Suchlogik), „Avatar“ (aus seinen Sorgen) oder „Anbieterfakten“ (aus dem, was der Anbieter beantworten kann)."
     } theme: das Unterthema in 1–3 Wörtern.
 deferred_questions: Fragen, die eine andere Seite der Website besser beantwortet (keine Kannibalisierung) – link_to ist der Name dieser Seite (nur erlaubte Linkziele oder Seiten aus der Website-Liste), short_answer_hint sagt, wie diese Seite in einem Satz darauf verweist.
@@ -771,7 +802,7 @@ Schritt 2 SEO: Du schreibst den vollständigen Seitentext auf Basis der Analyse 
 ${pageTypeRules(context)}
 
 Festes Gerüst, in dieser Reihenfolge:
-1. H1 (erster Abschnitt, level 1): kurz, das Hauptkeyword steht vorn. Enthält eine H1-Option aus der Excel das Hauptkeyword, nimm sie wörtlich; sonst formulierst du selbst.
+1. H1 (erster Abschnitt, level 1): kurz, das Hauptkeyword steht vorn. Enthält eine H1-Option ${briefingLabel(page)} das Hauptkeyword, nimm sie wörtlich; sonst formulierst du selbst.
 2. Direkt darunter ein Abschnitt mit id „hero“, level 2, Überschrift exakt „${CONTENT_HERO_PLACEHOLDER}“ und leerem html. Du schreibst keinen echten Hero; Schritt 5 füllt ihn.
 3. Abschnitt id „zusammenfassung“ (H2, z. B. „Das Wichtigste in Kürze“ oder die main_question als Frage): 60–80 Wörter, beantwortet die main_question direkt im ersten Satz, enthält 3–4 belegte Fakten, taugt als Snippet.
 4. Abschnitt id „einleitung“ (H2): 100–150 Wörter Einstieg aus Sicht des Avatars (sein Anliegen, was ihn hier erwartet).

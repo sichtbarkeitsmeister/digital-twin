@@ -9,6 +9,7 @@ import {
   ClipboardList,
   ClipboardPenLine,
   FileSearch,
+  FileSignature,
   FileText,
   FolderUp,
   Inbox,
@@ -146,7 +147,8 @@ export function DashboardSidebar({
             href: "/dashboard/verwaltung/seo",
             icon: Sparkles,
             match: (pathname: string) =>
-              pathname.startsWith("/dashboard/verwaltung/seo") ||
+              pathname === "/dashboard/verwaltung/seo" ||
+              pathname.startsWith("/dashboard/verwaltung/seo/") ||
               pathname.startsWith("/dashboard/digital-twin/seo"),
           },
           {
@@ -154,6 +156,12 @@ export function DashboardSidebar({
             href: "/dashboard/verwaltung/texte",
             icon: PenLine,
             match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/texte"),
+          },
+          {
+            label: "SEO",
+            href: "/dashboard/verwaltung/seo-text",
+            icon: FileSignature,
+            match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/seo-text"),
           },
           {
             label: "GEO",
