@@ -7,8 +7,9 @@ import {
 } from "@/lib/dt/content/load-sources";
 import {
   CONTENT_ANREDEN,
-  CONTENT_BRANCHEN,
+  CONTENT_BRANCHE_MAX,
   CONTENT_TONALITAET_KEYS,
+  CONTENT_WORDS_MAX,
   anbieterFromWorkshop,
   avatarFromAgent,
   mergeContentAnbieter,
@@ -29,9 +30,9 @@ const bodySchema = z.object({
   agentId: z.string().uuid().nullable().optional(),
   settings: z.object({
     anrede: z.enum(CONTENT_ANREDEN),
-    branche: z.enum(CONTENT_BRANCHEN),
+    branche: z.string().trim().min(1).max(CONTENT_BRANCHE_MAX),
     tonalitaet: z.enum(CONTENT_TONALITAET_KEYS),
-    verbotene_woerter: z.array(z.string().max(200)).max(100),
+    verbotene_woerter: z.array(z.string().max(200)).max(CONTENT_WORDS_MAX),
   }),
 });
 

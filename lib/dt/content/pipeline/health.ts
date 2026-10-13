@@ -16,7 +16,6 @@ import {
   type ContentJobVerdict,
 } from "@/lib/dt/content/job-state";
 import type { ContentPageRow } from "@/lib/dt/content/store";
-import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 
 export const CONTENT_JOB_GONE_MESSAGE =
   "Der Durchlauf wurde unterbrochen. Mit „Weiterlaufen lassen“ geht es an dieser Stelle weiter.";
@@ -135,7 +134,12 @@ export async function reconcileContentPages(
       .in("id", plan.releaseJobIds)
       .eq("status", "running");
   }
-  if (plan.kick) kickJobsWorker(1);
+  if (plan.kick) {
+    // Loaded on demand: the worker brings the whole jobs registry (every handler, some of them
+    // server-only) into the module graph, which the pure parts of this module and their tests do not need.
+    const { kickJobsWorker } = await import("@/lib/jobs/kick-worker");
+    kickJobsWorker(1);
+  }
 
   const next = pages.map((page) => {
     const repair = repaired.get(page.id);

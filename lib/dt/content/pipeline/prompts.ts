@@ -12,7 +12,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 import type { ContentPageKeywords } from "@/lib/dt/content/excel-structure";
 import {
-  CONTENT_BRANCHE_LABELS,
+  brancheRuleGroup,
   contentTonalitaetText,
   type ContentTextSettings,
   type WorkshopAnbieterSection,
@@ -361,20 +361,21 @@ function settingsBlock(settings: ContentTextSettings): string {
   return [
     "## Vorgaben",
     `Anrede: ${settings.anrede === "Du" ? "Du (Leser werden geduzt)" : "Sie (Leser werden gesiezt)"}`,
-    `Branche: ${CONTENT_BRANCHE_LABELS[settings.branche]}`,
+    `Branche: ${settings.branche || "nicht angegeben"}`,
     `Tonalität: ${contentTonalitaetText(settings.tonalitaet)}`,
     `Verbotene Wörter (dürfen nirgends vorkommen, auch nicht in Überschriften): ${forbidden}`,
   ].join("\n");
 }
 
+/** The free-text branch picks one of three rule groups; the text itself is in the Vorgaben block. */
 function brancheRules(settings: ContentTextSettings): string {
-  switch (settings.branche) {
+  switch (brancheRuleGroup(settings.branche)) {
     case "rechtsanwalt":
       return "Branchenregel Kanzlei: keine Erfolgsversprechen, keine Garantien zum Ausgang eines Verfahrens, keine Superlative wie „der beste Anwalt“. Fachgebiete nur nennen, wenn sie in den Anbieterfakten stehen.";
     case "arzt":
       return "Branchenregel Praxis (Heilmittelwerbegesetz): keine Heilversprechen, keine Erfolgsquoten, keine Vorher-nachher-Vergleiche, keine Angst machenden Formulierungen. Behandlungen nur nennen, wenn sie in den Anbieterfakten stehen.";
     default:
-      return "Branchenregel Handwerk & Dienstleistung: Preise, Fristen und Garantien nur so, wie sie in den Anbieterfakten stehen. Keine erfundenen Referenzen oder Zahlen.";
+      return "Branchenregel Dienstleistung & Handwerk: Preise, Fristen und Garantien nur so, wie sie in den Anbieterfakten stehen. Keine erfundenen Referenzen oder Zahlen.";
   }
 }
 

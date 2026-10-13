@@ -1,9 +1,9 @@
-import { fullHtmlDocument } from "@/lib/dt/content/render";
+import { fullHtmlDocument, htmlToPlainText } from "@/lib/dt/content/render";
 import { contentError, gateContentRoute, isValidContentSlug } from "@/lib/dt/content/route-helpers";
 import { loadContentPage } from "@/lib/dt/content/store";
 import type { ContentExportFormat } from "@/lib/dt/content/types";
 
-const FORMATS: ContentExportFormat[] = ["html", "fragment", "md"];
+const FORMATS: ContentExportFormat[] = ["html", "fragment", "md", "txt"];
 
 function attachment(filename: string): string {
   return `attachment; filename="${filename.replace(/[^a-z0-9._-]/gi, "_")}"`;
@@ -31,7 +31,9 @@ export async function GET(req: Request, context: { params: Promise<{ slug: strin
   if (!page.html) return contentError("Für diese Seite gibt es noch keinen Text.", 404);
 
   const file =
-    format === "md"
+    format === "txt"
+      ? { body: htmlToPlainText(page.html), filename: `${slug}.txt`, contentType: "text/plain; charset=utf-8" }
+      : format === "md"
       ? { body: page.markdown, filename: `${slug}.md`, contentType: "text/markdown; charset=utf-8" }
       : format === "fragment"
         ? { body: page.html, filename: `${slug}.fragment.html`, contentType: "text/html; charset=utf-8" }
