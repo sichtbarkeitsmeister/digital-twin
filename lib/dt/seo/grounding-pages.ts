@@ -8,9 +8,10 @@ import {
   type GroundingPageSchedule,
   type GroundingPageStatus,
 } from "@/lib/dt/seo/grounding-page-schedule";
+import type { DtGroundingRunView } from "@/lib/dt/seo/grounding-run/store";
 
 export const DT_GROUNDING_PAGE_SELECT =
-  "id,organisation_id,kind,url,entity_name,slug,standard_version,review_status,uploaded_at,date_modified,last_reviewed,reviewed_by,notes,position,created_at,updated_at";
+  "id,organisation_id,kind,url,entity_name,slug,standard_version,review_status,uploaded_at,date_modified,last_reviewed,reviewed_by,notes,position,run_state,run_step,run_error,job_id,facts,questions,findings,run_notes,html,title,meta_description,entity_type,cost_eur,started_by,created_at,updated_at";
 
 /** Standard version a page may claim once a human review is documented. */
 export const GROUNDING_STANDARD_VERSION_REVIEWED = "1.7";
@@ -35,6 +36,8 @@ export type DtGroundingPageView = {
   /** Page changed after the last documented review → neue Prüfung prüfen. */
   modifiedAfterReview: boolean;
   schedule: GroundingPageSchedule;
+  /** Draft of the Grounding agent (steps, questions, HTML); null when not loaded. */
+  run: DtGroundingRunView | null;
 };
 
 export type DtGroundingSummary = {
@@ -75,6 +78,7 @@ export function isModifiedAfterReview(
 export function serializeGroundingPage(
   row: DtGroundingPageRow,
   now?: string | Date,
+  run: DtGroundingRunView | null = null,
 ): DtGroundingPageView {
   return {
     id: row.id,
@@ -97,6 +101,7 @@ export function serializeGroundingPage(
       uploadedAt: row.uploaded_at,
       now,
     }),
+    run,
   };
 }
 

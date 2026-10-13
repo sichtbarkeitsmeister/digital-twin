@@ -74,7 +74,15 @@ export async function GET(req: Request) {
     );
   }
 
-  let pages = await loadGroundingPageViews(auth.supabase, orgId);
+  let pages;
+  try {
+    pages = await loadGroundingPageViews(auth.supabase, orgId);
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, message: err instanceof Error ? err.message : "Grounding Pages konnten nicht geladen werden." },
+      { status: 500 },
+    );
+  }
   let llmsTxt = await checkLlmsTxt(config.website_url, config.grounding_llms_txt_url);
   let llmsTxtUrl = config.grounding_llms_txt_url ?? null;
 

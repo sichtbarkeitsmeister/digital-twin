@@ -7,6 +7,13 @@ import {
   sortGroundingPages,
   type DtGroundingPageView,
 } from "@/lib/dt/seo/grounding-pages";
+import { reconcileGroundingPages } from "@/lib/dt/seo/grounding-run/health";
+import {
+  buildGroundingRunView,
+  groundingRunDbErrorMessage,
+  loadGroundingStepsForPages,
+} from "@/lib/dt/seo/grounding-run/store";
+import { createServiceClient } from "@/lib/supabase/service";
 import type { DtGroundingPageRow } from "@/lib/dt/types";
 
 const dateInput = z
@@ -46,16 +53,27 @@ export async function loadGroundingPageRows(
     .eq("organisation_id", organisationId)
     .order("position", { ascending: true })
     .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(groundingRunDbErrorMessage(error, "Grounding Pages konnten nicht geladen werden"));
   return sortGroundingPages((data ?? []) as DtGroundingPageRow[]);
 }
 
+/**
+ * Views with the agent's draft state. Steps and jobs are read with the service role
+ * (access to the organisation was checked by the caller); a page whose job died is
+ * repaired on the way, so the tab never shows „läuft“ for a dead run.
+ */
 export async function loadGroundingPageViews(
   supabase: SupabaseClient,
   organisationId: string,
 ): Promise<DtGroundingPageView[]> {
   const rows = await loadGroundingPageRows(supabase, organisationId);
-  return rows.map((row) => serializeGroundingPage(row));
+  if (rows.length === 0) return [];
+  const service = createServiceClient();
+  const { pages, verdicts } = await reconcileGroundingPages(service, rows);
+  const steps = await loadGroundingStepsForPages(service, pages.map((p) => p.id));
+  return pages.map((row) =>
+    serializeGroundingPage(row, undefined, buildGroundingRunView(row, steps.get(row.id) ?? [], verdicts.get(row.id) ?? null)),
+  );
 }
 
 export async function loadGroundingPageRow(

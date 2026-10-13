@@ -64,8 +64,42 @@ export type DtGroundingPageRow = {
   reviewed_by: string | null;
   notes: string | null;
   position: number;
+  /** Entwurf des Grounding-Agenten (Migration 20261013_dt_grounding_drafts.sql). */
+  run_state: DtGroundingRunState;
+  run_step: number | null;
+  run_error: string | null;
+  job_id: string | null;
+  facts: unknown | null;
+  questions: unknown;
+  findings: unknown;
+  run_notes: unknown;
+  html: string | null;
+  title: string | null;
+  meta_description: string | null;
+  entity_type: string | null;
+  cost_eur: number | string;
+  started_by: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type DtGroundingRunState = "nicht_begonnen" | "laeuft" | "in_arbeit" | "braucht_sie" | "fertig";
+
+export type DtGroundingStepRow = {
+  id: string;
+  page_id: string;
+  organisation_id: string;
+  step: number;
+  name: string;
+  status: "pending" | "running" | "waiting" | "done" | "error" | "skipped";
+  output: unknown;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_eur: number | string;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 export type DtSeoTaskRow = {
