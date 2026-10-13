@@ -262,12 +262,19 @@ Das frühere Feld „Seiten eintragen“ (Seitenliste tippen) gibt es nicht mehr
 
 Die Datei wird auf dem Server gelesen (PDF mit `unpdf`, Word mit `mammoth`, beides schon für Chat-Anhänge im Einsatz) und in Abschnitte zerlegt: H1/H2/H3 aus HTML und Word werden Überschriften, bei reinem Text (auch PDF) gelten kurze Zeilen zwischen Leerzeilen, `#`-Zeilen und unterstrichene Zeilen als Überschrift, Zeilen mit `-`, `•` oder `1.` als Liste (die Regeln stehen in `lib/dt/text-tools/ingest.ts`). Die Abschnitte heißen `abschnitt-1`, `abschnitt-2` …; ein HTML-Export aus Texte kommt mit seinen eigenen Abschnitts-ids zurück. Der Durchlauf ist ein Hintergrund-Job (`text-tool.geo`, siehe Abschnitt 10), die Seite fragt alle paar Sekunden nach; das Ergebnis steht als Vorschau da und lässt sich wie in Texte als **HTML** (vollständige Datei) oder **Text (.txt)** herunterladen. Verbrauch und Kosten landen in der Token-Nutzung unter dem Modus `text-tool.geo`. Es braucht keine neue Tabelle und keine weiteren Umgebungsvariablen: Schlüssel und Modell sind die von Texte (`ANTHROPIC_DT_CONTENT_API_KEY`, `ANTHROPIC_DT_CONTENT_MODEL`).
 
-Die drei Textwerkzeuge im Überblick:
+### Watermark Entfernung: Schritt 8 auf eine hochgeladene Datei
+
+**Watermark Entfernung** liegt ebenfalls unter **Verwaltung** (`/dashboard/verwaltung/watermark-entfernung`, Organisation wie bei Texte oben in der Leiste oder über `?org=`). Es ist das zweite eigenständige Textwerkzeug: eine Datei hochladen (dieselben Formate und Grenzen wie bei GEO, gelesen von `lib/dt/text-tools/ingest.ts`), optional Seitenname und Anmerkungen, dann **Verarbeiten**. Es läuft genau einmal Schritt 8 „Watermark Entfernung“ aus Texte: jeder Satz wird auf Grok (xAI) neu formuliert, Überschriften, Abschnitts-ids, Fakten, Zahlen, Marker und Handlungsaufforderungen bleiben – dieselbe Implementierung wie in der Pipeline (`lib/dt/content/pipeline/rephrase-runner.ts`, von Schritt 8 und dem Werkzeug gemeinsam genutzt, derselbe System-Prompt und dieselben Abschnittsgruppen aus `rephrase.ts`, derselbe Chunk-Prompt mit den bestätigten **Einstellungen für Texte** und den Anmerkungen). Anbieterfakten und Avatar braucht dieser Schritt nicht. Es gibt keinen Ausweg über Claude: ohne `XAI_API_KEY` sagt die Seite „Der Grok-Zugang für Texte ist nicht eingerichtet (XAI_API_KEY fehlt)“ und startet nicht.
+
+Der Durchlauf ist ein Hintergrund-Job (`text-tool.watermark`), der wie Schritt 8 in kleinen Abschnittsgruppen arbeitet und seinen Stand nach jeder Gruppe auf der Job-Zeile speichert (`result.progress`): Geht einem Tick des Workers die Zeit aus, gibt der Job den Stand zurück, wird ohne Fehlversuch neu eingeplant und macht im nächsten Tick dort weiter; auch ein Fehlversuch (Grok ausgelastet, Zeitlimit) setzt bei den noch offenen Gruppen an. Die Seite fragt alle paar Sekunden nach und zeigt „Neu formuliert: 4 von 11 Abschnitten“; Überschriften und Einzeiler unter 40 Zeichen bleiben unverändert und zählen nicht mit. Das Ergebnis steht als Vorschau da und lässt sich wie in Texte als **HTML** (vollständige Datei) oder **Text (.txt)** herunterladen. Verbrauch und Kosten landen in der Token-Nutzung unter dem Modus `text-tool.watermark`. Keine neue Tabelle, keine neuen Umgebungsvariablen: Schlüssel und Modell sind die von Schritt 8 (`XAI_API_KEY`, `XAI_DT_CONTENT_MODEL`). **Betrieb:** ob der Schlüssel gilt, welche Grok-Modelle er sieht und wie schnell sie eine Abschnittsgruppe beantworten, prüft `XAI_API_KEY=… npm run xai:check` (optional `XAI_DT_CONTENT_MODEL=…`); das ist der erste Griff, wenn das Werkzeug oder Schritt 8 mit „Grok … nicht verfügbar“ oder dem Zeitlimit stehen bleibt. Test: `npm run test:text-tools-watermark` (Abschnittsgruppen, Zusammenführen nach id, Grok-Aufruf mit nachgestelltem `fetch`, Fortsetzen nach Zeitmangel, Prompt ohne die Wörter des Menüpunkts).
+
+Die vier Textwerkzeuge im Überblick:
 
 | Werkzeug | Adresse | Was es tut |
 |---|---|---|
 | Texte | `/dashboard/verwaltung/texte` | Seitentexte aus Briefing und Anbieterfakten in neun Schritten schreiben, prüfen, freigeben, exportieren. |
 | GEO | `/dashboard/verwaltung/geo` | Einen hochgeladenen Text einmal durch Schritt 4 „GEO“ schicken und als HTML oder .txt herunterladen. |
+| Watermark Entfernung | `/dashboard/verwaltung/watermark-entfernung` | Einen hochgeladenen Text einmal durch Schritt 8 „Watermark Entfernung“ (Grok) schicken, Fortschritt je Abschnitt, als HTML oder .txt herunterladen. |
 | Text-Modus im Chat | DigitalTwin-Chat, Schalter „Text-Modus“ | Freie Texte (Flyer, Posts, Mails) im Gespräch mit einem Avatar schreiben lassen. |
 
 **Woher die Fakten kommen.** Beides zählt, beides darf fehlen, solange das andere da ist:
@@ -482,6 +489,7 @@ Nach dem Login landet man auf `/dashboard/organisations`.
 | SEO Modus | Crawl, Berichte, Aufgaben, Search Console, Grounding, Seitenstruktur. |
 | Texte | Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Organisation oben in der Leiste wechseln. |
 | GEO | Eine hochgeladene Datei einmal durch den GEO-Schritt aus Texte schicken und als HTML oder .txt herunterladen. |
+| Watermark Entfernung | Eine hochgeladene Datei einmal durch Schritt 8 „Watermark Entfernung“ aus Texte (Grok) schicken und als HTML oder .txt herunterladen. |
 | Token-Nutzung | Wie viel die KI verbraucht hat. Kunden sehen das nicht. |
 | Transkripte | Gesprächsmitschriften auswerten und ins Wissen der Avatare übernehmen. |
 | Erstgespräch | Erstgespräche einer Firma. |
@@ -508,6 +516,7 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/verwaltung/seo` | SEO-Arbeitsplatz der Agentur. |
 | `/dashboard/verwaltung/texte` | Texte: Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/verwaltung/geo` | GEO: eine Datei hochladen, Schritt 4 „GEO“ aus Texte einmal darauf laufen lassen, Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
+| `/dashboard/verwaltung/watermark-entfernung` | Watermark Entfernung: eine Datei hochladen, Schritt 8 aus Texte einmal darauf laufen lassen (Grok, in Abschnittsgruppen), Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
 ---
@@ -593,6 +602,8 @@ Es gibt drei Job-Arten:
 | `leadinfo.normalize` | Macht aus einem rohen Leadinfo-Ereignis einen lesbaren Eintrag. |
 | `grounding.page` | Erstellt eine Grounding Page unter **SEO Modus → Grounding** in vier Schritten (1 Fakten sammeln, 2 Faktencheck, 3 Seite bauen, 4 Endprüfung); hält an, wenn der Faktencheck Fragen an den Kunden hat, und endet mit der HTML-Datei zur menschlichen Prüfung. Ergebnisse in `dt_grounding_pages` und `dt_grounding_steps`. |
 | `content.page` | Schreibt den Text einer Seite unter **Verwaltung → Texte**: so viele Schritte, wie in einen Aufruf passen (1 Recherche, 2 Gliederung, 3 Rohtext, 4 Faktencheck, 5 Tonalität & Avatar, 6 SEO-Feinschliff, 7 Lektorat, 8 Endabnahme), dann stellt er sich für den Rest wieder an. Er hält an, wenn der Faktencheck Fragen an den Kunden hat („Braucht Sie“) und nach der Endabnahme bis zur Freigabe. Jeder Fehler – auch ein unterbrochener Worker – zählt als Versuch; nach drei Versuchen pausiert die Seite mit Grund. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. Fakten kommen aus dem Anbieter-Fragebogen und aus den ausgewerteten Gesprächen. |
+| `text-tool.geo` | Ein Durchlauf des GEO-Werkzeugs unter **Verwaltung → GEO**: Schritt 4 einmal auf die hochgeladenen Abschnitte, Ergebnis auf der Job-Zeile. |
+| `text-tool.watermark` | Ein Durchlauf von **Verwaltung → Watermark Entfernung**: Schritt 8 (Grok) in Abschnittsgruppen auf die hochgeladenen Abschnitte; der Stand liegt zwischen zwei Ticks auf der Job-Zeile (`result.progress`), bei Zeitmangel wird ohne Fehlversuch neu eingeplant. |
 
 Ein Job, der zu oft scheitert, bleibt als fehlgeschlagen liegen und ist unter **Jobs** sichtbar.
 

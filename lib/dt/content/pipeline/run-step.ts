@@ -16,27 +16,14 @@ import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import {
   contentStepSpec,
-  rephraseChunkPrompt,
   type ContentPipelineContext,
   type ContentStepSpec,
   type TextOutput,
 } from "@/lib/dt/content/pipeline/prompts";
-import {
-  REPHRASE_CHUNK_TIMEOUT_MS,
-  REPHRASE_MIN_REMAINING_MS,
-  REPHRASE_SLOW_MODEL_MS,
-  needsRephrase,
-  parseRephrasedChunk,
-  planRephraseChunks,
-  readRephraseProgress,
-  rephraseChunkMaxTokens,
-  rephraseModelOrder,
-  rephrasedBlocks,
-  type RephraseProgress,
-} from "@/lib/dt/content/pipeline/rephrase";
+import { readRephraseProgress, rephraseBlockCount, type RephraseProgress } from "@/lib/dt/content/pipeline/rephrase";
+import { runRephraseOnBlocks } from "@/lib/dt/content/pipeline/rephrase-runner";
 import { stepPatchFor } from "@/lib/dt/content/pipeline/step-patch";
 import { contentStepDefinition, type ContentStepDefinition } from "@/lib/dt/content/pipeline/steps";
-import { XaiTimeoutError, callXaiText, resolveXaiModels } from "@/lib/dt/content/pipeline/xai";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
@@ -296,11 +283,12 @@ async function pageStillRunning(service: SupabaseClient, pageId: string): Promis
 }
 
 /**
- * Step 8 on Grok, in chunks. Each group of sections is one short call; the rewritten HTML
- * lands in the step row's output after every call, so a worker that dies or a job budget
- * that runs out loses at most one chunk. With little budget left the step hands back
- * `partial`, the job reschedules without a failed attempt, and the next tick resumes with
- * the chunks still open. Every call is billed on the page like the Claude steps.
+ * Step 8 on Grok, in chunks (`rephrase-runner.ts`, shared with the Watermark tool under
+ * Verwaltung). Each group of sections is one short call; the rewritten HTML lands in the
+ * step row's output after every call, so a worker that dies or a job budget that runs out
+ * loses at most one chunk. With little budget left the step hands back `partial`, the job
+ * reschedules without a failed attempt, and the next tick resumes with the chunks still
+ * open. Every call is billed on the page like the Claude steps.
  */
 async function runRephraseStep(input: {
   service: SupabaseClient;
@@ -313,11 +301,12 @@ async function runRephraseStep(input: {
 }): Promise<StepOutcome> {
   const { service, page, def, context } = input;
   const deadline = Date.now() + (input.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS);
-  const total = context.blocks.filter(needsRephrase).length;
-  const progress: RephraseProgress = readRephraseProgress(input.steps.find((s) => s.step === def.step)?.output, total);
-  let model = progress.models[progress.models.length - 1] ?? resolveXaiModels()[0]!;
+  const progress: RephraseProgress = readRephraseProgress(
+    input.steps.find((s) => s.step === def.step)?.output,
+    rephraseBlockCount(context.blocks),
+  );
 
-  const saveProgress = (patch: Partial<ContentStepRow>) =>
+  const saveProgress = (model: string, patch: Partial<ContentStepRow>) =>
     upsertStep(service, page, def.step, {
       output: progress as unknown as Record<string, unknown>,
       model,
@@ -328,68 +317,42 @@ async function runRephraseStep(input: {
       ...patch,
     });
 
-  for (const chunk of planRephraseChunks(context.blocks, progress.rewritten)) {
-    const remaining = deadline - Date.now();
-    if (remaining < REPHRASE_MIN_REMAINING_MS) {
-      await saveProgress({ status: "pending", finished_at: null });
-      return { step: def.step, halted: false, partial: true, model, costEur: 0 };
-    }
-
-    const prompt = rephraseChunkPrompt(context, chunk);
-    let answer;
-    try {
-      answer = await callXaiText({
-        system: prompt.system,
-        user: prompt.user,
-        maxTokens: rephraseChunkMaxTokens(chunk),
-        timeoutMs: Math.min(remaining, REPHRASE_CHUNK_TIMEOUT_MS),
-        models: rephraseModelOrder(resolveXaiModels(), progress.slow_models),
-      });
-    } catch (error) {
-      // A model that needs more than a minute for one small chunk is the wrong model for this
-      // page: remember it, so the retry starts with the next candidate instead of failing again.
-      if (error instanceof XaiTimeoutError && error.elapsedMs >= REPHRASE_SLOW_MODEL_MS && !progress.slow_models.includes(error.model)) {
-        progress.slow_models.push(error.model);
-        await saveProgress({ status: "pending", finished_at: null }).catch(() => undefined);
-      }
-      throw error;
-    }
-    model = answer.model;
-    const costEur = estimateCostEur(answer.model, answer.usage);
-    await recordLlmUsageEvent(service, {
-      organisationId: page.organisation_id,
-      userId: page.started_by,
-      agentId: input.avatarId,
-      mode: `content.${def.step}`,
-      via: "direct",
-      model: answer.model,
-      inputTokens: answer.usage.inputTokens,
-      outputTokens: answer.usage.outputTokens,
-    });
-    for (const block of parseRephrasedChunk(answer.text, chunk)) progress.rewritten[block.id] = block.html;
-    progress.calls += 1;
-    progress.input_tokens += answer.usage.inputTokens;
-    progress.output_tokens += answer.usage.outputTokens;
-    progress.cost_eur = roundEur(progress.cost_eur + costEur);
-    if (!progress.models.includes(model)) progress.models.push(model);
-
-    if (!(await pageStillRunning(service, page.id))) {
-      return { step: def.step, halted: true, discarded: true, model, costEur: progress.cost_eur };
-    }
-    await saveProgress({ status: "running" });
+  const run = await runRephraseOnBlocks(context, context.blocks, {
+    progress,
+    deadline,
+    onUsage: (usage) =>
+      recordLlmUsageEvent(service, {
+        organisationId: page.organisation_id,
+        userId: page.started_by,
+        agentId: input.avatarId,
+        mode: `content.${def.step}`,
+        via: "direct",
+        model: usage.model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      }),
+    save: (_progress, info) =>
+      saveProgress(info.model, info.reason === "paused" ? { status: "pending", finished_at: null } : { status: "running" }),
+    stillWanted: () => pageStillRunning(service, page.id),
+  });
+  if (run.state === "partial") {
+    return { step: def.step, halted: false, partial: true, model: run.model, costEur: 0 };
+  }
+  if (run.state === "discarded") {
+    return { step: def.step, halted: true, discarded: true, model: run.model, costEur: progress.cost_eur };
   }
 
   const output: TextOutput = {
-    blocks: rephrasedBlocks(context.blocks, progress.rewritten),
+    blocks: run.blocks,
     title: context.title,
     meta_description: context.metaDescription,
   };
   const { pagePatch, stepStatus, halted } = stepPatchFor(def, output);
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
-  await saveProgress({ status: stepStatus, finished_at: new Date().toISOString() });
+  await saveProgress(run.model, { status: stepStatus, finished_at: new Date().toISOString() });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
   if (error) throw new Error(`Seite konnte nicht gespeichert werden: ${error.message}`);
-  return { step: def.step, halted, model, costEur: progress.cost_eur };
+  return { step: def.step, halted, model: run.model, costEur: progress.cost_eur };
 }
 
 /** Pause the page with the error visible in the table and drawer. */

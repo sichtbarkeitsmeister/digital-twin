@@ -22,6 +22,7 @@ import {
   Mail,
   Phone,
   ScanSearch,
+  Eraser,
 } from "lucide-react";
 
 import { ZumChatButton } from "@/components/zum-chat-button";
@@ -159,6 +160,12 @@ export function DashboardSidebar({
             href: "/dashboard/verwaltung/geo",
             icon: ScanSearch,
             match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/geo"),
+          },
+          {
+            label: "Watermark Entfernung",
+            href: "/dashboard/verwaltung/watermark-entfernung",
+            icon: Eraser,
+            match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/watermark-entfernung"),
           },
         ]
       : []),
