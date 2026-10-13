@@ -28,6 +28,7 @@ import {
 } from "@/lib/dt/seo/grounding-page-schedule";
 import type { GroundingCommand, GroundingEntityPage, GroundingReleaseStatus } from "@/lib/dt/seo/grounding-pages";
 import { DtSeoGroundingEntities } from "@/components/dt/seo/dt-seo-grounding-entities";
+import { DtSeoGroundingRulesCard } from "@/components/dt/seo/dt-seo-grounding-rules-card";
 
 type LlmsTxtStatus =
   | {
@@ -394,9 +395,12 @@ export function DtSeoGroundingPanel(props: {
           Hub und Entitätsseiten. Die Fälligkeit liegt {GROUNDING_PAGE_INTERVAL_MONTHS} Monate nach
           der letzten menschlichen Prüfung (lastReviewed), nicht nach dem Upload. Ab{" "}
           {GROUNDING_PAGE_WARN_DAYS} Tage vorher gilt die Frühwarnung. Der Auftrag schreibt jede
-          Zielgruppe einzeln in „Anfragen & Lösungen“.
+          Zielgruppe einzeln in „Anfragen & Lösungen“. Die Regeln dafür stehen darunter und gelten
+          für alle Organisationen.
         </p>
       </div>
+
+      <DtSeoGroundingRulesCard canEdit={props.canEdit} />
 
       {loading ? (
         <DtGlassCard variant="subtle" className="flex items-center gap-2 p-4 text-sm">
@@ -518,7 +522,7 @@ export function DtSeoGroundingPanel(props: {
                   Grounding Page erstellen
                 </h3>
                 <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
-                  Startet einen SEO-Chat mit dem Grounding-Prompt. Wunschkunden-Profile liegen dem
+                  Startet einen SEO-Chat mit den Regeln oben. Wunschkunden-Profile liegen dem
                   Auftrag bei. Unterlagen kannst du an die erste Nachricht hängen. „Erstellen“ ist
                   ein Neubau, auch wenn schon eine URL hinterlegt ist.
                 </p>

@@ -13,7 +13,7 @@ import {
   isProspectPersonaKind,
 } from "@/lib/dt/prompts/build-system-prompt";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
-import { GROUNDING_PAGES_JOB_NOTE } from "@/lib/dt/prompts/grounding-pages-prompt";
+import { loadGroundingPagesRules } from "@/lib/dt/prompts/grounding-pages-rules";
 import { buildDtChatStaticSystemText, buildProspectStaticSystemText } from "@/lib/dt/prompts/system-static";
 import {
   DT_SEO_MODE_INSTRUCTIONS,
@@ -383,15 +383,18 @@ export async function loadDtAgentContextBundle(input: {
         content: buildDtGeoGroundingText(),
       }),
     );
+    const groundingRules = await loadGroundingPagesRules(supabase);
     sections.push(
       section({
         id: "grounding_pages_job",
         title: "Grounding Pages",
-        sourceLabel: "System",
-        sourceType: "system",
-        description:
-          "Gilt nur für Chats, die im Tab Grounding gestartet wurden. Dieser Preview zeigt die Regel, nicht den kompletten Auftrag.",
-        content: GROUNDING_PAGES_JOB_NOTE,
+        sourceLabel: groundingRules.isDefault ? "System (Standard)" : "Global",
+        sourceType: groundingRules.isDefault ? "system" : "user",
+        description: groundingRules.persisted
+          ? "Diese Regeln gelten für Chats aus SEO → Grounding. Domain, URLs, Termine und Wunschkunden setzt der Auftrag ein. Bearbeiten im Tab Grounding."
+          : "Diese Regeln gelten für Chats aus SEO → Grounding. Speichern ist möglich, sobald die Datenbankspalte angelegt ist.",
+        content: groundingRules.prompt,
+        editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=grounding#grounding-pages-rules`,
       }),
     );
 

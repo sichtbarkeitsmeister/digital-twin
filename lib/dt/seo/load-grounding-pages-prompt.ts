@@ -4,6 +4,7 @@ import {
   buildGroundingPagesPrompt,
   emptyGroundingHubFacts,
 } from "@/lib/dt/prompts/grounding-pages-prompt";
+import { loadGroundingPagesRules } from "@/lib/dt/prompts/grounding-pages-rules";
 import {
   GROUNDING_CONFIG_SELECT,
   parseGroundingEntityPages,
@@ -38,6 +39,7 @@ export async function loadGroundingPagesInstructions(
     return null;
   }
 
+  const rules = await loadGroundingPagesRules(supabase);
   let audienceText: string | null = null;
   try {
     audienceText = await loadWunschkundenKnowledgeForSeo(supabase, input.organisationId);
@@ -98,6 +100,7 @@ export async function loadGroundingPagesInstructions(
       command: command as GroundingCommand,
       explicitRebuild: command === "erstelle",
       audienceText,
+      rulesText: rules.prompt,
     });
   } catch (err) {
     console.error(
@@ -115,6 +118,7 @@ export async function loadGroundingPagesInstructions(
       command: command as GroundingCommand,
       explicitRebuild: command === "erstelle",
       audienceText,
+      rulesText: rules.prompt,
       dataWarning:
         "Die gespeicherten Grounding-Daten konnten nicht gelesen werden. Sage das zu Beginn und arbeite nur mit dem, was der Nutzer in diesem Chat liefert.",
     });

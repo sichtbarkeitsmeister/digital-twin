@@ -8,13 +8,10 @@ import type { GroundingPageSchedule } from "@/lib/dt/seo/grounding-page-schedule
 
 export const GROUNDING_PAGES_PROMPT_VERSION = "1.1";
 
-/** Shown in the agent inspector. The full prompt is attached only to Grounding-tab chats. */
-export const GROUNDING_PAGES_JOB_NOTE = [
-  "Chats aus SEO → Grounding bekommen den vollständigen Grounding-Page-Prompt.",
-  "Jede hinterlegte Zielgruppe wird einzeln durchgegangen. Der Cluster „Anfragen & Lösungen“ braucht je Zielgruppe einen eigenen Block.",
-  "Avatar-Namen bleiben im Checkpoint und stehen nicht in HTML oder llms.txt.",
-  "Ohne entity-cards (Cluster A–G), Stammdaten und Anfragen-Cluster wird keine Datei ausgegeben.",
-].join("\n");
+/** Replaced with the organisation's Wunschkunden profiles when a job starts. */
+export const GROUNDING_PAGES_AUDIENCE_TOKEN = "{{ZIELGRUPPEN}}";
+
+export const GROUNDING_PAGES_RULES_MAX_CHARS = 100_000;
 
 export type GroundingPagesPromptInput = {
   websiteUrl: string | null;
@@ -31,6 +28,8 @@ export type GroundingPagesPromptInput = {
   dataWarning?: string | null;
   /** Wunschkunden profiles already formatted for the agent. */
   audienceText?: string | null;
+  /** Agency rules. Empty uses the built-in default. */
+  rulesText?: string | null;
   now?: string | Date;
 };
 
@@ -351,6 +350,92 @@ Ablauf:
 Gibt es keine Änderungen, meldest du das und änderst keine Datei. Für die fällige Prüfung nennst du, was der Kunde bestätigen muss, damit lastReviewed neu gesetzt werden kann.
 `.trim();
 
+const GROUNDING_PAGES_ROLE = [
+  "## ROLLE",
+  "",
+  "Du bist ein GEO-Agent für Sichtbarkeitsmeister GmbH. Du erstellst und pflegst nach dem Grounding Page Standard (jeweils aktuelle Version, groundingpage.com):",
+  "",
+  "- eine Haupt-Grounding-Page (Hub) für die Organisation,",
+  "- Entitätsseiten (Spokes) für zentrale Leistungen, Methoden, Produkte oder Fachthemen,",
+  "- eine llms.txt pro Domain.",
+  "",
+  "Grounding Pages sind faktenreiche Referenzseiten für Menschen UND KI-Systeme, vergleichbar mit Wikipedia-Artikeln. Sie sind keine Werbeseiten und keine versteckten Dateien nur für Bots. Nach außen heißen Entitätsseiten „Grounding Page [Entitätsname]“.",
+].join("\n");
+
+const GROUNDING_PAGES_AUDIENCE_RULES = [
+  "## ZIELGRUPPEN (verbindlich für Hub, Entitätsseiten, FAQ und llms.txt)",
+  "Gehe jede Zielgruppe einzeln durch. Vermische sie nicht zu einer Durchschnittszielgruppe und lass keine aus.",
+  "Für jede Zielgruppe, in dieser Reihenfolge:",
+  "1. Sachliche Bezeichnung ohne Avatar-Namen und ohne fiktive Personendetails. So heißt die Zielgruppe im Cluster D und in „Anfragen & Lösungen“.",
+  "2. Die Fragen, die genau diese Zielgruppe vor der Entscheidung stellt. Im Checkpoint markierst du sie als genannt oder hergeleitet und nennst den Avatar nur dort.",
+  "3. In die Datei kommt eine Frage nur mit belegbarer Antwort. Fragen ohne Beleg werden zur Rückfrage, nicht zu einem leeren FAQ.",
+  "Der Satz im Wunschkunden-Wissen, Zielgruppen namentlich zu nennen, gilt nur für deine Antwort an den Nutzer. In HTML und llms.txt stehen keine Avatar-Namen.",
+  GROUNDING_PAGES_AUDIENCE_TOKEN,
+].join("\n\n");
+
+const GROUNDING_PAGES_OUTPUT_GATE = [
+  "## AUSGABESPERRE (vor jeder HTML-Datei und vor llms.txt)",
+  "Die öffentliche Vorlage auf groundingpage.com ersetzt Modul 5 nicht. Sieht eine Seite wie ein schlanker Artikel aus und lässt die folgenden Bausteine weg, ist sie nicht fertig. Gib sie nicht aus, sondern arbeite nach.",
+  "Pflicht im Hub:",
+  "- H1 nur der Organisationsname, Definitionssatz, Abgrenzung, Kernfakten als dl.",
+  "- Cluster A bis G als ausführliche entity-cards, keine Grids und keine Kompaktkarten. Jede Card enthält Entity Class, Konfidenzwert und eine eigene Abgrenzung.",
+  "- Cluster „[Firmenname]: Anfragen & Lösungen“ mit anfrage-q und anfrage-a, ein Block je Zielgruppe. Der Cluster heißt nicht „KI-Fragen“.",
+  "- FAQ, Weiterführende Informationen, Abschnitt „Weitere Grounding Pages“.",
+  "- Stammdaten nur einmal: Erstellt, Zuletzt aktualisiert, Standardversion, Changelog mit Entitätenzählung.",
+  "Verboten in der Datei:",
+  "- HTML-Kommentare und Fußzeilen zu offenen Punkten, darunter „Prüfung ausstehend“, „Entwurf“, „folgt“, „nicht verifiziert“, Platzhalter.",
+  "- Ein Prüfhinweis, solange keine Freigabe (Prüfer und lastReviewed) vorliegt. Bis dahin Version v1.6, ohne Hinweis-Box am Seitenanfang.",
+  "- Logo: kein img, keine Logo-URL, keine logo-Property im JSON-LD.",
+  "- Telefonnummern, die nur im JSON-LD international sind. Der sichtbare Text nutzt +49.",
+  "- AggregateRating ohne vom Nutzer bestätigte Google-Bewertung (Durchschnitt, Anzahl, GBP-URL).",
+  "- Kennzahlen ohne Fundstelle und ohne konkretes Stand-Datum. Die Quote gehört in den Checkpoint, nicht auf die Seite, solange die Quelle fehlt.",
+  "- alternateName, der mit einer bekannten anderen Organisation kollidiert, ohne dass der Nutzer die Kurzform bestätigt hat.",
+  "- Kundennamen in Beispielen, die nicht auf der Website stehen oder freigegeben sind.",
+  "- Zwei verschiedene @id für dieselbe Organisation. Die @id im Hub muss die @id im JSON-LD der Website sein. Weicht sie ab oder ist #website nicht definiert, im Checkpoint melden und nicht raten.",
+  "- Echte Standorte als Nebensatz. Jeder Standort ist eine eigene LocalBusiness-Entität.",
+  "- Farben, Schriften oder Radien, die nicht aus dem CSS der Ziel-Domain stammen.",
+  "Dieselbe Sperre gilt für jede Entitätsseite: Definition ohne Unternehmensbezug, eigener Anfragen-Cluster nur zu dieser Entität, Link zum Hub, keine Stammdaten der Firma außer dem verlinkten Namen.",
+].join("\n");
+
+/** The editable instruction text. Tool data and the live audience list are inserted around it. */
+export function defaultGroundingPagesRules(): string {
+  return [GROUNDING_PAGES_ROLE, RULES, GROUNDING_PAGES_AUDIENCE_RULES, GROUNDING_PAGES_OUTPUT_GATE].join(
+    "\n\n",
+  );
+}
+
+export function resolveGroundingPagesRules(stored: string | null | undefined): string {
+  const trimmed = stored?.trim() ?? "";
+  return trimmed || defaultGroundingPagesRules();
+}
+
+export function isDefaultGroundingPagesRules(value: string | null | undefined): boolean {
+  return resolveGroundingPagesRules(value) === defaultGroundingPagesRules();
+}
+
+export function renderGroundingAudienceBlock(audienceText: string | null | undefined): string {
+  const count = (audienceText ?? "").match(/### Wunschkunde:/g)?.length ?? 0;
+  if (count > 0) {
+    return [
+      `Hinterlegt sind ${count} Zielgruppe${count === 1 ? "" : "n"}. Der Cluster „[Firmenname]: Anfragen & Lösungen“ enthält genau ${count} Blöcke, einen je Zielgruppe. Fehlt ein Block, gib keine HTML-Datei aus.`,
+      audienceText!.trim(),
+    ].join("\n\n");
+  }
+  return [
+    "Es ist keine Zielgruppe hinterlegt. Erfinde keine. Frage nach den Zielgruppen, bevor du „Anfragen & Lösungen“, FAQ oder Entitätsseiten schreibst.",
+    audienceText?.trim() || "Noch keine Wunschkunden-Profile geladen.",
+  ].join("\n\n");
+}
+
+/** Insert audience profiles. If the token was removed, append the profiles so they are not lost. */
+export function applyGroundingAudienceToken(rules: string, audienceText: string | null | undefined): string {
+  const block = renderGroundingAudienceBlock(audienceText);
+  if (rules.includes(GROUNDING_PAGES_AUDIENCE_TOKEN)) {
+    return rules.split(GROUNDING_PAGES_AUDIENCE_TOKEN).join(block);
+  }
+  return `${rules.trim()}\n\n${block}`;
+}
+
 function absent(value: string | null | undefined): string {
   const trimmed = value?.trim();
   return trimmed ? trimmed : "nicht hinterlegt";
@@ -430,47 +515,10 @@ export function buildGroundingPagesPrompt(input: GroundingPagesPromptInput): str
     .filter((line) => line !== "")
     .join("\n");
 
-  const audienceCount = (input.audienceText ?? "").match(/### Wunschkunde:/g)?.length ?? 0;
-  const audiencesKnown = audienceCount > 0;
-  const zielgruppen = [
-    "## ZIELGRUPPEN (verbindlich für Hub, Entitätsseiten, FAQ und llms.txt)",
-    "Gehe jede Zielgruppe einzeln durch. Vermische sie nicht zu einer Durchschnittszielgruppe und lass keine aus.",
-    "Für jede Zielgruppe, in dieser Reihenfolge:",
-    "1. Sachliche Bezeichnung ohne Avatar-Namen und ohne fiktive Personendetails. So heißt die Zielgruppe im Cluster D und in „Anfragen & Lösungen“.",
-    "2. Die Fragen, die genau diese Zielgruppe vor der Entscheidung stellt. Im Checkpoint markierst du sie als genannt oder hergeleitet und nennst den Avatar nur dort.",
-    "3. In die Datei kommt eine Frage nur mit belegbarer Antwort. Fragen ohne Beleg werden zur Rückfrage, nicht zu einem leeren FAQ.",
-    audiencesKnown
-      ? `Hinterlegt sind ${audienceCount} Zielgruppe${audienceCount === 1 ? "" : "n"}. Der Cluster „[Firmenname]: Anfragen & Lösungen“ enthält genau ${audienceCount} Blöcke, einen je Zielgruppe. Fehlt ein Block, gib keine HTML-Datei aus.`
-      : "Es ist keine Zielgruppe hinterlegt. Erfinde keine. Frage nach den Zielgruppen, bevor du „Anfragen & Lösungen“, FAQ oder Entitätsseiten schreibst.",
-    "Der Satz im Wunschkunden-Wissen, Zielgruppen namentlich zu nennen, gilt nur für deine Antwort an den Nutzer. In HTML und llms.txt stehen keine Avatar-Namen.",
-    input.audienceText?.trim()
-      ? input.audienceText.trim()
-      : "Noch keine Wunschkunden-Profile geladen.",
-  ].join("\n\n");
-
-  const ausgabesperre = [
-    "## AUSGABESPERRE (vor jeder HTML-Datei und vor llms.txt)",
-    "Die öffentliche Vorlage auf groundingpage.com ersetzt Modul 5 nicht. Sieht eine Seite wie ein schlanker Artikel aus und lässt die folgenden Bausteine weg, ist sie nicht fertig. Gib sie nicht aus, sondern arbeite nach.",
-    "Pflicht im Hub:",
-    "- H1 nur der Organisationsname, Definitionssatz, Abgrenzung, Kernfakten als dl.",
-    "- Cluster A bis G als ausführliche entity-cards, keine Grids und keine Kompaktkarten. Jede Card enthält Entity Class, Konfidenzwert und eine eigene Abgrenzung.",
-    "- Cluster „[Firmenname]: Anfragen & Lösungen“ mit anfrage-q und anfrage-a, ein Block je Zielgruppe. Der Cluster heißt nicht „KI-Fragen“.",
-    "- FAQ, Weiterführende Informationen, Abschnitt „Weitere Grounding Pages“.",
-    "- Stammdaten nur einmal: Erstellt, Zuletzt aktualisiert, Standardversion, Changelog mit Entitätenzählung.",
-    "Verboten in der Datei:",
-    "- HTML-Kommentare und Fußzeilen zu offenen Punkten, darunter „Prüfung ausstehend“, „Entwurf“, „folgt“, „nicht verifiziert“, Platzhalter.",
-    "- Ein Prüfhinweis, solange keine Freigabe (Prüfer und lastReviewed) vorliegt. Bis dahin Version v1.6, ohne Hinweis-Box am Seitenanfang.",
-    "- Logo: kein img, keine Logo-URL, keine logo-Property im JSON-LD.",
-    "- Telefonnummern, die nur im JSON-LD international sind. Der sichtbare Text nutzt +49.",
-    "- AggregateRating ohne vom Nutzer bestätigte Google-Bewertung (Durchschnitt, Anzahl, GBP-URL).",
-    "- Kennzahlen ohne Fundstelle und ohne konkretes Stand-Datum. Die Quote gehört in den Checkpoint, nicht auf die Seite, solange die Quelle fehlt.",
-    "- alternateName, der mit einer bekannten anderen Organisation kollidiert, ohne dass der Nutzer die Kurzform bestätigt hat.",
-    "- Kundennamen in Beispielen, die nicht auf der Website stehen oder freigegeben sind.",
-    "- Zwei verschiedene @id für dieselbe Organisation. Die @id im Hub muss die @id im JSON-LD der Website sein. Weicht sie ab oder ist #website nicht definiert, im Checkpoint melden und nicht raten.",
-    "- Echte Standorte als Nebensatz. Jeder Standort ist eine eigene LocalBusiness-Entität.",
-    "- Farben, Schriften oder Radien, die nicht aus dem CSS der Ziel-Domain stammen.",
-    "Dieselbe Sperre gilt für jede Entitätsseite: Definition ohne Unternehmensbezug, eigener Anfragen-Cluster nur zu dieser Entität, Link zum Hub, keine Stammdaten der Firma außer dem verlinkten Namen.",
-  ].join("\n");
+  const rules = applyGroundingAudienceToken(
+    resolveGroundingPagesRules(input.rulesText),
+    input.audienceText,
+  );
 
   const auftrag = [
     "## DIESER AUFTRAG",
@@ -489,23 +537,9 @@ export function buildGroundingPagesPrompt(input: GroundingPagesPromptInput): str
     `Prompt-Version: ${GROUNDING_PAGES_PROMPT_VERSION} · Stand: 12.10.2026 · Sichtbarkeitsmeister GmbH`,
     "Bezug: Grounding Page Standard v1.7 (veröffentlicht 09.10.2026)",
     "",
-    "## ROLLE",
-    "",
-    "Du bist ein GEO-Agent für Sichtbarkeitsmeister GmbH. Du erstellst und pflegst nach dem Grounding Page Standard (jeweils aktuelle Version, groundingpage.com):",
-    "",
-    "- eine Haupt-Grounding-Page (Hub) für die Organisation,",
-    "- Entitätsseiten (Spokes) für zentrale Leistungen, Methoden, Produkte oder Fachthemen,",
-    "- eine llms.txt pro Domain.",
-    "",
-    "Grounding Pages sind faktenreiche Referenzseiten für Menschen UND KI-Systeme, vergleichbar mit Wikipedia-Artikeln. Sie sind keine Werbeseiten und keine versteckten Dateien nur für Bots. Nach außen heißen Entitätsseiten „Grounding Page [Entitätsname]“.",
-    "",
     toolContext,
     "",
-    RULES,
-    "",
-    zielgruppen,
-    "",
-    ausgabesperre,
+    rules,
     "",
     auftrag,
   ].join("\n");

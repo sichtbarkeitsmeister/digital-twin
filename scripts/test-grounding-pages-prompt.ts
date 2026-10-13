@@ -4,7 +4,13 @@
  */
 import assert from "node:assert/strict";
 
-import { buildGroundingPagesPrompt } from "../lib/dt/prompts/grounding-pages-prompt";
+import {
+  GROUNDING_PAGES_AUDIENCE_TOKEN,
+  buildGroundingPagesPrompt,
+  defaultGroundingPagesRules,
+  isDefaultGroundingPagesRules,
+  resolveGroundingPagesRules,
+} from "../lib/dt/prompts/grounding-pages-prompt";
 import {
   groundingStartDraft,
   parseGroundingEntityPages,
@@ -70,6 +76,71 @@ assert.match(prompt, /Neubau ausdrücklich/);
 assert.match(prompt, /https:\/\/existenzstand\.de\/grounding\/avgs\//);
 assert.doesNotMatch(prompt, /\{DOMAIN\}/);
 assert.doesNotMatch(prompt, /\{KUNDE\}/);
+assert.doesNotMatch(prompt, /\{\{ZIELGRUPPEN\}\}/);
+assert.equal(prompt.split("## ROLLE").length - 1, 1);
+assert.equal(prompt.split("## AUSGABESPERRE").length - 1, 1);
+assert.equal(prompt.split("## MODUL 0").length - 1, 1);
+assert.ok(prompt.indexOf("## AKTUELLER TOOL-KONTEXT") < prompt.indexOf("## ROLLE"));
+assert.ok(prompt.indexOf("## AUSGABESPERRE") < prompt.indexOf("## DIESER AUFTRAG"));
+assert.equal(isDefaultGroundingPagesRules(defaultGroundingPagesRules()), true);
+assert.equal(isDefaultGroundingPagesRules("  "), true);
+assert.equal(resolveGroundingPagesRules(null), defaultGroundingPagesRules());
+
+const custom = buildGroundingPagesPrompt({
+  websiteUrl: "https://www.existenzstand.de",
+  customerSlug: "existenzstand",
+  competitors: [],
+  llmsTxtUrl: null,
+  hubUrl: null,
+  hub: {
+    url: null,
+    uploadedAt: null,
+    dateModified: null,
+    lastReviewed: null,
+    reviewedBy: null,
+    notes: null,
+    releaseStatus: null,
+    standardVersion: null,
+  },
+  entities: [],
+  command: "pruefe",
+  explicitRebuild: false,
+  audienceText: "### Wunschkunde: Markus (Gründungsinteressent)\nWill einen AVGS-Antrag stellen.",
+  rulesText: `Eigene Regel für {KUNDE} vor dem Profil.\n\n${GROUNDING_PAGES_AUDIENCE_TOKEN}\n\nDanach nichts aus Modul 0.`,
+});
+assert.match(custom, /Eigene Regel für existenzstand/);
+assert.match(custom, /Hinterlegt sind 1 Zielgruppe/);
+assert.match(custom, /### Wunschkunde: Markus/);
+assert.doesNotMatch(custom, /## MODUL 0/);
+assert.doesNotMatch(custom, /\{\{ZIELGRUPPEN\}\}/);
+assert.match(custom, /Ziel-Domain: existenzstand\.de/);
+
+const withoutToken = buildGroundingPagesPrompt({
+  websiteUrl: null,
+  customerSlug: null,
+  competitors: [],
+  llmsTxtUrl: null,
+  hubUrl: null,
+  hub: {
+    url: null,
+    uploadedAt: null,
+    dateModified: null,
+    lastReviewed: null,
+    reviewedBy: null,
+    notes: null,
+    releaseStatus: null,
+    standardVersion: null,
+  },
+  entities: [],
+  command: "aktualisiere",
+  explicitRebuild: false,
+  audienceText: "### Wunschkunde: Daniel (Wachstumsgründer)\nSucht Begleitung.",
+  rulesText: "Nur diese Zeile, ohne Token.",
+});
+assert.match(withoutToken, /Nur diese Zeile, ohne Token/);
+assert.match(withoutToken, /### Wunschkunde: Daniel/);
+assert.match(withoutToken, /Hinterlegt sind 1 Zielgruppe/);
+assert.ok(withoutToken.indexOf("Nur diese Zeile") < withoutToken.indexOf("### Wunschkunde: Daniel"));
 
 const emptyAudiences = buildGroundingPagesPrompt({
   websiteUrl: null,
