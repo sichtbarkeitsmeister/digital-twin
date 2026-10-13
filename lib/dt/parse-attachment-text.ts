@@ -1,11 +1,10 @@
-import * as XLSX from "xlsx";
-
 import {
-  isDtExcelMime,
+  isDtSpreadsheetFile,
   isDtTextLikeMime,
   isDtWordMime,
   normalizeDtMime,
 } from "@/lib/dt/attachments-shared";
+import { extractExcelText } from "@/lib/dt/excel-text";
 
 /** True when stored preview is only a "file is attached" stub, not real content. */
 export function isDtPlaceholderAttachmentText(text: string | null | undefined): boolean {
@@ -78,21 +77,8 @@ async function extractDocxText(bytes: Uint8Array): Promise<string> {
   return (result.value ?? "").replace(/\r\n/g, "\n").trim();
 }
 
-function extractExcelText(bytes: Uint8Array): string {
-  const wb = XLSX.read(bytes, { type: "array" });
-  const parts: string[] = [];
-  for (const sheetName of wb.SheetNames.slice(0, 8)) {
-    const sheet = wb.Sheets[sheetName];
-    if (!sheet) continue;
-    const csv = XLSX.utils.sheet_to_csv(sheet, { FS: "\t" });
-    if (csv.trim()) parts.push(`--- ${sheetName} ---\n${csv}`);
-  }
-  return parts.join("\n\n").slice(0, TEXT_PREVIEW_MAX);
-}
-
 function looksLikeXlsx(fileName: string, mimeType: string): boolean {
-  const n = fileName.toLowerCase();
-  return isDtExcelMime(mimeType) || n.endsWith(".xlsx") || n.endsWith(".xls");
+  return isDtSpreadsheetFile(fileName, mimeType);
 }
 
 function looksLikeDocx(fileName: string, mimeType: string): boolean {
@@ -133,7 +119,7 @@ export async function extractTextPreviewFromBytes(
 
   if (looksLikeXlsx(fileName, norm)) {
     try {
-      const text = extractExcelText(bytes);
+      const text = extractExcelText(bytes).slice(0, TEXT_PREVIEW_MAX);
       return {
         ok: true,
         text: text || `[Excel-Datei „${fileName}“ enthält keine lesbaren Tabellen.]`,

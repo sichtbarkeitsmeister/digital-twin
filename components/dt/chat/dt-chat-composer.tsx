@@ -311,10 +311,15 @@ export function DtChatComposer(props: {
             disabled={props.isBusy || props.disabled}
             className="block max-h-40 min-h-[56px] w-full resize-none border-0 bg-transparent px-4 pb-1 pt-3.5 text-[15px] leading-relaxed text-sbkm-navy placeholder:text-sbkm-ink-500 focus:outline-none focus-visible:ring-0 disabled:cursor-not-allowed dark:text-white dark:placeholder:text-white/40"
             onPaste={(e) => {
-              const items = e.clipboardData?.items;
-              if (!items) return;
+              const cd = e.clipboardData;
+              if (!cd) return;
+              const text = cd.getData("text/plain") ?? "";
+              // Excel also puts a bitmap of the selection on the clipboard.
+              // Sending that image instead of the cells drops the list and
+              // can exceed the request size (shown as a network error).
+              if (text.includes("\t") || (text.includes("\n") && text.length > 40)) return;
               const imageFiles: File[] = [];
-              for (const item of items) {
+              for (const item of cd.items) {
                 if (item.kind === "file" && item.type.startsWith("image/")) {
                   const f = item.getAsFile();
                   if (f) imageFiles.push(f);
