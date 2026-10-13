@@ -19,6 +19,7 @@ import {
 import { applyCreatedChatFiles } from "@/lib/dt/apply-created-chat-files";
 import { mergeCreatedChatFiles } from "@/lib/dt/chat-files";
 import { parseDtCreatedFilesFromText, stripDtCreatedFileFences } from "@/lib/dt/parse-chat-file-fences";
+import { parseDtNextStepsFromText, stripDtNextStepBlocks } from "@/lib/dt/chat/next-steps";
 import {
   DEFAULT_DT_CHAT_TITLE,
   isProvisionalDtChatTitle,
@@ -155,25 +156,29 @@ async function maybePersistDtAutoTitle(input: {
 }
 
 function finalizeAssistantSeoContent(text: string, mode: DtChatMode) {
+  const nextSteps = parseDtNextStepsFromText(text);
   if (mode !== "seo") {
     return {
-      content: stripDtCreatedFileFences(text),
+      content: stripDtCreatedFileFences(stripDtNextStepBlocks(text)),
       seoTaskProposals: [] as ReturnType<typeof parseDtSeoTaskProposalsFromText>,
+      nextSteps,
     };
   }
   const seoTaskProposals = parseDtSeoTaskProposalsFromText(text);
-  const content = stripDtCreatedFileFences(stripDtSeoTaskProposalBlocks(text));
-  return { content, seoTaskProposals };
+  const content = stripDtCreatedFileFences(stripDtNextStepBlocks(stripDtSeoTaskProposalBlocks(text)));
+  return { content, seoTaskProposals, nextSteps };
 }
 
 function assistantMetadataExtras(
   base: Record<string, unknown>,
   mode: DtChatMode,
   seoTaskProposals: ReturnType<typeof parseDtSeoTaskProposalsFromText>,
+  nextSteps: ReturnType<typeof parseDtNextStepsFromText> = [],
 ) {
-  if (mode !== "seo" || seoTaskProposals.length === 0) return base;
+  const withSteps = nextSteps.length > 0 ? { ...base, next_steps: nextSteps } : base;
+  if (mode !== "seo" || seoTaskProposals.length === 0) return withSteps;
   return {
-    ...base,
+    ...withSteps,
     seo_task_proposals: buildDtSeoTaskProposalMetadata(seoTaskProposals),
   };
 }
@@ -327,6 +332,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           assistantRow.metadata,
           chat.mode as DtChatMode,
           finalized.seoTaskProposals,
+          finalized.nextSteps,
         ),
       };
 
@@ -351,6 +357,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
               (persisted.metadata as Record<string, unknown>) ?? {},
               chat.mode as DtChatMode,
               persistedFinal.seoTaskProposals,
+              persistedFinal.nextSteps,
             ),
           };
           await auth.supabase
@@ -442,6 +449,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
               (persistedAfterN8n.metadata as Record<string, unknown>) ?? {},
               chat.mode as DtChatMode,
               persistedFinal.seoTaskProposals,
+              persistedFinal.nextSteps,
             ),
           };
           if (
@@ -538,6 +546,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           },
           chat.mode as DtChatMode,
           finalized.seoTaskProposals,
+          finalized.nextSteps,
         ),
         author_user_id: null,
         stopped: false,
@@ -608,6 +617,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       },
       chat.mode as DtChatMode,
       finalized.seoTaskProposals,
+          finalized.nextSteps,
     );
     assistantRow = {
       id: `ghost-${Date.now()}`,

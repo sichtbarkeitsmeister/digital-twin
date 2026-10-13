@@ -46,7 +46,14 @@ export async function loadDtSeoUrlIndexStatus(
   }
 
   const { data, error } = await query;
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (/schema cache|does not exist/i.test(error.message)) {
+      throw new Error(
+        "Google-Indexdaten sind noch nicht eingerichtet: Bitte database/migrations/20260806_dt_seo_url_index_status.sql einmal im Supabase SQL Editor ausführen. Technische Indexierbarkeit geht weiter mit audit_site_indexability.",
+      );
+    }
+    throw new Error(error.message);
+  }
   return (data ?? []) as DtSeoUrlIndexStatusRow[];
 }
 

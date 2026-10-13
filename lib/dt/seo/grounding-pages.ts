@@ -206,7 +206,7 @@ export function formatGroundingPagesForPrompt(input: {
     );
     if (input.llmsTxtUrl) lines.push(`- llms.txt-URL: ${input.llmsTxtUrl}`);
     lines.push(
-      "Rückgabe an das Tool: nutze am Ende das Werkzeug update_grounding_page je Seite (URL, Art, Status Entwurf/freigegeben, dateModified, lastReviewed, Prüfer, Standardversion).",
+      "Entwurf erstellen: Nach Bestätigung des Nutzers start_grounding_draft mit kind \"hub\" und der geplanten URL (Standard: <Website>/grounding/) aufrufen; der Agent sammelt Fakten, prüft sie, baut die Seite und prüft sie noch einmal.",
     );
     return lines.join("\n");
   }
@@ -248,11 +248,13 @@ export function formatGroundingPagesForPrompt(input: {
     if (page.notes?.trim()) {
       lines.push(`  Notiz: ${page.notes.trim().replace(/\s+/g, " ").slice(0, 400)}`);
     }
+    for (const line of formatGroundingRunForPrompt(page.run)) lines.push(`  ${line}`);
   }
 
   lines.push("");
   lines.push("### Regeln");
   lines.push(
+    "- Entwürfe baut der Grounding-Agent im Hintergrund: mit start_grounding_draft starten (nach Bestätigung des Nutzers), Antworten auf Faktencheck-Fragen mit answer_grounding_draft weitergeben. Den Stand liest du oben je Seite unter „Entwurf“.",
     "- Bestehende URLs haben Vorrang vor der Standard-URL /grounding/. Bestehende Grounding Pages werden nicht auf eine neue URL umgezogen.",
     "- Es gibt bereits eine Grounding Page: jeder Auftrag ist ein „aktualisiere“, kein Neubau (außer der Nutzer verlangt ausdrücklich einen Neubau).",
     "- Die Fälligkeit richtet sich nach lastReviewed (letzte menschliche Prüfung), nicht nach dem Upload-Datum oder dateModified.",
@@ -267,6 +269,35 @@ export function formatGroundingPagesForPrompt(input: {
   }
 
   return lines.join("\n");
+}
+
+/** The draft state of one page for the Tool-Kontext (empty when no run view was loaded). */
+export function formatGroundingRunForPrompt(run: DtGroundingRunView | null): string[] {
+  if (!run) return [];
+  const lines: string[] = [];
+  if (run.state === "nicht_begonnen") {
+    lines.push("Entwurf: noch nicht gestartet.");
+    return lines;
+  }
+  lines.push(`Entwurf: ${run.label}${run.detail ? ` — ${run.detail}` : ""}`);
+  if (run.state === "braucht_sie" && run.questions.length > 0) {
+    lines.push("Fragen des Faktenchecks (nur der Nutzer kann sie beantworten; Antworten mit answer_grounding_draft weitergeben):");
+    run.questions.forEach((q, i) => lines.push(`${i + 1}. ${q.question}${q.placeholder ? ` (z. B. ${q.placeholder})` : ""}`));
+  }
+  if (run.state === "fertig") {
+    lines.push("HTML-Datei und llms.txt liegen im Tab Grounding zum Download.");
+    if (run.summary) lines.push(`Endprüfung: ${run.summary.replace(/\s+/g, " ").slice(0, 600)}`);
+    const high = run.findings.filter((f) => f.severity === "high");
+    if (high.length > 0) lines.push(`Vor der Freigabe klären: ${high.map((f) => f.title).join("; ")}`);
+  }
+  if (run.facts?.candidates.length) {
+    lines.push(
+      `Vorgeschlagene Entitätsseiten: ${run.facts.candidates
+        .map((c) => `${c.name} (${c.schema_type}, ${c.priority}${c.url ? `, ${c.url}` : ""})`)
+        .join("; ")}`,
+    );
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------

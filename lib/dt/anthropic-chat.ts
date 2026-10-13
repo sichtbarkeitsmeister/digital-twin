@@ -20,7 +20,11 @@ import {
   loadLatestDtSeoReportRawForOrg,
 } from "@/lib/dt/seo/report-detail-tool";
 import { formatSerpSnippetCheckForTool } from "@/lib/dt/seo/serp-pixel";
-import { updateGroundingPageForTool } from "@/lib/dt/seo/grounding-tools";
+import {
+  answerGroundingDraftForTool,
+  startGroundingDraftForTool,
+  updateGroundingPageForTool,
+} from "@/lib/dt/seo/grounding-tools";
 import {
   appendWebResearchNotes,
   DT_WEB_RESEARCH_TOOLS,
@@ -289,6 +293,34 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "start_grounding_draft",
+    description:
+      "Startet den Grounding-Agenten für eine Seite (Hub oder Entitätsseite): legt die Seite im Tab Grounding an, falls neu, und erstellt den Entwurf im Hintergrund in vier Schritten (Fakten sammeln, Faktencheck, Seite bauen, Endprüfung). Nur nach ausdrücklicher Bestätigung des Nutzers aufrufen. Setzt einen pausierten Entwurf fort; startet einen fertigen Entwurf nicht neu.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["hub", "entity"], description: "hub = Haupt-Grounding-Page der Organisation, entity = Entitätsseite." },
+        url: { type: "string", description: "Geplante Live-URL, z. B. https://…/grounding/ (Hub) oder https://…/grounding/<slug>/ (Entität). Nie die Startseite." },
+        entityName: { type: "string", description: "Name der Entität (nur Entitätsseiten)." },
+        slug: { type: "string", description: "Slug der Entitätsseite." },
+      },
+      required: ["kind", "url"],
+    },
+  },
+  {
+    name: "answer_grounding_draft",
+    description:
+      "Gibt die Antworten des Nutzers auf die Fragen des Faktenchecks an den Grounding-Agenten weiter; der Entwurf läuft dann mit „Seite bauen“ weiter. Nur aufrufen, wenn der Entwurf im Tool-Kontext auf „Braucht Ihre Antworten“ steht und der Nutzer die Fragen beantwortet hat.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "URL der Grounding Page, deren Fragen beantwortet werden." },
+        answers: { type: "string", description: "Die Antworten des Nutzers in der Reihenfolge der Fragen, wörtlich." },
+      },
+      required: ["url", "answers"],
+    },
+  },
+  {
     name: "check_serp_snippet",
     description:
       "Misst Title und/oder Meta-Description in Pixeln (Google-SERP-Schätzung mit Arial). Limits: Title Desktop ~600px, Mobile ~440px, Description ~920px. Zeichenzahl nur Zusatz. Nutze dies bei Title-/Meta-Vorschlägen.",
@@ -310,114 +342,138 @@ async function runDtRetrievalTool(
   name: string,
   input: unknown,
 ): Promise<string | null> {
-  const args = (input ?? {}) as Record<string, unknown>;
+  // `return await`: a rejected tool promise must land in this catch and become a tool
+  // result, not abort the whole chat turn (a missing table killed every SEO answer).
   try {
-    if (name === "search_website_content") {
-      const query = String(args.query ?? "").trim();
-      if (!query) return "Kein Suchbegriff angegeben.";
-      const hits = await searchDtSitePages(organisationId, query, 5);
-      if (hits.length === 0) return `Keine Treffer für „${query}“ in den gecrawlten Seiten.`;
-      return hits
-        .map((h, i) => `${i + 1}. ${h.title ?? h.url}\n   URL: ${h.url}\n   Auszug: ${h.snippet}`)
-        .join("\n\n");
-    }
-    if (name === "read_website_page") {
-      const url = String(args.url ?? "").trim();
-      if (!url) return "Keine URL angegeben.";
-      const page = await getDtSitePageContent(organisationId, url);
-      if (!page) return `Keine gecrawlte Seite für ${url} gefunden.`;
-      if (!page.content.trim()) {
-        return `Seite ${page.url} ist gecrawlt, enthält aber keinen extrahierbaren Text (evtl. JavaScript-gerendert).`;
-      }
-      return `Inhalt von ${page.url}${page.title ? ` (${page.title})` : ""}:\n\n${page.content}`;
-    }
-    if (name === "read_full_seo_report") {
-      const report = await loadLatestDtSeoReportRawForOrg(organisationId);
-      return formatSeoReportRawForTool(report);
-    }
-    if (name === "read_sitemap") {
-      const sitemapUrl = typeof args.sitemapUrl === "string" ? args.sitemapUrl : null;
-      return readSitemapForTool(organisationId, sitemapUrl);
-    }
-    if (name === "inspect_website_url") {
-      const url = String(args.url ?? "").trim();
-      if (!url) return "Keine URL angegeben.";
-      return inspectWebsiteUrlForTool(organisationId, url);
-    }
-    if (name === "audit_site_indexability") {
-      return auditSiteIndexabilityForTool(organisationId, {
-        sitemapUrl: typeof args.sitemapUrl === "string" ? args.sitemapUrl : null,
-        urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : null,
-        limit: typeof args.limit === "number" ? args.limit : null,
-      });
-    }
-    if (name === "read_index_status") {
-      return readIndexStatusForTool(organisationId, {
-        url: typeof args.url === "string" ? args.url : null,
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-      });
-    }
-    if (name === "request_gsc_index_check") {
-      return triggerGscIndexCheckN8n({
-        organisationId,
-        urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : undefined,
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-      });
-    }
-    if (name === "update_seo_task") {
-      const taskId = String(args.taskId ?? "").trim();
-      const nullable = (v: unknown) =>
-        v === undefined ? undefined : v === null ? null : String(v);
-      return updateSeoTaskForTool(organisationId, taskId, {
-        title: args.title !== undefined ? String(args.title) : undefined,
-        url: nullable(args.url),
-        keyword: nullable(args.keyword),
-        action: nullable(args.action),
-        status:
-          args.status !== undefined
-            ? (String(args.status) as "open" | "in_progress" | "done" | "wont_fix")
-            : undefined,
-        priority:
-          args.priority === undefined
-            ? undefined
-            : args.priority === null
-              ? null
-              : String(args.priority),
-        currentStatus: nullable(args.currentStatus),
-        notes: nullable(args.notes),
-      });
-    }
-    if (name === "delete_seo_task") {
-      const taskId = String(args.taskId ?? "").trim();
-      return deleteSeoTaskForTool(organisationId, taskId);
-    }
-    if (name === "update_grounding_page") {
-      const str = (v: unknown) => (v === undefined || v === null ? undefined : String(v));
-      return updateGroundingPageForTool(organisationId, {
-        url: String(args.url ?? ""),
-        kind: args.kind === "hub" || args.kind === "entity" ? args.kind : undefined,
-        entityName: str(args.entityName),
-        slug: str(args.slug),
-        status:
-          args.status === "approved" || args.status === "draft" ? args.status : undefined,
-        dateModified: str(args.dateModified),
-        lastReviewed: str(args.lastReviewed),
-        reviewedBy: str(args.reviewedBy),
-        standardVersion: str(args.standardVersion),
-        uploadedAt: str(args.uploadedAt),
-        note: str(args.note),
-      });
-    }
-    if (name === "check_serp_snippet") {
-      return formatSerpSnippetCheckForTool({
-        title: typeof args.title === "string" ? args.title : null,
-        description: typeof args.description === "string" ? args.description : null,
-      });
-    }
-    return null;
+    return await runDtRetrievalToolInner(organisationId, name, input);
   } catch (err) {
     return `Fehler beim Abrufen: ${err instanceof Error ? err.message : "unbekannt"}`;
   }
+}
+
+async function runDtRetrievalToolInner(
+  organisationId: string,
+  name: string,
+  input: unknown,
+): Promise<string | null> {
+  const args = (input ?? {}) as Record<string, unknown>;
+  if (name === "search_website_content") {
+    const query = String(args.query ?? "").trim();
+    if (!query) return "Kein Suchbegriff angegeben.";
+    const hits = await searchDtSitePages(organisationId, query, 5);
+    if (hits.length === 0) return `Keine Treffer für „${query}“ in den gecrawlten Seiten.`;
+    return hits
+      .map((h, i) => `${i + 1}. ${h.title ?? h.url}\n   URL: ${h.url}\n   Auszug: ${h.snippet}`)
+      .join("\n\n");
+  }
+  if (name === "read_website_page") {
+    const url = String(args.url ?? "").trim();
+    if (!url) return "Keine URL angegeben.";
+    const page = await getDtSitePageContent(organisationId, url);
+    if (!page) return `Keine gecrawlte Seite für ${url} gefunden.`;
+    if (!page.content.trim()) {
+      return `Seite ${page.url} ist gecrawlt, enthält aber keinen extrahierbaren Text (evtl. JavaScript-gerendert).`;
+    }
+    return `Inhalt von ${page.url}${page.title ? ` (${page.title})` : ""}:\n\n${page.content}`;
+  }
+  if (name === "read_full_seo_report") {
+    const report = await loadLatestDtSeoReportRawForOrg(organisationId);
+    return formatSeoReportRawForTool(report);
+  }
+  if (name === "read_sitemap") {
+    const sitemapUrl = typeof args.sitemapUrl === "string" ? args.sitemapUrl : null;
+    return readSitemapForTool(organisationId, sitemapUrl);
+  }
+  if (name === "inspect_website_url") {
+    const url = String(args.url ?? "").trim();
+    if (!url) return "Keine URL angegeben.";
+    return inspectWebsiteUrlForTool(organisationId, url);
+  }
+  if (name === "audit_site_indexability") {
+    return auditSiteIndexabilityForTool(organisationId, {
+      sitemapUrl: typeof args.sitemapUrl === "string" ? args.sitemapUrl : null,
+      urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : null,
+      limit: typeof args.limit === "number" ? args.limit : null,
+    });
+  }
+  if (name === "read_index_status") {
+    return readIndexStatusForTool(organisationId, {
+      url: typeof args.url === "string" ? args.url : null,
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    });
+  }
+  if (name === "request_gsc_index_check") {
+    return triggerGscIndexCheckN8n({
+      organisationId,
+      urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : undefined,
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    });
+  }
+  if (name === "update_seo_task") {
+    const taskId = String(args.taskId ?? "").trim();
+    const nullable = (v: unknown) =>
+      v === undefined ? undefined : v === null ? null : String(v);
+    return updateSeoTaskForTool(organisationId, taskId, {
+      title: args.title !== undefined ? String(args.title) : undefined,
+      url: nullable(args.url),
+      keyword: nullable(args.keyword),
+      action: nullable(args.action),
+      status:
+        args.status !== undefined
+          ? (String(args.status) as "open" | "in_progress" | "done" | "wont_fix")
+          : undefined,
+      priority:
+        args.priority === undefined
+          ? undefined
+          : args.priority === null
+            ? null
+            : String(args.priority),
+      currentStatus: nullable(args.currentStatus),
+      notes: nullable(args.notes),
+    });
+  }
+  if (name === "delete_seo_task") {
+    const taskId = String(args.taskId ?? "").trim();
+    return deleteSeoTaskForTool(organisationId, taskId);
+  }
+  if (name === "update_grounding_page") {
+    const str = (v: unknown) => (v === undefined || v === null ? undefined : String(v));
+    return updateGroundingPageForTool(organisationId, {
+      url: String(args.url ?? ""),
+      kind: args.kind === "hub" || args.kind === "entity" ? args.kind : undefined,
+      entityName: str(args.entityName),
+      slug: str(args.slug),
+      status:
+        args.status === "approved" || args.status === "draft" ? args.status : undefined,
+      dateModified: str(args.dateModified),
+      lastReviewed: str(args.lastReviewed),
+      reviewedBy: str(args.reviewedBy),
+      standardVersion: str(args.standardVersion),
+      uploadedAt: str(args.uploadedAt),
+      note: str(args.note),
+    });
+  }
+  if (name === "start_grounding_draft") {
+    return startGroundingDraftForTool(organisationId, {
+      kind: args.kind === "entity" ? "entity" : "hub",
+      url: String(args.url ?? ""),
+      entityName: typeof args.entityName === "string" ? args.entityName : null,
+      slug: typeof args.slug === "string" ? args.slug : null,
+    });
+  }
+  if (name === "answer_grounding_draft") {
+    return answerGroundingDraftForTool(organisationId, {
+      url: String(args.url ?? ""),
+      answers: String(args.answers ?? ""),
+    });
+  }
+  if (name === "check_serp_snippet") {
+    return formatSerpSnippetCheckForTool({
+      title: typeof args.title === "string" ? args.title : null,
+      description: typeof args.description === "string" ? args.description : null,
+    });
+  }
+  return null;
 }
 
 function textOfContentBlock(block: Anthropic.ContentBlockParam): string | null {
