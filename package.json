@@ -70,6 +70,7 @@
     "test:dt-next-steps": "tsx scripts/test-dt-next-steps.ts",
     "test:web-research": "tsx scripts/test-web-research.ts",
     "test:help-assistant": "tsx scripts/test-help-assistant.ts",
+    "test:speech-dictation": "tsx scripts/test-speech-dictation.ts",
     "test:website-structure": "tsx scripts/test-website-structure.ts",
     "test:meeting-transcripts": "tsx scripts/test-meeting-transcripts.ts",
     "test:workshop-corpus": "tsx scripts/test-workshop-corpus.ts",

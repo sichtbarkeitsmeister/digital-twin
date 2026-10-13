@@ -59,6 +59,7 @@ import {
   type HelpRecentError,
 } from "@/lib/help/handbook";
 import { getRecentHelpErrors } from "@/lib/help/recent-errors";
+import { DtDictationButton } from "@/components/dt/chat/dt-dictation-button";
 
 type PageContext = {
   page:
@@ -1220,6 +1221,12 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
+                  <DtDictationButton
+                    value={prompt}
+                    onChange={setPrompt}
+                    disabled={isBusy || !selectedChatId}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent text-secondary transition hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                  />
                 </div>
                 <Textarea
                   rows={1}
