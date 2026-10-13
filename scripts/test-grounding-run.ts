@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import {
   buildGroundingLlmsTxt,
+  factsText,
   groundingStepSpec,
   normalizeGroundingFacts,
   normalizeGroundingHtml,
@@ -43,6 +44,19 @@ const facts = normalizeGroundingFacts(
     core_facts: [{ label: "Sitz", value: "Hamburg", source: "Impressum", as_of: "" }, { label: "", value: "x" }],
     sections: [{ heading: "Leistungen von Existenzstand", paragraphs: ["AVGS-Beratung."], sources: [] }],
     faq: [],
+    audiences: [
+      {
+        name: "Markus Demir",
+        label: "Gründungsinteressierte mit Bezug von Arbeitslosengeld",
+        situation: "Arbeitslos, Gründungsidee, kennt den Ablauf nicht.",
+        questions: [
+          { question: "Wie bekomme ich den AVGS?", answer: "Der AVGS wird von der Agentur für Arbeit bewilligt; Existenzstand begleitet den Antrag.", source: "Website /avgs", basis: "genannt" },
+          { question: "", answer: "x" },
+        ],
+      },
+      { name: "Daniel Osei", label: "", situation: "", questions: [] },
+      { name: "", label: "" },
+    ],
     sources: [],
     related: [],
     open_questions: [{ question: "Rechtsform?", why: "Nur im Impressum", blocking: true }],
@@ -50,6 +64,14 @@ const facts = normalizeGroundingFacts(
   },
   hubPage,
 );
+assert.equal(facts.audiences.length, 2, "empty audience entries are dropped");
+assert.equal(facts.audiences[0]?.questions.length, 1);
+assert.equal(facts.audiences[0]?.questions[0]?.basis, "genannt");
+assert.equal(facts.audiences[1]?.label, "Daniel Osei", "label falls back to the avatar name");
+const factsAsText = factsText(facts);
+assert.ok(factsAsText.includes("Anfragen & Lösungen"));
+assert.ok(factsAsText.includes("Wie bekomme ich den AVGS?"));
+assert.ok(factsAsText.includes("noch keine belegbar beantwortbare Frage"));
 assert.equal(facts.entity.name, "Existenzstand");
 assert.equal(facts.entity.schema_type, "Organization");
 assert.equal(facts.core_facts.length, 1);
@@ -102,7 +124,21 @@ const spec1 = groundingStepSpec(1, context);
 assert.ok(spec1.user.includes("AVGS-Beratung für Gründer."));
 assert.ok(spec1.user.includes("Antworten und Anmerkungen der Redaktion"));
 assert.ok(spec1.system.includes("entity_candidates"));
+assert.ok(spec1.system.includes("JEDEN Wunschkunden"));
+assert.ok(spec1.system.includes("audiences:"));
+assert.ok(JSON.stringify(spec1.tool.input_schema).includes("audiences"));
+const spec2 = groundingStepSpec(2, { ...context, wunschkundenText: "### Wunschkunde: Markus Demir\nArbeitslos." });
+assert.ok(spec2.system.includes("Zielgruppe fehlt"));
+assert.ok(spec2.user.includes("Zielkunden"), "step 2 sees the Wunschkunden block");
 const spec3 = groundingStepSpec(3, context);
+assert.ok(spec3.system.includes("Anfragen & Lösungen"));
+assert.ok(spec3.system.includes("Stammdaten-Bereich"));
+assert.ok(spec3.system.includes("+49"));
+assert.ok(spec3.system.includes("Kein Firmenlogo"));
+assert.ok(spec3.user.includes("Anfragen & Lösungen"), "step 3 receives the audiences via the fact base");
+const spec4 = groundingStepSpec(4, context);
+assert.ok(spec4.system.includes("Avatar-Name"));
+assert.ok(spec4.system.includes("Hausregeln"));
 assert.ok(spec3.system.includes("Grounding Page Standard v1.6"));
 assert.ok(spec3.system.includes('<link rel="canonical" href="https://existenzstand.de/grounding/">'));
 assert.ok(spec3.user.includes("Faktenbasis (Schritt 1)"));
