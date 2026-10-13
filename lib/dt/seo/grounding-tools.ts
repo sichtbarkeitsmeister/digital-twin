@@ -6,6 +6,7 @@ import {
   type DtGroundingPagePatch,
 } from "@/lib/dt/seo/grounding-pages";
 import { answerGroundingQuestions, startGroundingRun } from "@/lib/dt/seo/grounding-run/actions";
+import { reconcileGroundingPages } from "@/lib/dt/seo/grounding-run/health";
 import { groundingRunQuestions } from "@/lib/dt/seo/grounding-run/store";
 import { groundingStepLabel } from "@/lib/dt/seo/grounding-run/steps";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
@@ -251,4 +252,68 @@ export async function answerGroundingDraftForTool(
   if (!result.ok) return result.message;
   if (result.jobId) kickJobsWorker(1);
   return `Antworten gespeichert. Der Agent baut jetzt die Seite (Schritt 3) und prüft sie (Schritt 4). ${STEP_HINT}`;
+}
+
+/**
+ * The user asked for the finished HTML file inside the chat. Writing that file in the
+ * chat turn blows the request and the client only sees a network error. Answer from the
+ * draft state instead and keep the background agent moving.
+ */
+function urlInText(text: string): string | null {
+  const match = text.match(/https?:\/\/[^\s)>\]]+/i);
+  return match?.[0]?.replace(/[.,;]+$/, "") ?? null;
+}
+
+function groundingTabHref(organisationId: string): string {
+  return `/dashboard/verwaltung/seo?org=${encodeURIComponent(organisationId)}&tab=grounding`;
+}
+
+export async function answerGroundingHtmlRequest(
+  organisationId: string,
+  userId: string,
+  text: string,
+): Promise<string> {
+  const tab = groundingTabHref(organisationId);
+  const supabase = createServiceClient();
+  const loaded = await loadPagesForOrg(organisationId);
+  if (loaded.error) return loaded.error;
+
+  let pages = loaded.pages;
+  try {
+    pages = (await reconcileGroundingPages(supabase, pages)).pages;
+  } catch (err) {
+    console.warn(
+      "[grounding] html request reconcile:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  const wanted = urlInText(text);
+  const page = (wanted ? findByUrl(pages, wanted) : null) ?? pages.find((p) => p.kind === "hub") ?? null;
+  if (!page) {
+    return `Es ist noch keine Grounding Page hinterlegt. Im Tab Grounding die Hub-URL anlegen, dann startet der Entwurf. [Grounding öffnen](${tab})`;
+  }
+
+  const name = page.kind === "hub" ? "Hub" : `Entitätsseite „${page.entity_name ?? page.slug ?? page.url}“`;
+  const link = `[Grounding öffnen](${tab})`;
+  const where = `Die Datei liegt im Tab Grounding zum Download, sobald die Endprüfung durch ist. ${link}`;
+
+  if (page.run_state === "laeuft") {
+    kickJobsWorker(1);
+    return `Der Entwurf für ${name} läuft (${groundingStepLabel(page.run_step ?? 1)}). Die HTML-Datei entsteht dort im Hintergrund, Schritt für Schritt. ${where}`;
+  }
+  if (page.run_state === "braucht_sie") {
+    return `Der Entwurf für ${name} wartet auf Antworten, danach baut der Agent die HTML-Datei.\n${questionsText(page)}\n${where}`;
+  }
+  if (page.run_state === "fertig") {
+    return `Die HTML-Datei für ${name} ist fertig und liegt im Tab Grounding zum Download. ${link}`;
+  }
+
+  const started = await startGroundingRun(supabase, page, userId);
+  if (!started.ok) return started.message;
+  if (started.jobId) kickJobsWorker(1);
+  const resumed = page.run_state === "in_arbeit";
+  return resumed
+    ? `Der unterbrochene Entwurf für ${name} läuft weiter (${page.url}). ${where}`
+    : `Der Entwurf für ${name} ist gestartet (${page.url}). ${where}`;
 }
