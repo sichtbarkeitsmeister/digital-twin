@@ -72,8 +72,6 @@ export function DtChatShell(props: {
   initialOrgId?: string;
   /** Deep link: active chat id (`?chat=`). */
   initialChatId?: string | null;
-  /** One-shot composer text (`?draft=`), consumed after mount. */
-  initialDraft?: string | null;
   /** Sync org/chat/scope to the URL (default on). */
   syncUrl?: boolean;
   /** Homepage: shared team chats for the whole organisation. */
@@ -131,21 +129,6 @@ export function DtChatShell(props: {
     Map<string, DtStoredAttachment[]>
   >(new Map());
   const [prompt, setPrompt] = useState("");
-  useEffect(() => {
-    const draft = props.initialDraft?.trim();
-    if (!draft) return;
-    setPrompt((current) => (current.trim() ? current : draft));
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has("draft")) return;
-    params.delete("draft");
-    const qs = params.toString();
-    window.history.replaceState(
-      window.history.state,
-      "",
-      `${window.location.pathname}${qs ? `?${qs}` : ""}`,
-    );
-  }, [props.initialDraft]);
   const [attachments, setAttachments] = useState<DtAttachmentDraft[]>([]);
   const [personaTesting, setPersonaTesting] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
