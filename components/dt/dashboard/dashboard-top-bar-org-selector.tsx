@@ -7,6 +7,7 @@ import { SeoTopBarOrgSelector } from "@/components/dt/seo/seo-top-bar-org-select
 import { DtSelect } from "@/components/dt/dt-select";
 import {
   isGeoDashboardPath,
+  isSeoTextDashboardPath,
   isWatermarkDashboardPath,
   isManageOrgBarPath,
   isOrganisationDashboardPath,
@@ -249,6 +250,9 @@ export function DashboardTopBarOrgSelector() {
     return <SeoTopBarOrgSelector variant="texte" />;
   }
 
+  if (isSeoTextDashboardPath(pathname)) {
+    return <SeoTopBarOrgSelector variant="seo-text" />;
+  }
   if (isGeoDashboardPath(pathname)) {
     return <SeoTopBarOrgSelector variant="geo" />;
   }
