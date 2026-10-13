@@ -7,10 +7,13 @@ import assert from "node:assert/strict";
 import { isSurveyPersonaAgent } from "../lib/dt/agents/seo-advisor";
 import { AVATAR_GLOBAL_PROMPT_ANCHOR } from "../lib/dt/prompts/avatar-global-prompt-anchor";
 import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
+import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "../lib/dt/prompts/digital-twin-global-prompt";
 import {
+  avatarProfileTextForSeo,
   clipSeoKnowledgeText,
   formatWunschkundenKnowledgeForSeo,
   isSeoWunschkundeSourceAgent,
+  promptTemplateHoldsAvatarProfile,
   stripAvatarAnchorForSeoKnowledge,
   type SeoWunschkundeProfile,
 } from "../lib/dt/seo/wunschkunden-knowledge";
@@ -102,6 +105,50 @@ function testEmptyState() {
   assert.match(text, /Noch keine Wunschkunden hinterlegt/);
   assert.match(text, /ohne extra „In SEO-Berater übernehmen“/);
   console.log("empty state: ok");
+}
+
+function testDirectlyCreatedAvatarUsesPromptTemplate() {
+  // Avatar created under „Agenten“ without a questionnaire: profile lives in prompt_template.
+  const daniel = {
+    prompt_template:
+      "Du bist Daniel Osei, 34, hast ein kleines Online-Business und willst strukturiert wachsen. Du fragst nach Finanzierung, Businessplan und Rechtsform.",
+    prompt_append: null,
+    uses_global_prompt: false,
+  };
+  assert.equal(promptTemplateHoldsAvatarProfile(daniel.prompt_template), true);
+  assert.match(avatarProfileTextForSeo(daniel), /Daniel Osei/);
+  assert.match(avatarProfileTextForSeo(daniel), /Businessplan/);
+
+  // Global-prompt avatar: placeholder template is ignored, prompt_append is the profile.
+  const placeholder = {
+    prompt_template: "Avatar: Markus Demir",
+    prompt_append: `${AVATAR_GLOBAL_PROMPT_ANCHOR}\n\n## DEINE SITUATION\nArbeitslos, Gründungsidee.`,
+    uses_global_prompt: true,
+  };
+  assert.equal(promptTemplateHoldsAvatarProfile(placeholder.prompt_template), false);
+  const markus = avatarProfileTextForSeo(placeholder);
+  assert.match(markus, /Gründungsidee/);
+  assert.doesNotMatch(markus, /Avatar: Markus/);
+  assert.doesNotMatch(markus, /ANKER/);
+
+  // A copy of the global DigitalTwin prompt is no profile either.
+  assert.equal(promptTemplateHoldsAvatarProfile(DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT), false);
+  assert.equal(avatarProfileTextForSeo({ prompt_template: "kurz", prompt_append: "" }), "");
+
+  // Both present: template profile first, then the avatar-specific part.
+  const both = avatarProfileTextForSeo({
+    prompt_template: "Du bist Lena, Inhaberin eines Cafés in Köln, suchst eine Agentur für mehr Gäste.",
+    prompt_append: "Du bist skeptisch bei hohen Monatspreisen.",
+    uses_global_prompt: false,
+  });
+  assert.ok(both.indexOf("Lena") < both.indexOf("skeptisch"));
+
+  const text = formatWunschkundenKnowledgeForSeo([
+    { id: "d", name: "Daniel Osei", role: "Der ambitionierte Wachstumsgründer", sourceKind: "agent", surveyTitle: null, body: "", bodyFrom: "empty" },
+  ]);
+  assert.match(text, /Unter Agenten den Prompt des Avatars ergänzen/);
+  assert.match(text, /JEDEN Wunschkunden einzeln/);
+  console.log("direct avatar prompt template: ok");
 }
 
 function testClipAndAnchorStrip() {
@@ -203,6 +250,7 @@ function testSeoAdvisorFormNotTreatedAsSurveyPersona() {
 testSourceFilter();
 testFormatSeparatesRoles();
 testEmptyState();
+testDirectlyCreatedAvatarUsesPromptTemplate();
 testClipAndAnchorStrip();
 testSeoPromptInjectsWunschkunden();
 testProspectPromptDoesNotGetWunschkundenUnlessPassed();

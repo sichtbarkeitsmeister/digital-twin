@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isDefaultTwinAgent, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { hasAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
+import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "@/lib/dt/prompts/digital-twin-global-prompt";
 import { isProspectPersonaKind } from "@/lib/dt/prompts/build-system-prompt";
 import { buildSurveyResponseContextForSeo } from "@/lib/dt/survey-facts";
 import type { SurveyFieldQuestionRow } from "@/lib/dt/survey-to-agent-context";
@@ -31,6 +32,9 @@ type AgentKnowledgeRow = {
   is_enabled: boolean | null;
   is_default: boolean | null;
   prompt_append: string | null;
+  /** Full own prompt — avatars created directly under „Agenten“ keep their profile here. */
+  prompt_template?: string | null;
+  uses_global_prompt?: boolean | null;
   source_survey_id: string | null;
   source_survey_response_id: string | null;
 };
@@ -108,6 +112,42 @@ export function stripAvatarAnchorForSeoKnowledge(text: string): string {
   return kept.join("\n").trim();
 }
 
+const PLACEHOLDER_TEMPLATE_RE = /^\s*avatar\s*:\s*[^\n]{0,120}\s*$/i;
+const GLOBAL_PROMPT_OPENING = DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT.slice(0, 40).toLowerCase();
+
+/**
+ * Does prompt_template carry the avatar's own profile? Not when it is the
+ * „Avatar: Name“ placeholder of global-prompt agents or a copy of the global
+ * DigitalTwin prompt itself.
+ */
+export function promptTemplateHoldsAvatarProfile(
+  template: string | null | undefined,
+): boolean {
+  const t = (template ?? "").trim();
+  if (t.length < 40) return false;
+  if (PLACEHOLDER_TEMPLATE_RE.test(t)) return false;
+  if (t.toLowerCase().startsWith(GLOBAL_PROMPT_OPENING)) return false;
+  return true;
+}
+
+/**
+ * Profile text of an avatar for the SEO advisor: the avatar-specific part
+ * (prompt_append) plus, for directly created avatars, their own prompt_template.
+ */
+export function avatarProfileTextForSeo(agent: {
+  prompt_append?: string | null;
+  prompt_template?: string | null;
+  uses_global_prompt?: boolean | null;
+}): string {
+  const parts: string[] = [];
+  if (promptTemplateHoldsAvatarProfile(agent.prompt_template)) {
+    parts.push(stripAvatarAnchorForSeoKnowledge(agent.prompt_template ?? ""));
+  }
+  const append = stripAvatarAnchorForSeoKnowledge(agent.prompt_append ?? "");
+  if (append) parts.push(append);
+  return parts.filter(Boolean).join("\n\n").trim();
+}
+
 function formatProfileHeading(profile: SeoWunschkundeProfile): string {
   const role = profile.role?.trim();
   const title = role ? `### Wunschkunde: ${profile.name} (${role})` : `### Wunschkunde: ${profile.name}`;
@@ -136,6 +176,8 @@ export function formatWunschkundenKnowledgeForSeo(
     "- Dieser Abschnitt = Fakten über die Menschen, die ihr gewinnen wollt (Sprache, Sorgen, Suchintention, Einwände).",
     "- Du bleibst SEO-Berater. Sprich NICHT als diese Personen und übernimm nicht ihre Ich-Form.",
     "- Mehrere Wunschkunden nicht zu einem Durchschnittskunden vermischen. Nenne sie namentlich, wenn der Unterschied relevant ist.",
+    "- Bei Empfehlungen zu Entitätsseiten, Inhalten, Keywords und Fragen gehst du JEDEN Wunschkunden einzeln durch und nennst ihn: Welche Fragen stellt er, welche Begriffe nutzt er, was braucht er vor seiner Entscheidung? Eine Empfehlung, die nur einen von mehreren Wunschkunden berücksichtigt, ist unvollständig.",
+    "- Ein Profil ohne Angaben ist ein Befund, kein Grund ihn zu übergehen: nenne den Wunschkunden trotzdem und sage, dass sein Profil unter Agenten ergänzt werden muss.",
     "",
   ];
 
@@ -155,7 +197,7 @@ export function formatWunschkundenKnowledgeForSeo(
     const heading = formatProfileHeading(profile);
     const body =
       profile.body.trim() ||
-      "Noch keine verwertbaren Angaben zu diesem Wunschkunden.";
+      "Noch keine verwertbaren Angaben zu diesem Wunschkunden: Der Avatar hat weder Fragebogen-Fakten noch einen Profiltext. Unter Agenten den Prompt des Avatars ergänzen (Situation, Fragen, Sprache), dann erscheint er hier.";
     return clipSeoKnowledgeText(`${heading}\n\n${body}`, perBudget);
   });
 
@@ -288,7 +330,7 @@ function profileFromAgent(
     };
   }
 
-  const avatar = stripAvatarAnchorForSeoKnowledge(agent.prompt_append ?? "");
+  const avatar = avatarProfileTextForSeo(agent);
   if (avatar) {
     return {
       id: agent.id,
@@ -385,7 +427,7 @@ export async function loadWunschkundeProfilesForSeo(
   const { data: agents, error: agentError } = await supabase
     .from("dt_agents")
     .select(
-      "id, name, role, kind, slug, is_enabled, is_default, prompt_append, source_survey_id, source_survey_response_id",
+      "id, name, role, kind, slug, is_enabled, is_default, prompt_append, prompt_template, uses_global_prompt, source_survey_id, source_survey_response_id",
     )
     .eq("organisation_id", organisationId)
     .eq("is_enabled", true)
