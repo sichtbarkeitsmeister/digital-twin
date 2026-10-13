@@ -1429,6 +1429,7 @@ export function DtChatShell(props: {
                       : undefined
                   }
                   seoTasks={props.seoMode || isSeoChat ? seoTasks : undefined}
+                  onNextStep={(text) => void handleSend(text)}
                   emptyHint={
                     ghostMode
                       ? "Probiere etwas aus — nichts wird in der Datenbank gespeichert."

@@ -20,7 +20,11 @@ import {
   loadLatestDtSeoReportRawForOrg,
 } from "@/lib/dt/seo/report-detail-tool";
 import { formatSerpSnippetCheckForTool } from "@/lib/dt/seo/serp-pixel";
-import { updateGroundingPageForTool } from "@/lib/dt/seo/grounding-tools";
+import {
+  answerGroundingDraftForTool,
+  startGroundingDraftForTool,
+  updateGroundingPageForTool,
+} from "@/lib/dt/seo/grounding-tools";
 import {
   appendWebResearchNotes,
   DT_WEB_RESEARCH_TOOLS,
@@ -289,6 +293,34 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "start_grounding_draft",
+    description:
+      "Startet den Grounding-Agenten für eine Seite (Hub oder Entitätsseite): legt die Seite im Tab Grounding an, falls neu, und erstellt den Entwurf im Hintergrund in vier Schritten (Fakten sammeln, Faktencheck, Seite bauen, Endprüfung). Nur nach ausdrücklicher Bestätigung des Nutzers aufrufen. Setzt einen pausierten Entwurf fort; startet einen fertigen Entwurf nicht neu.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["hub", "entity"], description: "hub = Haupt-Grounding-Page der Organisation, entity = Entitätsseite." },
+        url: { type: "string", description: "Geplante Live-URL, z. B. https://…/grounding/ (Hub) oder https://…/grounding/<slug>/ (Entität). Nie die Startseite." },
+        entityName: { type: "string", description: "Name der Entität (nur Entitätsseiten)." },
+        slug: { type: "string", description: "Slug der Entitätsseite." },
+      },
+      required: ["kind", "url"],
+    },
+  },
+  {
+    name: "answer_grounding_draft",
+    description:
+      "Gibt die Antworten des Nutzers auf die Fragen des Faktenchecks an den Grounding-Agenten weiter; der Entwurf läuft dann mit „Seite bauen“ weiter. Nur aufrufen, wenn der Entwurf im Tool-Kontext auf „Braucht Ihre Antworten“ steht und der Nutzer die Fragen beantwortet hat.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "URL der Grounding Page, deren Fragen beantwortet werden." },
+        answers: { type: "string", description: "Die Antworten des Nutzers in der Reihenfolge der Fragen, wörtlich." },
+      },
+      required: ["url", "answers"],
+    },
+  },
+  {
     name: "check_serp_snippet",
     description:
       "Misst Title und/oder Meta-Description in Pixeln (Google-SERP-Schätzung mit Arial). Limits: Title Desktop ~600px, Mobile ~440px, Description ~920px. Zeichenzahl nur Zusatz. Nutze dies bei Title-/Meta-Vorschlägen.",
@@ -406,6 +438,20 @@ async function runDtRetrievalTool(
         standardVersion: str(args.standardVersion),
         uploadedAt: str(args.uploadedAt),
         note: str(args.note),
+      });
+    }
+    if (name === "start_grounding_draft") {
+      return startGroundingDraftForTool(organisationId, {
+        kind: args.kind === "entity" ? "entity" : "hub",
+        url: String(args.url ?? ""),
+        entityName: typeof args.entityName === "string" ? args.entityName : null,
+        slug: typeof args.slug === "string" ? args.slug : null,
+      });
+    }
+    if (name === "answer_grounding_draft") {
+      return answerGroundingDraftForTool(organisationId, {
+        url: String(args.url ?? ""),
+        answers: String(args.answers ?? ""),
       });
     }
     if (name === "check_serp_snippet") {

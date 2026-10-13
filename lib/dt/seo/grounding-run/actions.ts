@@ -105,7 +105,7 @@ async function resetStepsFrom(service: SupabaseClient, pageId: string, fromStep:
 export async function startGroundingRun(
   service: SupabaseClient,
   page: DtGroundingPageRow,
-  userId: string,
+  userId: string | null,
 ): Promise<GroundingActionResult> {
   const reason = groundingSkipReason(page);
   if (reason) return { ok: false, status: 409, message: reason };
@@ -126,7 +126,7 @@ export async function answerGroundingQuestions(
   service: SupabaseClient,
   page: DtGroundingPageRow,
   answers: string,
-  userId: string,
+  userId: string | null,
 ): Promise<GroundingActionResult> {
   if (page.run_state !== "braucht_sie") {
     return { ok: false, status: 409, message: "Dieser Entwurf wartet gerade nicht auf Antworten." };

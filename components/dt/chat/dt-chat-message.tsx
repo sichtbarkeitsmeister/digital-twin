@@ -15,6 +15,7 @@ import {
   isDtPreviewableMime,
   normalizeDtMime,
 } from "@/lib/dt/attachments-shared";
+import { extractDtNextStepsFromMessage, stripDtNextStepBlocks } from "@/lib/dt/chat/next-steps";
 import {
   extractDtSeoTaskProposalsFromMessage,
   matchSavedSeoTaskProposalIndexes,
@@ -200,6 +201,9 @@ export function DtChatMessage(props: {
     proposals: DtSeoChatTaskProposal[],
   ) => Promise<{ ok?: boolean; message?: string }>;
   seoTasks?: DtSeoTaskProposalMatchRow[];
+  /** „Nächste Schritte“ buttons under the latest answer; a click sends the step's message. */
+  onNextStep?: (message: string) => void;
+  nextStepsDisabled?: boolean;
 }) {
   const isUser = props.message.role === "user";
   const isAdminReply = props.message.metadata?.admin_reply === true;
@@ -264,7 +268,13 @@ export function DtChatMessage(props: {
         })
       : []);
 
-  const displayContent = !isUser ? stripDtSeoTaskProposalBlocks(props.message.content) : props.message.content;
+  const displayContent = !isUser
+    ? stripDtNextStepBlocks(stripDtSeoTaskProposalBlocks(props.message.content))
+    : props.message.content;
+  const nextSteps =
+    !isUser && props.onNextStep
+      ? extractDtNextStepsFromMessage({ content: props.message.content, metadata: props.message.metadata })
+      : [];
 
   const savedProposalIndexes =
     !isUser && taskProposals.length > 0
@@ -321,6 +331,27 @@ export function DtChatMessage(props: {
             onSave={props.onSaveTaskProposal}
             onSaveAll={props.onSaveAllTaskProposals}
           />
+        ) : null}
+        {nextSteps.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-sbkm-navy/10 pt-3 dark:border-white/10">
+            {nextSteps.map((step, i) => (
+              <button
+                key={`${i}-${step.label}`}
+                type="button"
+                disabled={props.nextStepsDisabled}
+                onClick={() => props.onNextStep?.(step.message)}
+                title={step.message}
+                className={cn(
+                  "rounded-pill border px-3 py-1.5 text-xs font-semibold transition duration-150 active:scale-[0.98] disabled:opacity-50",
+                  i === 0
+                    ? "border-sbkm-mint/60 bg-sbkm-mint/25 text-sbkm-navy hover:bg-sbkm-mint/35 dark:text-white"
+                    : "border-sbkm-navy/12 bg-white/75 text-sbkm-navy hover:border-sbkm-mint/40 hover:bg-sbkm-mint/12 dark:border-white/12 dark:bg-white/5 dark:text-white",
+                )}
+              >
+                {step.label}
+              </button>
+            ))}
+          </div>
         ) : null}
       </div>
     </motion.div>
