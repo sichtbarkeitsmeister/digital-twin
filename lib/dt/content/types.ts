@@ -137,6 +137,7 @@ export type ContentActionKind =
   | "rerun_with_note"
   | "run_through"
   | "export"
+  | "export_txt"
   | "stop"
   | "reset"
   | "delete";
@@ -211,7 +212,7 @@ export type ContentJob = {
   error: string | null;
 };
 
-export type ContentExportFormat = "html" | "fragment" | "md";
+export type ContentExportFormat = "html" | "fragment" | "md" | "txt";
 
 /** What DigitalTwin itself has for the three readiness checks. */
 export type ContentLocalSources = {

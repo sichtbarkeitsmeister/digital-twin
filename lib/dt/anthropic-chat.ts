@@ -21,6 +21,19 @@ import {
 } from "@/lib/dt/seo/report-detail-tool";
 import { formatSerpSnippetCheckForTool } from "@/lib/dt/seo/serp-pixel";
 import {
+  answerGroundingDraftForTool,
+  startGroundingDraftForTool,
+  updateGroundingPageForTool,
+} from "@/lib/dt/seo/grounding-tools";
+import {
+  appendWebResearchNotes,
+  DT_WEB_RESEARCH_TOOLS,
+  inspectWebResearchBlocks,
+  mergeWebResearchUsage,
+  sumServerToolUsage,
+  type DtWebResearchUsage,
+} from "@/lib/dt/seo/web-research";
+import {
   deleteSeoTaskForTool,
   updateSeoTaskForTool,
 } from "@/lib/dt/seo/task-tools";
@@ -34,15 +47,22 @@ import type { DtChatMode } from "@/lib/dt/types";
 import {
   buildCreatedChatFile,
   createdFileToolResultMessage,
+  DT_MAX_CREATED_FILE_CHARS,
   DT_MAX_CREATED_FILES,
   type DtCreatedChatFile,
 } from "@/lib/dt/chat-files";
 
 const MAX_TOOL_ROUNDS = 6;
+/** How often one chat turn may recover from an output cut off at `max_tokens`. */
+const MAX_TRUNCATION_RECOVERIES = 2;
 
 export type DtAnthropicUsage = {
   inputTokens: number;
   outputTokens: number;
+  /** Websuchen (Anthropic server tool) in dieser Antwort — kostet extra. */
+  webSearchRequests?: number;
+  /** Web-Abrufe (Anthropic server tool) in dieser Antwort — nur Tokens. */
+  webFetchRequests?: number;
 };
 
 export type DtAnthropicChatResult = {
@@ -56,7 +76,7 @@ export type DtAnthropicChatResult = {
 const DT_CREATE_FILE_TOOL: Anthropic.Tool = {
   name: "create_file",
   description:
-    "Erzeugt eine echte Datei, die der Nutzer im Chat öffnen, anschauen und herunterladen kann (HTML-Vorschau, PDF, Excel, CSV, Markdown, Text, JSON). Nutze dies, sobald der Nutzer eine Datei, ein Dokument, eine Tabelle oder ein Artefakt braucht — nicht nur Code in der Antwort zeigen.",
+    `Erzeugt eine echte Datei, die der Nutzer im Chat öffnen, anschauen und herunterladen kann (HTML-Vorschau, PDF, Excel, CSV, Markdown, Text, JSON). Nutze dies, sobald der Nutzer eine Datei, ein Dokument, eine Tabelle oder ein Artefakt braucht — nicht nur Code in der Antwort zeigen. Maximal ${DT_MAX_CREATED_FILE_CHARS} Zeichen je Datei — längere Inhalte auf mehrere Dateien oder mehrere Antworten aufteilen.`,
   input_schema: {
     type: "object",
     properties: {
@@ -251,6 +271,56 @@ const DT_SEO_RETRIEVAL_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "update_grounding_page",
+    description:
+      "Rückgabe an das Tool (Grounding-Tab): meldet je Grounding Page (Hub oder Entitätsseite) URL, Art, Status (Entwurf/freigegeben), dateModified, lastReviewed, Prüfer und Standardversion. Upsert per URL. lastReviewed und Prüfer nur nach dokumentierter Freigabe durch den Nutzer setzen — nie bei Entwürfen, nie ein Zukunftsdatum. Nach „prüfe“, „aktualisiere“ oder einem Neubau für jede Seite einmal aufrufen.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Live-URL der Grounding Page (bestehende URLs haben Vorrang vor /grounding/)." },
+        kind: { type: "string", enum: ["hub", "entity"], description: "hub = Haupt-Grounding-Page, entity = Entitätsseite." },
+        entityName: { type: "string", description: "Entitätsname (nur Entitätsseiten)." },
+        slug: { type: "string", description: "Slug der Entitätsseite, ohne Orts-/Keyword-Zusätze." },
+        status: { type: "string", enum: ["draft", "approved"], description: "draft = Entwurf (v1.6), approved = menschlich geprüft und freigegeben (v1.7)." },
+        dateModified: { type: "string", description: "dateModified der Seite (YYYY-MM-DD)." },
+        lastReviewed: { type: "string", description: "Tatsächliches Prüfdatum (YYYY-MM-DD), nur nach Freigabe." },
+        reviewedBy: { type: "string", description: "Prüfer (Person oder Organisation), nur nach Freigabe." },
+        standardVersion: { type: "string", description: "Standardversion, die die Seite ausweist (z. B. 1.6 oder 1.7)." },
+        uploadedAt: { type: "string", description: "Upload-/Veröffentlichungsdatum (YYYY-MM-DD), falls bekannt." },
+        note: { type: "string", description: "Kurze Notiz (z. B. Befund: llms.txt neuer als Grounding Page)." },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "start_grounding_draft",
+    description:
+      "Startet den Grounding-Agenten für eine Seite (Hub oder Entitätsseite): legt die Seite im Tab Grounding an, falls neu, und erstellt den Entwurf im Hintergrund in vier Schritten (Fakten sammeln, Faktencheck, Seite bauen, Endprüfung). Nur nach ausdrücklicher Bestätigung des Nutzers aufrufen. Setzt einen pausierten Entwurf fort; startet einen fertigen Entwurf nicht neu.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["hub", "entity"], description: "hub = Haupt-Grounding-Page der Organisation, entity = Entitätsseite." },
+        url: { type: "string", description: "Geplante Live-URL, z. B. https://…/grounding/ (Hub) oder https://…/grounding/<slug>/ (Entität). Nie die Startseite." },
+        entityName: { type: "string", description: "Name der Entität (nur Entitätsseiten)." },
+        slug: { type: "string", description: "Slug der Entitätsseite." },
+      },
+      required: ["kind", "url"],
+    },
+  },
+  {
+    name: "answer_grounding_draft",
+    description:
+      "Gibt die Antworten des Nutzers auf die Fragen des Faktenchecks an den Grounding-Agenten weiter; der Entwurf läuft dann mit „Seite bauen“ weiter. Nur aufrufen, wenn der Entwurf im Tool-Kontext auf „Braucht Ihre Antworten“ steht und der Nutzer die Fragen beantwortet hat.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "URL der Grounding Page, deren Fragen beantwortet werden." },
+        answers: { type: "string", description: "Die Antworten des Nutzers in der Reihenfolge der Fragen, wörtlich." },
+      },
+      required: ["url", "answers"],
+    },
+  },
+  {
     name: "check_serp_snippet",
     description:
       "Misst Title und/oder Meta-Description in Pixeln (Google-SERP-Schätzung mit Arial). Limits: Title Desktop ~600px, Mobile ~440px, Description ~920px. Zeichenzahl nur Zusatz. Nutze dies bei Title-/Meta-Vorschlägen.",
@@ -272,97 +342,138 @@ async function runDtRetrievalTool(
   name: string,
   input: unknown,
 ): Promise<string | null> {
-  const args = (input ?? {}) as Record<string, unknown>;
+  // `return await`: a rejected tool promise must land in this catch and become a tool
+  // result, not abort the whole chat turn (a missing table killed every SEO answer).
   try {
-    if (name === "search_website_content") {
-      const query = String(args.query ?? "").trim();
-      if (!query) return "Kein Suchbegriff angegeben.";
-      const hits = await searchDtSitePages(organisationId, query, 5);
-      if (hits.length === 0) return `Keine Treffer für „${query}“ in den gecrawlten Seiten.`;
-      return hits
-        .map((h, i) => `${i + 1}. ${h.title ?? h.url}\n   URL: ${h.url}\n   Auszug: ${h.snippet}`)
-        .join("\n\n");
-    }
-    if (name === "read_website_page") {
-      const url = String(args.url ?? "").trim();
-      if (!url) return "Keine URL angegeben.";
-      const page = await getDtSitePageContent(organisationId, url);
-      if (!page) return `Keine gecrawlte Seite für ${url} gefunden.`;
-      if (!page.content.trim()) {
-        return `Seite ${page.url} ist gecrawlt, enthält aber keinen extrahierbaren Text (evtl. JavaScript-gerendert).`;
-      }
-      return `Inhalt von ${page.url}${page.title ? ` (${page.title})` : ""}:\n\n${page.content}`;
-    }
-    if (name === "read_full_seo_report") {
-      const report = await loadLatestDtSeoReportRawForOrg(organisationId);
-      return formatSeoReportRawForTool(report);
-    }
-    if (name === "read_sitemap") {
-      const sitemapUrl = typeof args.sitemapUrl === "string" ? args.sitemapUrl : null;
-      return readSitemapForTool(organisationId, sitemapUrl);
-    }
-    if (name === "inspect_website_url") {
-      const url = String(args.url ?? "").trim();
-      if (!url) return "Keine URL angegeben.";
-      return inspectWebsiteUrlForTool(organisationId, url);
-    }
-    if (name === "audit_site_indexability") {
-      return auditSiteIndexabilityForTool(organisationId, {
-        sitemapUrl: typeof args.sitemapUrl === "string" ? args.sitemapUrl : null,
-        urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : null,
-        limit: typeof args.limit === "number" ? args.limit : null,
-      });
-    }
-    if (name === "read_index_status") {
-      return readIndexStatusForTool(organisationId, {
-        url: typeof args.url === "string" ? args.url : null,
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-      });
-    }
-    if (name === "request_gsc_index_check") {
-      return triggerGscIndexCheckN8n({
-        organisationId,
-        urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : undefined,
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-      });
-    }
-    if (name === "update_seo_task") {
-      const taskId = String(args.taskId ?? "").trim();
-      const nullable = (v: unknown) =>
-        v === undefined ? undefined : v === null ? null : String(v);
-      return updateSeoTaskForTool(organisationId, taskId, {
-        title: args.title !== undefined ? String(args.title) : undefined,
-        url: nullable(args.url),
-        keyword: nullable(args.keyword),
-        action: nullable(args.action),
-        status:
-          args.status !== undefined
-            ? (String(args.status) as "open" | "in_progress" | "done" | "wont_fix")
-            : undefined,
-        priority:
-          args.priority === undefined
-            ? undefined
-            : args.priority === null
-              ? null
-              : String(args.priority),
-        currentStatus: nullable(args.currentStatus),
-        notes: nullable(args.notes),
-      });
-    }
-    if (name === "delete_seo_task") {
-      const taskId = String(args.taskId ?? "").trim();
-      return deleteSeoTaskForTool(organisationId, taskId);
-    }
-    if (name === "check_serp_snippet") {
-      return formatSerpSnippetCheckForTool({
-        title: typeof args.title === "string" ? args.title : null,
-        description: typeof args.description === "string" ? args.description : null,
-      });
-    }
-    return null;
+    return await runDtRetrievalToolInner(organisationId, name, input);
   } catch (err) {
     return `Fehler beim Abrufen: ${err instanceof Error ? err.message : "unbekannt"}`;
   }
+}
+
+async function runDtRetrievalToolInner(
+  organisationId: string,
+  name: string,
+  input: unknown,
+): Promise<string | null> {
+  const args = (input ?? {}) as Record<string, unknown>;
+  if (name === "search_website_content") {
+    const query = String(args.query ?? "").trim();
+    if (!query) return "Kein Suchbegriff angegeben.";
+    const hits = await searchDtSitePages(organisationId, query, 5);
+    if (hits.length === 0) return `Keine Treffer für „${query}“ in den gecrawlten Seiten.`;
+    return hits
+      .map((h, i) => `${i + 1}. ${h.title ?? h.url}\n   URL: ${h.url}\n   Auszug: ${h.snippet}`)
+      .join("\n\n");
+  }
+  if (name === "read_website_page") {
+    const url = String(args.url ?? "").trim();
+    if (!url) return "Keine URL angegeben.";
+    const page = await getDtSitePageContent(organisationId, url);
+    if (!page) return `Keine gecrawlte Seite für ${url} gefunden.`;
+    if (!page.content.trim()) {
+      return `Seite ${page.url} ist gecrawlt, enthält aber keinen extrahierbaren Text (evtl. JavaScript-gerendert).`;
+    }
+    return `Inhalt von ${page.url}${page.title ? ` (${page.title})` : ""}:\n\n${page.content}`;
+  }
+  if (name === "read_full_seo_report") {
+    const report = await loadLatestDtSeoReportRawForOrg(organisationId);
+    return formatSeoReportRawForTool(report);
+  }
+  if (name === "read_sitemap") {
+    const sitemapUrl = typeof args.sitemapUrl === "string" ? args.sitemapUrl : null;
+    return readSitemapForTool(organisationId, sitemapUrl);
+  }
+  if (name === "inspect_website_url") {
+    const url = String(args.url ?? "").trim();
+    if (!url) return "Keine URL angegeben.";
+    return inspectWebsiteUrlForTool(organisationId, url);
+  }
+  if (name === "audit_site_indexability") {
+    return auditSiteIndexabilityForTool(organisationId, {
+      sitemapUrl: typeof args.sitemapUrl === "string" ? args.sitemapUrl : null,
+      urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : null,
+      limit: typeof args.limit === "number" ? args.limit : null,
+    });
+  }
+  if (name === "read_index_status") {
+    return readIndexStatusForTool(organisationId, {
+      url: typeof args.url === "string" ? args.url : null,
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    });
+  }
+  if (name === "request_gsc_index_check") {
+    return triggerGscIndexCheckN8n({
+      organisationId,
+      urls: Array.isArray(args.urls) ? args.urls.map((u) => String(u)) : undefined,
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    });
+  }
+  if (name === "update_seo_task") {
+    const taskId = String(args.taskId ?? "").trim();
+    const nullable = (v: unknown) =>
+      v === undefined ? undefined : v === null ? null : String(v);
+    return updateSeoTaskForTool(organisationId, taskId, {
+      title: args.title !== undefined ? String(args.title) : undefined,
+      url: nullable(args.url),
+      keyword: nullable(args.keyword),
+      action: nullable(args.action),
+      status:
+        args.status !== undefined
+          ? (String(args.status) as "open" | "in_progress" | "done" | "wont_fix")
+          : undefined,
+      priority:
+        args.priority === undefined
+          ? undefined
+          : args.priority === null
+            ? null
+            : String(args.priority),
+      currentStatus: nullable(args.currentStatus),
+      notes: nullable(args.notes),
+    });
+  }
+  if (name === "delete_seo_task") {
+    const taskId = String(args.taskId ?? "").trim();
+    return deleteSeoTaskForTool(organisationId, taskId);
+  }
+  if (name === "update_grounding_page") {
+    const str = (v: unknown) => (v === undefined || v === null ? undefined : String(v));
+    return updateGroundingPageForTool(organisationId, {
+      url: String(args.url ?? ""),
+      kind: args.kind === "hub" || args.kind === "entity" ? args.kind : undefined,
+      entityName: str(args.entityName),
+      slug: str(args.slug),
+      status:
+        args.status === "approved" || args.status === "draft" ? args.status : undefined,
+      dateModified: str(args.dateModified),
+      lastReviewed: str(args.lastReviewed),
+      reviewedBy: str(args.reviewedBy),
+      standardVersion: str(args.standardVersion),
+      uploadedAt: str(args.uploadedAt),
+      note: str(args.note),
+    });
+  }
+  if (name === "start_grounding_draft") {
+    return startGroundingDraftForTool(organisationId, {
+      kind: args.kind === "entity" ? "entity" : "hub",
+      url: String(args.url ?? ""),
+      entityName: typeof args.entityName === "string" ? args.entityName : null,
+      slug: typeof args.slug === "string" ? args.slug : null,
+    });
+  }
+  if (name === "answer_grounding_draft") {
+    return answerGroundingDraftForTool(organisationId, {
+      url: String(args.url ?? ""),
+      answers: String(args.answers ?? ""),
+    });
+  }
+  if (name === "check_serp_snippet") {
+    return formatSerpSnippetCheckForTool({
+      title: typeof args.title === "string" ? args.title : null,
+      description: typeof args.description === "string" ? args.description : null,
+    });
+  }
+  return null;
 }
 
 function textOfContentBlock(block: Anthropic.ContentBlockParam): string | null {
@@ -470,16 +581,44 @@ export function dtAnthropicModelsForMode(mode: DtChatMode): string[] {
   return [...new Set([primary, ...fallbacks].map((model) => model.trim()).filter(Boolean))];
 }
 
+/**
+ * Short technical reason for the generic failure text, so an admin can read the cause
+ * in the chat instead of the server log: "400 invalid_request_error: …".
+ * The Anthropic SDK nests the API error one level deeper (`err.error.error`).
+ */
+export function dtChatFailureDetail(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+  const extra = err as {
+    status?: unknown;
+    error?: { message?: unknown; type?: unknown; error?: { message?: unknown; type?: unknown } };
+    message?: unknown;
+  };
+  const api = extra.error?.error ?? extra.error;
+  const type = typeof api?.type === "string" ? api.type : "";
+  const apiMessage = typeof api?.message === "string" ? api.message : "";
+  const own = typeof extra.message === "string" ? extra.message : "";
+  const text = (apiMessage || own).replace(/\s+/g, " ").trim();
+  if (!text && !type) return null;
+  const parts = [
+    typeof extra.status === "number" ? String(extra.status) : "",
+    type,
+  ].filter(Boolean);
+  const head = parts.join(" ");
+  const body = text.length > 220 ? `${text.slice(0, 217)}…` : text;
+  return [head, body].filter(Boolean).join(": ");
+}
+
 export function dtChatFailureUserMessage(err: unknown): string {
   const chunks: string[] = [];
   if (err instanceof Error && err.message) chunks.push(err.message);
   if (err && typeof err === "object") {
     const extra = err as {
       status?: unknown;
-      error?: { message?: unknown; type?: unknown };
+      error?: { message?: unknown; type?: unknown; error?: { message?: unknown; type?: unknown } };
     };
-    if (typeof extra.error?.message === "string") chunks.push(extra.error.message);
-    if (typeof extra.error?.type === "string") chunks.push(extra.error.type);
+    const api = extra.error?.error ?? extra.error;
+    if (typeof api?.message === "string") chunks.push(api.message);
+    if (typeof api?.type === "string") chunks.push(api.type);
     if (typeof extra.status === "number") chunks.push(String(extra.status));
   }
   const blob = chunks.join(" ");
@@ -515,22 +654,61 @@ export function dtChatFailureUserMessage(err: unknown): string {
   if (/rate.?limit|overloaded|529/i.test(blob)) {
     return "Die KI ist gerade überlastet. Bitte in einem Moment erneut versuchen.";
   }
-  return "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.";
+  const detail = dtChatFailureDetail(err);
+  return detail
+    ? `KI-Antwort fehlgeschlagen (${detail}). Bitte erneut versuchen.`
+    : "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.";
 }
 
-function resultFromResponse(
-  resp: Anthropic.Message,
-  model: string,
-  usage: DtAnthropicUsage,
-  createdFiles: DtCreatedChatFile[],
-): DtAnthropicChatResult {
-  return {
-    text: extractAnthropicText(resp) || "Keine Antwort erhalten.",
-    model,
-    stopReason: resp.stop_reason ?? null,
-    usage,
-    createdFiles,
-  };
+const DT_TRUNCATED_ANSWER_NOTE =
+  "(Die Antwort wurde am Längenlimit abgeschnitten. Bitte um Fortsetzung bitten oder in kleineren Schritten fragen, z. B. eine Aufgabe nach der anderen.)";
+
+const DT_CONTINUE_TRUNCATED_TEXT_PROMPT =
+  "Deine Antwort wurde am Ausgabelimit abgeschnitten. Setze exakt an der Stelle fort, an der du aufgehört hast — ohne Wiederholung und ohne Einleitung.";
+
+function truncatedToolCallResult(toolName: string, maxTokens: number): string {
+  return (
+    `Der Aufruf von ${toolName} wurde abgebrochen: Die Antwort hat das Ausgabelimit von ${maxTokens} Tokens überschritten, bevor der Aufruf vollständig war. Es wurde nichts erstellt oder geändert. ` +
+    `Antworte stattdessen direkt im Chat in kompakter Form — oder teile den Inhalt auf mehrere kleinere Dateien (max. ${DT_MAX_CREATED_FILE_CHARS} Zeichen je Datei) bzw. auf mehrere Antworten auf (z. B. Aufgabe für Aufgabe) und biete dem Nutzer die Fortsetzung an.`
+  );
+}
+
+/** Anthropic rejects empty text blocks in history; a stream cut off at a block start leaves one. */
+function assistantContentForHistory(resp: Anthropic.Message): Anthropic.ContentBlock[] {
+  return resp.content.filter((block) => block.type !== "text" || block.text.trim().length > 0);
+}
+
+/** Collects what the model wrote across tool rounds and continuation rounds of one turn. */
+class DtAnswerAccumulator {
+  private text = "";
+
+  /** Text written before a tool call or before the limit cut it off. */
+  append(part: string): void {
+    const trimmed = part.trim();
+    if (!trimmed) return;
+    this.text = this.text ? `${this.text}\n\n${trimmed}` : trimmed;
+  }
+
+  /** The model picked up mid-sentence, so no separator. */
+  appendContinuation(part: string): void {
+    if (!part.trim()) return;
+    if (!this.text) {
+      this.text = part.trim();
+      return;
+    }
+    this.text = `${this.text.replace(/\s+$/, "")}${part.replace(/^\s+/, " ")}`;
+  }
+
+  add(part: string, continuation: boolean): void {
+    if (continuation) this.appendContinuation(part);
+    else this.append(part);
+  }
+
+  finish(resp: Anthropic.Message, continuation: boolean): string {
+    this.add(extractAnthropicText(resp), continuation);
+    if (resp.stop_reason === "max_tokens") this.append(DT_TRUNCATED_ANSWER_NOTE);
+    return this.text || "Keine Antwort erhalten.";
+  }
 }
 
 export async function callDtAnthropicChat(params: {
@@ -561,14 +739,15 @@ export async function callDtAnthropicChat(params: {
   const roundTimeoutMs = params.mode === "seo" ? 180_000 : 120_000;
 
   const retrievalOrgId = params.mode === "seo" ? params.retrieval?.organisationId : undefined;
-  const tools: Anthropic.Tool[] = retrievalOrgId
-    ? [...DT_SEO_RETRIEVAL_TOOLS, DT_CREATE_FILE_TOOL]
+  // SEO mode also gets Anthropic's server-side web search + web fetch (max uses per answer).
+  const tools: Anthropic.ToolUnion[] = retrievalOrgId
+    ? [...DT_SEO_RETRIEVAL_TOOLS, DT_CREATE_FILE_TOOL, ...DT_WEB_RESEARCH_TOOLS]
     : [DT_CREATE_FILE_TOOL];
   const createdFiles: DtCreatedChatFile[] = [];
 
   const createRound = async (input: {
     convo: Anthropic.MessageParam[];
-    tools?: Anthropic.Tool[];
+    tools?: Anthropic.ToolUnion[];
   }): Promise<{ response: Anthropic.Message; model: string }> => {
     const result = await callAnthropicFirstAvailable({
       anthropic: client,
@@ -610,9 +789,26 @@ export async function callDtAnthropicChat(params: {
   };
 
   const convo: Anthropic.MessageParam[] = [...messages];
-  let lastResp: Anthropic.Message | null = null;
+  const answer = new DtAnswerAccumulator();
   let usedModel = models[0] ?? resolveDtAnthropicModel(params.mode);
   let totalUsage: DtAnthropicUsage = { inputTokens: 0, outputTokens: 0 };
+  let webUsage: DtWebResearchUsage = { webSearchRequests: 0, webFetchRequests: 0 };
+  /** Every content block seen across rounds: web-search limit errors + citations live here. */
+  const seenBlocks: unknown[] = [];
+  let recoveries = 0;
+  // True while the current round continues text that the limit cut off.
+  let continuing = false;
+
+  const finish = (resp: Anthropic.Message): DtAnthropicChatResult => ({
+    text: appendWebResearchNotes(
+      answer.finish(resp, continuing),
+      inspectWebResearchBlocks(seenBlocks),
+    ),
+    model: usedModel,
+    stopReason: resp.stop_reason ?? null,
+    usage: { ...totalUsage, ...webUsage },
+    createdFiles,
+  });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const roundResult = await createRound({
@@ -621,18 +817,63 @@ export async function callDtAnthropicChat(params: {
     });
     const resp = roundResult.response;
     usedModel = roundResult.model;
-    lastResp = resp;
     totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(resp.usage));
+    webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(resp.usage));
+    seenBlocks.push(...resp.content);
 
-    if (resp.stop_reason !== "tool_use") {
-      return resultFromResponse(resp, usedModel, totalUsage, createdFiles);
+    // Server tools (web search / fetch) may pause a long turn: keep the text so far,
+    // hand the content back unchanged and let the model continue.
+    if (resp.stop_reason === "pause_turn") {
+      answer.add(extractAnthropicText(resp), continuing);
+      continuing = false;
+      convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
+      continue;
     }
 
     const toolUses = resp.content.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
     );
 
-    convo.push({ role: "assistant", content: resp.content });
+    if (resp.stop_reason === "max_tokens" && recoveries < MAX_TRUNCATION_RECOVERIES) {
+      recoveries += 1;
+      const roundText = extractAnthropicText(resp);
+      answer.add(roundText, continuing);
+      continuing = false;
+
+      if (toolUses.length > 0) {
+        // The limit cut a tool call off mid-JSON (typically one huge create_file).
+        // Running the fragment would produce a broken file; let the model answer
+        // compactly or split the work instead of returning an empty turn.
+        convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
+        convo.push({
+          role: "user",
+          content: toolUses.map((tu) => ({
+            type: "tool_result" as const,
+            tool_use_id: tu.id,
+            is_error: true,
+            content: truncatedToolCallResult(tu.name, max_tokens),
+          })),
+        });
+        continue;
+      }
+
+      if (roundText) {
+        convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
+        convo.push({ role: "user", content: DT_CONTINUE_TRUNCATED_TEXT_PROMPT });
+        continuing = true;
+        continue;
+      }
+    }
+
+    if (resp.stop_reason !== "tool_use") {
+      return finish(resp);
+    }
+
+    // Keep what the model said before calling tools; it is part of the answer.
+    answer.add(extractAnthropicText(resp), continuing);
+    continuing = false;
+
+    convo.push({ role: "assistant", content: assistantContentForHistory(resp) });
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const tu of toolUses) {
@@ -646,17 +887,10 @@ export async function callDtAnthropicChat(params: {
   usedModel = finalRound.model;
   const finalResp = finalRound.response;
   totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(finalResp.usage));
+  webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(finalResp.usage));
+  seenBlocks.push(...finalResp.content);
 
-  return {
-    text:
-      extractAnthropicText(finalResp) ||
-      (lastResp ? extractAnthropicText(lastResp) : "") ||
-      "Keine Antwort erhalten.",
-    model: usedModel,
-    stopReason: finalResp.stop_reason ?? null,
-    usage: totalUsage,
-    createdFiles,
-  };
+  return finish(finalResp);
 }
 
 /** Sync truncation fallback (migration / callers without Anthropic). Prefer `resolveDtAutoTitleAfterTurn`. */

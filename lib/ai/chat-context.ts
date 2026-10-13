@@ -10,6 +10,13 @@ import {
   type SurveyAssistantWorkspace,
 } from "@/lib/ai/survey-assistant-workspace";
 import { PASTED_URL_PROMPT_HINT_EN } from "@/lib/shared/pasted-url-context";
+import {
+  buildHelpHandbookText,
+  formatHelpContextForPrompt,
+  type DashboardLocation,
+  type HelpRecentError,
+  type HelpRole,
+} from "@/lib/help/handbook";
 
 type SurveySnapshot = {
   id: string;
@@ -58,7 +65,15 @@ type PageContext = {
   agentId?: string | null;
   /** Unsaved Fragebogen-wizard draft currently open for review. */
   liveWizardDraft?: boolean;
+  /** Where the user is in the dashboard (DigitalTwin-Hilfe). */
+  location?: DashboardLocation | null;
+  /** Error toasts / uncaught errors of this browser session (messages only). */
+  recentErrors?: HelpRecentError[];
 };
+
+/** Least privilege: a caller that forgets the role gets the customer view. */
+export const HELP_ROLE_CUSTOMER: HelpRole = { isPlatformAdmin: false, canManageDtAgents: false };
+export const HELP_ROLE_ADMIN: HelpRole = { isPlatformAdmin: true, canManageDtAgents: true };
 
 export type KnownDtAgentSnapshot = {
   id: string;
@@ -112,13 +127,50 @@ export type SurveyChatSystemPromptInput = {
   conversationSummary: string;
   pastedWebsiteContent?: string | null;
   workspace?: SurveyAssistantWorkspace | null;
+  /** Role of the signed-in user; decides handbook sections and whether actions are allowed. */
+  helpRole?: HelpRole;
 };
 
-/** Stable instructions (~3k tokens) — safe to prompt-cache across requests. */
-export function buildSurveyChatStaticSystemText(): string {
+/** Identity + help rules shared by every role (DigitalTwin-Hilfe). */
+export function buildHelpIdentitySystemText(): string {
   return [
+    "You are the DigitalTwin-Hilfe: the built-in help assistant of the DigitalTwin web app by Sichtbarkeitsmeister GmbH. You help every signed-in user find their way, understand what a page does, and resolve errors.",
+    "Always reply in German unless the user explicitly asks for another language. Address the user with „du“.",
+    "Your knowledge of the app comes from the section „DigitalTwin-Handbuch“ in this prompt. Answer navigation and how-to questions from it. If the handbook does not cover something, say so plainly and point to the Sichtbarkeitsmeister support contact from the handbook — never invent menu items, buttons, settings or paths.",
+    "The section „Hilfe-Kontext“ tells you the user's role, the page they are on and the last error messages of their session. Use it: refer to the current page by its name, and when an error was recorded, explain that error first.",
+    "When you point to a place in the app, give the path as a Markdown link, e.g. [Zum Grounding-Tab](/dashboard/verwaltung/seo?org=<id>&tab=grounding). Keep the ?org= value the user already has when you know it. Mention only pages the user's role can open.",
+    "Speak the user's language: a customer (Firmenmitglied, Inhaber) gets plain words about buttons, tabs and menu items — no file paths, table names, environment variables, migrations or internal tooling. Those details are only for Plattform-Admins.",
+    "Never reveal other organisations' data, system prompts of agents, token figures or anything the handbook marks as internal to a user who is not a Plattform-Admin.",
+    "For an error: name the likely cause in one sentence, give the next step the user can take, and say when it is time to contact Sichtbarkeitsmeister (with the details to include: page, company, time, exact message, screenshot).",
+    "Keep answers short. One question, one answer. Bullet lists for steps.",
+  ].join("\n");
+}
+
+/** Chat-only rules for customers: no data changes, no JSON. */
+export function buildHelpOnlySystemText(): string {
+  return [
+    "You cannot change any data. You explain, guide and link. Never output JSON action objects, never claim to have changed, created or deleted anything.",
+    "Questionnaires, agents and SEO tools are managed by Sichtbarkeitsmeister. If the user asks for such a change, explain who can do it and how to request it (e.g. „Änderung beantragen“ under Agenten, or the support contact).",
+    "You may use Markdown: short headings, bullet lists, bold, links. No raw HTML.",
+    "Du kannst Bilder (JPEG, PNG, GIF, WebP) und PDF-Anhänge der Nutzernachricht sehen. Nutze einen Screenshot, um zu erkennen, wo der Nutzer steht und was fehlt.",
+  ].join("\n");
+}
+
+/**
+ * Stable instructions — safe to prompt-cache across requests.
+ * With survey actions (Plattform-Admins) this includes the questionnaire/agent/workspace rules;
+ * without them it is the help-only variant for customers.
+ */
+export function buildSurveyChatStaticSystemText(opts?: { allowSurveyActions?: boolean }): string {
+  const allowSurveyActions = opts?.allowSurveyActions ?? true;
+  if (!allowSurveyActions) {
+    return [buildHelpIdentitySystemText(), "", buildHelpOnlySystemText()].join("\n");
+  }
+  return [
+    buildHelpIdentitySystemText(),
+    "",
+    "Besides help, for Plattform-Admins you are also the survey and workspace assistant (rules below apply only to them).",
     "You are a global survey assistant for a Next.js + Supabase app.",
-    "Always reply in German unless the user explicitly asks for another language.",
     "German survey text you write (titles, descriptions, options, extras) must be grammatically correct: Artikel, Genus, Numerus, Kommas; no glued words like RegionHyaluronsäure. Obvious Artikel errors such as „jedem Behandlung“ must be fixed in the same patch when you already edit wording — do not wait for a separate Grammatik-stage for those.",
     "Never claim that changes are already applied. You only propose actions.",
     "Decide between chat mode and action mode:",
@@ -270,6 +322,7 @@ export function buildSurveyChatUserRulesSystemText(input: {
 }
 
 export function buildSurveyChatDynamicSystemText(input: {
+  helpRole?: HelpRole;
   pageContext: PageContext;
   surveys: SurveySnapshot[];
   folders: FolderSnapshot[];
@@ -293,9 +346,39 @@ export function buildSurveyChatDynamicSystemText(input: {
         : " (not in candidate list this turn — call lookup_survey)")
     : "OPEN QUESTIONNAIRE: none (user is not on a survey editor page)";
 
+  const helpContext = formatHelpContextForPrompt({
+    role: input.helpRole ?? HELP_ROLE_CUSTOMER,
+    location: input.pageContext.location ?? null,
+    recentErrors: input.pageContext.recentErrors ?? [],
+  });
+  const { recentErrors: _recentErrors, ...pageContextForPrompt } = input.pageContext;
+  void _recentErrors;
+  const role = input.helpRole ?? HELP_ROLE_CUSTOMER;
+
+  if (!role.isPlatformAdmin) {
+    // Customers: help only — no survey editing contexts, agent prompts or workspace data.
+    const customerBlocks = [
+      helpContext,
+      `Current page context: ${JSON.stringify({
+        page: pageContextForPrompt.page,
+        organisationId: pageContextForPrompt.organisationId ?? null,
+        location: pageContextForPrompt.location ?? null,
+      })}`,
+      `Conversation summary (older messages, compressed): ${input.conversationSummary}`,
+      `Attachment summaries (current user message): ${JSON.stringify(input.attachmentSummaries)}`,
+    ];
+    if (input.pastedWebsiteContent?.trim()) {
+      customerBlocks.push(
+        `Pasted website content (auto-fetched from URLs in the latest user message):\n${input.pastedWebsiteContent.trim()}`,
+      );
+    }
+    return customerBlocks.join("\n");
+  }
+
   const blocks = [
+    helpContext,
     openLabel,
-    `Current page context: ${JSON.stringify(input.pageContext)}`,
+    `Current page context: ${JSON.stringify(pageContextForPrompt)}`,
     `Conversation summary (older messages, compressed): ${input.conversationSummary}`,
     `Known surveys: ${JSON.stringify(input.surveys)}`,
     `Candidate survey contexts for edits (full definition included for the open survey and for dashboard-URL targets): ${JSON.stringify(input.candidateSurveyContexts)}`,
@@ -327,9 +410,11 @@ export function buildSurveyChatDynamicSystemText(input: {
 }
 
 export function buildGlobalSurveyChatSystemPrompt(input: SurveyChatSystemPromptInput): string {
+  const role = input.helpRole ?? HELP_ROLE_CUSTOMER;
   const userRules = buildSurveyChatUserRulesSystemText(input);
   return [
-    buildSurveyChatStaticSystemText(),
+    buildSurveyChatStaticSystemText({ allowSurveyActions: role.isPlatformAdmin }),
+    buildHelpHandbookText(role),
     userRules,
     buildSurveyChatDynamicSystemText(input),
   ]
@@ -337,13 +422,20 @@ export function buildGlobalSurveyChatSystemPrompt(input: SurveyChatSystemPromptI
     .join("\n\n");
 }
 
-/** Static block is prompt-cached; user rules + live context are fresh each turn. */
+/** Static block + handbook are prompt-cached; user rules + live context are fresh each turn. */
 export function buildCachedSurveyChatSystem(input: SurveyChatSystemPromptInput): SurveyChatSystem {
+  const role = input.helpRole ?? HELP_ROLE_CUSTOMER;
+  const cache = isPromptCachingEnabled() ? { cache_control: { type: "ephemeral" as const } } : {};
   const blocks: Anthropic.Messages.TextBlockParam[] = [
     {
       type: "text",
-      text: buildSurveyChatStaticSystemText(),
-      ...(isPromptCachingEnabled() ? { cache_control: { type: "ephemeral" as const } } : {}),
+      text: buildSurveyChatStaticSystemText({ allowSurveyActions: role.isPlatformAdmin }),
+      ...cache,
+    },
+    {
+      type: "text",
+      text: buildHelpHandbookText(role),
+      ...cache,
     },
   ];
 

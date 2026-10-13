@@ -26,7 +26,7 @@ export function DtSeoWorkspace(props: {
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { writeUrl, tab } = useDtSeoWorkspaceUrl();
+  const { writeUrl, tab, groundingFocus } = useDtSeoWorkspaceUrl();
 
   const [orgFlags, setOrgFlags] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(props.organisations.map((o) => [o.id, o.seoEnabled])),
@@ -177,7 +177,7 @@ export function DtSeoWorkspace(props: {
             currentUserId={props.currentUserId}
             initialOrgId={orgId}
             initialChatId={initialChatId}
-            initialDraft={searchParams.get("draft")}
+            initialGroundingMode={groundingFocus}
             initialScope="all"
             embedded
             seoMode
@@ -279,9 +279,7 @@ export function DtSeoWorkspace(props: {
           <DtSeoGroundingPanel
             organisationId={orgId}
             canEdit={canManage}
-            onOpenChat={(chatId, draft) =>
-              writeUrl({ org: orgId, tab: "chat", chat: chatId, draft })
-            }
+            onOpenChat={() => writeUrl({ org: orgId, tab: "chat", chat: null, grounding: true })}
           />
         </div>
       ) : null}

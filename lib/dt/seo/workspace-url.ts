@@ -42,6 +42,8 @@ export function useDtSeoWorkspaceUrl() {
   const tab = useMemo(() => parseDtSeoTab(searchParams.get("tab")), [searchParams]);
   const taskStatus = useMemo(() => parseDtTaskStatus(searchParams.get("status")), [searchParams]);
   const taskFocus = searchParams.get("focus") === "1";
+  /** Chat tab opened with the „Grounding Page“ switch on. */
+  const groundingFocus = searchParams.get("grounding") === "1";
 
   const writeUrl = useCallback(
     (next: {
@@ -50,7 +52,8 @@ export function useDtSeoWorkspaceUrl() {
       tab?: DtSeoTabId | null;
       taskStatus?: DtTaskStatus | null;
       taskFocus?: boolean | null;
-      draft?: string | null;
+      /** Open the chat with the Grounding switch on. */
+      grounding?: boolean | null;
     }) => {
       const params = new URLSearchParams(searchParams.toString());
 
@@ -73,6 +76,11 @@ export function useDtSeoWorkspaceUrl() {
           params.delete("status");
           params.delete("focus");
         }
+        if (next.tab && next.tab !== "chat") params.delete("grounding");
+      }
+      if ("grounding" in next) {
+        if (next.grounding) params.set("grounding", "1");
+        else params.delete("grounding");
       }
       if ("taskStatus" in next) {
         if (next.taskStatus && next.taskStatus !== "open") params.set("status", next.taskStatus);
@@ -81,13 +89,6 @@ export function useDtSeoWorkspaceUrl() {
       if ("taskFocus" in next) {
         if (next.taskFocus) params.set("focus", "1");
         else params.delete("focus");
-      }
-      if ("draft" in next) {
-        if (next.draft) params.set("draft", next.draft);
-        else params.delete("draft");
-      }
-      if ("tab" in next && next.tab && next.tab !== "chat") {
-        params.delete("draft");
       }
 
       const qs = params.toString();
@@ -103,5 +104,5 @@ export function useDtSeoWorkspaceUrl() {
     [pathname, router, searchParams],
   );
 
-  return { writeUrl, searchParams, tab, taskStatus, taskFocus };
+  return { writeUrl, searchParams, tab, taskStatus, taskFocus, groundingFocus };
 }

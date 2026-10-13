@@ -7,8 +7,10 @@
  * (`ANBIETER_POINTS`) and the answers of the Anbieter-Fragebogen. The four strict fields
  * (anrede, branche, tonalitaet, verbotene_woerter) cannot be read reliably from prose:
  * `suggestTextSettings` only pre-fills the "Einstellungen für Texte" card, and a person
- * confirms the values. The avatar never feeds the suggestion: it is the reader the text is
- * written for, not the client's business.
+ * confirms the values. The branch is free text: an outright answer in the client data
+ * („Branche: Zahnarztpraxis“) fills it, keyword signals only suggest a group label, and
+ * without either the SEO specialist types it. The avatar never feeds the suggestion: it is
+ * the reader the text is written for, not the client's business.
  */
 
 import type { AnbieterItem } from "@/lib/dt/transcripts/workshop-model";
@@ -16,6 +18,15 @@ import type { AnbieterItem } from "@/lib/dt/transcripts/workshop-model";
 export const CONTENT_ANREDEN = ["Sie", "Du"] as const;
 export type ContentAnrede = (typeof CONTENT_ANREDEN)[number];
 
+/** Longest branch text the card and the database accept. */
+export const CONTENT_BRANCHE_MAX = 80;
+
+/**
+ * The three rule groups behind a free-text branch: which Branchenregel the prompts apply and
+ * which tone is the default (`brancheRuleGroup`). Their labels are also what the suggestion
+ * pre-fills when the client data only carries keyword signals, and what the former fixed
+ * values turn into.
+ */
 export const CONTENT_BRANCHEN = ["handwerk", "rechtsanwalt", "arzt"] as const;
 export type ContentBranche = (typeof CONTENT_BRANCHEN)[number];
 
@@ -24,6 +35,30 @@ export const CONTENT_BRANCHE_LABELS: Record<ContentBranche, string> = {
   rechtsanwalt: "Rechtsanwalt & Kanzlei",
   arzt: "Arzt & Praxis",
 };
+
+const BRANCHE_GROUP_PATTERNS: Record<Exclude<ContentBranche, "handwerk">, RegExp> = {
+  rechtsanwalt: /anw[aä]lt|kanzlei|jurist|notar(?!zt)|rechtsberat|rechtsgebiet|steuerberat|wirtschaftspr[üu]f|\brecht\b/i,
+  arzt: /[aä]rzt|\bpraxis|\bpraxen|patient|klinik|zahn|physio|ergotherap|logop[aä]d|heilpraktik|\bmvz\b|sprechstunde|therap|medizin|(?:alten|kranken|intensiv|senioren|h[äa]usliche )pflege|pflegedienst|pflegeheim|apothek|psycholog|osteopath|hebamm|optik|h[oö]rakustik|sanit[aä]tshaus|dental|chirurg|orthop[aä]d|dermatolog|kieferorthop/i,
+};
+
+/** Which Branchenregel and default tone a branch text gets; anything unspecific counts as Dienstleistung & Handwerk. */
+export function brancheRuleGroup(branche: string): ContentBranche {
+  if (BRANCHE_GROUP_PATTERNS.rechtsanwalt.test(branche)) return "rechtsanwalt";
+  if (BRANCHE_GROUP_PATTERNS.arzt.test(branche)) return "arzt";
+  return "handwerk";
+}
+
+/** Trimmed, single-spaced, capped; the former fixed values become their labels. */
+export function cleanBranche(value: string): string {
+  const text = value
+    .replace(/\s+/g, " ")
+    .replace(/^[\s„“"»«‚‘’'.\-–]+|[\s„“"»«‚‘’'.]+$/g, "")
+    .trim()
+    .slice(0, CONTENT_BRANCHE_MAX)
+    .trim();
+  const key = text.toLowerCase();
+  return (CONTENT_BRANCHEN as readonly string[]).includes(key) ? CONTENT_BRANCHE_LABELS[key as ContentBranche] : text;
+}
 
 /**
  * Tone options. Each sits in a different corner of formal ↔ casual, warm ↔ sober and
@@ -121,7 +156,8 @@ export function contentTonalitaetText(key: ContentTonalitaet): string {
 
 export type ContentTextSettings = {
   anrede: ContentAnrede;
-  branche: ContentBranche;
+  /** Free text („Zahnarztpraxis“); empty only in a suggestion the person still has to fill. */
+  branche: string;
   tonalitaet: ContentTonalitaet;
   verbotene_woerter: string[];
 };
@@ -131,8 +167,8 @@ export type ContentTextSettingsSuggestion = {
   /** Why a value was suggested, e.g. `„Kanzlei“ in „Unternehmen & Kern“`. Missing = default. */
   reasons: Partial<Record<keyof ContentTextSettings, string>>;
   /**
-   * Fields the heuristic could not settle. The value is only a placeholder then; the card
-   * shows an explicit notice and the person has to pick. Today only `branche` can be here.
+   * Fields the heuristic could not settle. The value is empty then; the card shows an
+   * explicit notice and the person has to type it. Today only `branche` can be here.
    */
   unclear: Array<keyof ContentTextSettings>;
 };
@@ -169,7 +205,9 @@ export type DtAgentForContent = {
 const STRICT_KEYS = new Set<string>(["name", "anrede", "branche", "tonalitaet", "verbotene_woerter"]);
 const SECTION_KEY = /^[a-z][a-z0-9_]{0,39}$/;
 const WORD_MAX = 80;
-const WORDS_MAX = 50;
+/** Forbidden words per organisation; a `.txt` list is cut here. */
+export const CONTENT_WORDS_MAX = 200;
+const WORDS_MAX = CONTENT_WORDS_MAX;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -322,14 +360,26 @@ export function parseWordList(text: string): string[] {
   return dedupe(text.split(/[,;\n]+/).map(cleanWord).filter(Boolean)).slice(0, WORDS_MAX);
 }
 
+/**
+ * The uploaded `.txt`: one forbidden word or phrase per line (a comma inside a line stays).
+ * A byte-order mark, bullets, blank lines and duplicates are dropped; the list is capped.
+ */
+export function parseWordFile(text: string): string[] {
+  return dedupe(
+    text
+      .replace(/^\uFEFF/, "")
+      .split(/\r\n|\r|\n/)
+      .map(cleanWord)
+      .filter(Boolean),
+  ).slice(0, WORDS_MAX);
+}
+
 export function cleanTextSettings(settings: ContentTextSettings): ContentTextSettings {
-  const branche = (CONTENT_BRANCHEN as readonly string[]).includes(settings.branche)
-    ? settings.branche
-    : "handwerk";
+  const branche = cleanBranche(settings.branche ?? "");
   return {
     anrede: settings.anrede === "Du" ? "Du" : "Sie",
     branche,
-    tonalitaet: contentTonalitaet(settings.tonalitaet)?.key ?? DEFAULT_TONALITAET[branche],
+    tonalitaet: contentTonalitaet(settings.tonalitaet)?.key ?? DEFAULT_TONALITAET[brancheRuleGroup(branche)],
     verbotene_woerter: dedupe(settings.verbotene_woerter.map(cleanWord).filter(Boolean)).slice(
       0,
       WORDS_MAX,
@@ -382,6 +432,28 @@ const BRANCHE_SIGNALS: Record<ContentBranche, { pattern: RegExp; weight: number 
 };
 
 const BRANCHE_PRIORITY: readonly ContentBranche[] = ["rechtsanwalt", "arzt", "handwerk"];
+
+/**
+ * A line that answers the branch question outright: a Fragebogen answer („In welcher Branche
+ * sind Sie tätig?: Zahnmedizin“) or a note in a workshop section („Branche: Dachdeckerei“).
+ */
+const BRANCHE_ANSWER_RE =
+  /^[ \t]*(?:[^:\n]{0,80}\b(?:branche|gewerbe|t[äa]tigkeitsfeld|gesch[äa]ftsfeld|gesch[äa]ftszweig|unternehmensart|art (?:des|ihres) unternehmens)\b[^:\n]{0,80}):[ \t]*(.+?)[ \t]*$/i;
+
+function findBrancheAnswer(
+  items: readonly WorkshopAnbieterSection[],
+): { value: string; section: string } | null {
+  for (const item of items) {
+    for (const line of (item.current ?? "").split(/\r?\n/)) {
+      const match = line.match(BRANCHE_ANSWER_RE);
+      if (!match) continue;
+      const value = cleanBranche(match[1] ?? "");
+      if (value.length < 2 || value.includes("?")) continue;
+      return { value, section: item.label?.trim() || item.key };
+    }
+  }
+  return null;
+}
 
 type BrancheSuggestion = {
   value: ContentBranche;
@@ -464,8 +536,10 @@ function suggestVerboteneWoerter(text: string): string[] {
 /**
  * Pre-fill for the "Einstellungen für Texte" card. Simple keyword heuristics: anrede,
  * tonalitaet and verbotene_woerter from the "sprache" section, branche from every client
- * section (workshop and Fragebogen). Only a suggestion: a person confirms the values before
- * anything is sent, and an unclear branch is flagged instead of silently set to Handwerk.
+ * section (workshop and Fragebogen). An outright answer to the branch question is taken as
+ * typed; keyword signals pre-fill the group label; without either the field stays empty and
+ * is flagged, so the SEO specialist types the branch. Only a suggestion: a person confirms
+ * the values before anything is sent.
  */
 export function suggestTextSettings(
   items: readonly WorkshopAnbieterSection[],
@@ -477,19 +551,26 @@ export function suggestTextSettings(
   const anrede = suggestAnrede(sprache.text);
   if (anrede.match) reasons.anrede = `„${anrede.match}“ in „${sprache.label}“`;
 
+  const answer = findBrancheAnswer(items);
   const branche = suggestBranche(items);
-  if (branche.unclear) {
+  let brancheText: string;
+  if (answer) {
+    brancheText = answer.value;
+    reasons.branche = `Antwort „${answer.value}“ in „${answer.section}“`;
+  } else if (branche.unclear) {
     unclear.push("branche");
+    brancheText = "";
     const rival = branche.unclear.competing;
     reasons.branche =
       rival && branche.hit
-        ? `${BRANCHE_UNCLEAR_PREFIX} – „${branche.hit.match}“ (${branche.hit.section}) spricht für ${CONTENT_BRANCHE_LABELS[branche.value]}, „${rival.match}“ (${rival.section}) für ${CONTENT_BRANCHE_LABELS[rival.branche]}. Bitte manuell wählen.`
-        : `${BRANCHE_UNCLEAR_PREFIX} – in den Anbieterfakten steht nichts zur Branche. Bitte manuell wählen.`;
-  } else if (branche.hit) {
-    reasons.branche = `„${branche.hit.match}“ in „${branche.hit.section}“`;
+        ? `${BRANCHE_UNCLEAR_PREFIX} – „${branche.hit.match}“ (${branche.hit.section}) spricht für ${CONTENT_BRANCHE_LABELS[branche.value]}, „${rival.match}“ (${rival.section}) für ${CONTENT_BRANCHE_LABELS[rival.branche]}. Bitte eintragen.`
+        : `${BRANCHE_UNCLEAR_PREFIX} – in den Anbieterfakten steht nichts zur Branche. Bitte eintragen.`;
+  } else {
+    brancheText = CONTENT_BRANCHE_LABELS[branche.value];
+    if (branche.hit) reasons.branche = `„${branche.hit.match}“ in „${branche.hit.section}“`;
   }
 
-  const tonalitaet = suggestTonalitaet(sprache.text, branche.value);
+  const tonalitaet = suggestTonalitaet(sprache.text, answer ? brancheRuleGroup(answer.value) : branche.value);
   if (tonalitaet.matches.length > 0) {
     const quoted = tonalitaet.matches.slice(0, 3).map((m) => `„${m}“`).join(", ");
     reasons.tonalitaet = `${quoted} in „${sprache.label}“`;
@@ -501,7 +582,7 @@ export function suggestTextSettings(
   return {
     settings: {
       anrede: anrede.value,
-      branche: branche.value,
+      branche: brancheText,
       tonalitaet: tonalitaet.value,
       verbotene_woerter: verboteneWoerter,
     },

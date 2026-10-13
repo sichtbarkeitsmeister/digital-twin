@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Menu } from "lucide-react";
+import { Menu, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import {
@@ -14,6 +14,8 @@ import { DtWunschkundenPanel } from "@/components/dt/chat/dt-wunschkunden-panel"
 import { DtChatComposer } from "@/components/dt/chat/dt-chat-composer";
 import { DtChatFilePreview, type DtChatPreviewFile } from "@/components/dt/chat/dt-chat-file-preview";
 import { DtGhostBanner } from "@/components/dt/chat/dt-ghost-banner";
+import { DtGroundingBanner } from "@/components/dt/chat/dt-grounding-banner";
+import { DT_GROUNDING_CHAT_STARTERS } from "@/lib/dt/prompts/grounding-mode";
 import { DtPersonaTestingRail } from "@/components/dt/chat/dt-persona-testing-rail";
 import {
   DtChatSidebar,
@@ -78,6 +80,8 @@ export function DtChatShell(props: {
   embedded?: boolean;
   /** SEO workspace: private seo-mode chats with SEO advisor agent. */
   seoMode?: boolean;
+  /** Start with the „Grounding Page“ switch on (deep link from the Grounding tab). */
+  initialGroundingMode?: boolean;
   /** Platform-admin: browse and reply in any org member's chats. */
   adminOversight?: boolean;
   /** Platform-admin: show the internal prompt-context link. */
@@ -146,6 +150,7 @@ export function DtChatShell(props: {
   const [personaTesting, setPersonaTesting] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
   const [textMode, setTextMode] = useState(false);
+  const [groundingMode, setGroundingMode] = useState(Boolean(props.initialGroundingMode));
   const [previewFile, setPreviewFile] = useState<DtChatPreviewFile | null>(null);
   const closePreview = useCallback(() => setPreviewFile(null), []);
   const [dropHighlight, setDropHighlight] = useState(false);
@@ -230,6 +235,17 @@ export function DtChatShell(props: {
   );
 
   const isSeoChat = activeChat?.mode === "seo";
+  // The Grounding switch only exists for SEO chats; the server ignores it elsewhere.
+  const groundingAvailable = Boolean(props.seoMode) || isSeoChat;
+  const groundingActive = groundingMode && groundingAvailable;
+  const handleGroundingToggle = (next: boolean) => {
+    setGroundingMode(next);
+    if (next) setTextMode(false);
+  };
+  const handleTextModeToggle = (next: boolean) => {
+    setTextMode(next);
+    if (next) setGroundingMode(false);
+  };
   const showChatAuthors = Boolean(
     activeChat &&
       (activeChat.mode === "team" ||
@@ -268,7 +284,7 @@ export function DtChatShell(props: {
       : "default";
   const contextHref =
     props.isPlatformAdmin && selectedOrgId && selectedAgentId
-      ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}${textMode ? "&textMode=1" : ""}`
+      ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}${textMode ? "&textMode=1" : ""}${groundingActive ? "&groundingMode=1" : ""}`
       : null;
 
   const refreshChats = useCallback(async () => {
@@ -891,7 +907,11 @@ export function DtChatShell(props: {
         organisationId: selectedOrgId,
         agentId: selectedAgentId,
         mode: chatModeForCreate,
-        title: chatScope === "team" ? "Team-Chat" : "Neuer Chat",
+        title: groundingActive
+          ? "Grounding Page"
+          : chatScope === "team"
+            ? "Team-Chat"
+            : "Neuer Chat",
       }),
     });
     const json = (await res.json()) as { ok?: boolean; chat?: DtChatRow; message?: string };
@@ -963,6 +983,7 @@ export function DtChatShell(props: {
             history,
             attachments: outgoingAttachments,
             textMode,
+            groundingMode: groundingActive,
           }),
           signal: controller.signal,
         });
@@ -1000,6 +1021,7 @@ export function DtChatShell(props: {
           attachments: outgoingAttachments,
           ghostMode: false,
           textMode,
+          groundingMode: groundingActive,
         }),
         signal: controller.signal,
       });
@@ -1363,6 +1385,23 @@ export function DtChatShell(props: {
                 }
                 contextHref={contextHref}
               />
+              {groundingAvailable ? (
+                <button
+                  type="button"
+                  aria-pressed={groundingActive}
+                  disabled={isBusy}
+                  title="Grounding Page: Hub und Entitätsseiten nach Standard v1.7 prüfen, planen und als HTML-Datei erstellen"
+                  onClick={() => handleGroundingToggle(!groundingActive)}
+                  className={cn(
+                    "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-pill border border-sbkm-navy/15 bg-white/60 px-3 text-xs font-bold text-sbkm-navy transition hover:bg-sbkm-mint/20 active:scale-[0.98] disabled:opacity-60 dark:border-white/15 dark:bg-white/5 dark:text-white",
+                    groundingActive &&
+                      "border-sbkm-mint/60 bg-sbkm-mint/30 hover:bg-sbkm-mint/35 dark:bg-sbkm-mint/20",
+                  )}
+                >
+                  <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="hidden sm:inline">Grounding Page</span>
+                </button>
+              ) : null}
               <div className="ml-auto flex min-w-0 items-center gap-2">
                 <DtOrgWebsiteButton websiteUrl={selectedWebsiteUrl} />
                 <DtChatParticipantsBadge participants={participants} />
@@ -1375,7 +1414,10 @@ export function DtChatShell(props: {
             </header>
             ) : null}
 
-            <AnimatePresence>{ghostMode ? <DtGhostBanner /> : null}</AnimatePresence>
+            <AnimatePresence>
+              {ghostMode ? <DtGhostBanner /> : null}
+              {!ghostMode && groundingActive ? <DtGroundingBanner /> : null}
+            </AnimatePresence>
 
             <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -1392,7 +1434,11 @@ export function DtChatShell(props: {
                   teamMode={showChatAuthors}
                   authorLabels={authorLabels}
                   suggestedFollowUps={
-                    messages.length === 0 && !personaTesting ? quickActions : undefined
+                    messages.length === 0 && !personaTesting
+                      ? groundingActive
+                        ? [...DT_GROUNDING_CHAT_STARTERS]
+                        : quickActions
+                      : undefined
                   }
                   onSuggestedFollowUp={
                     messages.length === 0 && !personaTesting
@@ -1400,6 +1446,7 @@ export function DtChatShell(props: {
                       : undefined
                   }
                   seoTasks={props.seoMode || isSeoChat ? seoTasks : undefined}
+                  onNextStep={(text) => void handleSend(text)}
                   emptyHint={
                     ghostMode
                       ? "Probiere etwas aus — nichts wird in der Datenbank gespeichert."
@@ -1518,7 +1565,7 @@ export function DtChatShell(props: {
                   ghostMode={ghostMode}
                   onGhostModeChange={handleGhostToggle}
                   textMode={textMode}
-                  onTextModeChange={setTextMode}
+                  onTextModeChange={handleTextModeToggle}
                   attachments={attachments}
                   agentName={displayAgentName}
                   personaTestingAvailable={personaTestingAvailable}

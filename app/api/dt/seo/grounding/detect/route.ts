@@ -3,22 +3,27 @@ import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
+import { detectGroundingPageUploadedAt } from "@/lib/dt/seo/detect-grounding-page-date";
 import {
-  detectGroundingPageUploadedAt,
-  groundingDateColumnsFromDetection,
-} from "@/lib/dt/seo/detect-grounding-page-date";
-import { evaluateGroundingPageSchedule } from "@/lib/dt/seo/grounding-page-schedule";
-import {
-  GROUNDING_CONFIG_SELECT,
-  serializeGroundingRow,
-  type GroundingConfigRow,
+  DT_GROUNDING_PAGE_SELECT,
+  buildGroundingPageUpdate,
+  patchFromLiveFacts,
+  serializeGroundingPage,
+  summarizeGroundingPages,
 } from "@/lib/dt/seo/grounding-pages";
+import {
+  loadGroundingPageRow,
+  loadGroundingPageViews,
+} from "@/lib/dt/seo/grounding-pages-server";
+import type { DtGroundingPageRow } from "@/lib/dt/types";
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  /** Override; falls back to stored grounding_page_url. */
+  /** Existing page to read; falls back to `url`. */
+  pageId: z.string().uuid().optional(),
+  /** URL override (or the URL of a page not yet saved). */
   url: z.string().trim().url().max(2000).optional(),
-  /** Persist detected dates (+ URL) on the org config. */
+  /** Persist detected facts on the page (requires pageId). */
   apply: z.boolean().optional(),
 });
 
@@ -42,21 +47,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }
 
-  const { data: config, error: configError } = await auth.supabase
-    .from("dt_org_config")
-    .select(GROUNDING_CONFIG_SELECT)
-    .eq("organisation_id", orgId)
-    .maybeSingle();
-
-  if (configError || !config) {
-    return NextResponse.json(
-      { ok: false, message: configError?.message ?? "Konfiguration nicht gefunden." },
-      { status: 404 },
-    );
+  let page: DtGroundingPageRow | null = null;
+  if (parsed.data.pageId) {
+    page = await loadGroundingPageRow(auth.supabase, parsed.data.pageId);
+    if (!page || page.organisation_id !== orgId) {
+      return NextResponse.json(
+        { ok: false, message: "Grounding Page nicht gefunden." },
+        { status: 404 },
+      );
+    }
   }
 
-  const row = config as GroundingConfigRow;
-  const url = parsed.data.url?.trim() || row.grounding_page_url?.trim() || "";
+  const url = parsed.data.url?.trim() || page?.url?.trim() || "";
   if (!url) {
     return NextResponse.json(
       {
@@ -73,32 +75,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: detected.message }, { status: 422 });
   }
 
-  if (!parsed.data.apply) {
-    return NextResponse.json({
-      ok: true,
-      detection: detected,
-      schedule: evaluateGroundingPageSchedule({
-        uploadedAt: detected.appliesToUpload ? detected.detectedAt : row.grounding_page_uploaded_at,
-        lastReviewed: detected.lastReviewed?.at ?? row.grounding_page_last_reviewed,
-      }),
-    });
+  const patch = patchFromLiveFacts(page, detected);
+  if (!parsed.data.apply || !page) {
+    return NextResponse.json({ ok: true, detection: detected, patch });
   }
 
-  const noteLine = `Auto: ${detected.sourceLabel} (${new Date().toISOString().slice(0, 10)})`;
-  const prevNotes = (row.grounding_page_notes ?? "").trim();
-  const notes = prevNotes.includes("Auto:")
-    ? prevNotes.replace(/^Auto:.*$/m, noteLine).trim()
-    : [prevNotes, noteLine].filter(Boolean).join("\n");
+  const built = buildGroundingPageUpdate(patch, page);
+  if (!built.ok) {
+    return NextResponse.json({ ok: false, message: built.message, detection: detected }, { status: 400 });
+  }
 
   const { data: updated, error: updateError } = await auth.supabase
-    .from("dt_org_config")
-    .update({
-      grounding_page_url: detected.finalUrl || url,
-      ...groundingDateColumnsFromDetection(detected),
-      grounding_page_notes: notes || null,
-    })
-    .eq("organisation_id", orgId)
-    .select(GROUNDING_CONFIG_SELECT)
+    .from("dt_grounding_pages")
+    .update(built.update)
+    .eq("id", page.id)
+    .select(DT_GROUNDING_PAGE_SELECT)
     .maybeSingle();
 
   if (updateError || !updated) {
@@ -108,9 +99,13 @@ export async function POST(req: Request) {
     );
   }
 
+  const pages = await loadGroundingPageViews(auth.supabase, orgId);
   return NextResponse.json({
     ok: true,
     detection: detected,
-    grounding: serializeGroundingRow(updated as GroundingConfigRow),
+    patch,
+    page: serializeGroundingPage(updated as DtGroundingPageRow),
+    pages,
+    summary: summarizeGroundingPages(pages),
   });
 }

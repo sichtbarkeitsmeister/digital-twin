@@ -101,6 +101,11 @@ export function needsRephrase(block: ContentTextBlock): boolean {
   return blockPlainText(block).length >= MIN_TEXT_CHARS;
 }
 
+/** How many blocks of a text the step rewrites: the `total` of its progress. */
+export function rephraseBlockCount(blocks: readonly ContentTextBlock[]): number {
+  return blocks.filter(needsRephrase).length;
+}
+
 /**
  * Consecutive groups of blocks still to rewrite, each small enough for one quick call.
  * Blocks already in `done` are skipped, so a resumed run only pays for what is left.

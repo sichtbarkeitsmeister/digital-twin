@@ -39,6 +39,8 @@ export function DtChatThread(props: {
     messageId: string,
     proposals: DtSeoChatTaskProposal[],
   ) => Promise<{ ok?: boolean; message?: string }>;
+  /** „Nächste Schritte“ under the latest assistant answer. */
+  onNextStep?: (message: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -164,6 +166,11 @@ export function DtChatThread(props: {
                 onSaveAllTaskProposals={
                   m.role === "assistant" && props.onSaveAllTaskProposals
                     ? (proposals) => props.onSaveAllTaskProposals!(m.id, proposals)
+                    : undefined
+                }
+                onNextStep={
+                  m.role === "assistant" && i === visible.length - 1 && !props.isThinking
+                    ? props.onNextStep
                     : undefined
                 }
               />

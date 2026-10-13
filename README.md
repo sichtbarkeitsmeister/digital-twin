@@ -190,7 +190,7 @@ Jede Zeile ist eine **Umgebungsvariable**: ein Name und ein geheimer Wert. Lokal
 | `ANTHROPIC_DT_TITLE_MODEL` | Optionales günstigeres Modell für automatische Chat-Titel. |
 | `ANTHROPIC_DT_SURVEY_MODEL` | Modell, das aus einem Fragebogen einen Avatar schreibt. Standard: Sonnet. |
 | `ANTHROPIC_DT_SURVEY_MAX_TOKENS` | Wie lang diese Antwort werden darf. Standard ist hoch angesetzt, weil die Texte lang sind. |
-| `ANTHROPIC_SURVEY_CHAT_MODEL` | Modell für den Fragebogen-Assistenten im Gespräch. |
+| `ANTHROPIC_SURVEY_CHAT_MODEL` | Modell für die DigitalTwin-Hilfe im Gespräch (früher Fragebogen-Assistent). |
 | `ANTHROPIC_SURVEY_ACTION_MODEL` | Modell, wenn der Assistent den Fragebogen wirklich ändert. |
 | `ANTHROPIC_SURVEY_MODEL` | Älterer Ersatz nur für das Aktions-Modell. |
 | `ANTHROPIC_SURVEY_PROMPT_CACHE` | `1` lässt wiederkehrende Anweisungen zwischenspeichern. `0` schaltet das aus. |
@@ -233,7 +233,7 @@ Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthrop
 
 **Texte** liegt unter **Verwaltung**, neben SEO Modus (`/dashboard/verwaltung/texte`). Die Organisation wechselt man oben in der Leiste, wie bei SEO Modus und Agenten. Es braucht **keinen eigenen Dienst**. Die acht Schreibschritte laufen in der App selbst, als Hintergrund-Jobs (siehe Abschnitt 10, „Jobs“). Die KI ist Claude, aber über einen **eigenen Schlüssel**, damit die Ausgaben dieses Werkzeugs in der Anthropic Console für sich stehen.
 
-**Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql`, `database/migrations/20261008_dt_content_pages_source.sql`, `database/migrations/20261009_dt_content_excel_briefing.sql`, `database/migrations/20261010_dt_content_type_prompts.sql` und `database/migrations/20261011_dt_content_nine_steps.sql` im Supabase SQL Editor ausführen (in dieser Reihenfolge; die letzte erlaubt Schritt 9, vorher kannten die Tabellen nur acht Schritte). Solange die Tabellen oder Spalten fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ bzw. „… noch nicht auf dem neuesten Stand“ mit dem Dateinamen statt einer rohen Fehlermeldung.
+**Vor dem ersten Einsatz** einmal `database/migrations/20261006_dt_content_pipeline.sql`, `database/migrations/20261008_dt_content_pages_source.sql`, `database/migrations/20261009_dt_content_excel_briefing.sql`, `database/migrations/20261010_dt_content_type_prompts.sql`, `database/migrations/20261011_dt_content_nine_steps.sql` und `database/migrations/20261013_dt_content_branche_text.sql` im Supabase SQL Editor ausführen (in dieser Reihenfolge; die vorletzte erlaubt Schritt 9, die letzte macht die Branche zum freien Textfeld). Solange die Tabellen oder Spalten fehlen, zeigt die Seite „Die Datenbank ist noch nicht vorbereitet“ bzw. „… noch nicht auf dem neuesten Stand“ mit dem Dateinamen statt einer rohen Fehlermeldung.
 
 **Die neun Schritte** (einer je Hintergrund-Job): 1 Analyse (Suchintention, Keywords, Fragen, Hormozi-Bausteine, Faktenlage – schreibt noch nicht), 2 SEO (schreibt die ganze Seite), 3 Faktencheck (hält an, wenn nur der Kunde eine Frage beantworten kann), 4 GEO (für KI-Zitate: Kernantwort vorn, jeder Abschnitt für sich verständlich, „Zuletzt aktualisiert: [DATUM]“), 5 Hormozi (Hero-Satz, Value Equation, Handlungsaufforderungen – nur mit belegten Beweisen), 6 Vermenschlichung (nur Formulierung: kurze Sätze, keine Floskeln, bewertet sich selbst und versucht es bei schwacher Note einmal erneut), 7 Lektorat, 8 Watermark Entfernung (läuft als einziger Schritt auf Grok von xAI, mit eigenem Schlüssel `XAI_API_KEY`: formuliert jeden Satz neu; Überschriften, Abschnitts-ids, Fakten, Zahlen, Marker und Handlungsaufforderungen bleiben, dafür sorgt die App nach der Antwort. Der Schritt arbeitet in kleinen Gruppen von Abschnitten, je ein kurzer Grok-Aufruf, und speichert nach jeder Gruppe seinen Stand: Geht einem Durchlauf die Zeit aus, macht der nächste Tick dort weiter, die Statuszeile zeigt „… läuft (4 von 11 Abschnitten)“), 9 Endabnahme (hält für die Freigabe an, schreibt nichts). Jeder Schritt bekommt Anbieterfakten, Einstellungen, Avatar, Anmerkungen und das Briefing der Seite mit. Der SEO-Schritt lässt unter der H1 den Platzhalter „[HERO – wird in Schritt 5 gefuellt]“ stehen; Hormozi füllt ihn. Interne Links stehen als Marker `[LINK: Seitenname]` im Text, fehlende Zahlen als `[BITTE PRÜFEN: …]`.
 
@@ -250,7 +250,39 @@ Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthrop
 
 Das frühere Feld „Seiten eintragen“ (Seitenliste tippen) gibt es nicht mehr.
 
-**Branche.** Die Branche beschreibt das Geschäft des Kunden, nicht den Avatar. Der Vorschlag liest alle Anbieterfakten (Gesprächsabschnitte und Fragebogen-Antworten); Kanzlei- und Praxis-Wörter zählen doppelt, allgemeine Handwerks-Wörter einfach. Ist kein Signal da oder stehen zwei Branchen gleichauf, zeigt die Karte „Bitte manuell wählen“ mit der Begründung – Handwerk steht dann nur als Platzhalter im Feld. Die Branche lässt sich vor und nach dem Bestätigen jederzeit ändern („Ändern“).
+**Branche.** Die Branche beschreibt das Geschäft des Kunden, nicht den Avatar, und ist ein freies Textfeld („Zahnarztpraxis“, „Umzugsunternehmen“), das der SEO-Spezialist ausfüllt. Beantworten die Anbieterfakten die Frage direkt (eine Fragebogen-Antwort oder eine Zeile „Branche: …“ in einem Gesprächsabschnitt), steht die Antwort schon im Feld. Gibt es nur Signalwörter, steht die passende Gruppe als Vorschlag im Feld (Handwerk & Dienstleistung, Rechtsanwalt & Kanzlei, Arzt & Praxis; Kanzlei- und Praxis-Wörter zählen doppelt, allgemeine Handwerks-Wörter einfach). Ohne beides bleibt das Feld leer, die Karte sagt warum, und „Bestätigen“ geht erst mit einer eingetragenen Branche. Aus dem Text leitet die Pipeline die Branchenregel ab (Kanzlei, Praxis/Heilmittelwerbegesetz, sonst Dienstleistung & Handwerk) und den Standard-Ton. Migration `database/migrations/20261013_dt_content_branche_text.sql` (die früheren drei festen Werte werden zu ihren Bezeichnungen). Die Branche lässt sich vor und nach dem Bestätigen jederzeit ändern („Ändern“).
+
+**Verbotene Wörter** kommen aus einer `.txt`-Datei: ein Wort oder eine Wendung je Zeile, hochgeladen in der Karte „Einstellungen für Texte“ (höchstens 200, Doppelte fallen weg; die Datei wird im Browser gelesen, nichts wird abgelegt). Die Karte zeigt die geladene Liste, „Liste leeren“ entfernt sie. Was die Gespräche nahelegen, steht als Vorschlag vorab in der Liste.
+
+**Export.** Im Seitenfenster hat jede Seite mit Text zwei Knöpfe: **HTML exportieren** (vollständige HTML-Datei mit Titel) und **Text exportieren (.txt)** (nur der Text: Überschriften als Zeilen, Absätze, Listen mit Spiegelstrich, Links mit Adresse, ohne Auszeichnung).
+
+### SEO: Schritt 2 aus einem Briefing, ohne Seitenstruktur
+
+**SEO** liegt unter **Verwaltung**, direkt neben Texte (`/dashboard/verwaltung/seo-text`, Organisation wie bei Texte oben in der Leiste oder über `?org=`; die Adresse `/dashboard/verwaltung/seo` gehört dem SEO Modus). Es ist das eigenständige Textwerkzeug für eine einzelne Seite, die nicht in der Seitenstruktur steht und nicht durch die neun Schritte soll: **Seitenname** und **Seitentyp** (Hauptsilo-Seite, Unterseite, Ratgeberartikel, Standortseite – bestimmt die Textvorlage) eingeben, optional **Hauptsilo**, **Hauptkeyword**, **Nebenkeywords** (mit Komma), **H1-Optionen**, **Nutzerfragen** und **erlaubte interne Linkziele** (je eine je Zeile), **KI-Prompt** und **redaktionelle Anmerkungen**, optional eine Datei als **Material** hochladen (`.txt`, `.html`, `.pdf`, `.docx`, dieselben Grenzen wie bei GEO, gelesen von `lib/dt/text-tools/ingest.ts`; der Text dient nur zur Orientierung für Thema, Umfang und Begriffe, Fakten daraus zählen nur, wenn sie in den Anbieterfakten oder den Anmerkungen stehen), dann **Text schreiben**. Ohne Datei reicht das Briefing.
+
+Es läuft Schritt 2 „SEO“ aus Texte mit demselben Prompt, demselben Modell (Schreibmodell von Texte), derselben Textvorlage je Seitentyp, denselben Anbieterfakten, Einstellungen und Avatar der Organisation; das Ergebnis ist der vollständige Seitentext mit H1, Hero-Platzhalter, Zusammenfassung, Frage-Überschriften und Handlungsaufforderung, als Vorschau und als HTML- oder .txt-Download. Weil Schritt 2 aus der Analyse schreibt, läuft im selben Durchlauf vorher **Schritt 1 „Analyse“** mit demselben Prompt wie in Texte (zwei KI-Aufrufe, beide unter `text-tool.seo` abgerechnet, Keywords und Fragen aus dem Briefing bleiben gesetzt). Wer die Analyse schon hat (Ausgabe von Schritt 1 einer Texte-Seite), fügt sie als **Analyse-JSON** ein; dann läuft nur der SEO-Schritt. Die Analyse liegt nach dem ersten Aufruf auf der Job-Zeile (`result.analyse`): Reicht die Zeit des Ticks nicht für den zweiten Aufruf, schreibt der nächste Tick den Text aus der gespeicherten Analyse, und ein Modellfehler im SEO-Aufruf wiederholt nur diesen. Faktencheck, GEO, Hormozi und die weiteren Schritte laufen nicht; der Text landet nicht in Texte. Die bestätigten **Einstellungen für Texte** und die **Anbieterfakten** sind Voraussetzung (ohne Fakten schriebe der Schritt nur Platzhalter). Test: `npm run test:text-tools-seo` (Kontext-Aufbau aus dem Briefing, Prompt-Abgleich mit Schritt 1 und 2, Hero-Platzhalter, Zwei-Aufruf-Lauf mit Pause und Fortsetzung).
+
+### GEO: ein Texte-Schritt auf eine hochgeladene Datei
+
+**GEO** liegt unter **Verwaltung**, direkt neben Texte (`/dashboard/verwaltung/geo`, Organisation wie bei Texte oben in der Leiste oder über `?org=`). Es ist das eigenständige Textwerkzeug für fertige Texte, die nicht durch die neun Schritte sollen: eine Datei hochladen (`.txt`, `.html`, `.pdf`, `.docx`; das alte `.doc` bitte als `.docx` speichern; höchstens 10 MB, 60.000 Zeichen, 40 Abschnitte), optional Seitenname, redaktionelle Anmerkungen, Hauptfrage und Fan-out-Fragen (eine je Zeile) und ein Faktencheck-JSON aus Texte, dann **Verarbeiten**. Es läuft genau einmal Schritt 4 „GEO“ mit demselben Prompt, demselben Modell (Schreibmodell von Texte) und denselben Anbieterfakten, Einstellungen und Avatar der Organisation; Analyse, Faktencheck und die anderen Schritte laufen nicht. Ohne Fragen wird der Text nur nach den GEO-Regeln umgebaut, ohne Faktencheck wird Unbelegtes nur mit „[BITTE PRÜFEN: …]“ markiert, nicht gestrichen. Die bestätigten **Einstellungen für Texte** sind Voraussetzung; fehlen die Anbieterfakten, sagt die Seite das und läuft trotzdem.
+
+Die Datei wird auf dem Server gelesen (PDF mit `unpdf`, Word mit `mammoth`, beides schon für Chat-Anhänge im Einsatz) und in Abschnitte zerlegt: H1/H2/H3 aus HTML und Word werden Überschriften, bei reinem Text (auch PDF) gelten kurze Zeilen zwischen Leerzeilen, `#`-Zeilen und unterstrichene Zeilen als Überschrift, Zeilen mit `-`, `•` oder `1.` als Liste (die Regeln stehen in `lib/dt/text-tools/ingest.ts`). Die Abschnitte heißen `abschnitt-1`, `abschnitt-2` …; ein HTML-Export aus Texte kommt mit seinen eigenen Abschnitts-ids zurück. Der Durchlauf ist ein Hintergrund-Job (`text-tool.geo`, siehe Abschnitt 10), die Seite fragt alle paar Sekunden nach; das Ergebnis steht als Vorschau da und lässt sich wie in Texte als **HTML** (vollständige Datei) oder **Text (.txt)** herunterladen. Verbrauch und Kosten landen in der Token-Nutzung unter dem Modus `text-tool.geo`. Es braucht keine neue Tabelle und keine weiteren Umgebungsvariablen: Schlüssel und Modell sind die von Texte (`ANTHROPIC_DT_CONTENT_API_KEY`, `ANTHROPIC_DT_CONTENT_MODEL`).
+
+### Watermark Entfernung: Schritt 8 auf eine hochgeladene Datei
+
+**Watermark Entfernung** liegt ebenfalls unter **Verwaltung** (`/dashboard/verwaltung/watermark-entfernung`, Organisation wie bei Texte oben in der Leiste oder über `?org=`). Es ist das zweite eigenständige Textwerkzeug: eine Datei hochladen (dieselben Formate und Grenzen wie bei GEO, gelesen von `lib/dt/text-tools/ingest.ts`), optional Seitenname und Anmerkungen, dann **Verarbeiten**. Es läuft genau einmal Schritt 8 „Watermark Entfernung“ aus Texte: jeder Satz wird auf Grok (xAI) neu formuliert, Überschriften, Abschnitts-ids, Fakten, Zahlen, Marker und Handlungsaufforderungen bleiben – dieselbe Implementierung wie in der Pipeline (`lib/dt/content/pipeline/rephrase-runner.ts`, von Schritt 8 und dem Werkzeug gemeinsam genutzt, derselbe System-Prompt und dieselben Abschnittsgruppen aus `rephrase.ts`, derselbe Chunk-Prompt mit den bestätigten **Einstellungen für Texte** und den Anmerkungen). Anbieterfakten und Avatar braucht dieser Schritt nicht. Es gibt keinen Ausweg über Claude: ohne `XAI_API_KEY` sagt die Seite „Der Grok-Zugang für Texte ist nicht eingerichtet (XAI_API_KEY fehlt)“ und startet nicht.
+
+Der Durchlauf ist ein Hintergrund-Job (`text-tool.watermark`), der wie Schritt 8 in kleinen Abschnittsgruppen arbeitet und seinen Stand nach jeder Gruppe auf der Job-Zeile speichert (`result.progress`): Geht einem Tick des Workers die Zeit aus, gibt der Job den Stand zurück, wird ohne Fehlversuch neu eingeplant und macht im nächsten Tick dort weiter; auch ein Fehlversuch (Grok ausgelastet, Zeitlimit) setzt bei den noch offenen Gruppen an. Die Seite fragt alle paar Sekunden nach und zeigt „Neu formuliert: 4 von 11 Abschnitten“; Überschriften und Einzeiler unter 40 Zeichen bleiben unverändert und zählen nicht mit. Das Ergebnis steht als Vorschau da und lässt sich wie in Texte als **HTML** (vollständige Datei) oder **Text (.txt)** herunterladen. Verbrauch und Kosten landen in der Token-Nutzung unter dem Modus `text-tool.watermark`. Keine neue Tabelle, keine neuen Umgebungsvariablen: Schlüssel und Modell sind die von Schritt 8 (`XAI_API_KEY`, `XAI_DT_CONTENT_MODEL`). **Betrieb:** ob der Schlüssel gilt, welche Grok-Modelle er sieht und wie schnell sie eine Abschnittsgruppe beantworten, prüft `XAI_API_KEY=… npm run xai:check` (optional `XAI_DT_CONTENT_MODEL=…`); das ist der erste Griff, wenn das Werkzeug oder Schritt 8 mit „Grok … nicht verfügbar“ oder dem Zeitlimit stehen bleibt. Test: `npm run test:text-tools-watermark` (Abschnittsgruppen, Zusammenführen nach id, Grok-Aufruf mit nachgestelltem `fetch`, Fortsetzen nach Zeitmangel, Prompt ohne die Wörter des Menüpunkts).
+
+Die fünf Textwerkzeuge im Überblick:
+
+| Werkzeug | Adresse | Was es tut |
+|---|---|---|
+| Texte | `/dashboard/verwaltung/texte` | Seitentexte aus Briefing und Anbieterfakten in neun Schritten schreiben, prüfen, freigeben, exportieren. |
+| SEO | `/dashboard/verwaltung/seo-text` | Einen Seitentext aus einem Briefing (plus optional hochgeladenem Material) mit Schritt 2 „SEO“ schreiben lassen, Analyse im selben Durchlauf, als HTML oder .txt herunterladen. |
+| GEO | `/dashboard/verwaltung/geo` | Einen hochgeladenen Text einmal durch Schritt 4 „GEO“ schicken und als HTML oder .txt herunterladen. |
+| Watermark Entfernung | `/dashboard/verwaltung/watermark-entfernung` | Einen hochgeladenen Text einmal durch Schritt 8 „Watermark Entfernung“ (Grok) schicken, Fortschritt je Abschnitt, als HTML oder .txt herunterladen. |
+| Text-Modus im Chat | DigitalTwin-Chat, Schalter „Text-Modus“ | Freie Texte (Flyer, Posts, Mails) im Gespräch mit einem Avatar schreiben lassen. |
 
 **Woher die Fakten kommen.** Beides zählt, beides darf fehlen, solange das andere da ist:
 
@@ -338,7 +370,7 @@ Die Datenbank ist der Speicher. Tabellen sind Listen (Firmen, Nutzer, Chats, …
 1. In Supabase den **SQL Editor** öffnen.
 2. Den kompletten Inhalt von `database/schema.sql` einfügen und ausführen.  
    Das legt den Sockel an: Profile, Firmen, Mitglieder, Einladungen, Fragebögen und Antworten.
-3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 81 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
+3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 86 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
 4. In Supabase unter **Database → Extensions** prüfen, dass `pg_cron` und `pg_net` an sind. Die Job-Migration schaltet sie ein. `pg_cron` ist die Uhr, `pg_net` ist der Anruf von der Datenbank zur Website.
 5. Prüfen, dass bei den Tabellen **RLS** aktiv ist (Row Level Security).
 
@@ -368,7 +400,7 @@ Die Uhr heißt `jobs_runner_tick_30s` und läuft alle 30 Sekunden. Sie ruft `POS
 Die Migrationen legen private Ablage-Eimer an, **Buckets** genannt:
 
 - `dt-chat-attachments` für Dateien im DigitalTwin-Chat
-- `ai-chat-attachments` für Dateien im Fragebogen-Assistenten
+- `ai-chat-attachments` für Dateien in der DigitalTwin-Hilfe (früher Fragebogen-Assistent)
 
 Ohne diese Buckets scheitert der Upload.
 
@@ -463,6 +495,9 @@ Nach dem Login landet man auf `/dashboard/organisations`.
 | Agent-Kontext | Zeigt den zusammengebauten Auftrag an die KI. Intern, weil dort der ganze Prompt steht. |
 | SEO Modus | Crawl, Berichte, Aufgaben, Search Console, Grounding, Seitenstruktur. |
 | Texte | Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Organisation oben in der Leiste wechseln. |
+| SEO | Einen Seitentext aus einem Briefing mit Schritt 2 „SEO“ aus Texte schreiben lassen und als HTML oder .txt herunterladen. |
+| GEO | Eine hochgeladene Datei einmal durch den GEO-Schritt aus Texte schicken und als HTML oder .txt herunterladen. |
+| Watermark Entfernung | Eine hochgeladene Datei einmal durch Schritt 8 „Watermark Entfernung“ aus Texte (Grok) schicken und als HTML oder .txt herunterladen. |
 | Token-Nutzung | Wie viel die KI verbraucht hat. Kunden sehen das nicht. |
 | Transkripte | Gesprächsmitschriften auswerten und ins Wissen der Avatare übernehmen. |
 | Erstgespräch | Erstgespräche einer Firma. |
@@ -488,11 +523,27 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/digital-twin` | Chat- und Agenten-Bereich, zusätzlich zur Startseite. |
 | `/dashboard/verwaltung/seo` | SEO-Arbeitsplatz der Agentur. |
 | `/dashboard/verwaltung/texte` | Texte: Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, Organisation über `?org=`. |
+| `/dashboard/verwaltung/seo-text` | SEO: Briefing eingeben, optional eine Datei hochladen, Schritt 1 „Analyse“ und Schritt 2 „SEO“ aus Texte einmal laufen lassen, Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
+| `/dashboard/verwaltung/geo` | GEO: eine Datei hochladen, Schritt 4 „GEO“ aus Texte einmal darauf laufen lassen, Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
+| `/dashboard/verwaltung/watermark-entfernung` | Watermark Entfernung: eine Datei hochladen, Schritt 8 aus Texte einmal darauf laufen lassen (Grok, in Abschnittsgruppen), Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
 ---
 
 ## 10. Was im Hintergrund passiert
+
+### Diktieren im Chat
+
+Im DigitalTwin-Chat, im SEO-Chat und in der DigitalTwin-Hilfe gibt es im Eingabefeld ein Mikrofon. Ein Klick startet die **Spracherkennung des Browsers** (Web Speech API, Deutsch), der gesprochene Text erscheint live im Eingabefeld und lässt sich vor dem Senden korrigieren. Ein zweiter Klick beendet das Diktat. Chrome, Edge und Safari können das; in Firefox fehlt der Knopf. In Chrome geht die Tonspur zur Erkennung an Google, das gehört in die Datenschutzerklärung. Es gibt keinen Server-Anteil und keine Kosten; die Logik liegt in `lib/shared/speech-dictation.ts` und `components/dt/chat/use-speech-dictation.ts`.
+
+### DigitalTwin-Hilfe
+
+Unten rechts im Dashboard sitzt für alle eingeloggten Nutzer die **DigitalTwin-Hilfe** (`app/dashboard/_components/dashboard-sticky-survey-ai-assistant.tsx`). Sie beantwortet „Wo finde ich …“, „Was macht diese Seite“ und „Warum geht … nicht“.
+
+- **Wissen**: das Handbuch in `lib/help/handbook.ts`, eine kurze, rollengefilterte Fassung dieses READMEs. Mitglieder sehen Menü, Wege, Fehlerhilfe und Support-Kontakt; Inhaber zusätzlich Agenten; Plattform-Admins den SEO-Modus, Grounding, Texte und die Admin-Fehlerhilfe. Neue Seiten oder geänderte Wege dort nachpflegen.
+- **Kontext**: Rolle, aktuelle Seite (Pfad, Firma, SEO-Tab) und die letzten fünf Fehlermeldungen der Browser-Sitzung (Fehler-Toasts und unbehandelte Fehler, nur der Text). Links auf App-Seiten öffnen im selben Tab.
+- **Rollen**: Kunden bekommen nur Hilfe im Gespräch, keine Aktionen, keine Werkzeuge, keine Agenten-Prompts und keine Daten anderer Firmen. Für Plattform-Admins bleibt der Assistent zusätzlich der Fragebogen- und Workspace-Assistent mit Aktionen (Fragebögen, Ordner, Agenten-Prompts) und Crawl-Werkzeugen.
+- **Einstellungen**: unter `/settings` eigene Regeln für den Assistenten, pro Nutzer.
 
 ### Chat
 
@@ -513,6 +564,27 @@ Ein ausgefüllter Fragebogen kann einen Avatar erzeugen. Das läuft über Claude
 3. n8n ruft die App wieder auf und weist sich mit `DT_INTERNAL_WEBHOOK_SECRET` aus.
 4. Lange Website-Prüfungen laufen als Job `seo.crawl`. Die Datenbank-Uhr stößt `/api/jobs/run` an.
 5. Fertige Berichte kann der Firmeninhaber lesen. Die Bearbeitung bleibt bei der Agentur.
+
+### Grounding Pages
+
+Der Tab **Grounding** im SEO-Modus verwaltet je Firma die Grounding Pages nach dem Grounding Page Standard v1.7: einen **Hub** (Haupt-Grounding-Page) und beliebig viele **Entitätsseiten**, dazu die `llms.txt` der Domain. Je Seite stehen Upload-Datum, `dateModified`, `lastReviewed` (letzte menschliche Faktenprüfung), Prüfer, Standardversion und Status (Entwurf oder freigegeben) in `dt_grounding_pages` (Migration `database/migrations/20261012_dt_grounding_pages.sql`; sie übernimmt den bisherigen Hub aus `dt_org_config`).
+
+- **Fälligkeit**: drei Monate nach `lastReviewed`, Frühwarnung 14 Tage vorher. Ohne dokumentierte Prüfung gilt vorläufig das Upload-Datum.
+- **Von Seite lesen** holt die Werte von der Live-Seite in dieser Reihenfolge: JSON-LD `lastReviewed`, JSON-LD `dateModified`, sichtbarer Prüfhinweis („Fakten geprüft von … · Zuletzt von einem Menschen geprüft: …“), Meta-Tags, HTTP `Last-Modified`. Weichen Prüfhinweis und JSON-LD ab, landet das als Befund in der Notiz.
+- **Freigabe dokumentieren** setzt Prüfer und Prüfdatum; die Seite gilt dann als freigegeben (v1.7). Ein Prüfdatum in der Zukunft wird abgelehnt. Wird `dateModified` später neuer als `lastReviewed`, zeigt die Karte „nach Prüfung geändert“.
+- **Agent**: Im SEO-Chat und beim `geo_advisor` steht der Block „Grounding Pages (Tool-Kontext)“ im System-Prompt (auch im Agent-Kontext sichtbar). Mit dem Werkzeug `update_grounding_page` meldet der Agent je Seite URL, Status, `dateModified`, `lastReviewed`, Prüfer und Version zurück ins Tool.
+- **Grounding-Agent (Entwurf in vier Schritten)**: Eine ganze Grounding Page passt nicht in einen Chat-Zug (Vercel bricht nach 300 s ab). Deshalb baut der Tab **Grounding** jede Seite wie Texte als Hintergrund-Job `grounding.page` (`lib/dt/seo/grounding-run/`, `lib/jobs/handlers/grounding-page.ts`): **1 Fakten sammeln** (Anbieter-Fragebogen und Gespräche, Onboarding, gecrawlte Website-Seiten, bestehende Live-Seite, Wunschkunden-Wortwahl → Faktenbasis mit Quelle je Fakt; beim Hub zusätzlich Vorschläge für Entitätsseiten), **2 Faktencheck** (Befunde mit Vorschlag; hält mit „Braucht Sie“ an, wenn nur der Kunde eine Frage beantworten kann – Antworten im Tab eintragen oder „Ohne Antworten weiter“, dann bleiben unbelegte Fakten weg), **3 Seite bauen** (vollständige HTML-Datei: H1 = Entität, Lead, H2 mit Entitätsnamen, `<dl class="data-grid">`, Quellen und Stand, JSON-LD-Spiegelung, Standard-Zeile v1.6, kein Prüfhinweis), **4 Endprüfung** (Checkliste des Standards, korrigiert selbst, nennt, was ein Mensch prüfen muss). Danach steht die Seite auf „Entwurf fertig“: HTML-Datei und `llms.txt` herunterladen (`/api/dt/seo/grounding/pages/[id]/export`), auf der Website einfügen, Fakten prüfen, „Freigabe dokumentieren“. Vorgeschlagene Entitätsseiten legt ein Klick an; „Mit Anmerkung neu bauen“ wiederholt ab Schritt 3, „Neu erstellen“ beginnt von vorn. Zustände wie bei Texte: „Entwurf läuft“, „Pausiert“ (mit Grund, „Weiterlaufen lassen“), „Braucht Sie“, „Entwurf fertig“; ein toter Job wird beim Laden des Tabs repariert. Ergebnisse: `dt_grounding_pages` (Faktenbasis, Fragen, Befunde, HTML, Kosten) und `dt_grounding_steps` — **Migration `database/migrations/20261013_dt_grounding_drafts.sql` einmal ausführen**, sonst meldet der Tab das mit Dateinamen. Schlüssel: `ANTHROPIC_DT_GROUNDING_API_KEY`, sonst `ANTHROPIC_DT_CONTENT_API_KEY`, sonst `ANTHROPIC_API_KEY`; Modell wie Texte (`content_model` / `content_check_model`), Überschreibung mit `ANTHROPIC_DT_GROUNDING_MODEL`. Jeder Schritt schreibt Tokens und Kosten in `dt_grounding_steps` und `dt_llm_usage_events` (`mode = grounding.<Schritt>`).
+- **Schalter „Grounding Page“ im SEO-Chat** (Kopfzeile, `lib/dt/prompts/grounding-mode.ts`): für Bestand, Faktenlage, Planung der Entitätsseiten und Fragen zur Freigabe. Die Seite selbst baut der Chat nicht; er verweist auf „Entwurf erstellen“ im Tab. Der Schalter wird per `groundingMode` an `/api/dt/chats/[chatId]/messages`, `/api/dt/ghost/chat`, n8n und den Agent-Kontext (`groundingMode=1`) übergeben; „Text“ und „Grounding Page“ schließen sich aus. Der Tab öffnet den Chat mit `?tab=chat&grounding=1`.
+- **Tab Grounding**: Status, Hub, Entitätsseiten, llms.txt, je Seite der Entwurf des Agenten. Menschliche Schritte: „Von Seite lesen“, Fragen beantworten, „Freigabe dokumentieren“ (Prüfer + Prüfdatum) und „Entfernen“.
+- **Soft-404**: Leitet eine Website unbekannte Pfade (z. B. `/grounding/`) mit Status 200 auf die Startseite um, gilt das nicht als Fund. Die Startseite kann nicht als Grounding Page erfasst werden, und „Von Seite lesen“ übernimmt kein Datum von einer Weiterleitung auf die Startseite.
+
+### Websuche im SEO-Chat
+
+Der SEO-Chat hat Anthropics serverseitige **Websuche** und **Web-Abruf** (`lib/dt/seo/web-research.ts`). Sie laufen bei Anthropic, es gibt keinen eigenen Such-Loop. Gedacht für Nachfrage außerhalb der Avatare, Mitbewerber, die aktuelle Version des Grounding Page Standards und Branchenrecht; für die eigene Website bleiben die Crawl-Werkzeuge zuständig.
+
+- **Limit**: höchstens 10 Websuchen und 5 Web-Abrufe pro KI-Antwort. Ist das Limit erreicht, hängt der Chat einen festen Hinweis an die Antwort, dass weitere Suchen in dieser Antwort nicht möglich waren und eine neue Nachricht das Limit zurücksetzt. Der Hinweis kommt aus dem Code, nicht vom Modell.
+- **Quellen**: Zitierte Treffer erscheinen als Liste „Quellen (Websuche)“ unter der Antwort.
+- **Kosten**: 10 $ je 1.000 Suchen zusätzlich zu den Tokens, also höchstens 0,10 $ Suchgebühr pro Antwort; Web-Abruf kostet nur Tokens. Die Anzahl steht je KI-Antwort in `dt_llm_usage_events` (Migration `database/migrations/20261013_dt_llm_usage_web_search.sql`) und unter Token-Nutzung als eigene Kachel, in der Kostenschätzung und im Tages-Tooltip.
 
 ### Leadinfo
 
@@ -541,7 +613,11 @@ Es gibt drei Job-Arten:
 |---|---|
 | `seo.crawl` | Arbeitet die Warteschlange der Website-Prüfung ab. |
 | `leadinfo.normalize` | Macht aus einem rohen Leadinfo-Ereignis einen lesbaren Eintrag. |
+| `grounding.page` | Erstellt eine Grounding Page unter **SEO Modus → Grounding** in vier Schritten (1 Fakten sammeln, 2 Faktencheck, 3 Seite bauen, 4 Endprüfung); hält an, wenn der Faktencheck Fragen an den Kunden hat, und endet mit der HTML-Datei zur menschlichen Prüfung. Ergebnisse in `dt_grounding_pages` und `dt_grounding_steps`. |
 | `content.page` | Schreibt den Text einer Seite unter **Verwaltung → Texte**: so viele Schritte, wie in einen Aufruf passen (1 Recherche, 2 Gliederung, 3 Rohtext, 4 Faktencheck, 5 Tonalität & Avatar, 6 SEO-Feinschliff, 7 Lektorat, 8 Endabnahme), dann stellt er sich für den Rest wieder an. Er hält an, wenn der Faktencheck Fragen an den Kunden hat („Braucht Sie“) und nach der Endabnahme bis zur Freigabe. Jeder Fehler – auch ein unterbrochener Worker – zählt als Versuch; nach drei Versuchen pausiert die Seite mit Grund. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. Fakten kommen aus dem Anbieter-Fragebogen und aus den ausgewerteten Gesprächen. |
+| `text-tool.seo` | Ein Durchlauf des SEO-Werkzeugs unter **Verwaltung → SEO**: Schritt 1 „Analyse“ (außer ein Analyse-JSON wurde eingefügt), dann Schritt 2 „SEO“ für das Briefing; die Analyse liegt zwischen den beiden Aufrufen auf der Job-Zeile (`result.analyse`), bei Zeitmangel wird ohne Fehlversuch neu eingeplant. |
+| `text-tool.geo` | Ein Durchlauf des GEO-Werkzeugs unter **Verwaltung → GEO**: Schritt 4 einmal auf die hochgeladenen Abschnitte, Ergebnis auf der Job-Zeile. |
+| `text-tool.watermark` | Ein Durchlauf von **Verwaltung → Watermark Entfernung**: Schritt 8 (Grok) in Abschnittsgruppen auf die hochgeladenen Abschnitte; der Stand liegt zwischen zwei Ticks auf der Job-Zeile (`result.progress`), bei Zeitmangel wird ohne Fehlversuch neu eingeplant. |
 
 Ein Job, der zu oft scheitert, bleibt als fehlgeschlagen liegen und ist unter **Jobs** sichtbar.
 
@@ -661,7 +737,7 @@ Man muss sie nicht auswendig lernen. Sie sind nach Thema sortiert.
 | `app/api/dt/internal/` | Nur für n8n. Verlangt `DT_INTERNAL_WEBHOOK_SECRET`. |
 | `app/api/dt/onboarding/` | Onboarding-Dateien. |
 | `app/api/dt/transcripts/` und `app/api/dt/workshop/` | Mitschriften und Workshop. |
-| `app/api/ai/` | Fragebogen-Assistent. |
+| `app/api/ai/` | DigitalTwin-Hilfe (Chat-Routen, früher Fragebogen-Assistent). |
 | `app/api/surveys/` | Aus einer Antwort einen Avatar machen, nachschärfen, auf SEO anwenden. |
 | `app/api/notifications/` | Die zwei Fragebogen-Mails. |
 | `app/api/jobs/run` | Nimmt den Anruf der Datenbank-Uhr entgegen. |
@@ -675,7 +751,7 @@ Man muss sie nicht auswendig lernen. Sie sind nach Thema sortiert.
 | `lib/dt/` | DigitalTwin: Chat, Avatare, Prompts, Onboarding, SEO, Transkripte. |
 | `lib/dt/seo/` | SEO-Berichte, Crawl, Search Console, Aufgaben. |
 | `lib/dt/onboarding/` | Onboarding inklusive Verschlüsselung der Zugangsdaten. |
-| `lib/ai/` | Fragebogen-Assistent und Claude-Helfer. |
+| `lib/ai/` | DigitalTwin-Hilfe, Fragebogen-Aktionen und Claude-Helfer. `lib/help/` hält das Handbuch des Assistenten. |
 | `lib/surveys/` | Fragebogen-Regeln, Typen, Speichern. |
 | `lib/email/` | SMTP, Vorlagen, Einladung, Willkommen, Versand-Protokoll. |
 | `lib/jobs/` | Die zwei Hintergrund-Jobs und die Warteschlange. |

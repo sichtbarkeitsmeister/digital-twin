@@ -3,22 +3,20 @@ import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
-import {
-  detectGroundingPageUploadedAt,
-  groundingDateColumnsFromDetection,
-} from "@/lib/dt/seo/detect-grounding-page-date";
+import { detectGroundingPageUploadedAt } from "@/lib/dt/seo/detect-grounding-page-date";
 import {
   checkLlmsTxt,
   discoverGroundingPageUrl,
 } from "@/lib/dt/seo/discover-grounding-page-url";
 import {
-  GROUNDING_CONFIG_SELECT,
-  serializeGroundingRow,
-  validateGroundingEntityPages,
-  type GroundingConfigRow,
+  DT_GROUNDING_PAGE_SELECT,
+  buildGroundingPageUpdate,
+  patchFromLiveFacts,
+  summarizeGroundingPages,
 } from "@/lib/dt/seo/grounding-pages";
+import { loadGroundingPageViews } from "@/lib/dt/seo/grounding-pages-server";
 
-const SELECT = GROUNDING_CONFIG_SELECT;
+const CONFIG_SELECT = "organisation_id,website_url,grounding_llms_txt_url";
 
 const optionalUrl = z
   .union([z.string().trim().url().max(2000), z.literal(""), z.null()])
@@ -27,60 +25,22 @@ const optionalUrl = z
 
 const patchSchema = z.object({
   organisationId: z.string().uuid(),
-  uploadedAt: z
-    .union([
-      z.string().datetime({ offset: true }),
-      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum ungültig"),
-      z.null(),
-    ])
-    .optional()
-    .transform((v) => {
-      if (v === undefined) return undefined;
-      if (v == null) return null;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `${v}T12:00:00.000Z`;
-      return v;
-    }),
-  url: optionalUrl,
   llmsTxtUrl: optionalUrl,
-  notes: z.string().trim().max(2000).nullable().optional(),
-  dateModified: z
-    .union([
-      z.string().datetime({ offset: true }),
-      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum ungültig"),
-      z.null(),
-    ])
-    .optional(),
-  lastReviewed: z
-    .union([
-      z.string().datetime({ offset: true }),
-      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum ungültig"),
-      z.null(),
-    ])
-    .optional(),
-  reviewedBy: z.string().trim().max(160).nullable().optional(),
-  releaseStatus: z.enum(["draft", "released"]).nullable().optional(),
-  standardVersion: z.string().trim().max(40).nullable().optional(),
-  customerSlug: z
-    .union([
-      z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Kurzname ungültig").max(40),
-      z.literal(""),
-      z.null(),
-    ])
-    .optional(),
-  entityPages: z.array(z.unknown()).max(30).optional(),
 });
 
-function toStoredDate(value: string | null | undefined): string | null | undefined {
-  if (value === undefined) return undefined;
-  if (value == null) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T12:00:00.000Z`;
-  return value;
-}
-
-function blankToNull(value: string | null | undefined): string | null | undefined {
-  if (value === undefined) return undefined;
-  const trimmed = value?.trim() ?? "";
-  return trimmed ? trimmed : null;
+function llmsTxtPayload(llmsTxt: Awaited<ReturnType<typeof checkLlmsTxt>>) {
+  return llmsTxt.ok
+    ? {
+        found: true as const,
+        url: llmsTxt.url,
+        lastModified: llmsTxt.lastModified,
+        bytes: llmsTxt.bytes,
+      }
+    : {
+        found: false as const,
+        message: llmsTxt.message,
+        tried: llmsTxt.tried,
+      };
 }
 
 export async function GET(req: Request) {
@@ -101,29 +61,39 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }
 
-  const { data, error } = await auth.supabase
+  const { data: config, error } = await auth.supabase
     .from("dt_org_config")
-    .select(SELECT)
+    .select(CONFIG_SELECT)
     .eq("organisation_id", orgId)
     .maybeSingle();
 
-  if (error || !data) {
+  if (error || !config) {
     return NextResponse.json(
       { ok: false, message: error?.message ?? "Konfiguration nicht gefunden." },
       { status: 404 },
     );
   }
 
-  let row = data;
+  let pages;
+  try {
+    pages = await loadGroundingPageViews(auth.supabase, orgId);
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, message: err instanceof Error ? err.message : "Grounding Pages konnten nicht geladen werden." },
+      { status: 500 },
+    );
+  }
+  let llmsTxt = await checkLlmsTxt(config.website_url, config.grounding_llms_txt_url);
+  let llmsTxtUrl = config.grounding_llms_txt_url ?? null;
+
   let discoveredUrl: string | null = null;
   let discoveryMessage: string | null = null;
   let discoverySource: "footer" | "path_probe" | null = null;
   let autoApplied = false;
 
-  let llmsTxt = await checkLlmsTxt(row.website_url, row.grounding_llms_txt_url);
-
-  if (!row.grounding_page_url) {
-    const discovered = await discoverGroundingPageUrl(row.website_url);
+  const hasHub = pages.some((p) => p.kind === "hub");
+  if (!hasHub) {
+    const discovered = await discoverGroundingPageUrl(config.website_url);
     if (discovered.ok) {
       discoveredUrl = discovered.url;
       discoverySource = discovered.source;
@@ -132,71 +102,67 @@ export async function GET(req: Request) {
     }
   }
 
-  // First visit: persist discovered grounding URL + live date (+ llms.txt if found).
-  if (
-    auto &&
-    ((!row.grounding_page_url && discoveredUrl) ||
-      (!row.grounding_llms_txt_url && llmsTxt.ok))
-  ) {
-    const patch: Record<string, unknown> = {};
-
-    if (!row.grounding_page_url && discoveredUrl) {
+  // First visit: persist discovered hub (+ live facts) and llms.txt URL.
+  if (auto) {
+    if (!hasHub && discoveredUrl) {
       const detected = await detectGroundingPageUploadedAt(discoveredUrl);
       const sourceHint = discoverySource === "footer" ? "Footer" : "Pfad";
-      const noteLine = detected.ok
-        ? `Auto (${sourceHint}): ${detected.sourceLabel} (${new Date().toISOString().slice(0, 10)})`
-        : `Auto (${sourceHint}): URL erkannt (${new Date().toISOString().slice(0, 10)})`;
-      patch.grounding_page_url = detected.ok
-        ? detected.finalUrl || discoveredUrl
-        : discoveredUrl;
-      if (detected.ok) Object.assign(patch, groundingDateColumnsFromDetection(detected));
-      if (!row.grounding_page_notes?.trim()) patch.grounding_page_notes = noteLine;
+      const today = new Date().toISOString().slice(0, 10);
+      const patch = detected.ok
+        ? patchFromLiveFacts(null, detected, today)
+        : { notes: `Auto (${sourceHint}): URL erkannt (${today})` };
+      if (detected.ok && patch.notes) {
+        patch.notes = patch.notes.replace(/^Auto:/m, `Auto (${sourceHint}):`);
+      }
+      const built = buildGroundingPageUpdate(
+        { ...patch, kind: "hub", url: detected.ok ? detected.finalUrl || discoveredUrl : discoveredUrl },
+        null,
+      );
+      if (built.ok) {
+        const { error: insertError } = await auth.supabase
+          .from("dt_grounding_pages")
+          .insert({
+            organisation_id: orgId,
+            created_by_user_id: auth.userId,
+            position: 0,
+            ...built.update,
+          })
+          .select(DT_GROUNDING_PAGE_SELECT)
+          .maybeSingle();
+        if (!insertError) {
+          autoApplied = true;
+          pages = await loadGroundingPageViews(auth.supabase, orgId);
+        }
+      }
     }
 
-    if (!row.grounding_llms_txt_url && llmsTxt.ok) {
-      patch.grounding_llms_txt_url = llmsTxt.url;
-    }
-
-    if (Object.keys(patch).length > 0) {
-      const { data: updated, error: updateError } = await auth.supabase
+    if (!llmsTxtUrl && llmsTxt.ok) {
+      const { error: updateError } = await auth.supabase
         .from("dt_org_config")
-        .update(patch)
-        .eq("organisation_id", orgId)
-        .select(SELECT)
-        .maybeSingle();
-
-      if (!updateError && updated) {
-        row = updated;
-        autoApplied = Boolean(patch.grounding_page_url);
-        discoveredUrl = updated.grounding_page_url;
-        llmsTxt = await checkLlmsTxt(row.website_url, row.grounding_llms_txt_url);
+        .update({ grounding_llms_txt_url: llmsTxt.url })
+        .eq("organisation_id", orgId);
+      if (!updateError) {
+        llmsTxtUrl = llmsTxt.url;
+        llmsTxt = await checkLlmsTxt(config.website_url, llmsTxtUrl);
       }
     }
   }
 
   return NextResponse.json({
     ok: true,
-    grounding: serializeGroundingRow(row as GroundingConfigRow),
-    websiteUrl: row.website_url ?? null,
-    discoveredUrl: row.grounding_page_url ?? discoveredUrl,
+    websiteUrl: config.website_url ?? null,
+    llmsTxtUrl,
+    llmsTxt: llmsTxtPayload(llmsTxt),
+    pages,
+    summary: summarizeGroundingPages(pages),
+    discoveredUrl: pages.find((p) => p.kind === "hub")?.url ?? discoveredUrl,
     discoveryMessage,
     discoverySource,
     autoApplied,
-    llmsTxt: llmsTxt.ok
-      ? {
-          found: true as const,
-          url: llmsTxt.url,
-          lastModified: llmsTxt.lastModified,
-          bytes: llmsTxt.bytes,
-        }
-      : {
-          found: false as const,
-          message: llmsTxt.message,
-          tried: llmsTxt.tried,
-        },
   });
 }
 
+/** Domain-level settings (llms.txt URL). Pages are edited via /grounding/pages. */
 export async function PATCH(req: Request) {
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
@@ -217,52 +183,15 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
   }
 
-  const patch: Record<string, unknown> = {};
-  if (parsed.data.uploadedAt !== undefined) {
-    patch.grounding_page_uploaded_at = parsed.data.uploadedAt;
-  }
-  if (parsed.data.dateModified !== undefined) {
-    patch.grounding_page_date_modified = toStoredDate(parsed.data.dateModified);
-  }
-  if (parsed.data.lastReviewed !== undefined) {
-    patch.grounding_page_last_reviewed = toStoredDate(parsed.data.lastReviewed);
-  }
-  if (parsed.data.reviewedBy !== undefined) {
-    patch.grounding_page_reviewed_by = blankToNull(parsed.data.reviewedBy);
-  }
-  if (parsed.data.releaseStatus !== undefined) {
-    patch.grounding_page_release_status = parsed.data.releaseStatus;
-  }
-  if (parsed.data.standardVersion !== undefined) {
-    patch.grounding_page_standard_version = blankToNull(parsed.data.standardVersion);
-  }
-  if (parsed.data.customerSlug !== undefined) {
-    patch.grounding_customer_slug = blankToNull(parsed.data.customerSlug);
-  }
-  if (parsed.data.entityPages !== undefined) {
-    const entities = validateGroundingEntityPages(parsed.data.entityPages);
-    if (!entities.ok) {
-      return NextResponse.json({ ok: false, message: entities.message }, { status: 400 });
-    }
-    patch.grounding_entity_pages = entities.pages;
-  }
-  if (parsed.data.url !== undefined) patch.grounding_page_url = parsed.data.url;
-  if (parsed.data.llmsTxtUrl !== undefined) {
-    patch.grounding_llms_txt_url = parsed.data.llmsTxtUrl;
-  }
-  if (parsed.data.notes !== undefined) {
-    patch.grounding_page_notes = parsed.data.notes?.trim() || null;
-  }
-
-  if (Object.keys(patch).length === 0) {
+  if (parsed.data.llmsTxtUrl === undefined) {
     return NextResponse.json({ ok: false, message: "Keine Änderungen." }, { status: 400 });
   }
 
   const { data, error } = await auth.supabase
     .from("dt_org_config")
-    .update(patch)
+    .update({ grounding_llms_txt_url: parsed.data.llmsTxtUrl })
     .eq("organisation_id", orgId)
-    .select(SELECT)
+    .select(CONFIG_SELECT)
     .maybeSingle();
 
   if (error || !data) {
@@ -273,21 +202,9 @@ export async function PATCH(req: Request) {
   }
 
   const llmsTxt = await checkLlmsTxt(data.website_url, data.grounding_llms_txt_url);
-
   return NextResponse.json({
     ok: true,
-    grounding: serializeGroundingRow(data as GroundingConfigRow),
-    llmsTxt: llmsTxt.ok
-      ? {
-          found: true as const,
-          url: llmsTxt.url,
-          lastModified: llmsTxt.lastModified,
-          bytes: llmsTxt.bytes,
-        }
-      : {
-          found: false as const,
-          message: llmsTxt.message,
-          tried: llmsTxt.tried,
-        },
+    llmsTxtUrl: data.grounding_llms_txt_url ?? null,
+    llmsTxt: llmsTxtPayload(llmsTxt),
   });
 }

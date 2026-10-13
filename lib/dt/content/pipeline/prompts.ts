@@ -12,7 +12,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 import type { ContentPageKeywords } from "@/lib/dt/content/excel-structure";
 import {
-  CONTENT_BRANCHE_LABELS,
+  brancheRuleGroup,
   contentTonalitaetText,
   type ContentTextSettings,
   type WorkshopAnbieterSection,
@@ -34,12 +34,19 @@ import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock 
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
 
+/**
+ * Where a page of the prompt comes from: the Excel structure, the crawl, or — only in the
+ * standalone SEO tool (lib/dt/text-tools/seo.ts) — an upload with a briefing form. The
+ * third value never reaches `dt_content_pages`; it is a prompt-time label.
+ */
+export type ContentPipelinePageSource = ContentPageSource | "standalone";
+
 export type ContentPipelinePage = {
   name: string;
   path: string | null;
   level: number;
   url?: string | null;
-  source: ContentPageSource;
+  source: ContentPipelinePageSource;
   page_role: ContentPageRole | null;
   /** Effective type (a row without one gets a guess before the prompt is built). */
   page_type: ContentPageType;
@@ -57,7 +64,10 @@ export type ContentPipelineContext = {
   page: ContentPipelinePage;
   /** The other pages of the organisation (name, type, keyword) for cannibalisation and deferred questions. */
   structureOutline: string;
-  /** Current text of the live page for pages taken over from the crawl; null otherwise. */
+  /**
+   * Current text of the live page for pages taken over from the crawl; for a standalone
+   * page the uploaded material (briefing or old text); null otherwise.
+   */
   existingText: string | null;
   sections: WorkshopAnbieterSection[];
   settings: ContentTextSettings;
@@ -187,6 +197,8 @@ const MAX_SECTION_CHARS = 6_000;
 const MAX_AVATAR_CHARS = 5_000;
 const MAX_OUTLINE_CHARS = 5_000;
 const MAX_EXISTING_TEXT_CHARS = 6_000;
+/** An upload in the standalone SEO tool is the whole briefing, so it may be longer than a crawl excerpt. */
+export const MAX_STANDALONE_MATERIAL_CHARS = 30_000;
 const MAX_OUTPUT_CHARS = 12_000;
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -284,7 +296,10 @@ function blockIds(blocks: readonly ContentTextBlock[]): Set<string> {
   return new Set(blocks.map((b) => b.id));
 }
 
-function normalizeTextOutput(json: unknown, context: ContentPipelineContext): TextOutput {
+/** The text a rewriting step starts from; the whole pipeline context or the GEO tool's. */
+export type ContentCurrentText = Pick<ContentPipelineContext, "blocks" | "title" | "metaDescription">;
+
+export function normalizeTextOutput(json: unknown, context: ContentCurrentText): TextOutput {
   const r = rec(json);
   const blocks = normalizeBlocks(r.blocks);
   return {
@@ -344,8 +359,10 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 }
 
 // --- shared prompt parts ----------------------------------------------------------------------
+// Exported for the standalone GEO tool (lib/dt/text-tools/geo.ts), which builds the same
+// blocks around an uploaded text instead of a page of the pipeline.
 
-function anbieterBlock(context: ContentPipelineContext): string {
+export function anbieterBlock(context: Pick<ContentPipelineContext, "sections">): string {
   const filled = context.sections.filter((s) => s.current.trim());
   if (filled.length === 0) return "## Anbieterfakten\n(keine)";
   return [
@@ -354,31 +371,32 @@ function anbieterBlock(context: ContentPipelineContext): string {
   ].join("\n\n");
 }
 
-function settingsBlock(settings: ContentTextSettings): string {
+export function settingsBlock(settings: ContentTextSettings): string {
   const forbidden = settings.verbotene_woerter.length
     ? settings.verbotene_woerter.map((w) => `„${w}“`).join(", ")
     : "keine";
   return [
     "## Vorgaben",
     `Anrede: ${settings.anrede === "Du" ? "Du (Leser werden geduzt)" : "Sie (Leser werden gesiezt)"}`,
-    `Branche: ${CONTENT_BRANCHE_LABELS[settings.branche]}`,
+    `Branche: ${settings.branche || "nicht angegeben"}`,
     `Tonalität: ${contentTonalitaetText(settings.tonalitaet)}`,
     `Verbotene Wörter (dürfen nirgends vorkommen, auch nicht in Überschriften): ${forbidden}`,
   ].join("\n");
 }
 
-function brancheRules(settings: ContentTextSettings): string {
-  switch (settings.branche) {
+/** The free-text branch picks one of three rule groups; the text itself is in the Vorgaben block. */
+export function brancheRules(settings: ContentTextSettings): string {
+  switch (brancheRuleGroup(settings.branche)) {
     case "rechtsanwalt":
       return "Branchenregel Kanzlei: keine Erfolgsversprechen, keine Garantien zum Ausgang eines Verfahrens, keine Superlative wie „der beste Anwalt“. Fachgebiete nur nennen, wenn sie in den Anbieterfakten stehen.";
     case "arzt":
       return "Branchenregel Praxis (Heilmittelwerbegesetz): keine Heilversprechen, keine Erfolgsquoten, keine Vorher-nachher-Vergleiche, keine Angst machenden Formulierungen. Behandlungen nur nennen, wenn sie in den Anbieterfakten stehen.";
     default:
-      return "Branchenregel Handwerk & Dienstleistung: Preise, Fristen und Garantien nur so, wie sie in den Anbieterfakten stehen. Keine erfundenen Referenzen oder Zahlen.";
+      return "Branchenregel Dienstleistung & Handwerk: Preise, Fristen und Garantien nur so, wie sie in den Anbieterfakten stehen. Keine erfundenen Referenzen oder Zahlen.";
   }
 }
 
-function avatarBlock(context: ContentPipelineContext): string {
+export function avatarBlock(context: Pick<ContentPipelineContext, "avatar">): string {
   if (!context.avatar) return "## Avatar (Wunschkunde)\n(kein Avatar hinterlegt)";
   return [
     "## Avatar (Wunschkunde, für den der Text geschrieben wird)",
@@ -398,29 +416,43 @@ function list(items: readonly string[]): string {
   return items.map((i) => `- ${i}`).join("\n");
 }
 
+/** Which briefing the page's keywords, H1 options and questions come from, as the prompt names it. */
+function briefingLabel(page: ContentPipelinePage): string {
+  return page.source === "standalone" ? "aus dem Briefing" : "aus der Excel";
+}
+
+function sourceLine(page: ContentPipelinePage): string {
+  if (page.source === "structure") return "Excel-Seitenstruktur (Briefing der Redaktion)";
+  if (page.source === "standalone") {
+    return "eigenständiges SEO-Werkzeug (Briefing-Formular und ggf. hochgeladenes Material; keine Seitenstruktur, keine anderen Seiten bekannt)";
+  }
+  return "Crawl der bestehenden Website (kein Briefing, Keywords und Fragen werden hier erarbeitet)";
+}
+
 function pageBlock(context: ContentPipelineContext): string {
   const { page } = context;
-  const structure = page.source === "structure";
+  const standalone = page.source === "standalone";
+  const briefing = briefingLabel(page);
   const lines = [
     "## Seite",
     `Organisation: ${context.organisationName}`,
     `Seite: ${page.name}`,
     page.path ? `Pfad: ${page.path}` : "",
     page.url ? `Live-URL: ${page.url}` : "",
-    `Quelle: ${structure ? "Excel-Seitenstruktur (Briefing der Redaktion)" : "Crawl der bestehenden Website (kein Briefing, Keywords und Fragen werden hier erarbeitet)"}`,
-    `Rolle in der Struktur: ${page.page_role ? CONTENT_PAGE_ROLE_LABELS[page.page_role] : "keine (Crawl-Seite)"} · Ebene ${page.level} (0 = Startseite)`,
+    `Quelle: ${sourceLine(page)}`,
+    `Rolle in der Struktur: ${page.page_role ? CONTENT_PAGE_ROLE_LABELS[page.page_role] : standalone ? "keine (eigenständige Seite)" : "keine (Crawl-Seite)"} · Ebene ${page.level} (0 = Startseite)`,
     `Seitentyp: ${CONTENT_PAGE_TYPE_LABELS[page.page_type]}`,
     page.pillar_name ? `Hauptsilo (übergeordnete Seite): ${page.pillar_name}` : "",
     page.estimated_traffic != null ? `Geschätzter Traffic laut Excel: ${page.estimated_traffic}` : "",
     page.keywords
-      ? `Hauptkeyword aus der Excel (gesetzt, nicht ersetzen): ${keywordText(page.keywords.main)}`
+      ? `Hauptkeyword ${briefing} (gesetzt, nicht ersetzen): ${keywordText(page.keywords.main)}`
       : "Hauptkeyword: nicht vorgegeben",
     page.keywords && page.keywords.secondary.length > 0
-      ? `Nebenkeywords aus der Excel: ${page.keywords.secondary.map(keywordText).join(", ")}`
+      ? `Nebenkeywords ${briefing}: ${page.keywords.secondary.map(keywordText).join(", ")}`
       : "",
-    page.h1_options.length > 0 ? `H1-Optionen aus der Excel:\n${list(page.h1_options)}` : "",
+    page.h1_options.length > 0 ? `H1-Optionen ${briefing}:\n${list(page.h1_options)}` : "",
     page.user_questions.length > 0
-      ? `Nutzerfragen aus Spalte H (echte Google-Fragen, haben Vorrang vor erfundenen Fragen):\n${list(page.user_questions)}`
+      ? `Nutzerfragen ${standalone ? "aus dem Briefing (zählen wie Spalte H: echte Google-Fragen" : "aus Spalte H (echte Google-Fragen"}, haben Vorrang vor erfundenen Fragen):\n${list(page.user_questions)}`
       : "",
     page.ki_prompt ? `KI-Prompt der Redaktion für diese Seite (stehende Anweisung):\n${clip(page.ki_prompt, 2_000)}` : "",
     page.internal_link_targets.length > 0
@@ -430,22 +462,43 @@ function pageBlock(context: ContentPipelineContext): string {
       ? `\n## Weitere Seiten der Website (zur Abgrenzung: welche Fragen gehören auf eine andere Seite; keine Fakten)\n${clip(context.structureOutline, MAX_OUTLINE_CHARS)}`
       : "",
     context.existingText
-      ? `\n## Bisheriger Text der Seite (Live-Website, nur zur Orientierung)\nSo liest sich die Seite heute: Thema, Umfang, Begriffe. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_EXISTING_TEXT_CHARS)}`
+      ? standalone
+        ? `\n## Hochgeladenes Material (Briefing oder bisheriger Text, nur zur Orientierung)\nThema, Umfang, Begriffe, Aufbau. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten oder den Anmerkungen der Redaktion stehen – sonst sind sie unbelegt und bekommen [BITTE PRÜFEN: …].\n${clip(context.existingText, MAX_STANDALONE_MATERIAL_CHARS)}`
+        : `\n## Bisheriger Text der Seite (Live-Website, nur zur Orientierung)\nSo liest sich die Seite heute: Thema, Umfang, Begriffe. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_EXISTING_TEXT_CHARS)}`
       : "",
   ];
   return lines.filter(Boolean).join("\n");
 }
 
-function notesBlock(context: ContentPipelineContext): string {
-  const notes = [
-    ...(context.page.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
-    ...context.notes.map((n) => clip(n, 2_000)),
-  ];
+function formatNotes(notes: readonly string[]): string {
   if (notes.length === 0) return "";
   return [
     "## Anmerkungen der Redaktion (gelten vor allem anderen; Antworten darin sind bestätigte Fakten)",
     ...notes.map((n, i) => `${i + 1}. ${n}`),
   ].join("\n");
+}
+
+/** The editor's notes as a numbered list (each clipped); empty string without notes. */
+export function editorNotesBlock(notes: readonly string[]): string {
+  return formatNotes(notes.map((n) => clip(n, 2_000)).filter(Boolean));
+}
+
+/**
+ * What the notes block and the step-8 chunk prompt need: the Vorgaben, the editor's notes
+ * and, for a page of the pipeline, the KI-Prompt of the structure. The standalone
+ * Watermark tool (lib/dt/text-tools/watermark.ts) has no page and passes settings and notes.
+ */
+export type RephrasePromptContext = {
+  settings: ContentTextSettings;
+  notes: readonly string[];
+  page?: { ki_prompt: string | null } | null;
+};
+
+function notesBlock(context: RephrasePromptContext): string {
+  return formatNotes([
+    ...(context.page?.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
+    ...context.notes.map((n) => clip(n, 2_000)),
+  ]);
 }
 
 function outputBlock(context: ContentPipelineContext, step: number, title: string, max = MAX_OUTPUT_CHARS): string {
@@ -454,7 +507,7 @@ function outputBlock(context: ContentPipelineContext, step: number, title: strin
   return `## ${title}\n${JSON.stringify(output, null, 1).slice(0, max)}`;
 }
 
-function currentTextBlock(context: ContentPipelineContext): string {
+export function currentTextBlock(context: ContentCurrentText): string {
   if (context.blocks.length === 0) return "## Aktueller Text\n(noch keiner)";
   return [
     "## Aktueller Text (Abschnitte mit ihrer id)",
@@ -466,15 +519,18 @@ function currentTextBlock(context: ContentPipelineContext): string {
     .join("\n");
 }
 
-function join(parts: readonly string[]): string {
+/** Prompt blocks separated by a blank line; empty blocks (optional parts) fall out. */
+export function joinPromptParts(parts: readonly string[]): string {
   return parts.filter(Boolean).join("\n\n");
 }
 
-const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte für kleine Unternehmen schreibt. Sprache: Deutsch.
+const join = joinPromptParts;
+
+export const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte für kleine Unternehmen schreibt. Sprache: Deutsch.
 Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`;
 
-const KEEP_RULES =
+export const KEEP_RULES =
   "Unverändert bleiben: die H1, der Abschnitt „hero“, Frage-Überschriften (bleiben Fragen), Haupt- und Nebenkeywords, Platzhalter wie [BITTE PRÜFEN: …] und [QUELLE BITTE ERGÄNZEN], [LINK: …]-Marker, die ids der Abschnitte und alle Fakten.";
 
 const BLOCKS_SCHEMA = {
@@ -517,7 +573,7 @@ const TEXT_PROPERTIES = {
   blocks: BLOCKS_SCHEMA,
 };
 
-const TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
+export const TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
   type: "object",
   properties: TEXT_PROPERTIES,
   required: ["title", "meta_description", "blocks"],
@@ -538,6 +594,7 @@ function pageTypeRules(context: ContentPipelineContext): string {
 function analyse(context: ContentPipelineContext): ContentStepSpec {
   const { page } = context;
   const crawl = page.source === "crawl";
+  const standalone = page.source === "standalone";
   return {
     maxTokens: 6_000,
     system: `${BASE_RULES}
@@ -547,15 +604,17 @@ Schritt 1 Analyse: Du legst fest, wonach Menschen suchen, wenn sie diese Seite b
 Suchintention: intent.primary ist genau einer von ${CONTENT_INTENTS.join(" | ")}; modifiers aus ${CONTENT_INTENT_MODIFIERS.join(" | ")} (mehrere möglich, ymyl = Gesundheit, Recht, Geld). journey_phase: ${CONTENT_JOURNEY_PHASES.join(" | ")}. conversion_goal: ${CONTENT_CONVERSION_GOALS.join(" | ")}. content_angle: ${CONTENT_ANGLES.join(" | ")}. Nur diese Werte.
 Keywords: ${
       page.keywords
-        ? "Das Hauptkeyword aus der Excel ist gesetzt – übernimm es wörtlich als main_keyword, nicht ersetzen, nicht umformulieren. Nebenkeywords aus der Excel übernehmen und um 2–5 passende Varianten ergänzen; kein Suchvolumen erfinden."
+        ? `Das Hauptkeyword ${briefingLabel(page)} ist gesetzt – übernimm es wörtlich als main_keyword, nicht ersetzen, nicht umformulieren. Nebenkeywords ${briefingLabel(page)} übernehmen und um 2–5 passende Varianten ergänzen; kein Suchvolumen erfinden.`
         : crawl
           ? "Diese Seite kommt aus dem Crawl, ohne Briefing: Leite Haupt- und Nebenkeywords aus Seite, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab. Der bisherige Text ist nur Orientierung für Thema und Begriffe."
-          : "Es gibt kein Hauptkeyword aus der Excel: leite es aus Seite, Leistung und Ort (nur aus den Fakten) ab, 2–5 Wörter."
+          : standalone
+            ? "Das Briefing nennt kein Hauptkeyword: Leite Haupt- und Nebenkeywords aus Seitenname, hochgeladenem Material, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab, 2–5 Wörter. Das Material ist nur Orientierung für Thema und Begriffe."
+            : "Es gibt kein Hauptkeyword aus der Excel: leite es aus Seite, Leistung und Ort (nur aus den Fakten) ab, 2–5 Wörter."
     }
 main_question: die eine Frage, die der Suchende sich selbst stellt. Nie eine Frage AN den Kunden („Welche Leistungen bieten Sie?“ ist falsch), nie mit Firmenname.
 fanout_questions: mindestens 8 Fragen, die eine vollständige Antwort auf main_question abdecken muss (KI-Suchen fächern so auf). ${
       page.user_questions.length > 0
-        ? "Die Nutzerfragen aus Spalte H sind echte Google-Fragen: alle übernehmen, Wortlaut beibehalten, source „Spalte H“. Weitere Fragen ergänzen mit source „Recherche“, „Avatar“ oder „Anbieterfakten“."
+        ? `Die Nutzerfragen ${standalone ? "aus dem Briefing" : "aus Spalte H"} sind echte Google-Fragen: alle übernehmen, Wortlaut beibehalten, source „Spalte H“. Weitere Fragen ergänzen mit source „Recherche“, „Avatar“ oder „Anbieterfakten“.`
         : "source je Frage: „Recherche“ (aus der Suchlogik), „Avatar“ (aus seinen Sorgen) oder „Anbieterfakten“ (aus dem, was der Anbieter beantworten kann)."
     } theme: das Unterthema in 1–3 Wörtern.
 deferred_questions: Fragen, die eine andere Seite der Website besser beantwortet (keine Kannibalisierung) – link_to ist der Name dieser Seite (nur erlaubte Linkziele oder Seiten aus der Website-Liste), short_answer_hint sagt, wie diese Seite in einem Satz darauf verweist.
@@ -743,7 +802,7 @@ Schritt 2 SEO: Du schreibst den vollständigen Seitentext auf Basis der Analyse 
 ${pageTypeRules(context)}
 
 Festes Gerüst, in dieser Reihenfolge:
-1. H1 (erster Abschnitt, level 1): kurz, das Hauptkeyword steht vorn. Enthält eine H1-Option aus der Excel das Hauptkeyword, nimm sie wörtlich; sonst formulierst du selbst.
+1. H1 (erster Abschnitt, level 1): kurz, das Hauptkeyword steht vorn. Enthält eine H1-Option ${briefingLabel(page)} das Hauptkeyword, nimm sie wörtlich; sonst formulierst du selbst.
 2. Direkt darunter ein Abschnitt mit id „hero“, level 2, Überschrift exakt „${CONTENT_HERO_PLACEHOLDER}“ und leerem html. Du schreibst keinen echten Hero; Schritt 5 füllt ihn.
 3. Abschnitt id „zusammenfassung“ (H2, z. B. „Das Wichtigste in Kürze“ oder die main_question als Frage): 60–80 Wörter, beantwortet die main_question direkt im ersten Satz, enthält 3–4 belegte Fakten, taugt als Snippet.
 4. Abschnitt id „einleitung“ (H2): 100–150 Wörter Einstieg aus Sicht des Avatars (sein Anliegen, was ihn hier erwartet).
@@ -837,10 +896,15 @@ ${brancheRules(context.settings)}`,
   };
 }
 
-function geo(context: ContentPipelineContext): ContentStepSpec {
-  return {
-    maxTokens: 12_000,
-    system: `${BASE_RULES}
+/** Output size of the GEO rewrite; the standalone GEO tool uses the same budget. */
+export const GEO_MAX_TOKENS = 12_000;
+
+/**
+ * System prompt of step 4. The standalone GEO tool (Verwaltung → GEO) sends exactly this
+ * prompt, so an uploaded text is reworked by the same rules as a page of the pipeline.
+ */
+export function geoSystemPrompt(settings: ContentTextSettings): string {
+  return `${BASE_RULES}
 
 Schritt 4 GEO (Generative Engine Optimization): Du überarbeitest den Text so, dass KI-Suchsysteme ihn verstehen und zitieren können. Du erfindest keine Fakten und fügst keine hinzu.
 Zuerst setzt du die Befunde des Faktenchecks um: Unbelegtes streichen oder durch [BITTE PRÜFEN: …] ersetzen; offene Fragen so umschreiben, dass der Text ohne die Antwort auskommt. Antworten in den Anmerkungen der Redaktion sind bestätigte Fakten und werden eingearbeitet.
@@ -852,7 +916,25 @@ Dann:
 - Rechtliches, Medizinisches, Fristen und Zahlen brauchen eine Quelle aus den Fakten oder den Marker [QUELLE BITTE ERGÄNZEN].
 - Als letzter Abschnitt id „stand“ ohne Überschrift: „Zuletzt aktualisiert: [DATUM]“ als <p>.
 ${KEEP_RULES} Title und Meta-Description nur ändern, wenn der Faktencheck es verlangt.
-${brancheRules(context.settings)}`,
+${brancheRules(settings)}`;
+}
+
+export const GEO_TOOL: Anthropic.Tool = {
+  name: "submit_geo_text",
+  description: "Der für KI-Zitate überarbeitete Seitentext in Abschnitten.",
+  input_schema: TEXT_TOOL_SCHEMA,
+};
+
+/** Step 4's answer → text; a dropped hero block comes back from the previous text. */
+export function normalizeGeoOutput(json: unknown, context: ContentCurrentText): TextOutput {
+  const out = normalizeTextOutput(json, context);
+  return { ...out, blocks: keepHeroBlock(out.blocks, context.blocks) };
+}
+
+function geo(context: ContentPipelineContext): ContentStepSpec {
+  return {
+    maxTokens: GEO_MAX_TOKENS,
+    system: geoSystemPrompt(context.settings),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -863,15 +945,8 @@ ${brancheRules(context.settings)}`,
       avatarBlock(context),
       notesBlock(context),
     ]),
-    tool: {
-      name: "submit_geo_text",
-      description: "Der für KI-Zitate überarbeitete Seitentext in Abschnitten.",
-      input_schema: TEXT_TOOL_SCHEMA,
-    },
-    normalize: (json, ctx): TextOutput => {
-      const out = normalizeTextOutput(json, ctx);
-      return { ...out, blocks: keepHeroBlock(out.blocks, ctx.blocks) };
-    },
+    tool: GEO_TOOL,
+    normalize: normalizeGeoOutput,
   };
 }
 
@@ -1073,8 +1148,10 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
  * Step 8 runs on Grok (xAI, see `xai.ts` and `rephrase.ts`), not on Claude, and not through
  * a tool-forced JSON answer: one chunk of sections goes in as HTML and comes back as HTML.
  * This builds the prompt for one chunk; the same settings and notes as every other step.
+ * The Watermark tool under Verwaltung builds its chunks with this very function, so the
+ * two never drift apart.
  */
-export function rephraseChunkPrompt(context: ContentPipelineContext, chunk: readonly ContentTextBlock[]): { system: string; user: string } {
+export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: readonly ContentTextBlock[]): { system: string; user: string } {
   return {
     system: REPHRASE_SYSTEM,
     user: join([

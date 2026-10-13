@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Coins,
   Euro,
+  Globe,
   MessageSquare,
   Settings2,
   Users,
@@ -32,6 +33,9 @@ type UsageTotals = {
   outputTokens: number;
   totalTokens: number;
   avgTokensPerMessage: number;
+  /** Websuchen (SEO-Chat), 10 $ je 1.000 Suchen zusätzlich. */
+  webSearches?: number;
+  webFetches?: number;
 };
 
 type UserRow = {
@@ -67,6 +71,7 @@ type DayRow = {
   messages: number;
   inputTokens: number;
   outputTokens: number;
+  webSearches?: number;
 };
 
 type RecentRow = {
@@ -79,6 +84,8 @@ type RecentRow = {
   via: string;
   inputTokens: number;
   outputTokens: number;
+  webSearches?: number;
+  webFetches?: number;
 };
 
 type OrgRow = {
@@ -106,6 +113,13 @@ const DEFAULT_RATES: CostRates = { inputPerMTok: 3, outputPerMTok: 15 };
 
 function calcCost(inputTok: number, outputTok: number, rates: CostRates): number {
   return (inputTok * rates.inputPerMTok + outputTok * rates.outputPerMTok) / 1_000_000;
+}
+
+/** Anthropic web search: 10 $ je 1.000 Suchen (Web-Abruf kostenlos). */
+const WEB_SEARCH_USD_PER_REQUEST = 0.01;
+
+function calcWebSearchCost(searches: number): number {
+  return searches * WEB_SEARCH_USD_PER_REQUEST;
 }
 
 function formatCost(usd: number): string {
@@ -235,6 +249,7 @@ function UsageDailyChart(props: { days: DayRow[]; rates: CostRates }) {
               </span>
               <span className="tabular-nums text-sbkm-ink-600 dark:text-white/60">
                 {hovered.messages} Antw.
+                {(hovered.webSearches ?? 0) > 0 ? ` · ${hovered.webSearches} Websuchen` : ""}
               </span>
               <span className="inline-flex items-center gap-1 tabular-nums">
                 <span className="h-2 w-2 rounded-sm bg-sbkm-mint" />
@@ -663,8 +678,16 @@ export function DtUsageDashboard(props: {
 
   // Derived values
   const totalCost = useMemo(
-    () => (totals ? calcCost(totals.inputTokens, totals.outputTokens, rates) : 0),
+    () =>
+      totals
+        ? calcCost(totals.inputTokens, totals.outputTokens, rates) +
+          calcWebSearchCost(totals.webSearches ?? 0)
+        : 0,
     [totals, rates],
+  );
+  const webSearchCost = useMemo(
+    () => calcWebSearchCost(totals?.webSearches ?? 0),
+    [totals],
   );
 
   const globalCost = useMemo(
@@ -984,7 +1007,7 @@ export function DtUsageDashboard(props: {
           {tab === "overview" ? (
             <>
               <motion.div
-                className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
                 initial="hidden"
                 animate="show"
                 variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
@@ -994,7 +1017,10 @@ export function DtUsageDashboard(props: {
                     icon: Euro,
                     label: "Geschätzte Kosten",
                     value: formatCost(totalCost),
-                    hint: `${rates.inputPerMTok} $ / ${rates.outputPerMTok} $ pro MTok`,
+                    hint:
+                      (totals.webSearches ?? 0) > 0
+                        ? `${rates.inputPerMTok} $ / ${rates.outputPerMTok} $ pro MTok · inkl. ${formatCost(webSearchCost)} Websuche`
+                        : `${rates.inputPerMTok} $ / ${rates.outputPerMTok} $ pro MTok`,
                     highlight: true,
                   },
                   {
@@ -1009,6 +1035,16 @@ export function DtUsageDashboard(props: {
                     label: "KI-Antworten",
                     value: String(totals.messages),
                     hint: `Ø ${formatTokens(totals.avgTokensPerMessage)} Tokens pro Antwort`,
+                    highlight: false,
+                  },
+                  {
+                    icon: Globe,
+                    label: "Websuchen",
+                    value: String(totals.webSearches ?? 0),
+                    hint:
+                      (totals.webSearches ?? 0) > 0
+                        ? `≈ ${formatCost(webSearchCost)} · ${totals.webFetches ?? 0} Web-Abrufe (kostenlos)`
+                        : "SEO-Chat · 0,01 $ pro Suche",
                     highlight: false,
                   },
                   {
@@ -1228,7 +1264,9 @@ export function DtUsageDashboard(props: {
                   </li>
                 ) : (
                   recent.map((r) => {
-                    const rowCost = calcCost(r.inputTokens, r.outputTokens, rates);
+                    const rowCost =
+                      calcCost(r.inputTokens, r.outputTokens, rates) +
+                      calcWebSearchCost(r.webSearches ?? 0);
                     return (
                       <li
                         key={r.id}
@@ -1261,6 +1299,7 @@ export function DtUsageDashboard(props: {
                           </p>
                           <p className="mt-0.5 font-mono text-[10px] tabular-nums text-sbkm-ink-400 dark:text-white/35">
                             in {formatTokens(r.inputTokens)} · out {formatTokens(r.outputTokens)}
+                            {(r.webSearches ?? 0) > 0 ? ` · ${r.webSearches} Websuchen` : ""}
                           </p>
                           <p className="mt-1 tabular-nums text-sbkm-ink-400 dark:text-white/35">
                             {new Date(r.at).toLocaleString("de-DE", {

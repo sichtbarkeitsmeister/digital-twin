@@ -4,7 +4,11 @@
  */
 import assert from "node:assert/strict";
 
-import { buildSurveyChatDynamicSystemText, buildSurveyChatStaticSystemText } from "../lib/ai/chat-context";
+import {
+  buildSurveyChatDynamicSystemText,
+  buildSurveyChatStaticSystemText,
+  HELP_ROLE_ADMIN,
+} from "../lib/ai/chat-context";
 import {
   clipWorkspaceText,
   formatFocusedOrgWorkspaceForPrompt,
@@ -121,6 +125,7 @@ assert.match(staticPrompt, /wait for green light/i);
 assert.match(staticPrompt, /lookup_survey if the outline is missing/i);
 
 const dynamic = buildSurveyChatDynamicSystemText({
+  helpRole: HELP_ROLE_ADMIN,
   pageContext: { page: "survey_builder_edit", surveyId: null },
   surveys: [],
   folders: [],
@@ -148,6 +153,7 @@ assert.match(dynamic, /Kanzlei für Wirtschaftsprüfung/);
 assert.match(dynamic, /Title kürzen/);
 
 const noWorkspace = buildSurveyChatDynamicSystemText({
+  helpRole: HELP_ROLE_ADMIN,
   pageContext: { page: "survey_list", surveyId: null },
   surveys: [],
   folders: [],

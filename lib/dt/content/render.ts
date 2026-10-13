@@ -207,6 +207,32 @@ export function htmlToMarkdown(html: string): string {
     .trim();
 }
 
+/**
+ * Stored HTML → plain text for the `.txt` export: headings on their own line, a blank line
+ * between paragraphs, list items with a dash, links as „Text (Adresse)“, no markup at all.
+ */
+export function htmlToPlainText(html: string): string {
+  let out = html.replace(/<section\b[^>]*>|<\/section>/gi, "\n");
+  out = out
+    .replace(/<h[1-3]>([\s\S]*?)<\/h[1-3]>/gi, "\n$1\n\n")
+    .replace(/<ol>([\s\S]*?)<\/ol>/gi, (_, items: string) => {
+      let n = 0;
+      return `\n${items.replace(/<li>([\s\S]*?)<\/li>/gi, (_m, li: string) => `${++n}. ${li.trim()}\n`)}\n`;
+    })
+    .replace(/<li>([\s\S]*?)<\/li>/gi, "- $1\n")
+    .replace(/<\/?(ul|blockquote)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<a href="([^"]*)">([\s\S]*?)<\/a>/gi, "$2 ($1)")
+    .replace(/<p>([\s\S]*?)<\/p>/gi, "$1\n\n")
+    .replace(/<[^>]+>/g, "");
+  return `${decodeEntities(out)
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()}\n`;
+}
+
 export function fullHtmlDocument(title: string, bodyHtml: string): string {
   return `<!DOCTYPE html>\n<html lang="de">\n<head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`;
 }

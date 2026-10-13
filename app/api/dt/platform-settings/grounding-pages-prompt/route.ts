@@ -4,26 +4,55 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 import {
-  GROUNDING_PAGES_RULES_MAX_CHARS,
-  isDefaultGroundingPagesRules,
-  resolveGroundingPagesRules,
-} from "@/lib/dt/prompts/grounding-pages-prompt";
+  isDefaultGroundingModeInstructions,
+  resolveGroundingModeInstructions,
+} from "@/lib/dt/prompts/grounding-mode";
 import {
   GROUNDING_PAGES_RULES_MIGRATION_MESSAGE,
+  GROUNDING_RULES_MAX_CHARS,
   loadGroundingPagesRules,
 } from "@/lib/dt/prompts/grounding-pages-rules";
+import {
+  isDefaultGroundingAgentBase,
+  isDefaultGroundingAgentStandard,
+  resolveGroundingAgentRules,
+} from "@/lib/dt/seo/grounding-run/prompts";
+
+const text = z.string().max(GROUNDING_RULES_MAX_CHARS, "Ein Regeltext ist zu lang (maximal 100.000 Zeichen).");
 
 const patchSchema = z.object({
-  prompt: z
-    .string()
-    .max(
-      GROUNDING_PAGES_RULES_MAX_CHARS,
-      "Die Regeln sind zu lang (maximal 100.000 Zeichen).",
-    ),
+  modePrompt: text,
+  agentBase: text,
+  agentStandard: text,
 });
 
 function missingColumn(message: string): boolean {
-  return /grounding_pages_prompt|schema cache|does not exist/i.test(message);
+  return (
+    /grounding_mode_prompt|grounding_agent_base_prompt|grounding_agent_standard_prompt|schema cache/i.test(
+      message,
+    ) && /does not exist|schema cache/i.test(message)
+  );
+}
+
+function payload(input: {
+  mode: string | null;
+  base: string | null;
+  standard: string | null;
+  persisted: boolean;
+  message: string | null;
+}) {
+  const agent = resolveGroundingAgentRules({ base: input.base, standard: input.standard });
+  return {
+    ok: true as const,
+    modePrompt: resolveGroundingModeInstructions(input.mode),
+    agentBase: agent.base,
+    agentStandard: agent.standard,
+    modeIsDefault: isDefaultGroundingModeInstructions(input.mode),
+    agentBaseIsDefault: isDefaultGroundingAgentBase(input.base),
+    agentStandardIsDefault: isDefaultGroundingAgentStandard(input.standard),
+    persisted: input.persisted,
+    message: input.message,
+  };
 }
 
 export async function GET() {
@@ -35,8 +64,12 @@ export async function GET() {
   const state = await loadGroundingPagesRules(auth.supabase);
   return NextResponse.json({
     ok: true,
-    prompt: state.prompt,
-    isDefault: state.isDefault,
+    modePrompt: state.modePrompt,
+    agentBase: state.agentBase,
+    agentStandard: state.agentStandard,
+    modeIsDefault: state.modeIsDefault,
+    agentBaseIsDefault: state.agentBaseIsDefault,
+    agentStandardIsDefault: state.agentStandardIsDefault,
     persisted: state.persisted,
     message: state.message,
   });
@@ -63,13 +96,21 @@ export async function PATCH(req: Request) {
     );
   }
 
-  const trimmed = parsed.data.prompt.trim();
-  const nextStored = !trimmed || isDefaultGroundingPagesRules(trimmed) ? null : trimmed;
+  const mode = parsed.data.modePrompt.trim();
+  const base = parsed.data.agentBase.trim();
+  const standard = parsed.data.agentStandard.trim();
+  const next = {
+    id: "default",
+    grounding_mode_prompt: !mode || isDefaultGroundingModeInstructions(mode) ? null : mode,
+    grounding_agent_base_prompt: !base || isDefaultGroundingAgentBase(base) ? null : base,
+    grounding_agent_standard_prompt:
+      !standard || isDefaultGroundingAgentStandard(standard) ? null : standard,
+  };
 
   const { data, error } = await auth.supabase
     .from("dt_platform_settings")
-    .upsert({ id: "default", grounding_pages_prompt: nextStored }, { onConflict: "id" })
-    .select("grounding_pages_prompt")
+    .upsert(next, { onConflict: "id" })
+    .select("grounding_mode_prompt, grounding_agent_base_prompt, grounding_agent_standard_prompt")
     .single();
 
   if (error || !data) {
@@ -83,13 +124,19 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 
-  const stored =
-    typeof data.grounding_pages_prompt === "string" ? data.grounding_pages_prompt : null;
-  return NextResponse.json({
-    ok: true,
-    prompt: resolveGroundingPagesRules(stored),
-    isDefault: isDefaultGroundingPagesRules(stored),
-    persisted: true,
-    message: null,
-  });
+  return NextResponse.json(
+    payload({
+      mode: typeof data.grounding_mode_prompt === "string" ? data.grounding_mode_prompt : null,
+      base:
+        typeof data.grounding_agent_base_prompt === "string"
+          ? data.grounding_agent_base_prompt
+          : null,
+      standard:
+        typeof data.grounding_agent_standard_prompt === "string"
+          ? data.grounding_agent_standard_prompt
+          : null,
+      persisted: true,
+      message: null,
+    }),
+  );
 }

@@ -71,14 +71,18 @@ const markdownComponents: Components = {
   blockquote: (props) => (
     <blockquote className="my-2 border-l-2 border-primary/35 pl-3 text-[15px] text-secondary italic" {...withoutNode(props)} />
   ),
-  a: (props) => (
-    <a
-      className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...withoutNode(props)}
-    />
-  ),
+  a: (props) => {
+    const rest = withoutNode(props);
+    const internal = typeof rest.href === "string" && rest.href.startsWith("/");
+    // App links (DigitalTwin-Hilfe: „Bring mich hin“) stay in this tab.
+    return (
+      <a
+        className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+        {...(internal ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+        {...rest}
+      />
+    );
+  },
   table: (props) => (
     <div className="my-3 overflow-x-auto rounded-xl border border-border/60 bg-muted/20 shadow-sm scrollbar-subtle">
       <table className="w-full min-w-[520px] border-collapse text-[13px] leading-snug" {...withoutNode(props)} />

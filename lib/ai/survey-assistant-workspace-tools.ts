@@ -2,7 +2,6 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 import {
   callAnthropicFirstAvailable,
-  extractAnthropicText,
   type SurveyChatSystem,
 } from "@/lib/ai/anthropic-helpers";
 import { loadFocusedOrgWorkspace } from "@/lib/ai/load-survey-assistant-workspace";
@@ -261,6 +260,8 @@ export async function callAnthropicWithSurveyWorkspaceTools(input: {
   system: SurveyChatSystem;
   messages: Anthropic.MessageParam[];
   timeoutMs?: number;
+  /** False for customers (DigitalTwin-Hilfe): plain chat, no workspace/survey tools. */
+  enableTools?: boolean;
   organisations: SurveyAssistantOrgDirectoryEntry[];
   defaultOrganisationId: string | null;
   loadSurveyById?: (surveyId: string) => Promise<string>;
@@ -268,6 +269,7 @@ export async function callAnthropicWithSurveyWorkspaceTools(input: {
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const messages: Anthropic.MessageParam[] = [...input.messages];
   let last: { response: Anthropic.Messages.Message; model: string } | null = null;
+  const enableTools = input.enableTools ?? true;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     const call = await callAnthropicFirstAvailable({
@@ -277,7 +279,7 @@ export async function callAnthropicWithSurveyWorkspaceTools(input: {
       system: input.system,
       messages,
       timeoutMs: input.timeoutMs,
-      tools: SURVEY_ASSISTANT_WORKSPACE_TOOLS,
+      ...(enableTools ? { tools: SURVEY_ASSISTANT_WORKSPACE_TOOLS } : {}),
     });
     if (!call) return last;
     last = call;

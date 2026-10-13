@@ -19,6 +19,7 @@ import {
 import { applyCreatedChatFiles } from "@/lib/dt/apply-created-chat-files";
 import { mergeCreatedChatFiles } from "@/lib/dt/chat-files";
 import { parseDtCreatedFilesFromText, stripDtCreatedFileFences } from "@/lib/dt/parse-chat-file-fences";
+import { parseDtNextStepsFromText, stripDtNextStepBlocks } from "@/lib/dt/chat/next-steps";
 import {
   DEFAULT_DT_CHAT_TITLE,
   isProvisionalDtChatTitle,
@@ -54,6 +55,8 @@ async function trackLlmUsage(input: {
   model: string | null;
   inputTokens: number;
   outputTokens: number;
+  webSearchRequests?: number;
+  webFetchRequests?: number;
 }) {
   const service = createServiceClient();
   await recordLlmUsageEvent(service, {
@@ -67,6 +70,8 @@ async function trackLlmUsage(input: {
     model: input.model,
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
+    webSearchRequests: input.webSearchRequests,
+    webFetchRequests: input.webFetchRequests,
   });
 }
 
@@ -151,25 +156,29 @@ async function maybePersistDtAutoTitle(input: {
 }
 
 function finalizeAssistantSeoContent(text: string, mode: DtChatMode) {
+  const nextSteps = parseDtNextStepsFromText(text);
   if (mode !== "seo") {
     return {
-      content: stripDtCreatedFileFences(text),
+      content: stripDtCreatedFileFences(stripDtNextStepBlocks(text)),
       seoTaskProposals: [] as ReturnType<typeof parseDtSeoTaskProposalsFromText>,
+      nextSteps,
     };
   }
   const seoTaskProposals = parseDtSeoTaskProposalsFromText(text);
-  const content = stripDtCreatedFileFences(stripDtSeoTaskProposalBlocks(text));
-  return { content, seoTaskProposals };
+  const content = stripDtCreatedFileFences(stripDtNextStepBlocks(stripDtSeoTaskProposalBlocks(text)));
+  return { content, seoTaskProposals, nextSteps };
 }
 
 function assistantMetadataExtras(
   base: Record<string, unknown>,
   mode: DtChatMode,
   seoTaskProposals: ReturnType<typeof parseDtSeoTaskProposalsFromText>,
+  nextSteps: ReturnType<typeof parseDtNextStepsFromText> = [],
 ) {
-  if (mode !== "seo" || seoTaskProposals.length === 0) return base;
+  const withSteps = nextSteps.length > 0 ? { ...base, next_steps: nextSteps } : base;
+  if (mode !== "seo" || seoTaskProposals.length === 0) return withSteps;
   return {
-    ...base,
+    ...withSteps,
     seo_task_proposals: buildDtSeoTaskProposalMetadata(seoTaskProposals),
   };
 }
@@ -179,6 +188,8 @@ const bodySchema = z
     content: z.string().max(32_000).default(""),
     ghostMode: z.boolean().optional(),
     textMode: z.boolean().optional(),
+    /** Chat switch „Grounding Page“ (SEO chats only). */
+    groundingMode: z.boolean().optional(),
     attachments: z.array(dtAttachmentInboundSchema).max(5).optional().default([]),
   })
   .superRefine((data, ctx) => {
@@ -228,6 +239,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
 
   const ghostMode = parsed.data.ghostMode ?? chat.mode === "ghost";
   const textMode = parsed.data.textMode ?? false;
+  const groundingMode = (parsed.data.groundingMode ?? false) && chat.mode === "seo";
   const content = parsed.data.content.trim() || "(Anhang)";
   const attachmentMeta = buildAttachmentMetadataForMessage(prepared.items);
   const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId);
@@ -307,6 +319,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         userMessageId: userRow?.id ?? null,
         ghostMode,
         textMode,
+        groundingMode,
       });
 
       let assistantRow = mapN8nResultToAssistantRow(chatId, n8n, n8n.model);
@@ -319,6 +332,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           assistantRow.metadata,
           chat.mode as DtChatMode,
           finalized.seoTaskProposals,
+          finalized.nextSteps,
         ),
       };
 
@@ -343,6 +357,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
               (persisted.metadata as Record<string, unknown>) ?? {},
               chat.mode as DtChatMode,
               persistedFinal.seoTaskProposals,
+              persistedFinal.nextSteps,
             ),
           };
           await auth.supabase
@@ -434,6 +449,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
               (persistedAfterN8n.metadata as Record<string, unknown>) ?? {},
               chat.mode as DtChatMode,
               persistedFinal.seoTaskProposals,
+              persistedFinal.nextSteps,
             ),
           };
           if (
@@ -475,6 +491,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       userId: auth.userId,
       ghostMode,
       textMode,
+      groundingMode,
       supabase: auth.supabase,
     });
     direct = await callDtAnthropicChat({
@@ -529,6 +546,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
           },
           chat.mode as DtChatMode,
           finalized.seoTaskProposals,
+          finalized.nextSteps,
         ),
         author_user_id: null,
         stopped: false,
@@ -578,6 +596,8 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
         model: direct.model,
         inputTokens: direct.usage.inputTokens,
         outputTokens: direct.usage.outputTokens,
+        webSearchRequests: direct.usage.webSearchRequests,
+        webFetchRequests: direct.usage.webFetchRequests,
       });
     }
   } else {
@@ -597,6 +617,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       },
       chat.mode as DtChatMode,
       finalized.seoTaskProposals,
+          finalized.nextSteps,
     );
     assistantRow = {
       id: `ghost-${Date.now()}`,

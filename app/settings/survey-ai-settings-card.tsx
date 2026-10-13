@@ -88,7 +88,7 @@ export function SurveyAiSettingsCard() {
   return (
     <Card id="survey-ai-settings">
       <CardHeader>
-        <CardTitle>Survey KI</CardTitle>
+        <CardTitle>DigitalTwin-Hilfe</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4">
         {loadError ? <p className="text-xs text-destructive">{loadError}</p> : null}
@@ -135,7 +135,7 @@ export function SurveyAiSettingsCard() {
             Globale KI-Regeln
           </label>
           <p className="text-xs text-secondary">
-            Gelten für alle Survey-KI-Chats. Die KI befolgt sie, soweit sie mit technischen Vorgaben (z. B.
+            Gelten für alle Chats mit der DigitalTwin-Hilfe. Die KI befolgt sie, soweit sie mit technischen Vorgaben (z. B.
             JSON im Aktionsmodus) vereinbar sind.
           </p>
           <Textarea

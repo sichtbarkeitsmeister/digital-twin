@@ -13,7 +13,11 @@ import {
   isProspectPersonaKind,
 } from "@/lib/dt/prompts/build-system-prompt";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
-import { loadGroundingPagesRules } from "@/lib/dt/prompts/grounding-pages-rules";
+import {
+  formatGroundingRulesPreview,
+  groundingRulesAreDefault,
+  loadGroundingPagesRules,
+} from "@/lib/dt/prompts/grounding-pages-rules";
 import { buildDtChatStaticSystemText, buildProspectStaticSystemText } from "@/lib/dt/prompts/system-static";
 import {
   DT_SEO_MODE_INSTRUCTIONS,
@@ -40,6 +44,7 @@ import {
 } from "@/lib/dt/seo/load-website-structure";
 import { loadTranscriptKnowledgeForPrompt } from "@/lib/dt/transcripts/load-for-prompt";
 import { loadOnboardingPromptText } from "@/lib/dt/onboarding/load-prompt";
+import { loadGroundingPromptText } from "@/lib/dt/seo/grounding-prompt-context";
 import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
 import {
   formatSeoChecklist,
@@ -74,6 +79,8 @@ export async function loadDtAgentContextBundle(input: {
   agentId: string;
   mode: DtAgentContextMode;
   textMode?: boolean;
+  /** Chat switch „Grounding Page“ (SEO/GEO): include the Grounding-Modus block. */
+  groundingMode?: boolean;
   supabase?: SupabaseClient;
 }): Promise<DtAgentContextBundle> {
   const supabase = input.supabase ?? createServiceClient();
@@ -169,6 +176,10 @@ export async function loadDtAgentContextBundle(input: {
   const onboardingText = !isProspectPersonaKind(agent.kind, agent.slug)
     ? await loadOnboardingPromptText(input.organisationId)
     : "";
+  const groundingPagesText =
+    promptMode === "seo" || agent.kind === "geo_advisor"
+      ? await loadGroundingPromptText(supabase, input.organisationId)
+      : "";
 
   const globalRules = prefs?.global_assistant_rules?.trim() ?? "";
   const textModeLoaded = await loadTextModeInstructions(supabase);
@@ -384,19 +395,35 @@ export async function loadDtAgentContextBundle(input: {
       }),
     );
     const groundingRules = await loadGroundingPagesRules(supabase);
+    const groundingRulesDefault = groundingRulesAreDefault(groundingRules);
     sections.push(
       section({
         id: "grounding_pages_job",
         title: "Grounding Pages",
-        sourceLabel: groundingRules.isDefault ? "System (Standard)" : "Global",
-        sourceType: groundingRules.isDefault ? "system" : "user",
+        sourceLabel: groundingRulesDefault ? "System (Standard)" : "Global",
+        sourceType: groundingRulesDefault ? "system" : "user",
         description: groundingRules.persisted
-          ? "Diese Regeln gelten für Chats aus SEO → Grounding. Domain, URLs, Termine und Wunschkunden setzt der Auftrag ein. Bearbeiten im Tab Grounding."
-          : "Diese Regeln gelten für Chats aus SEO → Grounding. Speichern ist möglich, sobald die Datenbankspalte angelegt ist.",
-        content: groundingRules.prompt,
+          ? "Chat-Schalter, Grundregeln und Pflichtblöcke des Grounding-Agenten. Bearbeiten im Tab Grounding."
+          : "Chat-Schalter, Grundregeln und Pflichtblöcke des Grounding-Agenten. Speichern ist möglich, sobald die Datenbankspalten angelegt sind.",
+        content: formatGroundingRulesPreview(groundingRules),
         editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=grounding#grounding-pages-rules`,
       }),
     );
+
+    if (groundingPagesText) {
+      sections.push(
+        section({
+          id: "grounding_pages",
+          title: "Grounding Pages (Tool-Kontext)",
+          sourceLabel: "Organisation",
+          sourceType: "organisation",
+          description:
+            "Hub, Entitätsseiten, llms.txt und Prüfdaten aus dem Grounding-Tab. Fälligkeit nach lastReviewed. Im Grounding-Tab pflegen.",
+          content: groundingPagesText,
+          editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=grounding`,
+        }),
+      );
+    }
 
     if (checklistText) {
       sections.push(
@@ -626,8 +653,10 @@ export async function loadDtAgentContextBundle(input: {
       ? transcriptKnowledgeText
       : undefined,
     onboardingText: onboardingText || undefined,
+    groundingPagesText: groundingPagesText || undefined,
     textMode: includeTextMode,
     textModePrompt: textModeLoaded.prompt,
+    groundingMode: Boolean(input.groundingMode) && isSeoOrGeo,
   });
 
   return {

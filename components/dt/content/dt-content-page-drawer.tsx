@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ChevronDown,
   Download,
+  FileText,
   Loader2,
   MessageCircleQuestion,
   X,
@@ -17,6 +18,7 @@ import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
+import { downloadContentExport } from "@/components/dt/content/download";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import {
@@ -88,6 +90,9 @@ function openFindings(review: ContentReview): ContentFinding[] {
 }
 
 type Mode = { kind: "edit"; action: ContentAction } | { kind: "rerun"; action: ContentAction } | null;
+
+/** Actions that sit on the right of the footer: the two exports and the two destructive ones. */
+const RIGHT_ACTIONS = new Set<string>(["export", "export_txt", "reset", "delete"]);
 
 export function DtContentPageDrawer(props: {
   organisationId: string;
@@ -318,30 +323,17 @@ export function DtContentPageDrawer(props: {
     onChangedRef.current();
   }
 
-  async function exportHtml() {
+  /** „HTML exportieren“ / „Text exportieren (.txt)“: the final text as a download. */
+  async function exportPage(kind: "export" | "export_txt") {
     if (!base || !page) return;
-    setBusy("export");
-    try {
-      const res = await fetch(`${base}/export?${contentQuery(organisationId)}&format=html`);
-      if (!res.ok) {
-        const json = (await res.json().catch(() => null)) as { message?: string } | null;
-        toast.error(json?.message ?? "Export fehlgeschlagen.");
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${page.slug}.html`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch {
-      toast.error("Export fehlgeschlagen.");
-    } finally {
-      setBusy(null);
-    }
+    const format = kind === "export_txt" ? "txt" : "html";
+    setBusy(kind);
+    const res = await downloadContentExport(
+      `${base}/export?${contentQuery(organisationId)}&format=${format}`,
+      `${page.slug}.${format}`,
+    );
+    if (!res.ok) toast.error(res.message);
+    setBusy(null);
   }
 
   function onAction(action: ContentAction) {
@@ -359,7 +351,8 @@ export function DtContentPageDrawer(props: {
         void runThrough();
         return;
       case "export":
-        void exportHtml();
+      case "export_txt":
+        void exportPage(action.kind);
         return;
       case "stop":
         void runReset("stop");
@@ -779,7 +772,7 @@ export function DtContentPageDrawer(props: {
                         variant={
                           action.kind === "approve"
                             ? "mint"
-                            : action.kind === "export" || action.kind === "reset" || action.kind === "delete"
+                            : RIGHT_ACTIONS.has(action.kind)
                               ? "ghost"
                               : "outline"
                         }
@@ -790,8 +783,8 @@ export function DtContentPageDrawer(props: {
                         onClick={() => onAction(action)}
                         className={cn(
                           // export / reset / delete sit on the right; the first of them takes the margin
-                          ["export", "reset", "delete"].includes(action.kind) &&
-                            actions.findIndex((a) => ["export", "reset", "delete"].includes(a.kind)) === index &&
+                          RIGHT_ACTIONS.has(action.kind) &&
+                            actions.findIndex((a) => RIGHT_ACTIONS.has(a.kind)) === index &&
                             "sm:ml-auto",
                           (action.kind === "reset" || action.kind === "delete") && "text-red-700 dark:text-red-300",
                         )}
@@ -800,6 +793,8 @@ export function DtContentPageDrawer(props: {
                           <Loader2 className="size-3.5 animate-spin" aria-hidden />
                         ) : action.kind === "export" ? (
                           <Download className="size-3.5" aria-hidden />
+                        ) : action.kind === "export_txt" ? (
+                          <FileText className="size-3.5" aria-hidden />
                         ) : null}
                         {contentActionLabel(action.kind)}
                       </DtPillButton>
