@@ -198,6 +198,12 @@ Jede Zeile ist eine **Umgebungsvariable**: ein Name und ein geheimer Wert. Lokal
 
 Die genauen Modellnamen stehen in `.env.example`. Sie ändern sich, wenn Anthropic neue Modelle herausbringt.
 
+### Textwerkzeuge unter Verwaltung
+
+| Name | Was er bedeutet |
+|---|---|
+| `DT_TEXT_TOOLS` | Welche Textwerkzeuge (GEO-Text, SEO-Text, Wasserzeichen) Plattform-Admins sehen: `all`, `none` oder eine Liste wie `geo,seo,wasserzeichen`. Wenn leer: lokal alle, in Produktion keine. |
+
 ### Damit Links in Mails und Automationen stimmen
 
 | Name | Was er bedeutet |
@@ -709,6 +715,8 @@ Man muss sie nicht auswendig lernen. Sie sind nach Thema sortiert.
 | `lib/supabase/` | Verbindung zur Datenbank: Browser, Server, Service-Role, Türsteher. |
 | `lib/dt/` | DigitalTwin: Chat, Avatare, Prompts, Onboarding, SEO, Transkripte. |
 | `lib/dt/seo/` | SEO-Berichte, Crawl, Search Console, Aufgaben. |
+| `lib/dt/content/` | Texte: die Seitentext-Pipeline in neun Schritten. |
+| `lib/dt/text-tools/` | Textwerkzeuge (GEO, SEO, Wasserzeichen): Upload lesen (`ingest.ts`), Download bauen (`export.ts`), Zugriff (`access.ts`), Liste und Freischaltung (`tools.ts`). |
 | `lib/dt/onboarding/` | Onboarding inklusive Verschlüsselung der Zugangsdaten. |
 | `lib/ai/` | DigitalTwin-Hilfe, Fragebogen-Aktionen und Claude-Helfer. `lib/help/` hält das Handbuch des Assistenten. |
 | `lib/surveys/` | Fragebogen-Regeln, Typen, Speichern. |

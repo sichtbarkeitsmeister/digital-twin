@@ -13,7 +13,7 @@ import {
   writeSelectedOrganisationId,
 } from "@/lib/shared/selected-organisation-storage";
 
-export function SeoTopBarOrgSelector(props: { variant?: "seo" | "texte" } = {}) {
+export function SeoTopBarOrgSelector(props: { variant?: "seo" | "texte" | "textwerkzeuge" } = {}) {
   const variant = props.variant ?? "seo";
   const pathname = usePathname();
   const router = useRouter();
@@ -114,7 +114,7 @@ export function SeoTopBarOrgSelector(props: { variant?: "seo" | "texte" } = {}) 
   if (organisations.length === 0) {
     return (
       <p className="truncate text-sm font-semibold text-sbkm-navy dark:text-white">
-        {variant === "texte" ? "Texte" : "SEO"}
+        {variant === "texte" ? "Texte" : variant === "textwerkzeuge" ? "Textwerkzeuge" : "SEO"}
       </p>
     );
   }

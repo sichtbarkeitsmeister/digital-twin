@@ -11,12 +11,15 @@ import {
   FileSearch,
   FileText,
   FolderUp,
+  Globe,
   Inbox,
   MessageCircle,
   PenLine,
   Plug,
+  Search,
   Shield,
   Sparkles,
+  Stamp,
   Users,
   Workflow,
   Mail,
@@ -24,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { ZumChatButton } from "@/components/zum-chat-button";
+import { TEXT_TOOLS, textToolHref, type TextToolId } from "@/lib/dt/text-tools/tools";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -85,6 +89,7 @@ export function DashboardSidebar({
   showFrageboegen,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
+  textTools = [],
 }: {
   isPlatformAdmin: boolean;
   canManageIntegrations: boolean;
@@ -94,6 +99,8 @@ export function DashboardSidebar({
   showFrageboegen: boolean;
   pendingSurveyQuestionsCount: number;
   pendingAgentEditRequestsCount: number;
+  /** Enabled Textwerkzeuge (feature flag, platform admins only); empty hides the group. */
+  textTools?: TextToolId[];
 }) {
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
@@ -166,6 +173,17 @@ export function DashboardSidebar({
         ]
       : []),
   ];
+
+  // Textwerkzeuge: GEO, SEO and Wasserzeichen as their own group under Verwaltung.
+  const textToolIcons: Record<TextToolId, NavItem["icon"]> = { geo: Globe, seo: Search, watermark: Stamp };
+  const textToolItems: NavItem[] = isPlatformAdmin
+    ? textTools.map((id) => ({
+        label: TEXT_TOOLS[id].label,
+        href: textToolHref(id),
+        icon: textToolIcons[id],
+        match: (pathname: string) => pathname.startsWith(textToolHref(id)),
+      }))
+    : [];
 
   const transkripteItem: NavItem | null = isPlatformAdmin
     ? {
@@ -259,6 +277,20 @@ export function DashboardSidebar({
             {verwaltungItems.map((item) => (
               <NavLink key={item.href} item={item} />
             ))}
+          </nav>
+          {textToolItems.length > 0 ? (
+            <div className="grid gap-1 pt-1">
+              <p className="px-2 text-[11px] font-bold uppercase tracking-[0.14em] text-sbkm-ink-500">
+                Textwerkzeuge
+              </p>
+              <nav className="grid gap-1" aria-label="Textwerkzeuge">
+                {textToolItems.map((item) => (
+                  <NavLink key={item.href} item={item} />
+                ))}
+              </nav>
+            </div>
+          ) : null}
+          <nav className="grid gap-1">
             {isPlatformAdmin
               ? adminItems.map((item) => <NavLink key={item.href} item={item} />)
               : null}

@@ -233,8 +233,14 @@ export function htmlToPlainText(html: string): string {
     .trim()}\n`;
 }
 
-export function fullHtmlDocument(title: string, bodyHtml: string): string {
-  return `<!DOCTYPE html>\n<html lang="de">\n<head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`;
+export function fullHtmlDocument(
+  title: string,
+  bodyHtml: string,
+  options: { description?: string | null } = {},
+): string {
+  const description = options.description?.trim();
+  const meta = description ? `<meta name="description" content="${escapeHtml(description)}">` : "";
+  return `<!DOCTYPE html>\n<html lang="de">\n<head><meta charset="utf-8"><title>${escapeHtml(title)}</title>${meta}</head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`;
 }
 
 /** Text the LLM reads in later steps: headings as Markdown, body as plain text. */

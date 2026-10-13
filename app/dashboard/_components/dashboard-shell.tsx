@@ -9,6 +9,7 @@ import { DashboardMainArea } from "@/app/dashboard/_components/dashboard-main-ar
 import { DashboardTopBar } from "@/app/dashboard/_components/dashboard-top-bar";
 import { DashboardStickySurveyAiAssistant } from "@/app/dashboard/_components/dashboard-sticky-survey-ai-assistant";
 import { DtPageShell } from "@/components/dt/dt-page-shell";
+import type { TextToolId } from "@/lib/dt/text-tools/tools";
 
 export function DashboardShell({
   children,
@@ -20,6 +21,7 @@ export function DashboardShell({
   showFrageboegen,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
+  textTools,
 }: {
   children: React.ReactNode;
   isPlatformAdmin: boolean;
@@ -30,6 +32,7 @@ export function DashboardShell({
   showFrageboegen?: boolean;
   pendingSurveyQuestionsCount?: number;
   pendingAgentEditRequestsCount?: number;
+  textTools?: TextToolId[];
 }) {
   return (
     <DtPageShell variant="dashboard" className="min-h-screen">
@@ -49,6 +52,7 @@ export function DashboardShell({
                 showFrageboegen={showFrageboegen ?? false}
                 pendingSurveyQuestionsCount={pendingSurveyQuestionsCount ?? 0}
                 pendingAgentEditRequestsCount={pendingAgentEditRequestsCount ?? 0}
+                textTools={textTools ?? []}
               />
             </div>
           </div>

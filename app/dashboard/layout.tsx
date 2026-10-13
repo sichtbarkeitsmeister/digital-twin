@@ -8,6 +8,7 @@ import { userCanManageAnyIntegrations } from "@/lib/dashboard/org-context";
 import { userCanManageAnyDtAgents, userHasAnyOrganisation } from "@/lib/dt/org-access";
 import { userCanViewAnyDtUsage } from "@/lib/dt/usage/access";
 import { countPendingDtAgentEditRequests } from "@/lib/dt/agent-edit-requests";
+import { enabledTextTools } from "@/lib/dt/text-tools/tools";
 
 export default function DashboardLayout({
   children,
@@ -82,6 +83,7 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
       showFrageboegen={showFrageboegen}
       pendingSurveyQuestionsCount={pendingSurveyQuestionsCount}
       pendingAgentEditRequestsCount={pendingAgentEditRequestsCount}
+      textTools={isPlatformAdmin ? enabledTextTools() : []}
     >
       {children}
     </DashboardShell>

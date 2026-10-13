@@ -10,6 +10,7 @@ import {
   isOrganisationDashboardPath,
   isSeoDashboardPath,
   isTexteDashboardPath,
+  isTextToolsDashboardPath,
 } from "@/lib/dt/seo/dashboard-path";
 import {
   organisationOptionLabel,
@@ -245,6 +246,10 @@ export function DashboardTopBarOrgSelector() {
 
   if (isTexteDashboardPath(pathname)) {
     return <SeoTopBarOrgSelector variant="texte" />;
+  }
+
+  if (isTextToolsDashboardPath(pathname)) {
+    return <SeoTopBarOrgSelector variant="textwerkzeuge" />;
   }
 
   if (isOrganisationDashboardPath(pathname)) {
