@@ -12,6 +12,7 @@ import {
 import {
   dtAnthropicBetaHeaders,
   dtAnthropicModelsForMode,
+  dtChatFailureDetail,
   dtChatFailureUserMessage,
   normalizeDtAnthropicMessages,
 } from "../lib/dt/anthropic-chat";
@@ -290,3 +291,27 @@ async function main() {
 }
 
 void main();
+
+
+function testFailureDetail() {
+  // Anthropic SDK shape: status + nested error body.
+  const sdkError = Object.assign(new Error("400 {\"type\":\"error\"}"), {
+    status: 400,
+    error: { type: "error", error: { type: "invalid_request_error", message: "tools.3.name: must be unique" } },
+  });
+  assert.equal(dtChatFailureDetail(sdkError), "400 invalid_request_error: tools.3.name: must be unique");
+  assert.equal(
+    dtChatFailureUserMessage(sdkError),
+    "KI-Antwort fehlgeschlagen (400 invalid_request_error: tools.3.name: must be unique). Bitte erneut versuchen.",
+  );
+  const credit = Object.assign(new Error("400"), {
+    status: 400,
+    error: { type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } },
+  });
+  assert.ok(dtChatFailureUserMessage(credit).startsWith("Das Anthropic-Guthaben"));
+  assert.equal(dtChatFailureUserMessage("x"), "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.");
+  assert.equal(dtChatFailureUserMessage(new Error("Supabase: relation does not exist")), "KI-Antwort fehlgeschlagen (Supabase: relation does not exist). Bitte erneut versuchen.");
+  console.log("failure detail: ok");
+}
+
+testFailureDetail();

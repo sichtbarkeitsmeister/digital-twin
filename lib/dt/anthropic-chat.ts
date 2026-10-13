@@ -525,16 +525,44 @@ export function dtAnthropicModelsForMode(mode: DtChatMode): string[] {
   return [...new Set([primary, ...fallbacks].map((model) => model.trim()).filter(Boolean))];
 }
 
+/**
+ * Short technical reason for the generic failure text, so an admin can read the cause
+ * in the chat instead of the server log: "400 invalid_request_error: …".
+ * The Anthropic SDK nests the API error one level deeper (`err.error.error`).
+ */
+export function dtChatFailureDetail(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+  const extra = err as {
+    status?: unknown;
+    error?: { message?: unknown; type?: unknown; error?: { message?: unknown; type?: unknown } };
+    message?: unknown;
+  };
+  const api = extra.error?.error ?? extra.error;
+  const type = typeof api?.type === "string" ? api.type : "";
+  const apiMessage = typeof api?.message === "string" ? api.message : "";
+  const own = typeof extra.message === "string" ? extra.message : "";
+  const text = (apiMessage || own).replace(/\s+/g, " ").trim();
+  if (!text && !type) return null;
+  const parts = [
+    typeof extra.status === "number" ? String(extra.status) : "",
+    type,
+  ].filter(Boolean);
+  const head = parts.join(" ");
+  const body = text.length > 220 ? `${text.slice(0, 217)}…` : text;
+  return [head, body].filter(Boolean).join(": ");
+}
+
 export function dtChatFailureUserMessage(err: unknown): string {
   const chunks: string[] = [];
   if (err instanceof Error && err.message) chunks.push(err.message);
   if (err && typeof err === "object") {
     const extra = err as {
       status?: unknown;
-      error?: { message?: unknown; type?: unknown };
+      error?: { message?: unknown; type?: unknown; error?: { message?: unknown; type?: unknown } };
     };
-    if (typeof extra.error?.message === "string") chunks.push(extra.error.message);
-    if (typeof extra.error?.type === "string") chunks.push(extra.error.type);
+    const api = extra.error?.error ?? extra.error;
+    if (typeof api?.message === "string") chunks.push(api.message);
+    if (typeof api?.type === "string") chunks.push(api.type);
     if (typeof extra.status === "number") chunks.push(String(extra.status));
   }
   const blob = chunks.join(" ");
@@ -570,7 +598,10 @@ export function dtChatFailureUserMessage(err: unknown): string {
   if (/rate.?limit|overloaded|529/i.test(blob)) {
     return "Die KI ist gerade überlastet. Bitte in einem Moment erneut versuchen.";
   }
-  return "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.";
+  const detail = dtChatFailureDetail(err);
+  return detail
+    ? `KI-Antwort fehlgeschlagen (${detail}). Bitte erneut versuchen.`
+    : "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.";
 }
 
 const DT_TRUNCATED_ANSWER_NOTE =
