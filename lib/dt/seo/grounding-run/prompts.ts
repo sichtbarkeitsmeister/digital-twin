@@ -388,7 +388,7 @@ function htmlBlock(context: GroundingRunContext): string | null {
 
 // --- rules -----------------------------------------------------------------------------------
 
-const BASE_RULES = `Du bist der Grounding-Agent von DigitalTwin. Du erstellst Grounding Pages nach dem Grounding Page Standard v1.7 (groundingpage.com/spec): faktische, enzyklopädische Referenzseiten für Menschen und KI-Systeme.
+export const BASE_RULES = `Du bist der Grounding-Agent von DigitalTwin. Du erstellst Grounding Pages nach dem Grounding Page Standard v1.7 (groundingpage.com/spec): faktische, enzyklopädische Referenzseiten für Menschen und KI-Systeme.
 
 Eiserne Regeln:
 - Nur belegbare Fakten. Jede Aussage stammt aus den Anbieterfakten, dem Onboarding, den Website-Inhalten, der bestehenden Grounding Page oder den Antworten der Redaktion. Nichts wird erfunden, ergänzt, gerundet oder „plausibel“ gemacht.
@@ -397,7 +397,7 @@ Eiserne Regeln:
 - Stil: ruhig, enzyklopädisch, ein Fakt pro Satz, keine Adjektive, kein Marketing, keine Superlative, kein „wir“. Vollständige Sätze mit dem Namen der Entität, damit jeder Abschnitt allein zitierbar bleibt. Deutsch; Eigennamen unverändert; Begriffe so, wie die Zielkunden sie verwenden.
 - Kein Satz über KI, LLMs, Retrieval oder „Grounding“ im sichtbaren Text. Die Seite muss ohne jede solche Erwähnung vollen Wert für Menschen haben.`;
 
-const STANDARD_RULES = `Pflichtblöcke je Seite (Standard v1.7):
+export const STANDARD_RULES = `Pflichtblöcke je Seite (Standard v1.7):
 - Genau eine Hauptentität. H1 = Name der Entität (kein Slogan, nicht „Grounding Page“).
 - Lead (2–3 kurze Absätze): Definition („<Name> ist …“), Einordnung (Segment, Region, Zielgruppe), Abgrenzung (was <Name> nicht ist, womit es verwechselt wird).
 - Tragende H2 mit Entitätsnamen („Kerndaten von <Name>“, „Leistungen von <Name>“, „Geschichte von <Name>“, „Abgrenzung von <Name>“, „FAQ zu <Name>“). Jede Sektion muss allein verständlich sein.
@@ -504,11 +504,31 @@ const FACTS_SCHEMA: Anthropic.Tool["input_schema"] = {
   required: ["entity", "classification", "core_facts", "sections", "faq", "sources", "related", "open_questions", "entity_candidates"],
 };
 
-function faktenSpec(context: GroundingRunContext): GroundingStepSpec {
+export type GroundingAgentRules = { base: string; standard: string };
+
+/** Stored text replaces the code default only when it is non-empty. */
+export function resolveGroundingAgentRules(
+  rules?: { base?: string | null; standard?: string | null } | null,
+): GroundingAgentRules {
+  return {
+    base: rules?.base?.trim() || BASE_RULES,
+    standard: rules?.standard?.trim() || STANDARD_RULES,
+  };
+}
+
+export function isDefaultGroundingAgentBase(value: string | null | undefined): boolean {
+  return !value?.trim() || value.trim() === BASE_RULES;
+}
+
+export function isDefaultGroundingAgentStandard(value: string | null | undefined): boolean {
+  return !value?.trim() || value.trim() === STANDARD_RULES;
+}
+
+function faktenSpec(context: GroundingRunContext, rules: GroundingAgentRules): GroundingStepSpec {
   const hub = context.page.kind === "hub";
   return {
     maxTokens: 8_000,
-    system: `${BASE_RULES}
+    system: `${rules.base}
 
 Schritt 1 Fakten sammeln: Du legst die Faktenbasis für die Seite an. Noch kein HTML.
 - Lies alle Quellen und ordne jeden Fakt der Entität zu. Nenne je Fakt die Quelle.
@@ -552,10 +572,10 @@ const FINDINGS_ITEMS: Record<string, unknown> = {
   },
 };
 
-function faktencheckSpec(context: GroundingRunContext): GroundingStepSpec {
+function faktencheckSpec(context: GroundingRunContext, rules: GroundingAgentRules): GroundingStepSpec {
   return {
     maxTokens: 6_000,
-    system: `${BASE_RULES}
+    system: `${rules.base}
 
 Schritt 2 Faktencheck: Du prüfst jeden Fakt der Faktenbasis (Schritt 1) gegen die Quellen.
 Ein finding ist jeder Fakt, der in keiner Quelle steht, den Quellen widerspricht, eine gerundete oder erfundene Zahl enthält, einen Superlativ oder ein Versprechen enthält, eine falsche Entität beschreibt oder einen zeitabhängigen Wert ohne Stand nennt. severity high = falsch oder rechtlich riskant, medium = unbelegt, low = unscharf. Vorschlag: streichen, korrigieren, „Stand“ ergänzen.
@@ -608,14 +628,14 @@ summary: zwei Sätze zur Faktenlage (wie belastbar, was fehlt).`,
   };
 }
 
-function bauenSpec(context: GroundingRunContext): GroundingStepSpec {
+function bauenSpec(context: GroundingRunContext, rules: GroundingAgentRules): GroundingStepSpec {
   const { page } = context;
   return {
     maxTokens: 12_000,
-    system: `${BASE_RULES}
+    system: `${rules.base}
 
 Schritt 3 Seite bauen: Du schreibst die vollständige HTML-Datei der Grounding Page aus der Faktenbasis, mit den Befunden des Faktenchecks eingearbeitet und den Antworten der Redaktion.
-${STANDARD_RULES}
+${rules.standard}
 
 Technik:
 - Vollständiges Dokument: <!doctype html>, <html lang="de">, <head> mit <meta charset>, <meta name="viewport">, <title> (Name der Entität, optional „: Fakten“), <meta name="description"> (ein Satz, 120–155 Zeichen, nur Fakten), <link rel="canonical" href="${page.url}">, die JSON-LD-Skripte; <body> mit <main> und dem Inhalt. Nur wenige Zeilen CSS im <head> (lead-definition, data-grid als zweispaltige Liste, review-notice, max-width) – die Seite übernimmt Header, Footer und Typografie der Website.
@@ -658,13 +678,13 @@ Technik:
   };
 }
 
-function endpruefungSpec(context: GroundingRunContext): GroundingStepSpec {
+function endpruefungSpec(context: GroundingRunContext, rules: GroundingAgentRules): GroundingStepSpec {
   return {
     maxTokens: 12_000,
-    system: `${BASE_RULES}
+    system: `${rules.base}
 
 Schritt 4 Endprüfung: Du prüfst die HTML-Datei (Schritt 3) gegen die Faktenbasis und die Checkliste des Standards v1.7, bevor ein Mensch sie freigibt.
-${STANDARD_RULES}
+${rules.standard}
 
 Checkliste:
 1. Ist die Hauptentität eindeutig, H1 nur der Name, Definition im ersten Absatz?
@@ -708,17 +728,21 @@ Ergebnis:
   };
 }
 
-const SPECS: Record<number, (context: GroundingRunContext) => GroundingStepSpec> = {
+const SPECS: Record<number, (context: GroundingRunContext, rules: GroundingAgentRules) => GroundingStepSpec> = {
   [GROUNDING_STEP_FAKTEN]: faktenSpec,
   [GROUNDING_STEP_FAKTENCHECK]: faktencheckSpec,
   [GROUNDING_STEP_BAUEN]: bauenSpec,
   [GROUNDING_STEP_ENDPRUEFUNG]: endpruefungSpec,
 };
 
-export function groundingStepSpec(step: number, context: GroundingRunContext): GroundingStepSpec {
+export function groundingStepSpec(
+  step: number,
+  context: GroundingRunContext,
+  rules?: { base?: string | null; standard?: string | null } | null,
+): GroundingStepSpec {
   const build = SPECS[step];
   if (!build) throw new Error(`Unbekannter Schritt ${step}.`);
-  return build(context);
+  return build(context, resolveGroundingAgentRules(rules));
 }
 
 /** `llms.txt` for the domain: the Hub and every finished Entitätsseite. */

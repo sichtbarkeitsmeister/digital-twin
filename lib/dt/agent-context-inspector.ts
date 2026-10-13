@@ -13,6 +13,11 @@ import {
   isProspectPersonaKind,
 } from "@/lib/dt/prompts/build-system-prompt";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
+import {
+  formatGroundingRulesPreview,
+  groundingRulesAreDefault,
+  loadGroundingPagesRules,
+} from "@/lib/dt/prompts/grounding-pages-rules";
 import { buildDtChatStaticSystemText, buildProspectStaticSystemText } from "@/lib/dt/prompts/system-static";
 import {
   DT_SEO_MODE_INSTRUCTIONS,
@@ -387,6 +392,21 @@ export async function loadDtAgentContextBundle(input: {
         description:
           "Fester GEO/LLM-Sichtbarkeitsblock für SEO- und geo_advisor-Agenten.",
         content: buildDtGeoGroundingText(),
+      }),
+    );
+    const groundingRules = await loadGroundingPagesRules(supabase);
+    const groundingRulesDefault = groundingRulesAreDefault(groundingRules);
+    sections.push(
+      section({
+        id: "grounding_pages_job",
+        title: "Grounding Pages",
+        sourceLabel: groundingRulesDefault ? "System (Standard)" : "Global",
+        sourceType: groundingRulesDefault ? "system" : "user",
+        description: groundingRules.persisted
+          ? "Chat-Schalter, Grundregeln und Pflichtblöcke des Grounding-Agenten. Bearbeiten im Tab Grounding."
+          : "Chat-Schalter, Grundregeln und Pflichtblöcke des Grounding-Agenten. Speichern ist möglich, sobald die Datenbankspalten angelegt sind.",
+        content: formatGroundingRulesPreview(groundingRules),
+        editHref: `/dashboard/verwaltung/seo?org=${orgQuery}&tab=grounding#grounding-pages-rules`,
       }),
     );
 

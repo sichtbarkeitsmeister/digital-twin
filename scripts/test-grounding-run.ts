@@ -103,7 +103,15 @@ assert.ok(spec1.user.includes("AVGS-Beratung für Gründer."));
 assert.ok(spec1.user.includes("Antworten und Anmerkungen der Redaktion"));
 assert.ok(spec1.system.includes("entity_candidates"));
 const spec3 = groundingStepSpec(3, context);
+assert.ok(spec3.system.includes("Nur belegbare Fakten"));
 assert.ok(spec3.system.includes("Grounding Page Standard v1.6"));
+const customRules = groundingStepSpec(3, context, {
+  base: "EIGENE BASISREGEL",
+  standard: "EIGENE PFLICHT",
+});
+assert.ok(customRules.system.includes("EIGENE BASISREGEL"));
+assert.ok(customRules.system.includes("EIGENE PFLICHT"));
+assert.equal(customRules.system.includes("Nur belegbare Fakten"), false);
 assert.ok(spec3.system.includes('<link rel="canonical" href="https://existenzstand.de/grounding/">'));
 assert.ok(spec3.user.includes("Faktenbasis (Schritt 1)"));
 assert.throws(() => groundingStepSpec(9, context));

@@ -32,6 +32,7 @@ import type {
   DtGroundingSummary,
 } from "@/lib/dt/seo/grounding-pages";
 import type { DtGroundingRunState } from "@/lib/dt/types";
+import { DtSeoGroundingRulesCard } from "@/components/dt/seo/dt-seo-grounding-rules-card";
 
 /**
  * Overview of the organisation's Grounding Pages (Hub + Entitätsseiten + llms.txt).
@@ -1061,6 +1062,8 @@ export function DtSeoGroundingPanel(props: {
           <OpenChatButton onClick={props.onOpenChat} label="Im SEO-Chat besprechen" size="md" />
         ) : null}
       </div>
+
+      <DtSeoGroundingRulesCard canEdit={props.canEdit} />
 
       {loading ? (
         <DtGlassCard variant="subtle" className="flex items-center gap-2 p-4 text-sm">

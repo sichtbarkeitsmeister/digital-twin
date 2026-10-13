@@ -9,6 +9,7 @@ import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { loadGroundingRunContext } from "@/lib/dt/seo/grounding-run/context";
+import { loadGroundingPagesRules } from "@/lib/dt/prompts/grounding-pages-rules";
 import { groundingStepSpec } from "@/lib/dt/seo/grounding-run/prompts";
 import { groundingStepPatchFor } from "@/lib/dt/seo/grounding-run/step-patch";
 import { groundingRunDbErrorMessage, num } from "@/lib/dt/seo/grounding-run/store";
@@ -74,7 +75,11 @@ export async function runGroundingStep(
   const models = await loadContentModelConfig(service);
   const override = process.env.ANTHROPIC_DT_GROUNDING_MODEL?.trim();
   const candidates = override ? [override, ...models[def.tier]] : models[def.tier];
-  const spec = groundingStepSpec(step, context);
+  const rules = await loadGroundingPagesRules(service);
+  const spec = groundingStepSpec(step, context, {
+    base: rules.agentBase,
+    standard: rules.agentStandard,
+  });
   const call = await callContentTool({
     models: candidates,
     system: spec.system,

@@ -66,3 +66,12 @@ JSON-LD im WebPage-Objekt: "lastReviewed": "JJJJ-MM-TT", "reviewedBy": { "@type"
 ${DT_NEXT_STEPS_INSTRUCTIONS}
 Typische Buttons im Grounding-Modus: „Hub-Entwurf jetzt erstellen“ (message mit der geplanten URL), „Entitätsseite <Name> anlegen“, „Stand des Entwurfs prüfen“, „Antworten senden“ (wenn der Nutzer die Fragen gerade beantwortet hat, brauchst du keinen Button: führe answer_grounding_draft direkt aus).
 `.trim();
+
+export function resolveGroundingModeInstructions(stored: string | null | undefined): string {
+  const trimmed = stored?.trim() ?? "";
+  return trimmed || DT_GROUNDING_MODE_INSTRUCTIONS;
+}
+
+export function isDefaultGroundingModeInstructions(value: string | null | undefined): boolean {
+  return resolveGroundingModeInstructions(value) === DT_GROUNDING_MODE_INSTRUCTIONS;
+}

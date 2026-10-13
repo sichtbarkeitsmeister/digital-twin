@@ -32,6 +32,7 @@ import { loadGroundingPromptText } from "@/lib/dt/seo/grounding-prompt-context";
 import { buildPastedUrlContextText } from "@/lib/shared/pasted-url-context";
 import { buildDtSystemPrompt, isProspectPersonaKind } from "@/lib/dt/prompts/build-system-prompt";
 import { loadTextModeInstructions } from "@/lib/dt/prompts/text-mode";
+import { loadGroundingPagesRules } from "@/lib/dt/prompts/grounding-pages-rules";
 import { resolveDtAgentPrompt } from "@/lib/dt/prompts/resolve-agent-prompt";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -264,6 +265,12 @@ export async function assembleDtChatFromDb(input: {
   const textModePrompt = input.textMode
     ? (await loadTextModeInstructions(supabase)).prompt
     : undefined;
+  const groundingModeActive = Boolean(
+    input.groundingMode && (promptMode === "seo" || agent.kind === "geo_advisor"),
+  );
+  const groundingModePrompt = groundingModeActive
+    ? (await loadGroundingPagesRules(supabase)).modePrompt
+    : undefined;
 
   const lastUserMessage = [...prefixed].reverse().find((m) => m.role === "user");
   const pastedUrlsText = lastUserMessage?.content
@@ -291,7 +298,8 @@ export async function assembleDtChatFromDb(input: {
     ghostMode: input.ghostMode ?? mode === "ghost",
     textMode: input.textMode,
     textModePrompt,
-    groundingMode: input.groundingMode && (promptMode === "seo" || agent.kind === "geo_advisor"),
+    groundingMode: groundingModeActive,
+    groundingModePrompt,
     sitePages,
     latestSeoReportText:
       promptMode === "seo" ? formatDtSeoReportForPrompt(latestSeoReport) : undefined,
@@ -397,6 +405,12 @@ export async function assembleDtChatEphemeral(input: {
   const textModePrompt = input.textMode
     ? (await loadTextModeInstructions(supabase)).prompt
     : undefined;
+  const groundingModeActive = Boolean(
+    input.groundingMode && (agent.kind === "geo_advisor" || agent.kind === "seo_advisor"),
+  );
+  const groundingModePrompt = groundingModeActive
+    ? (await loadGroundingPagesRules(supabase)).modePrompt
+    : undefined;
 
   const system = buildDtSystemPrompt({
     agent: {
@@ -419,8 +433,8 @@ export async function assembleDtChatEphemeral(input: {
     ghostMode: true,
     textMode: input.textMode,
     textModePrompt,
-    groundingMode:
-      input.groundingMode && (agent.kind === "geo_advisor" || agent.kind === "seo_advisor"),
+    groundingMode: groundingModeActive,
+    groundingModePrompt,
     wunschkundenKnowledgeText,
     websiteStructureText,
     transcriptKnowledgeText,
