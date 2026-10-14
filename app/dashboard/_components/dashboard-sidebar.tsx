@@ -7,19 +7,15 @@ import {
   Building2,
   Bot,
   ClipboardList,
-  ClipboardPenLine,
   FileSearch,
   FileSignature,
   FileText,
   FolderUp,
   Inbox,
-  MessageCircle,
   PenLine,
-  Plug,
   Shield,
   Sparkles,
   Users,
-  Workflow,
   Mail,
   Phone,
   ScanSearch,
@@ -81,20 +77,14 @@ function NavLink({ item }: { item: NavItem }) {
 
 export function DashboardSidebar({
   isPlatformAdmin,
-  canManageIntegrations,
   canManageDtAgents,
   canViewDtUsage,
-  showLeads,
-  showFrageboegen,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
 }: {
   isPlatformAdmin: boolean;
-  canManageIntegrations: boolean;
   canManageDtAgents: boolean;
   canViewDtUsage: boolean;
-  showLeads: boolean;
-  showFrageboegen: boolean;
   pendingSurveyQuestionsCount: number;
   pendingAgentEditRequestsCount: number;
 }) {
@@ -112,12 +102,7 @@ export function DashboardSidebar({
       icon: Phone,
       match: (pathname: string) => pathname.startsWith("/dashboard/ansprechpartner"),
     },
-    // Leadinfo company lists stay internal — customers never see this tab.
-    ...(showLeads ? [{ label: "Leads", href: "/dashboard/leads", icon: Sparkles }] : []),
     { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },
-    ...(canManageIntegrations
-      ? [{ label: "Integrationen", href: "/dashboard/integrations", icon: Plug }]
-      : []),
   ];
 
   const verwaltungItems: NavItem[] = [
@@ -198,25 +183,6 @@ export function DashboardSidebar({
       }
     : null;
 
-  const erstgespraechItem: NavItem | null = isPlatformAdmin
-    ? {
-        label: "Erstgespräch",
-        href: "/dashboard/erstgespraech",
-        icon: MessageCircle,
-        match: (pathname: string) => pathname.startsWith("/dashboard/erstgespraech"),
-      }
-    : null;
-
-  const frageboegenItem: NavItem | null =
-    showFrageboegen || canManageDtAgents || isPlatformAdmin
-      ? {
-          label: "Fragebögen",
-          href: "/dashboard/frageboegen",
-          icon: ClipboardPenLine,
-          match: (pathname: string) => pathname.startsWith("/dashboard/frageboegen"),
-        }
-      : null;
-
   const adminItems: NavItem[] = [
     {
       label: "Agent-Anfragen",
@@ -239,7 +205,6 @@ export function DashboardSidebar({
       icon: Users,
       match: (pathname: string) => pathname.startsWith("/dashboard/admin/team"),
     },
-    { label: "Jobs", href: "/dashboard/admin/jobs", icon: Workflow },
     {
       label: "E-Mails",
       href: "/dashboard/admin/mails",
@@ -266,11 +231,7 @@ export function DashboardSidebar({
         ))}
       </nav>
 
-      {verwaltungItems.length > 0 ||
-      transkripteItem ||
-      erstgespraechItem ||
-      frageboegenItem ||
-      isPlatformAdmin ? (
+      {verwaltungItems.length > 0 || transkripteItem || isPlatformAdmin ? (
         <div className="grid gap-2 pt-2">
           <div className="border-t border-sbkm-navy/10 pt-3 dark:border-white/10">
             <p className="px-2 text-[11px] font-bold uppercase tracking-[0.14em] text-sbkm-ink-500">
@@ -287,10 +248,6 @@ export function DashboardSidebar({
             {transkripteItem ? (
               <NavLink key={transkripteItem.href} item={transkripteItem} />
             ) : null}
-            {erstgespraechItem ? (
-              <NavLink key={erstgespraechItem.href} item={erstgespraechItem} />
-            ) : null}
-            {frageboegenItem ? <NavLink key={frageboegenItem.href} item={frageboegenItem} /> : null}
             {isPlatformAdmin ? <NavLink key={alleUmfragenItem.href} item={alleUmfragenItem} /> : null}
           </nav>
         </div>

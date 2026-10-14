@@ -13,21 +13,15 @@ import { DtPageShell } from "@/components/dt/dt-page-shell";
 export function DashboardShell({
   children,
   isPlatformAdmin,
-  canManageIntegrations,
   canManageDtAgents,
   canViewDtUsage,
-  showLeads,
-  showFrageboegen,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
 }: {
   children: React.ReactNode;
   isPlatformAdmin: boolean;
-  canManageIntegrations: boolean;
   canManageDtAgents?: boolean;
   canViewDtUsage?: boolean;
-  showLeads?: boolean;
-  showFrageboegen?: boolean;
   pendingSurveyQuestionsCount?: number;
   pendingAgentEditRequestsCount?: number;
 }) {
@@ -42,11 +36,8 @@ export function DashboardShell({
             <div className="flex-1 overflow-y-auto p-4 scrollbar-subtle">
               <DashboardSidebar
                 isPlatformAdmin={isPlatformAdmin}
-                canManageIntegrations={canManageIntegrations}
                 canManageDtAgents={canManageDtAgents ?? false}
                 canViewDtUsage={canViewDtUsage ?? false}
-                showLeads={showLeads ?? false}
-                showFrageboegen={showFrageboegen ?? false}
                 pendingSurveyQuestionsCount={pendingSurveyQuestionsCount ?? 0}
                 pendingAgentEditRequestsCount={pendingAgentEditRequestsCount ?? 0}
               />

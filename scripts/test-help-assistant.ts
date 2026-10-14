@@ -41,7 +41,7 @@ assert.ok(!memberBook.includes("ANTHROPIC_API_KEY"), "customers never see env va
 assert.ok(!memberBook.includes("/dashboard/verwaltung/seo"), "customers never see the SEO workspace");
 assert.ok(!memberBook.includes("Agent-Kontext"));
 assert.ok(adminBook.includes("### Grounding Pages"));
-assert.ok(adminBook.includes("/dashboard/admin/jobs"));
+assert.ok(adminBook.includes("/dashboard/admin/mails"));
 assert.ok(adminBook.length > memberBook.length);
 const managerBook = buildHelpHandbookText(manager);
 assert.ok(managerBook.includes("/dashboard/verwaltung/agents"));
