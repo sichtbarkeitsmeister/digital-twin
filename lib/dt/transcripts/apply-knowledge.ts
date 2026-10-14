@@ -100,15 +100,16 @@ export type TranscriptPersonaMatchAgent = {
   kind: string;
 };
 
-function findMatchingAgent<T extends { name: string; slug: string | null }>(
+function findMatchingAgent<T extends { name: string }>(
   agents: T[],
   persona: DtTranscriptPersonaExtract,
 ): T | null {
   const key = normalizePersonaKey(persona.name);
-  const slug = slugFromPersonaName(persona.name);
-  const exactSlug = agents.find((a) => (a.slug ?? "") === slug);
-  if (exactSlug) return exactSlug;
-  return agents.find((a) => normalizePersonaKey(a.name) === key) ?? null;
+  if (!key) return null;
+  // The slug is assigned at creation and is not updated when the agent is renamed
+  // (Markus → Andreas keeps slug "markus"). Matching that leftover slug treats the
+  // renamed agent as the old person and blocks a new, different avatar.
+  return agents.find((agent) => normalizePersonaKey(agent.name) === key) ?? null;
 }
 
 /** Personas from an extract that do not already exist as a Wunschkunde/Persona agent. */
@@ -227,7 +228,8 @@ export async function applyTranscriptExtractToOrg(input: {
 
 /**
  * Creates persona agents only for names the user confirmed.
- * Names that already exist as agents are skipped.
+ * An agent is skipped only when its current name matches. A slug left behind
+ * by a rename does not count as the same avatar.
  */
 export async function createConfirmedTranscriptPersonas(input: {
   supabase: SupabaseClient;
