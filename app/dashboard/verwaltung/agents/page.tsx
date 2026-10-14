@@ -52,9 +52,12 @@ async function AgentsPageContent({
 export default async function VerwaltungAgentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string }>;
+  searchParams: Promise<{ org?: string; view?: string }>;
 }) {
   const sp = await searchParams;
+  if (sp.view === "prompts") {
+    redirect("/dashboard/verwaltung/globale-prompts");
+  }
 
   return (
     <Suspense

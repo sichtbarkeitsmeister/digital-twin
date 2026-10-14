@@ -19,6 +19,7 @@ import {
   Mail,
   Phone,
   ScanSearch,
+  ScrollText,
   Eraser,
 } from "lucide-react";
 
@@ -120,6 +121,13 @@ export function DashboardSidebar({
       : []),
     ...(isPlatformAdmin
       ? [
+          {
+            label: "Globale Prompts",
+            href: "/dashboard/verwaltung/globale-prompts",
+            icon: ScrollText,
+            match: (pathname: string) =>
+              pathname.startsWith("/dashboard/verwaltung/globale-prompts"),
+          },
           {
             label: "Agent-Kontext",
             href: "/dashboard/verwaltung/agent-kontext",

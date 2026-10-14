@@ -20,6 +20,7 @@ export function DashboardPrefetcher({
 
     if (isPlatformAdmin) {
       routes.push(
+        "/dashboard/verwaltung/globale-prompts",
         "/dashboard/admin/organisations",
         "/dashboard/admin/team",
         "/dashboard/admin/mails",

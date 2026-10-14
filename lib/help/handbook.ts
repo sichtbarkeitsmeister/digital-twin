@@ -89,6 +89,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Menü für Plattform-Admins",
     audience: "admin",
     lines: [
+      "Globale Prompts: /dashboard/verwaltung/globale-prompts — plattformweite Standard-Prompts (DigitalTwin, SEO-Berater, Umfrage → Agent) und die globale SEO-Checkliste. Nur für Plattform-Admins.",
       "Agent-Kontext: /dashboard/verwaltung/agent-kontext?org=<id> — zeigt den zusammengebauten System-Prompt einer Figur mit allen Bausteinen (Wunschkunden-Wissen, Transkripte, Website-Struktur, Onboarding, Grounding). Intern, nie für Kunden.",
       "SEO Modus: /dashboard/verwaltung/seo?org=<id>&tab=<tab> — Tabs: chat (SEO-Berater mit Crawl-Werkzeugen und Websuche), stats (Statistik), tasks (Aufgaben-Board), reports (SEO-Reports, auch an den Inhaber senden), analyse (Crawl-Viewer, Indexierbarkeit), struktur (hochgeladene Website-Struktur), grounding (Grounding Pages), settings (Website-URL, Sitemap, Search Console, „Jetzt crawlen“, SEO-Checkliste).",
       "Texte: /dashboard/verwaltung/texte?org=<id> — Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Textvorlagen je Seitentyp unten auf der Seite.",
@@ -213,6 +214,7 @@ const ROUTES: RouteEntry[] = [
   { test: (p) => p.startsWith("/dashboard/digital-twin/agents"), label: "Agenten", audience: "manager" },
   { test: (p) => p.startsWith("/dashboard/digital-twin/seo"), label: "SEO Modus", audience: "admin" },
   { test: (p) => p.startsWith("/dashboard/digital-twin"), label: "DigitalTwin-Chat", audience: "all" },
+  { test: (p) => p.startsWith("/dashboard/verwaltung/globale-prompts"), label: "Globale Prompts", audience: "admin" },
   { test: (p) => p.startsWith("/dashboard/verwaltung/agents"), label: "Agenten", audience: "manager" },
   { test: (p) => p.startsWith("/dashboard/verwaltung/agent-kontext"), label: "Agent-Kontext", audience: "admin" },
   { test: (p) => p.startsWith("/dashboard/verwaltung/seo/crawl"), label: "SEO Modus · Crawl-Viewer", audience: "admin" },
