@@ -270,6 +270,19 @@ function testPersonasAwaitConfirmation() {
     [{ name: persona.name, slug: "seo_advisor", kind: "seo_advisor" }],
   );
   assert.equal(seoDoesNotMatch.length, 1);
+
+  const renamedAway = personasAwaitingConfirmation(
+    [{ ...persona, name: "Markus" }],
+    [{ name: "Andreas", slug: "markus", kind: "persona" }],
+  );
+  assert.equal(renamedAway.length, 1, "a renamed agent must not block the old name");
+  assert.equal(renamedAway[0]?.name, "Markus");
+
+  const stillNamedMarkus = personasAwaitingConfirmation(
+    [{ ...persona, name: "Markus" }],
+    [{ name: "Markus", slug: "markus_alt", kind: "persona" }],
+  );
+  assert.equal(stillNamedMarkus.length, 0, "the current name still counts as the same avatar");
   console.log("personas await confirmation: ok");
 }
 
