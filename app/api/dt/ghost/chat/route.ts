@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { callDtAnthropicChat, dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
+import { jsonKeepaliveResponse } from "@/lib/dt/json-keepalive";
 import {
   createdFilesToGhostMetadata,
   dtAttachmentInboundSchema,
@@ -63,67 +64,69 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: prepared.message }, { status: 400 });
   }
 
-  try {
-    const assembled = await assembleDtChatEphemeral({
-      userId: auth.userId,
-      organisationId: parsed.data.organisationId,
-      agentId: parsed.data.agentId,
-      history: parsed.data.history,
-      content: parsed.data.content,
-      textMode: parsed.data.textMode,
-      groundingMode: parsed.data.groundingMode,
-    });
-
-    const messages = appendEphemeralAttachmentsToMessages(
-      assembled.messages,
-      parsed.data.content.trim(),
-      prepared.items,
-    );
-
-    const direct = await callDtAnthropicChat({
-      system: assembled.system,
-      messages,
-      mode: "ghost",
-    });
-
-    if (direct.usage.inputTokens > 0 || direct.usage.outputTokens > 0) {
-      const service = createServiceClient();
-      await recordLlmUsageEvent(service, {
-        organisationId: parsed.data.organisationId,
+  return jsonKeepaliveResponse(async () => {
+    try {
+      const assembled = await assembleDtChatEphemeral({
         userId: auth.userId,
+        organisationId: parsed.data.organisationId,
         agentId: parsed.data.agentId,
-        mode: "ghost",
-        via: "ghost",
-        model: direct.model,
-        inputTokens: direct.usage.inputTokens,
-        outputTokens: direct.usage.outputTokens,
+        history: parsed.data.history,
+        content: parsed.data.content,
+        textMode: parsed.data.textMode,
+        groundingMode: parsed.data.groundingMode,
       });
-    }
 
-    const fenceFiles = await parseDtCreatedFilesFromText(direct.text);
-    const createdFiles = mergeCreatedChatFiles(direct.createdFiles ?? [], fenceFiles);
-    const content = stripDtCreatedFileFences(direct.text);
+      const messages = appendEphemeralAttachmentsToMessages(
+        assembled.messages,
+        parsed.data.content.trim(),
+        prepared.items,
+      );
 
-    return NextResponse.json({
-      ok: true,
-      assistantMessage: {
-        id: `ghost-${Date.now()}`,
-        role: "assistant" as const,
-        content,
-        metadata: {
-          via: "anthropic_ghost",
+      const direct = await callDtAnthropicChat({
+        system: assembled.system,
+        messages,
+        mode: "ghost",
+      });
+
+      if (direct.usage.inputTokens > 0 || direct.usage.outputTokens > 0) {
+        const service = createServiceClient();
+        await recordLlmUsageEvent(service, {
+          organisationId: parsed.data.organisationId,
+          userId: auth.userId,
+          agentId: parsed.data.agentId,
+          mode: "ghost",
+          via: "ghost",
           model: direct.model,
-          ...(createdFiles.length > 0
-            ? { created_files: createdFilesToGhostMetadata(createdFiles) }
-            : {}),
+          inputTokens: direct.usage.inputTokens,
+          outputTokens: direct.usage.outputTokens,
+        });
+      }
+
+      const fenceFiles = await parseDtCreatedFilesFromText(direct.text);
+      const createdFiles = mergeCreatedChatFiles(direct.createdFiles ?? [], fenceFiles);
+      const content = stripDtCreatedFileFences(direct.text);
+
+      return {
+        ok: true,
+        assistantMessage: {
+          id: `ghost-${Date.now()}`,
+          role: "assistant" as const,
+          content,
+          metadata: {
+            via: "anthropic_ghost",
+            model: direct.model,
+            ...(createdFiles.length > 0
+              ? { created_files: createdFilesToGhostMetadata(createdFiles) }
+              : {}),
+          },
+          created_at: new Date().toISOString(),
         },
-        created_at: new Date().toISOString(),
-      },
-      via: "anthropic_ghost",
-    });
-  } catch (err) {
-    const message = err instanceof Error ? dtChatFailureUserMessage(err) : "Ghost-Chat fehlgeschlagen.";
-    console.warn("[dt] ghost chat:", message);
-    return NextResponse.json({ ok: false, message }, { status: 500 });
-  }
+        via: "anthropic_ghost",
+      };
+    } catch (err) {
+      const message = err instanceof Error ? dtChatFailureUserMessage(err) : "Ghost-Chat fehlgeschlagen.";
+      console.warn("[dt] ghost chat:", message);
+      return { ok: false, message };
+    }
+  });
 }

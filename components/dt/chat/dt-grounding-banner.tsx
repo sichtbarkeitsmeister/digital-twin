@@ -14,8 +14,8 @@ export function DtGroundingBanner() {
       <ShieldCheck className="h-4 w-4 shrink-0 text-sbkm-navy dark:text-sbkm-mint" aria-hidden />
       <span>
         <strong className="font-semibold">Grounding Page aktiv:</strong> der SEO-Berater arbeitet
-        nach Grounding Page Standard v1.7, plant Hub und Entitätsseiten und liefert fertige
-        HTML-Dateien zum Einfügen auf der Website. Bestand und Freigabe im Tab „Grounding“.
+        nach Grounding Page Standard v1.7 und plant Hub und Entitätsseiten. Die HTML-Datei baut
+        der Agent im Hintergrund. Download und Freigabe liegen im Tab „Grounding“.
       </span>
     </motion.div>
   );

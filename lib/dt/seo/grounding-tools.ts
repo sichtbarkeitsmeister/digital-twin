@@ -1,10 +1,14 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import {
   DT_GROUNDING_PAGE_SELECT,
   buildGroundingPageUpdate,
+  formatGroundingChatStatus,
   serializeGroundingPage,
   type DtGroundingPagePatch,
 } from "@/lib/dt/seo/grounding-pages";
+import { loadGroundingPageViews } from "@/lib/dt/seo/grounding-pages-server";
 import { answerGroundingQuestions, startGroundingRun } from "@/lib/dt/seo/grounding-run/actions";
 import { reconcileGroundingPages } from "@/lib/dt/seo/grounding-run/health";
 import { groundingRunQuestions } from "@/lib/dt/seo/grounding-run/store";
@@ -316,4 +320,13 @@ export async function answerGroundingHtmlRequest(
   return resumed
     ? `Der unterbrochene Entwurf für ${name} läuft weiter (${page.url}). ${where}`
     : `Der Entwurf für ${name} ist gestartet (${page.url}). ${where}`;
+}
+
+/** Status questions from the chat. Reads the saved pages and does not start a run. */
+export async function answerGroundingStatusRequest(
+  supabase: SupabaseClient,
+  organisationId: string,
+): Promise<string> {
+  const views = await loadGroundingPageViews(supabase, organisationId);
+  return formatGroundingChatStatus(views, groundingTabHref(organisationId));
 }

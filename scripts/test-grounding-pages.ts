@@ -4,8 +4,10 @@
  */
 import assert from "node:assert/strict";
 
+import { jsonKeepaliveResponse } from "../lib/dt/json-keepalive";
 import {
   buildGroundingPageUpdate,
+  formatGroundingChatStatus,
   formatGroundingPagesForPrompt,
   isModifiedAfterReview,
   normalizeGroundingDate,
@@ -13,9 +15,13 @@ import {
   serializeGroundingPage,
   sortGroundingPages,
   summarizeGroundingPages,
+  type DtGroundingPageView,
 } from "../lib/dt/seo/grounding-pages";
 import { buildDtSystemPrompt } from "../lib/dt/prompts/build-system-prompt";
-import { isGroundingHtmlBuildRequest } from "../lib/dt/seo/grounding-html-request";
+import {
+  isGroundingHtmlBuildRequest,
+  isGroundingStatusRequest,
+} from "../lib/dt/seo/grounding-html-request";
 import type { DtGroundingPageRow } from "../lib/dt/types";
 
 const NOW = "2026-10-12T12:00:00.000Z";
@@ -248,4 +254,80 @@ assert.equal(isGroundingHtmlBuildRequest("HTML-Datei jetzt erstellen"), true);
 assert.equal(isGroundingHtmlBuildRequest("Agent-Stand neu prüfen"), false);
 assert.equal(isGroundingHtmlBuildRequest("Prüfe, ob die HTML-Datei schon fertig ist."), false);
 
-console.log("grounding-pages tests: ok");
+assert.equal(
+  isGroundingStatusRequest("Prüfe die Grounding Pages dieser Website und gib mir den Status."),
+  true,
+);
+assert.equal(isGroundingStatusRequest("Agent-Stand neu prüfen"), true);
+assert.equal(isGroundingStatusRequest("Stand des Entwurfs prüfen"), true);
+assert.equal(isGroundingStatusRequest("Prüfe, ob die HTML-Datei schon fertig ist."), true);
+assert.equal(isGroundingStatusRequest("HTML-Datei jetzt erstellen"), false);
+assert.equal(
+  isGroundingStatusRequest("Ja, erstelle die HTML-Datei jetzt direkt hier im Chat."),
+  false,
+);
+assert.equal(
+  isGroundingStatusRequest("Welche Fakten fehlen uns noch für die Hub-Grounding-Page?"),
+  false,
+);
+assert.equal(
+  isGroundingStatusRequest("Welche Entitätsseiten sollten wir zusätzlich anlegen?"),
+  false,
+);
+assert.equal(
+  isGroundingStatusRequest("Erkläre mir die Freigabe nach Standard v1.7 Schritt für Schritt."),
+  false,
+);
+
+const statusHub = serializeGroundingPage(
+  row({
+    kind: "hub",
+    url: "https://www.example.de/grounding/",
+    run_state: "laeuft",
+  }),
+  NOW,
+);
+statusHub.run = {
+  state: "laeuft",
+  label: "Entwurf läuft",
+  detail: "Schritt 1 von 4: Fakten sammeln läuft",
+  hasHtml: false,
+  questions: [],
+} as unknown as DtGroundingPageView["run"];
+const statusText = formatGroundingChatStatus([statusHub], "/dashboard/verwaltung/seo?org=org&tab=grounding");
+assert.match(statusText, /Entwurf läuft: Schritt 1 von 4/);
+assert.match(statusText, /Grounding öffnen/);
+assert.equal(
+  formatGroundingChatStatus([], "/dashboard/verwaltung/seo?org=org&tab=grounding").includes(
+    "noch keine Grounding Page",
+  ),
+  true,
+);
+
+void (async () => {
+  const keptAlive = jsonKeepaliveResponse(
+    async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { ok: true, n: 1 };
+    },
+    { intervalMs: 10, padBytes: 32 },
+  );
+  const keptText = await keptAlive.text();
+  assert.match(keptText, /^\s+\{/);
+  assert.deepEqual(JSON.parse(keptText), { ok: true, n: 1 });
+  assert.equal(keptAlive.headers.get("content-type"), "application/json; charset=utf-8");
+  assert.equal(keptAlive.headers.get("x-accel-buffering"), "no");
+
+  const failedAlive = jsonKeepaliveResponse(async () => {
+    throw new Error("kaputt");
+  }, { intervalMs: 10_000, padBytes: 4 });
+  assert.deepEqual(JSON.parse(await failedAlive.text()), {
+    ok: false,
+    message: "Antwort fehlgeschlagen.",
+  });
+
+  console.log("grounding-pages tests: ok");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
