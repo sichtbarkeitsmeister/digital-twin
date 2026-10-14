@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { DtAgentsManager } from "@/components/dt/agents/dt-agents-manager";
-import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { filterAgentsHiddenFromOrgMembers, withoutSeededStandardAvatars } from "@/lib/dt/agents/seo-advisor";
+import { removeSeededStandardAvatars } from "@/lib/dt/agents/remove-standard-avatar";
 import { loadAgentsForOrgManage } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents } from "@/lib/dt/org-access";
 import { loadDtManageOrganisations } from "@/lib/dt/load-manage-organisations";
@@ -34,10 +35,12 @@ async function AgentsPageContent({
       ? searchParams.org
       : adminOrgs[0]!.id;
 
+  await removeSeededStandardAvatars(initialOrgId);
+
   const rawAgents = await loadAgentsForOrgManage(initialOrgId, supabase);
-  const initialAgents = initialCanDirectlyEdit
-    ? rawAgents
-    : filterAgentsHiddenFromOrgMembers(rawAgents);
+  const initialAgents = withoutSeededStandardAvatars(
+    initialCanDirectlyEdit ? rawAgents : filterAgentsHiddenFromOrgMembers(rawAgents),
+  );
 
   return (
     <DtAgentsManager
