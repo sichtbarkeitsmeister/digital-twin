@@ -201,7 +201,7 @@ export async function loadDtAgentContextBundle(input: {
   const orgQuery = encodeURIComponent(input.organisationId);
   const agentsEditHref = `/dashboard/verwaltung/agents?org=${orgQuery}`;
   const seoSettingsHref = `/dashboard/verwaltung/seo?org=${orgQuery}&tab=settings#seo-checklist`;
-  const globalChecklistHref = `/dashboard/verwaltung/agents?org=${orgQuery}&view=prompts#global-seo-checklist`;
+  const globalChecklistHref = "/dashboard/verwaltung/globale-prompts#global-seo-checklist";
   const seoTasksHref = `/dashboard/verwaltung/seo?org=${orgQuery}&tab=tasks`;
   const reportEditHref = latestSeoReport
     ? `/dashboard/verwaltung/seo/reports/${latestSeoReport.id}`
@@ -448,7 +448,7 @@ export async function loadDtAgentContextBundle(input: {
           sourceType: checklistPersonalized ? "organisation" : "system",
           description: checklistPersonalized
             ? "Noch keine eigene Checkliste hinterlegt. In SEO-Einstellungen pflegen oder globale Liste nutzen."
-            : "Noch keine globale Checkliste hinterlegt. Unter Verwaltung → Agenten → Globale Prompts pflegen.",
+            : "Noch keine globale Checkliste hinterlegt. Unter Verwaltung → Globale Prompts pflegen.",
           content: "",
           isEmpty: true,
           editHref: checklistPersonalized ? seoSettingsHref : globalChecklistHref,

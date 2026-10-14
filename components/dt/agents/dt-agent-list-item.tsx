@@ -307,7 +307,7 @@ export function DtAgentListItem(props: {
             isSeoAdvisor
           }
           // Survey personas: only one editable prompt field (below).
-          // Shared rules live under „Globale Prompts“ — not a second textarea.
+          // Shared rules live under Verwaltung → Globale Prompts — not a second textarea.
           hidePrompt={
             !agent.is_default &&
             (agent.uses_global_prompt || isSurveyPersona)
@@ -316,9 +316,9 @@ export function DtAgentListItem(props: {
             !agent.is_default &&
             (agent.uses_global_prompt || isSurveyPersona) &&
             !isSeoAdvisor
-              ? "Gemeinsame Regeln stehen unter „Globale Prompts“. Unten bearbeitest du nur den Prompt für diesen Avatar."
+              ? "Gemeinsame Regeln stehen unter Verwaltung → Globale Prompts. Unten bearbeitest du nur den Prompt für diesen Avatar."
               : !agent.is_default && isSeoAdvisor
-                ? "Gemeinsame SEO-Regeln stehen unter „Globale Prompts“. Unten liegt das Anbieter-Wissen dieser Organisation."
+                ? "Gemeinsame SEO-Regeln stehen unter Verwaltung → Globale Prompts. Unten liegt das Anbieter-Wissen dieser Organisation."
                 : undefined
           }
           appendLabel={

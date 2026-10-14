@@ -539,7 +539,7 @@ export function DtSeoConfigForm(props: {
             <span className="mt-0.5 block text-xs text-sbkm-ink-600 dark:text-white/55">
               {config.seo_checklist_personalized
                 ? "Nur die Punkte unten gelten für diese Organisation."
-                : "Es gilt die globale Plattform-Checkliste (unter Agenten → Globale Prompts)."}
+                : "Es gilt die globale Plattform-Checkliste (unter Verwaltung → Globale Prompts)."}
             </span>
           </span>
         </label>
@@ -588,7 +588,7 @@ export function DtSeoConfigForm(props: {
             )}
             {props.canEdit ? (
               <Link
-                href={`/dashboard/verwaltung/agents?org=${encodeURIComponent(props.organisationId)}&view=prompts#global-seo-checklist`}
+                href="/dashboard/verwaltung/globale-prompts#global-seo-checklist"
                 className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-sbkm-mint hover:underline"
               >
                 Globale Checkliste bearbeiten

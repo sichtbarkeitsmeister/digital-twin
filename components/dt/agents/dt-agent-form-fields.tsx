@@ -122,7 +122,7 @@ export function DtAgentFormFields(props: {
                 className="min-h-[100px] text-xs opacity-80"
               />
               <p className="text-xs text-sbkm-ink-500 dark:text-white/40">
-                Bearbeitung unter „Globale Standard-Prompts“.{" "}
+                Bearbeitung unter Verwaltung → Globale Prompts.{" "}
                 <code className="text-[10px]">{"{{organisation}}"}</code> wird beim Chat
                 ersetzt.
               </p>
@@ -145,7 +145,7 @@ export function DtAgentFormFields(props: {
       ) : hidePrompt ? (
         <p className="rounded-2xl border border-sbkm-navy/10 bg-sbkm-mint/10 px-3 py-2 text-xs text-sbkm-ink-600 dark:border-white/10 dark:bg-white/5 dark:text-white/55">
           {promptNote ??
-            "Der System-Prompt dieses Agenten wird global verwaltet (siehe „Globale Standard-Prompts“) und gilt für alle Organisationen."}
+            "Der System-Prompt dieses Agenten wird global verwaltet (siehe Verwaltung → Globale Prompts) und gilt für alle Organisationen."}
         </p>
       ) : (
         <label className="grid gap-1 text-sm">

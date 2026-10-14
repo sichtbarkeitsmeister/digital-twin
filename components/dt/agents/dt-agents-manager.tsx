@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { LayoutGroup } from "framer-motion";
 import { FileSearch, Plus, Users } from "lucide-react";
@@ -20,14 +20,11 @@ import {
 import { DtAgentCreateWizard } from "@/components/dt/agents/dt-agent-create-wizard";
 import { DtAgentsSidebar } from "@/components/dt/agents/dt-agents-sidebar";
 import { quickActionsFromForm } from "@/components/dt/agents/dt-agent-form-fields";
-import { DtGlobalPromptsPanel } from "@/components/dt/agents/dt-global-prompts-panel";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
-import { DtTabs } from "@/components/dt/dt-tabs";
 import type { DtAgentEditRequestRow } from "@/lib/dt/agent-edit-requests";
 import { filterAgentsHiddenFromOrgMembers, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { isProtectedSeoAdvisorAgent } from "@/lib/dt/delete-agent-policy";
-import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
 import { organisationOptionLabel, type OrganisationOption } from "@/lib/shared/organisation-option";
 import { cn } from "@/components/dt/cn";
@@ -40,8 +37,6 @@ type GlobalPrompts = {
   survey_to_agent: string;
   survey_refine_agent: string;
 };
-
-type PageView = "agents" | "prompts";
 
 function isProtectedAlwaysOn(agent: AgentRow): boolean {
   return isProtectedSeoAdvisorAgent(agent);
@@ -90,7 +85,6 @@ function AgentsSidebarSkeleton() {
   return (
     <aside className="grid gap-4" aria-hidden>
       <div className="h-[148px] animate-pulse rounded-dt-lg bg-sbkm-navy/[0.04] dark:bg-white/[0.03]" />
-      <div className="h-[132px] animate-pulse rounded-dt-lg bg-sbkm-navy/[0.04] dark:bg-white/[0.03]" />
     </aside>
   );
 }
@@ -123,10 +117,6 @@ export function DtAgentsManager(props: {
   );
   const [editRequests, setEditRequests] = useState<DtAgentEditRequestRow[]>([]);
   const [requestAgent, setRequestAgent] = useState<AgentRow | null>(null);
-  const [pageView, setPageView] = useState<PageView>(() =>
-    searchParams.get("view") === "prompts" ? "prompts" : "agents",
-  );
-  const secondaryLoadedForOrgRef = useRef<string | null>(null);
 
   // Resolve preferred org before the first client fetch (URL > localStorage > SSR).
   useLayoutEffect(() => {
@@ -160,12 +150,6 @@ export function DtAgentsManager(props: {
     setInitialLoading(true);
   }, [searchParams, props.organisations, orgReady, orgId]);
 
-  useEffect(() => {
-    if (searchParams.get("view") === "prompts") {
-      setPageView("prompts");
-    }
-  }, [searchParams]);
-
   const [createWizardOpen, setCreateWizardOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [quickActionsOnly, setQuickActionsOnly] = useState(false);
@@ -197,17 +181,7 @@ export function DtAgentsManager(props: {
     setEditingId(row.id);
     setQuickActionsOnly(!canDirectlyEdit);
     setEditValues(agentFormValuesFromRow(row));
-    setPageView("agents");
   }, [searchParams, agents, editingId, canDirectlyEdit]);
-
-  const [globalPromptDraft, setGlobalPromptDraft] = useState<GlobalPrompts>({
-    default: "",
-    seo_advisor: "",
-    survey_to_agent: "",
-    survey_refine_agent: "",
-  });
-  const [globalChecklist, setGlobalChecklist] = useState("");
-  const [globalChecklistDraft, setGlobalChecklistDraft] = useState("");
 
   const orgName =
     organisationOptionLabel(props.organisations.find((o) => o.id === orgId));
@@ -228,14 +202,6 @@ export function DtAgentsManager(props: {
   const editingAgent = useMemo(
     () => agents.find((a) => a.id === editingId) ?? null,
     [agents, editingId],
-  );
-
-  const pageTabs = useMemo(
-    () => [
-      { id: "agents", label: "Agenten" },
-      { id: "prompts", label: "Globale Prompts" },
-    ],
-    [],
   );
 
   const applyManageJson = useCallback((manageJson: {
@@ -260,9 +226,8 @@ export function DtAgentsManager(props: {
   }, [orgId]);
 
   const refreshSecondary = useCallback(async () => {
-    const [globalRes, checklistRes] = await Promise.all([
+    const [globalRes] = await Promise.all([
       fetch("/api/dt/agents/default-prompt"),
-      fetch("/api/dt/platform-settings/seo-checklist"),
       refreshRequests(),
     ]);
 
@@ -271,28 +236,14 @@ export function DtAgentsManager(props: {
       prompts?: Partial<GlobalPrompts>;
     };
     if (globalJson.ok && globalJson.prompts) {
-      const next: GlobalPrompts = {
+      setGlobalPrompts({
         default: globalJson.prompts.default ?? "",
         seo_advisor: globalJson.prompts.seo_advisor ?? "",
         survey_to_agent: globalJson.prompts.survey_to_agent ?? "",
         survey_refine_agent: globalJson.prompts.survey_refine_agent ?? "",
-      };
-      setGlobalPrompts(next);
-      setGlobalPromptDraft(next);
+      });
     }
-
-    const checklistJson = (await checklistRes.json()) as {
-      ok?: boolean;
-      checklist?: unknown;
-    };
-    if (checklistJson.ok) {
-      const text = checklistToText(checklistJson.checklist);
-      setGlobalChecklist(text);
-      setGlobalChecklistDraft(text);
-    }
-
-    secondaryLoadedForOrgRef.current = orgId;
-  }, [orgId, refreshRequests]);
+  }, [refreshRequests]);
 
   const refreshAgents = useCallback(async (opts: { silent?: boolean; dim?: boolean } = {}) => {
     const silent = Boolean(opts.silent);
@@ -331,7 +282,7 @@ export function DtAgentsManager(props: {
     void (async () => {
       if (canUseSsr) {
         setInitialLoading(false);
-        // Soft revalidate list + load prompts/checklist without blocking or dimming.
+        // Soft revalidate list + load global prompt previews without blocking or dimming.
         await Promise.all([
           refreshAgents({ silent: true, dim: false }),
           refreshSecondary(),
@@ -356,13 +307,6 @@ export function DtAgentsManager(props: {
     refreshSecondary,
   ]);
 
-  // When switching to the prompts tab, ensure secondary data is loaded.
-  useEffect(() => {
-    if (pageView !== "prompts") return;
-    if (secondaryLoadedForOrgRef.current === orgId) return;
-    void refreshSecondary();
-  }, [pageView, orgId, refreshSecondary]);
-
   function writeAgentQuery(agentId: string | null) {
     const params = new URLSearchParams(searchParams.toString());
     if (agentId) params.set("agent", agentId);
@@ -375,7 +319,6 @@ export function DtAgentsManager(props: {
     setEditingId(agent.id);
     setQuickActionsOnly(mode === "quickActions");
     setEditValues(agentFormValuesFromRow(agent));
-    setPageView("agents");
     writeAgentQuery(agent.id);
   }
 
@@ -539,45 +482,6 @@ export function DtAgentsManager(props: {
     await refresh(true);
   }
 
-  async function saveGlobalPrompt(slug: keyof GlobalPrompts) {
-    setBusy(true);
-    const res = await fetch("/api/dt/agents/default-prompt", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug, prompt: globalPromptDraft[slug] }),
-    });
-    const json = (await res.json()) as { ok?: boolean; message?: string };
-    setBusy(false);
-    if (!json.ok) {
-      toast.error(json.message ?? "Globaler Prompt konnte nicht gespeichert werden.");
-      return;
-    }
-    setGlobalPrompts((prev) => ({ ...prev, [slug]: globalPromptDraft[slug] }));
-    toast.success("Globaler Prompt übernommen — gilt ab sofort für alle Organisationen.");
-  }
-
-  async function saveGlobalChecklist() {
-    setBusy(true);
-    const res = await fetch("/api/dt/platform-settings/seo-checklist", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        checklist: globalChecklistDraft
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-      }),
-    });
-    const json = (await res.json()) as { ok?: boolean; message?: string };
-    setBusy(false);
-    if (!json.ok) {
-      toast.error(json.message ?? "Globale Checkliste konnte nicht gespeichert werden.");
-      return;
-    }
-    setGlobalChecklist(globalChecklistDraft);
-    toast.success("Globale SEO-Checkliste gespeichert.");
-  }
-
   async function cancelRequest(requestId: string) {
     setBusy(true);
     const res = await fetch(`/api/dt/agents/edit-requests/${requestId}`, {
@@ -734,7 +638,6 @@ export function DtAgentsManager(props: {
               <DtAgentsSidebar
                 busy={busy}
                 onCreateAgent={() => setCreateWizardOpen(true)}
-                onOpenGlobalPrompts={() => setPageView("prompts")}
               />
             )}
           </div>
@@ -749,7 +652,6 @@ export function DtAgentsManager(props: {
             <DtAgentsSidebar
               busy={busy}
               onCreateAgent={() => setCreateWizardOpen(true)}
-              onOpenGlobalPrompts={() => setPageView("prompts")}
             />
           )}
         </div>
@@ -815,53 +717,7 @@ export function DtAgentsManager(props: {
         />
       ) : null}
 
-      {showAdminChrome ? (
-        <DtTabs
-          tabs={pageTabs}
-          active={pageView}
-          onChange={(id) => setPageView(id as PageView)}
-          layoutId="agents-page-tab"
-          className="mb-0"
-          disabled={initialLoading}
-        />
-      ) : null}
-
-      {showAdminChrome ? (
-        <div className="grid">
-          <div
-            className={cn(
-              "col-start-1 row-start-1 transition-opacity duration-200",
-              pageView !== "agents" && "pointer-events-none opacity-0",
-            )}
-            aria-hidden={pageView !== "agents"}
-          >
-            {agentsMainContent}
-          </div>
-          <div
-            className={cn(
-              "col-start-1 row-start-1 transition-opacity duration-200",
-              pageView !== "prompts" && "pointer-events-none opacity-0",
-            )}
-            aria-hidden={pageView !== "prompts"}
-          >
-            <DtGlobalPromptsPanel
-              drafts={globalPromptDraft}
-              saved={globalPrompts}
-              globalChecklistDraft={globalChecklistDraft}
-              globalChecklistSaved={globalChecklist}
-              busy={busy}
-              onDraftChange={(slug, value) =>
-                setGlobalPromptDraft((v) => ({ ...v, [slug]: value }))
-              }
-              onSave={(slug) => void saveGlobalPrompt(slug)}
-              onGlobalChecklistDraftChange={setGlobalChecklistDraft}
-              onSaveGlobalChecklist={() => void saveGlobalChecklist()}
-            />
-          </div>
-        </div>
-      ) : (
-        agentsMainContent
-      )}
+      {agentsMainContent}
 
       <DtAgentCreateWizard
         open={createWizardOpen}

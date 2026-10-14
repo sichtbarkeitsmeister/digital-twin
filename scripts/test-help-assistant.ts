@@ -42,6 +42,8 @@ assert.ok(!memberBook.includes("/dashboard/verwaltung/seo"), "customers never se
 assert.ok(!memberBook.includes("Agent-Kontext"));
 assert.ok(adminBook.includes("### Grounding Pages"));
 assert.ok(adminBook.includes("/dashboard/admin/mails"));
+assert.ok(adminBook.includes("/dashboard/verwaltung/globale-prompts"));
+assert.ok(!memberBook.includes("/dashboard/verwaltung/globale-prompts"));
 assert.ok(adminBook.length > memberBook.length);
 const managerBook = buildHelpHandbookText(manager);
 assert.ok(managerBook.includes("/dashboard/verwaltung/agents"));
