@@ -13,8 +13,6 @@ import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 const EMPTY_PROMPTS: GlobalPrompts = {
   default: "",
   seo_advisor: "",
-  survey_to_agent: "",
-  survey_refine_agent: "",
 };
 
 export function DtGlobalPromptsPage() {
@@ -43,8 +41,6 @@ export function DtGlobalPromptsPage() {
     const next: GlobalPrompts = {
       default: globalJson.prompts.default ?? "",
       seo_advisor: globalJson.prompts.seo_advisor ?? "",
-      survey_to_agent: globalJson.prompts.survey_to_agent ?? "",
-      survey_refine_agent: globalJson.prompts.survey_refine_agent ?? "",
     };
     setSaved(next);
     setDrafts(next);
