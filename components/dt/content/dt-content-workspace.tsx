@@ -18,6 +18,7 @@ import {
 import { DtContentReadinessCard } from "@/components/dt/content/dt-content-readiness-card";
 import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settings-card";
 import { DtContentTypePromptsCard } from "@/components/dt/content/dt-content-type-prompts-card";
+import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-card";
 import { CenteredModal } from "@/components/ui/centered-modal";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
@@ -514,6 +515,7 @@ export function DtContentWorkspace(props: {
         </div>
       </section>
 
+      <DtTexterPromptCard placement="texte" />
       <DtContentTypePromptsCard />
 
       <CenteredModal

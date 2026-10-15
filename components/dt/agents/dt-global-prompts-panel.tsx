@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { CheckSquare, ClipboardList, FileText, Globe2, Sparkles } from "lucide-react";
+import { CheckSquare, ClipboardList, Globe2, Sparkles } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -52,24 +51,15 @@ export function DtGlobalPromptsPanel(props: {
   saved: GlobalPrompts;
   globalChecklistDraft: string;
   globalChecklistSaved: string;
-  texterDraft: string;
-  texterSaved: string;
-  texterIsDefault: boolean;
-  texterPersisted: boolean;
-  texterMessage: string | null;
   busy: boolean;
   onDraftChange: (slug: keyof GlobalPrompts, value: string) => void;
   onSave: (slug: keyof GlobalPrompts) => void;
   onGlobalChecklistDraftChange: (value: string) => void;
   onSaveGlobalChecklist: () => void;
-  onTexterDraftChange: (value: string) => void;
-  onSaveTexter: () => void;
-  onResetTexter: () => void;
 }) {
   const checklistDirty =
     props.globalChecklistDraft.trim() !== props.globalChecklistSaved.trim();
   const checklistCount = textToChecklist(props.globalChecklistDraft).length;
-  const texterDirty = props.texterDraft.trim() !== props.texterSaved.trim();
 
   return (
     <div className="grid gap-4">
@@ -141,67 +131,6 @@ export function DtGlobalPromptsPanel(props: {
           );
         })}
       </div>
-
-      <DtGlassCard
-        id="texter-prompt"
-        variant="subtle"
-        padding="none"
-        className="scroll-mt-24 grid gap-4 p-4 sm:p-5"
-      >
-        <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sbkm-mint/15 text-sbkm-navy dark:text-sbkm-mint">
-            <FileText className="size-5" aria-hidden />
-          </div>
-          <div>
-            <p className="font-semibold tracking-tight text-sbkm-navy dark:text-white">Texter</p>
-            <p className="mt-0.5 text-sm text-sbkm-ink-600 dark:text-white/55">
-              Allgemeine Regeln für jeden Seitentyp im SEO-Schritt von Texte. Die sechs Textvorlagen
-              (Startseite, Hauptsilo, Unterseite, Ratgeber, Standort, Über uns) stehen auf der Seite{" "}
-              <Link href="/dashboard/verwaltung/texte" className="font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint">
-                Texte
-              </Link>
-              . Bei Widerspruch gilt die Textvorlage. Gilt ab dem nächsten SEO-Schritt.
-            </p>
-          </div>
-        </div>
-        {props.texterMessage ? (
-          <p className="rounded-lg border border-orange-300/70 bg-orange-50 px-3 py-2 text-xs leading-relaxed text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
-            {props.texterMessage}
-          </p>
-        ) : null}
-        <Textarea
-          value={props.texterDraft}
-          disabled={props.busy || !props.texterPersisted}
-          onChange={(e) => props.onTexterDraftChange(e.target.value)}
-          className="min-h-[320px] font-mono text-sm leading-relaxed"
-          placeholder="Allgemeine Regeln für den Texter …"
-        />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs tabular-nums text-sbkm-ink-500 dark:text-white/45">
-            {props.texterIsDefault && !texterDirty ? "Standard · " : ""}
-            {props.texterDraft.length.toLocaleString("de-DE")} Zeichen
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <DtPillButton
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={props.busy || !props.texterPersisted || (props.texterIsDefault && !texterDirty)}
-              onClick={props.onResetTexter}
-            >
-              Auf Standard zurücksetzen
-            </DtPillButton>
-            <DtPillButton
-              type="button"
-              size="sm"
-              disabled={props.busy || !props.texterPersisted || !texterDirty}
-              onClick={props.onSaveTexter}
-            >
-              Texter-Prompt speichern
-            </DtPillButton>
-          </div>
-        </div>
-      </DtGlassCard>
 
       <DtGlassCard
         id="global-seo-checklist"

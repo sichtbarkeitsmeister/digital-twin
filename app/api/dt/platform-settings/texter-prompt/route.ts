@@ -41,7 +41,7 @@ export async function GET() {
         prompt: DEFAULT_TEXTER_PROMPT,
         isDefault: true,
         persisted: false,
-        message: `Die Datenbank kennt den Texter-Prompt noch nicht: Bitte ${TEXTER_PROMPT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin gilt der Standard, Speichern ist noch nicht möglich.`,
+        message: `Die Datenbank kennt den Text-Prompt noch nicht: Bitte ${TEXTER_PROMPT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin gilt der Standard, Speichern ist noch nicht möglich.`,
       });
     }
     return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
@@ -64,7 +64,7 @@ export async function PATCH(req: Request) {
   }
   if (!(await isPlatformAdmin(auth.supabase, auth.userId))) {
     return NextResponse.json(
-      { ok: false, message: "Der Texter-Prompt kann nur von Administratoren bearbeitet werden." },
+      { ok: false, message: "Der Text-Prompt kann nur von Administratoren bearbeitet werden." },
       { status: 403 },
     );
   }
@@ -91,7 +91,7 @@ export async function PATCH(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          message: `Die Datenbank kennt den Texter-Prompt noch nicht: Bitte ${TEXTER_PROMPT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
+          message: `Die Datenbank kennt den Text-Prompt noch nicht: Bitte ${TEXTER_PROMPT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
         },
         { status: 500 },
       );

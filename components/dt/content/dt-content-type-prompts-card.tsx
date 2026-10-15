@@ -112,11 +112,7 @@ export function DtContentTypePromptsCard() {
           <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Textvorlagen</h2>
           <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
             Wie der SEO-Schritt die sechs Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren
-            eigenen Seitentyp. Die allgemeinen Regeln stehen unter{" "}
-            <Link href={TEXTER_PROMPT_HREF} className="font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-white">
-              Globale Prompts
-            </Link>
-            .
+            eigenen Seitentyp. Die allgemeinen Regeln stehen im Text-Prompt direkt darüber.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -164,12 +160,12 @@ export function DtContentTypePromptsCard() {
             </p>
           ) : null}
           <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
-            Die allgemeinen Regeln (Hormozi-Reihenfolge, Platzhalter, Abgrenzung der Seitentypen) gelten für jeden
-            Seitentyp und lassen sich unter{" "}
+            Die allgemeinen Regeln (Hormozi-Reihenfolge, Platzhalter, Abgrenzung der Seitentypen) stehen im Text-Prompt
+            direkt darüber und unter{" "}
             <Link href={TEXTER_PROMPT_HREF} className="font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-white">
-              Globale Prompts → Texter
-            </Link>{" "}
-            bearbeiten. Die Vorlage hier sagt, was bei diesem Seitentyp zusätzlich gilt; bei Widerspruch gilt sie.
+              Globale Prompts → Text-Prompt
+            </Link>
+            . Die Vorlage hier sagt, was bei diesem Seitentyp zusätzlich gilt; bei Widerspruch gilt sie.
             „{CONTENT_TYPE_PROMPT_PILLAR_TOKEN}“ wird durch den Namen der übergeordneten Seite ersetzt. Das technische
             Gerüst des SEO-Schritts (H1, Hero-Platzhalter, Link-Marker) bleibt. Fertige Seiten ändern sich erst, wenn
             ihr SEO-Schritt neu läuft.
