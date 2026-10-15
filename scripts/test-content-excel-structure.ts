@@ -418,7 +418,8 @@ assert.match(crawlAnalyse.user, /keine internen Links setzen/);
 
 const seo = contentStepSpec(2, context());
 assert.match(seo.system, /Hauptsilo-Seite/);
-assert.match(seo.system, /2–5 interne Links/);
+assert.match(seo.system, /Entscheidungshilfe/);
+assert.match(seo.system, /Bei Widerspruch gewinnt die Seitentyp-Vorlage/);
 assert.match(seo.system, new RegExp(CONTENT_HERO_PLACEHOLDER.replace(/[[\]]/g, "\\$&")));
 assert.match(seo.system, /Mindestens 3 Frage-Überschriften/);
 assert.match(seo.system, /\[BITTE PRÜFEN/);
@@ -428,7 +429,8 @@ assert.match(seoRatgeber.system, /Ratgeberartikel/);
 assert.match(seoRatgeber.system, /Mindestens 5 Frage-Überschriften/);
 assert.match(seoRatgeber.system, /Kein erfundener Autor/);
 const seoUnterseite = contentStepSpec(2, context({ page_type: "unterseite", page_role: "supporting", pillar_name: "Privatumzug", name: "Seniorenumzug" }));
-assert.match(seoUnterseite.system, /verlinkt IMMER auf ihr Hauptsilo „Privatumzug“ \(Marker \[LINK: Privatumzug\]\)/, "[Hauptsilo] becomes the pillar name");
+assert.match(seoUnterseite.system, /innerhalb des Hauptsilos „Privatumzug“/, "[Hauptsilo] becomes the pillar name");
+assert.match(seoUnterseite.system, /Marker \[LINK: Privatumzug\]/);
 assert.match(contentStepSpec(2, context({ page_type: "standort" })).system, /Standortseite/);
 
 // --- Textvorlagen: the agency's recipes feed the SEO step, and only the SEO step --------------
@@ -442,17 +444,18 @@ assert.equal(saved.unterseite, DEFAULT_CONTENT_TYPE_PROMPTS.unterseite, "untouch
 assert.equal(hasCustomContentTypePrompts(DEFAULT_CONTENT_TYPE_PROMPTS), false);
 assert.equal(hasCustomContentTypePrompts(saved), true);
 assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"], "nicht_bearbeiten has no recipe");
-assert.equal(DEFAULT_CONTENT_TYPE_PROMPTS.startseite, "", "the Startseite recipe starts empty");
-assert.equal(DEFAULT_CONTENT_TYPE_PROMPTS.ueber_uns, "", "the Über-uns recipe starts empty");
-assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "startseite", null), "");
-assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "ueber_uns", null), "");
+assert.match(DEFAULT_CONTENT_TYPE_PROMPTS.startseite, /Seitentyp Startseite/);
+assert.match(DEFAULT_CONTENT_TYPE_PROMPTS.ueber_uns, /Seitentyp Über-uns-Seite/);
+assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "startseite", null), /Visitenkarte/);
+assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "ueber_uns", null), /Vertrauensfrage/);
 assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "nicht_bearbeiten", null), renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "unterseite", null));
-assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "unterseite", null), /auf ihr Hauptsilo „Hauptsilo“/, "without a pillar the word stays");
+assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "unterseite", null), /Silo-Seite „Hauptsilo“/, "without a pillar the word stays");
 
 const customContext = context({ page_type: "hauptsilo" }, { typePrompts: saved });
 const seoCustom = contentStepSpec(2, customContext);
 assert.match(seoCustom.system, /Hauptsilo nach Hausrezept: nur drei Abschnitte\./, "the saved Hauptsilo recipe is in the SEO system prompt");
-assert.doesNotMatch(seoCustom.system, /2–5 interne Links/, "the default Hauptsilo rule is replaced, not appended");
+assert.doesNotMatch(seoCustom.system, /Entscheidungshilfe/, "the default Hauptsilo rule is replaced, not appended");
+assert.match(seoCustom.system, /Bei Widerspruch gewinnt die Seitentyp-Vorlage/, "the general Texter prompt stays");
 assert.match(seoCustom.system, /Tatsachen \(Leistungen, Zahlen, Namen, Preise/, "the locked rules stay");
 assert.match(seoCustom.system, new RegExp(CONTENT_HERO_PLACEHOLDER.replace(/[[\]]/g, "\\$&")), "the hero placeholder stays");
 assert.match(contentStepSpec(2, context({ page_type: "unterseite", pillar_name: "Privatumzug" }, { typePrompts: saved })).system, /Marker \[LINK: Privatumzug\]/, "each page still writes with its own type");

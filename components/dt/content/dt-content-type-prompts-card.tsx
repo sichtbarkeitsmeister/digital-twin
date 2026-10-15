@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, Loader2, RotateCcw, Save } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import { contentApi } from "@/components/dt/content/content-api";
 import { DtTextarea } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { formatContentDate } from "@/lib/dt/content/presentation";
+import { TEXTER_PROMPT_HREF } from "@/lib/dt/content/texter-prompt";
 import {
   CONTENT_TYPE_PROMPT_HELP,
   CONTENT_TYPE_PROMPT_KEYS,
@@ -110,7 +112,11 @@ export function DtContentTypePromptsCard() {
           <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Textvorlagen</h2>
           <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
             Wie der SEO-Schritt die sechs Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren
-            eigenen Seitentyp. Startseite und Über-uns-Seite sind leer, bis hier eine Vorlage steht.
+            eigenen Seitentyp. Die allgemeinen Regeln stehen unter{" "}
+            <Link href={TEXTER_PROMPT_HREF} className="font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-white">
+              Globale Prompts
+            </Link>
+            .
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -158,10 +164,15 @@ export function DtContentTypePromptsCard() {
             </p>
           ) : null}
           <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
-            Die festen Regeln des SEO-Schritts (keine erfundenen Fakten, Anrede, Tonalität, verbotene Wörter, H1,
-            Hero-Platzhalter, Platzhalter, Link-Marker) bleiben; die Vorlage sagt nur, wie der jeweilige Seitentyp
-            geschrieben wird. „{CONTENT_TYPE_PROMPT_PILLAR_TOKEN}“ wird durch den Namen der übergeordneten Seite ersetzt.
-            Fertige Seiten ändern sich erst, wenn ihr SEO-Schritt neu läuft.
+            Die allgemeinen Regeln (Hormozi-Reihenfolge, Platzhalter, Abgrenzung der Seitentypen) gelten für jeden
+            Seitentyp und lassen sich unter{" "}
+            <Link href={TEXTER_PROMPT_HREF} className="font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-white">
+              Globale Prompts → Texter
+            </Link>{" "}
+            bearbeiten. Die Vorlage hier sagt, was bei diesem Seitentyp zusätzlich gilt; bei Widerspruch gilt sie.
+            „{CONTENT_TYPE_PROMPT_PILLAR_TOKEN}“ wird durch den Namen der übergeordneten Seite ersetzt. Das technische
+            Gerüst des SEO-Schritts (H1, Hero-Platzhalter, Link-Marker) bleibt. Fertige Seiten ändern sich erst, wenn
+            ihr SEO-Schritt neu läuft.
           </p>
 
           <div className="grid gap-4 lg:grid-cols-2">

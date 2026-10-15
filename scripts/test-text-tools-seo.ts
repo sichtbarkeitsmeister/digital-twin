@@ -260,7 +260,8 @@ function testSpecsMatchPipelineSteps() {
   const structure: ContentPipelineContext = { ...withAnalyse, page: { ...withAnalyse.page, source: "structure", path: "/prophylaxe", page_role: "supporting" } };
   const pipelineSystem = contentStepSpec(CONTENT_STEP_SEO, structure).system;
   assert.equal(spec.system, pipelineSystem.replace("H1-Option aus der Excel", "H1-Option aus dem Briefing"));
-  assert.match(spec.system, /Seitentyp Unterseite innerhalb eines Hauptsilos[^\n]*„Zahnmedizin“/, "Textvorlage with the Hauptsilo filled in");
+  assert.match(spec.system, /Hauptsilos „Zahnmedizin“/, "Textvorlage with the Hauptsilo filled in");
+  assert.match(spec.system, /Bei Widerspruch gewinnt die Seitentyp-Vorlage/);
   assert.match(spec.system, new RegExp(CONTENT_HERO_PLACEHOLDER.replace(/[[\]]/g, "\\$&")));
   assert.match(spec.system, /Branchenregel Praxis/);
   assert.match(spec.system, /Mindestens 3 Frage-Überschriften/);
