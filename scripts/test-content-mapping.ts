@@ -57,6 +57,8 @@ import {
   contentActionLabel,
   contentStateMeta,
   countContentPagesByState,
+  currentContentProblems,
+  describeEmptyContentFilter,
   extractContentBlocks,
   filterContentPages,
   isContentPageFilterActive,
@@ -370,6 +372,27 @@ assert.deepEqual(names("", ["braucht_sie"]), []);
 assert.deepEqual(names("kon", ["fertig"]), ["Kontakt"], "search and status combine");
 assert.deepEqual(names("kon", ["laeuft"]), []);
 assert.deepEqual(countContentPagesByState(filterable), { nicht_begonnen: 1, laeuft: 1, in_arbeit: 1, braucht_sie: 0, fertig: 1 });
+assert.deepEqual(describeEmptyContentFilter({ query: "", states: ["laeuft"] }, 47), {
+  title: "Keine Seite hat den Status „Läuft“",
+  detail: "47 Seiten sind in der Tabelle. Filter zurücksetzen, dann sind sie sichtbar.",
+});
+assert.match(describeEmptyContentFilter({ query: "kontakt", states: [] }, 47).detail, /kontakt/);
+assert.match(describeEmptyContentFilter({ query: "", states: ["fertig", "braucht_sie"] }, 2).detail, /„Fertig“ und „Braucht Sie“/);
+assert.match(describeEmptyContentFilter({ query: "dach", states: ["laeuft"] }, 47).title, /Suche und Filter/);
+const readyChecks = [
+  { ok: true, hint: "31 Seiten aus der Seitenstruktur „s.xlsx“." },
+  { ok: true, hint: "4 Avatare verfügbar." },
+];
+assert.deepEqual(
+  currentContentProblems({ checks: readyChecks }, ["29 Seiten gecrawlt – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken."]),
+  [],
+  "an Excel upload clears the stale crawl warning",
+);
+assert.deepEqual(
+  currentContentProblems({ checks: [{ ok: false, hint: "Noch kein Avatar." }, { ok: true, hint: "Seiten da." }] }, ["alt"]),
+  ["Noch kein Avatar."],
+);
+assert.deepEqual(currentContentProblems(null, ["  ", "Noch keine Seiten."]), ["Noch keine Seiten."]);
 
 const blocks = extractContentBlocks(
   `<section data-block-id="intro"><h1>Titel</h1><p>A &amp; B</p></section>` +
@@ -586,7 +609,10 @@ assert.equal(justUploaded.ok, true, "an upload counts before the table synced it
 assert.match(justUploaded.hint, /Seiten werden übernommen/);
 const crawledOnly = describeSeiten({ ...crawlLocal, pages: { total: 0, structure: 0, crawl: 0 } });
 assert.equal(crawledOnly.ok, false, "a crawl is not a page list until it is taken over");
-assert.equal(crawledOnly.hint, "40 Seiten gecrawlt – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken.");
+assert.equal(
+  crawledOnly.hint,
+  "40 Seiten gecrawlt – unter „Seitenquelle“ die Karte „Crawler – bestehende Website“ wählen und auf „40 Seiten übernehmen“ klicken.",
+);
 const nothing = describeSeiten({ structure: null, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0 } });
 assert.equal(nothing.ok, false);
 assert.match(nothing.hint, /Excel-Seitenstruktur hochladen/);

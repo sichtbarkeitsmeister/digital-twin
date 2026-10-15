@@ -74,6 +74,61 @@ export function isContentPageFilterActive(filter: ContentPageFilter): boolean {
   return filter.query.trim() !== "" || filter.states.length > 0;
 }
 
+function quoteList(labels: readonly string[]): string {
+  const quoted = labels.map((label) => `„${label}“`);
+  if (quoted.length <= 1) return quoted[0] ?? "";
+  return `${quoted.slice(0, -1).join(", ")} und ${quoted[quoted.length - 1]}`;
+}
+
+/**
+ * Why the table is empty although pages exist. Names the active status, so a
+ * selected „Läuft“ chip with zero hits does not look like a missing upload.
+ */
+export function describeEmptyContentFilter(
+  filter: ContentPageFilter,
+  total: number,
+): { title: string; detail: string } {
+  const labels = filter.states.map((state) => CONTENT_STATE_META[state].label);
+  const query = filter.query.trim();
+  const inTable = `${total} ${total === 1 ? "Seite ist" : "Seiten sind"} in der Tabelle`;
+
+  if (labels.length === 1 && !query) {
+    return {
+      title: `Keine Seite hat den Status „${labels[0]}“`,
+      detail: `${inTable}. Filter zurücksetzen, dann sind sie sichtbar.`,
+    };
+  }
+  if (labels.length > 1 && !query) {
+    return {
+      title: "Keine Seite passt zu den gewählten Status",
+      detail: `${quoteList(labels)} treffen keine Seite. ${inTable}.`,
+    };
+  }
+  if (query && labels.length === 0) {
+    return {
+      title: "Keine Seite passt zur Suche",
+      detail: `Nichts passt zu „${query}“. ${inTable}.`,
+    };
+  }
+  return {
+    title: "Keine Seite passt zu Suche und Filter",
+    detail: `Suche „${query}“ und Status ${quoteList(labels)} treffen keine Seite. ${inTable}.`,
+  };
+}
+
+/**
+ * Warnings after the text settings were confirmed. Once readiness is known, the
+ * list follows the current checks: an Excel upload must not keep an older
+ * „Seiten übernehmen“ note from before the pages were in the table.
+ */
+export function currentContentProblems(
+  readiness: { checks: Array<{ ok: boolean; hint: string }> } | null,
+  snapshot: readonly string[],
+): string[] {
+  if (!readiness) return snapshot.filter((line) => line.trim() !== "");
+  return readiness.checks.filter((check) => !check.ok && check.hint.trim() !== "").map((check) => check.hint);
+}
+
 /** Lowercase, umlauts as ae/oe/ue/ss, other accents dropped: „Träger“ finds „fahrradtraeger“. */
 export function normalizeSearchText(text: string): string {
   return text

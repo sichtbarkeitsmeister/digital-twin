@@ -169,9 +169,10 @@ export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "c
     };
   }
   if (local.crawl.pageCount > 0) {
+    const label = `${pagesWord(local.crawl.pageCount)} übernehmen`;
     return {
       ok: false,
-      hint: `${pagesWord(local.crawl.pageCount)} gecrawlt – unter „Seitenquelle“ auf „Seiten übernehmen“ klicken.`,
+      hint: `${pagesWord(local.crawl.pageCount)} gecrawlt – unter „Seitenquelle“ die Karte „Crawler – bestehende Website“ wählen und auf „${label}“ klicken.`,
     };
   }
   return {
