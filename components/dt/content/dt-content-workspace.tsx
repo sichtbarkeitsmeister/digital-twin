@@ -24,6 +24,8 @@ import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/d
 import {
   EMPTY_CONTENT_PAGE_FILTER,
   anyContentPageRunning,
+  currentContentProblems,
+  describeEmptyContentFilter,
   filterContentPages,
   formatContentDate,
   isContentPageFilterActive,
@@ -170,6 +172,9 @@ export function DtContentWorkspace(props: {
   const pages = useMemo(() => overview?.pages ?? [], [overview]);
   const visible = useMemo(() => filterContentPages(pages, filter), [pages, filter]);
   const filterActive = isContentPageFilterActive(filter);
+  const confirmedProblems = sync ? currentContentProblems(readiness, sync.result.problems) : [];
+  const hiddenByFilter = pages.length > 0 && visible.length === 0;
+  const emptyFilterCopy = hiddenByFilter ? describeEmptyContentFilter(filter, pages.length) : null;
 
   // Pages hidden by search or status filter leave the selection: bulk actions only hit what is visible.
   useEffect(() => {
@@ -333,9 +338,11 @@ export function DtContentWorkspace(props: {
     : settingsOpen
       ? "Erst die Einstellungen für Texte bestätigen."
       : selectedCount === 0
-        ? filterActive
-          ? "Seiten in der gefilterten Tabelle anhaken – nur angehakte Seiten bekommen Texte."
-          : "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
+        ? hiddenByFilter
+          ? "Der Filter blendet alle Seiten aus. Unten „Filter zurücksetzen“, dann die Seiten anhaken."
+          : filterActive
+            ? "Seiten in der gefilterten Tabelle anhaken – nur angehakte Seiten bekommen Texte."
+            : "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
         : "Läuft im Hintergrund durch neun Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
 
   return (
@@ -361,6 +368,7 @@ export function DtContentWorkspace(props: {
         loading={readinessLoading}
         onChanged={(next) => {
           if (next) applyOverview(next);
+          setFilter(EMPTY_CONTENT_PAGE_FILTER);
           void loadReadiness();
           void loadOverview();
         }}
@@ -392,9 +400,9 @@ export function DtContentWorkspace(props: {
           </div>
         </div>
 
-        {sync && sync.result.problems.length > 0 ? (
+        {confirmedProblems.length > 0 ? (
           <ul className="list-disc rounded-xl border border-orange-300/60 bg-orange-50 py-2 pl-7 pr-3 text-xs text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
-            {sync.result.problems.map((p) => (
+            {confirmedProblems.map((p) => (
               <li key={p}>{p}</li>
             ))}
           </ul>
@@ -478,16 +486,21 @@ export function DtContentWorkspace(props: {
                 <div key={i} className="h-11 animate-pulse rounded-lg bg-sbkm-navy/[0.05] dark:bg-white/[0.05]" />
               ))}
             </div>
-          ) : pages.length > 0 && visible.length === 0 ? (
+          ) : emptyFilterCopy ? (
             <div className="grid gap-2 rounded-dt border border-dashed border-sbkm-navy/15 px-4 py-8 text-center dark:border-white/15">
-              <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Keine Seite passt zu Suche und Filter</p>
-              <button
+              <p className="text-sm font-semibold text-sbkm-navy dark:text-white">{emptyFilterCopy.title}</p>
+              <p className="mx-auto max-w-md text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
+                {emptyFilterCopy.detail}
+              </p>
+              <DtPillButton
                 type="button"
+                size="sm"
+                variant="outline"
+                className="mt-1 justify-self-center"
                 onClick={() => setFilter(EMPTY_CONTENT_PAGE_FILTER)}
-                className="mx-auto w-fit text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
               >
                 Filter zurücksetzen
-              </button>
+              </DtPillButton>
             </div>
           ) : (
             <DtContentPagesTable
