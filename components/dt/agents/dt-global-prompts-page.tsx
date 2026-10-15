@@ -23,11 +23,17 @@ export function DtGlobalPromptsPage() {
   const [drafts, setDrafts] = useState<GlobalPrompts>(EMPTY_PROMPTS);
   const [checklistSaved, setChecklistSaved] = useState("");
   const [checklistDraft, setChecklistDraft] = useState("");
+  const [texterSaved, setTexterSaved] = useState("");
+  const [texterDraft, setTexterDraft] = useState("");
+  const [texterIsDefault, setTexterIsDefault] = useState(true);
+  const [texterPersisted, setTexterPersisted] = useState(true);
+  const [texterMessage, setTexterMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [globalRes, checklistRes] = await Promise.all([
+    const [globalRes, checklistRes, texterRes] = await Promise.all([
       fetch("/api/dt/agents/default-prompt"),
       fetch("/api/dt/platform-settings/seo-checklist"),
+      fetch("/api/dt/platform-settings/texter-prompt"),
     ]);
 
     const globalJson = (await globalRes.json()) as {
@@ -59,6 +65,22 @@ export function DtGlobalPromptsPage() {
     const text = checklistToText(checklistJson.checklist);
     setChecklistSaved(text);
     setChecklistDraft(text);
+
+    const texterJson = (await texterRes.json()) as {
+      ok?: boolean;
+      message?: string;
+      prompt?: string;
+      isDefault?: boolean;
+      persisted?: boolean;
+    };
+    if (!texterJson.ok || typeof texterJson.prompt !== "string") {
+      throw new Error(texterJson.message ?? "Texter-Prompt konnte nicht geladen werden.");
+    }
+    setTexterSaved(texterJson.prompt);
+    setTexterDraft(texterJson.prompt);
+    setTexterIsDefault(texterJson.isDefault !== false);
+    setTexterPersisted(texterJson.persisted !== false);
+    setTexterMessage(texterJson.persisted === false ? (texterJson.message ?? null) : null);
   }, []);
 
   useEffect(() => {
@@ -94,6 +116,30 @@ export function DtGlobalPromptsPage() {
     }
     setSaved((prev) => ({ ...prev, [slug]: drafts[slug] }));
     toast.success("Globaler Prompt übernommen — gilt ab sofort für alle Organisationen.");
+  }
+
+  async function saveTexter(next?: string) {
+    setBusy(true);
+    const prompt = next ?? texterDraft;
+    const res = await fetch("/api/dt/platform-settings/texter-prompt", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    const json = (await res.json()) as { ok?: boolean; message?: string; prompt?: string; isDefault?: boolean };
+    setBusy(false);
+    if (!json.ok || typeof json.prompt !== "string") {
+      toast.error(json.message ?? "Texter-Prompt konnte nicht gespeichert werden.");
+      return;
+    }
+    setTexterSaved(json.prompt);
+    setTexterDraft(json.prompt);
+    setTexterIsDefault(json.isDefault !== false);
+    toast.success(
+      json.isDefault
+        ? "Texter-Prompt auf den Standard zurückgesetzt."
+        : "Texter-Prompt gespeichert — gilt ab dem nächsten SEO-Schritt.",
+    );
   }
 
   async function saveChecklist() {
@@ -144,6 +190,17 @@ export function DtGlobalPromptsPage() {
           onSave={(slug) => void savePrompt(slug)}
           onGlobalChecklistDraftChange={setChecklistDraft}
           onSaveGlobalChecklist={() => void saveChecklist()}
+          texterDraft={texterDraft}
+          texterSaved={texterSaved}
+          texterIsDefault={texterIsDefault}
+          texterPersisted={texterPersisted}
+          texterMessage={texterMessage}
+          onTexterDraftChange={setTexterDraft}
+          onSaveTexter={() => void saveTexter()}
+          onResetTexter={() => {
+            if (!window.confirm("Den allgemeinen Texter-Prompt auf den Standard zurücksetzen? Eigene Formulierungen gehen verloren.")) return;
+            void saveTexter("");
+          }}
         />
       )}
     </div>

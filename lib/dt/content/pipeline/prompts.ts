@@ -31,6 +31,7 @@ import {
   CONTENT_STEP_WATERMARK,
 } from "@/lib/dt/content/pipeline/steps";
 import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
+import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
 
@@ -74,6 +75,11 @@ export type ContentPipelineContext = {
   avatar: { name: string; role: string; beschreibung: string } | null;
   /** The agency's writing recipes per page type („Textvorlagen“); only the SEO step reads them. */
   typePrompts: ContentTypePrompts;
+  /**
+   * General rules for every page type (Globale Prompts → Texter). Only the SEO step reads
+   * them; a missing value means the code default.
+   */
+  texterPrompt?: string;
   /** Human notes from "Mit Anmerkung wiederholen", oldest first. */
   notes: string[];
   /** Normalised outputs of earlier steps, by step number. */
@@ -794,11 +800,17 @@ export function normalizeAnalyse(json: unknown, context: ContentPipelineContext)
 function seo(context: ContentPipelineContext): ContentStepSpec {
   const { page } = context;
   const minQuestions = page.page_type === "ratgeber" ? 5 : 3;
+  const general = context.texterPrompt?.trim() || DEFAULT_TEXTER_PROMPT;
   return {
     maxTokens: 12_000,
     system: `${BASE_RULES}
 
 Schritt 2 SEO: Du schreibst den vollständigen Seitentext auf Basis der Analyse (Schritt 1) und der belegten Fakten.
+
+Allgemeine Regeln (jeder Seitentyp):
+${general}
+
+Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):
 ${pageTypeRules(context)}
 
 Festes Gerüst, in dieser Reihenfolge:
