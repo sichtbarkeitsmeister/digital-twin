@@ -89,7 +89,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Menü für Plattform-Admins",
     audience: "admin",
     lines: [
-      "Globale Prompts: /dashboard/verwaltung/globale-prompts — plattformweite Standard-Prompts (DigitalTwin, SEO-Berater, Umfrage → Agent), der Text-Prompt (erste Karte, allgemeine Regeln für jeden Seitentyp) und die globale SEO-Checkliste. Nur für Plattform-Admins.",
+      "Globale Prompts: /dashboard/verwaltung/globale-prompts — plattformweite Standard-Prompts (DigitalTwin, SEO-Berater), der Text-Prompt (erste Karte, allgemeine Regeln für jeden Seitentyp) und die globale SEO-Checkliste. Nur für Plattform-Admins.",
       "Agent-Kontext: /dashboard/verwaltung/agent-kontext?org=<id> — zeigt den zusammengebauten System-Prompt einer Figur mit allen Bausteinen (Wunschkunden-Wissen, Transkripte, Website-Struktur, Onboarding, Grounding). Intern, nie für Kunden.",
       "SEO Modus: /dashboard/verwaltung/seo?org=<id>&tab=<tab> — Tabs: chat (SEO-Berater mit Crawl-Werkzeugen und Websuche), stats (Statistik), tasks (Aufgaben-Board), reports (SEO-Reports, auch an den Inhaber senden), analyse (Crawl-Viewer, Indexierbarkeit), struktur (hochgeladene Website-Struktur), grounding (Grounding Pages), settings (Website-URL, Sitemap, Search Console, „Jetzt crawlen“, SEO-Checkliste).",
       "Texte: /dashboard/verwaltung/texte?org=<id> — Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Unten auf der Seite steht der Text-Prompt (allgemeine Regeln, vollständig sichtbar) und darunter die sechs Textvorlagen. Derselbe Text-Prompt ist die erste Karte unter Globale Prompts.",
