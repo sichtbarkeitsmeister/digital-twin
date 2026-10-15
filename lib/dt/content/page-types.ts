@@ -12,7 +12,7 @@
 export const CONTENT_PAGE_ROLES = ["startseite", "pillar", "supporting"] as const;
 export type ContentPageRole = (typeof CONTENT_PAGE_ROLES)[number];
 
-export const CONTENT_PAGE_TYPES = ["hauptsilo", "unterseite", "ratgeber", "standort", "nicht_bearbeiten"] as const;
+export const CONTENT_PAGE_TYPES = ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns", "nicht_bearbeiten"] as const;
 export type ContentPageType = (typeof CONTENT_PAGE_TYPES)[number];
 
 export const CONTENT_PAGE_TYPE_LABELS: Record<ContentPageType, string> = {
@@ -20,6 +20,8 @@ export const CONTENT_PAGE_TYPE_LABELS: Record<ContentPageType, string> = {
   unterseite: "Unterseite",
   ratgeber: "Ratgeberartikel",
   standort: "Standortseite",
+  startseite: "Startseite",
+  ueber_uns: "Über-uns-Seite",
   nicht_bearbeiten: "Nicht bearbeiten",
 };
 
@@ -58,7 +60,8 @@ export function normalizePageName(text: string): string {
 /**
  * Legal and organisational pages the old importer skipped (`EXCLUDED`): they get no text.
  * Matched against the normalised page name and the last path segment, as a whole or as the
- * leading words („Kontakt & Anfahrt“, „Über uns – das Team“).
+ * leading words („Kontakt & Anfahrt“, „Über uns – das Team“). A page named exactly „Über uns“
+ * is the type Über-uns-Seite and is checked before this list.
  */
 export const CONTENT_EXCLUDED_PAGE_NAMES = [
   "impressum",
@@ -72,6 +75,17 @@ export const CONTENT_EXCLUDED_PAGE_NAMES = [
   "referenzen",
   "agb",
 ] as const;
+
+/** The about page itself („Über uns“), not „Über uns – das Team“ and not a path that only ends there. */
+export function isAboutContentPageName(name: string): boolean {
+  return normalizePageName(name) === "ueber uns";
+}
+
+/** A page titled Startseite, Home or Hauptseite. The homepage role and the site root count separately. */
+export function isHomeContentName(name: string): boolean {
+  const normalized = normalizePageName(name);
+  return normalized === "startseite" || normalized === "home" || normalized === "homepage" || normalized === "hauptseite";
+}
 
 export function isExcludedContentPageName(name: string, path?: string | null): boolean {
   const candidates = [normalizePageName(name)];
@@ -105,18 +119,21 @@ export type DerivePageTypeInput = {
 /** `derive_page_type` of the old importer, for pages from the Excel-Seitenstruktur. */
 export function derivePageType(input: DerivePageTypeInput): ContentPageType {
   const name = input.name.trim();
+  if (isAboutContentPageName(name)) return "ueber_uns";
   if (isExcludedContentPageName(name, input.path)) return "nicht_bearbeiten";
+  if (input.role === "startseite") return "startseite";
   const pillar = input.pillarName?.trim() ?? "";
   if (RATGEBER_RE.test(pillar) || RATGEBER_RE.test(name)) return "ratgeber";
   if (REGIONEN_RE.test(pillar) || mentionsCity(name, input.cities ?? [])) return "standort";
-  if (input.role === "pillar" || input.role === "startseite") return "hauptsilo";
+  if (input.role === "pillar") return "hauptsilo";
   if (input.role === "supporting") return "unterseite";
   return "unterseite";
 }
 
 /**
- * Crawl pages have no role: the depth of the path decides. Nested pages are Unterseiten,
- * top-level pages Hauptsilo-Seiten; Ratgeber and excluded names as for the Excel.
+ * Crawl pages have no role: the depth of the path decides. The site root is the Startseite,
+ * nested pages are Unterseiten, other top-level pages Hauptsilo-Seiten; Ratgeber, Über uns
+ * and excluded names as for the Excel.
  */
 export function guessCrawlPageType(input: {
   name: string;
@@ -124,7 +141,9 @@ export function guessCrawlPageType(input: {
   level: number;
   cities?: readonly string[];
 }): ContentPageType {
+  if (isAboutContentPageName(input.name)) return "ueber_uns";
   if (isExcludedContentPageName(input.name, input.path)) return "nicht_bearbeiten";
+  if (input.path === "/" || input.level === 0 || isHomeContentName(input.name)) return "startseite";
   if (RATGEBER_RE.test(input.name) || RATGEBER_RE.test(input.path ?? "")) return "ratgeber";
   if (mentionsCity(input.name, input.cities ?? [])) return "standort";
   return input.level >= 2 ? "unterseite" : "hauptsilo";

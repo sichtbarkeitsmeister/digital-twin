@@ -7,6 +7,7 @@ import {
   normalizeContentTypePrompts,
 } from "@/lib/dt/content/type-prompts";
 import {
+  CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE,
   CONTENT_TYPE_PROMPTS_MIGRATION_FILE,
   loadContentTypePrompts,
   saveContentTypePrompts,
@@ -18,7 +19,14 @@ const recipe = z.string().max(CONTENT_TYPE_PROMPT_MAX_CHARS).optional();
 
 const putSchema = z.object({
   prompts: z
-    .object({ hauptsilo: recipe, unterseite: recipe, ratgeber: recipe, standort: recipe })
+    .object({
+      hauptsilo: recipe,
+      unterseite: recipe,
+      ratgeber: recipe,
+      standort: recipe,
+      startseite: recipe,
+      ueber_uns: recipe,
+    })
     .optional(),
   /** „Auf Standard zurücksetzen“: the defaults are stored, so the last change is visible. */
   reset: z.boolean().optional(),
@@ -34,7 +42,9 @@ function result(state: ContentTypePromptsState): ContentTypePromptsResult {
     hint:
       state.storage === "missing_table"
         ? `Die Datenbank kennt die Textvorlagen noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin gelten die Standardvorlagen.`
-        : null,
+        : state.storage === "missing_columns"
+          ? `Die Datenbank kennt Startseite und Über-uns-Seite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin lassen sich diese beiden Vorlagen nicht speichern.`
+          : null,
   };
 }
 

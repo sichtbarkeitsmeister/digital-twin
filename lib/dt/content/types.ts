@@ -297,7 +297,7 @@ export type ContentToolResetResult = {
 export type ContentTypePromptsResult = {
   prompts: ContentTypePrompts;
   defaults: ContentTypePrompts;
-  storage: "db" | "defaults" | "missing_table";
+  storage: "db" | "defaults" | "missing_table" | "missing_columns";
   updated_at: string | null;
   updated_by_email: string | null;
   /** Set when the table is missing: which migration to run. */

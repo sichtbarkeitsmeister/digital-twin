@@ -142,7 +142,7 @@ assert.equal(steiner.briefing, true);
 assert.deepEqual(
   steiner.pages.map((p) => [p.slug, p.page_role, p.page_type, p.level, p.pillar_name]),
   [
-    ["startseite", "startseite", "hauptsilo", 0, null],
+    ["startseite", "startseite", "startseite", 0, null],
     ["privatumzug", "pillar", "hauptsilo", 1, null],
     ["seniorenumzug", "supporting", "unterseite", 2, "Privatumzug"],
     ["ratgeber", "pillar", "ratgeber", 1, null],
@@ -219,11 +219,11 @@ assert.equal(template.briefing, true);
 assert.deepEqual(
   template.pages.map((p) => [p.slug, p.page_role, p.page_type, p.level, p.pillar_name]),
   [
-    ["startseite", "startseite", "hauptsilo", 0, null],
+    ["startseite", "startseite", "startseite", 0, null],
     ["leistungen", "pillar", "hauptsilo", 1, null],
     ["dachsanierung", "supporting", "unterseite", 2, "Leistungen"],
     ["flachdach", "supporting", "unterseite", 3, "Leistungen"],
-    ["ueber-uns", "pillar", "nicht_bearbeiten", 1, null],
+    ["ueber-uns", "pillar", "ueber_uns", 1, null],
   ],
 );
 assert.equal(template.pages[1]!.keywords?.main.text, "Dachdecker Köln");
@@ -277,7 +277,9 @@ console.log("template and fallbacks: ok");
 
 assert.equal(derivePageType({ name: "Impressum", role: "pillar" }), "nicht_bearbeiten");
 assert.equal(derivePageType({ name: "Kontakt & Anfahrt", role: "pillar" }), "nicht_bearbeiten");
-assert.equal(derivePageType({ name: "Über uns", role: "pillar" }), "nicht_bearbeiten");
+assert.equal(derivePageType({ name: "Über uns", role: "pillar" }), "ueber_uns");
+assert.equal(derivePageType({ name: "Ueber uns", role: "pillar" }), "ueber_uns");
+assert.equal(derivePageType({ name: "Über uns – das Team", role: "pillar" }), "nicht_bearbeiten", "only the page named exactly Über uns");
 assert.equal(derivePageType({ name: "Team", role: "supporting", path: "/ueber-uns" }), "nicht_bearbeiten", "the path segment counts too");
 assert.equal(derivePageType({ name: "Umzugsratgeber", role: "pillar" }), "ratgeber");
 assert.equal(derivePageType({ name: "Checkliste", role: "supporting", pillarName: "Ratgeber" }), "ratgeber");
@@ -285,13 +287,16 @@ assert.equal(derivePageType({ name: "Umzug Bonn", role: "supporting", pillarName
 assert.equal(derivePageType({ name: "Umzug Bonn", role: "supporting", pillarName: "Leistungen", cities: ["Bonn"] }), "standort");
 assert.equal(derivePageType({ name: "Gewissenhafte Planung", role: "supporting", pillarName: "Leistungen" }), "unterseite", "„wissen“ inside a word is no Ratgeber");
 assert.equal(derivePageType({ name: "Privatumzug", role: "pillar" }), "hauptsilo");
-assert.equal(derivePageType({ name: "Startseite", role: "startseite" }), "hauptsilo");
+assert.equal(derivePageType({ name: "Startseite", role: "startseite" }), "startseite");
+assert.equal(derivePageType({ name: "Hauptseite", role: "startseite" }), "startseite");
 assert.equal(derivePageType({ name: "Seniorenumzug", role: "supporting", pillarName: "Privatumzug" }), "unterseite");
 assert.equal(isExcludedContentPageName("Datenschutzerklärung"), true);
 assert.equal(isExcludedContentPageName("Referenzen"), true);
 assert.equal(isExcludedContentPageName("Kontaktlinsen"), false, "only whole words");
 assert.equal(isExcludedContentPageName("Leistungen", "/kontakt/leistungen"), false, "only the last segment counts");
-assert.equal(guessCrawlPageType({ name: "Startseite", path: "/", level: 0 }), "hauptsilo");
+assert.equal(guessCrawlPageType({ name: "Startseite", path: "/", level: 0 }), "startseite");
+assert.equal(guessCrawlPageType({ name: "Start | Firma", path: "/", level: 0 }), "startseite", "the site root is the homepage whatever the title");
+assert.equal(guessCrawlPageType({ name: "Über uns", path: "/ueber-uns", level: 1 }), "ueber_uns");
 assert.equal(guessCrawlPageType({ name: "Dachsanierung", path: "/leistungen/dachsanierung", level: 2 }), "unterseite");
 assert.equal(guessCrawlPageType({ name: "Leistungen", path: "/leistungen", level: 1 }), "hauptsilo");
 assert.equal(guessCrawlPageType({ name: "5 Tipps", path: "/ratgeber/5-tipps", level: 2 }), "ratgeber");
@@ -322,7 +327,7 @@ const crawlPlan = planCrawlContentPages([], [
 assert.deepEqual(
   crawlPlan.inserts.map((p) => [p.slug, p.page_type, p.pillar_name, p.source_url]),
   [
-    ["startseite", "hauptsilo", null, "https://x.de/"],
+    ["startseite", "startseite", null, "https://x.de/"],
     ["kontakt", "nicht_bearbeiten", null, "https://x.de/kontakt/"],
     ["leistungen", "hauptsilo", null, "https://x.de/leistungen"],
     ["dach", "unterseite", "Leistungen", "https://x.de/leistungen/dach"],
@@ -436,7 +441,11 @@ assert.equal(saved.standort.length, CONTENT_TYPE_PROMPT_MAX_CHARS, "capped at th
 assert.equal(saved.unterseite, DEFAULT_CONTENT_TYPE_PROMPTS.unterseite, "untouched recipes keep the default");
 assert.equal(hasCustomContentTypePrompts(DEFAULT_CONTENT_TYPE_PROMPTS), false);
 assert.equal(hasCustomContentTypePrompts(saved), true);
-assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "unterseite", "ratgeber", "standort"], "nicht_bearbeiten has no recipe");
+assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"], "nicht_bearbeiten has no recipe");
+assert.equal(DEFAULT_CONTENT_TYPE_PROMPTS.startseite, "", "the Startseite recipe starts empty");
+assert.equal(DEFAULT_CONTENT_TYPE_PROMPTS.ueber_uns, "", "the Über-uns recipe starts empty");
+assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "startseite", null), "");
+assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "ueber_uns", null), "");
 assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "nicht_bearbeiten", null), renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "unterseite", null));
 assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "unterseite", null), /auf ihr Hauptsilo „Hauptsilo“/, "without a pillar the word stays");
 

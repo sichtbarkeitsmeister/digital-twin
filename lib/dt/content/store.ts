@@ -150,6 +150,7 @@ export const CONTENT_SOURCE_MIGRATION_FILE = "database/migrations/20261008_dt_co
 export const CONTENT_BRIEFING_MIGRATION_FILE = "database/migrations/20261009_dt_content_excel_briefing.sql";
 export const CONTENT_NINE_STEPS_MIGRATION_FILE = "database/migrations/20261011_dt_content_nine_steps.sql";
 export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
+export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261015_dt_content_startseite_ueber_uns.sql";
 
 /** 23514 on the step CHECK: the database still allows steps 1 … 8 only (migration 20261011 never ran). */
 export function isContentStepRangeError(error: { code?: string; message?: string } | null | undefined): boolean {
@@ -161,6 +162,12 @@ export function isContentStepRangeError(error: { code?: string; message?: string
 export function isContentBrancheCheckError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   return error.code === "23514" && /branche_check/i.test(error.message ?? "");
+}
+
+/** 23514 on the page_type CHECK: Startseite and Über-uns-Seite are not allowed yet (migration 20261015 never ran). */
+export function isContentPageTypeCheckError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return error.code === "23514" && /page_type/i.test(error.message ?? "");
 }
 
 /** PostgREST answers PGRST205 when a table is not in its schema cache, i.e. the migration never ran. */
@@ -187,6 +194,9 @@ export function contentDbErrorMessage(error: { code?: string; message?: string }
   }
   if (isContentBrancheCheckError(error)) {
     return `Die Datenbank erlaubt für die Branche noch nur drei feste Werte: Bitte ${CONTENT_BRANCHE_TEXT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+  }
+  if (isContentPageTypeCheckError(error)) {
+    return `Die Datenbank kennt die Seitentypen Startseite und Über-uns-Seite noch nicht: Bitte ${CONTENT_PAGE_TYPES_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
   if (isMissingContentColumnError(error)) {
     return `Die Datenbank ist noch nicht auf dem neuesten Stand: Bitte ${CONTENT_BRIEFING_MIGRATION_FILE} (und, falls noch nicht geschehen, ${CONTENT_SOURCE_MIGRATION_FILE}) einmal im Supabase SQL Editor ausführen.`;

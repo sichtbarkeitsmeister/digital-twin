@@ -62,7 +62,11 @@ const PAGE_TYPE_OPTIONS = CONTENT_PAGE_TYPES.map((value) => ({
           ? "Informationell, kein harter Verkauf"
           : value === "standort"
             ? "Leistung an einem Ort"
-            : "Bekommt keinen Text",
+            : value === "startseite"
+              ? "Die Hauptseite der Website"
+              : value === "ueber_uns"
+                ? "Die Seite über das Unternehmen"
+                : "Bekommt keinen Text",
 }));
 
 function severityClass(severity: string): string {

@@ -1,6 +1,7 @@
 /**
  * Writing recipes per page type („Textvorlagen“): what the SEO step (step 2) is told about
- * a Hauptsilo-Seite, Unterseite, Ratgeberartikel or Standortseite. One set for the whole
+ * a Hauptsilo-Seite, Unterseite, Ratgeberartikel, Standortseite, Startseite or Über-uns-Seite.
+ * Startseite and Über-uns-Seite start empty: the agency writes those recipes itself. One set for the whole
  * agency, stored in `dt_content_type_prompts`; the defaults below are the rules the step
  * used before they became editable and are what „Auf Standard zurücksetzen“ restores.
  *
@@ -11,7 +12,7 @@
 
 import type { ContentPageType } from "@/lib/dt/content/page-types";
 
-export const CONTENT_TYPE_PROMPT_KEYS = ["hauptsilo", "unterseite", "ratgeber", "standort"] as const;
+export const CONTENT_TYPE_PROMPT_KEYS = ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const;
 export type ContentTypePromptKey = (typeof CONTENT_TYPE_PROMPT_KEYS)[number];
 export type ContentTypePrompts = Record<ContentTypePromptKey, string>;
 
@@ -29,6 +30,8 @@ export const DEFAULT_CONTENT_TYPE_PROMPTS: ContentTypePrompts = {
     "Seitentyp Ratgeberartikel: informationell. Aufbau Problem → Lösung → Vertrauen → nächster Schritt. Kein harter Verkauf, keine drängenden Handlungsaufforderungen (Schritt 5 nutzt den Ratgeber-Zyklus). Mindestens 5 Frage-Überschriften. Am Ende ein Abschnitt id „autor“ mit Autor- oder Prüfhinweis: nur mit einem Namen, der in den Anbieterfakten steht; sonst der Platzhalter [BITTE PRÜFEN: Autor oder fachliche Prüfung ergänzen]. Kein erfundener Autor.",
   standort:
     "Seitentyp Standortseite: wie eine Unterseite, Fokus ist die Leistung an diesem Ort. Verlinkt auf das Hauptsilo „[Hauptsilo]“ ([LINK: [Hauptsilo]]), wenn eines angegeben ist. Lokaler Bezug nur aus den Anbieterfakten (Einzugsgebiet, Anfahrt, Besonderheiten, Ansprechpartner); keine erfundenen Ortsangaben, den Ortsnamen nicht stapeln. Mindestens 3 Frage-Überschriften.",
+  startseite: "",
+  ueber_uns: "",
 };
 
 export const CONTENT_TYPE_PROMPT_LABELS: Record<ContentTypePromptKey, string> = {
@@ -36,6 +39,8 @@ export const CONTENT_TYPE_PROMPT_LABELS: Record<ContentTypePromptKey, string> = 
   unterseite: "Unterseite",
   ratgeber: "Ratgeberartikel",
   standort: "Standortseite",
+  startseite: "Startseite",
+  ueber_uns: "Über-uns-Seite",
 };
 
 /** One line under each textarea of the „Textvorlagen“ card. */
@@ -44,6 +49,8 @@ export const CONTENT_TYPE_PROMPT_HELP: Record<ContentTypePromptKey, string> = {
   unterseite: "Ein Unterthema in der Tiefe, immer zurück zum Hauptsilo verlinken.",
   ratgeber: "Hilfe-Artikel, Fragen beantworten, nicht hart verkaufen.",
   standort: "Leistung an einem Ort.",
+  startseite: "Die Hauptseite der Website.",
+  ueber_uns: "Die Seite über das Unternehmen.",
 };
 
 export function isContentTypePromptKey(value: unknown): value is ContentTypePromptKey {
