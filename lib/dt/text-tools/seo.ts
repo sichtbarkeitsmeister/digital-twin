@@ -51,7 +51,7 @@ export const SEO_TOOL_JOB_KIND = "text-tool.seo";
 export const SEO_TOOL_USAGE_MODE = "text-tool.seo";
 
 /** The page types the dropdown offers („Nicht bearbeiten“ has no Textvorlage and no text). */
-export const SEO_TOOL_PAGE_TYPES = ["hauptsilo", "unterseite", "ratgeber", "standort"] as const satisfies readonly ContentPageType[];
+export const SEO_TOOL_PAGE_TYPES = ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const satisfies readonly ContentPageType[];
 export type SeoToolPageType = (typeof SEO_TOOL_PAGE_TYPES)[number];
 
 export const SEO_TOOL_MAX_NOTES_CHARS = 4_000;

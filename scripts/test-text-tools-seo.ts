@@ -144,7 +144,7 @@ function testInputParsing() {
   assert.ok(long && long.length <= SEO_TOOL_MAX_MATERIAL_CHARS + 20 && long.endsWith("[… gekürzt]"), "long material is clipped, not refused");
   assert.deepEqual(
     SEO_TOOL_PAGE_TYPE_OPTIONS.map((o) => o.value),
-    ["hauptsilo", "unterseite", "ratgeber", "standort"],
+    ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"],
     "nicht_bearbeiten is not offered",
   );
   console.log("input parsing: ok");

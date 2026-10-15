@@ -15,6 +15,7 @@ import {
   CONTENT_TYPE_PROMPT_LABELS,
   CONTENT_TYPE_PROMPT_MAX_CHARS,
   CONTENT_TYPE_PROMPT_PILLAR_TOKEN,
+  DEFAULT_CONTENT_TYPE_PROMPTS,
   hasCustomContentTypePrompts,
   isDefaultContentTypePrompt,
   type ContentTypePrompts,
@@ -86,7 +87,7 @@ export function DtContentTypePromptsCard() {
 
   async function resetToDefaults() {
     if (busy) return;
-    if (!window.confirm("Alle vier Textvorlagen auf den Standard zurücksetzen? Eigene Formulierungen gehen verloren.")) return;
+    if (!window.confirm("Alle sechs Textvorlagen auf den Standard zurücksetzen? Eigene Formulierungen gehen verloren.")) return;
     setBusy("reset");
     try {
       const res = await contentApi<ContentTypePromptsResult>(ENDPOINT, { method: "PUT", body: { reset: true } });
@@ -108,8 +109,8 @@ export function DtContentTypePromptsCard() {
         <div className="grid gap-0.5">
           <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Textvorlagen</h2>
           <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
-            Wie der SEO-Schritt die vier Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren
-            eigenen Seitentyp.
+            Wie der SEO-Schritt die sechs Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren
+            eigenen Seitentyp. Startseite und Über-uns-Seite sind leer, bis hier eine Vorlage steht.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -185,6 +186,7 @@ export function DtContentTypePromptsCard() {
                     maxLength={CONTENT_TYPE_PROMPT_MAX_CHARS}
                     rows={7}
                     disabled={!draft || Boolean(busy)}
+                    placeholder={DEFAULT_CONTENT_TYPE_PROMPTS[key] ? undefined : "Noch keine Vorlage. Hier eintragen, wie dieser Seitentyp geschrieben wird."}
                     onChange={(event) => setDraft((prev) => (prev ? { ...prev, [key]: event.target.value } : prev))}
                     className="min-h-[160px] resize-y text-xs leading-relaxed"
                   />
