@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckSquare, ClipboardList, Globe2, Sparkles } from "lucide-react";
+import { CheckSquare, Globe2, Sparkles } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -10,8 +10,6 @@ import { textToChecklist } from "@/lib/dt/seo/seo-checklist";
 type GlobalPrompts = {
   default: string;
   seo_advisor: string;
-  survey_to_agent: string;
-  survey_refine_agent: string;
 };
 
 const PROMPT_META: Record<
@@ -29,20 +27,6 @@ const PROMPT_META: Record<
     description:
       "Nur im SEO-Modus für Plattform-Admins. Nutzt SEO-Daten, Website-Inhalte, Anbieter-Wissen und automatisch die Wunschkunden-Avatare der jeweiligen Organisation.",
     icon: Globe2,
-  },
-  survey_to_agent: {
-    title: "Umfrage → Agent (Neu)",
-    description:
-      "Erzeugt den avatar-spezifischen Teil eines Wunschkunden; der Agent nutzt den globalen DigitalTwin-Prompt.",
-    icon: ClipboardList,
-    placeholder:
-      "Prompt für die JSON-Ausgabe (name, role, slug, prompt_template, …). Platzhalter {{reference_examples}} für Referenz-Agenten.",
-  },
-  survey_refine_agent: {
-    title: "Umfrage → Agent (Verfeinern)",
-    description:
-      "Verfeinert nur den avatar-spezifischen Teil; globale DigitalTwin-Regeln bleiben aktiv und Markenbotschafter-Ton wird korrigiert.",
-    icon: ClipboardList,
   },
 };
 
@@ -72,22 +56,13 @@ export function DtGlobalPromptsPanel(props: {
           <code className="rounded bg-sbkm-navy/5 px-1 text-xs dark:bg-white/10">
             {"{{organisation}}"}
           </code>
-          ; Umfrage-Konvertierung nutzt{" "}
-          <code className="rounded bg-sbkm-navy/5 px-1 text-xs dark:bg-white/10">
-            {"{{reference_examples}}"}
-          </code>{" "}
-          für Referenz-Personas.
+          .
         </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {(
-          [
-            "default",
-            "seo_advisor",
-            "survey_to_agent",
-            "survey_refine_agent",
-          ] as const
+          ["default", "seo_advisor"] as const
         ).map((slug) => {
           const meta = PROMPT_META[slug];
           const Icon = meta.icon;

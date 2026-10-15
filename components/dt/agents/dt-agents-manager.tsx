@@ -34,8 +34,6 @@ type AgentRow = DtAgentListItemRow;
 type GlobalPrompts = {
   default: string;
   seo_advisor: string;
-  survey_to_agent: string;
-  survey_refine_agent: string;
 };
 
 function isProtectedAlwaysOn(agent: AgentRow): boolean {
@@ -167,8 +165,6 @@ export function DtAgentsManager(props: {
   const [globalPrompts, setGlobalPrompts] = useState<GlobalPrompts>({
     default: "",
     seo_advisor: "",
-    survey_to_agent: "",
-    survey_refine_agent: "",
   });
 
   // Keep Survey-KI focus in sync when opening an agent from deep links.
@@ -239,8 +235,6 @@ export function DtAgentsManager(props: {
       setGlobalPrompts({
         default: globalJson.prompts.default ?? "",
         seo_advisor: globalJson.prompts.seo_advisor ?? "",
-        survey_to_agent: globalJson.prompts.survey_to_agent ?? "",
-        survey_refine_agent: globalJson.prompts.survey_refine_agent ?? "",
       });
     }
   }, [refreshRequests]);
