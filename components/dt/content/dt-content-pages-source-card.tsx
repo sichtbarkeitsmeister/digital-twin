@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, FileSpreadsheet, Globe, Loader2, Upload } from "lucide-react";
+import { ArrowRight, FilePlus2, FileSpreadsheet, Globe, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -19,6 +19,8 @@ import type {
   ContentCrawlStatus,
   ContentLocalSources,
   ContentOverview,
+  ContentStructureCreateResult,
+  ContentStructurePlanResult,
   ContentStructureUploadResult,
 } from "@/lib/dt/content/types";
 
@@ -38,16 +40,16 @@ const MODES: Array<{
 }> = [
   {
     id: "structure",
-    title: "Excel-Seitenstruktur",
-    when: "Kunde ohne Website oder vor dem Relaunch",
-    text: "Briefing-Excel hochladen: je Seite URL, Ebene, Keywords, H1-Optionen und Nutzerfragen. Jede Zeile wird eine Seite.",
+    title: "Neue Website",
+    when: "Kunde hat noch keine Website",
+    text: "Seitenstruktur hochladen. Jede Zeile wird eine Seite, die neu geschrieben wird.",
     icon: FileSpreadsheet,
   },
   {
     id: "crawl",
-    title: "Crawler – bestehende Website",
-    when: "Kunde hat eine Website",
-    text: "Alle Seiten der Website einlesen und in die Tabelle übernehmen.",
+    title: "Verbesserung",
+    when: "Bestehende Website überarbeiten",
+    text: "Website crawlen und die Seitenstruktur hochladen. Seiten, die es auf der Website noch nicht gibt, können angelegt werden.",
     icon: Globe,
   },
 ];
@@ -76,6 +78,62 @@ function pagesWord(n: number): string {
   return `${n} ${n === 1 ? "Seite" : "Seiten"}`;
 }
 
+/**
+ * „Verbesserung“: the pages of the Seitenstruktur that the website does not have (without a
+ * crawl: that the table does not have), and the button that creates exactly those.
+ */
+function StructurePlanList(props: {
+  plan: ContentStructurePlanResult;
+  creating: boolean;
+  onCreate: () => void;
+}) {
+  const { plan } = props;
+  if (!plan.structure) return null;
+  const empty = plan.missing.length === 0;
+  return (
+    <div className="grid gap-2 border-t border-sbkm-navy/8 pt-3 dark:border-white/8" data-testid="content-structure-plan">
+      {empty ? (
+        <p className="text-xs font-semibold text-sbkm-navy dark:text-white">
+          {plan.crawled
+            ? "Alle Seiten der Seitenstruktur gibt es bereits auf der Website."
+            : "Alle Seiten der Seitenstruktur stehen bereits in der Tabelle."}
+        </p>
+      ) : (
+        <>
+          <p className="text-xs font-semibold text-sbkm-navy dark:text-white">
+            {plan.crawled
+              ? "Diese Seiten stehen in der Seitenstruktur, gibt es auf der Website aber noch nicht."
+              : "Noch kein Crawl. Diese Seiten sind in der Seitenstruktur und können neu angelegt werden."}
+          </p>
+          <ul className="grid max-h-64 gap-1 overflow-y-auto rounded-lg border border-sbkm-navy/8 bg-white/70 p-2 text-xs scrollbar-subtle dark:border-white/8 dark:bg-white/[0.04]">
+            {plan.missing.map((page) => (
+              <li key={page.slug} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 py-0.5">
+                <span className="font-semibold text-sbkm-navy dark:text-white">{page.name}</span>
+                <span className="font-mono text-[11px] text-sbkm-ink-500 dark:text-white/45">{page.path ?? "ohne Pfad"}</span>
+                <span className="ml-auto rounded-pill bg-sbkm-navy/[0.06] px-2 py-0.5 text-[10px] font-bold text-sbkm-ink-600 dark:bg-white/10 dark:text-white/70">
+                  {page.page_type_label}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div>
+            <DtPillButton type="button" size="sm" disabled={props.creating} onClick={props.onCreate}>
+              {props.creating ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <FilePlus2 className="size-4" aria-hidden />}
+              Diese Seiten anlegen
+            </DtPillButton>
+          </div>
+        </>
+      )}
+      {plan.on_site > 0 ? (
+        <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
+          {pagesWord(plan.on_site)} der Seitenstruktur {plan.on_site === 1 ? "ist" : "sind"} im Crawl, aber noch nicht in der
+          Tabelle. „Übernehmen“ legt sie mit dem Briefing aus der Datei an.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function DtContentPagesSourceCard(props: {
   organisationId: string;
   local: ContentLocalSources | null;
@@ -89,6 +147,8 @@ export function DtContentPagesSourceCard(props: {
   const [crawl, setCrawl] = useState<ContentCrawlStatus | null>(null);
   const [crawlError, setCrawlError] = useState<string | null>(null);
   const [crawlBusy, setCrawlBusy] = useState<"start" | "import" | null>(null);
+  const [plan, setPlan] = useState<ContentStructurePlanResult | null>(null);
+  const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -122,6 +182,20 @@ export function DtContentPagesSourceCard(props: {
 
   const crawlActive = Boolean(crawl?.crawl && (crawl.crawl.status === "queued" || crawl.crawl.status === "running"));
 
+  const loadPlan = useCallback(async () => {
+    const res = await contentApi<ContentStructurePlanResult>(`/api/dt/content/structure?${contentQuery(organisationId)}`);
+    if (res.ok) setPlan(res.data);
+  }, [organisationId]);
+
+  // The list follows the table, the uploaded structure and the crawl (also when a crawl ends).
+  const structureStamp = local?.structure?.uploadedAt ?? null;
+  const pageTotal = local?.pages.total ?? null;
+  const crawlStamp = `${crawl?.page_count ?? ""}|${crawl?.last_crawled_at ?? ""}|${crawlActive}`;
+  useEffect(() => {
+    if (mode !== "crawl") return;
+    void loadPlan();
+  }, [mode, loadPlan, structureStamp, pageTotal, crawlStamp]);
+
   useEffect(() => {
     if (mode !== "crawl") return;
     void loadCrawl();
@@ -141,18 +215,32 @@ export function DtContentPagesSourceCard(props: {
    */
   async function uploadStructure(file: File | undefined) {
     if (!file) return;
+    const uploadMode: ContentPagesMode = mode ?? "structure";
     setUploading(true);
     try {
       const payload = await readContentStructureFile(file);
       const res = await contentApi<ContentStructureUploadResult>("/api/dt/content/structure", {
         method: "POST",
-        body: { organisationId, ...payload },
+        body: { organisationId, ...payload, mode: uploadMode },
       });
       if (!res.ok) {
         toast.error(res.message);
         return;
       }
       const d = res.data;
+      if (d.mode === "crawl") {
+        if (d.plan) setPlan(d.plan);
+        const missing = d.plan?.missing.length ?? 0;
+        const parts = [
+          `${pagesWord(d.pages)} in der Datei`,
+          d.updated > 0 ? `${d.updated} vorhandene mit Briefing aktualisiert` : "keine vorhandene Seite getroffen",
+          missing > 0 ? `${missing} noch nicht auf der Website` : "",
+          d.plan && d.plan.on_site > 0 ? `${d.plan.on_site} im Crawl, noch nicht übernommen` : "",
+        ].filter(Boolean);
+        toast.success(`Seitenstruktur „${payload.filename}“ gespeichert`, { description: parts.join(" · ") });
+        props.onChanged(d.overview);
+        return;
+      }
       const parts = [
         `${pagesWord(d.pages)} in der Tabelle`,
         d.keywords > 0 ? `${d.keywords} mit Keywords` : "",
@@ -169,6 +257,29 @@ export function DtContentPagesSourceCard(props: {
       toast.error(error instanceof Error ? error.message : "Datei konnte nicht gelesen werden.");
     } finally {
       setUploading(false);
+    }
+  }
+
+  /** „Diese Seiten anlegen“: exactly the listed pages become rows of the table. */
+  async function createMissingPages() {
+    if (!plan || plan.missing.length === 0) return;
+    setCreating(true);
+    try {
+      const res = await contentApi<ContentStructureCreateResult>("/api/dt/content/structure/missing", {
+        method: "POST",
+        body: { organisationId, slugs: plan.missing.map((p) => p.slug) },
+      });
+      if (!res.ok) {
+        toast.error(res.message);
+        return;
+      }
+      setPlan(res.data.plan);
+      toast.success(res.data.created > 0 ? `${pagesWord(res.data.created)} angelegt` : "Keine Seite angelegt", {
+        description: res.data.created > 0 ? "Sie stehen jetzt in der Tabelle und können gestartet werden." : undefined,
+      });
+      props.onChanged(res.data.overview);
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -201,10 +312,11 @@ export function DtContentPagesSourceCard(props: {
         toast.error(res.message);
         return;
       }
-      const { imported, attached, skipped } = res.data;
+      const { imported, attached, briefed, skipped } = res.data;
       const parts = [
         imported > 0 ? `${pagesWord(imported)} neu in der Tabelle` : "Keine neue Seite",
         attached > 0 ? `${attached} vorhandene mit der Live-URL verknüpft` : "",
+        briefed > 0 ? `${briefed} mit Briefing aus der Seitenstruktur` : "",
         skipped.over_limit > 0 ? `${skipped.over_limit} über dem Limit von 300` : "",
       ].filter(Boolean);
       toast.success("Seiten aus dem Crawl übernommen", { description: parts.join(" · ") });
@@ -273,6 +385,20 @@ export function DtContentPagesSourceCard(props: {
           })}
         </div>
 
+        {/* One file input for both modes; the upload goes with the mode that is shown. */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept={CONTENT_STRUCTURE_FILE_ACCEPT}
+          className="sr-only"
+          aria-label="Seitenstruktur-Datei wählen"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            void uploadStructure(file);
+          }}
+        />
+
         {mode === "structure" ? (
           <div className="grid gap-3 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-4 text-sm dark:border-white/8 dark:bg-white/[0.03]">
             <p className="text-xs text-sbkm-ink-600 dark:text-white/65">
@@ -290,18 +416,6 @@ export function DtContentPagesSourceCard(props: {
               )}
             </p>
             <div className="flex flex-wrap items-center gap-3">
-              <input
-                ref={fileRef}
-                type="file"
-                accept={CONTENT_STRUCTURE_FILE_ACCEPT}
-                className="sr-only"
-                aria-label="Seitenstruktur-Datei wählen"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  void uploadStructure(file);
-                }}
-              />
               <DtPillButton type="button" size="sm" disabled={uploading} onClick={() => fileRef.current?.click()}>
                 {uploading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Upload className="size-4" aria-hidden />}
                 {structure ? "Neue Datei hochladen" : "Seitenstruktur hochladen"}
@@ -396,6 +510,45 @@ export function DtContentPagesSourceCard(props: {
                 </p>
               </>
             )}
+          </div>
+        ) : null}
+
+        {mode === "crawl" ? (
+          <div className="grid gap-3 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-4 text-sm dark:border-white/8 dark:bg-white/[0.03]">
+            <p className="text-xs text-sbkm-ink-600 dark:text-white/65">
+              {props.loading && !local ? (
+                "Lädt …"
+              ) : structure ? (
+                <>
+                  Seitenstruktur:{" "}
+                  <span className="font-semibold text-sbkm-navy dark:text-white">„{structure.filename?.trim() || "ohne Dateiname"}“</span>
+                  {structure.nodeCount > 0 ? ` · ${structure.nodeCount} Einträge` : ""}
+                  {structure.uploadedAt ? ` · hochgeladen ${formatContentDate(structure.uploadedAt)}` : ""}
+                </>
+              ) : (
+                "Noch keine Seitenstruktur hochgeladen."
+              )}
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <DtPillButton type="button" size="sm" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                {uploading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Upload className="size-4" aria-hidden />}
+                {structure ? "Neue Seitenstruktur hochladen" : "Seitenstruktur hochladen"}
+              </DtPillButton>
+              <Link
+                href={`/dashboard/verwaltung/seo?org=${org}&tab=struktur`}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
+              >
+                In SEO → Struktur ansehen
+                <ArrowRight className="size-3" aria-hidden />
+              </Link>
+            </div>
+            <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
+              {CONTENT_STRUCTURE_FILE_HINT} Seiten, die es schon gibt (in der Tabelle oder im Crawl), bekommen Seitentyp,
+              Hauptsilo, Keywords, H1-Optionen, Nutzerfragen, KI-Prompt und Linkziele aus der Datei; ihr Text und die Live-URL
+              bleiben. Gecrawlte Seiten, die nicht in der Datei stehen, bleiben in der Tabelle. Neue Seiten entstehen nur über
+              „Diese Seiten anlegen“.
+            </p>
+            {plan ? <StructurePlanList plan={plan} creating={creating} onCreate={() => void createMissingPages()} /> : null}
           </div>
         ) : null}
       </div>

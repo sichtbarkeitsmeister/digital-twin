@@ -235,3 +235,16 @@ export function formatEur(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(value);
 }
+
+/** Asked before „Freigeben“ while questions or open points are still on the page. */
+export const CONTENT_APPROVE_OPEN_ITEMS_CONFIRM =
+  "Es gibt noch offene Punkte oder Fragen an den Kunden, die nicht bearbeitet sind. Trotzdem freigeben?";
+
+/**
+ * Whether „Freigeben“ asks first: „Fragen an den Kunden“ or „Offene Punkte“ (findings, on the
+ * final release also the Endabnahme's) are still listed. „Abschnitt ändern“ removes the ones
+ * of the edited Abschnitt, so a page whose Abschnitte were all edited releases without asking.
+ */
+export function approveNeedsConfirm(open: { questions: readonly unknown[]; findings: readonly unknown[] }): boolean {
+  return open.questions.length > 0 || open.findings.length > 0;
+}

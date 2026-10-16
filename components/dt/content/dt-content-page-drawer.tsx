@@ -28,6 +28,8 @@ import {
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
 import {
+  CONTENT_APPROVE_OPEN_ITEMS_CONFIRM,
+  approveNeedsConfirm,
   contentActionLabel,
   contentStepStatusLabel,
   extractContentBlocks,
@@ -196,9 +198,15 @@ export function DtContentPageDrawer(props: {
 
   const blocks = useMemo(() => extractContentBlocks(review?.html ?? ""), [review?.html]);
   const findings = useMemo(() => (review ? openFindings(review) : []), [review]);
+  const questions = useMemo(() => review?.questions ?? [], [review]);
+  // Open points and the Abschnitte a question is about are marked in the text.
   const highlightIds = useMemo(
-    () => findings.map((f) => f.block_id).filter((id): id is string => Boolean(id)),
-    [findings],
+    () => [
+      ...new Set(
+        [...questions.map((q) => q.block_id), ...findings.map((f) => f.block_id)].filter((id): id is string => Boolean(id)),
+      ),
+    ],
+    [findings, questions],
   );
   const actions = useMemo(
     () => (review?.actions ?? []).filter((a) => contentActionLabel(a.kind)),
@@ -206,7 +214,7 @@ export function DtContentPageDrawer(props: {
   );
 
   function startEdit(action: ContentAction) {
-    const first = findings.find((f) => f.block_id)?.block_id ?? blocks[0]?.id ?? "";
+    const first = highlightIds[0] ?? blocks[0]?.id ?? "";
     setBlockId(first);
     setBlockText(blocks.find((b) => b.id === first)?.text ?? "");
     setMode({ kind: "edit", action });
@@ -343,6 +351,9 @@ export function DtContentPageDrawer(props: {
   function onAction(action: ContentAction) {
     switch (action.kind) {
       case "approve":
+        // Questions and open points that were not handled („Abschnitt ändern“ clears the ones
+        // of the edited Abschnitt): ask once, then send the same request.
+        if (approveNeedsConfirm({ questions, findings }) && !window.confirm(CONTENT_APPROVE_OPEN_ITEMS_CONFIRM)) return;
         void runStepAction(action, "approve", {}, "Freigegeben");
         return;
       case "edit":
@@ -539,7 +550,11 @@ export function DtContentPageDrawer(props: {
                       <h3 className={sectionTitleClass}>
                         Briefing
                         <span className="font-semibold normal-case tracking-normal">
-                          {review.briefing.source === "crawl" ? "aus dem Crawl" : "aus der Excel"}
+                          {review.briefing.source === "crawl"
+                            ? review.briefing.from_excel
+                              ? "aus Crawl und Excel"
+                              : "aus dem Crawl"
+                            : "aus der Excel"}
                         </span>
                       </h3>
                       {review.briefing.type_editable ? (
@@ -654,14 +669,19 @@ export function DtContentPageDrawer(props: {
                     <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <h3 className={sectionTitleClass}>
                         Fragen an den Kunden
-                        <span className="tabular-nums">{review.questions.length}</span>
+                        <span className="tabular-nums">{questions.length}</span>
                       </h3>
-                      {review.questions.length === 0 ? (
+                      {questions.length === 0 ? (
                         <p className="text-sm text-sbkm-ink-600 dark:text-white/60">Keine Fragen offen.</p>
                       ) : (
                         <ul className="grid gap-2.5">
-                          {review.questions.map((q, i) => (
+                          {questions.map((q, i) => (
                             <li key={`${q.question}-${i}`} className="grid gap-1.5">
+                              {q.section || q.block_id ? (
+                                <p className="ml-6 text-[11px] font-semibold uppercase tracking-wider text-orange-700 dark:text-orange-300">
+                                  Abschnitt „{q.section || q.block_id}“
+                                </p>
+                              ) : null}
                               <p className="flex gap-2 text-sm font-medium leading-snug text-sbkm-navy dark:text-white">
                                 <MessageCircleQuestion className="mt-0.5 size-4 shrink-0 text-orange-600 dark:text-orange-300" aria-hidden />
                                 {q.question}

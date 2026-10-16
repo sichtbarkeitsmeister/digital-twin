@@ -73,15 +73,22 @@ function pathSegments(path: string): string[] {
   return path.split("/").filter(Boolean);
 }
 
+/**
+ * One spelling per page path: `/Kontakt/`, `https://x.de/kontakt` and `/kontakt` all become
+ * `/kontakt`, the root `/`. Null for an empty value (the path is unknown).
+ */
+export function contentPathKey(value: string | null | undefined): string | null {
+  const known = value?.trim();
+  if (!known) return null;
+  const pathname = /^https?:\/\//i.test(known) ? pathOfUrl(known) : known;
+  return (decodeSegment(pathname).replace(/\/+$/, "") || "/").toLowerCase();
+}
+
 /** `/Kontakt/`, `https://x.de/kontakt` and `/kontakt` are the same page; no path means „unknown“. */
 export function sameContentPath(existing: string | null | undefined, crawled: string): boolean {
-  const known = existing?.trim();
+  const known = contentPathKey(existing);
   if (!known) return true;
-  const normalise = (value: string) => {
-    const pathname = /^https?:\/\//i.test(value) ? pathOfUrl(value) : value;
-    return (decodeSegment(pathname).replace(/\/+$/, "") || "/").toLowerCase();
-  };
-  return normalise(known) === normalise(crawled);
+  return known === contentPathKey(crawled);
 }
 
 /** Host without `www.` plus path: the same page under http/https or www/non-www counts once. */
@@ -131,9 +138,21 @@ export function pageNameFromCrawl(page: Pick<CrawledSitePage, "h1" | "title">, p
   return labelFromPath(path);
 }
 
+/** The slug a crawled page gets before collisions: last path segment, `startseite` for the root. */
+export function crawlPageSlug(path: string, name: string): string {
+  const segments = pathSegments(path);
+  if (segments.length === 0) return "startseite";
+  return slugify(decodeSegment(segments[segments.length - 1]!)) || slugify(name) || "seite";
+}
+
 /** Fetch failures leave neither title nor text; those rows are not pages to write for. */
 function hasContent(page: CrawledSitePage): boolean {
   return Boolean(squash(page.title) || squash(page.h1) || (page.text_content ?? "").trim());
+}
+
+/** A crawled row that stands for a real page of the site: not excluded, no redirect, not an empty fetch. */
+export function isLiveCrawledPage(page: CrawledSitePage): boolean {
+  return !page.is_excluded && !isRedirectedCrawlPage(page) && hasContent(page);
 }
 
 /**
@@ -193,8 +212,7 @@ export function planCrawlContentPages(
 
   for (const { page, path, level } of candidates) {
     const name = pageNameFromCrawl(page, path);
-    const lastSegment = pathSegments(path).pop() ?? "";
-    const base = level === 0 ? "startseite" : slugify(decodeSegment(lastSegment)) || slugify(name) || "seite";
+    const base = crawlPageSlug(path, name);
 
     const hit = existingBySlug.get(base);
     if (hit && sameContentPath(hit.path, path)) {

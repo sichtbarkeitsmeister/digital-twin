@@ -115,8 +115,11 @@ export type ContentQuestion = {
   kind: string;
   question: string;
   field?: string | null;
+  /** Faktencheck: an example answer. A gap found in the text: the placeholder itself. */
   placeholder?: string | null;
   block_id?: string | null;
+  /** Name of the Abschnitt (its heading, else its id); set when the page stops for the question. */
+  section?: string | null;
   excerpt?: string | null;
   blocking: boolean;
 };
@@ -151,10 +154,13 @@ export type ContentAction = {
 /** What the Excel briefing (or the crawl guess) knows about a page; shown compactly in the drawer. */
 export type ContentPageBriefing = {
   source: ContentPageSource;
+  /** The briefing comes from an Excel: structure pages, and crawl pages matched by a Seitenstruktur in „Verbesserung“. */
+  from_excel: boolean;
   page_type: ContentPageType | null;
   /**
    * Crawl pages: the editor may change the type (the guess from name and depth can be wrong).
-   * Excel pages: locked, the Excel is the briefing; a corrected Excel changes the type.
+   * Excel pages (and crawl pages with an Excel briefing): locked, the Excel is the briefing;
+   * a corrected Excel changes the type.
    */
   type_editable: boolean;
   page_role: ContentPageRole | null;
@@ -261,8 +267,56 @@ export type ContentResetResult = {
   overview: ContentOverview;
 };
 
+/** Where the Seitenstruktur was uploaded: „Neue Website“ (structure) or „Verbesserung“ (crawl). */
+export type ContentStructureMode = ContentPageSource;
+
+/** One page of the Seitenstruktur that the website does not have yet („Verbesserung“). */
+export type ContentStructurePlanPage = {
+  slug: string;
+  name: string;
+  path: string | null;
+  page_type: ContentPageType;
+  page_type_label: string;
+};
+
+/**
+ * `GET /api/dt/content/structure`: the Seitenstruktur next to the crawl („Verbesserung“).
+ * `missing` are the pages neither the table nor the crawled site has; without a crawl, the
+ * pages that are not in the table.
+ */
+export type ContentStructurePlanResult = {
+  structure: {
+    filename: string | null;
+    uploaded_at: string | null;
+    pages: number;
+    /** Which mode the file was uploaded in; null for a structure from SEO → Struktur or before the migration. */
+    mode: ContentStructureMode | null;
+  } | null;
+  /** Whether a crawl of the live site exists to compare with. */
+  crawled: boolean;
+  /** Structure pages that are rows of the table. */
+  matched: number;
+  /** Structure pages on the crawled site that are not in the table yet („Seiten übernehmen“ brings them). */
+  on_site: number;
+  missing: ContentStructurePlanPage[];
+  /** False while the database lacks `dt_website_structures.content_briefing` (migration). */
+  supported: boolean;
+};
+
+/** `POST /api/dt/content/structure/missing`: „Diese Seiten anlegen“. */
+export type ContentStructureCreateResult = {
+  created: number;
+  plan: ContentStructurePlanResult;
+  overview: ContentOverview;
+};
+
 /** `POST /api/dt/content/structure`: the Excel briefing (or a structure text) became page rows. */
 export type ContentStructureUploadResult = {
+  mode: ContentStructureMode;
+  /** „Verbesserung“: rows of the table that took the Excel briefing (no row is created). */
+  updated: number;
+  /** „Verbesserung“: the comparison with the crawl after the upload; null for „Neue Website“. */
+  plan: ContentStructurePlanResult | null;
   filename: string | null;
   /** Which layout was read: the old briefing (A–H), the DT template (Ebene 1 … n) or a plain structure text. */
   layout: "briefing" | "template" | "text";
@@ -311,6 +365,8 @@ export type ContentPagePatchResult = { review: ContentReview; overview: ContentO
 export type ContentCrawlImportResult = {
   imported: number;
   attached: number;
+  /** Rows that took the briefing of a Seitenstruktur uploaded in „Verbesserung“. */
+  briefed: number;
   skipped: { excluded: number; empty: number; redirected: number; duplicate: number; over_limit: number };
   overview: ContentOverview;
 };

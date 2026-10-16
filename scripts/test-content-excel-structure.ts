@@ -25,6 +25,7 @@ import {
 } from "../lib/dt/content/page-types";
 import {
   CONTENT_HERO_PLACEHOLDER,
+  brancheRules,
   contentStepSpec,
   ensureHeroPlaceholder,
   keepHeroBlock,
@@ -48,6 +49,7 @@ import {
   rephraseProgressLabel,
   rephrasedBlocks,
 } from "../lib/dt/content/pipeline/rephrase";
+import { contentGapQuestions, findContentGapsInHtml, gapQuestion, hasContentGap } from "../lib/dt/content/pipeline/gaps";
 import { stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
 import {
   CONTENT_STEP_ENDABNAHME,
@@ -61,15 +63,31 @@ import {
 } from "../lib/dt/content/pipeline/steps";
 import { callXaiText, DEFAULT_XAI_MODEL, resolveXaiModels, XAI_MISSING_KEY_MESSAGE, XAI_MODEL_FALLBACKS, XaiTimeoutError } from "../lib/dt/content/pipeline/xai";
 import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
-import { parseBlocksFromHtml } from "../lib/dt/content/render";
+import { approveNeedsConfirm } from "../lib/dt/content/presentation";
+import { parseBlocksFromHtml, renderBlocksHtml } from "../lib/dt/content/render";
 import {
   CONTENT_TYPE_LOCKED_MESSAGE,
   canEditContentPageType,
   contentPageTypeChangeBlocker,
   contentStructureOutline,
+  pageActions,
   pageBriefing,
+  pageDetail,
+  questionsDetail,
+  rerunStepFor,
   type ContentPageRow,
 } from "../lib/dt/content/store";
+import {
+  CONTENT_STEP_PROMPT_KEYS,
+  CONTENT_STEP_PROMPT_MAX_CHARS,
+  DEFAULT_CONTENT_STEP_PROMPTS,
+  fillContentStepPrompt,
+  normalizeStoredContentStepPrompts,
+  resolveContentStepPrompt,
+  resolveContentStepPrompts,
+} from "../lib/dt/content/step-prompts";
+import { briefingPatchFor, planImprovementStructure } from "../lib/dt/content/structure-plan";
+import { DEFAULT_TEXTER_PROMPT } from "../lib/dt/content/texter-prompt";
 import {
   CONTENT_TYPE_PROMPT_KEYS,
   CONTENT_TYPE_PROMPT_MAX_CHARS,
@@ -338,6 +356,71 @@ assert.deepEqual(
 assert.ok(crawlPlan.inserts.every((p) => !("keywords" in p)), "the crawl invents no keywords or questions");
 console.log("crawl without excel: ok");
 
+// --- „Verbesserung“: the Seitenstruktur next to the table and the crawl ---------------------------
+
+{
+  const rows = [
+    { slug: "startseite", path: "/", source_url: "https://steiner-umzuege.de/", position: 0 },
+    { slug: "privatumzug", path: "/privatumzug", source_url: "https://steiner-umzuege.de/Privatumzug/", position: 1 },
+    { slug: "kontakt", path: "/kontakt", source_url: "https://steiner-umzuege.de/kontakt", position: 2 },
+    { slug: "firmenumzug", path: "/firmenumzug", source_url: "https://steiner-umzuege.de/firmenumzug", position: 3 },
+    { slug: "ratgeber", path: "/blog/ratgeber", source_url: "https://steiner-umzuege.de/blog/ratgeber", position: 4 },
+  ];
+  const crawled = [
+    site({ url: "https://steiner-umzuege.de/", title: "Steiner" }),
+    site({ url: "https://steiner-umzuege.de/Privatumzug/", title: "Privatumzug" }),
+    site({ url: "https://steiner-umzuege.de/kontakt", title: "Kontakt" }),
+    site({ url: "https://steiner-umzuege.de/firmenumzug", title: "Firmenumzug" }),
+    site({ url: "https://steiner-umzuege.de/blog/ratgeber", title: "Blog" }),
+    site({ url: "https://steiner-umzuege.de/ratgeber/umzugscheckliste/", h1: "Checkliste" }),
+    site({ url: "https://steiner-umzuege.de/regionen/bonn", title: "Bonn", final_url: "https://steiner-umzuege.de/" }),
+  ];
+  const plan = planImprovementStructure(steiner.pages, rows, crawled);
+  assert.equal(plan.crawled, true);
+  assert.deepEqual(
+    plan.updates.map((u) => [u.slug, u.page.slug]),
+    [["startseite", "startseite"], ["privatumzug", "privatumzug"], ["kontakt", "kontakt"]],
+    "Excel rows that match a table row by path (any spelling) brief that row, no new row",
+  );
+  assert.deepEqual(plan.onSite.map((p) => p.slug), ["umzugscheckliste"], "on the crawled site but not taken over yet: nothing to create");
+  assert.deepEqual(
+    plan.missing.map((p) => [p.slug, p.name, p.path, p.page_type, p.position, p.source_url]),
+    [
+      ["seniorenumzug", "Seniorenumzug", "/privatumzug/seniorenumzug", "unterseite", 5, null],
+      ["ratgeber-2", "Ratgeber", "/ratgeber", "ratgeber", 6, null],
+      ["regionen", "Regionen", "/regionen", "hauptsilo", 7, null],
+      ["bonn", "Umzug Bonn", "/regionen/bonn", "standort", 8, null],
+    ],
+    "missing: not in the table, not on the site (a redirect is no page); a slug of the table is never reused; no live URL",
+  );
+  assert.ok(!plan.missing.some((p) => p.page_type === "nicht_bearbeiten"), "Impressum and Co. are never listed");
+  assert.ok(!plan.updates.some((u) => u.slug === "firmenumzug"), "a crawled page the Excel does not name is left alone");
+
+  const bySlugOnly = planImprovementStructure(
+    briefingFromStructureTree([{ label: "Firmenumzug", children: [] }]),
+    rows,
+    crawled,
+  );
+  assert.deepEqual(bySlugOnly.updates.map((u) => u.slug), ["firmenumzug"], "without a path the slug matches");
+
+  const noCrawl = planImprovementStructure(steiner.pages, [], []);
+  assert.equal(noCrawl.crawled, false);
+  assert.deepEqual(
+    noCrawl.missing.map((p) => p.slug),
+    ["startseite", "privatumzug", "seniorenumzug", "ratgeber", "umzugscheckliste", "regionen", "bonn"],
+    "before a crawl: every Excel page with a text to write that is not in the table",
+  );
+
+  const patch = briefingPatchFor(privat);
+  assert.deepEqual(
+    Object.keys(patch).sort(),
+    ["estimated_traffic", "h1_options", "internal_link_targets", "keywords", "ki_prompt", "main_keyword", "page_role", "page_type", "pillar_name", "user_questions"],
+    "the briefing only: no slug, name, path, source, live URL, text, state, steps or cost",
+  );
+  assert.deepEqual(Object.keys(briefingPatchFor(privat, "structure")).sort(), ["internal_link_targets", "page_role", "page_type", "pillar_name"], "a text structure keeps the keywords");
+}
+console.log("verbesserung plan: ok");
+
 // --- the eight steps ----------------------------------------------------------------------------
 
 assert.deepEqual(
@@ -463,6 +546,68 @@ for (const step of [1, 3, 4, 5, 6, 7, 9]) {
   assert.doesNotMatch(contentStepSpec(step, customContext).system, /Hausrezept/, `step ${step} does not read the recipes`);
 }
 console.log("textvorlagen: ok");
+
+// --- editable step prompts (Globale Prompts) ------------------------------------------------------
+
+{
+  assert.deepEqual([...CONTENT_STEP_PROMPT_KEYS], ["seo", "faktencheck", "geo", "hormozi", "vermenschlichung", "lektorat"]);
+  for (const key of CONTENT_STEP_PROMPT_KEYS) {
+    const text = DEFAULT_CONTENT_STEP_PROMPTS[key];
+    assert.ok(text.length > 200 && text.length <= CONTENT_STEP_PROMPT_MAX_CHARS, `${key}: a real default within the limit`);
+    assert.ok(!text.includes(DEFAULT_TEXTER_PROMPT.slice(0, 80)), `${key}: the Texter prompt is not pasted into the default`);
+    assert.ok(!text.includes(DEFAULT_CONTENT_TYPE_PROMPTS.hauptsilo.slice(0, 80)), `${key}: no Textvorlage in the default`);
+    assert.ok(!text.includes("Du arbeitest für eine Agentur"), `${key}: BASE_RULES stay in code`);
+  }
+
+  // Storage: NULL, empty and the default itself mean „default“; own texts are capped.
+  assert.deepEqual(resolveContentStepPrompts(null), DEFAULT_CONTENT_STEP_PROMPTS);
+  assert.deepEqual(normalizeStoredContentStepPrompts({ seo: "   ", geo: DEFAULT_CONTENT_STEP_PROMPTS.geo, unknown: "x" }), {});
+  assert.deepEqual(normalizeStoredContentStepPrompts('{"lektorat":"  Nur Kommas prüfen.  "}'), { lektorat: "Nur Kommas prüfen." }, "a JSON string is read too");
+  assert.equal(normalizeStoredContentStepPrompts({ hormozi: "x".repeat(CONTENT_STEP_PROMPT_MAX_CHARS + 10) }).hormozi?.length, CONTENT_STEP_PROMPT_MAX_CHARS);
+  assert.equal(resolveContentStepPrompt("geo", ""), DEFAULT_CONTENT_STEP_PROMPTS.geo);
+  assert.equal(fillContentStepPrompt("{{firmenname}} / {{unbekannt}}", { firmenname: "Steiner" }), "Steiner / {{unbekannt}}", "unknown names stay visible");
+
+  // Saved SEO instruction: it replaces the default, the code still adds BASE_RULES, the Texter
+  // prompt, the Textvorlage (in that order, after the instruction), the Branchenregel, the user
+  // message and the tool schema.
+  const own = "Eigene SEO-Anweisung für {{firmenname}}: drei Abschnitte, mindestens {{mindest_fragen}} Fragen.";
+  const ownSeo = contentStepSpec(2, context({}, { stepPrompts: { seo: own } }));
+  assert.ok(ownSeo.system.startsWith("Eigene SEO-Anweisung für Steiner Umzüge: drei Abschnitte, mindestens 3 Fragen."), "the saved text comes first, variables filled");
+  assert.doesNotMatch(ownSeo.system, /Festes Gerüst/, "the default instruction is replaced, not appended");
+  const at = (text: string) => ownSeo.system.indexOf(text);
+  assert.ok(at("Tatsachen (Leistungen, Zahlen, Namen") > 0, "BASE_RULES after the instruction");
+  assert.ok(at("Allgemeine Regeln (jeder Seitentyp):") > at("Tatsachen (Leistungen"), "Texter prompt after BASE_RULES");
+  assert.match(ownSeo.system, /Bei Widerspruch gewinnt die Seitentyp-Vorlage/, "the Texter prompt is still injected");
+  assert.ok(at("Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):") > at("Allgemeine Regeln"), "the Textvorlage after the Texter prompt, so it wins");
+  assert.match(ownSeo.system, /Entscheidungshilfe/, "the Hauptsilo Textvorlage is still injected");
+  assert.ok(ownSeo.system.endsWith(brancheRules(context().settings)), "the Branchenregel closes the system prompt");
+  assert.equal(ownSeo.user, contentStepSpec(2, context()).user, "the user message does not change");
+  assert.deepEqual(ownSeo.tool, contentStepSpec(2, context()).tool, "the tool schema does not change");
+  const customTexter = contentStepSpec(2, context({}, { stepPrompts: { seo: own }, texterPrompt: "Hausregel: kurze Sätze.", typePrompts: saved }));
+  assert.match(customTexter.system, /Hausregel: kurze Sätze\./);
+  assert.match(customTexter.system, /Hauptsilo nach Hausrezept/, "a saved Textvorlage still reaches the SEO step");
+
+  // Empty saved text falls back to the default, byte for byte.
+  assert.equal(contentStepSpec(2, context({}, { stepPrompts: { seo: "  \n " } })).system, contentStepSpec(2, context()).system);
+  assert.match(contentStepSpec(2, context()).system, /^Schritt 2 SEO: /, "the default instruction leads the system prompt");
+
+  // Each of the six reads its own text, the others keep their default; Analyse and Endabnahme are not editable.
+  const allOwn = Object.fromEntries(CONTENT_STEP_PROMPT_KEYS.map((key) => [key, `EIGEN-${key}`]));
+  const steps: Record<string, number> = { seo: 2, faktencheck: 3, geo: 4, hormozi: 5, vermenschlichung: 6, lektorat: 7 };
+  for (const key of CONTENT_STEP_PROMPT_KEYS) {
+    const spec = contentStepSpec(steps[key]!, context({}, { stepPrompts: { [key]: `EIGEN-${key}` } }));
+    assert.ok(spec.system.startsWith(`EIGEN-${key}\n\nDu arbeitest für eine Agentur`), `${key}: the saved text, then BASE_RULES`);
+    assert.ok(spec.system.endsWith(brancheRules(context().settings)), `${key}: the Branchenregel stays`);
+    for (const other of CONTENT_STEP_PROMPT_KEYS.filter((k) => k !== key)) {
+      assert.doesNotMatch(contentStepSpec(steps[other]!, context({}, { stepPrompts: { [key]: `EIGEN-${key}` } })).system, new RegExp(`EIGEN-${key}`), `${other} does not read ${key}`);
+    }
+  }
+  assert.equal(contentStepSpec(3, context({}, { stepPrompts: allOwn })).tool.name, "submit_faktencheck", "the parser keeps its schema");
+  assert.doesNotMatch(contentStepSpec(1, context({}, { stepPrompts: allOwn })).system, /EIGEN-/, "Analyse is not editable");
+  assert.equal(contentStepSpec(9, context({}, { stepPrompts: allOwn })).system, contentStepSpec(9, context()).system, "Endabnahme is not editable");
+  assert.throws(() => contentStepSpec(8, context({}, { stepPrompts: allOwn })), /Grok/, "Watermark Entfernung stays on the Grok rephrase prompt");
+}
+console.log("step prompts: ok");
 
 // --- who may change the Seitentyp ---------------------------------------------------------------
 
@@ -591,7 +736,9 @@ const blocking: FaktencheckOutput = {
 const halt = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, blocking);
 assert.deepEqual([halt.halted, halt.stepStatus, halt.pagePatch.state, halt.pagePatch.job_id], [true, "waiting", "braucht_sie", null], "blocking questions stop the page for the customer");
 const soft = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [{ kind: "fact", question: "Egal", blocking: false }] });
-assert.deepEqual([soft.halted, soft.stepStatus, soft.pagePatch.state], [false, "done", undefined]);
+assert.deepEqual([soft.halted, soft.stepStatus, soft.pagePatch.state], [true, "waiting", "braucht_sie"], "a non-blocking question stops the page too");
+const clean = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [] }, { html: renderBlocksHtml(seoBlocks) });
+assert.deepEqual([clean.halted, clean.stepStatus, clean.pagePatch.state, clean.pagePatch.questions], [false, "done", undefined, []], "no question, no placeholder: the page goes on");
 const release = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" });
 assert.deepEqual([release.halted, release.pagePatch.state, release.pagePatch.released], [true, "fertig", false]);
 const geoPatch = stepPatchFor(contentStepDefinition(4)!, { blocks: seoBlocks, title: "T", meta_description: "M" });
@@ -604,6 +751,113 @@ const strong = vermenschlichungSpec.normalize({ title: "", meta_description: "",
 assert.equal(vermenschlichungSpec.retryHint!(strong), null);
 assert.ok(vermenschlichungSpec.score!(strong) > vermenschlichungSpec.score!(weak));
 console.log("halting rules: ok");
+
+// --- missing data stops the page as „Braucht Sie“ ------------------------------------------------
+
+{
+  const gapHtml = renderBlocksHtml([
+    { id: "intro", heading: "Privatumzug Köln", level: 1, html: "" },
+    { id: "hero", heading: CONTENT_HERO_PLACEHOLDER, level: 2, html: "" },
+    { id: "kosten", heading: "Was kostet ein Privatumzug?", level: 2, html: "<p>Steiner Umzüge arbeitet mit Festpreisen. Eine 3-Zimmer-Wohnung kostet [BITTE PRÜFEN: Festpreis für 3 Zimmer]. Die Besichtigung ist kostenlos.</p>" },
+    { id: "ablauf", heading: "Wie läuft der Umzug ab?", level: 2, html: "<p>Mehr dazu unter [LINK: Seniorenumzug].</p>" },
+    { id: "stand", heading: null, level: 2, html: "<p>Zuletzt aktualisiert: [DATUM]</p>" },
+  ]);
+  const gaps = findContentGapsInHtml(gapHtml);
+  assert.deepEqual(
+    gaps.map((g) => [g.block_id, g.section, g.placeholder, g.question, g.excerpt]),
+    [[
+      "kosten",
+      "Was kostet ein Privatumzug?",
+      "[BITTE PRÜFEN: Festpreis für 3 Zimmer]",
+      "Festpreis für 3 Zimmer – was soll hier stehen?",
+      "Eine 3-Zimmer-Wohnung kostet [BITTE PRÜFEN: Festpreis für 3 Zimmer].",
+    ]],
+    "a [BITTE PRÜFEN: …] is a gap, named by its Abschnitt, with its sentence",
+  );
+  assert.equal(hasContentGap("[LINK: Seniorenumzug] [DATUM] [FOTO: Team] " + CONTENT_HERO_PLACEHOLDER), false, "wanted markers are no gap");
+  assert.equal(hasContentGap("Quelle: [QUELLE BITTE ERGÄNZEN]"), true);
+  assert.equal(hasContentGap("Preis: [PREIS BITTE PRÜFEN UND ANPASSEN: ab 99 €]"), true);
+  assert.equal(hasContentGap("[bitte prüfen: Gründungsjahr]"), true, "spelling does not matter");
+  assert.equal(gapQuestion("[QUELLE BITTE ERGÄNZEN]"), "Welche Quelle belegt diese Aussage?");
+  assert.equal(gapQuestion("[PREIS BITTE PRÜFEN UND ANPASSEN…]"), "Welcher Preis gilt hier?");
+  assert.equal(gapQuestion("[BITTE PRÜFEN: Stimmt die Zahl 1.800?]"), "Stimmt die Zahl 1.800?");
+
+  // After a text step: a placeholder stops the page and names the block.
+  const seoWithGap = { blocks: parseBlocksFromHtml(gapHtml), title: "T", meta_description: "M" };
+  const halted = stepPatchFor(contentStepDefinition(2)!, seoWithGap);
+  assert.deepEqual([halted.halted, halted.stepStatus, halted.pagePatch.state, halted.pagePatch.job_id], [true, "waiting", "braucht_sie", null]);
+  assert.deepEqual(
+    halted.pagePatch.questions,
+    [{
+      kind: "missing",
+      question: "Festpreis für 3 Zimmer – was soll hier stehen?",
+      field: null,
+      placeholder: "[BITTE PRÜFEN: Festpreis für 3 Zimmer]",
+      block_id: "kosten",
+      section: "Was kostet ein Privatumzug?",
+      excerpt: "Eine 3-Zimmer-Wohnung kostet [BITTE PRÜFEN: Festpreis für 3 Zimmer].",
+      blocking: true,
+    }],
+  );
+  assert.equal(halted.pagePatch.html, gapHtml, "the text is saved as it is: the placeholder stays");
+  for (const step of [4, 5, 6, 7]) {
+    const out = step === 7 ? { ...seoWithGap, final_findings: [] } : seoWithGap;
+    assert.equal(stepPatchFor(contentStepDefinition(step)!, out).halted, true, `step ${step} stops for the placeholder`);
+  }
+  assert.equal(stepPatchFor(contentStepDefinition(CONTENT_STEP_WATERMARK)!, seoWithGap).halted, false, "Watermark Entfernung goes on; the Endabnahme right after it checks");
+
+  // [LINK: …], [DATUM] and the hero placeholder do not stop anything.
+  const markersOnly = parseBlocksFromHtml(gapHtml).filter((b) => b.id !== "kosten");
+  const goesOn = stepPatchFor(contentStepDefinition(2)!, { blocks: markersOnly, title: "T", meta_description: "M" });
+  assert.deepEqual([goesOn.halted, goesOn.stepStatus, goesOn.pagePatch.state, goesOn.pagePatch.questions], [false, "done", undefined, []]);
+
+  // Faktencheck: every question stops the page, also a non-blocking one, each with its Abschnitt;
+  // its own question for a placeholder is not listed twice.
+  const fakten = stepPatchFor(
+    contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!,
+    {
+      findings: [],
+      questions: [
+        { kind: "fact", question: "Bieten Sie Einlagerung an?", block_id: "ablauf", excerpt: "Mehr dazu", blocking: false },
+        { kind: "missing", question: "Wie hoch ist der Festpreis für 3 Zimmer?", placeholder: "[BITTE PRÜFEN: Festpreis für 3 Zimmer]", block_id: "kosten", blocking: true },
+      ],
+    },
+    { html: gapHtml },
+  );
+  assert.equal(fakten.halted, true);
+  assert.deepEqual(
+    (fakten.pagePatch.questions as Array<{ block_id: string; section: string; blocking: boolean }>).map((q) => [q.block_id, q.section, q.blocking]),
+    [["ablauf", "Wie läuft der Umzug ab?", true], ["kosten", "Was kostet ein Privatumzug?", true]],
+  );
+  const placeholderOnly = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [] }, { html: gapHtml });
+  assert.equal(placeholderOnly.halted, true, "a placeholder the Faktencheck did not ask about still stops the page");
+  const unlocated = contentGapQuestions(parseBlocksFromHtml(gapHtml), [{ kind: "missing", question: "Festpreis für 3 Zimmer?", blocking: true }]);
+  assert.deepEqual(unlocated.map((q) => [q.block_id, q.section]), [["kosten", "Was kostet ein Privatumzug?"]], "a question without block gets the placeholder's Abschnitt");
+
+  // Endabnahme: never „fertig“ while a placeholder is left.
+  const endGap = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" }, { html: gapHtml });
+  assert.deepEqual([endGap.halted, endGap.pagePatch.state, endGap.pagePatch.released, (endGap.pagePatch.questions as unknown[]).length], [true, "braucht_sie", false, 1]);
+  const endClean = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" }, { html: renderBlocksHtml(markersOnly) });
+  assert.deepEqual([endClean.pagePatch.state, endClean.pagePatch.questions], ["fertig", []]);
+
+  // Table detail and actions name the Abschnitt and the step the page waits at.
+  const q = (section: string) => ({ kind: "missing", question: "?", block_id: section.toLowerCase(), section, blocking: true });
+  assert.equal(questionsDetail([q("Kosten")]), "Abschnitt „Kosten“ braucht eine Angabe");
+  assert.equal(questionsDetail([q("Kosten"), q("Kosten"), q("Ablauf"), q("Garantie")]), "3 Abschnitte brauchen eine Angabe: Kosten, Ablauf, Garantie");
+  assert.equal(questionsDetail([q("Kosten"), q("Ablauf"), q("Garantie"), q("Team"), q("Kontakt")]), "5 Abschnitte brauchen eine Angabe: Kosten, Ablauf, Garantie +2 weitere");
+  assert.equal(questionsDetail([{ kind: "missing", question: "?", block_id: "kosten", blocking: true }]), "Abschnitt „kosten“ braucht eine Angabe", "without a heading: the block id");
+  const waitingPage: ContentPageRow = { ...excelPage, state: "braucht_sie", step: 5, html: gapHtml, questions: halted.pagePatch.questions as ContentPageRow["questions"] };
+  assert.equal(pageDetail(waitingPage), "Abschnitt „Was kostet ein Privatumzug?“ braucht eine Angabe");
+  assert.deepEqual(pageActions(waitingPage).filter((a) => a.step != null).map((a) => [a.kind, a.step]), [["approve", 5], ["edit", 5], ["rerun_with_note", 5]]);
+  assert.equal(rerunStepFor({ ...waitingPage, step: 9 }), 7, "after the Endabnahme a rerun starts at the Lektorat");
+  assert.deepEqual(pageActions({ ...waitingPage, step: 9 }).find((a) => a.kind === "approve")?.step, 9);
+
+  // „Freigeben“ asks first while questions or open points are listed.
+  assert.equal(approveNeedsConfirm({ questions: [q("Kosten")], findings: [] }), true);
+  assert.equal(approveNeedsConfirm({ questions: [], findings: [{ title: "x" }] }), true);
+  assert.equal(approveNeedsConfirm({ questions: [], findings: [] }), false);
+}
+console.log("gaps stop the page: ok");
 
 // --- the outline of the other pages ----------------------------------------------------------
 

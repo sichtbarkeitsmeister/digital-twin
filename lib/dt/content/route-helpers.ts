@@ -172,7 +172,7 @@ export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "c
     const label = `${pagesWord(local.crawl.pageCount)} übernehmen`;
     return {
       ok: false,
-      hint: `${pagesWord(local.crawl.pageCount)} gecrawlt – unter „Seitenquelle“ die Karte „Crawler – bestehende Website“ wählen und auf „${label}“ klicken.`,
+      hint: `${pagesWord(local.crawl.pageCount)} gecrawlt – unter „Seitenquelle“ die Karte „Verbesserung“ wählen und auf „${label}“ klicken.`,
     };
   }
   return {
