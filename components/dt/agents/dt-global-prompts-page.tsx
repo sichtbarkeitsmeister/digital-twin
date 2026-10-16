@@ -7,6 +7,7 @@ import {
   DtGlobalPromptsPanel,
   type GlobalPrompts,
 } from "@/components/dt/agents/dt-global-prompts-panel";
+import { DtContentStepPromptCards } from "@/components/dt/content/dt-content-step-prompt-cards";
 import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-card";
 import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 
@@ -123,11 +124,13 @@ export function DtGlobalPromptsPage() {
         </h1>
         <p className="max-w-2xl text-sm text-sbkm-ink-600 dark:text-white/60">
           Plattformweite Standard-Prompts und die SEO-Checkliste. Der Text-Prompt steht direkt darunter und gilt für
-          jeden Seitentyp unter Texte.
+          jeden Seitentyp unter Texte, danach folgen die Anweisungen der Texte-Schritte SEO bis Lektorat.
         </p>
       </header>
 
       <DtTexterPromptCard placement="global" />
+
+      <DtContentStepPromptCards />
 
       {loading ? (
         <p className="text-sm text-sbkm-ink-600 dark:text-white/70">

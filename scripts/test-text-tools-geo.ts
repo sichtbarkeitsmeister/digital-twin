@@ -271,6 +271,19 @@ function testSpecMatchesPipelineStep() {
   console.log("spec matches pipeline step 4: ok");
 }
 
+/** Verwaltung → GEO reads the GEO instruction saved under Globale Prompts, like step 4. */
+function testSavedGeoPrompt() {
+  const own = "Eigene GEO-Anweisung für {{firmenname}}: Antworten zuerst.";
+  const tool = geoTextToolSpec(toolContext({ geoPrompt: own }));
+  assert.ok(tool.system.startsWith("Eigene GEO-Anweisung für Praxis Dr. Test: Antworten zuerst.\n\nDu arbeitest für eine Agentur"), "saved text first, then BASE_RULES");
+  assert.doesNotMatch(tool.system, /Schritt 4 GEO/, "the default instruction is replaced");
+  assert.match(tool.system, /Branchenregel Praxis/, "the Branchenregel is still added");
+  assert.equal(tool.tool.name, "submit_geo_text", "same tool schema");
+  assert.equal(geoTextToolSpec(toolContext({ geoPrompt: "   " })).system, geoTextToolSpec(toolContext()).system, "empty means the default");
+  assert.match(geoTextToolSpec(toolContext()).system, /^Schritt 4 GEO/);
+  console.log("saved GEO prompt: ok");
+}
+
 function testUserPromptBlocks() {
   const user = geoTextToolSpec(
     toolContext({
@@ -381,6 +394,7 @@ async function main() {
   testLimits();
   await testExtractUploadedDocument();
   testSpecMatchesPipelineStep();
+  testSavedGeoPrompt();
   testUserPromptBlocks();
   testNormalizeKeepsHero();
   testResultAndJobMapping();

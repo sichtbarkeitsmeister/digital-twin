@@ -36,6 +36,7 @@ import {
   type ContentPageRow,
   type ContentStepRow,
 } from "@/lib/dt/content/store";
+import { loadContentStepPrompts } from "@/lib/dt/content/step-prompts";
 import { loadTexterPrompt } from "@/lib/dt/content/texter-prompt";
 import { loadContentTypePromptsForRun } from "@/lib/dt/content/type-prompts-db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
@@ -83,7 +84,9 @@ async function loadContext(
   page: ContentPageRow,
   steps: ContentStepRow[],
 ): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt] = await Promise.all([
+  // The editable texts (Texter prompt, Textvorlagen, step instructions) are read for every
+  // step, so a save under Globale Prompts reaches the next step without a deploy.
+  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
     loadContentAnbieterSources(service, page.organisation_id),
@@ -91,6 +94,7 @@ async function loadContext(
     loadExistingText(service, page),
     loadContentTypePromptsForRun(service),
     loadTexterPrompt(service),
+    loadContentStepPrompts(service),
   ]);
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind noch nicht bestätigt.", false);
@@ -143,6 +147,7 @@ async function loadContext(
       avatar: avatar ? { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } : null,
       typePrompts,
       texterPrompt,
+      stepPrompts,
       notes: page.notes,
       outputs,
       blocks: parseBlocksFromHtml(page.html),
@@ -260,7 +265,7 @@ export async function runContentStep(
     return { step, halted: true, discarded: true, model, costEur };
   }
 
-  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output);
+  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output, page);
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + costEur);
 
   await upsertStep(service, page, step, {
@@ -350,7 +355,7 @@ async function runRephraseStep(input: {
     title: context.title,
     meta_description: context.metaDescription,
   };
-  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output);
+  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output, page);
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
   await saveProgress(run.model, { status: stepStatus, finished_at: new Date().toISOString() });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);

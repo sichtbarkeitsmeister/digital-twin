@@ -13,7 +13,7 @@ import {
   CONTENT_STEP_LEKTORAT,
 } from "@/lib/dt/content/pipeline/steps";
 import { htmlToMarkdown, replaceBlockText } from "@/lib/dt/content/render";
-import { rerunStepFor, type ContentPageRow } from "@/lib/dt/content/store";
+import { rerunStepFor, waitingStepFor, type ContentPageRow } from "@/lib/dt/content/store";
 import { enqueueJob } from "@/lib/jobs/queue";
 
 export const CONTENT_JOB_KIND = "content.page";
@@ -118,7 +118,12 @@ export async function startContentRun(
   return enqueuePageJob(service, page, userId);
 }
 
-/** Step 3 (Faktencheck): accept the text despite open questions and continue. Step 8: release the page. */
+/**
+ * „Freigeben“. On a page that stopped as „Braucht Sie“ (open questions after the Faktencheck,
+ * a placeholder after a text step): accept the text as it is and continue with the next
+ * step; nothing is filled in or removed, so a placeholder still in the text stops the page
+ * again. After the Endabnahme that stopped for a placeholder, and on a finished page: release.
+ */
 export async function approveContentStep(
   service: SupabaseClient,
   page: ContentPageRow,
@@ -126,12 +131,20 @@ export async function approveContentStep(
   userId: string,
 ): Promise<ActionResult> {
   const now = new Date().toISOString();
-  if (step === CONTENT_STEP_FAKTENCHECK && page.state === "braucht_sie") {
+  if (page.state === "braucht_sie" && step === waitingStepFor(page)) {
     await service
       .from("dt_content_steps")
       .update({ status: "done", approved_by: userId, approved_at: now })
       .eq("page_id", page.id)
       .eq("step", step);
+    if (step === CONTENT_STEP_ENDABNAHME) {
+      const { error } = await service
+        .from("dt_content_pages")
+        .update({ state: "fertig", released: true, released_by: userId, released_at: now, questions: [], job_id: null })
+        .eq("id", page.id);
+      if (error) return { ok: false, status: 500, message: error.message };
+      return { ok: true, jobId: null };
+    }
     return enqueuePageJob(service, page, userId, { questions: [] });
   }
   if (step === CONTENT_STEP_ENDABNAHME && page.state === "fertig" && !page.released) {

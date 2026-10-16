@@ -25,6 +25,7 @@ import {
   GEO_TOOL,
   anbieterBlock,
   avatarBlock,
+  contentStepPromptVariables,
   currentTextBlock,
   editorNotesBlock,
   geoSystemPrompt,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/dt/content/pipeline/prompts";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
+import { fillContentStepPrompt, loadContentStepPrompts, resolveContentStepPrompt } from "@/lib/dt/content/step-prompts";
 import { loadContentSettings, settingsFromRow } from "@/lib/dt/content/store";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
@@ -116,6 +118,8 @@ export type GeoToolContext = {
   blocks: ContentTextBlock[];
   title: string | null;
   metaDescription: string | null;
+  /** The GEO instruction saved under Globale Prompts; omitted or empty means the default. */
+  geoPrompt?: string | null;
 };
 
 const MAX_JSON_CHARS = 12_000;
@@ -160,11 +164,18 @@ function faktencheckBlock(faktencheck: unknown): string {
   return `## Faktencheck (Schritt 3) – umsetzen\n${JSON.stringify(faktencheck, null, 1).slice(0, MAX_JSON_CHARS)}`;
 }
 
-/** Step 4 of the pipeline for an uploaded document: same system prompt, same tool, same normalisation. */
+/**
+ * Step 4 of the pipeline for an uploaded document: same system prompt (with the GEO
+ * instruction saved under Globale Prompts), same tool, same normalisation.
+ */
 export function geoTextToolSpec(context: GeoToolContext): ContentStepSpec {
+  const instruction = fillContentStepPrompt(
+    resolveContentStepPrompt("geo", context.geoPrompt),
+    contentStepPromptVariables({ organisationName: context.organisationName, page: null }),
+  );
   return {
     maxTokens: GEO_MAX_TOKENS,
-    system: geoSystemPrompt(context.settings),
+    system: geoSystemPrompt(context.settings, instruction),
     user: joinPromptParts([
       documentBlock(context),
       currentTextBlock(context),
@@ -232,10 +243,11 @@ export type GeoToolModelCall = (input: {
  * already exists and the rules then only mark unproven claims.
  */
 export async function loadGeoToolContext(service: SupabaseClient, payload: GeoToolPayload): Promise<{ context: GeoToolContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, anbieter] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, stepPrompts] = await Promise.all([
     service.from("organisations").select("name").eq("id", payload.organisationId).maybeSingle(),
     loadContentSettings(service, payload.organisationId),
     loadContentAnbieterSources(service, payload.organisationId),
+    loadContentStepPrompts(service),
   ]);
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind für diese Organisation noch nicht bestätigt. Bitte zuerst unter Texte bestätigen.", false);
@@ -264,6 +276,7 @@ export async function loadGeoToolContext(service: SupabaseClient, payload: GeoTo
       blocks: payload.blocks,
       title: payload.title,
       metaDescription: payload.metaDescription,
+      geoPrompt: stepPrompts.geo,
     },
   };
 }

@@ -42,6 +42,7 @@ import { CONTENT_STEP_ANALYSE, CONTENT_STEP_SEO } from "@/lib/dt/content/pipelin
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { htmlToPlainText, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import { loadContentSettings, settingsFromRow } from "@/lib/dt/content/store";
+import { loadContentStepPrompts, type ContentStepPrompts } from "@/lib/dt/content/step-prompts";
 import { loadTexterPrompt } from "@/lib/dt/content/texter-prompt";
 import { loadContentTypePromptsForRun } from "@/lib/dt/content/type-prompts-db";
 import type { ContentTypePrompts } from "@/lib/dt/content/type-prompts";
@@ -155,6 +156,8 @@ export type SeoToolContextInput = {
   typePrompts: ContentTypePrompts;
   /** General Texter rules. Omitted in tests: the SEO step then uses the code default. */
   texterPrompt?: string;
+  /** Step instructions from Globale Prompts (this tool reads the SEO one). Omitted: the defaults. */
+  stepPrompts?: Partial<ContentStepPrompts>;
   payload: Omit<SeoToolPayload, "organisationId" | "userId">;
 };
 
@@ -299,6 +302,7 @@ export function buildSeoToolContext(input: SeoToolContextInput): ContentPipeline
     avatar: input.avatar,
     typePrompts: input.typePrompts,
     texterPrompt: input.texterPrompt,
+    stepPrompts: input.stepPrompts,
     notes: payload.notes,
     outputs: {},
     blocks: [],
@@ -338,12 +342,13 @@ export function seoToolSpec(context: ContentPipelineContext): ContentStepSpec {
  * facts, and without any it would only write placeholders.
  */
 export async function loadSeoToolContext(service: SupabaseClient, payload: SeoToolPayload): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, anbieter, typePrompts, texterPrompt] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, typePrompts, texterPrompt, stepPrompts] = await Promise.all([
     service.from("organisations").select("name").eq("id", payload.organisationId).maybeSingle(),
     loadContentSettings(service, payload.organisationId),
     loadContentAnbieterSources(service, payload.organisationId),
     loadContentTypePromptsForRun(service),
     loadTexterPrompt(service),
+    loadContentStepPrompts(service),
   ]);
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind für diese Organisation noch nicht bestätigt. Bitte zuerst unter Texte bestätigen.", false);
@@ -369,6 +374,7 @@ export async function loadSeoToolContext(service: SupabaseClient, payload: SeoTo
       avatar: avatar ? { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } : null,
       typePrompts,
       texterPrompt,
+      stepPrompts,
       payload,
     }),
   };

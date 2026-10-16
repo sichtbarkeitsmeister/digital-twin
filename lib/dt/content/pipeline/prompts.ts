@@ -31,6 +31,16 @@ import {
   CONTENT_STEP_WATERMARK,
 } from "@/lib/dt/content/pipeline/steps";
 import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
+import {
+  CONTENT_FLOSKELN,
+  CONTENT_FUELLWOERTER,
+  CONTENT_HERO_PLACEHOLDER,
+  KEEP_RULES,
+  fillContentStepPrompt,
+  resolveContentStepPrompt,
+  type ContentStepPromptKey,
+  type ContentStepPrompts,
+} from "@/lib/dt/content/step-prompts";
 import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
@@ -80,6 +90,11 @@ export type ContentPipelineContext = {
    * them; a missing value means the code default.
    */
   texterPrompt?: string;
+  /**
+   * The editable step instructions (Globale Prompts → SEO … Lektorat). A missing or empty
+   * one means the built-in default; the locked rules and the tool schema are added in code.
+   */
+  stepPrompts?: Partial<ContentStepPrompts>;
   /** Human notes from "Mit Anmerkung wiederholen", oldest first. */
   notes: string[];
   /** Normalised outputs of earlier steps, by step number. */
@@ -173,31 +188,11 @@ export type ContentStepSpec = {
   score?: (output: unknown) => number;
 };
 
-/** The SEO step leaves this heading; Hormozi (step 5) replaces it with the hero sentence. */
-export const CONTENT_HERO_PLACEHOLDER = "[HERO – wird in Schritt 5 gefuellt]";
+// Defined with the editable step defaults (step-prompts.ts), which quote them; kept importable from here.
+export { CONTENT_FLOSKELN, CONTENT_FUELLWOERTER, CONTENT_HERO_PLACEHOLDER, KEEP_RULES };
 export const CONTENT_HERO_BLOCK_ID = "hero";
 /** Sum of the five self-scores (1–10 each) under which the Vermenschlichung tries once more. */
 export const CONTENT_SELF_SCORE_MIN = 35;
-
-/** Phrases the Vermenschlichung replaces (the old floskeln list). */
-export const CONTENT_FLOSKELN = [
-  "In der heutigen schnelllebigen Zeit",
-  "Es ist wichtig zu beachten",
-  "spielt eine entscheidende Rolle",
-  "nahtlos",
-  "ganzheitlich",
-  "maßgeschneidert",
-  "Rundum-sorglos",
-  "Ihr zuverlässiger Partner",
-  "Wir legen großen Wert auf",
-  "Tauchen wir ein",
-  "Doch was bedeutet das konkret",
-  "Die Antwort ist einfach",
-  "Die Gründe sind vielfältig",
-  "nicht nur, sondern auch",
-  "Es versteht sich von selbst",
-] as const;
-export const CONTENT_FUELLWOERTER = ["natürlich", "selbstverständlich", "grundsätzlich", "eigentlich", "im Grunde", "tatsächlich", "durchaus"] as const;
 
 const MAX_SECTION_CHARS = 6_000;
 const MAX_AVATAR_CHARS = 5_000;
@@ -423,12 +418,16 @@ function list(items: readonly string[]): string {
 }
 
 /** Which briefing the page's keywords, H1 options and questions come from, as the prompt names it. */
-function briefingLabel(page: ContentPipelinePage): string {
+function briefingLabel(page: Pick<ContentPipelinePage, "source">): string {
   return page.source === "standalone" ? "aus dem Briefing" : "aus der Excel";
 }
 
 function sourceLine(page: ContentPipelinePage): string {
   if (page.source === "structure") return "Excel-Seitenstruktur (Briefing der Redaktion)";
+  // A crawl page that a Seitenstruktur matched („Verbesserung“): only the Excel sets a role.
+  if (page.source === "crawl" && page.page_role) {
+    return "Bestehende Website (Crawl) mit Briefing aus der Excel-Seitenstruktur";
+  }
   if (page.source === "standalone") {
     return "eigenständiges SEO-Werkzeug (Briefing-Formular und ggf. hochgeladenes Material; keine Seitenstruktur, keine anderen Seiten bekannt)";
   }
@@ -536,9 +535,6 @@ export const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte f�
 Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`;
 
-export const KEEP_RULES =
-  "Unverändert bleiben: die H1, der Abschnitt „hero“, Frage-Überschriften (bleiben Fragen), Haupt- und Nebenkeywords, Platzhalter wie [BITTE PRÜFEN: …] und [QUELLE BITTE ERGÄNZEN], [LINK: …]-Marker, die ids der Abschnitte und alle Fakten.";
-
 const BLOCKS_SCHEMA = {
   type: "array",
   description:
@@ -593,6 +589,44 @@ export const TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
  */
 function pageTypeRules(context: ContentPipelineContext): string {
   return renderContentTypePrompt(context.typePrompts, context.page.page_type, context.page.pillar_name);
+}
+
+// --- editable step instructions ----------------------------------------------------------------
+
+/**
+ * What `{{…}}` in a step instruction stands for on this page. The standalone tools pass their
+ * own page (GEO: none, so not a Ratgeber and „aus dem Briefing“).
+ */
+export function contentStepPromptVariables(context: {
+  organisationName: string;
+  page: Pick<ContentPipelinePage, "source" | "page_type"> | null;
+}): Record<string, string> {
+  const ratgeber = context.page?.page_type === "ratgeber";
+  return {
+    briefing: context.page ? briefingLabel(context.page) : "aus dem Briefing",
+    mindest_fragen: ratgeber ? "5" : "3",
+    abschluss: ratgeber
+      ? "Zum Schluss ein weicher nächster Schritt (Abschnitt id „naechster-schritt“): weiterlesen, unverbindlich fragen – ohne Dringlichkeit, nur Kontaktwege aus den Fakten."
+      : "Handlungsaufforderung am Ende (Abschnitt id „kontakt“): nur Kontaktwege, die in den Fakten stehen. Schritt 5 schärft sie.",
+    firmenname: context.organisationName || "[Firmenname]",
+    cta_regel: ratgeber
+      ? "Ratgeberartikel: Problem–Lösung-Zyklus, am Ende ein weicher nächster Schritt (weiterlesen, unverbindlich fragen). Kein harter Verkauf, keine Dringlichkeit."
+      : "Jede Handlungsaufforderung nennt, was der Leser bekommt und was der nächste Schritt ist.",
+  };
+}
+
+/** The step's own instruction: the text saved under Globale Prompts, or the default; page parts filled in. */
+function stepInstruction(context: ContentPipelineContext, key: ContentStepPromptKey): string {
+  return fillContentStepPrompt(resolveContentStepPrompt(key, context.stepPrompts?.[key]), contentStepPromptVariables(context));
+}
+
+/**
+ * System prompt of an editable step: the instruction first, then what the code always adds
+ * after it — the locked rules, step-specific blocks (SEO: Texter prompt and Textvorlage) and
+ * the Branchenregel. The user message and the tool schema stay with the spec.
+ */
+function stepSystem(instruction: string, settings: ContentTextSettings, extra: readonly string[] = []): string {
+  return join([instruction, BASE_RULES, ...extra, brancheRules(settings)]);
 }
 
 // --- the eight steps ---------------------------------------------------------------------------
@@ -798,43 +832,13 @@ export function normalizeAnalyse(json: unknown, context: ContentPipelineContext)
 }
 
 function seo(context: ContentPipelineContext): ContentStepSpec {
-  const { page } = context;
-  const minQuestions = page.page_type === "ratgeber" ? 5 : 3;
   const general = context.texterPrompt?.trim() || DEFAULT_TEXTER_PROMPT;
   return {
     maxTokens: 12_000,
-    system: `${BASE_RULES}
-
-Schritt 2 SEO: Du schreibst den vollständigen Seitentext auf Basis der Analyse (Schritt 1) und der belegten Fakten.
-
-Allgemeine Regeln (jeder Seitentyp):
-${general}
-
-Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):
-${pageTypeRules(context)}
-
-Festes Gerüst, in dieser Reihenfolge:
-1. H1 (erster Abschnitt, level 1): kurz, das Hauptkeyword steht vorn. Enthält eine H1-Option ${briefingLabel(page)} das Hauptkeyword, nimm sie wörtlich; sonst formulierst du selbst.
-2. Direkt darunter ein Abschnitt mit id „hero“, level 2, Überschrift exakt „${CONTENT_HERO_PLACEHOLDER}“ und leerem html. Du schreibst keinen echten Hero; Schritt 5 füllt ihn.
-3. Abschnitt id „zusammenfassung“ (H2, z. B. „Das Wichtigste in Kürze“ oder die main_question als Frage): 60–80 Wörter, beantwortet die main_question direkt im ersten Satz, enthält 3–4 belegte Fakten, taugt als Snippet.
-4. Abschnitt id „einleitung“ (H2): 100–150 Wörter Einstieg aus Sicht des Avatars (sein Anliegen, was ihn hier erwartet).
-5. Danach H2/H3 im Wechsel aus Frage-Überschriften (aus fanout_questions, Spalte H zuerst, als echte Frage formuliert) und beschreibenden Überschriften. Die ersten 1–2 Sätze unter einer Frage-Überschrift beantworten die Frage direkt. Kein FAQ-Block am Ende: die Fragen SIND die Überschriften. Mindestens ${minQuestions} Frage-Überschriften.
-6. ${
-      page.page_type === "ratgeber"
-        ? "Zum Schluss ein weicher nächster Schritt (Abschnitt id „naechster-schritt“): weiterlesen, unverbindlich fragen – ohne Dringlichkeit, nur Kontaktwege aus den Fakten."
-        : "Handlungsaufforderung am Ende (Abschnitt id „kontakt“): nur Kontaktwege, die in den Fakten stehen. Schritt 5 schärft sie."
-    }
-
-Regeln:
-- Hauptkeyword in H1, Zusammenfassung und mindestens einer Abschnittsüberschrift; Nebenkeywords natürlich verteilt, keine Wiederholung um ihrer selbst willen.
-- deferred_questions werden nicht beantwortet, sondern in einem Satz mit [LINK: Seitenname] auf die zuständige Seite verwiesen.
-- Lokale Seiten: echter lokaler Bezug aus den Fakten (Einzugsgebiet, Anfahrt, Besonderheiten), den Ortsnamen nicht stapeln.
-- Fehlende Preise, Zahlen, Fristen, Namen: Platzhalter [BITTE PRÜFEN: was genau fehlt] statt erfinden.
-- Interne Links nur auf die erlaubten Linkziele, als Marker [LINK: Seitenname] im Fließtext; keine <a>-Tags, keine erfundenen Ziele.
-- „Wir von ${context.organisationName || "[Firmenname]"}“ 1–2-mal im Text; sonst Firmenname und „unser Team“ abwechseln.
-- Länge: so lang, wie die belegten Fakten tragen, typisch 700–1.400 Wörter. Kein Füllmaterial, konkrete Sätze statt Allgemeinplätze.
-- title: Title-Tag mit Hauptkeyword, max. 60 Zeichen. meta_description: max. 155 Zeichen, Nutzen plus Hauptkeyword.
-${brancheRules(context.settings)}`,
+    system: stepSystem(stepInstruction(context, "seo"), context.settings, [
+      `Allgemeine Regeln (jeder Seitentyp):\n${general}`,
+      `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
+    ]),
     user: join([
       pageBlock(context),
       outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1)"),
@@ -858,13 +862,7 @@ ${brancheRules(context.settings)}`,
 function faktencheck(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 6_000,
-    system: `${BASE_RULES}
-
-Schritt 3 Faktencheck: Du prüfst jeden Satz des aktuellen Texts gegen die Anbieterfakten und die Anmerkungen der Redaktion.
-Ein finding ist jede Aussage, die nicht belegt ist, den Fakten widerspricht, eine erfundene oder gerundete Zahl enthält, ein verbotenes Wort enthält, die Anrede bricht, einen unbelegten Superlativ oder ein Versprechen macht oder gegen die Branchenregel verstößt. severity high = falsch oder rechtlich riskant, medium = unbelegt, low = unscharf. Der Platzhalter „${CONTENT_HERO_PLACEHOLDER}“ ist gewollt und kein Befund; [LINK: …]-Marker sind gewollt.
-Eine question stellst du nur, wenn allein der Kunde die Antwort kennt (Zahl stimmt? Leistung wird angeboten? Kontaktweg? Preis für den Platzhalter?). Jeder Platzhalter [BITTE PRÜFEN: …] im Text wird eine question mit kind „missing“. blocking = true, wenn der Text ohne Antwort nicht veröffentlicht werden darf. Was du selbst durch Streichen lösen kannst, ist keine Frage, sondern ein finding mit Vorschlag.
-Beantwortet eine Anmerkung der Redaktion eine Frage bereits, stellst du sie nicht noch einmal.
-${brancheRules(context.settings)}`,
+    system: stepSystem(stepInstruction(context, "faktencheck"), context.settings),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -911,24 +909,15 @@ ${brancheRules(context.settings)}`,
 /** Output size of the GEO rewrite; the standalone GEO tool uses the same budget. */
 export const GEO_MAX_TOKENS = 12_000;
 
+const DEFAULT_GEO_INSTRUCTION = resolveContentStepPrompt("geo", null);
+
 /**
  * System prompt of step 4. The standalone GEO tool (Verwaltung → GEO) sends exactly this
- * prompt, so an uploaded text is reworked by the same rules as a page of the pipeline.
+ * prompt, so an uploaded text is reworked by the same rules as a page of the pipeline. The
+ * instruction is the saved GEO text from Globale Prompts (or the default), already filled.
  */
-export function geoSystemPrompt(settings: ContentTextSettings): string {
-  return `${BASE_RULES}
-
-Schritt 4 GEO (Generative Engine Optimization): Du überarbeitest den Text so, dass KI-Suchsysteme ihn verstehen und zitieren können. Du erfindest keine Fakten und fügst keine hinzu.
-Zuerst setzt du die Befunde des Faktenchecks um: Unbelegtes streichen oder durch [BITTE PRÜFEN: …] ersetzen; offene Fragen so umschreiben, dass der Text ohne die Antwort auskommt. Antworten in den Anmerkungen der Redaktion sind bestätigte Fakten und werden eingearbeitet.
-Dann:
-- Die Kernantwort steht in den ersten 100–150 Wörtern (Zusammenfassung und Einleitung). Ankündigungen wie „In diesem Artikel erfahren Sie …“ streichen.
-- fanout_questions aus der Analyse, die der Text noch nicht beantwortet, beantworten: als Frage-Überschrift mit Antwort oder als Satz in einem passenden Abschnitt. deferred_questions nur mit Verweis [LINK: Seitenname].
-- Jeder Abschnitt 120–180 Wörter und für sich allein verständlich; keine Verweise wie „wie oben erwähnt“. Der erste Satz eines Abschnitts nennt das Thema ausdrücklich.
-- Entitäten: Firmenname, Ort (nur aus den Fakten) und Kernleistung stehen ausgeschrieben im Text; bei Kernfakten den Firmennamen nennen, nicht nur „wir“.
-- Rechtliches, Medizinisches, Fristen und Zahlen brauchen eine Quelle aus den Fakten oder den Marker [QUELLE BITTE ERGÄNZEN].
-- Als letzter Abschnitt id „stand“ ohne Überschrift: „Zuletzt aktualisiert: [DATUM]“ als <p>.
-${KEEP_RULES} Title und Meta-Description nur ändern, wenn der Faktencheck es verlangt.
-${brancheRules(settings)}`;
+export function geoSystemPrompt(settings: ContentTextSettings, instruction: string = DEFAULT_GEO_INSTRUCTION): string {
+  return stepSystem(instruction, settings);
 }
 
 export const GEO_TOOL: Anthropic.Tool = {
@@ -946,7 +935,7 @@ export function normalizeGeoOutput(json: unknown, context: ContentCurrentText): 
 function geo(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: GEO_MAX_TOKENS,
-    system: geoSystemPrompt(context.settings),
+    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo")),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -963,23 +952,9 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
 }
 
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
-  const ratgeber = context.page.page_type === "ratgeber";
   return {
     maxTokens: 12_000,
-    system: `${BASE_RULES}
-
-Schritt 5 Hormozi (Conversion-Schicht): Du machst den Text überzeugend, ohne die SEO- und GEO-Struktur zu ersetzen.
-- Hero: Der Abschnitt „hero“ bekommt statt des Platzhalters genau EINEN Satz – das Traumergebnis oder der gelöste Hauptschmerz des Avatars (hormozi.traumziel / hormozi.hauptschmerz aus der Analyse), in der bestätigten Anrede. heading bleibt leer, der Satz steht als <p>. Die H1 bleibt unverändert.
-- Value Equation nur aus hormozi der Analyse und den Anbieterfakten: Traumergebnis, Erfolgswahrscheinlichkeit (nur mit echten, belegten Beweisen – sonst weglassen), Zeit bis zum Ergebnis, Aufwand für den Kunden. In die bestehenden Abschnitte einweben; keine neuen Überschriftenebenen, keine neuen Abschnitte.
-- Handlungsaufforderungen: konkretes Angebot plus Grund, jetzt zu handeln, mit den Kontaktwegen aus den Fakten. Verknappung, Garantien und Fristen nur, wenn sie in den Anbieterfakten stehen.
-${
-  ratgeber
-    ? "- Ratgeberartikel: Problem–Lösung-Zyklus, am Ende ein weicher nächster Schritt (weiterlesen, unverbindlich fragen). Kein harter Verkauf, keine Dringlichkeit."
-    : "- Jede Handlungsaufforderung nennt, was der Leser bekommt und was der nächste Schritt ist."
-}
-- Keine Erfolgsversprechen, keine unbelegten Superlative, keine erfundenen Zahlen oder Referenzen.
-${KEEP_RULES} Überschriftenebenen bleiben, Title und Meta-Description bleiben.
-${brancheRules(context.settings)}`,
+    system: stepSystem(stepInstruction(context, "hormozi"), context.settings),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1022,18 +997,7 @@ function normalizeSelfScore(raw: unknown): SelfScore | null {
 function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 12_000,
-    system: `${BASE_RULES}
-
-Schritt 6 Vermenschlichung: Du änderst nur die Formulierung – nicht Inhalt, Struktur, Reihenfolge oder Fakten.
-- Sätze höchstens etwa 20 Wörter, Sprachniveau B2, aktiv, Verben statt Substantivketten, keine Füllwörter.
-- Den Leser mit der bestätigten Anrede ansprechen; Überschriften bleiben neutral (kein „Ich“, kein „Wir“ in Überschriften).
-- KI-Muster entfernen: Dreierlisten als Reflex, „nicht X, sondern Y“, „Doch was bedeutet das konkret?“, gleichförmiger Satzrhythmus, vages „Die Gründe sind vielfältig“, absolute „immer/jeder/nie“ ohne Beleg, fette Mini-Überschriften mitten im Absatz.
-- Gedankenstriche so wenig wie möglich; höchstens 3 im ganzen Text, wenn er unter etwa 1.500 Wörter hat.
-- Gesperrte Floskeln (ersetzen oder streichen): ${CONTENT_FLOSKELN.map((f) => `„${f}“`).join(", ")}. Füllwörter ${CONTENT_FUELLWOERTER.join(", ")} streichen, wenn sie nichts tragen.
-- Keine erfundenen Ich-Geschichten, keine neuen Fakten, keine neuen Zahlen.
-${KEEP_RULES} Der Hero-Satz bleibt ein Satz. Title und Meta-Description bleiben.
-self_score: Bewerte den fertigen Text ehrlich von 1 bis 10 in direktheit (sagt sofort, was Sache ist), rhythmus (Satzlängen wechseln), vertrauen (belegt statt behauptet), natuerlichkeit (klingt nach Mensch), dichte (kein Satz ohne Inhalt).
-${brancheRules(context.settings)}`,
+    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1084,12 +1048,7 @@ ${brancheRules(context.settings)}`,
 function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 12_000,
-    system: `${BASE_RULES}
-
-Schritt 7 Lektorat: Du korrigierst Rechtschreibung, Grammatik, Zeichensetzung und Satzbau. Du glättest Wiederholungen und Füllwörter. Du änderst keine Fakten, keine Struktur und keine Reihenfolge; ids bleiben.
-Prüfe noch einmal: Anrede durchgehend, kein verbotenes Wort, Tonalität getroffen, Branchenregel eingehalten, Frage-Überschriften noch Fragen, Hauptkeyword in H1 und Zusammenfassung. Was du nicht selbst beheben darfst (fehlende Fakten, offene Entscheidungen, stehengebliebene Platzhalter, ein nicht gefüllter Hero), meldest du als final_findings.
-${KEEP_RULES}
-${brancheRules(context.settings)}`,
+    system: stepSystem(stepInstruction(context, "lektorat"), context.settings),
     user: join([
       pageBlock(context),
       currentTextBlock(context),

@@ -38,7 +38,16 @@ import {
   judgeContentJob,
   type ContentJobState,
 } from "../lib/dt/content/job-state";
-import { deleteContentPage, resetContentPage, resetContentTool, stopContentRun } from "../lib/dt/content/pipeline/actions";
+import {
+  approveContentStep,
+  deleteContentPage,
+  editContentBlock,
+  resetContentPage,
+  resetContentTool,
+  stopContentRun,
+} from "../lib/dt/content/pipeline/actions";
+import { briefingToStructureText, parseContentStructureWorkbook } from "../lib/dt/content/excel-structure";
+import { CONTENT_PAGE_TYPE_LABELS } from "../lib/dt/content/page-types";
 import { CONTENT_JOB_GONE_MESSAGE, planContentPageRepairs } from "../lib/dt/content/pipeline/health";
 import { describeAnbieterSources, describeSeiten, readinessFromLocal } from "../lib/dt/content/route-helpers";
 import {
@@ -57,6 +66,7 @@ import {
   contentActionLabel,
   contentStateMeta,
   countContentPagesByState,
+  approveNeedsConfirm,
   currentContentProblems,
   describeEmptyContentFilter,
   extractContentBlocks,
@@ -76,9 +86,16 @@ import {
   slugify,
 } from "../lib/dt/content/render";
 import {
+  applyContentBriefingUpdates,
+  applyStoredContentBriefing,
   buildOverview,
   buildReview,
+  canEditContentPageType,
+  contentBriefingToStore,
+  contentStructurePlanResult,
+  createMissingContentPages,
   flattenStructure,
+  loadContentStructurePlan,
   pageActions,
   pageSummary,
   rerunStepFor,
@@ -470,7 +487,8 @@ const cases: Array<[Partial<ContentPageRow>, string[], string | null]> = [
   [{}, ["run_through", "delete"], null],
   [{ page_type: "nicht_bearbeiten" }, ["delete"], null],
   [{ state: "laeuft", step: 2 }, ["stop", "reset", "delete"], "Schritt 2 von 9: SEO läuft"],
-  [{ state: "braucht_sie", step: 3, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
+  [{ state: "braucht_sie", step: 3, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Abschnitt „faq“ braucht eine Angabe"],
+  [{ state: "braucht_sie", step: 3, html, questions: [{ ...q, block_id: null }] }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
   [{ state: "in_arbeit", step: 2, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset", "delete"], "Fehler in Schritt 2: Ratenlimit"],
   [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Pausiert nach Schritt 5: Hormozi"],
   [{ state: "fertig", step: 9, html }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Wartet auf Freigabe"],
@@ -611,7 +629,7 @@ const crawledOnly = describeSeiten({ ...crawlLocal, pages: { total: 0, structure
 assert.equal(crawledOnly.ok, false, "a crawl is not a page list until it is taken over");
 assert.equal(
   crawledOnly.hint,
-  "40 Seiten gecrawlt – unter „Seitenquelle“ die Karte „Crawler – bestehende Website“ wählen und auf „40 Seiten übernehmen“ klicken.",
+  "40 Seiten gecrawlt – unter „Seitenquelle“ die Karte „Verbesserung“ wählen und auf „40 Seiten übernehmen“ klicken.",
 );
 const nothing = describeSeiten({ structure: null, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0 } });
 assert.equal(nothing.ok, false);
@@ -761,13 +779,18 @@ function memoryClient() {
     return tables.get(name)!;
   };
   class Builder {
+    /** `alias:column->>key` in a select, as PostgREST reads one field of a JSON column. */
+    private jsonFields: Array<[alias: string, column: string, key: string]> = [];
     private filters: Array<(row: MemRow) => boolean> = [];
     private op: "select" | "insert" | "upsert" | "update" | "delete" = "select";
     private payload: MemRow[] = [];
     private single = false;
     private limitN: number | null = null;
     constructor(private name: string) {}
-    select() { return this; }
+    select(columns?: string) {
+      for (const m of (columns ?? "").matchAll(/(\w+):(\w+)->>(\w+)/g)) this.jsonFields.push([m[1]!, m[2]!, m[3]!]);
+      return this;
+    }
     eq(col: string, value: unknown) { this.filters.push((row) => row[col] === value); return this; }
     not(col: string, op: string, value: unknown) {
       if (op === "is" && value === null) this.filters.push((row) => row[col] != null);
@@ -813,6 +836,16 @@ function memoryClient() {
       }
       let found = table.filter((row) => this.filters.every((filter) => filter(row)));
       if (this.limitN != null) found = found.slice(0, this.limitN);
+      if (this.jsonFields.length > 0) {
+        found = found.map((row) => {
+          const out: MemRow = { ...row };
+          for (const [alias, column, key] of this.jsonFields) {
+            const value = (row[column] as Record<string, unknown> | null | undefined)?.[key];
+            out[alias] = value == null ? null : String(value);
+          }
+          return out;
+        });
+      }
       return { data: this.single ? (found[0] ?? null) : found, error: null };
     }
     then<T>(onfulfilled?: (value: { data: unknown; error: null }) => T) {
@@ -994,9 +1027,169 @@ assert.equal(estimateCostEur("claude-haiku-4-5", { inputTokens: 0, outputTokens:
 assert.equal(resolveContentApiKey({}), null, "Texte does not fall back to ANTHROPIC_API_KEY");
 assert.equal(resolveContentApiKey({ ANTHROPIC_API_KEY: "shared", [CONTENT_API_KEY_ENV]: "  content-key  " }), "content-key");
 
+/**
+ * „Verbesserung“: the uploaded Seitenstruktur briefs the pages the site has, creates none of
+ * the others until „Diese Seiten anlegen“, and works in both orders (crawl first, Excel first).
+ */
+async function runVerbesserung() {
+  const UPLOADED = "2026-10-16T09:00:00.000Z";
+  const excel = parseContentStructureWorkbook([{
+    name: "Webseitenstruktur",
+    rows: [
+      ["URL", "Startseite", "Ebene 1", "Ebene 2", "Traffic", "Keywords", "H1-Optionen", "Nutzerfragen", "KI-Prompt"],
+      ["https://x.de/", "Startseite", "", "", "", "Dachdecker Köln (500)", "", "", ""],
+      ["https://x.de/leistungen/", "", "Leistungen", "", "", "", "", "", ""],
+      ["https://x.de/leistungen/dachsanierung", "", "", "Dachsanierung", "90", "Dachsanierung Köln (90)", "Dachsanierung in Köln", "Was kostet eine Dachsanierung?", "Förderung erwähnen."],
+      ["https://x.de/leistungen/fassade", "", "", "Fassadenreinigung", "", "Fassadenreinigung (40)", "", "Wie oft reinigen?", ""],
+      ["https://x.de/kontakt", "", "Kontakt", "", "", "", "", "", ""],
+    ],
+  }]).pages;
+  const structureRow = (org: string, mode: "structure" | "crawl", uploadedAt = UPLOADED) => ({
+    organisation_id: org,
+    filename: "struktur.xlsx",
+    raw_text: briefingToStructureText(excel),
+    uploaded_at: uploadedAt,
+    // As jsonb comes back from the database.
+    content_briefing: JSON.parse(JSON.stringify(contentBriefingToStore(mode, uploadedAt, excel, "briefing"))) as unknown,
+  });
+  const site = (org: string, patch: MemRow) => ({ organisation_id: org, title: null, h1: null, is_excluded: false, crawled_at: crawledAt, final_url: null, ...patch });
+  const livePages = (org: string) => [
+    site(org, { url: "https://x.de/", title: "Start | Firma" }),
+    site(org, { url: "https://x.de/leistungen/dachsanierung/", h1: "Dachsanierung vom Meister" }),
+    site(org, { url: "https://x.de/kontakt", title: "Kontakt | Firma" }),
+    site(org, { url: "https://x.de/blog/tipps", h1: "Tipps fürs Dach" }),
+  ];
+
+  // Crawl first, then the Excel.
+  const ORG = "00000000-0000-0000-0000-00000000eeee";
+  const mem = memoryClient();
+  mem.tables.set("dt_site_pages", livePages(ORG));
+  await syncContentPagesFromCrawl(mem.client, ORG);
+  const rows = mem.tables.get("dt_content_pages")!;
+  const dach = rows.find((r) => r.slug === "dachsanierung")!;
+  Object.assign(dach, { html: "<p>Überarbeitet</p>", state: "fertig", step: 9, cost_eur: 1.25 });
+  const before = rows.length;
+  mem.tables.set("dt_website_structures", [structureRow(ORG, "crawl")]);
+
+  const state = await loadContentStructurePlan(mem.client, ORG);
+  assert.equal(state.briefing?.mode, "crawl", "the stored briefing belongs to the current upload");
+  const updated = await applyContentBriefingUpdates(mem.client, ORG, state.plan!.updates, UPLOADED, "briefing");
+  assert.equal(updated, 3, "Startseite, Dachsanierung and Kontakt are on the site");
+  assert.equal(rows.length, before, "the upload creates no row and duplicates none");
+  assert.deepEqual(
+    [dach.page_type, dach.pillar_name, dach.keywords, dach.h1_options, dach.user_questions, dach.ki_prompt, dach.internal_link_targets, dach.main_keyword],
+    ["unterseite", "Leistungen", { main: { text: "Dachsanierung Köln", volume: 90 }, secondary: [] }, ["Dachsanierung in Köln"], ["Was kostet eine Dachsanierung?"], "Förderung erwähnen.", ["Leistungen", "Fassadenreinigung"], "Dachsanierung Köln"],
+    "the matched crawl row takes the Excel briefing",
+  );
+  assert.deepEqual(
+    [dach.html, dach.state, dach.step, dach.cost_eur, dach.source, dach.source_url, dach.name],
+    ["<p>Überarbeitet</p>", "fertig", 9, 1.25, "crawl", "https://x.de/leistungen/dachsanierung/", "Dachsanierung vom Meister"],
+    "text, state, step, cost, source and live URL (so the crawled text) stay",
+  );
+  assert.equal(canEditContentPageType({ source: "crawl", page_role: dach.page_role as ContentPageRow["page_role"] }), false, "the Excel type is locked on the briefed row");
+  const tipps = rows.find((r) => r.slug === "tipps")!;
+  assert.ok(tipps && tipps.page_role == null && tipps.keywords == null, "a crawled page the Excel does not name stays as it was");
+
+  assert.deepEqual(await syncContentPagesFromStructure(mem.client, ORG), { synced: false, pages: 0 }, "the overview sync creates nothing in „Verbesserung“");
+  assert.equal(rows.length, before);
+
+  const listed = contentStructurePlanResult(await loadContentStructurePlan(mem.client, ORG));
+  assert.equal(listed.crawled, true);
+  assert.deepEqual(
+    listed.missing.map((p) => [p.slug, p.name, p.path, p.page_type_label]),
+    [
+      ["leistungen", "Leistungen", "/leistungen", CONTENT_PAGE_TYPE_LABELS.hauptsilo],
+      ["fassade", "Fassadenreinigung", "/leistungen/fassade", CONTENT_PAGE_TYPE_LABELS.unterseite],
+    ],
+    "listed: in the Seitenstruktur, not on the website",
+  );
+  assert.deepEqual([listed.structure?.mode, listed.structure?.pages, listed.matched, listed.on_site], ["crawl", 5, 3, 0]);
+
+  const created = await createMissingContentPages(mem.client, ORG, ["fassade", "nicht-gelistet"]);
+  assert.equal(created, 1, "only listed pages that are still missing are created");
+  const fassade = rows.find((r) => r.slug === "fassade")!;
+  assert.deepEqual(
+    [fassade.source, fassade.source_url ?? null, fassade.page_type, fassade.name, (fassade.keywords as { main: { text: string } }).main.text, fassade.user_questions],
+    ["structure", null, "unterseite", "Fassadenreinigung", "Fassadenreinigung", ["Wie oft reinigen?"]],
+    "created like „Neue Website“: source structure, no live URL, with its briefing",
+  );
+  assert.equal(canEditContentPageType({ source: "structure" }), false, "the Excel type is locked");
+  assert.ok(!rows.some((r) => r.slug === "leistungen"), "a page that was not asked for is not created");
+  assert.deepEqual(contentStructurePlanResult(await loadContentStructurePlan(mem.client, ORG)).missing.map((p) => p.slug), ["leistungen"]);
+
+  // Excel first, then the crawl.
+  const ORG2 = "00000000-0000-0000-0000-00000000ffff";
+  const mem2 = memoryClient();
+  mem2.tables.set("dt_website_structures", [structureRow(ORG2, "crawl")]);
+  mem2.tables.set("dt_content_pages", []);
+  const early = contentStructurePlanResult(await loadContentStructurePlan(mem2.client, ORG2));
+  assert.equal(early.crawled, false, "no crawl yet");
+  assert.deepEqual(early.missing.map((p) => p.slug), ["startseite", "leistungen", "dachsanierung", "fassade"], "without a crawl: every Excel page not in the table (Kontakt is never listed)");
+  assert.deepEqual(await syncContentPagesFromStructure(mem2.client, ORG2), { synced: false, pages: 0 });
+  assert.equal(mem2.tables.get("dt_content_pages")!.length, 0, "the upload alone inserts nothing");
+
+  mem2.tables.set("dt_site_pages", livePages(ORG2));
+  await syncContentPagesFromCrawl(mem2.client, ORG2);
+  assert.equal(await applyStoredContentBriefing(mem2.client, ORG2), 3, "„Seiten übernehmen“ briefs the pages the Excel names");
+  const dach2 = mem2.tables.get("dt_content_pages")!.find((r) => r.slug === "dachsanierung")!;
+  assert.deepEqual([dach2.page_type, (dach2.keywords as { main: { text: string } }).main.text, dach2.source], ["unterseite", "Dachsanierung Köln", "crawl"]);
+  dach2.page_type = "ratgeber";
+  assert.equal(await applyStoredContentBriefing(mem2.client, ORG2), 0, "a second take-over does not brief the same rows again");
+  assert.equal(dach2.page_type, "ratgeber");
+  assert.deepEqual(contentStructurePlanResult(await loadContentStructurePlan(mem2.client, ORG2)).missing.map((p) => p.slug), ["leistungen", "fassade"]);
+
+  // „Neue Website“ is unchanged: every row on upload.
+  const ORG3 = "00000000-0000-0000-0000-000000001111";
+  const mem3 = memoryClient();
+  mem3.tables.set("dt_website_structures", [structureRow(ORG3, "structure")]);
+  const synced = await syncContentPagesFromStructure(mem3.client, ORG3);
+  assert.deepEqual(synced, { synced: true, pages: excel.length }, "„Neue Website“ creates every row");
+
+  // A later upload under SEO → Struktur makes the stored briefing stale: the old sync rules apply.
+  const ORG4 = "00000000-0000-0000-0000-000000002222";
+  const mem4 = memoryClient();
+  mem4.tables.set("dt_website_structures", [{ ...structureRow(ORG4, "crawl"), uploaded_at: "2026-10-16T10:00:00.000Z" }]);
+  assert.equal((await loadContentStructurePlan(mem4.client, ORG4)).briefing, null);
+  assert.equal((await syncContentPagesFromStructure(mem4.client, ORG4)).synced, true);
+}
+
+/** „Freigeben“ after the Endabnahme stopped for a placeholder; „Abschnitt ändern“ clears what the warning counts. */
+async function runApproveAndEdit() {
+  const ORG = "00000000-0000-0000-0000-000000003333";
+  const mem = memoryClient();
+  const client = mem.client as unknown as Parameters<typeof approveContentStep>[0];
+  const gapHtml = renderBlocksHtml([
+    { id: "intro", heading: "Keller", level: 1, html: "" },
+    { id: "kosten", heading: "Kosten", level: 2, html: "<p>Ab [BITTE PRÜFEN: Preis].</p>" },
+    { id: "ablauf", heading: "Ablauf", level: 2, html: "<p>Besichtigung, dann Angebot.</p>" },
+  ]);
+  const question = { kind: "missing", question: "Preis – was soll hier stehen?", block_id: "kosten", section: "Kosten", blocking: true };
+  const waiting: ContentPageRow = { ...base, id: "p-wait", organisation_id: ORG, slug: "keller", state: "braucht_sie", step: 9, html: gapHtml, questions: [question] };
+  mem.tables.set("dt_content_pages", [{ ...waiting }]);
+  mem.tables.set("dt_content_steps", [{ page_id: "p-wait", step: 9, status: "waiting" }]);
+  const row = mem.tables.get("dt_content_pages")![0]!;
+
+  assert.deepEqual(await approveContentStep(client, waiting, 3, "u1"), { ok: false, status: 409, message: "Dieser Schritt wartet gerade nicht auf eine Freigabe." }, "only the step the page waits at");
+
+  const edited = await editContentBlock(client, { ...waiting, findings: [{ title: "Preis", problem: "fehlt", proposal: "", severity: "high", severity_label: "Wichtig", block_id: "kosten" }] }, "kosten", "Ab 290 € pro Keller.");
+  assert.equal(edited.ok, true);
+  assert.deepEqual([row.questions, row.findings], [[], []], "„Abschnitt ändern“ settles the question and the open point of that Abschnitt");
+  assert.equal(approveNeedsConfirm({ questions: row.questions as unknown[], findings: row.findings as unknown[] }), false, "then „Freigeben“ asks nothing");
+  assert.doesNotMatch(String(row.html), /BITTE PRÜFEN/);
+
+  const released = await approveContentStep(client, waiting, 9, "u1");
+  assert.deepEqual(released, { ok: true, jobId: null });
+  assert.deepEqual([row.state, row.released, row.released_by, row.questions], ["fertig", true, "u1", []], "after the Endabnahme „Freigeben“ releases");
+  assert.equal(mem.tables.get("dt_content_steps")![0]!.status, "done");
+}
+
 runStoredPages()
   .then(() => runStopAndReset())
   .then(() => runResetTool())
+  .then(() => runVerbesserung())
+  .then(() => console.log("verbesserung store: ok"))
+  .then(() => runApproveAndEdit())
+  .then(() => console.log("freigeben and edit: ok"))
   .then(() => console.log("OK: content tests passed"))
   .catch((error) => {
     console.error(error);

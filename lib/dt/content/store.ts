@@ -37,6 +37,12 @@ import {
 } from "@/lib/dt/content/pipeline/steps";
 import { CONTENT_ACTION_LABELS, formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
+import {
+  briefingPatchFor,
+  planImprovementStructure,
+  type ImprovementStructurePlan,
+  type StructurePlanRow,
+} from "@/lib/dt/content/structure-plan";
 import { parseWebsiteStructure, type WebsiteStructureNode } from "@/lib/dt/seo/website-structure";
 import type {
   ContentAction,
@@ -51,6 +57,8 @@ import type {
   ContentReview,
   ContentStep,
   ContentStepStatus,
+  ContentStructureMode,
+  ContentStructurePlanResult,
 } from "@/lib/dt/content/types";
 
 export type ContentPageRow = {
@@ -473,6 +481,32 @@ export async function upsertContentPagesFromBriefing(
 }
 
 /**
+ * What the overview's sync reads on every poll: the structure text and whether its current
+ * upload came from „Verbesserung“ — the two fields of the stored briefing, not its pages.
+ */
+async function loadStructureForSync(
+  service: SupabaseClient,
+  organisationId: string,
+): Promise<{ raw_text: string; uploaded_at: string; improvement: boolean } | null> {
+  const read = (columns: string) =>
+    service.from("dt_website_structures").select(columns).eq("organisation_id", organisationId).maybeSingle();
+  let result = await read("raw_text, uploaded_at, briefing_mode:content_briefing->>mode, briefing_uploaded_at:content_briefing->>uploaded_at");
+  if (result.error && isMissingContentColumnError(result.error)) result = await read("raw_text, uploaded_at");
+  if (result.error) {
+    console.warn("[content] structure not readable:", result.error.message);
+    return null;
+  }
+  const row = result.data as unknown as Record<string, unknown> | null;
+  if (!row || typeof row.raw_text !== "string" || typeof row.uploaded_at !== "string") return null;
+  const briefingAt = typeof row.briefing_uploaded_at === "string" ? new Date(row.briefing_uploaded_at).getTime() : NaN;
+  return {
+    raw_text: row.raw_text,
+    uploaded_at: row.uploaded_at,
+    improvement: row.briefing_mode === "crawl" && briefingAt === new Date(row.uploaded_at).getTime(),
+  };
+}
+
+/**
  * Creates page rows for the Seitenstruktur stored under SEO → Struktur. Runs only when that
  * upload is newer than the last sync (`structure_uploaded_at` on the rows), so polling the
  * overview stays cheap. An Excel uploaded in Texte (`/api/dt/content/structure`) writes its
@@ -483,12 +517,8 @@ export async function syncContentPagesFromStructure(
   service: SupabaseClient,
   organisationId: string,
 ): Promise<{ synced: boolean; pages: number }> {
-  const [{ data: structure }, { data: lastSync, error: syncError }] = await Promise.all([
-    service
-      .from("dt_website_structures")
-      .select("raw_text, uploaded_at")
-      .eq("organisation_id", organisationId)
-      .maybeSingle(),
+  const [structure, { data: lastSync, error: syncError }] = await Promise.all([
+    loadStructureForSync(service, organisationId),
     service
       .from("dt_content_pages")
       .select("structure_uploaded_at")
@@ -502,7 +532,10 @@ export async function syncContentPagesFromStructure(
     throw new Error(contentDbErrorMessage(syncError, "Seiten konnten nicht geladen werden"));
   }
   if (!structure?.raw_text) return { synced: false, pages: 0 };
-  const uploadedAt = structure.uploaded_at as string;
+  // „Verbesserung“: the upload briefed the matching rows itself; the pages the website does
+  // not have wait for „Diese Seiten anlegen“ instead of appearing on the next poll.
+  if (structure.improvement) return { synced: false, pages: 0 };
+  const uploadedAt = structure.uploaded_at;
   if (
     lastSync?.structure_uploaded_at &&
     new Date(lastSync.structure_uploaded_at as string) >= new Date(uploadedAt)
@@ -512,7 +545,7 @@ export async function syncContentPagesFromStructure(
 
   let pages: ContentBriefingPage[];
   try {
-    pages = briefingFromStructureTree(parseWebsiteStructure(structure.raw_text as string).nodes);
+    pages = briefingFromStructureTree(parseWebsiteStructure(structure.raw_text).nodes);
   } catch {
     return { synced: false, pages: 0 };
   }
@@ -525,11 +558,19 @@ export const CONTENT_TYPE_LOCKED_MESSAGE = "Der Seitentyp kommt aus der Excel un
 export const CONTENT_TYPE_RUNNING_MESSAGE = "Die Seite läuft gerade – erst stoppen, dann den Seitentyp ändern.";
 
 /**
- * Who may change „Seitentyp“: only crawl pages. The Excel is the briefing; a wrong type there
- * is fixed with a corrected Excel, never by hand in the drawer.
+ * Whether the page carries an Excel briefing: every structure page, and a crawl page that a
+ * Seitenstruktur uploaded in „Verbesserung“ matched (only the Excel sets a role).
  */
-export function canEditContentPageType(page: Pick<ContentPageRow, "source">): boolean {
-  return page.source === "crawl";
+export function hasExcelBriefing(page: Pick<ContentPageRow, "source"> & Partial<Pick<ContentPageRow, "page_role">>): boolean {
+  return page.source === "structure" || page.page_role != null;
+}
+
+/**
+ * Who may change „Seitentyp“: only crawl pages without an Excel briefing. The Excel is the
+ * briefing; a wrong type there is fixed with a corrected Excel, never by hand in the drawer.
+ */
+export function canEditContentPageType(page: Pick<ContentPageRow, "source"> & Partial<Pick<ContentPageRow, "page_role">>): boolean {
+  return !hasExcelBriefing(page);
 }
 
 /** Why the type cannot be changed right now (status and German message), or null when it can. */
@@ -691,6 +732,229 @@ export async function syncContentPagesFromCrawl(
   return { imported: plan.inserts.length, attached: plan.attach.length, skipped: plan.skipped };
 }
 
+// --- the Seitenstruktur of Texte: stored briefing and „Verbesserung“ -------------------------
+
+export const CONTENT_STRUCTURE_BRIEFING_MIGRATION_FILE = "database/migrations/20261017_dt_content_step_prompts_verbesserung.sql";
+
+/** The Excel briefing kept with the structure (`dt_website_structures.content_briefing`). */
+export type StoredContentBriefing = {
+  mode: ContentStructureMode;
+  uploaded_at: string;
+  /** „briefing“ for a spreadsheet; „structure“ for a text without briefing columns. */
+  columns: BriefingUpsertMode;
+  pages: ContentBriefingPage[];
+};
+
+function briefingPageFromJson(raw: unknown, index: number): ContentBriefingPage | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const slug = typeof r.slug === "string" ? r.slug.trim() : "";
+  const name = typeof r.name === "string" ? r.name.trim() : "";
+  if (!slug || !name || !isContentPageType(r.page_type)) return null;
+  return {
+    slug,
+    name,
+    path: nullableText(r.path),
+    level: typeof r.level === "number" && Number.isFinite(r.level) ? r.level : 1,
+    position: typeof r.position === "number" && Number.isFinite(r.position) ? r.position : index,
+    page_role: isContentPageRole(r.page_role) ? r.page_role : "supporting",
+    page_type: r.page_type,
+    pillar_name: nullableText(r.pillar_name),
+    source_url: nullableText(r.source_url),
+    estimated_traffic: typeof r.estimated_traffic === "number" && Number.isFinite(r.estimated_traffic) ? r.estimated_traffic : null,
+    keywords: normalizeKeywords(r.keywords),
+    h1_options: stringList(r.h1_options),
+    user_questions: stringList(r.user_questions),
+    ki_prompt: nullableText(r.ki_prompt),
+    internal_link_targets: stringList(r.internal_link_targets),
+  };
+}
+
+/**
+ * The stored briefing, when it belongs to the structure's current upload. An upload under
+ * SEO → Struktur replaces the structure without touching the briefing: then it is stale.
+ */
+export function readStoredContentBriefing(raw: unknown, structureUploadedAt: string | null | undefined): StoredContentBriefing | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !structureUploadedAt) return null;
+  const r = raw as { mode?: unknown; uploaded_at?: unknown; pages?: unknown };
+  if ((r.mode !== "structure" && r.mode !== "crawl") || typeof r.uploaded_at !== "string" || !Array.isArray(r.pages)) return null;
+  const stamp = new Date(r.uploaded_at).getTime();
+  if (!Number.isFinite(stamp) || stamp !== new Date(structureUploadedAt).getTime()) return null;
+  const pages = r.pages.map(briefingPageFromJson).filter((p): p is ContentBriefingPage => Boolean(p));
+  const columns = (raw as { columns?: unknown }).columns === "structure" ? "structure" : "briefing";
+  return { mode: r.mode, uploaded_at: r.uploaded_at, columns, pages };
+}
+
+export type ContentStructureWithBriefing = {
+  structure: { filename: string | null; raw_text: string; uploaded_at: string } | null;
+  briefing: StoredContentBriefing | null;
+  /** False while the database has no `content_briefing` column (migration not run). */
+  supported: boolean;
+};
+
+/** The organisation's Seitenstruktur with the Excel briefing of its upload under Texte. */
+export async function loadContentStructureWithBriefing(
+  service: SupabaseClient,
+  organisationId: string,
+): Promise<ContentStructureWithBriefing> {
+  const read = (columns: string) =>
+    service.from("dt_website_structures").select(columns).eq("organisation_id", organisationId).maybeSingle();
+  let supported = true;
+  let result = await read("filename, raw_text, uploaded_at, content_briefing");
+  if (result.error && isMissingContentColumnError(result.error)) {
+    supported = false;
+    result = await read("filename, raw_text, uploaded_at");
+  }
+  if (result.error) throw new Error(`Seitenstruktur konnte nicht geladen werden: ${result.error.message}`);
+  const row = result.data as unknown as Record<string, unknown> | null;
+  if (!row || typeof row.raw_text !== "string") return { structure: null, briefing: null, supported };
+  const uploadedAt = typeof row.uploaded_at === "string" ? row.uploaded_at : "";
+  return {
+    structure: { filename: nullableText(row.filename), raw_text: row.raw_text, uploaded_at: uploadedAt },
+    briefing: supported ? readStoredContentBriefing(row.content_briefing, uploadedAt) : null,
+    supported,
+  };
+}
+
+/** What a structure upload under Texte stores next to the outline: its mode and its Excel pages. */
+export function contentBriefingToStore(
+  mode: ContentStructureMode,
+  uploadedAt: string,
+  pages: readonly ContentBriefingPage[],
+  columns: BriefingUpsertMode,
+): StoredContentBriefing {
+  return { mode, uploaded_at: uploadedAt, columns, pages: pages.slice(0, MAX_PAGES) };
+}
+
+type PlanRow = StructurePlanRow & { structure_uploaded_at?: string | null };
+
+async function loadPlanRows(service: SupabaseClient, organisationId: string): Promise<PlanRow[]> {
+  const { data, error } = await service
+    .from("dt_content_pages")
+    .select("slug, path, source_url, position, structure_uploaded_at")
+    .eq("organisation_id", organisationId)
+    .limit(MAX_PAGES);
+  if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
+  return (data ?? []) as PlanRow[];
+}
+
+export type ContentStructurePlanState = ContentStructureWithBriefing & {
+  rows: PlanRow[];
+  /** The structure's pages: the stored Excel briefing, else the structure text parsed. */
+  pages: ContentBriefingPage[];
+  plan: ImprovementStructurePlan | null;
+};
+
+/** The Seitenstruktur next to the table and the crawl: what „Verbesserung“ shows and creates. */
+export async function loadContentStructurePlan(
+  service: SupabaseClient,
+  organisationId: string,
+): Promise<ContentStructurePlanState> {
+  const [stored, rows, crawled] = await Promise.all([
+    loadContentStructureWithBriefing(service, organisationId),
+    loadPlanRows(service, organisationId),
+    loadCrawledSitePages(service, organisationId),
+  ]);
+  let pages: ContentBriefingPage[] = stored.briefing?.pages ?? [];
+  if (!stored.briefing && stored.structure) {
+    try {
+      pages = briefingFromStructureTree(parseWebsiteStructure(stored.structure.raw_text).nodes);
+    } catch {
+      pages = [];
+    }
+  }
+  const plan = stored.structure ? planImprovementStructure(pages, rows, crawled) : null;
+  return { ...stored, rows, pages, plan };
+}
+
+export function contentStructurePlanResult(state: ContentStructurePlanState): ContentStructurePlanResult {
+  return {
+    structure: state.structure
+      ? {
+          filename: state.structure.filename,
+          uploaded_at: state.structure.uploaded_at || null,
+          pages: state.pages.length,
+          mode: state.briefing?.mode ?? null,
+        }
+      : null,
+    crawled: state.plan?.crawled ?? false,
+    matched: state.plan?.updates.length ?? 0,
+    on_site: state.plan?.onSite.length ?? 0,
+    missing: (state.plan?.missing ?? []).map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      path: p.path,
+      page_type: p.page_type,
+      page_type_label: CONTENT_PAGE_TYPE_LABELS[p.page_type],
+    })),
+    supported: state.supported,
+  };
+}
+
+/**
+ * The Excel briefing onto existing rows: type, Hauptsilo, keywords, H1 options, questions,
+ * KI-Prompt and link targets follow the file; text, state, steps, cost, source and live URL
+ * stay. `structure_uploaded_at` marks the upload the row was matched with.
+ */
+export async function applyContentBriefingUpdates(
+  service: SupabaseClient,
+  organisationId: string,
+  updates: ImprovementStructurePlan["updates"],
+  uploadedAt: string,
+  columns: BriefingUpsertMode,
+): Promise<number> {
+  for (let i = 0; i < updates.length; i += 10) {
+    const results = await Promise.all(
+      updates.slice(i, i + 10).map(({ slug, page }) =>
+        service
+          .from("dt_content_pages")
+          .update({ ...briefingPatchFor(page, columns), structure_uploaded_at: uploadedAt })
+          .eq("organisation_id", organisationId)
+          .eq("slug", slug),
+      ),
+    );
+    const failed = results.find((r) => r.error)?.error;
+    if (failed) throw new Error(contentDbErrorMessage(failed, "Seiten konnten nicht aktualisiert werden"));
+  }
+  return updates.length;
+}
+
+/**
+ * After „Seiten übernehmen“ in „Verbesserung“: rows that arrived from the crawl take the
+ * briefing of the stored Seitenstruktur (Excel first, crawl second). Rows already matched
+ * with this upload are left alone, so a type chosen since then stays.
+ */
+export async function applyStoredContentBriefing(service: SupabaseClient, organisationId: string): Promise<number> {
+  const state = await loadContentStructurePlan(service, organisationId);
+  if (state.briefing?.mode !== "crawl" || !state.plan) return 0;
+  const stamp = new Date(state.briefing.uploaded_at).getTime();
+  const briefedAlready = new Set(
+    state.rows
+      .filter((row) => row.structure_uploaded_at && new Date(row.structure_uploaded_at).getTime() === stamp)
+      .map((row) => row.slug),
+  );
+  const updates = state.plan.updates.filter((u) => !briefedAlready.has(u.slug));
+  return applyContentBriefingUpdates(service, organisationId, updates, state.briefing.uploaded_at, state.briefing.columns);
+}
+
+/**
+ * „Diese Seiten anlegen“: only the listed pages that the website and the table still lack,
+ * through the same briefing insert as „Neue Website“ (source structure, no live URL, the
+ * Excel type locked). Slugs not on the current list are ignored.
+ */
+export async function createMissingContentPages(
+  service: SupabaseClient,
+  organisationId: string,
+  slugs: readonly string[],
+): Promise<number> {
+  const state = await loadContentStructurePlan(service, organisationId);
+  if (!state.plan) return 0;
+  const wanted = new Set(slugs);
+  const pages = state.plan.missing.filter((p) => wanted.has(p.slug));
+  const uploadedAt = state.briefing?.uploaded_at || state.structure?.uploaded_at || new Date().toISOString();
+  return upsertContentPagesFromBriefing(service, organisationId, pages, uploadedAt, state.briefing?.columns ?? "structure");
+}
+
 // --- presentation -----------------------------------------------------------------------------
 
 const STATE_LABELS: Record<ContentPageState, string> = {
@@ -707,18 +971,34 @@ export type ContentPageExtra = {
   verdict?: ContentJobVerdict | null;
 };
 
+/**
+ * Why a page waits for the customer, by Abschnitt: „Abschnitt „Kosten“ braucht eine Angabe“,
+ * „3 Abschnitte brauchen eine Angabe: Kosten, Ablauf, Garantie“ (three names, then „+N
+ * weitere“). Questions without an Abschnitt are counted as before.
+ */
+export function questionsDetail(questions: readonly ContentQuestion[]): string {
+  const sections: string[] = [];
+  for (const q of questions) {
+    const name = q.section?.trim() || q.block_id?.trim();
+    if (name && !sections.includes(name)) sections.push(name);
+  }
+  if (sections.length === 1) return `Abschnitt „${sections[0]}“ braucht eine Angabe`;
+  if (sections.length > 1) {
+    const more = sections.length > 3 ? ` +${sections.length - 3} weitere` : "";
+    return `${sections.length} Abschnitte brauchen eine Angabe: ${sections.slice(0, 3).join(", ")}${more}`;
+  }
+  const blocking = questions.filter((q) => q.blocking).length;
+  const n = blocking || questions.length;
+  return n > 0 ? `${n} ${n === 1 ? "Frage" : "Fragen"} an den Kunden, bevor es weitergeht` : "Wartet auf Ihre Freigabe";
+}
+
 export function pageDetail(page: ContentPageRow, extra: ContentPageExtra = {}): string | null {
   const stepName = contentStepName(page.step);
   switch (page.state) {
     case "laeuft":
       return describeRunningPage(page, extra.steps ?? null, extra.verdict ?? null);
-    case "braucht_sie": {
-      const blocking = page.questions.filter((q) => q.blocking).length;
-      const n = blocking || page.questions.length;
-      return n > 0
-        ? `${n} ${n === 1 ? "Frage" : "Fragen"} an den Kunden, bevor es weitergeht`
-        : "Wartet auf Ihre Freigabe";
-    }
+    case "braucht_sie":
+      return questionsDetail(page.questions);
     case "in_arbeit":
       if (page.error) return `Fehler in Schritt ${page.step ?? "?"}: ${page.error}`;
       return page.step ? `Pausiert nach Schritt ${page.step}: ${stepName}` : "Pausiert";
@@ -773,9 +1053,20 @@ export function buildOverview(
   };
 }
 
+/**
+ * The step a „Braucht Sie“ page waits at: the step that stopped it (Faktencheck, a text
+ * step with a placeholder left, or the Endabnahme). Pages from before default to the Faktencheck.
+ */
+export function waitingStepFor(page: Pick<ContentPageRow, "step">): number {
+  return page.step ?? CONTENT_STEP_FAKTENCHECK;
+}
+
 /** Which step a rerun-with-note restarts at for the current state. */
 export function rerunStepFor(page: ContentPageRow): number {
-  if (page.state === "braucht_sie") return CONTENT_STEP_FAKTENCHECK;
+  if (page.state === "braucht_sie") {
+    const waiting = waitingStepFor(page);
+    return waiting >= CONTENT_STEP_ENDABNAHME ? CONTENT_STEP_LEKTORAT : waiting;
+  }
   if (page.state === "fertig") return CONTENT_STEP_LEKTORAT;
   return page.step ?? 1;
 }
@@ -803,9 +1094,9 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
       return [{ kind: "stop", label: "Stoppen" }, reset, remove];
     case "braucht_sie":
       return [
-        { kind: "approve", step: CONTENT_STEP_FAKTENCHECK, label: "Freigeben" },
-        { kind: "edit", step: CONTENT_STEP_FAKTENCHECK, label: "Abschnitt ändern" },
-        { kind: "rerun_with_note", step: CONTENT_STEP_FAKTENCHECK, label: "Mit Anmerkung wiederholen" },
+        { kind: "approve", step: waitingStepFor(page), label: "Freigeben" },
+        { kind: "edit", step: waitingStepFor(page), label: "Abschnitt ändern" },
+        { kind: "rerun_with_note", step: rerunStepFor(page), label: "Mit Anmerkung wiederholen" },
         ...exportAction,
         reset,
         remove,
@@ -853,6 +1144,7 @@ export function stepList(steps: ContentStepRow[]): ContentStep[] {
 export function pageBriefing(page: ContentPageRow): ContentPageBriefing {
   return {
     source: page.source,
+    from_excel: hasExcelBriefing(page),
     page_type: page.page_type ?? effectiveContentPageType(page),
     type_editable: canEditContentPageType(page),
     page_role: page.page_role,
@@ -874,7 +1166,7 @@ export function buildReview(
   verdict: ContentJobVerdict | null = null,
 ): ContentReview {
   const textSteps = steps
-    .filter((s) => s.status === "done" && CONTENT_STEPS.find((d) => d.step === s.step)?.writesText)
+    .filter((s) => (s.status === "done" || s.status === "waiting") && CONTENT_STEPS.find((d) => d.step === s.step)?.writesText)
     .map((s) => s.step);
   const summary = pageSummary(page, { steps, verdict });
   return {

@@ -293,6 +293,25 @@ function testSpecsMatchPipelineSteps() {
 
 // --- hero placeholder normalisation -----------------------------------------------------------
 
+/**
+ * Verwaltung → SEO reads the SEO instruction saved under Globale Prompts, and the Texter prompt
+ * and the Textvorlage are still added after it.
+ */
+function testSavedSeoPrompt() {
+  const own = "Eigene SEO-Anweisung: kurz, {{mindest_fragen}} Fragen, Linkmarker {{briefing}}.";
+  const withAnalyse = (context: ContentPipelineContext): ContentPipelineContext => ({ ...context, outputs: { [CONTENT_STEP_ANALYSE]: analyseFixture } });
+  const spec = seoToolSpec(withAnalyse(buildSeoToolContext({ ...input(), stepPrompts: { seo: own }, texterPrompt: "Hausregel Texter." })));
+  assert.ok(spec.system.startsWith("Eigene SEO-Anweisung: kurz, 3 Fragen, Linkmarker aus dem Briefing."), "the saved text leads, variables filled");
+  assert.doesNotMatch(spec.system, /Festes Gerüst/, "the default instruction is replaced");
+  assert.match(spec.system, /Allgemeine Regeln \(jeder Seitentyp\):\nHausregel Texter\./, "the Texter prompt is still injected");
+  assert.match(spec.system, /Seitentyp-Vorlage \(gilt bei Widerspruch vor den allgemeinen Regeln\):\n[\s\S]*Hauptsilos „Zahnmedizin“/, "the Textvorlage is still injected");
+  assert.ok(spec.system.indexOf("Hausregel Texter.") < spec.system.indexOf("Seitentyp-Vorlage (gilt"), "Textvorlage after the Texter prompt");
+  assert.equal(spec.tool.name, "submit_seo_text");
+  const fallback = seoToolSpec(withAnalyse(buildSeoToolContext({ ...input(), stepPrompts: { seo: "" } })));
+  assert.equal(fallback.system, seoToolSpec(withAnalyse(buildSeoToolContext(input()))).system, "empty means the default");
+  console.log("saved SEO prompt: ok");
+}
+
 function testHeroPlaceholderNormalisation() {
   const context = buildSeoToolContext(input());
   const spec = seoToolSpec({ ...context, outputs: { [CONTENT_STEP_ANALYSE]: analyseFixture } });
@@ -489,6 +508,7 @@ async function main() {
   testPayloadSchema();
   testContextBuilder();
   testSpecsMatchPipelineSteps();
+  testSavedSeoPrompt();
   testHeroPlaceholderNormalisation();
   await testRunDerivesAnalyseThenWrites();
   await testRunWithPastedAnalyse();
