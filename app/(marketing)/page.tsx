@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 import { DtChatShell } from "@/components/dt/chat/dt-chat-shell";
+import { OrganisationDocumentTitle } from "@/components/shared/organisation-document-title";
 import {
   LandingAccess,
   LandingFaq,
@@ -76,6 +77,7 @@ async function HomeContent({
 
   return (
     <div className="dt-home-chat flex min-h-0 w-full flex-1 flex-col overflow-hidden">
+      <OrganisationDocumentTitle />
       <DtChatShell
         organisations={organisations}
         currentUserId={user.id}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { forgetOrganisationDocumentTitleCache } from "@/components/shared/organisation-document-title";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ export function UserMenu() {
   const logout = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
+    forgetOrganisationDocumentTitleCache();
     router.push("/auth/login");
   };
 

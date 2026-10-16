@@ -9,6 +9,7 @@ import { DashboardMainArea } from "@/app/dashboard/_components/dashboard-main-ar
 import { DashboardTopBar } from "@/app/dashboard/_components/dashboard-top-bar";
 import { DashboardStickySurveyAiAssistant } from "@/app/dashboard/_components/dashboard-sticky-survey-ai-assistant";
 import { DtPageShell } from "@/components/dt/dt-page-shell";
+import { OrganisationDocumentTitle } from "@/components/shared/organisation-document-title";
 
 export function DashboardShell({
   children,
@@ -54,6 +55,7 @@ export function DashboardShell({
       </div>
 
       <DashboardPrefetcher isPlatformAdmin={isPlatformAdmin} />
+      <OrganisationDocumentTitle />
 
       <Suspense fallback={null}>
         <DashboardStickySurveyAiAssistant />
