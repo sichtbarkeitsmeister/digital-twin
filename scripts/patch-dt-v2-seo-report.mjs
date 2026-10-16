@@ -5,6 +5,8 @@
  * - If GSC compares the full ads@ address (otherwise the false output is ads2).
  * - Format Report only strips a short duplicate header, not the whole HTML body.
  * - SEO Cache: Status Done stores an error when Claude returned no HTML.
+ * - Previous-period keyword requests use the query dimension and a full row limit.
+ * - Analyze Keywords Vormonat returns that query count plus top_keywords.
  *
  * Usage: node scripts/patch-dt-v2-seo-report.mjs
  */
@@ -68,6 +70,13 @@ async function main() {
   });
   if (!patched.ifGsc || !patched.statusDone) {
     throw new Error(`Patch unvollständig: ${JSON.stringify(patched)}`);
+  }
+  if (
+    patched.previousKeywordQueries < 2 ||
+    patched.previousKeywordPages < 2 ||
+    patched.previousKeywordAnalysis < 2
+  ) {
+    throw new Error(`Vorperioden-Keywords nicht gepatcht: ${JSON.stringify(patched)}`);
   }
   if (!patched.formatReport) {
     console.warn(
