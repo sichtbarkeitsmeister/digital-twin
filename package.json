@@ -35,6 +35,7 @@
     "test:organisation-option": "tsx scripts/test-organisation-option.ts",
     "test:sbkm-staff-email": "tsx scripts/test-sbkm-staff-email.ts",
     "test:seo-report-readiness": "tsx scripts/test-seo-report-readiness.ts",
+    "test:seo-report-keyword-patch": "node scripts/test-seo-report-keyword-patch.mjs",
     "test:prospect-persona-prompt": "tsx scripts/test-prospect-persona-prompt.ts",
     "test:owner-welcome-email": "tsx scripts/test-owner-welcome-email.ts",
     "test:transfer-ownership": "tsx scripts/test-transfer-ownership.ts",
