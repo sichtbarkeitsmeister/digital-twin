@@ -1,5 +1,13 @@
 export const SELECTED_ORGANISATION_STORAGE_KEY = "app:selected-organisation-id";
 
+/**
+ * Fired on `window` after every `writeSelectedOrganisationId`, so a switch that does not touch
+ * the URL (the chat) is seen too, e.g. by the tab title. Same tab only.
+ */
+export const SELECTED_ORGANISATION_CHANGED_EVENT = "app:selected-organisation-changed";
+
+export type SelectedOrganisationChangedDetail = { organisationId: string | null };
+
 export function readSelectedOrganisationId(): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -15,9 +23,18 @@ export function writeSelectedOrganisationId(organisationId: string | null) {
   try {
     if (!organisationId) {
       window.localStorage.removeItem(SELECTED_ORGANISATION_STORAGE_KEY);
-      return;
+    } else {
+      window.localStorage.setItem(SELECTED_ORGANISATION_STORAGE_KEY, organisationId);
     }
-    window.localStorage.setItem(SELECTED_ORGANISATION_STORAGE_KEY, organisationId);
+  } catch {
+    // ignore
+  }
+  try {
+    window.dispatchEvent(
+      new CustomEvent<SelectedOrganisationChangedDetail>(SELECTED_ORGANISATION_CHANGED_EVENT, {
+        detail: { organisationId: organisationId || null },
+      }),
+    );
   } catch {
     // ignore
   }
