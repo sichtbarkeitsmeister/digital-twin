@@ -16,15 +16,22 @@ import {
 export const CONTENT_TYPE_PROMPTS_MIGRATION_FILE = "database/migrations/20261010_dt_content_type_prompts.sql";
 /** Adds the Startseite and Über-uns-Seite columns, and allows those page types on `dt_content_pages`. */
 export const CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE = "database/migrations/20261015_dt_content_startseite_ueber_uns.sql";
+/** Adds the Hauptseite column, and allows that page type on `dt_content_pages`. */
+export const CONTENT_TYPE_PROMPTS_HAUPTSEITE_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
 
 const ROW_ID = "agency";
-const COLUMNS = "hauptsilo, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
+const COLUMNS = "hauptsilo, hauptseite, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
+/** Before 20261017: everything but the Hauptseite. */
+const WITHOUT_HAUPTSEITE_COLUMNS = "hauptsilo, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
 const LEGACY_COLUMNS = "hauptsilo, unterseite, ratgeber, standort, updated_at, updated_by_email";
 
 export type ContentTypePromptsState = {
   prompts: ContentTypePrompts;
-  /** Where the recipes come from: the saved row, the defaults (no row yet), or the defaults because the table is missing. */
-  storage: "db" | "defaults" | "missing_table" | "missing_columns";
+  /**
+   * Where the recipes come from: the saved row, the defaults (no row yet), or the defaults
+   * because the table or some columns are missing (`missing_hauptseite`: only 20261017).
+   */
+  storage: "db" | "defaults" | "missing_table" | "missing_columns" | "missing_hauptseite";
   updated_at: string | null;
   updated_by_email: string | null;
 };
@@ -51,6 +58,9 @@ export async function loadContentTypePrompts(service: SupabaseClient): Promise<C
       return { prompts: { ...DEFAULT_CONTENT_TYPE_PROMPTS }, storage: "missing_table", updated_at: null, updated_by_email: null };
     }
     if (isMissingContentColumnError(error)) {
+      // Only the Hauptseite column missing: keep the saved Startseite and Über-uns recipes.
+      const recent = await service.from("dt_content_type_prompts").select(WITHOUT_HAUPTSEITE_COLUMNS).eq("id", ROW_ID).maybeSingle();
+      if (!recent.error) return stateFromRow((recent.data as Record<string, unknown> | null) ?? null, "missing_hauptseite");
       const legacy = await service.from("dt_content_type_prompts").select(LEGACY_COLUMNS).eq("id", ROW_ID).maybeSingle();
       if (legacy.error) {
         if (isMissingContentTableError(legacy.error)) {
@@ -94,7 +104,9 @@ export async function saveContentTypePrompts(
   if (isMissingContentColumnError(error)) {
     return {
       ok: false,
-      error: `Die Datenbank kennt Startseite und Über-uns-Seite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
+      error: /hauptseite/i.test(error.message ?? "")
+        ? `Die Datenbank kennt den Seitentyp Hauptseite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_HAUPTSEITE_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`
+        : `Die Datenbank kennt Startseite und Über-uns-Seite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
     };
   }
   if (isMissingContentTableError(error)) {

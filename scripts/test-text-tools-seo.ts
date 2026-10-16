@@ -144,7 +144,7 @@ function testInputParsing() {
   assert.ok(long && long.length <= SEO_TOOL_MAX_MATERIAL_CHARS + 20 && long.endsWith("[… gekürzt]"), "long material is clipped, not refused");
   assert.deepEqual(
     SEO_TOOL_PAGE_TYPE_OPTIONS.map((o) => o.value),
-    ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"],
+    ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"],
     "nicht_bearbeiten is not offered",
   );
   console.log("input parsing: ok");
@@ -297,6 +297,18 @@ function testSpecsMatchPipelineSteps() {
  * Verwaltung → SEO reads the SEO instruction saved under Globale Prompts, and the Texter prompt
  * and the Textvorlage are still added after it.
  */
+/** Verwaltung → SEO offers the Hauptseite and writes it with the Hauptseite recipe. */
+function testHauptseite() {
+  const context = buildSeoToolContext(input({ pageType: "hauptseite", pillarName: null }));
+  assert.equal(context.page.page_type, "hauptseite");
+  assert.equal(context.page.level, 1, "a main page sits at the top level");
+  const spec = seoToolSpec({ ...context, outputs: { [CONTENT_STEP_ANALYSE]: analyseFixture } });
+  assert.ok(spec.system.includes(DEFAULT_CONTENT_TYPE_PROMPTS.hauptseite), "the Hauptseite recipe is in the SEO system prompt");
+  assert.doesNotMatch(spec.system, /Seitentyp Unterseite innerhalb/, "not the Unterseite recipe");
+  assert.match(spec.user, /Seitentyp: Hauptseite/);
+  console.log("hauptseite: ok");
+}
+
 function testSavedSeoPrompt() {
   const own = "Eigene SEO-Anweisung: kurz, {{mindest_fragen}} Fragen, Linkmarker {{briefing}}.";
   const withAnalyse = (context: ContentPipelineContext): ContentPipelineContext => ({ ...context, outputs: { [CONTENT_STEP_ANALYSE]: analyseFixture } });
@@ -509,6 +521,7 @@ async function main() {
   testContextBuilder();
   testSpecsMatchPipelineSteps();
   testSavedSeoPrompt();
+  testHauptseite();
   testHeroPlaceholderNormalisation();
   await testRunDerivesAnalyseThenWrites();
   await testRunWithPastedAnalyse();

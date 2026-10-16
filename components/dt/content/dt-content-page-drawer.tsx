@@ -23,7 +23,7 @@ import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import {
   CONTENT_PAGE_TYPE_LABELS,
-  CONTENT_PAGE_TYPES,
+  CONTENT_PAGE_TYPE_OPTIONS,
   contentPageTypeLabel,
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
@@ -51,25 +51,6 @@ const sectionTitleClass =
   "flex items-center justify-between gap-2 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55";
 
 const JOB_POLL_MS = 4_000;
-
-const PAGE_TYPE_OPTIONS = CONTENT_PAGE_TYPES.map((value) => ({
-  value,
-  label: CONTENT_PAGE_TYPE_LABELS[value],
-  description:
-    value === "hauptsilo"
-      ? "Breit, verlinkt auf Unterseiten"
-      : value === "unterseite"
-        ? "Ein Unterthema, verlinkt aufs Hauptsilo"
-        : value === "ratgeber"
-          ? "Informationell, kein harter Verkauf"
-          : value === "standort"
-            ? "Leistung an einem Ort"
-            : value === "startseite"
-              ? "Die Hauptseite der Website"
-              : value === "ueber_uns"
-                ? "Die Seite über das Unternehmen"
-                : "Bekommt keinen Text",
-}));
 
 function severityClass(severity: string): string {
   switch (severity) {
@@ -562,7 +543,8 @@ export function DtContentPageDrawer(props: {
                           label="Seitentyp"
                           value={review.briefing.page_type ?? ""}
                           onValueChange={(next) => void changePageType(next)}
-                          options={PAGE_TYPE_OPTIONS}
+                          options={[...CONTENT_PAGE_TYPE_OPTIONS]}
+                          searchable={false}
                           placeholder="Noch nicht bestimmt"
                           disabled={Boolean(busy) || review.public.state === "laeuft"}
                           elevated

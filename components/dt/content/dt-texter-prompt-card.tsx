@@ -109,7 +109,7 @@ export function DtTexterPromptCard(props: { placement: "texte" | "global" }) {
         <div className="grid gap-0.5">
           <h2 className="font-semibold tracking-tight text-sbkm-navy dark:text-white">Text-Prompt</h2>
           <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-            Allgemeine Regeln für jeden Seitentyp. Die sechs Textvorlagen ergänzen ihn; bei Widerspruch gilt die
+            Allgemeine Regeln für jeden Seitentyp. Die sieben Textvorlagen ergänzen ihn; bei Widerspruch gilt die
             Vorlage. Gilt ab dem nächsten SEO-Schritt.
             {props.placement === "texte" ? (
               <>

@@ -6,17 +6,28 @@
  * - role: where the page sits in the Excel-Seitenstruktur (Startseite, Ebene 1 = pillar,
  *   Ebene 2 = supporting). Crawl pages have no role.
  * - type: which writing variant the SEO step uses. Derived from role, pillar and name;
- *   the editor may override it in the drawer.
+ *   the editor may override it in the drawer. „Hauptseite“ (one offer without Unterseiten)
+ *   is never derived or guessed: it is only ever chosen by hand.
  */
 
 export const CONTENT_PAGE_ROLES = ["startseite", "pillar", "supporting"] as const;
 export type ContentPageRole = (typeof CONTENT_PAGE_ROLES)[number];
 
-export const CONTENT_PAGE_TYPES = ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns", "nicht_bearbeiten"] as const;
+export const CONTENT_PAGE_TYPES = [
+  "hauptsilo",
+  "hauptseite",
+  "unterseite",
+  "ratgeber",
+  "standort",
+  "startseite",
+  "ueber_uns",
+  "nicht_bearbeiten",
+] as const;
 export type ContentPageType = (typeof CONTENT_PAGE_TYPES)[number];
 
 export const CONTENT_PAGE_TYPE_LABELS: Record<ContentPageType, string> = {
   hauptsilo: "Hauptsilo-Seite",
+  hauptseite: "Hauptseite",
   unterseite: "Unterseite",
   ratgeber: "Ratgeberartikel",
   standort: "Standortseite",
@@ -24,6 +35,22 @@ export const CONTENT_PAGE_TYPE_LABELS: Record<ContentPageType, string> = {
   ueber_uns: "Über-uns-Seite",
   nicht_bearbeiten: "Nicht bearbeiten",
 };
+
+/** One line per type in the Seitentyp select (drawer and table). */
+export const CONTENT_PAGE_TYPE_HINTS: Record<ContentPageType, string> = {
+  hauptsilo: "Breit, verlinkt auf Unterseiten",
+  hauptseite: "Eine Leistung ohne Unterseiten",
+  unterseite: "Ein Unterthema, verlinkt aufs Hauptsilo",
+  ratgeber: "Informationell, kein harter Verkauf",
+  standort: "Leistung an einem Ort",
+  startseite: "Die Startseite der Website",
+  ueber_uns: "Die Seite über das Unternehmen",
+  nicht_bearbeiten: "Bekommt keinen Text",
+};
+
+/** The options of the Seitentyp select, in list order. */
+export const CONTENT_PAGE_TYPE_OPTIONS: ReadonlyArray<{ value: ContentPageType; label: string; description: string }> =
+  CONTENT_PAGE_TYPES.map((value) => ({ value, label: CONTENT_PAGE_TYPE_LABELS[value], description: CONTENT_PAGE_TYPE_HINTS[value] }));
 
 export const CONTENT_PAGE_ROLE_LABELS: Record<ContentPageRole, string> = {
   startseite: "Startseite",

@@ -17,11 +17,18 @@ import {
   summariseBriefing,
 } from "../lib/dt/content/excel-structure";
 import {
+  CONTENT_PAGE_ROLES,
+  CONTENT_PAGE_TYPE_LABELS,
+  CONTENT_PAGE_TYPE_OPTIONS,
+  CONTENT_PAGE_TYPES,
+  contentPageTypeLabel,
   derivePageType,
   effectiveContentPageType,
   extractCityCandidates,
   guessCrawlPageType,
+  isContentPageType,
   isExcludedContentPageName,
+  isHomeContentName,
 } from "../lib/dt/content/page-types";
 import {
   CONTENT_HERO_PLACEHOLDER,
@@ -73,6 +80,7 @@ import {
   pageActions,
   pageBriefing,
   pageDetail,
+  pageSummary,
   questionsDetail,
   rerunStepFor,
   type ContentPageRow,
@@ -89,13 +97,17 @@ import {
 import { briefingPatchFor, planImprovementStructure } from "../lib/dt/content/structure-plan";
 import { DEFAULT_TEXTER_PROMPT } from "../lib/dt/content/texter-prompt";
 import {
+  CONTENT_TYPE_PROMPT_HELP,
   CONTENT_TYPE_PROMPT_KEYS,
+  CONTENT_TYPE_PROMPT_LABELS,
   CONTENT_TYPE_PROMPT_MAX_CHARS,
   DEFAULT_CONTENT_TYPE_PROMPTS,
+  contentTypePromptKeyFor,
   hasCustomContentTypePrompts,
   normalizeContentTypePrompts,
   renderContentTypePrompt,
 } from "../lib/dt/content/type-prompts";
+import { loadContentTypePrompts, saveContentTypePrompts } from "../lib/dt/content/type-prompts-db";
 import { parseWebsiteStructure } from "../lib/dt/seo/website-structure";
 
 // --- cells ------------------------------------------------------------------------------------
@@ -327,6 +339,34 @@ assert.deepEqual(
   ),
   ["Düsseldorf", "Köln", "Frankfurt am Main", "Bad Homburg", "Neuss"],
 );
+
+// „Hauptseite“: its own type, chosen by hand only.
+assert.ok(isContentPageType("hauptseite"));
+assert.equal(CONTENT_PAGE_TYPE_LABELS.hauptseite, "Hauptseite");
+assert.equal(contentPageTypeLabel("hauptseite"), "Hauptseite");
+assert.equal(contentPageTypeLabel(null), "Noch nicht bestimmt");
+assert.deepEqual(
+  CONTENT_PAGE_TYPE_OPTIONS.map((o) => o.value),
+  [...CONTENT_PAGE_TYPES],
+  "the select offers every type, „Nicht bearbeiten“ included",
+);
+assert.ok(CONTENT_PAGE_TYPES.includes("nicht_bearbeiten") && CONTENT_PAGE_TYPES.includes("startseite") && CONTENT_PAGE_TYPES.includes("hauptsilo"), "Startseite and Hauptsilo-Seite stay");
+assert.equal(isHomeContentName("Hauptseite"), true, "the name check is unchanged");
+assert.equal(guessCrawlPageType({ name: "Hauptseite", path: "/hauptseite", level: 1 }), "startseite", "a page titled „Hauptseite“ is still guessed as Startseite");
+const names = ["Hauptseite", "Startseite", "Home", "Privatumzug", "Hauptseite Dachsanierung", "Leistungen", "Umzug Bonn", "Ratgeber", "Über uns", "Impressum", "Fassadenreinigung"];
+const paths = [null, "/", "/hauptseite", "/leistungen", "/leistungen/fassade", "/regionen/bonn"];
+for (const name of names) {
+  for (const path of paths) {
+    for (const role of [...CONTENT_PAGE_ROLES, null]) {
+      for (const pillarName of [null, "Leistungen", "Regionen", "Hauptseite"]) {
+        assert.notEqual(derivePageType({ name, role, path, pillarName, cities: ["Bonn"] }), "hauptseite", `derivePageType(${name}, ${role}, ${path}) never returns hauptseite`);
+      }
+    }
+    for (const level of [0, 1, 2, 3]) {
+      assert.notEqual(guessCrawlPageType({ name, path, level, cities: ["Bonn"] }), "hauptseite", `guessCrawlPageType(${name}, ${path}, ${level}) never returns hauptseite`);
+    }
+  }
+}
 console.log("page types: ok");
 
 // --- crawl pages need no Excel -----------------------------------------------------------------
@@ -526,7 +566,7 @@ assert.equal(saved.standort.length, CONTENT_TYPE_PROMPT_MAX_CHARS, "capped at th
 assert.equal(saved.unterseite, DEFAULT_CONTENT_TYPE_PROMPTS.unterseite, "untouched recipes keep the default");
 assert.equal(hasCustomContentTypePrompts(DEFAULT_CONTENT_TYPE_PROMPTS), false);
 assert.equal(hasCustomContentTypePrompts(saved), true);
-assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"], "nicht_bearbeiten has no recipe");
+assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"], "nicht_bearbeiten has no recipe");
 assert.match(DEFAULT_CONTENT_TYPE_PROMPTS.startseite, /Seitentyp Startseite/);
 assert.match(DEFAULT_CONTENT_TYPE_PROMPTS.ueber_uns, /Seitentyp Über-uns-Seite/);
 assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "startseite", null), /Visitenkarte/);
@@ -545,6 +585,26 @@ assert.match(contentStepSpec(2, context({ page_type: "unterseite", pillar_name: 
 for (const step of [1, 3, 4, 5, 6, 7, 9]) {
   assert.doesNotMatch(contentStepSpec(step, customContext).system, /Hausrezept/, `step ${step} does not read the recipes`);
 }
+
+// Hauptseite: its own recipe, used by the SEO step for that type (and by nothing else).
+assert.equal(CONTENT_TYPE_PROMPT_LABELS.hauptseite, "Hauptseite");
+assert.equal(CONTENT_TYPE_PROMPT_HELP.hauptseite, "Eine Leistung als eigene Hauptseite, ohne Unterseiten.");
+assert.equal(contentTypePromptKeyFor("hauptseite"), "hauptseite");
+assert.equal(contentTypePromptKeyFor("nicht_bearbeiten"), "unterseite", "unchanged");
+const hauptseiteRecipe = DEFAULT_CONTENT_TYPE_PROMPTS.hauptseite;
+for (const part of [/^Seitentyp Hauptseite\./, /Pflicht-Inputs:/, /Struktur:\n1\. /, /Besondere Regeln:/, /Keine Unterseiten erfinden/, /Zur Startseite/, /Kein Silo-Überblick/]) {
+  assert.match(hauptseiteRecipe, part, `the default Hauptseite recipe has ${part}`);
+}
+assert.ok(hauptseiteRecipe.length <= CONTENT_TYPE_PROMPT_MAX_CHARS);
+assert.equal(normalizeContentTypePrompts({}).hauptseite, hauptseiteRecipe, "an empty column means the default");
+assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "hauptseite", null), hauptseiteRecipe);
+const hauptseiteSeo = contentStepSpec(2, context({ page_type: "hauptseite", page_role: null, pillar_name: null }));
+assert.ok(hauptseiteSeo.system.includes(hauptseiteRecipe), "a Hauptseite writes with the Hauptseite recipe");
+assert.doesNotMatch(hauptseiteSeo.system, /Entscheidungshilfe/, "not with the Hauptsilo recipe");
+assert.match(hauptseiteSeo.user, /Seitentyp: Hauptseite/);
+const ownHauptseite = contentStepSpec(2, context({ page_type: "hauptseite" }, { typePrompts: normalizeContentTypePrompts({ hauptseite: "Hauptseite nach Hausrezept." }) }));
+assert.match(ownHauptseite.system, /Hauptseite nach Hausrezept\./, "a saved Hauptseite recipe reaches the SEO step");
+assert.doesNotMatch(contentStepSpec(2, context({ page_type: "startseite" })).system, /Seitentyp Hauptseite\./, "the Startseite keeps its own recipe");
 console.log("textvorlagen: ok");
 
 // --- editable step prompts (Globale Prompts) ------------------------------------------------------
@@ -630,6 +690,10 @@ assert.equal(canEditContentPageType(excelPage), false);
 assert.equal(canEditContentPageType(crawlPage), true);
 assert.equal(pageBriefing(excelPage).type_editable, false, "the drawer shows a label for Excel pages");
 assert.equal(pageBriefing(crawlPage).type_editable, true, "the drawer shows the select for crawl pages");
+assert.equal(pageSummary(crawlPage).type_editable, true, "a crawl page with a guessed type: select in the table");
+assert.equal(pageSummary(excelPage).type_editable, false, "a page from the Seitenstruktur: label only");
+assert.equal(pageSummary({ ...crawlPage, page_role: "supporting" }).type_editable, false, "a crawl page matched to an Excel row keeps the Excel type");
+assert.equal(pageSummary({ ...crawlPage, page_type: null }).type_editable, true, "also before a type is set");
 console.log("seitentyp lock: ok");
 
 const geo = contentStepSpec(4, context());
@@ -1059,7 +1123,39 @@ async function runXai() {
   console.log("grok caller: ok");
 }
 
-runXai()
+/** `dt_content_type_prompts` before migration 20261017: every column but `hauptseite`. */
+async function runTypePromptsWithoutHauptseite() {
+  const row = { hauptsilo: "Silo eigen", unterseite: "", ratgeber: "", standort: "", startseite: "Start eigen", ueber_uns: "", updated_at: null, updated_by_email: null };
+  let upserted: Record<string, unknown> | null = null;
+  const client = {
+    from: () => ({
+      select: (columns: string) => ({
+        eq: () => ({
+          maybeSingle: async () =>
+            /\bhauptseite\b/.test(columns)
+              ? { data: null, error: { code: "42703", message: "column dt_content_type_prompts.hauptseite does not exist" } }
+              : { data: row, error: null },
+        }),
+      }),
+      upsert: async (value: Record<string, unknown>) => {
+        upserted = value;
+        return { error: { code: "PGRST204", message: "Could not find the 'hauptseite' column of 'dt_content_type_prompts' in the schema cache" } };
+      },
+    }),
+  } as unknown as Parameters<typeof loadContentTypePrompts>[0];
+
+  const state = await loadContentTypePrompts(client);
+  assert.equal(state.storage, "missing_hauptseite");
+  assert.deepEqual([state.prompts.hauptsilo, state.prompts.startseite], ["Silo eigen", "Start eigen"], "saved recipes are not lost while the column is missing");
+  assert.equal(state.prompts.hauptseite, DEFAULT_CONTENT_TYPE_PROMPTS.hauptseite, "the Hauptseite writes with the default");
+  const saved = await saveContentTypePrompts(client, { prompts: state.prompts, userId: "u1", userEmail: null });
+  assert.deepEqual(saved, { ok: false, error: "Die Datenbank kennt den Seitentyp Hauptseite noch nicht: Bitte database/migrations/20261017_dt_content_hauptseite.sql einmal im Supabase SQL Editor ausführen." });
+  assert.ok(upserted && "hauptseite" in upserted, "the save sends the Hauptseite recipe");
+  console.log("textvorlagen without hauptseite column: ok");
+}
+
+runTypePromptsWithoutHauptseite()
+  .then(() => runXai())
   .then(() => console.log("OK: content excel structure tests passed"))
   .catch((error) => {
     console.error(error);
