@@ -28,15 +28,30 @@ type AgentVisibilityInput = {
 };
 
 /**
- * Legacy starter persona (slug=default). New orgs no longer get one; existing
- * unused starters are soft-disabled. Still hidden from customers when present.
+ * Legacy starter persona (slug=default). New orgs must not get one.
+ * Still hidden from customers when a leftover row is present.
  */
 export function isDefaultTwinAgent(agent: { slug?: string | null }): boolean {
   return agent.slug === "default";
 }
 
+/** Auto-seeded „DigitalTwin von …“ / Standard-Avatar. Not a Wunschkunde. */
+export function isSeededStandardAvatar(agent: {
+  slug?: string | null;
+  kind?: string | null;
+  is_default?: boolean | null;
+}): boolean {
+  return agent.slug === "default" && agent.kind !== "seo_advisor" && Boolean(agent.is_default);
+}
+
 function isAgentEnabled(agent: AgentVisibilityInput): boolean {
   return agent.is_enabled ?? agent.isEnabled ?? true;
+}
+
+export function withoutSeededStandardAvatars<
+  T extends { slug?: string | null; kind?: string | null; is_default?: boolean | null },
+>(agents: T[]): T[] {
+  return agents.filter((agent) => !isSeededStandardAvatar(agent));
 }
 
 export function filterAgentsHiddenFromOrgMembers<T extends AgentVisibilityInput>(
