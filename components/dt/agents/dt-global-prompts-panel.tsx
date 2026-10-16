@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckSquare, Globe2, Sparkles } from "lucide-react";
+import { CheckSquare, Globe2, RotateCcw, Sparkles, UsersRound } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -10,6 +10,7 @@ import { textToChecklist } from "@/lib/dt/seo/seo-checklist";
 type GlobalPrompts = {
   default: string;
   seo_advisor: string;
+  avatar_generator: string;
 };
 
 const PROMPT_META: Record<
@@ -28,7 +29,16 @@ const PROMPT_META: Record<
       "Nur im SEO-Modus für Plattform-Admins. Nutzt SEO-Daten, Website-Inhalte, Anbieter-Wissen und automatisch die Wunschkunden-Avatare der jeweiligen Organisation.",
     icon: Globe2,
   },
+  avatar_generator: {
+    title: "Anbieter-Avatare",
+    description:
+      "Erstellt im Transkripte-Schritt Avatar-Plan den avatar-spezifischen Teil jedes Avatars. Der globale DigitalTwin-Prompt steht zur Laufzeit davor.",
+    icon: UsersRound,
+  },
 };
+
+/** Prompts with a built-in default from code; their card gets „Auf Standard zurücksetzen“. */
+const RESETTABLE: Partial<Record<keyof GlobalPrompts, true>> = { avatar_generator: true };
 
 export function DtGlobalPromptsPanel(props: {
   drafts: GlobalPrompts;
@@ -38,6 +48,10 @@ export function DtGlobalPromptsPanel(props: {
   busy: boolean;
   onDraftChange: (slug: keyof GlobalPrompts, value: string) => void;
   onSave: (slug: keyof GlobalPrompts) => void;
+  /** „Auf Standard zurücksetzen“: saves the default from code (only for resettable prompts). */
+  onReset?: (slug: keyof GlobalPrompts) => void;
+  /** Whether the saved text already equals the default from code. */
+  isDefault?: (slug: keyof GlobalPrompts) => boolean;
   onGlobalChecklistDraftChange: (value: string) => void;
   onSaveGlobalChecklist: () => void;
 }) {
@@ -62,7 +76,7 @@ export function DtGlobalPromptsPanel(props: {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {(
-          ["default", "seo_advisor"] as const
+          ["default", "seo_advisor", "avatar_generator"] as const
         ).map((slug) => {
           const meta = PROMPT_META[slug];
           const Icon = meta.icon;
@@ -92,7 +106,19 @@ export function DtGlobalPromptsPanel(props: {
                 className="min-h-[200px] font-mono text-sm leading-relaxed"
                 placeholder={meta.placeholder ?? "Prompt …"}
               />
-              <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
+                {RESETTABLE[slug] && props.onReset ? (
+                  <DtPillButton
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={props.busy || (Boolean(props.isDefault?.(slug)) && !dirty)}
+                    onClick={() => props.onReset?.(slug)}
+                  >
+                    <RotateCcw className="size-3.5" aria-hidden />
+                    Auf Standard zurücksetzen
+                  </DtPillButton>
+                ) : null}
                 <DtPillButton
                   type="button"
                   size="sm"

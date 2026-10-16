@@ -5,8 +5,17 @@ import { requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 
 import { SURVEY_AGENT_GLOBAL_PROMPT_SLUGS } from "@/lib/dt/survey-agent-global-prompts";
+import {
+  AVATAR_GENERATOR_PROMPT_MIGRATION_FILE,
+  AVATAR_GENERATOR_PROMPT_SLUG,
+} from "@/lib/dt/transcripts/avatar-generator-prompt";
 
-const GLOBAL_PROMPT_SLUGS = ["default", "seo_advisor", ...SURVEY_AGENT_GLOBAL_PROMPT_SLUGS] as const;
+const GLOBAL_PROMPT_SLUGS = [
+  "default",
+  "seo_advisor",
+  ...SURVEY_AGENT_GLOBAL_PROMPT_SLUGS,
+  AVATAR_GENERATOR_PROMPT_SLUG,
+] as const;
 
 const patchSchema = z.object({
   slug: z.enum(GLOBAL_PROMPT_SLUGS),
@@ -67,8 +76,16 @@ export async function PATCH(req: Request) {
   });
 
   if (error) {
+    // Before the migration the function does not accept the slug, or the row is missing.
+    const missingMigration =
+      parsed.data.slug === AVATAR_GENERATOR_PROMPT_SLUG && /invalid_slug|template_not_found/.test(error.message ?? "");
     return NextResponse.json(
-      { ok: false, message: error.message || "Speichern fehlgeschlagen." },
+      {
+        ok: false,
+        message: missingMigration
+          ? `Die Datenbank kennt den Prompt „Anbieter-Avatare“ noch nicht: Bitte ${AVATAR_GENERATOR_PROMPT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin gilt der Standard.`
+          : error.message || "Speichern fehlgeschlagen.",
+      },
       { status: 500 },
     );
   }

@@ -2,18 +2,27 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireAuthUser } from "@/lib/dt/db";
-import { ensureAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
-import { AVATAR_QUICK_ACTIONS } from "@/lib/dt/transcripts/avatar-value";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
-import { createConfirmedTranscriptPersonas } from "@/lib/dt/transcripts/apply-knowledge";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
 import {
-  buildAvatarDossier,
-  previewAvatarFromDossier,
+  applyAvatarGeneratorResult,
+  buildAvatarGeneratorUserMessage,
+  type OrgAgentRow,
+} from "@/lib/dt/transcripts/avatar-generator";
+import { loadAvatarGeneratorPrompt } from "@/lib/dt/transcripts/avatar-generator-prompt-db";
+import {
+  generateAvatar,
   proposeAvatarPlan,
   workshopFailureMessage,
 } from "@/lib/dt/transcripts/workshop-llm";
-import { isMissingAgentError } from "@/lib/dt/transcripts/workshop-model";
+import {
+  AVATAR_PLAN_MAX,
+  AVATAR_PLAN_MIN,
+  mergeAntworten,
+  missingSummaryMessage,
+  normalizeAntworten,
+  sourcesWithoutSummary,
+} from "@/lib/dt/transcripts/workshop-model";
 import {
   loadWorkshopState,
   reconcileAvatarAgents,
@@ -25,13 +34,26 @@ export const maxDuration = 300;
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  action: z.enum(["plan", "approve", "dossier", "preview", "create"]),
+  action: z.enum(["plan", "approve", "generate"]),
   avatarKey: z.string().min(1).max(48).optional(),
+  /** „Anzahl Avatare“ of the plan. */
+  count: z.number().int().min(AVATAR_PLAN_MIN).max(AVATAR_PLAN_MAX).optional(),
   notWanted: z.string().max(2000).optional(),
   instruction: z.string().trim().max(4_000).optional(),
   titles: z
     .array(z.object({ key: z.string().min(1).max(48), title: z.string().trim().min(2).max(120) }))
-    .max(6)
+    .max(AVATAR_PLAN_MAX)
+    .optional(),
+  /** Answers to the generator's Rückfragen. */
+  answers: z
+    .array(
+      z.object({
+        block: z.string().max(200),
+        frage: z.string().min(1).max(2_000),
+        antwort: z.string().max(4_000),
+      }),
+    )
+    .max(40)
     .optional(),
 });
 
@@ -77,12 +99,26 @@ export async function POST(req: Request) {
       .maybeSingle();
     const organisationName = org?.name?.trim() || "Organisation";
 
+    // Plan and avatars read only the saved summaries; a conversation without one blocks both.
+    if (action !== "approve") {
+      const missing = sourcesWithoutSummary(state.sources);
+      if (missing.length > 0) {
+        return NextResponse.json(
+          { ok: false, message: missingSummaryMessage(missing), missingSummaries: missing },
+          { status: 400 },
+        );
+      }
+    }
+
     if (action === "plan") {
       const instruction = parsed.data.instruction?.trim() ?? "";
+      const count = parsed.data.count ?? Math.max(AVATAR_PLAN_MIN, state.avatarPlan.avatars.length);
       const result = await proposeAvatarPlan({
         organisationName,
         sources: state.sources,
+        anbieterItems: state.anbieter.items,
         previous: state.avatarPlan.avatars,
+        count,
         instruction,
         notWanted: state.avatarPlan.notWanted,
       });
@@ -93,6 +129,7 @@ export async function POST(req: Request) {
         approvedFingerprint: null,
         revisionNote: instruction || state.avatarPlan.revisionNote,
         notWanted: result.notWanted,
+        hinweis: result.hinweis,
         avatars: result.avatars,
       });
       const fresh = await loadWorkshopState(auth.supabase, organisationId);
@@ -128,112 +165,77 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan });
     }
 
+    // generate: one avatar of the approved plan → Rückfragen, or a checked prompt in Agenten.
     if (state.avatarPlan.status !== "approved") {
       return NextResponse.json(
         { ok: false, message: "Bitte zuerst den Avatar-Plan freigeben." },
         { status: 400 },
       );
     }
-    const avatar = state.avatarPlan.avatars.find((item) => item.key === parsed.data.avatarKey);
+    const plan = await reconcileAvatarAgents(auth.supabase, organisationId, state.avatarPlan);
+    const avatar = plan.avatars.find((item) => item.key === parsed.data.avatarKey);
     if (!avatar) {
       return NextResponse.json({ ok: false, message: "Avatar nicht gefunden." }, { status: 404 });
     }
+    const { data: agentRows, error: agentsError } = await auth.supabase
+      .from("dt_agents")
+      .select("id,name,avatar_data")
+      .eq("organisation_id", organisationId);
+    if (agentsError) throw new Error(agentsError.message);
+    const agents = (agentRows ?? []) as OrgAgentRow[];
+    const ownAgent = avatar.agentId ? agents.find((agent) => agent.id === avatar.agentId) : null;
 
-    if (action === "dossier") {
-      const result = await buildAvatarDossier({
-        organisationName,
-        sources: state.sources,
-        avatar,
-      });
-      await recordUsage(auth.supabase, organisationId, auth.userId, result);
-      await saveAvatarPlan(
-        auth.supabase,
-        organisationId,
-        replaceAvatar(state.avatarPlan, avatar.key, { ...avatar, dossier: result.dossier }),
-      );
-      const fresh = await loadWorkshopState(auth.supabase, organisationId);
-      return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan });
-    }
-
-    if (action === "preview") {
-      const revisionNote = [state.avatarPlan.revisionNote, state.anbieter.revisionNote]
-        .map((note) => note.trim())
-        .filter(Boolean)
-        .join("\n\n");
-      const result = await previewAvatarFromDossier({ organisationName, avatar, revisionNote });
-      await recordUsage(auth.supabase, organisationId, auth.userId, result);
-      await saveAvatarPlan(
-        auth.supabase,
-        organisationId,
-        replaceAvatar(state.avatarPlan, avatar.key, { ...avatar, preview: result.preview }),
-      );
-      const fresh = await loadWorkshopState(auth.supabase, organisationId);
-      return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan });
-    }
-
-    if (!avatar.preview) {
-      return NextResponse.json({ ok: false, message: "Zuerst die Vorschau erzeugen." }, { status: 400 });
-    }
-    const plan = await reconcileAvatarAgents(auth.supabase, organisationId, state.avatarPlan);
-    const current = plan.avatars.find((item) => item.key === avatar.key) ?? { ...avatar, agentId: null };
-    const preview = current.preview ?? avatar.preview;
-    const promptAppend = ensureAvatarGlobalPromptAnchor(preview.promptAppend);
-    if (current.agentId) {
-      const { error } = await auth.supabase.rpc("dt_update_agent", {
-        p_agent_id: current.agentId,
-        p_patch: {
-          name: preview.name,
-          role: preview.role,
-          prompt_append: promptAppend,
-          uses_global_prompt: true,
-          quick_actions: [...AVATAR_QUICK_ACTIONS],
-        },
-      });
-      if (!error) {
-        const fresh = await loadWorkshopState(auth.supabase, organisationId);
-        return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan, updated: true });
-      }
-      if (!isMissingAgentError(error.message)) {
-        return NextResponse.json({ ok: false, message: error.message }, { status: 400 });
-      }
-    }
-
-    const created = await createConfirmedTranscriptPersonas({
+    const antworten = mergeAntworten(
+      avatar.generator?.antworten ?? [],
+      normalizeAntworten(parsed.data.answers ?? []),
+    );
+    const previousErrors = avatar.generator?.status === "fehler" ? avatar.generator.errors : [];
+    const system = await loadAvatarGeneratorPrompt(organisationName);
+    const user = buildAvatarGeneratorUserMessage({
+      organisationName,
+      avatar,
+      otherTitles: plan.avatars.filter((item) => item.key !== avatar.key).map((item) => item.title),
+      notWanted: plan.notWanted,
+      existingAgentNames: agents.map((agent) => agent.name),
+      ownAgentName: ownAgent?.name ?? null,
+      sources: state.sources,
+      anbieterItems: state.anbieter.items,
+      antworten,
+      previousErrors,
+    });
+    const generated = await generateAvatar({ system, user });
+    await recordUsage(auth.supabase, organisationId, auth.userId, generated);
+    const applied = await applyAvatarGeneratorResult({
       supabase: auth.supabase,
       organisationId,
-      names: [preview.name],
-      personas: [
-        {
-          name: preview.name,
-          role: preview.role || null,
-          priority: "A",
-          isPrimary: true,
-          description: preview.summary || current.title,
-          goals: current.dossier?.traumergebnis || null,
-          pains: current.dossier?.schmerz || null,
-          objections: current.dossier?.huerde || null,
-          language: null,
-          buyingTriggers: null,
-          promptAppend: preview.promptAppend,
-        },
-      ],
+      avatar,
+      result: generated.result,
+      agents,
+      antworten,
     });
-    if (!created.createdPersonaIds[0]) {
-      return NextResponse.json(
-        { ok: false, message: created.warnings[0] ?? "Avatar konnte nicht angelegt werden." },
-        { status: 400 },
+
+    // Only this avatar changes; the rest of the plan is read again after the long call.
+    const latest = await loadWorkshopState(auth.supabase, organisationId);
+    const current = latest.avatarPlan.avatars.find((item) => item.key === avatar.key);
+    if (current) {
+      await saveAvatarPlan(
+        auth.supabase,
+        organisationId,
+        replaceAvatar(latest.avatarPlan, avatar.key, {
+          ...current,
+          generator: applied.avatar.generator,
+          agentId: applied.avatar.agentId,
+        }),
       );
     }
-    await saveAvatarPlan(
-      auth.supabase,
-      organisationId,
-      replaceAvatar(plan, current.key, {
-        ...current,
-        agentId: created.createdPersonaIds[0],
-      }),
-    );
     const fresh = await loadWorkshopState(auth.supabase, organisationId);
-    return NextResponse.json({ ok: true, avatarPlan: fresh.avatarPlan, created: true });
+    return NextResponse.json({
+      ok: true,
+      avatarPlan: fresh.avatarPlan,
+      outcome: applied.outcome.kind,
+      errors: applied.outcome.kind === "invalid" ? applied.outcome.errors : [],
+      agentId: applied.avatar.agentId,
+    });
   } catch (err) {
     const message = workshopFailureMessage(err, "Avatar-Schritt fehlgeschlagen.");
     return NextResponse.json(

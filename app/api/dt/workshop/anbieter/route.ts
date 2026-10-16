@@ -70,6 +70,7 @@ export async function POST(req: Request) {
         approvedFingerprint: null,
         revisionNote: instruction || state.anbieter.revisionNote,
         items: result.items,
+        savedAt: new Date().toISOString(),
       };
       await saveAnbieterState(auth.supabase, parsed.data.organisationId, anbieter);
       const fresh = await loadWorkshopState(auth.supabase, parsed.data.organisationId);

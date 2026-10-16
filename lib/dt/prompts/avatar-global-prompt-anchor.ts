@@ -9,7 +9,7 @@ export const AVATAR_GLOBAL_PROMPT_ANCHOR_HEADING =
 export const AVATAR_GLOBAL_PROMPT_ANCHOR = `${AVATAR_GLOBAL_PROMPT_ANCHOR_HEADING}
 Dieser Text ist nur der avatar-spezifische Teil (Persönlichkeit, Situation, Sprachstil).
 Die verbindlichen Regeln stehen im globalen DigitalTwin-Prompt: Interessent/Wunschkunde im Pre-Sale, User = Mitarbeiter der Organisation, kein Markenbotschafter, kein internes Firmenwissen, keine Marketing-Enzyklopädie.
-Bei Widerspruch gilt der globale Prompt — nicht dieser Avatar-Teil.`;
+Bei Widerspruch gilt der globale Prompt, nicht dieser Avatar-Teil.`;
 
 const ANCHOR_HEADING_RE =
   /##\s*ANKER:\s*GLOBALER\s+DIGITALTWIN-PROMPT/i;
