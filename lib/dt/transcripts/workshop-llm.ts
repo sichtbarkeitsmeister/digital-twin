@@ -8,7 +8,7 @@ import { resolveSurveyActionModels } from "@/lib/ai/survey-model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
 import {
-  generateAvatarWith,
+  generateCheckedAvatarWith,
   proposeAvatarPlanWith,
   type GenerateAvatarResult,
   type ProposeAvatarPlanInput,
@@ -186,6 +186,12 @@ export function proposeAvatarPlan(input: Omit<ProposeAvatarPlanInput, "call">): 
   return proposeAvatarPlanWith({ ...input, call: callTool });
 }
 
-export function generateAvatar(input: { system: string; user: string }): Promise<GenerateAvatarResult> {
-  return generateAvatarWith({ ...input, call: callTool });
+/** A generator run with the rules checked and up to two rounds of fixes; see `generateCheckedAvatarWith`. */
+export function generateCheckedAvatar(input: {
+  system: string;
+  user: string;
+  otherAgentNames: readonly string[];
+  deadline?: number;
+}): Promise<GenerateAvatarResult & { errors: string[]; fixRounds: number }> {
+  return generateCheckedAvatarWith({ ...input, call: callTool });
 }

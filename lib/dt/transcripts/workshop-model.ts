@@ -81,10 +81,20 @@ export type AvatarGeneratorMeta = {
   offene_fragen: string[];
 };
 
+/** A finished result that broke a rule: kept so the team can see it, correct it and save it. */
+export type AvatarGeneratorDraft = {
+  promptTemplate: string;
+  name: string;
+  role: string;
+  icon: string;
+  quickActions: string[];
+  meta: AvatarGeneratorMeta | null;
+};
+
 /**
  * The generator's state for one avatar of the plan (kept in `dt_workshop_corpus.avatar_plan`):
- * open Rückfragen, the answers given so far, the last validation errors, and the meta of the
- * text that was saved to Agenten.
+ * open Rückfragen, the answers given so far, the last validation errors with the rejected
+ * draft, and the meta of the text that was saved to Agenten.
  */
 export type AvatarGeneratorState = {
   status: "rueckfragen" | "fehler" | "fertig";
@@ -92,6 +102,8 @@ export type AvatarGeneratorState = {
   antworten: AvatarAntwort[];
   meta: AvatarGeneratorMeta | null;
   errors: string[];
+  /** Only with status „fehler“: the result that was not saved. */
+  draft: AvatarGeneratorDraft | null;
   updatedAt: string;
 };
 
@@ -683,6 +695,21 @@ export function mergeAntworten(earlier: AvatarAntwort[], later: AvatarAntwort[])
   return [...byKey.values()].slice(-80);
 }
 
+export function normalizeGeneratorDraft(raw: unknown): AvatarGeneratorDraft | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const promptTemplate = typeof record.promptTemplate === "string" ? record.promptTemplate.trim().slice(0, 60_000) : "";
+  if (!promptTemplate) return null;
+  return {
+    promptTemplate,
+    name: asString(record.name, 80),
+    role: asString(record.role, 200),
+    icon: asString(record.icon, 16),
+    quickActions: textList(record.quickActions, 12, 160),
+    meta: normalizeGeneratorMeta(record.meta),
+  };
+}
+
 export function normalizeGeneratorState(raw: unknown): AvatarGeneratorState | null {
   const record = asRecord(raw);
   if (!record) return null;
@@ -694,6 +721,7 @@ export function normalizeGeneratorState(raw: unknown): AvatarGeneratorState | nu
     antworten: normalizeAntworten(record.antworten),
     meta: normalizeGeneratorMeta(record.meta),
     errors: textList(record.errors, 40, 1_000),
+    draft: status === "fehler" ? normalizeGeneratorDraft(record.draft) : null,
     updatedAt: asString(record.updatedAt, 40),
   };
 }

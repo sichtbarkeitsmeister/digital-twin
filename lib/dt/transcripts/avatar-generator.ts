@@ -3,11 +3,13 @@
  * plan writes the avatar-specific part of its prompt („Anbieter-Avatare“ in Globale Prompte).
  *
  * The model answers with exactly one ERGEBNIS: either Rückfragen (nothing goes to Agenten
- * while they are open) or the finished prompt with avatar_data and meta. A finished prompt is
- * checked here in code before anything is saved; on a failed rule nothing is written and the
- * errors go back into the next run. meta stays in the workshop JSON for the team and never
- * reaches the prompt. Supabase only in `applyAvatarGeneratorResult`, so the rules are
- * testable without it.
+ * while they are open) or the finished prompt with avatar_data and meta. Typography the model
+ * keeps getting wrong (dashes, a code fence) is fixed in code first; then the prompt is checked
+ * against the rules. A broken rule is first handed back to the model as a short list of fixes
+ * (`avatar-plan-llm.ts`); if it still fails, nothing is written, the errors and the rejected
+ * draft stay with the avatar so the team can correct it or run it again. meta stays in the
+ * workshop JSON for the team and never reaches the prompt. Supabase only in
+ * `applyAvatarGeneratorResult`, so the rules are testable without it.
  */
 
 import type Anthropic from "@anthropic-ai/sdk";
@@ -21,6 +23,7 @@ import {
 import {
   type AnbieterItem,
   type AvatarAntwort,
+  type AvatarGeneratorDraft,
   type AvatarGeneratorMeta,
   type AvatarGeneratorState,
   type AvatarRueckfrage,
@@ -164,7 +167,7 @@ export function normalizeAvatarGeneratorResult(raw: unknown): AvatarGeneratorRes
   const record = asRecord(raw) ?? {};
   const data = asRecord(record.avatar_data ?? record.avatarData) ?? {};
   const rueckfragen = normalizeRueckfragen(record.rueckfragen);
-  const promptTemplate = text(record.prompt_template ?? record.promptTemplate, 60_000);
+  const promptTemplate = tidyAvatarPromptTemplate(text(record.prompt_template ?? record.promptTemplate, 60_000));
   const quick = data.quick_actions ?? data.quickActions;
   const status: AvatarGeneratorResult["status"] =
     record.status === "rueckfragen" && rueckfragen.length > 0
@@ -184,6 +187,27 @@ export function normalizeAvatarGeneratorResult(raw: unknown): AvatarGeneratorRes
     },
     meta: normalizeGeneratorMeta(record.meta),
   };
+}
+
+/**
+ * Typography fixed in code before the rules are checked, so a stray character does not cost a
+ * whole new run: a code fence around the text and anything before the anchor heading go, a
+ * dash between numbers becomes „bis“, a dash used as a pause becomes a comma, a dash as list
+ * marker or inside a word a hyphen. Idempotent.
+ */
+export function tidyAvatarPromptTemplate(value: string): string {
+  let out = value.replace(/\r\n/g, "\n").trim();
+  const fenced = out.match(/^```[\w-]*[ \t]*\n([\s\S]*?)\n?```$/);
+  if (fenced) out = (fenced[1] ?? "").trim();
+  const anchor = out.search(/^[ \t]*##[ \t]*ANKER:/m);
+  if (anchor > 0) out = out.slice(anchor).trim();
+  return out
+    .replace(/(\d)[ \t]*[–—][ \t]*(\d)/g, "$1 bis $2")
+    .replace(/^([ \t]*)[–—](?=[ \t])/gm, "$1-")
+    .replace(/[ \t]+[–—][ \t]*$/gm, "")
+    .replace(/[ \t]+[–—][ \t]+/g, ", ")
+    .replace(/[–—]/g, "-")
+    .replace(/,[ \t]*([,.!?;:])/g, "$1");
 }
 
 function headingKey(value: string): string {
@@ -218,11 +242,12 @@ const AGE_SPAN_RES = [
   /(?<!\p{L})(?:Anfang|Mitte|Ende)\s+(?:der\s+)?\d{2}(?!\d)/u,
   /(?<!\d)\d{2}\s*(?:bis|-)\s*\d{2}(?!\d)\s*Jahre/u,
 ];
-const NUMBER_WORDS = "zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn";
+// „Sätze“ next to a digit is the global length rule („höchstens 3 Sätze“); „in zwei Sätzen
+// erklärt bekommen“ describes the avatar and stays.
 const GLOBAL_RULE_RES: Array<{ re: RegExp; label: string }> = [
   { re: /markdown/i, label: "Markdown" },
   { re: /emoji/i, label: "Emoji" },
-  { re: new RegExp(`(?:(?<!\\d)\\d+|(?<!\\p{L})(?:${NUMBER_WORDS}))\\s+(?:\\p{L}+\\s+)?Sätzen?(?!\\p{L})`, "iu"), label: "Satzanzahl" },
+  { re: /(?<!\d)\d+\s*Sätzen?(?!\p{L})/iu, label: "Satzanzahl" },
   { re: /(?<!\p{L})Sätzen?\s*[:(]?\s*\d+(?!\d)/iu, label: "Satzanzahl" },
   { re: /(?<!\p{L})Sätzen?\s+pro\s+(?:Antwort|Nachricht)/iu, label: "Sätze pro Antwort" },
 ];
@@ -230,6 +255,17 @@ const PERSONA_START_RE = /^[\s"'„“‚‘»«(]*(ich|mir|mich|mein|meine|mein
 
 function quoted(value: string): string {
   return `„${value.length > 80 ? `${value.slice(0, 79)}…` : value}“`;
+}
+
+/** The line around a match, at most 100 characters, so the team (and a fix) finds the spot. */
+function excerptAt(prompt: string, index: number, length: number): string {
+  const start = prompt.lastIndexOf("\n", index) + 1;
+  const endBreak = prompt.indexOf("\n", index + length);
+  const line = prompt.slice(start, endBreak < 0 ? prompt.length : endBreak).trim();
+  if (line.length <= 100) return `„${line}“`;
+  const at = Math.max(0, index - start - 40);
+  const cut = line.slice(at, at + 100).trim();
+  return `„${at > 0 ? "…" : ""}${cut}${at + 100 < line.length ? "…" : ""}“`;
 }
 
 function nameKey(value: string): string {
@@ -288,8 +324,14 @@ export function validateAvatarResult(
   if (DASH_RE.test(prompt)) errors.push("Gedankenstrich im Text („–“ oder „—“).");
 
   // 5
-  const hedges = [...new Set([...prompt.matchAll(HEDGE_RE)].map((match) => match[1]!.toLocaleLowerCase("de-DE")))];
-  if (hedges.length > 0) errors.push(`Absicherungswort im Text: ${hedges.map(quoted).join(", ")}.`);
+  const hedgeMatches = [...prompt.matchAll(HEDGE_RE)];
+  const hedges = [...new Set(hedgeMatches.map((match) => match[1]!.toLocaleLowerCase("de-DE")))];
+  if (hedges.length > 0) {
+    const first = hedgeMatches[0]!;
+    errors.push(
+      `Absicherungswort im Text: ${hedges.map(quoted).join(", ")}, zum Beispiel in ${excerptAt(prompt, first.index ?? 0, first[0].length)}.`,
+    );
+  }
 
   // 6
   const whoBlock = avatarPromptBlock(prompt, "WER DU BIST");
@@ -304,13 +346,15 @@ export function validateAvatarResult(
   }
 
   // 8
-  const globalRules = new Map<string, string>();
+  const globalRules = new Map<string, RegExpMatchArray>();
   for (const { re, label } of GLOBAL_RULE_RES) {
-    const found = prompt.match(re)?.[0];
+    const found = prompt.match(re);
     if (found && !globalRules.has(label)) globalRules.set(label, found);
   }
   for (const found of globalRules.values()) {
-    errors.push(`Globale Regel im Avatar-Teil: ${quoted(found)}. Das steht nur im globalen Prompt.`);
+    errors.push(
+      `Globale Regel im Avatar-Teil: ${quoted(found[0])} in ${excerptAt(prompt, found.index ?? 0, found[0].length)}. Das steht nur im globalen Prompt.`,
+    );
   }
 
   // 9
@@ -334,6 +378,104 @@ export function validateAvatarResult(
 
   return errors;
 }
+
+/** The lines of the text that break a rule about wording, so a fix can name them exactly. */
+export function avatarRuleViolationLines(prompt: string): string[] {
+  const checks: RegExp[] = [
+    PLACEHOLDER_RE,
+    DASH_RE,
+    HEDGE_RE,
+    ...AGE_SPAN_RES,
+    ...GLOBAL_RULE_RES.map((rule) => rule.re),
+  ];
+  const lines = prompt
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) =>
+      checks.some((re) => {
+        re.lastIndex = 0;
+        const hit = re.test(line);
+        re.lastIndex = 0;
+        return hit;
+      }),
+    );
+  return [...new Set(lines)].slice(0, 40);
+}
+
+/** Targeted corrections for a result that broke a rule. */
+export type AvatarFixes = {
+  ersetzungen: Array<{ alt: string; neu: string }>;
+  name: string;
+  quickActions: string[];
+};
+
+export function normalizeAvatarFixes(raw: unknown): AvatarFixes {
+  const record = asRecord(raw) ?? {};
+  const rows = Array.isArray(record.ersetzungen) ? record.ersetzungen : [];
+  const ersetzungen = rows
+    .map((row) => {
+      const item = asRecord(row);
+      const alt = typeof item?.alt === "string" ? item.alt : "";
+      const neu = typeof item?.neu === "string" ? item.neu : "";
+      return alt.trim() ? { alt, neu } : null;
+    })
+    .filter((row): row is { alt: string; neu: string } => Boolean(row))
+    .slice(0, 80);
+  const quick = Array.isArray(record.quick_actions) ? record.quick_actions : [];
+  return {
+    ersetzungen,
+    name: text(record.name, 80).replace(/\s+/g, " "),
+    quickActions: quick.map((item) => text(item, 160)).filter(Boolean).slice(0, 12),
+  };
+}
+
+/**
+ * Applies the corrections: each `alt` that occurs in the text is replaced everywhere (also
+ * with surrounding spaces trimmed when the exact snippet is not there); an `alt` that is not
+ * in the text is skipped. Name and Quick Actions are replaced only when the fix brings them.
+ */
+export function applyAvatarFixes(
+  result: AvatarGeneratorResult,
+  fixes: AvatarFixes,
+): { result: AvatarGeneratorResult; applied: number } {
+  let prompt = result.promptTemplate;
+  let applied = 0;
+  for (const { alt, neu } of fixes.ersetzungen) {
+    const needle = prompt.includes(alt) ? alt : prompt.includes(alt.trim()) ? alt.trim() : null;
+    if (!needle) continue;
+    prompt = prompt.split(needle).join(needle === alt ? neu : neu.trim());
+    applied += 1;
+  }
+  return {
+    result: {
+      ...result,
+      promptTemplate: tidyAvatarPromptTemplate(prompt),
+      avatarData: {
+        ...result.avatarData,
+        name: fixes.name || result.avatarData.name,
+        quickActions: fixes.quickActions.length > 0 ? fixes.quickActions : result.avatarData.quickActions,
+      },
+    },
+    applied: applied + (fixes.name ? 1 : 0) + (fixes.quickActions.length > 0 ? 1 : 0),
+  };
+}
+
+/** The names a new or updated avatar must not take: every other agent of the organisation. */
+export function otherAgentNamesFor(agents: readonly OrgAgentRow[], ownAgentId: string | null): string[] {
+  return agents.filter((agent) => agent.id !== ownAgentId).map((agent) => agent.name);
+}
+
+/** The rules checked in code, told to the generator up front so the first result passes. */
+const CHECKED_RULES = [
+  "Der Text beginnt mit „## ANKER: GLOBALER DIGITALTWIN-PROMPT“, die Pflichtblöcke stehen in der festen Reihenfolge.",
+  "Kein Platzhalter in eckigen Klammern.",
+  "Kein Gedankenstrich („–“ oder „—“). Statt eines Gedankenstrichs ein Komma, einen Punkt oder „bis“.",
+  `Nie diese Wörter: ${AVATAR_HEDGE_WORDS.join(", ")}.`,
+  "„## WER DU BIST“ nennt ein exaktes Alter wie „34 Jahre“, keine Spanne wie „Mitte 40“ oder „30 bis 40 Jahre“.",
+  "Keine globalen Regeln: nicht Markdown, nicht Emojis, keine Satzanzahl wie „3 Sätze“ oder „Sätze pro Antwort“.",
+  "4 bis 6 Quick Actions aus Sicht des Mitarbeiters, keine beginnt mit Ich, Mir, Mich oder Mein.",
+  "Der Name ist bei dieser Organisation noch nicht vergeben.",
+];
 
 /** Everything the generator gets besides its system prompt. */
 export function buildAvatarGeneratorUserMessage(input: {
@@ -378,6 +520,7 @@ export function buildAvatarGeneratorUserMessage(input: {
           ...input.antworten.map((item) => `- ${item.block ? `${item.block}: ` : ""}${item.frage}\n  Antwort: ${item.antwort}`),
         ].join("\n")
       : "",
+    ["# Diese Regeln prüft das System vor dem Speichern. Ein Verstoß wird nicht gespeichert.", ...CHECKED_RULES.map((rule) => `- ${rule}`)].join("\n"),
     input.previousErrors && input.previousErrors.length > 0
       ? [
           "# Das letzte Ergebnis wurde nicht gespeichert. Diese Regeln waren verletzt, behebe sie:",
@@ -405,6 +548,7 @@ function generatorState(
   return {
     rueckfragen: [],
     errors: [],
+    draft: null,
     // The meta of the text that is in Agenten stays until a new text replaces it.
     meta: avatar.generator?.meta ?? null,
     ...patch,
@@ -430,9 +574,24 @@ export async function applyAvatarGeneratorResult(input: {
   now?: string;
 }): Promise<{ avatar: WorkshopAvatar; outcome: AvatarGeneratorOutcome }> {
   const now = input.now ?? new Date().toISOString();
-  const { avatar, result, antworten } = input;
+  const { avatar, antworten } = input;
+  const result: AvatarGeneratorResult = {
+    ...input.result,
+    promptTemplate: tidyAvatarPromptTemplate(input.result.promptTemplate),
+  };
+  const draft: AvatarGeneratorDraft = {
+    promptTemplate: result.promptTemplate,
+    name: result.avatarData.name,
+    role: result.avatarData.role,
+    icon: result.avatarData.icon,
+    quickActions: result.avatarData.quickActions,
+    meta: result.meta,
+  };
   const fail = (errors: string[]) => ({
-    avatar: { ...avatar, generator: generatorState(avatar, { status: "fehler", errors }, antworten, now) },
+    avatar: {
+      ...avatar,
+      generator: generatorState(avatar, { status: "fehler", errors, draft: draft.promptTemplate ? draft : null }, antworten, now),
+    },
     outcome: { kind: "invalid", errors } as AvatarGeneratorOutcome,
   });
 
@@ -448,7 +607,7 @@ export async function applyAvatarGeneratorResult(input: {
 
   const existing = avatar.agentId ? (input.agents.find((agent) => agent.id === avatar.agentId) ?? null) : null;
   const errors = validateAvatarResult(result, {
-    otherAgentNames: input.agents.filter((agent) => agent.id !== existing?.id).map((agent) => agent.name),
+    otherAgentNames: otherAgentNamesFor(input.agents, existing?.id ?? null),
   });
   if (errors.length > 0) return fail(errors);
 

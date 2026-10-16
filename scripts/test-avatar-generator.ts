@@ -11,10 +11,14 @@ import { AVATAR_GLOBAL_PROMPT_ANCHOR } from "../lib/dt/prompts/avatar-global-pro
 import {
   AVATAR_GENERATOR_TOOL,
   AVATAR_REQUIRED_HEADINGS,
+  applyAvatarFixes,
   applyAvatarGeneratorResult,
   avatarPromptBlock,
+  avatarRuleViolationLines,
   buildAvatarGeneratorUserMessage,
+  normalizeAvatarFixes,
   normalizeAvatarGeneratorResult,
+  tidyAvatarPromptTemplate,
   validateAvatarResult,
   type AvatarGeneratorResult,
 } from "../lib/dt/transcripts/avatar-generator";
@@ -23,11 +27,17 @@ import {
   resolveAvatarGeneratorPrompt,
 } from "../lib/dt/transcripts/avatar-generator-prompt";
 import {
+  AVATAR_FIX_TOOL,
   generateAvatarWith,
+  generateCheckedAvatarWith,
   proposeAvatarPlanWith,
   type WorkshopToolCall,
 } from "../lib/dt/transcripts/avatar-plan-llm";
-import type { WorkshopAvatar, WorkshopSource } from "../lib/dt/transcripts/workshop-model";
+import {
+  normalizeGeneratorState,
+  type WorkshopAvatar,
+  type WorkshopSource,
+} from "../lib/dt/transcripts/workshop-model";
 
 const VALID_TEMPLATE = `${AVATAR_GLOBAL_PROMPT_ANCHOR}
 ---
@@ -318,6 +328,20 @@ function testValidationRules() {
   expectOnly(withPrompt(VALID_TEMPLATE.replace("- Tonalität: kurz", "- Keine Emojis.\n- Tonalität: kurz")), /Globale Regel im Avatar-Teil: „Emoji“/);
   expectOnly(withPrompt(VALID_TEMPLATE.replace("- Tonalität: kurz", "- Du schreibst höchstens 2 Sätze.\n- Tonalität: kurz")), /Globale Regel im Avatar-Teil: „2 Sätze“/);
   expectOnly(withPrompt(VALID_TEMPLATE.replace("- Tonalität: kurz", "- Kurze Sätze pro Nachricht.\n- Tonalität: kurz")), /Globale Regel im Avatar-Teil: „Sätze pro Nachricht“/);
+  // What the avatar wants from the employee is no global rule.
+  assert.deepEqual(
+    validateAvatarResult(
+      withPrompt(VALID_TEMPLATE.replace("- Tonalität: kurz", "- Den Ablauf willst du in zwei Sätzen erklärt bekommen.\n- Tonalität: kurz")),
+      { otherAgentNames: [] },
+    ),
+    [],
+  );
+  // The error names the line, so the spot can be found in the draft.
+  const hedgeErrors = validateAvatarResult(
+    withPrompt(VALID_TEMPLATE.replace("Du bist gereizt,", "Manchmal bist du gereizt,")),
+    { otherAgentNames: [] },
+  );
+  assert.match(hedgeErrors[0] ?? "", /zum Beispiel in „Manchmal bist du gereizt, weil/);
 
   // 9 Quick Actions: 4 to 6, from the employee's view
   expectOnly(finished({}, { quickActions: QUICK_ACTIONS.slice(0, 3) }), /3 Quick Actions statt 4 bis 6/);
@@ -394,6 +418,7 @@ function testNormalizeAndPrompt() {
     "Malerbetrieb aus Mülheim",
     "Antwort: Du",
     "Gedankenstrich im Text",
+    "Diese Regeln prüft das System vor dem Speichern",
   ]) {
     assert.ok(user.includes(expected), `user message misses ${expected}`);
   }
@@ -573,12 +598,187 @@ async function testApply() {
   console.log("apply: Rückfragen write nothing, a valid result creates one agent: ok");
 }
 
+function testTidy() {
+  // Dashes become what they stand for; the valid template stays as it is.
+  assert.equal(tidyAvatarPromptTemplate(VALID_TEMPLATE), VALID_TEMPLATE);
+  assert.equal(tidyAvatarPromptTemplate("Nach 10–14 Tagen, 2—3 Wochen."), "Nach 10 bis 14 Tagen, 2 bis 3 Wochen.");
+  assert.equal(tidyAvatarPromptTemplate("Du willst Ruhe – und zwar sofort."), "Du willst Ruhe, und zwar sofort.");
+  assert.equal(tidyAvatarPromptTemplate("„Ich – äh – weiß nicht.“"), "„Ich, äh, weiß nicht.“");
+  assert.equal(tidyAvatarPromptTemplate("Liste:\n– erster Punkt\n  — zweiter Punkt"), "Liste:\n- erster Punkt\n  - zweiter Punkt");
+  assert.equal(tidyAvatarPromptTemplate("Am Ende –\nweiter"), "Am Ende\nweiter");
+  assert.equal(tidyAvatarPromptTemplate("Nord—Süd"), "Nord-Süd");
+  assert.equal(tidyAvatarPromptTemplate("Das reicht – ."), "Das reicht.");
+  // Code fence and text before the anchor go.
+  assert.equal(tidyAvatarPromptTemplate(`\`\`\`markdown\n${VALID_TEMPLATE}\n\`\`\``), VALID_TEMPLATE);
+  assert.equal(tidyAvatarPromptTemplate(`Hier ist der Avatar-Teil:\n\n${VALID_TEMPLATE}`), VALID_TEMPLATE);
+  const messy = VALID_TEMPLATE.replace("Du bist gereizt,", "Du bist gereizt – ").replace("nach 10 Tagen", "nach 7–10 Tagen");
+  assert.equal(tidyAvatarPromptTemplate(tidyAvatarPromptTemplate(messy)), tidyAvatarPromptTemplate(messy));
+  assert.deepEqual(validateAvatarResult(withPrompt(tidyAvatarPromptTemplate(messy)), { otherAgentNames: [] }), []);
+  // Results are tidied when they are read.
+  const read = normalizeAvatarGeneratorResult({
+    status: "fertig",
+    prompt_template: `\`\`\`\n${messy}\n\`\`\``,
+    avatar_data: { name: "Sandra Becker", role: "Inhaberin", icon: "🏢", quick_actions: QUICK_ACTIONS },
+  });
+  assert.equal(/[–—]/.test(read.promptTemplate), false);
+  assert.ok(read.promptTemplate.startsWith("## ANKER: GLOBALER DIGITALTWIN-PROMPT"));
+  console.log("tidy: ok");
+}
+
+function testFixes() {
+  const broken = finished({ promptTemplate: VALID_TEMPLATE.replace("Du bist gereizt,", "Manchmal bist du gereizt,") });
+  assert.deepEqual(avatarRuleViolationLines(broken.promptTemplate), [
+    "Manchmal bist du gereizt, weil du dich vor den Eigentümern rechtfertigen musst.",
+  ]);
+  const fixes = normalizeAvatarFixes({
+    ersetzungen: [
+      { alt: "Manchmal bist du gereizt,", neu: "Du bist gereizt," },
+      { alt: "steht nicht im Text", neu: "egal" },
+      { alt: "", neu: "leer" },
+    ],
+    name: "",
+    quick_actions: [],
+  });
+  assert.equal(fixes.ersetzungen.length, 2);
+  const fixed = applyAvatarFixes(broken, fixes);
+  assert.equal(fixed.applied, 1);
+  assert.equal(fixed.result.promptTemplate, VALID_TEMPLATE);
+  assert.equal(fixed.result.avatarData.name, "Sandra Becker");
+  const renamed = applyAvatarFixes(finished(), normalizeAvatarFixes({ ersetzungen: [], name: "Petra Lorenz", quick_actions: QUICK_ACTIONS.slice(0, 4) }));
+  assert.equal(renamed.result.avatarData.name, "Petra Lorenz");
+  assert.equal(renamed.applied, 2);
+  console.log("fixes: ok");
+}
+
+async function testCheckedGeneration() {
+  const draft = {
+    status: "fertig",
+    prompt_template: VALID_TEMPLATE.replace("Du bist gereizt,", "Manchmal bist du gereizt – ").replace("nach 10 Tagen", "nach 7–10 Tagen"),
+    avatar_data: { name: "Sandra Becker", role: "Inhaberin", icon: "🏢", quick_actions: QUICK_ACTIONS },
+    meta: META,
+  };
+  // The dashes are tidied in code, the hedge word goes back to the model as one fix.
+  const fake = fakeCall([draft, { ersetzungen: [{ alt: "Manchmal bist du gereizt,", neu: "Du bist gereizt," }] }]);
+  const out = await generateCheckedAvatarWith({ system: "SYSTEM", user: "USER", call: fake.call, otherAgentNames: [] });
+  assert.deepEqual(out.errors, []);
+  assert.equal(out.fixRounds, 1);
+  assert.equal(fake.calls.length, 2);
+  assert.equal(fake.calls[1]!.tool.name, AVATAR_FIX_TOOL.name);
+  assert.equal(fake.calls[1]!.system, "SYSTEM");
+  assert.match(fake.calls[1]!.user, /^USER/);
+  assert.match(fake.calls[1]!.user, /## Betroffene Zeilen\n- Manchmal bist du gereizt, weil/);
+  assert.match(fake.calls[1]!.user, /Absicherungswort im Text: „manchmal“/);
+  assert.equal(/[–—]/.test(out.result.promptTemplate), false);
+  assert.ok(out.result.promptTemplate.includes("nach 7 bis 10 Tagen"));
+  assert.ok(out.result.promptTemplate.includes("Du bist gereizt, weil"));
+  assert.equal(out.usage.inputTokens, 20);
+
+  // Valid at once: no fix round.
+  const clean = fakeCall([{ ...draft, prompt_template: VALID_TEMPLATE }]);
+  const direct = await generateCheckedAvatarWith({ system: "S", user: "U", call: clean.call, otherAgentNames: [] });
+  assert.deepEqual(direct.errors, []);
+  assert.equal(clean.calls.length, 1);
+
+  // A fix that changes nothing ends the rounds; the errors stay for the team.
+  const stuck = fakeCall([draft, { ersetzungen: [{ alt: "gibt es nicht", neu: "x" }] }]);
+  const stuckOut = await generateCheckedAvatarWith({ system: "S", user: "U", call: stuck.call, otherAgentNames: [] });
+  assert.equal(stuckOut.errors.length, 1);
+  assert.equal(stuck.calls.length, 2);
+
+  // At most two rounds.
+  const twice = fakeCall([draft, { ersetzungen: [{ alt: "Tagen", neu: "Tagen" }] }]);
+  const twiceOut = await generateCheckedAvatarWith({ system: "S", user: "U", call: twice.call, otherAgentNames: [] });
+  assert.equal(twiceOut.fixRounds, 2);
+  assert.equal(twice.calls.length, 3);
+
+  // Past the deadline no fix round starts.
+  const late = fakeCall([draft]);
+  const lateOut = await generateCheckedAvatarWith({ system: "S", user: "U", call: late.call, otherAgentNames: [], deadline: 1_000, now: () => 2_000 });
+  assert.equal(late.calls.length, 1);
+  assert.equal(lateOut.fixRounds, 0);
+  assert.equal(lateOut.errors.length, 1);
+
+  // Rückfragen are no result to check.
+  const asking = fakeCall([{ status: "rueckfragen", rueckfragen: [{ block: "WER DU BIST", frage: "46?", vorschlag: "46" }] }]);
+  const askOut = await generateCheckedAvatarWith({ system: "S", user: "U", call: asking.call, otherAgentNames: [] });
+  assert.equal(askOut.result.status, "rueckfragen");
+  assert.equal(asking.calls.length, 1);
+  console.log("checked generation with fixes: ok");
+}
+
+async function testDraft() {
+  const antworten = [{ block: "ANREDE", frage: "Du oder Sie?", antwort: "Du" }];
+  // A broken result keeps its draft (with its meta) next to the errors; nothing is written.
+  const broken = fakeSupabase(ORG_AGENTS);
+  const rejected = await applyAvatarGeneratorResult({
+    supabase: broken.client,
+    organisationId: "org",
+    avatar: avatar(),
+    result: finished({ promptTemplate: VALID_TEMPLATE.replace("Du bist gereizt,", "Manchmal bist du gereizt,") }),
+    agents: ORG_AGENTS,
+    antworten,
+  });
+  assert.equal(broken.calls.length, 0);
+  const state = rejected.avatar.generator!;
+  assert.equal(state.status, "fehler");
+  assert.equal(state.meta, null);
+  assert.equal(state.draft?.name, "Sandra Becker");
+  assert.deepEqual(state.draft?.quickActions, QUICK_ACTIONS);
+  assert.equal(state.draft?.meta?.fehlende_daten[0], "META-GEHEIM Budgetgrenze");
+  assert.ok(state.draft?.promptTemplate.includes("Manchmal bist du gereizt"));
+  // The draft survives a reload; with another status it is dropped.
+  const reread = normalizeGeneratorState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(reread?.draft, state.draft);
+  assert.equal(normalizeGeneratorState({ ...state, status: "fertig" })?.draft, null);
+
+  // A dash alone no longer rejects: it is tidied before the check.
+  const dashed = fakeSupabase(ORG_AGENTS);
+  const saved = await applyAvatarGeneratorResult({
+    supabase: dashed.client,
+    organisationId: "org",
+    avatar: avatar(),
+    result: finished({ promptTemplate: VALID_TEMPLATE.replace("Du bist gereizt,", "Du bist gereizt – ") }),
+    agents: ORG_AGENTS,
+    antworten,
+  });
+  assert.equal(saved.outcome.kind, "created");
+  const payload = dashed.calls.find((call) => call.fn === "dt_create_persona_agent")!.args.p_payload as Record<string, unknown>;
+  assert.equal(/[–—]/.test(String(payload.prompt_append)), false);
+
+  // „Prüfen und speichern“: the corrected draft goes through the same rules and is saved.
+  const corrected = normalizeAvatarGeneratorResult({
+    status: "fertig",
+    prompt_template: state.draft!.promptTemplate.replace("Manchmal bist du gereizt,", "Du bist gereizt,"),
+    avatar_data: { name: state.draft!.name, role: state.draft!.role, icon: state.draft!.icon, quick_actions: state.draft!.quickActions },
+    meta: state.draft!.meta,
+  });
+  const saving = fakeSupabase(ORG_AGENTS);
+  const fromDraft = await applyAvatarGeneratorResult({
+    supabase: saving.client,
+    organisationId: "org",
+    avatar: rejected.avatar,
+    result: corrected,
+    agents: ORG_AGENTS,
+    antworten,
+  });
+  assert.equal(fromDraft.outcome.kind, "created");
+  assert.equal(fromDraft.avatar.generator?.status, "fertig");
+  assert.equal(fromDraft.avatar.generator?.draft, null);
+  assert.equal(fromDraft.avatar.generator?.meta?.fehlende_daten[0], "META-GEHEIM Budgetgrenze");
+  assert.equal(JSON.stringify(saving.calls).includes("META-GEHEIM"), false);
+  console.log("draft: kept on failure, saved after correction: ok");
+}
+
 async function main() {
   await testPlanCountAndInput();
   testValidationRules();
   testNormalizeAndPrompt();
   await testGenerateCall();
   await testApply();
+  testTidy();
+  testFixes();
+  await testCheckedGeneration();
+  await testDraft();
   console.log("avatar generator: all ok");
 }
 

@@ -69,12 +69,27 @@ type AvatarGeneratorMeta = {
   offene_fragen: string[];
 };
 
+type AvatarGeneratorDraft = {
+  promptTemplate: string;
+  name: string;
+  role: string;
+  icon: string;
+  quickActions: string[];
+};
+
 type AvatarGenerator = {
   status: "rueckfragen" | "fehler" | "fertig";
   rueckfragen: AvatarRueckfrage[];
   meta: AvatarGeneratorMeta | null;
   errors: string[];
+  /** With status „fehler“: the result that was not saved. */
+  draft: AvatarGeneratorDraft | null;
 };
+
+/** The editable fields of a rejected draft; Quick Actions one per line. */
+type DraftForm = { promptTemplate: string; name: string; role: string; quickActions: string };
+
+type GeneratorMode = "generate" | "answers" | "draft";
 
 type WorkshopAvatar = {
   key: string;
@@ -178,6 +193,9 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   /** Edited answers to the Rückfragen, per avatar and question; untouched ones keep the Vorschlag. */
   const [answers, setAnswers] = useState<Record<string, Record<number, string>>>({});
   const [running, setRunning] = useState<string | null>(null);
+  const [runningMode, setRunningMode] = useState<GeneratorMode | null>(null);
+  /** Edits of a rejected draft, per avatar; untouched fields show the stored draft. */
+  const [draftEdits, setDraftEdits] = useState<Record<string, Partial<DraftForm>>>({});
 
   const applyPlan = useCallback((plan: AvatarPlan) => {
     setAvatarPlan(plan);
@@ -221,6 +239,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     // Another organisation: its own count and no answers carried over.
     countTouched.current = false;
     setAnswers({});
+    setDraftEdits({});
     setLoading(true);
     void refresh();
   }, [refresh]);
@@ -345,28 +364,63 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   }
 
   /** One run of the avatar generator; the caller holds `busy`. */
+  function draftForm(avatar: WorkshopAvatar): DraftForm {
+    const stored = avatar.generator?.draft;
+    const edits = draftEdits[avatar.key] ?? {};
+    return {
+      promptTemplate: edits.promptTemplate ?? stored?.promptTemplate ?? "",
+      name: edits.name ?? stored?.name ?? "",
+      role: edits.role ?? stored?.role ?? "",
+      quickActions: edits.quickActions ?? (stored?.quickActions ?? []).join("\n"),
+    };
+  }
+
+  function editDraft(key: string, patch: Partial<DraftForm>) {
+    setDraftEdits((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  }
+
+  /**
+   * One run for one avatar: a new generator run, the answers to its Rückfragen, or the
+   * corrected draft („Prüfen und speichern“, no model call). The caller holds `busy`.
+   */
   async function runGenerator(
     avatar: WorkshopAvatar,
-    withAnswers: boolean,
+    mode: GeneratorMode,
   ): Promise<{ outcome: GenerateOutcome; message?: string }> {
     setRunning(avatar.key);
+    setRunningMode(mode);
     setAvatarError(null);
     try {
       const given =
-        withAnswers && avatar.generator?.status === "rueckfragen"
+        mode === "answers" && avatar.generator?.status === "rueckfragen"
           ? avatar.generator.rueckfragen.map((question, index) => ({
               block: question.block,
               frage: question.frage,
               antwort: (answers[avatar.key]?.[index] ?? question.vorschlag).trim(),
             }))
           : [];
+      const form = draftForm(avatar);
       const result = await postJson<{ avatarPlan?: AvatarPlan; outcome?: string }>(
         "/api/dt/workshop/avatars",
         {
           organisationId: props.organisationId,
-          action: "generate",
           avatarKey: avatar.key,
-          ...(given.length > 0 ? { answers: given } : {}),
+          ...(mode === "draft"
+            ? {
+                action: "save_draft",
+                draft: {
+                  promptTemplate: form.promptTemplate,
+                  name: form.name.trim(),
+                  role: form.role.trim(),
+                  icon: avatar.generator?.draft?.icon ?? "",
+                  quickActions: form.quickActions
+                    .split("\n")
+                    .map((line) => line.replace(/^\s*[-*•]\s*/, "").trim())
+                    .filter(Boolean)
+                    .slice(0, 12),
+                },
+              }
+            : { action: "generate", ...(given.length > 0 ? { answers: given } : {}) }),
         },
       );
       if (!result.ok) {
@@ -380,19 +434,25 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
         delete next[avatar.key];
         return next;
       });
+      setDraftEdits((prev) => {
+        const next = { ...prev };
+        delete next[avatar.key];
+        return next;
+      });
       const outcome = result.json.outcome;
       return outcome === "created" || outcome === "updated" || outcome === "rueckfragen" || outcome === "invalid"
         ? { outcome }
         : { outcome: "failed", message: "Der Avatar-Schritt hat nichts zurückgegeben." };
     } finally {
       setRunning(null);
+      setRunningMode(null);
     }
   }
 
-  async function generateOne(avatar: WorkshopAvatar, withAnswers: boolean) {
+  async function generateOne(avatar: WorkshopAvatar, mode: GeneratorMode) {
     setBusy(`generate:${avatar.key}`);
     try {
-      const { outcome, message } = await runGenerator(avatar, withAnswers);
+      const { outcome, message } = await runGenerator(avatar, mode);
       const title = titles[avatar.key] ?? avatar.title;
       if (outcome === "created") toast.success(`${title}: Avatar erstellt. Er steht jetzt in Agenten.`);
       else if (outcome === "updated") toast.success(`${title}: Avatar aktualisiert.`);
@@ -414,7 +474,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     const counts = { done: 0, rueckfragen: 0, invalid: 0, failed: 0 };
     try {
       for (const avatar of pending) {
-        const { outcome } = await runGenerator(avatar, false);
+        const { outcome } = await runGenerator(avatar, "generate");
         if (outcome === "created" || outcome === "updated") counts.done += 1;
         else counts[outcome] += 1;
       }
@@ -905,9 +965,9 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                             type="button"
                             size="sm"
                             disabled={busy != null || missingSummaries.length > 0}
-                            onClick={() => void generateOne(avatar, true)}
+                            onClick={() => void generateOne(avatar, "answers")}
                           >
-                            {running === avatar.key ? (
+                            {running === avatar.key && runningMode !== "draft" ? (
                               <Loader2 className="size-3.5 animate-spin" aria-hidden />
                             ) : null}
                             {avatar.agentId
@@ -925,7 +985,73 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                             <li key={errorIndex}>{message}</li>
                           ))}
                         </ul>
+                        <p className="text-xs text-secondary">
+                          {avatar.agentId
+                            ? "Der Avatar in Agenten bleibt unverändert. "
+                            : ""}
+                          {generator.draft
+                            ? "Den Entwurf unten an diesen Stellen korrigieren und prüfen lassen, oder neu erzeugen."
+                            : "Neu erzeugen; die Fehler gehen dabei an die KI mit."}
+                        </p>
                       </div>
+                    ) : null}
+                    {avatarPlan.status === "approved" && generator?.status === "fehler" && generator.draft ? (
+                      <details className="rounded-lg border border-sbkm-navy/10 px-3 py-2 dark:border-white/10">
+                        <summary className="cursor-pointer text-sm font-medium text-primary">
+                          Entwurf ansehen und selbst korrigieren
+                        </summary>
+                        <div className="mt-3 grid gap-3">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="grid gap-1 text-sm">
+                              <span className="text-xs font-medium text-secondary">Name</span>
+                              <Input
+                                value={draftForm(avatar).name}
+                                onChange={(event) => editDraft(avatar.key, { name: event.target.value })}
+                              />
+                            </label>
+                            <label className="grid gap-1 text-sm">
+                              <span className="text-xs font-medium text-secondary">Rolle</span>
+                              <Input
+                                value={draftForm(avatar).role}
+                                onChange={(event) => editDraft(avatar.key, { role: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                          <label className="grid gap-1 text-sm">
+                            <span className="text-xs font-medium text-secondary">
+                              Quick Actions (eine pro Zeile, 4 bis 6)
+                            </span>
+                            <Textarea
+                              value={draftForm(avatar).quickActions}
+                              onChange={(event) => editDraft(avatar.key, { quickActions: event.target.value })}
+                              className="min-h-[110px]"
+                            />
+                          </label>
+                          <label className="grid gap-1 text-sm">
+                            <span className="text-xs font-medium text-secondary">Avatar-Text</span>
+                            <Textarea
+                              value={draftForm(avatar).promptTemplate}
+                              onChange={(event) => editDraft(avatar.key, { promptTemplate: event.target.value })}
+                              className="min-h-[420px] font-mono text-xs leading-relaxed"
+                            />
+                          </label>
+                          <div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={busy != null || !draftForm(avatar).promptTemplate.trim()}
+                              onClick={() => void generateOne(avatar, "draft")}
+                            >
+                              {running === avatar.key && runningMode === "draft" ? (
+                                <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                              ) : (
+                                <CheckCircle2 className="size-3.5" aria-hidden />
+                              )}
+                              {avatar.agentId ? "Prüfen und Avatar aktualisieren" : "Prüfen und speichern"}
+                            </Button>
+                          </div>
+                        </div>
+                      </details>
                     ) : null}
                     {avatarPlan.status === "approved" ? (
                       <div className="flex flex-wrap items-center gap-2">
@@ -934,9 +1060,9 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                             type="button"
                             size="sm"
                             disabled={busy != null || missingSummaries.length > 0}
-                            onClick={() => void generateOne(avatar, false)}
+                            onClick={() => void generateOne(avatar, "generate")}
                           >
-                            {running === avatar.key ? (
+                            {running === avatar.key && runningMode !== "draft" ? (
                               <Loader2 className="size-3.5 animate-spin" aria-hidden />
                             ) : null}
                             {generator?.status === "fehler"
@@ -959,7 +1085,9 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                     {running === avatar.key ? (
                       <p className="flex items-center gap-2 text-sm text-primary">
                         <Loader2 className="size-4 animate-spin" aria-hidden />
-                        Der Avatar wird erzeugt und geprüft. Das kann einige Minuten dauern.
+                        {runningMode === "draft"
+                          ? "Der Entwurf wird geprüft und gespeichert."
+                          : "Der Avatar wird erzeugt und geprüft. Das kann einige Minuten dauern."}
                       </p>
                     ) : null}
                     {meta ? (

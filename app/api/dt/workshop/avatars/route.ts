@@ -7,11 +7,14 @@ import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
 import {
   applyAvatarGeneratorResult,
   buildAvatarGeneratorUserMessage,
+  normalizeAvatarGeneratorResult,
+  otherAgentNamesFor,
+  type AvatarGeneratorResult,
   type OrgAgentRow,
 } from "@/lib/dt/transcripts/avatar-generator";
 import { loadAvatarGeneratorPrompt } from "@/lib/dt/transcripts/avatar-generator-prompt-db";
 import {
-  generateAvatar,
+  generateCheckedAvatar,
   proposeAvatarPlan,
   workshopFailureMessage,
 } from "@/lib/dt/transcripts/workshop-llm";
@@ -32,9 +35,12 @@ import {
 
 export const maxDuration = 300;
 
+/** No fix round of the generator starts later than this after the request began. */
+const FIX_DEADLINE_MS = 220_000;
+
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  action: z.enum(["plan", "approve", "generate"]),
+  action: z.enum(["plan", "approve", "generate", "save_draft"]),
   avatarKey: z.string().min(1).max(48).optional(),
   /** „Anzahl Avatare“ of the plan. */
   count: z.number().int().min(AVATAR_PLAN_MIN).max(AVATAR_PLAN_MAX).optional(),
@@ -54,6 +60,16 @@ const bodySchema = z.object({
       }),
     )
     .max(40)
+    .optional(),
+  /** „Prüfen und speichern“: the rejected draft as the team corrected it. */
+  draft: z
+    .object({
+      promptTemplate: z.string().min(1).max(60_000),
+      name: z.string().max(80),
+      role: z.string().max(200),
+      icon: z.string().max(16),
+      quickActions: z.array(z.string().max(160)).max(12),
+    })
     .optional(),
 });
 
@@ -75,6 +91,7 @@ async function recordUsage(
 }
 
 export async function POST(req: Request) {
+  const startedAt = Date.now();
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
     return NextResponse.json({ ok: false, message: "Nicht angemeldet." }, { status: 401 });
@@ -166,6 +183,7 @@ export async function POST(req: Request) {
     }
 
     // generate: one avatar of the approved plan → Rückfragen, or a checked prompt in Agenten.
+    // save_draft: the rejected draft as corrected by the team, checked by the same rules.
     if (state.avatarPlan.status !== "approved") {
       return NextResponse.json(
         { ok: false, message: "Bitte zuerst den Avatar-Plan freigeben." },
@@ -183,33 +201,51 @@ export async function POST(req: Request) {
       .eq("organisation_id", organisationId);
     if (agentsError) throw new Error(agentsError.message);
     const agents = (agentRows ?? []) as OrgAgentRow[];
-    const ownAgent = avatar.agentId ? agents.find((agent) => agent.id === avatar.agentId) : null;
+    const ownAgent = avatar.agentId ? (agents.find((agent) => agent.id === avatar.agentId) ?? null) : null;
 
-    const antworten = mergeAntworten(
-      avatar.generator?.antworten ?? [],
-      normalizeAntworten(parsed.data.answers ?? []),
-    );
-    const previousErrors = avatar.generator?.status === "fehler" ? avatar.generator.errors : [];
-    const system = await loadAvatarGeneratorPrompt(organisationName);
-    const user = buildAvatarGeneratorUserMessage({
-      organisationName,
-      avatar,
-      otherTitles: plan.avatars.filter((item) => item.key !== avatar.key).map((item) => item.title),
-      notWanted: plan.notWanted,
-      existingAgentNames: agents.map((agent) => agent.name),
-      ownAgentName: ownAgent?.name ?? null,
-      sources: state.sources,
-      anbieterItems: state.anbieter.items,
-      antworten,
-      previousErrors,
-    });
-    const generated = await generateAvatar({ system, user });
-    await recordUsage(auth.supabase, organisationId, auth.userId, generated);
+    let result: AvatarGeneratorResult;
+    let antworten = avatar.generator?.antworten ?? [];
+    if (action === "save_draft") {
+      const draft = parsed.data.draft;
+      if (!draft) {
+        return NextResponse.json({ ok: false, message: "Kein Entwurf zum Speichern." }, { status: 400 });
+      }
+      result = normalizeAvatarGeneratorResult({
+        status: "fertig",
+        prompt_template: draft.promptTemplate,
+        avatar_data: { name: draft.name, role: draft.role, icon: draft.icon, quick_actions: draft.quickActions },
+        meta: avatar.generator?.draft?.meta ?? null,
+      });
+    } else {
+      antworten = mergeAntworten(antworten, normalizeAntworten(parsed.data.answers ?? []));
+      const previousErrors = avatar.generator?.status === "fehler" ? avatar.generator.errors : [];
+      const system = await loadAvatarGeneratorPrompt(organisationName);
+      const user = buildAvatarGeneratorUserMessage({
+        organisationName,
+        avatar,
+        otherTitles: plan.avatars.filter((item) => item.key !== avatar.key).map((item) => item.title),
+        notWanted: plan.notWanted,
+        existingAgentNames: agents.map((agent) => agent.name),
+        ownAgentName: ownAgent?.name ?? null,
+        sources: state.sources,
+        anbieterItems: state.anbieter.items,
+        antworten,
+        previousErrors,
+      });
+      const generated = await generateCheckedAvatar({
+        system,
+        user,
+        otherAgentNames: otherAgentNamesFor(agents, ownAgent?.id ?? null),
+        deadline: startedAt + FIX_DEADLINE_MS,
+      });
+      await recordUsage(auth.supabase, organisationId, auth.userId, generated);
+      result = generated.result;
+    }
     const applied = await applyAvatarGeneratorResult({
       supabase: auth.supabase,
       organisationId,
       avatar,
-      result: generated.result,
+      result,
       agents,
       antworten,
     });
