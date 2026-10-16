@@ -4,7 +4,13 @@ import { ArrowRight, FileText, Loader2 } from "lucide-react";
 
 import { cn } from "@/components/dt/cn";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
-import { CONTENT_PAGE_TYPE_LABELS } from "@/lib/dt/content/page-types";
+import { DtSelect } from "@/components/dt/dt-select";
+import {
+  CONTENT_PAGE_TYPE_OPTIONS,
+  contentPageTypeLabel,
+  isContentPageType,
+  type ContentPageType,
+} from "@/lib/dt/content/page-types";
 import { formatContentDate } from "@/lib/dt/content/presentation";
 import type { ContentPageSummary } from "@/lib/dt/content/types";
 
@@ -13,6 +19,49 @@ const checkboxClass =
 
 export function isContentPageSelectable(page: ContentPageSummary): boolean {
   return page.state !== "laeuft";
+}
+
+const TYPE_OPTIONS = [...CONTENT_PAGE_TYPE_OPTIONS];
+
+/**
+ * „Seitentyp“: a select for crawl pages whose type was guessed (same control and PATCH as
+ * the drawer, not while the page runs); the label as text for pages with an Excel briefing.
+ */
+function PageTypeCell(props: {
+  page: ContentPageSummary;
+  onChange?: (page: ContentPageSummary, type: ContentPageType) => void;
+  busy: boolean;
+}) {
+  const { page } = props;
+  if (!page.type_editable || !props.onChange) {
+    return (
+      <span
+        className="text-xs font-semibold text-sbkm-navy dark:text-white/85"
+        title={page.type_editable ? undefined : "aus der Seitenstruktur"}
+      >
+        {contentPageTypeLabel(page.page_type)}
+      </span>
+    );
+  }
+  const running = page.state === "laeuft";
+  return (
+    // The select lives inside the row; a click on it never opens the page.
+    <div className="w-44" onClick={(event) => event.stopPropagation()} title={running ? "Läuft gerade – erst stoppen, dann den Seitentyp ändern" : undefined}>
+      <DtSelect
+        srLabel={`Seitentyp von ${page.name}`}
+        value={page.page_type ?? ""}
+        onValueChange={(next) => {
+          if (isContentPageType(next) && next !== page.page_type) props.onChange?.(page, next);
+        }}
+        options={TYPE_OPTIONS}
+        placeholder="Noch nicht bestimmt"
+        disabled={running || props.busy}
+        searchable={false}
+        size="sm"
+        fullWidth
+      />
+    </div>
+  );
 }
 
 export function DtContentPagesTable(props: {
@@ -25,6 +74,10 @@ export function DtContentPagesTable(props: {
   onStop?: (page: ContentPageSummary) => void;
   /** Slug whose stop request is in flight. */
   stopping?: string | null;
+  /** „Seitentyp“ chosen in the table (crawl pages without Excel briefing). */
+  onTypeChange?: (page: ContentPageSummary, type: ContentPageType) => void;
+  /** Slug whose type change is in flight. */
+  changingType?: string | null;
 }) {
   const selectable = props.pages.filter(isContentPageSelectable);
   const allSelected =
@@ -37,7 +90,7 @@ export function DtContentPagesTable(props: {
         <FileText className="mx-auto size-5 text-sbkm-ink-500" aria-hidden />
         <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Noch keine Seiten</p>
         <p className="mx-auto max-w-sm text-xs text-sbkm-ink-600 dark:text-white/60">
-          Oben unter „Seitenquelle“ die Excel-Seitenstruktur hochladen oder die Website crawlen.
+          Oben unter „Seitenquelle“ die Seitenstruktur hochladen oder die Website crawlen.
         </p>
       </div>
     );
@@ -45,7 +98,7 @@ export function DtContentPagesTable(props: {
 
   return (
     <div className="overflow-x-auto scrollbar-subtle">
-      <table className="w-full min-w-[720px] border-separate border-spacing-0 text-sm">
+      <table className="w-full min-w-[900px] border-separate border-spacing-0 text-sm">
         <thead>
           <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-500 dark:text-white/45">
             <th className="w-10 border-b border-sbkm-navy/10 px-3 py-2.5 dark:border-white/10">
@@ -62,6 +115,7 @@ export function DtContentPagesTable(props: {
               />
             </th>
             <th className="border-b border-sbkm-navy/10 px-3 py-2.5 dark:border-white/10">Seite</th>
+            <th className="border-b border-sbkm-navy/10 px-3 py-2.5 dark:border-white/10">Seitentyp</th>
             <th className="border-b border-sbkm-navy/10 px-3 py-2.5 dark:border-white/10">Status</th>
             <th className="border-b border-sbkm-navy/10 px-3 py-2.5 text-right dark:border-white/10">Kosten</th>
             <th className="border-b border-sbkm-navy/10 px-3 py-2.5 text-right dark:border-white/10">Fragen</th>
@@ -119,23 +173,6 @@ export function DtContentPagesTable(props: {
                           Crawl
                         </span>
                       ) : null}
-                      {page.page_type === "nicht_bearbeiten" || page.page_type === "ratgeber" ? (
-                        <span
-                          className={cn(
-                            "shrink-0 rounded-pill px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-                            page.page_type === "nicht_bearbeiten"
-                              ? "bg-sbkm-navy/[0.06] text-sbkm-ink-500 dark:bg-white/10 dark:text-white/45"
-                              : "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-200",
-                          )}
-                          title={
-                            page.page_type === "nicht_bearbeiten"
-                              ? "Impressum, Datenschutz, Kontakt und Co. bekommen keinen Text. Der Seitentyp lässt sich im Seitenfenster ändern."
-                              : "Ratgeberartikel: informationell, ohne harten Verkauf"
-                          }
-                        >
-                          {CONTENT_PAGE_TYPE_LABELS[page.page_type]}
-                        </span>
-                      ) : null}
                     </span>
                     {page.source_url || page.path ? (
                       <span
@@ -153,6 +190,9 @@ export function DtContentPagesTable(props: {
                       </span>
                     ) : null}
                   </div>
+                </td>
+                <td className="border-b border-sbkm-navy/8 px-3 py-3 align-middle dark:border-white/8">
+                  <PageTypeCell page={page} onChange={props.onTypeChange} busy={props.changingType === page.slug} />
                 </td>
                 <td className="border-b border-sbkm-navy/8 px-3 py-3 align-middle dark:border-white/8">
                   <div className="grid gap-1">

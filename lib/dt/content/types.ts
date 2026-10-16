@@ -44,6 +44,11 @@ export type ContentPageSummary = {
   /** Which writing variant the SEO step uses; null for rows from before the briefing migration. */
   page_type: ContentPageType | null;
   page_role: ContentPageRole | null;
+  /**
+   * Whether the table and the drawer offer the Seitentyp select: a crawl page whose type was
+   * guessed. Pages with an Excel briefing keep the Excel type (`canEditContentPageType`).
+   */
+  type_editable: boolean;
   /** Real Google questions from the Excel (Spalte H). */
   user_questions: number;
   started: boolean;
@@ -351,7 +356,7 @@ export type ContentToolResetResult = {
 export type ContentTypePromptsResult = {
   prompts: ContentTypePrompts;
   defaults: ContentTypePrompts;
-  storage: "db" | "defaults" | "missing_table" | "missing_columns";
+  storage: "db" | "defaults" | "missing_table" | "missing_columns" | "missing_hauptseite";
   updated_at: string | null;
   updated_by_email: string | null;
   /** Set when the table is missing: which migration to run. */

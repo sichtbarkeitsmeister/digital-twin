@@ -53,7 +53,7 @@ export const SEO_TOOL_JOB_KIND = "text-tool.seo";
 export const SEO_TOOL_USAGE_MODE = "text-tool.seo";
 
 /** The page types the dropdown offers („Nicht bearbeiten“ has no Textvorlage and no text). */
-export const SEO_TOOL_PAGE_TYPES = ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const satisfies readonly ContentPageType[];
+export const SEO_TOOL_PAGE_TYPES = ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const satisfies readonly ContentPageType[];
 export type SeoToolPageType = (typeof SEO_TOOL_PAGE_TYPES)[number];
 
 export const SEO_TOOL_MAX_NOTES_CHARS = 4_000;
@@ -242,7 +242,7 @@ export function materialTextFromBlocks(blocks: readonly ContentTextBlock[]): str
 
 /** The level the prompt reports (0 = Startseite): a Hauptsilo sits on level 1, everything else below it. */
 function levelFor(pageType: SeoToolPageType): number {
-  return pageType === "hauptsilo" ? 1 : 2;
+  return pageType === "hauptsilo" || pageType === "hauptseite" ? 1 : 2;
 }
 
 function keywordsFor(payload: SeoToolContextInput["payload"]): ContentPipelineContext["page"]["keywords"] {

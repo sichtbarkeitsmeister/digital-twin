@@ -22,6 +22,7 @@ import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-car
 import { CenteredModal } from "@/components/ui/centered-modal";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
+import { CONTENT_PAGE_TYPE_LABELS, type ContentPageType } from "@/lib/dt/content/page-types";
 import {
   EMPTY_CONTENT_PAGE_FILTER,
   anyContentPageRunning,
@@ -37,6 +38,8 @@ import type {
   ContentClientPutResult,
   ContentLocalSources,
   ContentOverview,
+  ContentPagePatchResult,
+  ContentPageSummary,
   ContentReadiness,
   ContentReadinessResult,
   ContentResetResult,
@@ -98,6 +101,7 @@ export function DtContentWorkspace(props: {
   /** Which bulk action waits for the person's confirmation in the modal; „all“ is the whole tool. */
   const [confirmBulk, setConfirmBulk] = useState<"reset" | "delete" | "all" | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
+  const [changingType, setChangingType] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
   const [editingSettings, setEditingSettings] = useState(false);
   const [sync, setSync] = useState<{ result: ContentClientPutResult; sent: ContentClientPutBody } | null>(null);
@@ -250,6 +254,25 @@ export function DtContentWorkspace(props: {
       await loadOverview();
     } finally {
       setStopping(null);
+    }
+  }
+
+  /** „Seitentyp“ in the table row: the same PATCH as the drawer; the answer carries the fresh table. */
+  async function changePageType(page: ContentPageSummary, pageType: ContentPageType) {
+    setChangingType(page.slug);
+    try {
+      const res = await contentApi<ContentPagePatchResult>(`/api/dt/content/pages/${encodeURIComponent(page.slug)}`, {
+        method: "PATCH",
+        body: { organisationId, page_type: pageType },
+      });
+      if (!res.ok) {
+        toast.error(res.message);
+        return;
+      }
+      applyOverview(res.data.overview);
+      toast.success(`Seitentyp: ${CONTENT_PAGE_TYPE_LABELS[pageType]}`, { description: page.name });
+    } finally {
+      setChangingType(null);
     }
   }
 
@@ -523,6 +546,8 @@ export function DtContentWorkspace(props: {
               onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })}
               onStop={(page) => void stopPage(page.slug)}
               stopping={stopping}
+              onTypeChange={(page, pageType) => void changePageType(page, pageType)}
+              changingType={changingType}
             />
           )}
         </div>

@@ -1,6 +1,7 @@
 /**
  * Writing recipes per page type („Textvorlagen“): what the SEO step (step 2) is told about
- * a Hauptsilo-Seite, Unterseite, Ratgeberartikel, Standortseite, Startseite or Über-uns-Seite.
+ * a Hauptsilo-Seite, Hauptseite, Unterseite, Ratgeberartikel, Standortseite, Startseite or
+ * Über-uns-Seite.
  * The general rules for every type live in the Texter prompt (Globale Prompts). These recipes
  * only say what is different for that type. One set for the whole
  * agency, stored in `dt_content_type_prompts`; the defaults below are what „Auf Standard zurücksetzen“ restores.
@@ -12,7 +13,7 @@
 
 import type { ContentPageType } from "@/lib/dt/content/page-types";
 
-export const CONTENT_TYPE_PROMPT_KEYS = ["hauptsilo", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const;
+export const CONTENT_TYPE_PROMPT_KEYS = ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const;
 export type ContentTypePromptKey = (typeof CONTENT_TYPE_PROMPT_KEYS)[number];
 export type ContentTypePrompts = Record<ContentTypePromptKey, string>;
 
@@ -59,6 +60,23 @@ Struktur:
 11. Abschluss-CTA, der auch Unentschlossene abholt.
 
 Besondere Regeln: Jede Unterseite des Silos wird verlinkt, Ankertext ist der Leistungsname. Zugehörige Ratgeber verlinken, nicht ausschreiben. Keine Links in fremde Silos außer zur Startseite, Kontakt und thematisch zwingend verwandten Seiten. Die Seite muss auch ohne Klick auf Unterseiten eine vollständige Orientierung geben. Fehlende Unterthemen nicht ausfüllen, sondern nur verlinken, wenn es die Seite schon gibt.`,
+  hauptseite: `Seitentyp Hauptseite. Die Seite ist die zentrale Seite für genau ein Angebot, zu dem es keine Unterseiten gibt. Der Besucher bekommt hier das ganze Angebot auf einer Seite: welches Problem es löst, für wen es gedacht ist, was enthalten ist, wie es abläuft, was es kostet und was er als Nächstes tun kann. Sie ist keine Startseite und keine Silo-Übersicht.
+
+Pflicht-Inputs: Angebot, Haupt- und Nebenkeywords; Zielgruppe und typischer Anlass; Leistungsumfang (was enthalten ist und was nicht); Ablauf aus Kundensicht; Preisinformationen, soweit in den Fakten; Beweise, Garantien und Zertifikate zu diesem Angebot; Conversion-Ziel und Kontaktweg; verwandte Seiten, die es bereits gibt. Fehlt etwas, Platzhalter.
+
+Struktur:
+1. H1, Subheadline, Kurzzusammenfassung und Einleitung nach der allgemeinen Regel. Die Subheadline nennt das Ergebnis dieses Angebots.
+2. Für wen das Angebot gedacht ist und in welcher Situation. Konkrete Auslöser.
+3. Was das Angebot löst: Ausgangslage des Kunden und Ergebnis.
+4. Leistungsumfang vollständig. Was enthalten ist und was nicht. Alle Bestandteile hier erklären, nichts auf Unterseiten auslagern.
+5. Ablauf Schritt für Schritt aus Kundensicht, mit Dauer nur wenn sie in den Fakten steht. Was der Kunde selbst tun muss.
+6. Kosten. Einflussfaktoren plus Preisrahmen nur aus den Fakten. Direkt danach ein sekundärer CTA.
+7. Die 2–4 häufigsten Einwände zu diesem Angebot, jeweils mit Beweis oder Garantie aus den Fakten.
+8. Beweise: Praxisbeispiel (echt oder als „typischer Fall“ gekennzeichnet) und Kundenstimmen, nur echte.
+9. Mindestens 5 Fragen zu diesem Angebot im Fließtext.
+10. Abschluss-CTA mit konkreter nächster Handlung und minimalem Aufwand für den Kunden, nur so wie es die Fakten hergeben.
+
+Besondere Regeln: Zur Startseite und zu verwandten Seiten verlinken, die es bereits gibt, nur über die erlaubten Linkziele (Marker [LINK: Seitenname]). Keine Unterseiten erfinden, keine Links auf Seiten, die es nicht gibt, kein Abschnitt, der auf erfundene Unterseiten verteilt. Kein Silo-Überblick und keine Zusammenfassung anderer Leistungen: ein anderes Angebot höchstens in einem Satz nennen und verlinken, wenn es seine Seite gibt. Grundlagenfragen an vorhandene Ratgeber verlinken statt ausschreiben. Tiefe zu diesem einen Angebot vor Breite.`,
   unterseite: `Seitentyp Unterseite innerhalb des Hauptsilos „[Hauptsilo]“. Die Seite verkauft genau eine Leistung. Der Besucher weiß bereits, was er braucht, und prüft: Können die das, wie läuft es ab, was kostet es, was muss ich tun? Das Silo wird nicht noch einmal aufgerollt.
 
 Pflicht-Inputs: Leistung, Haupt- und Nebenkeywords; übergeordnete Silo-Seite und verwandte Unterseiten; Leistungsumfang (was enthalten ist und was nicht); Ablauf aus Kundensicht; Preisinformationen, soweit in den Fakten; Besonderheiten, Garantien, Zertifikate zu dieser Leistung; Conversion-Ziel. Fehlt etwas, Platzhalter.
@@ -119,6 +137,7 @@ Besondere Regeln: Fakten müssen zu den übrigen Anbieterfakten passen. Keine Fl
 
 export const CONTENT_TYPE_PROMPT_LABELS: Record<ContentTypePromptKey, string> = {
   hauptsilo: "Hauptsilo-Seite",
+  hauptseite: "Hauptseite",
   unterseite: "Unterseite",
   ratgeber: "Ratgeberartikel",
   standort: "Standortseite",
@@ -129,10 +148,11 @@ export const CONTENT_TYPE_PROMPT_LABELS: Record<ContentTypePromptKey, string> = 
 /** One line under each textarea of the „Textvorlagen“ card. */
 export const CONTENT_TYPE_PROMPT_HELP: Record<ContentTypePromptKey, string> = {
   hauptsilo: "Übersicht zum großen Thema, Unterthemen nur anreißen und verlinken.",
+  hauptseite: "Eine Leistung als eigene Hauptseite, ohne Unterseiten.",
   unterseite: "Ein Unterthema in der Tiefe, immer zurück zum Hauptsilo verlinken.",
   ratgeber: "Hilfe-Artikel, Fragen beantworten, nicht hart verkaufen.",
   standort: "Leistung an einem Ort.",
-  startseite: "Die Hauptseite der Website.",
+  startseite: "Die Startseite der Website.",
   ueber_uns: "Die Seite über das Unternehmen.",
 };
 

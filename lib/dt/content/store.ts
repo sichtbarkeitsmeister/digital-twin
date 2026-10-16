@@ -158,7 +158,8 @@ export const CONTENT_SOURCE_MIGRATION_FILE = "database/migrations/20261008_dt_co
 export const CONTENT_BRIEFING_MIGRATION_FILE = "database/migrations/20261009_dt_content_excel_briefing.sql";
 export const CONTENT_NINE_STEPS_MIGRATION_FILE = "database/migrations/20261011_dt_content_nine_steps.sql";
 export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
-export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261015_dt_content_startseite_ueber_uns.sql";
+/** The latest migration that lists every page type in the CHECK of `dt_content_pages.page_type`. */
+export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
 
 /** 23514 on the step CHECK: the database still allows steps 1 … 8 only (migration 20261011 never ran). */
 export function isContentStepRangeError(error: { code?: string; message?: string } | null | undefined): boolean {
@@ -172,7 +173,7 @@ export function isContentBrancheCheckError(error: { code?: string; message?: str
   return error.code === "23514" && /branche_check/i.test(error.message ?? "");
 }
 
-/** 23514 on the page_type CHECK: Startseite and Über-uns-Seite are not allowed yet (migration 20261015 never ran). */
+/** 23514 on the page_type CHECK: a page type is not allowed yet (Hauptseite: migration 20261017 never ran). */
 export function isContentPageTypeCheckError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   return error.code === "23514" && /page_type/i.test(error.message ?? "");
@@ -204,7 +205,7 @@ export function contentDbErrorMessage(error: { code?: string; message?: string }
     return `Die Datenbank erlaubt für die Branche noch nur drei feste Werte: Bitte ${CONTENT_BRANCHE_TEXT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
   if (isContentPageTypeCheckError(error)) {
-    return `Die Datenbank kennt die Seitentypen Startseite und Über-uns-Seite noch nicht: Bitte ${CONTENT_PAGE_TYPES_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+    return `Die Datenbank kennt noch nicht alle Seitentypen (Hauptseite): Bitte ${CONTENT_PAGE_TYPES_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
   if (isMissingContentColumnError(error)) {
     return `Die Datenbank ist noch nicht auf dem neuesten Stand: Bitte ${CONTENT_BRIEFING_MIGRATION_FILE} (und, falls noch nicht geschehen, ${CONTENT_SOURCE_MIGRATION_FILE}) einmal im Supabase SQL Editor ausführen.`;
@@ -1021,6 +1022,7 @@ export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}):
     main_keyword: page.keywords?.main.text ?? page.main_keyword,
     page_type: page.page_type,
     page_role: page.page_role,
+    type_editable: canEditContentPageType(page),
     user_questions: page.user_questions.length,
     started: page.state !== "nicht_begonnen",
     state: page.state,

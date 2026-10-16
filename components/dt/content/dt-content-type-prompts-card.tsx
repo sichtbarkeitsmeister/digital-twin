@@ -89,7 +89,7 @@ export function DtContentTypePromptsCard() {
 
   async function resetToDefaults() {
     if (busy) return;
-    if (!window.confirm("Alle sechs Textvorlagen auf den Standard zurücksetzen? Eigene Formulierungen gehen verloren.")) return;
+    if (!window.confirm("Alle sieben Textvorlagen auf den Standard zurücksetzen? Eigene Formulierungen gehen verloren.")) return;
     setBusy("reset");
     try {
       const res = await contentApi<ContentTypePromptsResult>(ENDPOINT, { method: "PUT", body: { reset: true } });
@@ -111,7 +111,7 @@ export function DtContentTypePromptsCard() {
         <div className="grid gap-0.5">
           <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Textvorlagen</h2>
           <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
-            Wie der SEO-Schritt die sechs Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren
+            Wie der SEO-Schritt die sieben Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren
             eigenen Seitentyp. Die allgemeinen Regeln stehen im Text-Prompt direkt darüber.
           </p>
         </div>
