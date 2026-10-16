@@ -16,6 +16,8 @@ Captured via MCP on 2026-05-28. Source of truth for Phase 7 migration into **NEW
 | `archived_sessions` | 5 | **off** | Archived chat session ids |
 
 > Six tables have RLS disabled on OLD — data was readable with the anon key (security risk on legacy project).
+>
+> **Fix (Security Advisor, 7 errors):** this is the OLD production project *digitaltwin n8n Workflow*, not NEW. Anyone with the public anon key (embedded in the legacy WordPress pages) can currently CRUD those six tables. Do **not** add `USING (true)` policies — that only silences the linter. Cut over to the NEW portal, then run `scripts/lock-down-old-supabase-rls.sql` in the OLD SQL Editor (enables RLS, revokes `anon`/`authenticated`, leaves `service_role` / n8n working). Rerun the linter. Rotate the OLD anon key if WordPress is dead. Do **not** run that SQL on NEW.
 
 ## Chat volume by `client`
 
