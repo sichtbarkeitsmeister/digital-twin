@@ -1,5 +1,5 @@
 /**
- * Workshop corpus: order, fingerprint, checklist, SEO text.
+ * Workshop corpus: order, fingerprint, checklist, SEO text, saved summaries, plan input.
  * Run: npx tsx scripts/test-workshop-corpus.ts
  */
 import assert from "node:assert/strict";
@@ -13,13 +13,17 @@ import {
   avatarShortRole,
   ensureAvatarIntroducesSelf,
 } from "../lib/dt/transcripts/avatar-value";
+import { anbieterHasSavedPoints } from "../lib/dt/transcripts/anbieter-markdown";
 import {
   isMarkdownTranscriptFilename,
+  markdownDownloadName,
   resolveTranscriptReading,
+  transcriptSummaryMarkdown,
 } from "../lib/dt/transcripts/markdown-file";
 import {
   ANBIETER_POINTS,
   buildCorpusPrompt,
+  buildSummaryCorpusPrompt,
   buildCurrentAnbieterMarkdown,
   corpusFingerprint,
   describeAnbieterStand,
@@ -29,11 +33,13 @@ import {
   normalizeDossier,
   forgetMissingAvatarAgents,
   isMissingAgentError,
+  missingSummaryMessage,
   normalizePreview,
   orderWorkshopSources,
   readAnbieterState,
   readAvatarPlan,
   sectionStatus,
+  sourcesWithoutSummary,
   type WorkshopSource,
 } from "../lib/dt/transcripts/workshop-model";
 
@@ -426,12 +432,14 @@ function testMissingAgentLink() {
     approvedFingerprint: "abc",
     revisionNote: "",
     notWanted: "",
+    hinweis: "",
     avatars: [
       {
         key: "a",
         title: "Geschäftsführer ohne eigene IT",
         whySeparate: "",
         cases: [],
+        generator: null,
         dossier: null,
         preview: null,
         agentId: gone,
@@ -441,6 +449,7 @@ function testMissingAgentLink() {
         title: "Zweiter",
         whySeparate: "",
         cases: [],
+        generator: null,
         dossier: null,
         preview: null,
         agentId: live,
@@ -499,6 +508,169 @@ function testAvatarPromptKeepsDossier() {
   console.log("avatar prompt keeps dossier: ok");
 }
 
+function testSavedSummaryReading() {
+  // Pasted summary: source_kind "summary", no .md name, empty summary column → the body is the summary.
+  const pasted = "Zusammenfassung Workshop: Festpreis pro Treppenhaus, Start nach zwei Wochen.";
+  for (const filename of [null, "Notizen Workshop.txt"]) {
+    for (const summary of [null, "", "   "]) {
+      const reading = resolveTranscriptReading({ filename, sourceKind: "summary", summary, rawText: pasted });
+      assert.equal(reading.sourceKind, "summary");
+      assert.equal(reading.summary, pasted);
+    }
+  }
+  // A saved summary column wins; a raw transcript without one stays without one.
+  assert.equal(
+    resolveTranscriptReading({ filename: null, sourceKind: "summary", summary: "Gespeichert", rawText: pasted }).summary,
+    "Gespeichert",
+  );
+  assert.equal(
+    resolveTranscriptReading({ filename: "call.txt", sourceKind: "raw", summary: null, rawText: "Wortlaut" }).summary,
+    null,
+  );
+
+  assert.equal(markdownDownloadName("Müller & Söhne: Auftakt"), "mueller-soehne-auftakt.md");
+  assert.equal(markdownDownloadName("   "), "zusammenfassung.md");
+  assert.equal(
+    transcriptSummaryMarkdown({ title: "Auftakt", filename: null, spokenOn: "2026-09-01", summary: "Festpreis.\n" }),
+    "# Auftakt\n\nGespräch vom 01.09.2026\n\nFestpreis.\n",
+  );
+  console.log("saved summary reading: ok");
+}
+
+function testAnbieterSavedAt() {
+  const savedAt = "2026-10-01T09:30:00.000Z";
+  const stored = {
+    sourceFingerprint: "old",
+    approvedFingerprint: "old",
+    revisionNote: "",
+    savedAt,
+    items: [
+      { key: "unternehmen", label: "Unternehmen & Kern", current: "Malerbetrieb aus Mülheim" },
+      { key: "preis", label: "Preis & Positionierung", current: "" },
+    ],
+  };
+  // The Bestand changed since: the section is stale, the saved points and savedAt stay.
+  const stale = readAnbieterState(stored, "new");
+  assert.equal(stale.status, "stale");
+  assert.equal(stale.savedAt, savedAt);
+  assert.equal(anbieterHasSavedPoints(stale.items), true);
+  assert.equal(stale.items.find((item) => item.key === "unternehmen")?.current, "Malerbetrieb aus Mülheim");
+  assert.equal(stale.items.find((item) => item.key === "preis")?.current, "");
+  const markdown = buildCurrentAnbieterMarkdown({ organisationName: "Malerei Hoffmann", items: stale.items });
+  assert.match(markdown, /## Unternehmen & Kern\nMalerbetrieb aus Mülheim/);
+  assert.match(markdown, /- Preis & Positionierung/);
+
+  for (const status of ["approved", "proposed"] as const) {
+    const state = readAnbieterState(
+      { ...stored, approvedFingerprint: status === "approved" ? "old" : null },
+      "old",
+    );
+    assert.equal(state.status, status);
+    assert.equal(state.savedAt, savedAt);
+    assert.equal(anbieterHasSavedPoints(state.items), true);
+  }
+  // Older rows without savedAt, or garbage, read as unknown.
+  assert.equal(readAnbieterState({ ...stored, savedAt: undefined }, "old").savedAt, null);
+  assert.equal(readAnbieterState({ ...stored, savedAt: "gestern" }, "old").savedAt, null);
+  assert.equal(anbieterHasSavedPoints(normalizeAnbieterItems([])), false);
+  console.log("anbieter savedAt + stale points: ok");
+}
+
+function testSummaryOnlyPlanInput() {
+  const sources = [
+    source({
+      id: "late",
+      spokenOn: "2026-09-20",
+      title: "Folgegespräch",
+      summary: "Hausverwaltungen wollen Festpreise.",
+      rawText: "ROHTEXT-SPÄT Wortlaut",
+    }),
+    source({
+      id: "early",
+      spokenOn: "2026-09-01",
+      title: "Auftakt",
+      sourceKind: "summary",
+      summary: "Privatkunden mit Altbau.",
+      rawText: "Privatkunden mit Altbau.",
+    }),
+  ];
+  const prompt = buildSummaryCorpusPrompt(sources, [
+    { label: "Unternehmen & Kern", current: "Malerbetrieb aus Mülheim" },
+    { label: "Preis & Positionierung", current: "" },
+  ]);
+  assert.ok(prompt.indexOf("Auftakt") < prompt.indexOf("Folgegespräch"));
+  assert.match(prompt, /Privatkunden mit Altbau\./);
+  assert.match(prompt, /Hausverwaltungen wollen Festpreise\./);
+  assert.equal(prompt.includes("ROHTEXT-SPÄT"), false);
+  assert.equal(prompt.includes("Wortlaut"), false);
+  assert.match(prompt, /# Anbieterstand \(gespeicherte Punkte\)\n\n### Unternehmen & Kern\nMalerbetrieb aus Mülheim/);
+  assert.equal(prompt.includes("Preis & Positionierung"), false);
+  // Without Anbieter points no Anbieter section.
+  assert.equal(buildSummaryCorpusPrompt(sources, []).includes("Anbieterstand"), false);
+
+  // A raw conversation without a summary blocks, named in conversation order.
+  const missing = sourcesWithoutSummary([
+    ...sources,
+    source({ id: "raw-b", spokenOn: "2026-09-25", title: "Telefonat", summary: null, rawText: "nur Wortlaut" }),
+    source({ id: "raw-a", spokenOn: "2026-09-10", title: "Rundgang", summary: "  ", rawText: "nur Wortlaut" }),
+  ]);
+  assert.deepEqual(
+    missing.map((item) => item.id),
+    ["raw-a", "raw-b"],
+  );
+  assert.equal(
+    missingSummaryMessage(missing),
+    "Diese Gespräche haben noch keine Zusammenfassung: 10.09.2026 · Rundgang, 25.09.2026 · Telefonat. Bitte zuerst zusammenfassen.",
+  );
+  assert.deepEqual(sourcesWithoutSummary(sources), []);
+  console.log("plan input uses summaries only: ok");
+}
+
+function testGeneratorStateRestore() {
+  const stored = readAvatarPlan(
+    {
+      sourceFingerprint: "abc",
+      approvedFingerprint: "abc",
+      notWanted: "",
+      hinweis: "Avatar 2 und 3 überschneiden sich beim Anlass.",
+      avatars: [
+        {
+          key: "verwaltung",
+          title: "Hausverwaltung mit mehreren Objekten",
+          whySeparate: "",
+          cases: [],
+          generator: {
+            status: "rueckfragen",
+            rueckfragen: [{ block: "WER DU BIST", frage: "Soll ich 46 nehmen?", vorschlag: "46" }],
+            antworten: [{ block: "ANREDE", frage: "Du oder Sie?", antwort: "Du" }],
+            meta: null,
+            errors: [],
+            updatedAt: "2026-10-01T10:00:00.000Z",
+          },
+          // An old Akte stays readable.
+          dossier: { narrative: "Alte Akte" },
+          agentId: null,
+        },
+      ],
+    },
+    "abc",
+  );
+  assert.equal(stored.hinweis, "Avatar 2 und 3 überschneiden sich beim Anlass.");
+  assert.equal(stored.avatars[0]?.generator?.status, "rueckfragen");
+  assert.equal(stored.avatars[0]?.generator?.rueckfragen[0]?.vorschlag, "46");
+  assert.equal(stored.avatars[0]?.generator?.antworten[0]?.antwort, "Du");
+  assert.equal(stored.avatars[0]?.dossier?.narrative, "Alte Akte");
+  // A new plan keeps the generator state of an avatar with the same title.
+  const replanned = normalizeAvatarPlan([{ title: "Hausverwaltung mit mehreren Objekten" }], stored.avatars);
+  assert.equal(replanned[0]?.generator?.status, "rueckfragen");
+  assert.equal(readAvatarPlan({}, "abc").hinweis, "");
+  console.log("generator state restore: ok");
+}
+
 testMissingAgentLink();
 testAvatarPromptKeepsDossier();
+testSavedSummaryReading();
+testAnbieterSavedAt();
+testSummaryOnlyPlanInput();
+testGeneratorStateRestore();
 console.log("workshop corpus: all ok");

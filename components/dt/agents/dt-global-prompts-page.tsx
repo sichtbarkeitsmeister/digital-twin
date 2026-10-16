@@ -10,11 +10,16 @@ import {
 import { DtContentStepPromptCards } from "@/components/dt/content/dt-content-step-prompt-cards";
 import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-card";
 import { checklistToText } from "@/lib/dt/seo/seo-checklist";
+import { DEFAULT_AVATAR_GENERATOR_PROMPT } from "@/lib/dt/transcripts/avatar-generator-prompt";
 
 const EMPTY_PROMPTS: GlobalPrompts = {
   default: "",
   seo_advisor: "",
+  avatar_generator: DEFAULT_AVATAR_GENERATOR_PROMPT,
 };
+
+/** Built-in defaults: an empty or missing row means this text at runtime. */
+const PROMPT_DEFAULTS: Partial<GlobalPrompts> = { avatar_generator: DEFAULT_AVATAR_GENERATOR_PROMPT };
 
 export function DtGlobalPromptsPage() {
   const [loading, setLoading] = useState(true);
@@ -42,6 +47,7 @@ export function DtGlobalPromptsPage() {
     const next: GlobalPrompts = {
       default: globalJson.prompts.default ?? "",
       seo_advisor: globalJson.prompts.seo_advisor ?? "",
+      avatar_generator: globalJson.prompts.avatar_generator?.trim() || DEFAULT_AVATAR_GENERATOR_PROMPT,
     };
     setSaved(next);
     setDrafts(next);
@@ -77,21 +83,30 @@ export function DtGlobalPromptsPage() {
     };
   }, [load]);
 
-  async function savePrompt(slug: keyof GlobalPrompts) {
+  async function savePrompt(slug: keyof GlobalPrompts, text: string = drafts[slug]) {
     setBusy(true);
     const res = await fetch("/api/dt/agents/default-prompt", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug, prompt: drafts[slug] }),
+      body: JSON.stringify({ slug, prompt: text }),
     });
     const json = (await res.json()) as { ok?: boolean; message?: string };
     setBusy(false);
     if (!json.ok) {
       toast.error(json.message ?? "Globaler Prompt konnte nicht gespeichert werden.");
-      return;
+      return false;
     }
-    setSaved((prev) => ({ ...prev, [slug]: drafts[slug] }));
+    setSaved((prev) => ({ ...prev, [slug]: text }));
+    setDrafts((prev) => ({ ...prev, [slug]: text }));
     toast.success("Globaler Prompt übernommen — gilt ab sofort für alle Organisationen.");
+    return true;
+  }
+
+  async function resetPrompt(slug: keyof GlobalPrompts) {
+    const fallback = PROMPT_DEFAULTS[slug];
+    if (!fallback) return;
+    if (!window.confirm("Diesen Prompt auf den Standard zurücksetzen? Eigene Formulierungen gehen verloren.")) return;
+    await savePrompt(slug, fallback);
   }
 
   async function saveChecklist() {
@@ -145,6 +160,8 @@ export function DtGlobalPromptsPage() {
           busy={busy}
           onDraftChange={(slug, value) => setDrafts((prev) => ({ ...prev, [slug]: value }))}
           onSave={(slug) => void savePrompt(slug)}
+          onReset={(slug) => void resetPrompt(slug)}
+          isDefault={(slug) => saved[slug].trim() === (PROMPT_DEFAULTS[slug] ?? "").trim()}
           onGlobalChecklistDraftChange={setChecklistDraft}
           onSaveGlobalChecklist={() => void saveChecklist()}
         />

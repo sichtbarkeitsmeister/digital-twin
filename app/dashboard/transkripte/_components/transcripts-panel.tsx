@@ -9,9 +9,11 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { downloadMarkdown } from "@/app/dashboard/transkripte/_components/download-markdown";
 import { WORKSHOP_CHANGED_EVENT } from "@/app/dashboard/transkripte/_components/workshop-board";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +27,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isMarkdownTranscriptFilename } from "@/lib/dt/transcripts/markdown-file";
+import {
+  isMarkdownTranscriptFilename,
+  markdownDownloadName,
+  transcriptSummaryMarkdown,
+} from "@/lib/dt/transcripts/markdown-file";
 import type { DtTranscriptListItem } from "@/lib/dt/transcripts/types";
 import { readQuestionnaireFileText } from "@/lib/surveys/read-questionnaire-file-text";
 import { cn } from "@/lib/utils";
@@ -90,6 +96,7 @@ export function TranscriptsPanel(props: {
   const [sourceKind, setSourceKind] = useState<"raw" | "summary">("raw");
   const [spokenOn, setSpokenOn] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [openSummaryId, setOpenSummaryId] = useState<string | null>(null);
   const [rawById, setRawById] = useState<Record<string, string>>({});
   const [dropHighlight, setDropHighlight] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -215,8 +222,14 @@ export function TranscriptsPanel(props: {
         return;
       }
       setItems((prev) => prev.map((row) => (row.id === id ? { ...row, ...json.transcript } : row)));
-      toast.success("Zusammenfassung gespeichert. Freigaben bleiben, bis du neu auswertest.");
       notifyWorkshop();
+      // Only a row that came back with a summary counts; it opens in full right away.
+      if (!json.transcript.summary?.trim()) {
+        toast.error("Die Zusammenfassung kam leer zurück. Bitte erneut zusammenfassen.");
+        return;
+      }
+      setOpenSummaryId(id);
+      toast.success("Zusammenfassung gespeichert. Freigaben bleiben, bis du neu auswertest.");
     } catch {
       toast.error("Zusammenfassung fehlgeschlagen.");
     } finally {
@@ -446,7 +459,8 @@ export function TranscriptsPanel(props: {
                 return (
                   <li
                     key={item.id}
-                    className="rounded-xl border border-sbkm-navy/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-white/5"
+                    id={`transkript-${item.id}`}
+                    className="scroll-mt-24 rounded-xl border border-sbkm-navy/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-white/5"
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0 grid gap-1">
@@ -464,11 +478,11 @@ export function TranscriptsPanel(props: {
                           {item.rawTextChars.toLocaleString("de-DE")} Zeichen · hochgeladen{" "}
                           {formatDeDate(item.createdAt)}
                         </p>
-                        {item.summary ? (
+                        {item.summary && openSummaryId !== item.id ? (
                           <p className="line-clamp-6 whitespace-pre-wrap text-sm text-sbkm-navy/80 dark:text-white/80">
                             {item.summary}
                           </p>
-                        ) : (
+                        ) : item.summary ? null : (
                           <p className="text-xs text-secondary">Noch ohne Zusammenfassung.</p>
                         )}
                         {item.errorMessage ? (
@@ -491,6 +505,22 @@ export function TranscriptsPanel(props: {
                               <Loader2 className="size-3.5 animate-spin" aria-hidden />
                             ) : null}
                             {item.summary ? "Zusammenfassung erneuern" : "Zusammenfassen"}
+                          </Button>
+                        ) : null}
+                        {item.summary ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            aria-expanded={openSummaryId === item.id}
+                            onClick={() => setOpenSummaryId((cur) => (cur === item.id ? null : item.id))}
+                          >
+                            {openSummaryId === item.id ? (
+                              <ChevronUp className="size-3.5" aria-hidden />
+                            ) : (
+                              <ChevronDown className="size-3.5" aria-hidden />
+                            )}
+                            Zusammenfassung
                           </Button>
                         ) : null}
                         <Button
@@ -517,6 +547,39 @@ export function TranscriptsPanel(props: {
                         </Button>
                       </div>
                     </div>
+                    {openSummaryId === item.id && item.summary ? (
+                      <div className="mt-3 grid gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+                            Gespeicherte Zusammenfassung
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              downloadMarkdown(
+                                markdownDownloadName(
+                                  `${item.title || item.filename?.replace(/\.[^.]+$/, "") || "gespraech"}-zusammenfassung`,
+                                ),
+                                transcriptSummaryMarkdown({
+                                  title: item.title,
+                                  filename: item.filename,
+                                  spokenOn: item.spokenOn,
+                                  summary: item.summary ?? "",
+                                }),
+                              )
+                            }
+                          >
+                            <Download className="size-3.5" aria-hidden />
+                            Als .md herunterladen
+                          </Button>
+                        </div>
+                        <div className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm leading-relaxed text-sbkm-navy dark:text-white/90">
+                          {item.summary}
+                        </div>
+                      </div>
+                    ) : null}
                     {open ? (
                       <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-muted/50 p-3 text-[12px] leading-relaxed whitespace-pre-wrap">
                         {rawById[item.id] || "…"}

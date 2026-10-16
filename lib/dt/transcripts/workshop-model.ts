@@ -6,6 +6,7 @@ import {
   ensureAvatarIntroducesSelf,
   type AvatarValueKey,
 } from "@/lib/dt/transcripts/avatar-value";
+import { buildCurrentAnbieterMarkdown } from "@/lib/dt/transcripts/anbieter-markdown";
 import { normalizePersonaKey, slugFromPersonaName } from "@/lib/dt/transcripts/sanitize";
 
 export const WORKSHOP_CORPUS_START = "<!-- DT_WORKSHOP_CORPUS_START -->";
@@ -67,11 +68,52 @@ export type AvatarDossier = {
   outcome: string;
 } & Record<AvatarValueKey, string>;
 
+/** One question of the avatar generator before it writes the prompt. */
+export type AvatarRueckfrage = { block: string; frage: string; vorschlag: string };
+/** The reviewer's answer to a Rückfrage; it counts before the summaries. */
+export type AvatarAntwort = { block: string; frage: string; antwort: string };
+
+/** What the generator derived or could not find; only the team sees it, never the avatar. */
+export type AvatarGeneratorMeta = {
+  abgeleitet: Array<{ block: string; aussage: string; grund: string }>;
+  fehlende_daten: string[];
+  zusatzbloecke: string[];
+  offene_fragen: string[];
+};
+
+/** A finished result that broke a rule: kept so the team can see it, correct it and save it. */
+export type AvatarGeneratorDraft = {
+  promptTemplate: string;
+  name: string;
+  role: string;
+  icon: string;
+  quickActions: string[];
+  meta: AvatarGeneratorMeta | null;
+};
+
+/**
+ * The generator's state for one avatar of the plan (kept in `dt_workshop_corpus.avatar_plan`):
+ * open Rückfragen, the answers given so far, the last validation errors with the rejected
+ * draft, and the meta of the text that was saved to Agenten.
+ */
+export type AvatarGeneratorState = {
+  status: "rueckfragen" | "fehler" | "fertig";
+  rueckfragen: AvatarRueckfrage[];
+  antworten: AvatarAntwort[];
+  meta: AvatarGeneratorMeta | null;
+  errors: string[];
+  /** Only with status „fehler“: the result that was not saved. */
+  draft: AvatarGeneratorDraft | null;
+  updatedAt: string;
+};
+
 export type WorkshopAvatar = {
   key: string;
   title: string;
   whySeparate: string;
   cases: AvatarCase[];
+  /** Avatar generator (Avatar-Plan → „Avatar erstellen“); null until it ran once. */
+  generator: AvatarGeneratorState | null;
   dossier: AvatarDossier | null;
   preview: {
     name: string;
@@ -90,6 +132,8 @@ export type AnbieterState = {
   approvedFingerprint: string | null;
   revisionNote: string;
   items: AnbieterItem[];
+  /** When the points were last saved (an evaluation or a revision), ISO. Null for older rows. */
+  savedAt: string | null;
 };
 
 export type AvatarPlanState = {
@@ -98,8 +142,14 @@ export type AvatarPlanState = {
   approvedFingerprint: string | null;
   revisionNote: string;
   notWanted: string;
+  /** Set by the plan when the summaries separate fewer groups than the requested count. */
+  hinweis: string;
   avatars: WorkshopAvatar[];
 };
+
+/** Bounds of „Anzahl Avatare“ in the Avatar-Plan. */
+export const AVATAR_PLAN_MIN = 1;
+export const AVATAR_PLAN_MAX = 6;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -193,6 +243,42 @@ export function buildCorpusPrompt(sources: WorkshopSource[], options?: { rawChar
       }
       return parts.join("\n");
     })
+    .join("\n\n");
+}
+
+/** Conversations without a saved summary, in conversation order; they block plan and avatars. */
+export function sourcesWithoutSummary(sources: WorkshopSource[]): Array<{ id: string; label: string }> {
+  return orderWorkshopSources(sources)
+    .map((source, index) => ({ source, index }))
+    .filter(({ source }) => !source.summary?.trim())
+    .map(({ source, index }) => ({ id: source.id, label: sourceLabel(source, index) }));
+}
+
+export function missingSummaryMessage(missing: Array<{ label: string }>): string {
+  return `Diese Gespräche haben noch keine Zusammenfassung: ${missing.map((item) => item.label).join(", ")}. Bitte zuerst zusammenfassen.`;
+}
+
+/**
+ * Input of the Avatar-Plan and the avatar generator: only the saved summaries, every
+ * conversation in conversation order, plus the saved Anbieter points when there are any.
+ * The raw wording is never sent.
+ */
+export function buildSummaryCorpusPrompt(
+  sources: WorkshopSource[],
+  anbieterItems: Array<Pick<AnbieterItem, "label" | "current">> = [],
+): string {
+  const conversations = orderWorkshopSources(sources).map((source, index) =>
+    [`## Gespräch ${index + 1}: ${sourceLabel(source, index)}`, source.summary?.trim() || "(keine Zusammenfassung)"].join("\n"),
+  );
+  const points = anbieterItems
+    .filter((item) => item.current.trim())
+    .map((item) => `### ${item.label}\n${item.current.trim()}`);
+  return [
+    "# Zusammenfassungen der Gespräche (von alt nach neu)",
+    ...conversations,
+    points.length > 0 ? ["# Anbieterstand (gespeicherte Punkte)", ...points].join("\n\n") : "",
+  ]
+    .filter(Boolean)
     .join("\n\n");
 }
 
@@ -343,30 +429,7 @@ export function normalizeAnbieterItems(raw: unknown): AnbieterItem[] {
   });
 }
 
-export function buildCurrentAnbieterMarkdown(input: {
-  organisationName: string;
-  items: AnbieterItem[];
-}): string {
-  const filled = input.items.filter((item) => item.current.trim());
-  const open = input.items.filter((item) => !item.current.trim());
-  const lines = [
-    `Organisation: ${input.organisationName}`,
-    "Dies ist der aktuelle Stand aus allen Workshops und Gesprächen.",
-    "Spätere Aussagen haben frühere zum selben Punkt ersetzt. Nur diesen Stand verwenden. Nichts ergänzen, was hier nicht steht.",
-    "",
-  ];
-  for (const item of filled) {
-    lines.push(`## ${item.label}`, item.current.trim(), "");
-  }
-  if (open.length > 0) {
-    lines.push(
-      "## Noch offen",
-      "Diese Punkte wurden nicht belegt. Nicht erfinden:",
-      ...open.map((item) => `- ${item.label}`),
-    );
-  }
-  return lines.join("\n").trim();
-}
+export { buildCurrentAnbieterMarkdown };
 
 export function sectionStatus(input: {
   fingerprint: string;
@@ -428,11 +491,12 @@ export function normalizeAvatarPlan(raw: unknown, previous: WorkshopAvatar[] = [
       title,
       whySeparate: asString(item.whySeparate ?? item.why_separate, 800),
       cases: normalizeCases(item.cases),
+      generator: kept?.generator ?? null,
       dossier: kept?.dossier ?? null,
       preview: kept?.preview ?? null,
       agentId: kept?.agentId ?? null,
     });
-    if (avatars.length >= 6) break;
+    if (avatars.length >= AVATAR_PLAN_MAX) break;
   }
   return avatars;
 }
@@ -551,6 +615,7 @@ export function emptyAnbieterState(): AnbieterState {
     approvedFingerprint: null,
     revisionNote: "",
     items: normalizeAnbieterItems([]),
+    savedAt: null,
   };
 }
 
@@ -561,7 +626,103 @@ export function emptyAvatarPlan(): AvatarPlanState {
     approvedFingerprint: null,
     revisionNote: "",
     notWanted: "",
+    hinweis: "",
     avatars: [],
+  };
+}
+
+function textList(raw: unknown, max: number, itemMax: number): string[] {
+  return Array.isArray(raw) ? raw.map((item) => asString(item, itemMax)).filter(Boolean).slice(0, max) : [];
+}
+
+export function normalizeGeneratorMeta(raw: unknown): AvatarGeneratorMeta | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const abgeleitet = Array.isArray(record.abgeleitet)
+    ? record.abgeleitet
+        .map((row) => {
+          const item = asRecord(row);
+          if (!item) return null;
+          const aussage = asString(item.aussage, 2_000);
+          if (!aussage) return null;
+          return { block: asString(item.block, 200), aussage, grund: asString(item.grund, 2_000) };
+        })
+        .filter((row): row is { block: string; aussage: string; grund: string } => Boolean(row))
+        .slice(0, 60)
+    : [];
+  return {
+    abgeleitet,
+    fehlende_daten: textList(record.fehlende_daten, 60, 1_000),
+    zusatzbloecke: textList(record.zusatzbloecke, 30, 200),
+    offene_fragen: textList(record.offene_fragen, 60, 1_000),
+  };
+}
+
+export function normalizeRueckfragen(raw: unknown): AvatarRueckfrage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => {
+      const item = asRecord(row);
+      if (!item) return null;
+      const frage = asString(item.frage, 2_000);
+      if (!frage) return null;
+      return { block: asString(item.block, 200), frage, vorschlag: asString(item.vorschlag, 2_000) };
+    })
+    .filter((row): row is AvatarRueckfrage => Boolean(row))
+    .slice(0, 40);
+}
+
+export function normalizeAntworten(raw: unknown): AvatarAntwort[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => {
+      const item = asRecord(row);
+      if (!item) return null;
+      const frage = asString(item.frage, 2_000);
+      const antwort = asString(item.antwort, 4_000);
+      if (!frage || !antwort) return null;
+      return { block: asString(item.block, 200), frage, antwort };
+    })
+    .filter((row): row is AvatarAntwort => Boolean(row))
+    .slice(-80);
+}
+
+/** Later answers to the same question replace earlier ones; order of first appearance stays. */
+export function mergeAntworten(earlier: AvatarAntwort[], later: AvatarAntwort[]): AvatarAntwort[] {
+  const key = (item: AvatarAntwort) => `${item.block.trim().toLowerCase()}|${item.frage.trim().toLowerCase()}`;
+  const byKey = new Map<string, AvatarAntwort>();
+  for (const item of [...earlier, ...later]) byKey.set(key(item), item);
+  return [...byKey.values()].slice(-80);
+}
+
+export function normalizeGeneratorDraft(raw: unknown): AvatarGeneratorDraft | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const promptTemplate = typeof record.promptTemplate === "string" ? record.promptTemplate.trim().slice(0, 60_000) : "";
+  if (!promptTemplate) return null;
+  return {
+    promptTemplate,
+    name: asString(record.name, 80),
+    role: asString(record.role, 200),
+    icon: asString(record.icon, 16),
+    quickActions: textList(record.quickActions, 12, 160),
+    meta: normalizeGeneratorMeta(record.meta),
+  };
+}
+
+export function normalizeGeneratorState(raw: unknown): AvatarGeneratorState | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const status = record.status === "rueckfragen" || record.status === "fehler" || record.status === "fertig" ? record.status : null;
+  if (!status) return null;
+  return {
+    status,
+    rueckfragen: normalizeRueckfragen(record.rueckfragen),
+    antworten: normalizeAntworten(record.antworten),
+    meta: normalizeGeneratorMeta(record.meta),
+    errors: textList(record.errors, 40, 1_000),
+    draft: status === "fehler" ? normalizeGeneratorDraft(record.draft) : null,
+    updatedAt: asString(record.updatedAt, 40),
   };
 }
 
@@ -571,11 +732,13 @@ export function readAnbieterState(raw: unknown, fingerprint: string): AnbieterSt
   const hasContent = items.some((item) => item.current.trim() || item.earlier);
   const sourceFingerprint = asString(record?.sourceFingerprint, 40) || null;
   const approvedFingerprint = asString(record?.approvedFingerprint, 40) || null;
+  const savedAt = asString(record?.savedAt, 40);
   return {
     items,
     sourceFingerprint,
     approvedFingerprint,
     revisionNote: asString(record?.revisionNote, REVISION_NOTE_MAX),
+    savedAt: savedAt && Number.isFinite(Date.parse(savedAt)) ? savedAt : null,
     status: sectionStatus({
       fingerprint,
       sourceFingerprint,
@@ -614,6 +777,7 @@ export function readAvatarPlan(raw: unknown, fingerprint: string): AvatarPlanSta
     const item = asRecord(original);
     return {
       ...avatar,
+      generator: normalizeGeneratorState(item?.generator),
       dossier: normalizeDossier(item?.dossier),
       preview: normalizePreview(item?.preview),
       agentId: asString(item?.agentId, 80) || null,
@@ -625,6 +789,7 @@ export function readAvatarPlan(raw: unknown, fingerprint: string): AvatarPlanSta
   return {
     avatars: restored,
     notWanted: asString(record?.notWanted, 8_000),
+    hinweis: asString(record?.hinweis, 2_000),
     revisionNote: asString(record?.revisionNote, REVISION_NOTE_MAX),
     sourceFingerprint,
     approvedFingerprint,

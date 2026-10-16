@@ -76,7 +76,10 @@ export default async function TranskriptePage({
               organisationId={organisationId}
               organisationName={organisationOptionLabel(selected)}
             />
-            <WorkshopBoard organisationId={organisationId} />
+            <WorkshopBoard
+              organisationId={organisationId}
+              organisationName={organisationOptionLabel(selected)}
+            />
           </>
         )}
       </div>
