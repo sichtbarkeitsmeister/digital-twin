@@ -3,14 +3,8 @@ import { Suspense } from "react";
 
 import { OrganisationPageShell } from "@/app/dashboard/_components/organisations/organisation-page-shell";
 import { DtSeoTool } from "@/components/dt/text-tools/dt-seo-tool";
-import {
-  anbieterSummary,
-  loadContentAnbieterSources,
-  loadContentAvatarOptions,
-  loadContentAvatarRow,
-} from "@/lib/dt/content/load-sources";
+import { anbieterSummary, loadContentAnbieterSources, loadContentAvatarOptions } from "@/lib/dt/content/load-sources";
 import { describeAnbieterSources } from "@/lib/dt/content/route-helpers";
-import { loadContentSettings } from "@/lib/dt/content/store";
 import { loadDtSeoOrganisations } from "@/lib/dt/load-seo-organisations";
 import { createClient } from "@/lib/supabase/server";
 
@@ -26,7 +20,7 @@ function SeoToolFallback() {
   );
 }
 
-/** Same access and organisation list as Texte: platform admins, `?org=` picks the organisation. */
+/** Platform admins, `?org=` picks the organisation whose Anbieterfakten and avatars are used. */
 async function SeoToolPageContent({ searchParams }: { searchParams: { org?: string } }) {
   const supabase = await createClient();
   const {
@@ -52,13 +46,10 @@ async function SeoToolPageContent({ searchParams }: { searchParams: { org?: stri
       : organisations[0]!.id;
   const organisation = organisations.find((o) => o.id === organisationId)!;
 
-  const [settingsRow, anbieter, avatars] = await Promise.all([
-    loadContentSettings(supabase, organisationId).catch(() => null),
+  const [anbieter, avatars] = await Promise.all([
     loadContentAnbieterSources(supabase, organisationId),
     loadContentAvatarOptions(supabase, organisationId),
   ]);
-  const avatarId = settingsRow?.avatar_agent_id ?? avatars[0]?.id ?? null;
-  const avatar = avatarId ? await loadContentAvatarRow(supabase, organisationId, avatarId) : null;
 
   return (
     <OrganisationPageShell>
@@ -66,8 +57,8 @@ async function SeoToolPageContent({ searchParams }: { searchParams: { org?: stri
         <div className="grid gap-1">
           <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">SEO</h1>
           <p className="text-xs text-secondary sm:text-sm">
-            Einen vollständigen Seitentext für <span className="font-semibold">{organisation.name}</span> aus einem
-            Briefing schreiben lassen – Schritt 2 „SEO“ aus Texte, ohne die neun Schritte und ohne Seitenstruktur.
+            Einen vollständigen Seitentext für <span className="font-semibold">{organisation.name}</span> schreiben
+            lassen – eigenständig, ohne Texte und ohne Seitenstruktur.
           </p>
         </div>
 
@@ -75,9 +66,8 @@ async function SeoToolPageContent({ searchParams }: { searchParams: { org?: stri
           key={organisationId}
           organisationId={organisationId}
           organisationName={organisation.name}
-          settingsConfirmed={Boolean(settingsRow)}
           anbieterHint={describeAnbieterSources(anbieterSummary(anbieter))}
-          avatarName={avatar?.name ?? null}
+          avatars={avatars.map((a) => ({ id: a.id, name: a.name, role: a.role }))}
         />
       </div>
     </OrganisationPageShell>
