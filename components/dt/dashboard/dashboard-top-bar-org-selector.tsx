@@ -8,7 +8,6 @@ import { DtSelect } from "@/components/dt/dt-select";
 import {
   isGeoDashboardPath,
   isSeoTextDashboardPath,
-  isWatermarkDashboardPath,
   isManageOrgBarPath,
   isOrganisationDashboardPath,
   isSeoDashboardPath,
@@ -255,9 +254,6 @@ export function DashboardTopBarOrgSelector() {
   }
   if (isGeoDashboardPath(pathname)) {
     return <SeoTopBarOrgSelector variant="geo" />;
-  }
-  if (isWatermarkDashboardPath(pathname)) {
-    return <SeoTopBarOrgSelector variant="watermark" />;
   }
 
   if (isOrganisationDashboardPath(pathname)) {

@@ -1,14 +1,14 @@
 /**
  * Watermark tool: chunk planning, merging by id, the shared Grok runner with a stubbed
- * `fetch` (no network, no database), pausing and resuming, and the prompt wiring that must
- * match step 8 of Texte. Run: npx tsx scripts/test-text-tools-watermark.ts
+ * `fetch` (no network, no database), pausing and resuming, the prompt wiring that must
+ * match step 8 of Texte, and the standalone flow (plan → one call per chunk → export). Run: npx tsx scripts/test-text-tools-watermark.ts
  */
 import assert from "node:assert/strict";
 
 import { contentExportFile } from "../lib/dt/content/export";
 import type { ContentTextSettings } from "../lib/dt/content/mapping";
 import { ContentLlmError } from "../lib/dt/content/pipeline/llm";
-import { rephraseChunkPrompt, settingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
+import { REPHRASE_OWN_VORGABEN, rephraseChunkPrompt, settingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
 import {
   REPHRASE_CHUNK_CHARS,
   REPHRASE_MIN_REMAINING_MS,
@@ -21,6 +21,7 @@ import {
   readRephraseProgress,
   rephraseBlockCount,
   rephraseProgressLabel,
+  rephrasedBlocks,
   type RephraseProgress,
 } from "../lib/dt/content/pipeline/rephrase";
 import { runRephraseOnBlocks, type RephraseRunOptions } from "../lib/dt/content/pipeline/rephrase-runner";
@@ -28,17 +29,12 @@ import { XAI_MISSING_KEY_MESSAGE, XaiTimeoutError, callXaiText, type XaiTextCall
 import { renderBlocksHtml, type ContentTextBlock } from "../lib/dt/content/render";
 import { blocksFromDocument } from "../lib/dt/text-tools/ingest";
 import {
-  WATERMARK_TOOL_JOB_KIND,
-  WATERMARK_TOOL_USAGE_MODE,
-  readWatermarkJobProgress,
-  runWatermarkOnContext,
-  splitWatermarkNotes,
-  watermarkToolJobFromRow,
-  watermarkToolPayloadSchema,
-  watermarkToolResult,
-  type WatermarkToolContext,
-  type WatermarkToolPayload,
+  WATERMARK_CHUNK_MAX_BLOCKS,
+  prepareWatermarkDocument,
+  rephraseWatermarkChunk,
+  watermarkChunkRequestSchema,
 } from "../lib/dt/text-tools/watermark";
+import { mergeWatermarkBlocks, watermarkExportFile } from "../lib/dt/text-tools/watermark-export";
 
 const settings: ContentTextSettings = { anrede: "Sie", branche: "Zahnarztpraxis", tonalitaet: "sachlich", verbotene_woerter: ["günstig"] };
 const MODELS = ["grok-test-fast", "grok-test-slow"] as const;
@@ -170,6 +166,16 @@ function testPromptMatchesStepEight() {
   const withKi = rephraseChunkPrompt({ settings, notes: [], page: { ki_prompt: "Immer die Praxis nennen." } }, chunk);
   assert.match(withKi.user, /KI-Prompt aus der Seitenstruktur: Immer die Praxis nennen\./);
   assert.doesNotMatch(rephraseChunkPrompt({ settings, notes: [] }, chunk).user, /## Anmerkungen/);
+
+  // The standalone tool: no settings, no notes. Same system prompt and section block; the
+  // Vorgaben keep the text's own address and tone instead of naming any organisation's.
+  const standalone = rephraseChunkPrompt({ notes: [] }, chunk);
+  assert.equal(standalone.system, REPHRASE_SYSTEM);
+  assert.equal(standalone.user.split("\n\n## Vorgaben")[0], tool.user.split("\n\n## Vorgaben")[0], "same sections block as step 8");
+  assert.ok(standalone.user.endsWith(REPHRASE_OWN_VORGABEN));
+  assert.doesNotMatch(standalone.user, /Branche|Verbotene Wörter|## Anmerkungen/);
+  assert.doesNotMatch(standalone.user, forbidden);
+  assert.doesNotMatch(REPHRASE_OWN_VORGABEN, forbidden);
   console.log("prompt matches step 8: ok");
 }
 
@@ -378,137 +384,146 @@ async function testRunnerSlowModelAndErrors() {
   console.log("runner slow model and errors: ok");
 }
 
-// --- the tool around the runner --------------------------------------------------------------------
+// --- the standalone tool around the runner ----------------------------------------------------------
 
-function payloadFor(blocks: ContentTextBlock[], notes: string[] = []): WatermarkToolPayload {
-  const parsed = watermarkToolPayloadSchema.safeParse({
-    organisationId: "11111111-1111-4111-8111-111111111111",
-    userId: "22222222-2222-4222-8222-222222222222",
-    fileName: "leistungen.docx",
-    pageName: "Leistungen",
-    blocks,
-    title: null,
-    metaDescription: null,
-    notes,
-  });
-  assert.ok(parsed.success, parsed.success ? "" : parsed.error.message);
-  return parsed.data;
+function testPrepareDocument() {
+  const blocks = uploadBlocks();
+  const doc = prepareWatermarkDocument("praxis.docx", "docx", { blocks, title: null, chars: 500 });
+  assert.equal(doc.fileName, "praxis.docx");
+  assert.equal(doc.format, "docx");
+  assert.equal(doc.total, 3);
+  assert.deepEqual(doc.chunks, planRephraseChunks(blocks).map((c) => c.map((b) => b.id)), "planned exactly like step 8");
+  assert.equal(doc.chunks.flat().length, doc.total, "every rewritable block is in exactly one call");
+
+  const big = bigBlocks(9, 20);
+  const bigDoc = prepareWatermarkDocument("a.txt", "txt", { blocks: big, title: "T", chars: 9_000 });
+  assert.deepEqual(bigDoc.chunks.map((c) => c.length), [4, 4, 1]);
+  assert.ok(bigDoc.chunks.every((c) => c.length <= WATERMARK_CHUNK_MAX_BLOCKS), "every planned chunk passes the request limit");
+  for (const ids of bigDoc.chunks) {
+    const request = watermarkChunkRequestSchema.safeParse({ blocks: ids.map((id) => big.find((b) => b.id === id)) });
+    assert.ok(request.success, "a planned chunk is a valid request");
+    assert.deepEqual(request.data.slowModels, [], "slowModels default to none");
+  }
+  console.log("prepare document: ok");
 }
 
-function contextFor(payload: WatermarkToolPayload): WatermarkToolContext {
-  return {
-    settings,
-    notes: payload.notes,
-    fileName: payload.fileName,
-    pageName: payload.pageName,
-    blocks: payload.blocks,
-    title: payload.title,
-    metaDescription: payload.metaDescription,
-  };
+function testChunkRequestValidation() {
+  const [block] = bigBlocks(1, 10);
+  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [] }).success, false);
+  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: bigBlocks(5, 5) }).success, false, "more than four blocks");
+  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [{ ...block!, html: "x".repeat(30_000) }] }).success, false, "too much HTML");
+  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [{ ...block!, level: 4 }] }).success, false);
+  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [block], slowModels: ["grok-3"] }).success, true);
+  console.log("chunk request validation: ok");
 }
 
-async function testToolRun() {
-  const blocks = bigBlocks(6, 120);
-  const payload = payloadFor(blocks, ["Nur Sie."]);
-  const context = contextFor(payload);
-  const chunks = planRephraseChunks(blocks);
+async function testChunkCall() {
+  const blocks = bigBlocks(3, 60);
   const seen: Array<{ model: string; user: string; maxTokens: number }> = [];
-  const stored: unknown[] = [];
-  const usage: Array<{ model: string }> = [];
-
-  // First tick with budget for one chunk → partial, progress handed back for the job row.
-  let clock = 5_000_000;
-  const first = await runWatermarkOnContext(context, payload, {
-    timeoutMs: REPHRASE_MIN_REMAINING_MS + 1,
-    previous: null,
-    models: MODELS,
-    now: () => clock,
-    call: async (input) => {
-      clock += 10_000;
-      return viaFetch(stubFetch(seen))!(input);
-    },
-    saveProgress: async (state) => {
-      stored.push(JSON.parse(JSON.stringify(state)));
-    },
-    recordUsage: async (u) => {
-      usage.push(u);
-    },
-  });
-  assert.equal(first.state, "partial");
-  assert.equal(seen.length, 1);
-  assert.equal(stored.length, 2, "the chunk's progress and the pause went to the job row");
-  if (first.state !== "partial") return;
-  assert.deepEqual(stored[1], { progress: JSON.parse(JSON.stringify(first.progress)) }, "the last save is what the handler reschedules with");
-  assert.equal(rephraseProgressLabel(first.progress), `${chunks[0]!.length} von ${blocks.length} Abschnitten`);
-  const row = { progress: JSON.parse(JSON.stringify(first.progress)) as RephraseProgress };
-  assert.deepEqual(readWatermarkJobProgress(row, blocks), first.progress);
-  assert.deepEqual(readWatermarkJobProgress(null, blocks), emptyRephraseProgress(blocks.length));
-  assert.deepEqual(readWatermarkJobProgress({ html: "x" }, blocks), emptyRephraseProgress(blocks.length), "a finished result is not a progress");
-
-  // The status route while it runs: „2 von 6 Abschnitten“.
-  const running = watermarkToolJobFromRow({ status: "pending", result: row, last_error: "Rate limit" });
-  assert.deepEqual(running, { state: "running", progress: `${chunks[0]!.length} von ${blocks.length} Abschnitten`, result: null, error: null });
-  assert.equal(watermarkToolJobFromRow({ status: "running", result: null, last_error: null }).progress, null);
-
-  // Next tick resumes from the row and finishes.
-  const second = await runWatermarkOnContext(context, payload, {
-    timeoutMs: 600_000,
-    previous: row,
+  const usage: Array<{ model: string; inputTokens: number }> = [];
+  const result = await rephraseWatermarkChunk(blocks, {
     models: MODELS,
     call: viaFetch(stubFetch(seen)),
-    recordUsage: async (u) => {
+    onUsage: async (u) => {
       usage.push(u);
     },
   });
-  assert.equal(second.state, "done");
-  if (second.state !== "done") return;
-  const { result } = second;
-  assert.equal(seen.length, chunks.length, "the second tick called only the open chunks");
-  assert.equal(usage.length, chunks.length);
-  assert.equal(result.calls, chunks.length);
-  assert.equal(result.input_blocks, blocks.length);
-  assert.equal(result.rewritten_blocks, blocks.length);
-  assert.equal(result.model, "grok-test-fast");
-  assert.deepEqual(result.models, ["grok-test-fast"]);
-  assert.equal(result.file_name, "leistungen.docx");
-  assert.equal(result.page_name, "Leistungen");
-  assert.equal(result.input_tokens, 120 * chunks.length);
-  assert.equal(result.html, renderBlocksHtml(result.blocks), "the stored HTML is the rendered blocks");
-  assert.match(result.html, /^<section data-block-id="b-1"><h2>Teil 1<\/h2>\s*<p>Neu b-1\.<\/p><\/section>/);
-  assert.deepEqual(result.blocks.map((b) => b.heading), blocks.map((b) => b.heading));
+  assert.ok(result.ok);
+  if (!result.ok) return;
+  assert.equal(seen.length, 1, "one planned chunk is one Grok call");
+  assert.ok(seen[0]!.user.endsWith(REPHRASE_OWN_VORGABEN), "no organisation settings in the prompt");
+  assert.deepEqual(result.value.blocks.map((b) => [b.id, b.heading, b.level, b.html]), blocks.map((b) => [b.id, b.heading, b.level, `<p>Neu ${b.id}.</p>`]));
+  assert.equal(result.value.model, "grok-test-fast");
+  assert.deepEqual(result.value.slowModels, []);
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0]!.inputTokens, 120);
 
-  // Done and dead rows, and the export of the result like a Texte page.
-  assert.deepEqual(watermarkToolJobFromRow({ status: "succeeded", result, last_error: null }), { state: "done", progress: null, result, error: null });
-  assert.equal(watermarkToolJobFromRow({ status: "succeeded", result: { progress: row.progress }, last_error: null }).state, "error");
-  assert.deepEqual(watermarkToolJobFromRow({ status: "dead", result: row, last_error: XAI_MISSING_KEY_MESSAGE }), {
-    state: "error",
-    progress: null,
-    result: null,
-    error: XAI_MISSING_KEY_MESSAGE,
+  // Slow models from earlier chunks go last.
+  let candidates: readonly string[] | undefined;
+  const ordered = await rephraseWatermarkChunk(blocks, {
+    models: MODELS,
+    slowModels: ["grok-test-fast"],
+    call: (input) => {
+      candidates = input.models;
+      return viaFetch(stubFetch([]))!(input);
+    },
   });
-  const txt = contentExportFile("txt", { slug: "leistungen-ueberarbeitet", title: "Leistungen", html: result.html });
-  assert.match(txt.body, /^Teil 1\n\nNeu b-1\./);
-  assert.equal(txt.filename, "leistungen-ueberarbeitet.txt");
-  const html = contentExportFile("html", { slug: "leistungen-ueberarbeitet", title: "Leistungen", html: result.html });
-  assert.match(html.body, /<title>Leistungen<\/title>/);
-  console.log("tool run: ok");
+  assert.ok(ordered.ok);
+  assert.deepEqual(candidates, ["grok-test-slow", "grok-test-fast"]);
+  if (ordered.ok) assert.deepEqual(ordered.value.slowModels, ["grok-test-fast"]);
+
+  // A model that ran into the time limit comes back as retryable, with the model noted for the browser.
+  const slow = await rephraseWatermarkChunk(blocks, {
+    models: MODELS,
+    call: async () => {
+      throw new XaiTimeoutError("grok-test-fast", 70_000);
+    },
+  });
+  assert.deepEqual(slow.ok ? null : slow.error.slowModels, ["grok-test-fast"]);
+  assert.equal(slow.ok ? null : slow.error.retryable, true);
+
+  // Rate limit: retryable, German message.
+  const busy = await rephraseWatermarkChunk(blocks, {
+    models: MODELS,
+    call: viaFetch(async () => new Response(JSON.stringify({ error: { message: "busy" } }), { status: 429 })),
+  });
+  assert.ok(!busy.ok && busy.error.retryable && /ausgelastet/.test(busy.error.message));
+
+  // No key: the German message, not retryable, no network, no other provider.
+  const noKey = await rephraseWatermarkChunk(blocks, {
+    models: MODELS,
+    call: (input) =>
+      callXaiText({
+        ...input,
+        env: {},
+        fetchImpl: async () => {
+          throw new Error("must not be called");
+        },
+      }),
+  });
+  assert.deepEqual(noKey.ok ? null : { message: noKey.error.message, retryable: noKey.error.retryable }, { message: XAI_MISSING_KEY_MESSAGE, retryable: false });
+
+  // An unexpected error never escapes as a throw.
+  const broken = await rephraseWatermarkChunk(blocks, {
+    models: MODELS,
+    call: async () => {
+      throw new TypeError("boom");
+    },
+  });
+  assert.ok(!broken.ok && broken.error.retryable);
+  console.log("chunk call: ok");
 }
 
-function testToolHelpers() {
+async function testBrowserRunAndExport() {
+  // What the browser does: parse → every planned chunk through the chunk call → merge → export.
   const blocks = uploadBlocks();
-  const short = blocks.filter((b) => !needsRephrase(b));
-  assert.ok(short.length > 0);
-  const result = watermarkToolResult(blocks, { ...emptyRephraseProgress(3), calls: 1, rewritten: { x: "<p>x</p>" }, models: ["m"] }, "m", payloadFor(blocks));
-  assert.equal(result.rewritten_blocks, 1);
-  assert.equal(result.html, renderBlocksHtml(blocks), "untouched blocks render as they came");
+  const doc = prepareWatermarkDocument("Praxis Dr. Test.docx", "docx", { blocks, title: null, chars: 500 });
+  const rewritten: Record<string, string> = {};
+  for (const ids of doc.chunks) {
+    const chunk = ids.map((id) => doc.blocks.find((b) => b.id === id)!);
+    const result = await rephraseWatermarkChunk(chunk, { models: MODELS, call: viaFetch(stubFetch([])) });
+    assert.ok(result.ok);
+    if (result.ok) for (const b of result.value.blocks) rewritten[b.id] = b.html;
+  }
+  const merged = mergeWatermarkBlocks(doc.blocks, rewritten);
+  assert.deepEqual(merged, rephrasedBlocks(doc.blocks, rewritten), "same merge rule as step 8");
+  assert.deepEqual(merged.map((b) => [b.id, b.heading]), blocks.map((b) => [b.id, b.heading]), "headings and order unchanged");
+  assert.equal(merged.filter((b, i) => b.html !== blocks[i]!.html).length, doc.total, "exactly the planned blocks changed");
 
-  assert.deepEqual(splitWatermarkNotes("Erste Anmerkung\nzweite Zeile\n\n\nZweite Anmerkung\r\n\r\n  "), ["Erste Anmerkung\nzweite Zeile", "Zweite Anmerkung"]);
-  assert.deepEqual(splitWatermarkNotes(null), []);
-  assert.equal(watermarkToolPayloadSchema.safeParse({}).success, false);
-  assert.equal(watermarkToolPayloadSchema.safeParse({ ...payloadFor(blocks), blocks: [] }).success, false);
-  assert.equal(WATERMARK_TOOL_JOB_KIND, "text-tool.watermark");
-  assert.equal(WATERMARK_TOOL_USAGE_MODE, "text-tool.watermark");
-  console.log("tool helpers: ok");
+  const html = watermarkExportFile("html", { fileName: doc.fileName, title: doc.title, blocks: merged });
+  assert.equal(html.filename, "praxis-dr-test-ueberarbeitet.html");
+  assert.match(html.contentType, /^text\/html/);
+  assert.match(html.body, /<title>Praxis Dr\. Test<\/title>/);
+  assert.equal(html.body, contentExportFile("html", { slug: "praxis-dr-test-ueberarbeitet", title: "Praxis Dr. Test", html: renderBlocksHtml(merged) }).body);
+
+  const txt = watermarkExportFile("txt", { fileName: doc.fileName, title: doc.title, blocks: merged });
+  assert.equal(txt.filename, "praxis-dr-test-ueberarbeitet.txt");
+  assert.match(txt.contentType, /^text\/plain/);
+  assert.doesNotMatch(txt.body, /<[a-z]/i, "plain text, no markup");
+  assert.match(txt.body, /^Zahnarzt in Münster\n/);
+  assert.match(txt.body, /Neu abschnitt-\d+\./);
+  assert.equal(watermarkExportFile("txt", { fileName: ".docx", title: null, blocks: merged }).filename, "text-ueberarbeitet.txt");
+  console.log("browser run and export: ok");
 }
 
 async function main() {
@@ -518,9 +533,14 @@ async function main() {
   await testRunnerFullRun();
   await testRunnerPausesAndResumes();
   await testRunnerSlowModelAndErrors();
-  await testToolRun();
-  testToolHelpers();
+  testPrepareDocument();
+  testChunkRequestValidation();
+  await testChunkCall();
+  await testBrowserRunAndExport();
   console.log("ok: text-tools watermark");
 }
 
-void main();
+void main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
