@@ -268,11 +268,13 @@ Ein einziger Claude-Aufruf (Schreibmodell von Texte, Tool `submit_seo_text`) sch
 
 **Eigene Textvorlagen.** Unter dem Werkzeug steht dieselbe Karte **Textvorlagen** wie in Texte, aber mit einem eigenen Satz Vorlagen (zweite Zeile `id = 'seo_tool'` in `dt_content_type_prompts`, Route `/api/dt/text-tools/seo/type-prompts`). Ändert jemand die Textvorlagen unter Texte, ändert sich hier nichts, und umgekehrt. Die Migration `database/migrations/20261019_dt_seo_tool_type_prompts.sql` (einmal im Supabase SQL Editor ausführen) erlaubt die zweite Zeile und legt sie als Kopie der heutigen Texte-Vorlagen an; ohne sie gelten im Werkzeug die Standardvorlagen und **Speichern** meldet, welche Migration fehlt. Test: `npm run test:text-tools-seo` (Prompt aus Globale Prompts und eigener Textvorlage, nur Anbieterfakten und Avatar, ein Aufruf, Hero-Platzhalter, getrennte Textvorlagen).
 
-### GEO: ein Texte-Schritt auf eine hochgeladene Datei
+### GEO: eigenständiges Werkzeug für eine hochgeladene Datei
 
-**GEO** liegt unter **Verwaltung**, direkt neben Texte (`/dashboard/verwaltung/geo`, Organisation wie bei Texte oben in der Leiste oder über `?org=`). Es ist das eigenständige Textwerkzeug für fertige Texte, die nicht durch die neun Schritte sollen: eine Datei hochladen (`.txt`, `.html`, `.pdf`, `.docx`; das alte `.doc` bitte als `.docx` speichern; höchstens 10 MB, 60.000 Zeichen, 40 Abschnitte), optional Seitenname, redaktionelle Anmerkungen, Hauptfrage und Fan-out-Fragen (eine je Zeile) und ein Faktencheck-JSON aus Texte, dann **Verarbeiten**. Es läuft genau einmal Schritt 4 „GEO“ mit demselben Prompt, demselben Modell (Schreibmodell von Texte) und denselben Anbieterfakten, Einstellungen und Avatar der Organisation; Analyse, Faktencheck und die anderen Schritte laufen nicht. Ohne Fragen wird der Text nur nach den GEO-Regeln umgebaut, ohne Faktencheck wird Unbelegtes nur mit „[BITTE PRÜFEN: …]“ markiert, nicht gestrichen. Die bestätigten **Einstellungen für Texte** sind Voraussetzung; fehlen die Anbieterfakten, sagt die Seite das und läuft trotzdem.
+**GEO** liegt unter **Verwaltung**, direkt neben Texte (`/dashboard/verwaltung/geo`, Organisation oben in der Leiste oder über `?org=`). Es ist **eigenständig**: keine Seitenstruktur, keine Einstellungen aus Texte, keine Analyse, kein Faktencheck, kein Hintergrund-Job, nichts wird gespeichert. Das Formular hat drei Felder: **Datei** (`.txt`, `.html`, `.pdf`, `.docx`; das alte `.doc` bitte als `.docx` speichern; höchstens 10 MB, 60.000 Zeichen, 40 Abschnitte), **Seitenname** (optional, nur Beschriftung und Dateiname des Exports) und **Avatar** (die Avatare der Organisation oder „Ohne Avatar“). **Verarbeiten** schickt alles in einem Claude-Aufruf (Schreibmodell von Texte) los; die Seite wartet auf die Antwort, meist ein bis drei Minuten (Route mit 300 s, Modell mit 270 s Zeitlimit).
 
-Die Datei wird auf dem Server gelesen (PDF mit `unpdf`, Word mit `mammoth`, beides schon für Chat-Anhänge im Einsatz) und in Abschnitte zerlegt: H1/H2/H3 aus HTML und Word werden Überschriften, bei reinem Text (auch PDF) gelten kurze Zeilen zwischen Leerzeilen, `#`-Zeilen und unterstrichene Zeilen als Überschrift, Zeilen mit `-`, `•` oder `1.` als Liste (die Regeln stehen in `lib/dt/text-tools/ingest.ts`). Die Abschnitte heißen `abschnitt-1`, `abschnitt-2` …; ein HTML-Export aus Texte kommt mit seinen eigenen Abschnitts-ids zurück. Der Durchlauf ist ein Hintergrund-Job (`text-tool.geo`, siehe Abschnitt 10), die Seite fragt alle paar Sekunden nach; das Ergebnis steht als Vorschau da und lässt sich wie in Texte als **HTML** (vollständige Datei) oder **Text (.txt)** herunterladen. Verbrauch und Kosten landen in der Token-Nutzung unter dem Modus `text-tool.geo`. Es braucht keine neue Tabelle und keine weiteren Umgebungsvariablen: Schlüssel und Modell sind die von Texte (`ANTHROPIC_DT_CONTENT_API_KEY`, `ANTHROPIC_DT_CONTENT_MODEL`).
+Der Prompt besteht aus: der Anweisung aus **Globale Prompts → GEO** (`/dashboard/verwaltung/globale-prompts#schritt-prompts`; gespeichert, sonst Standard, `{{firmenname}}` usw. gefüllt), festen Regeln des Werkzeugs (Fakten nur aus Text und Anbieterfakten, Widersprüche als `[BITTE PRÜFEN: …]` markieren statt streichen, Anrede und Ton wie im hochgeladenen Text), dem hochgeladenen Text in Abschnitten, den **Anbieterfakten** und dem gewählten **Avatar**. Es gibt keine Vorgaben aus Texte, keine Branchenregel, keine Anmerkungen. Fehlen die Anbieterfakten, sagt die Seite das und läuft trotzdem. Das Ergebnis steht als Vorschau da und lässt sich als **HTML** (vollständige Datei) oder **Text (.txt)** herunterladen; beide Dateien entstehen im Browser mit demselben Rendering wie der Texte-Export. Verbrauch und Kosten landen in der Token-Nutzung unter dem Modus `text-tool.geo`. Schlüssel und Modell sind die von Texte (`ANTHROPIC_DT_CONTENT_API_KEY`, `ANTHROPIC_DT_CONTENT_MODEL`), keine Tabelle und keine Migration.
+
+Die Datei wird auf dem Server gelesen (PDF mit `unpdf`, Word mit `mammoth`) und in Abschnitte zerlegt: H1/H2/H3 aus HTML und Word werden Überschriften, bei reinem Text (auch PDF) gelten kurze Zeilen zwischen Leerzeilen, `#`-Zeilen und unterstrichene Zeilen als Überschrift, Zeilen mit `-`, `•` oder `1.` als Liste (die Regeln stehen in `lib/dt/text-tools/ingest.ts`). Die Abschnitte heißen `abschnitt-1`, `abschnitt-2` …; ein HTML-Export aus Texte kommt mit seinen eigenen Abschnitts-ids zurück.
 
 ### Watermark Entfernung: Schritt 8 auf eine hochgeladene Datei
 
@@ -288,7 +290,7 @@ Die fünf Textwerkzeuge im Überblick:
 |---|---|---|
 | Texte | `/dashboard/verwaltung/texte` | Seitentexte aus Briefing und Anbieterfakten in neun Schritten schreiben, prüfen, freigeben, exportieren. |
 | SEO | `/dashboard/verwaltung/seo-text` | Eigenständig einen Seitentext aus Seitenname, Seitentyp, Avatar und optionalem Material schreiben lassen (Prompt aus Globale Prompts → SEO, eigene Textvorlagen), als HTML oder .txt herunterladen. |
-| GEO | `/dashboard/verwaltung/geo` | Einen hochgeladenen Text einmal durch Schritt 4 „GEO“ schicken und als HTML oder .txt herunterladen. |
+| GEO | `/dashboard/verwaltung/geo` | Einen hochgeladenen Text mit dem GEO-Prompt aus Globale Prompts, den Anbieterfakten und einem Avatar überarbeiten und als HTML oder .txt herunterladen. |
 | Watermark Entfernung | `/dashboard/verwaltung/watermark-entfernung` | Eigenständig: Datei hochladen, jeder Satz wird auf Grok neu formuliert (Schritt 8 aus Texte), als HTML oder .txt herunterladen. |
 | Text-Modus im Chat | DigitalTwin-Chat, Schalter „Text-Modus“ | Freie Texte (Flyer, Posts, Mails) im Gespräch mit einem Avatar schreiben lassen. |
 
@@ -504,7 +506,7 @@ Nach dem Login landet man auf `/dashboard/organisations`.
 | SEO Modus | Crawl, Berichte, Aufgaben, Search Console, Grounding, Seitenstruktur. |
 | Texte | Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Organisation oben in der Leiste wechseln. |
 | SEO | Einen Seitentext aus einem Briefing mit Schritt 2 „SEO“ aus Texte schreiben lassen und als HTML oder .txt herunterladen. |
-| GEO | Eine hochgeladene Datei einmal durch den GEO-Schritt aus Texte schicken und als HTML oder .txt herunterladen. |
+| GEO | Eine hochgeladene Datei mit dem GEO-Prompt aus Globale Prompts für KI-Zitate überarbeiten und als HTML oder .txt herunterladen. |
 | Watermark Entfernung | Eigenständig: Datei hochladen, jeder Satz neu formuliert (Schritt 8 aus Texte, Grok), als HTML oder .txt herunterladen. |
 | Token-Nutzung | Wie viel die KI verbraucht hat. Kunden sehen das nicht. |
 | Transkripte | Gesprächsmitschriften auswerten und ins Wissen der Avatare übernehmen. |
@@ -532,7 +534,7 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/verwaltung/seo` | SEO-Arbeitsplatz der Agentur. |
 | `/dashboard/verwaltung/texte` | Texte: Seitentexte in neun Schritten schreiben lassen, prüfen und freigeben. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/verwaltung/seo-text` | SEO: Seitenname, Seitentyp, Avatar, optional eine Datei; ein Claude-Aufruf mit dem SEO-Prompt aus Globale Prompts und den eigenen Textvorlagen, Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
-| `/dashboard/verwaltung/geo` | GEO: eine Datei hochladen, Schritt 4 „GEO“ aus Texte einmal darauf laufen lassen, Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
+| `/dashboard/verwaltung/geo` | GEO: eine Datei hochladen, Avatar wählen, mit dem GEO-Prompt aus Globale Prompts überarbeiten, Ergebnis herunterladen. Nur Plattform-Admins, Organisation über `?org=`. |
 | `/dashboard/verwaltung/watermark-entfernung` | Watermark Entfernung: eigenständig, ohne Organisation; Datei hochladen, Ergebnis als HTML oder .txt herunterladen. Nur Plattform-Admins. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
@@ -623,7 +625,6 @@ Es gibt drei Job-Arten:
 | `leadinfo.normalize` | Macht aus einem rohen Leadinfo-Ereignis einen lesbaren Eintrag. |
 | `grounding.page` | Erstellt eine Grounding Page unter **SEO Modus → Grounding** in vier Schritten (1 Fakten sammeln, 2 Faktencheck, 3 Seite bauen, 4 Endprüfung); hält an, wenn der Faktencheck Fragen an den Kunden hat, und endet mit der HTML-Datei zur menschlichen Prüfung. Ergebnisse in `dt_grounding_pages` und `dt_grounding_steps`. |
 | `content.page` | Schreibt den Text einer Seite unter **Verwaltung → Texte**: so viele Schritte, wie in einen Aufruf passen (1 Analyse, 2 SEO, 3 Faktencheck, 4 GEO, 5 Hormozi, 6 Vermenschlichung, 7 Lektorat, 8 Watermark Entfernung, 9 Endabnahme), dann stellt er sich für den Rest wieder an. Er hält an, sobald eine Angabe fehlt (Fragen des Faktenchecks oder ein Platzhalter im Text, „Braucht Sie“), und nach der Endabnahme bis zur Freigabe. Jeder Fehler – auch ein unterbrochener Worker – zählt als Versuch; nach drei Versuchen pausiert die Seite mit Grund. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. Fakten kommen aus dem Anbieter-Fragebogen und aus den ausgewerteten Gesprächen. |
-| `text-tool.geo` | Ein Durchlauf des GEO-Werkzeugs unter **Verwaltung → GEO**: Schritt 4 einmal auf die hochgeladenen Abschnitte, Ergebnis auf der Job-Zeile. |
 
 Ein Job, der zu oft scheitert, bleibt als fehlgeschlagen liegen und ist unter **Jobs** sichtbar.
 

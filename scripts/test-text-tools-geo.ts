@@ -1,28 +1,25 @@
 /**
- * GEO tool: file ingestion → blocks, and the prompt wiring of the standalone step 4
- * (mocked model, no network, no database for the prompt part).
+ * GEO tool (Verwaltung → GEO): file ingestion → blocks, and the standalone prompt: the GEO
+ * instruction from Globale Prompts, Anbieterfakten and the chosen avatar; nothing from Texte's
+ * settings, Seitenstruktur, Analyse or Faktencheck. Mocked model, no network, no database.
  * Run: npx tsx scripts/test-text-tools-geo.ts
  */
 import assert from "node:assert/strict";
 
 import { contentExportFile } from "../lib/dt/content/export";
-import {
-  CONTENT_HERO_BLOCK_ID,
-  CONTENT_HERO_PLACEHOLDER,
-  contentStepSpec,
-  type ContentPipelineContext,
-} from "../lib/dt/content/pipeline/prompts";
-import { CONTENT_STEP_GEO } from "../lib/dt/content/pipeline/steps";
+import { ContentLlmError } from "../lib/dt/content/pipeline/llm";
+import { CONTENT_HERO_BLOCK_ID, CONTENT_HERO_PLACEHOLDER, GEO_TOOL, TEXT_TOOL_SCHEMA } from "../lib/dt/content/pipeline/prompts";
 import { renderBlocksHtml } from "../lib/dt/content/render";
+import { DEFAULT_CONTENT_STEP_PROMPTS } from "../lib/dt/content/step-prompts";
 import {
-  geoTextToolSpec,
-  geoToolJobFromRow,
-  geoToolPayloadSchema,
-  geoToolResult,
-  parseFaktencheckJson,
-  splitNotes,
-  splitQuestions,
+  GEO_TOOL_NO_PRIOR_STEPS,
+  GEO_TOOL_RULES,
+  geoToolInstruction,
+  geoToolRequestSchema,
+  geoToolSpec,
+  runGeoOnContext,
   type GeoToolContext,
+  type GeoToolModelCall,
 } from "../lib/dt/text-tools/geo";
 import {
   TEXT_TOOL_MAX_BLOCKS,
@@ -205,7 +202,6 @@ async function testExtractUploadedDocument() {
 
 // --- prompt wiring -------------------------------------------------------------------------------
 
-const settings = { anrede: "Sie" as const, branche: "Zahnarztpraxis", tonalitaet: "sachlich" as const, verbotene_woerter: ["nahtlos"] };
 const sections = [{ key: "leistungen", label: "Leistungen", current: "Prophylaxe und Implantate in Münster." }];
 const uploadBlocks = [
   { id: "abschnitt-1", heading: "Zahnarzt in Münster", level: 1 as const, html: "<p>Wir behandeln.</p>" },
@@ -219,11 +215,8 @@ function toolContext(extra: Partial<GeoToolContext> = {}): GeoToolContext {
     fileName: "leistungen.docx",
     pageName: "Leistungen",
     sections,
-    settings,
     avatar: { name: "Anna", role: "Patientin", beschreibung: "45, berufstätig." },
-    notes: [],
-    questions: [],
-    faktencheck: null,
+    geoPrompt: null,
     blocks: uploadBlocks,
     title: null,
     metaDescription: null,
@@ -231,157 +224,134 @@ function toolContext(extra: Partial<GeoToolContext> = {}): GeoToolContext {
   };
 }
 
-function testSpecMatchesPipelineStep() {
-  const tool = geoTextToolSpec(toolContext());
-  const pipelineContext: ContentPipelineContext = {
-    organisationName: "Praxis Dr. Test",
-    page: {
-      name: "Leistungen",
-      path: "/leistungen",
-      level: 1,
-      source: "structure",
-      page_role: null,
-      page_type: "unterseite",
-      pillar_name: null,
-      estimated_traffic: null,
-      keywords: null,
-      h1_options: [],
-      user_questions: [],
-      ki_prompt: null,
-      internal_link_targets: [],
-    },
-    structureOutline: "",
-    existingText: null,
-    sections,
-    settings,
-    avatar: null,
-    typePrompts: {} as ContentPipelineContext["typePrompts"],
-    notes: [],
-    outputs: {},
-    blocks: uploadBlocks,
-    title: null,
-    metaDescription: null,
-  };
-  const step = contentStepSpec(CONTENT_STEP_GEO, pipelineContext);
-  assert.equal(tool.system, step.system, "same system prompt as step 4");
-  assert.equal(tool.tool.name, "submit_geo_text");
-  assert.deepEqual(tool.tool, step.tool);
-  assert.equal(tool.maxTokens, step.maxTokens);
-  assert.match(tool.system, /Branchenregel Praxis/);
-  console.log("spec matches pipeline step 4: ok");
+/** Without a saved text the instruction is the Globale-Prompts default; the tool's own rules follow. */
+function testSystemPromptUsesGlobalGeoPrompt() {
+  const spec = geoToolSpec(toolContext());
+  const instruction = geoToolInstruction(toolContext());
+  assert.equal(instruction, DEFAULT_CONTENT_STEP_PROMPTS.geo, "the GEO default has no {{…}} variables");
+  assert.equal(spec.system, `${instruction}\n\n${GEO_TOOL_RULES}`, "instruction first, then the fixed rules, nothing else");
+  assert.match(spec.system, /^Schritt 4 GEO/);
+  // Nothing from Texte's settings: no Vorgaben, no Branchenregel, no Anrede rule from the settings.
+  assert.doesNotMatch(spec.system, /Branchenregel|aus den Vorgaben gelten/);
+  assert.doesNotMatch(spec.system, /\{\{/, "no unfilled variable");
+  assert.deepEqual(spec.tool, GEO_TOOL);
+  assert.equal(spec.tool.name, "submit_geo_text");
+  assert.deepEqual(spec.tool.input_schema, TEXT_TOOL_SCHEMA);
+  assert.equal(spec.maxTokens, 12_000);
+  console.log("system prompt from Globale Prompts: ok");
 }
 
-/** Verwaltung → GEO reads the GEO instruction saved under Globale Prompts, like step 4. */
-function testSavedGeoPrompt() {
-  const own = "Eigene GEO-Anweisung für {{firmenname}}: Antworten zuerst.";
-  const tool = geoTextToolSpec(toolContext({ geoPrompt: own }));
-  assert.ok(tool.system.startsWith("Eigene GEO-Anweisung für Praxis Dr. Test: Antworten zuerst.\n\nDu arbeitest für eine Agentur"), "saved text first, then BASE_RULES");
-  assert.doesNotMatch(tool.system, /Schritt 4 GEO/, "the default instruction is replaced");
-  assert.match(tool.system, /Branchenregel Praxis/, "the Branchenregel is still added");
-  assert.equal(tool.tool.name, "submit_geo_text", "same tool schema");
-  assert.equal(geoTextToolSpec(toolContext({ geoPrompt: "   " })).system, geoTextToolSpec(toolContext()).system, "empty means the default");
-  assert.match(geoTextToolSpec(toolContext()).system, /^Schritt 4 GEO/);
-  console.log("saved GEO prompt: ok");
+/** A text saved under Globale Prompts → GEO replaces the default; variables are filled. */
+function testSavedGlobalGeoPromptWins() {
+  const own = "Eigene GEO-Anweisung für {{firmenname}}: Antworten zuerst. {{unbekannt}}";
+  const spec = geoToolSpec(toolContext({ geoPrompt: own }));
+  assert.ok(spec.system.startsWith("Eigene GEO-Anweisung für Praxis Dr. Test: Antworten zuerst. {{unbekannt}}\n\n"), spec.system.slice(0, 120));
+  assert.doesNotMatch(spec.system, /Schritt 4 GEO/, "the default instruction is replaced");
+  assert.ok(spec.system.endsWith(GEO_TOOL_RULES));
+  assert.equal(geoToolSpec(toolContext({ geoPrompt: "   " })).system, geoToolSpec(toolContext()).system, "empty means the default");
+  assert.match(geoToolInstruction({ organisationName: "", geoPrompt: "Für {{firmenname}}." }), /^Für \[Firmenname\]\.$/);
+  console.log("saved Globale-Prompts GEO text wins: ok");
 }
 
-function testUserPromptBlocks() {
-  const user = geoTextToolSpec(
-    toolContext({
-      notes: ["Die Praxis hat drei Standorte."],
-      questions: ["Was kostet Prophylaxe?", "Wie oft zur Prophylaxe?"],
-      faktencheck: { findings: [{ title: "Unbelegt", problem: "Zahl", proposal: "streichen", severity: "high", block_id: "abschnitt-2" }], questions: [] },
-      title: "Zahnarzt Münster",
-      metaDescription: "Praxis in Münster.",
-    }),
-  ).user;
-  assert.match(user, /## Seite\nOrganisation: Praxis Dr\. Test\nSeite: Leistungen\nQuelle: hochgeladene Datei „leistungen\.docx“/);
+/** The message holds the page label, the text, Anbieterfakten and the avatar – nothing else. */
+function testUserPromptOnlyTextAnbieterfaktenAndAvatar() {
+  const user = geoToolSpec(toolContext({ title: "Zahnarzt Münster", metaDescription: "Praxis in Münster." })).user;
+  assert.match(user, /^## Seite\nOrganisation: Praxis Dr\. Test\nSeite: Leistungen\nQuelle: hochgeladene Datei „leistungen\.docx“/);
+  assert.ok(user.includes(GEO_TOOL_NO_PRIOR_STEPS));
   assert.match(user, /## Aktueller Text \(Abschnitte mit ihrer id\)\nTitle-Tag: Zahnarzt Münster\nMeta-Description: Praxis in Münster\./);
   assert.match(user, /\[Abschnitt abschnitt-1\]\n# Zahnarzt in Münster\nWir behandeln\./);
-  assert.match(user, /## Analyse \(Schritt 1\)[\s\S]*"main_question": "Was kostet Prophylaxe\?"[\s\S]*"question": "Wie oft zur Prophylaxe\?"/);
-  assert.match(user, /## Faktencheck \(Schritt 3\) – umsetzen[\s\S]*"title": "Unbelegt"/);
   assert.match(user, /## Anbieterfakten aus Fragebogen und Kundengesprächen[\s\S]*### Leistungen\nProphylaxe und Implantate in Münster\./);
-  assert.match(user, /## Vorgaben\nAnrede: Sie[\s\S]*Branche: Zahnarztpraxis[\s\S]*Verbotene Wörter[^\n]*„nahtlos“/);
   assert.match(user, /## Avatar \(Wunschkunde[\s\S]*Name: Anna\nRolle: Patientin\n45, berufstätig\./);
-  assert.match(user, /## Anmerkungen der Redaktion[^\n]*\n1\. Die Praxis hat drei Standorte\./);
-  assert.doesNotMatch(user, /keine Analyse mit Fragen vor|kein Faktencheck vor/);
+  // Removed inputs and Texte-only parts never appear.
+  assert.doesNotMatch(user, /## Vorgaben|## Anmerkungen der Redaktion|## Analyse \(Schritt 1\)|## Faktencheck \(Schritt 3\)|Seitenstruktur \(|Weitere Seiten der Website/);
+  const order = ["## Seite", "## Vorschritte", "## Aktueller Text", "## Anbieterfakten", "## Avatar"].map((h) => user.indexOf(h));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, "blocks in a fixed order");
 
-  const bare = geoTextToolSpec(toolContext()).user;
-  assert.match(bare, /Es liegt keine Analyse mit Fragen vor/);
-  assert.match(bare, /Es liegt kein Faktencheck vor/);
-  assert.doesNotMatch(bare, /## Analyse|## Faktencheck|## Anmerkungen/);
-  assert.match(bare, /## Anbieterfakten/);
-  console.log("user prompt blocks: ok");
+  const bare = geoToolSpec(toolContext({ pageName: null, avatar: null, sections: [] })).user;
+  assert.doesNotMatch(bare, /^Seite:/m, "no page label without a Seitenname");
+  assert.match(bare, /## Anbieterfakten\n\(keine\)/);
+  assert.match(bare, /## Avatar \(Wunschkunde\)\n\(kein Avatar hinterlegt\)/);
+  console.log("user prompt only text, Anbieterfakten and avatar: ok");
 }
 
-function testNormalizeKeepsHero() {
-  const spec = geoTextToolSpec(toolContext());
-  const json = {
-    title: "",
-    meta_description: "Neu.",
-    blocks: [
-      { id: "abschnitt-1", heading: "Zahnarzt in Münster", level: 1, html: "<p>Die Praxis Dr. Test behandelt in Münster.</p><script>x</script>" },
-      { id: "abschnitt-2", heading: "Prophylaxe", level: 2, html: "<p>Alle sechs Monate.</p>" },
-      { id: "stand", heading: "", level: 2, html: "<p>Zuletzt aktualisiert: [DATUM]</p>" },
-    ],
+const answer = {
+  title: "",
+  meta_description: "Neu.",
+  blocks: [
+    { id: "abschnitt-1", heading: "Zahnarzt in Münster", level: 1, html: "<p>Die Praxis Dr. Test behandelt in Münster.</p><script>x</script>" },
+    { id: "abschnitt-2", heading: "Prophylaxe", level: 2, html: "<p>Alle sechs Monate.</p>" },
+    { id: "stand", heading: "", level: 2, html: "<p>Zuletzt aktualisiert: [DATUM]</p>" },
+  ],
+};
+
+/** One model call with the spec; the dropped hero block returns; the result renders and exports. */
+async function testRunOneCall() {
+  const calls: Parameters<GeoToolModelCall>[0][] = [];
+  const call: GeoToolModelCall = async (input) => {
+    calls.push(input);
+    return { json: answer, usage: { inputTokens: 1_000, outputTokens: 2_000 }, model: "claude-sonnet-4-6" };
   };
-  const out = spec.normalize(json, {} as ContentPipelineContext) as { blocks: { id: string; html: string }[]; title: string | null; meta_description: string | null };
-  assert.deepEqual(
-    out.blocks.map((b) => b.id),
-    ["abschnitt-1", CONTENT_HERO_BLOCK_ID, "abschnitt-2", "stand"],
-    "the dropped hero block returns after the H1",
-  );
-  assert.equal(out.title, null, "empty title keeps the upload's (none)");
-  assert.equal(out.meta_description, "Neu.");
-  assert.doesNotMatch(out.blocks[0]!.html, /<script>/);
+  const context = toolContext();
+  const { result, usage } = await runGeoOnContext(context, { models: ["claude-sonnet-4-6"], call });
+  assert.equal(calls.length, 1, "exactly one model call");
+  const spec = geoToolSpec(context);
+  assert.equal(calls[0]!.system, spec.system);
+  assert.equal(calls[0]!.user, spec.user);
+  assert.equal(calls[0]!.tool.name, "submit_geo_text");
+  assert.equal(calls[0]!.timeoutMs, 270_000);
+  assert.deepEqual(usage, { model: "claude-sonnet-4-6", inputTokens: 1_000, outputTokens: 2_000 });
 
-  // Empty answer → the uploaded text stays.
-  const fallback = spec.normalize({ blocks: [] }, {} as ContentPipelineContext) as { blocks: unknown[] };
-  assert.equal(fallback.blocks.length, uploadBlocks.length);
-  console.log("normalize keeps hero: ok");
-}
-
-function testResultAndJobMapping() {
-  const result = geoToolResult(
-    { blocks: uploadBlocks, title: "T", meta_description: null },
-    { model: "claude-sonnet-4-6", usage: { inputTokens: 1_000, outputTokens: 2_000 } },
-    { fileName: "a.txt", pageName: null, blocks: uploadBlocks },
-  );
+  assert.deepEqual(result.blocks.map((b) => b.id), ["abschnitt-1", CONTENT_HERO_BLOCK_ID, "abschnitt-2", "stand"], "the dropped hero block returns after the H1");
+  assert.doesNotMatch(result.blocks[0]!.html, /<script>/);
+  assert.equal(result.title, null, "empty title keeps the upload's (none)");
+  assert.equal(result.meta_description, "Neu.");
+  assert.equal(result.avatar_name, "Anna");
+  assert.equal(result.page_name, "Leistungen");
+  assert.equal(result.file_name, "leistungen.docx");
   assert.equal(result.input_blocks, 3);
   assert.ok(result.cost_eur > 0);
-  assert.match(result.html, /<section data-block-id="abschnitt-1"><h1>Zahnarzt in Münster<\/h1>/);
-  const txt = contentExportFile("txt", { slug: "x", title: "T", html: result.html });
-  assert.match(txt.body, /^Zahnarzt in Münster\n\nWir behandeln\./);
-  assert.equal(txt.filename, "x.txt");
+  assert.equal(result.html, renderBlocksHtml(result.blocks));
 
-  assert.deepEqual(geoToolJobFromRow({ status: "succeeded", result, last_error: null }), { state: "done", result, error: null });
-  assert.deepEqual(geoToolJobFromRow({ status: "dead", result: null, last_error: "Kaputt" }), { state: "error", result: null, error: "Kaputt" });
-  assert.deepEqual(geoToolJobFromRow({ status: "pending", result: null, last_error: "Rate limit" }), { state: "running", result: null, error: null });
-  console.log("result and job mapping: ok");
+  const html = contentExportFile("html", { slug: "leistungen-geo", title: "Leistungen", html: result.html });
+  assert.equal(html.filename, "leistungen-geo.html");
+  assert.match(html.body, /^<!DOCTYPE html>[\s\S]*<title>Leistungen<\/title>[\s\S]*<h1>Zahnarzt in Münster<\/h1>/);
+  const txt = contentExportFile("txt", { slug: "leistungen-geo", title: "Leistungen", html: result.html });
+  assert.equal(txt.filename, "leistungen-geo.txt");
+  assert.match(txt.body, /^Zahnarzt in Münster\n\nDie Praxis Dr\. Test behandelt in Münster\./);
+  assert.doesNotMatch(txt.body, /<[a-z]/);
+  console.log("run: one call, normalised result, HTML and .txt export: ok");
 }
 
-function testInputParsing() {
-  assert.deepEqual(splitNotes("Erste Anmerkung\nzweite Zeile\n\n\nZweite Anmerkung\r\n\r\n  "), ["Erste Anmerkung\nzweite Zeile", "Zweite Anmerkung"]);
-  assert.deepEqual(splitQuestions("Hauptfrage?\n- Fan-out 1?\n2. Fan-out 2?\n\n"), ["Hauptfrage?", "Fan-out 1?", "Fan-out 2?"]);
-  assert.deepEqual(parseFaktencheckJson(""), { ok: true, value: null });
-  assert.deepEqual(parseFaktencheckJson('{"findings":[]}'), { ok: true, value: { findings: [] } });
-  assert.equal(parseFaktencheckJson("{nope").ok, false);
-  assert.equal(parseFaktencheckJson("42").ok, false);
+/** An answer without blocks is an error, not the upload handed back as if reworked. */
+async function testEmptyAnswerIsAnError() {
+  const call: GeoToolModelCall = async () => ({ json: { blocks: [] }, usage: { inputTokens: 1, outputTokens: 1 }, model: "m" });
+  await assert.rejects(
+    runGeoOnContext(toolContext(), { models: ["m"], call }),
+    (error: unknown) => error instanceof ContentLlmError && error.retryable && /keinen überarbeiteten Text/.test(error.message),
+  );
+  console.log("empty answer is an error: ok");
+}
 
-  const payload = geoToolPayloadSchema.safeParse({
+function testRequestSchema() {
+  const base = {
     organisationId: "11111111-1111-4111-8111-111111111111",
     userId: "22222222-2222-4222-8222-222222222222",
     fileName: "a.txt",
     pageName: null,
+    avatarId: null,
     blocks: uploadBlocks,
     title: null,
     metaDescription: null,
-    notes: [],
-    questions: [],
-    faktencheck: null,
-  });
-  assert.ok(payload.success);
-  assert.equal(geoToolPayloadSchema.safeParse({}).success, false);
-  console.log("input parsing: ok");
+  };
+  assert.ok(geoToolRequestSchema.safeParse(base).success);
+  assert.ok(geoToolRequestSchema.safeParse({ ...base, pageName: "Leistungen", avatarId: "33333333-3333-4333-8333-333333333333" }).success);
+  assert.equal(geoToolRequestSchema.safeParse({ ...base, avatarId: "kein-uuid" }).success, false);
+  assert.equal(geoToolRequestSchema.safeParse({ ...base, blocks: [] }).success, false);
+  assert.equal(geoToolRequestSchema.safeParse({}).success, false);
+  // Removed inputs are not part of the request any more.
+  const parsed = geoToolRequestSchema.parse({ ...base, notes: ["x"], questions: ["y"], faktencheck: {} });
+  assert.ok(!("notes" in parsed) && !("questions" in parsed) && !("faktencheck" in parsed));
+  console.log("request schema: ok");
 }
 
 async function main() {
@@ -393,12 +363,12 @@ async function main() {
   testTexteExportRoundTrip();
   testLimits();
   await testExtractUploadedDocument();
-  testSpecMatchesPipelineStep();
-  testSavedGeoPrompt();
-  testUserPromptBlocks();
-  testNormalizeKeepsHero();
-  testResultAndJobMapping();
-  testInputParsing();
+  testSystemPromptUsesGlobalGeoPrompt();
+  testSavedGlobalGeoPromptWins();
+  testUserPromptOnlyTextAnbieterfaktenAndAvatar();
+  await testRunOneCall();
+  await testEmptyAnswerIsAnError();
+  testRequestSchema();
   console.log("ok: text-tools geo");
 }
 

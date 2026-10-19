@@ -1,23 +1,23 @@
 /**
- * The standalone GEO tool (Verwaltung → GEO): one run of the pipeline's step 4 on an
- * uploaded text, without a page row. Prompt, tool schema, model tier and output handling
- * are the pipeline's (`lib/dt/content/pipeline/prompts.ts`); only the context differs: a
- * document instead of a page with Excel briefing, optional questions instead of the
- * Analyse, an optional pasted Faktencheck instead of step 3.
+ * The standalone GEO tool (Verwaltung → GEO): reworks one uploaded text for AI search systems
+ * in one Claude call. It depends on nothing of Texte (no Seitenstruktur, no confirmed
+ * settings, no Analyse, no Faktencheck, no page row, no background job):
  *
- * `geoTextToolSpec` and the payload/result shapes are pure; `runGeoTextTool` loads the
- * organisation's Texte context and calls Claude (injectable for tests).
+ *   - instruction: the GEO step prompt from Globale Prompts (`content_step_prompts.geo`, its
+ *     default when none is saved), with its `{{…}}` variables filled;
+ *   - facts and reader: the organisation's Anbieterfakten and the avatar picked in the form;
+ *   - text: the uploaded file, split into blocks by `ingest.ts`.
+ *
+ * Tool schema (`submit_geo_text`), model tier (write) and the output normalisation are those
+ * of Texte step 4. `geoToolSpec` and the helpers are pure; `runGeoTool` loads the context and
+ * calls the model (injectable for tests).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import {
-  loadContentAnbieterSources,
-  loadContentAvatarOptions,
-  loadContentAvatarRow,
-} from "@/lib/dt/content/load-sources";
-import { avatarFromAgent, type ContentTextSettings, type WorkshopAnbieterSection } from "@/lib/dt/content/mapping";
+import { loadContentAnbieterSources, loadContentAvatarRow } from "@/lib/dt/content/load-sources";
+import { avatarFromAgent, type WorkshopAnbieterSection } from "@/lib/dt/content/mapping";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import {
@@ -27,26 +27,19 @@ import {
   avatarBlock,
   contentStepPromptVariables,
   currentTextBlock,
-  editorNotesBlock,
-  geoSystemPrompt,
   joinPromptParts,
   normalizeGeoOutput,
-  settingsBlock,
-  type ContentStepSpec,
   type TextOutput,
 } from "@/lib/dt/content/pipeline/prompts";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
+import { normalizeBlocks, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import { fillContentStepPrompt, loadContentStepPrompts, resolveContentStepPrompt } from "@/lib/dt/content/step-prompts";
-import { loadContentSettings, settingsFromRow } from "@/lib/dt/content/store";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
-/** `jobs.kind` of a run and the `mode` of its usage events. */
-export const GEO_TOOL_JOB_KIND = "text-tool.geo";
+/** The `mode` of the usage event of a run. */
 export const GEO_TOOL_USAGE_MODE = "text-tool.geo";
-export const GEO_TOOL_MAX_NOTES_CHARS = 4_000;
-export const GEO_TOOL_MAX_QUESTIONS_CHARS = 4_000;
-export const GEO_TOOL_MAX_FAKTENCHECK_CHARS = 20_000;
+/** The run route may take 300 s; the model gets most of it, the rest is reading the file and answering. */
+export const GEO_TOOL_TIMEOUT_MS = 270_000;
 
 const blockSchema = z.object({
   id: z.string().min(1).max(60),
@@ -55,25 +48,22 @@ const blockSchema = z.object({
   html: z.string(),
 });
 
-/** What the run route stores on the job; the handler reads it back. */
-export const geoToolPayloadSchema = z.object({
+/** What the run route hands to `runGeoTool` after reading the form and the file. */
+export const geoToolRequestSchema = z.object({
   organisationId: z.string().uuid(),
   userId: z.string().uuid(),
   fileName: z.string().min(1).max(260),
-  /** Label only (the „Seite“ line of the prompt); never a database key. */
-  pageName: z.string().max(200).nullable(),
+  /** Label for the prompt and the export's file name; never a database key. */
+  pageName: z.string().trim().max(200).nullable(),
+  /** The avatar picked in the form; null reworks the text without one. */
+  avatarId: z.string().uuid().nullable(),
   blocks: z.array(blockSchema).min(1).max(40),
+  /** `<title>` / meta description of an HTML upload, null otherwise. */
   title: z.string().max(200).nullable(),
   metaDescription: z.string().max(400).nullable(),
-  /** Redaktionelle Anmerkungen; one note per paragraph. */
-  notes: z.array(z.string().max(GEO_TOOL_MAX_NOTES_CHARS)).max(20),
-  /** Main question and fan-out questions, one per line; empty when the person gave none. */
-  questions: z.array(z.string().max(600)).max(40),
-  /** A pasted Faktencheck result (step 3 JSON); null when none was given. */
-  faktencheck: z.unknown().nullable(),
 });
 
-export type GeoToolPayload = z.infer<typeof geoToolPayloadSchema>;
+export type GeoToolRequest = z.infer<typeof geoToolRequestSchema>;
 
 export type GeoToolResult = {
   blocks: ContentTextBlock[];
@@ -87,263 +77,177 @@ export type GeoToolResult = {
   cost_eur: number;
   file_name: string;
   page_name: string | null;
-  /** Number of blocks the upload had, for the UI („12 Abschnitte“). */
+  avatar_name: string | null;
+  /** Number of blocks the upload had, for the result line. */
   input_blocks: number;
 };
 
-/** What the status route hands the browser. */
-export type GeoToolJob = {
-  state: "running" | "done" | "error";
-  result: GeoToolResult | null;
-  error: string | null;
-};
-
-export type GeoToolStartResult = {
-  id: string;
-  status_url: string;
-  /** What was read from the upload, so the UI can show it while the model works. */
-  input: { blocks: number; chars: number; title: string | null; format: string };
-};
-
+/** Everything the prompt reads; the loader fills it from the database. */
 export type GeoToolContext = {
   organisationName: string;
   fileName: string;
   pageName: string | null;
   sections: WorkshopAnbieterSection[];
-  settings: ContentTextSettings;
   avatar: { name: string; role: string; beschreibung: string } | null;
-  notes: string[];
-  questions: string[];
-  faktencheck: unknown | null;
+  /** The GEO instruction saved under Globale Prompts; empty or missing means its default. */
+  geoPrompt: string | null;
   blocks: ContentTextBlock[];
   title: string | null;
   metaDescription: string | null;
-  /** The GEO instruction saved under Globale Prompts; omitted or empty means the default. */
-  geoPrompt?: string | null;
 };
 
-const MAX_JSON_CHARS = 12_000;
+// --- prompt ------------------------------------------------------------------------------------
 
-/** Replaces the pipeline's „Seite“ block: what the text is and where it came from. */
-function documentBlock(context: GeoToolContext): string {
+/**
+ * The fixed rules the code always adds after the instruction. Like Texte's locked rules, but
+ * without the Vorgaben (Anrede, Tonalität, verbotene Wörter), the Branchenregel and the
+ * Anmerkungen this tool has not: the uploaded text keeps its own voice.
+ */
+export const GEO_TOOL_RULES = `Du arbeitest für eine Agentur, die Webseitentexte für kleine Unternehmen schreibt. Sprache: Deutsch.
+Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus dem hochgeladenen Text und den Anbieterfakten. Nichts erfinden, nichts aus Branchenwissen ergänzen; neue Angaben nur, wenn sie in den Anbieterfakten stehen. Eine Angabe im Text, die den Anbieterfakten widerspricht, bleibt stehen und bekommt den Marker [BITTE PRÜFEN: …]; nichts streichen.
+Es gibt keine Vorgaben zu Anrede und Tonalität: Anrede und Ton bleiben wie im hochgeladenen Text, passend zum Avatar.`;
+
+/** The GEO instruction from Globale Prompts with its variables filled (no page: „aus dem Briefing“, not a Ratgeber). */
+export function geoToolInstruction(context: Pick<GeoToolContext, "organisationName" | "geoPrompt">): string {
+  return fillContentStepPrompt(
+    resolveContentStepPrompt("geo", context.geoPrompt),
+    contentStepPromptVariables({ organisationName: context.organisationName, page: null }),
+  );
+}
+
+export function geoToolSystemPrompt(context: Pick<GeoToolContext, "organisationName" | "geoPrompt">): string {
+  return joinPromptParts([geoToolInstruction(context), GEO_TOOL_RULES]);
+}
+
+function pageBlock(context: GeoToolContext): string {
   return [
     "## Seite",
     `Organisation: ${context.organisationName || "unbekannt"}`,
     context.pageName ? `Seite: ${context.pageName}` : "",
-    `Quelle: hochgeladene Datei „${context.fileName}“ (eigenständiges GEO-Werkzeug, kein Seiten-Briefing, kein Faktencheck-Schritt vorab)`,
+    `Quelle: hochgeladene Datei „${context.fileName}“ (eigenständiges GEO-Werkzeug; keine Seitenstruktur, keine anderen Seiten bekannt)`,
     "Erlaubte interne Linkziele: keine bekannt – keine neuen internen Links setzen, vorhandene [LINK: …]-Marker bleiben",
-    context.questions.length === 0
-      ? "Es liegt keine Analyse mit Fragen vor: der Text wird nur nach den GEO-Regeln umgebaut, keine neuen Fragen hinzuerfinden."
-      : "",
-    context.faktencheck == null
-      ? "Es liegt kein Faktencheck vor: Angaben, die nicht in den Anbieterfakten oder Anmerkungen stehen, nur als [BITTE PRÜFEN: …] markieren, nicht streichen."
-      : "",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-/**
- * The person's questions in the shape of the Analyse output, so the GEO rules
- * („fanout_questions aus der Analyse …“) apply to them unchanged. The first line is the
- * main question, the rest are fan-out questions.
- */
-function questionsBlock(questions: readonly string[]): string {
-  if (questions.length === 0) return "";
-  const [main, ...rest] = questions;
-  const analyse = {
-    main_question: main,
-    fanout_questions: rest.map((question) => ({ question, source: "Redaktion", theme: "" })),
-    deferred_questions: [],
-  };
-  return `## Analyse (Schritt 1) – Fragen, die der Text abdecken muss\n${JSON.stringify(analyse, null, 1).slice(0, MAX_JSON_CHARS)}`;
+/** Stands where Texte puts the Analyse and the Faktencheck (steps 1 and 3): this tool has neither. */
+export const GEO_TOOL_NO_PRIOR_STEPS = `## Vorschritte
+Es gibt keine Analyse (Schritt 1) und keinen Faktencheck (Schritt 3): keine Befunde umzusetzen, keine fanout_questions oder deferred_questions, keine Anmerkungen der Redaktion. Keine neuen Fragen hinzuerfinden; beantworte nur, was der Text und die Anbieterfakten hergeben.`;
+
+export function geoToolUserPrompt(context: GeoToolContext): string {
+  return joinPromptParts([pageBlock(context), GEO_TOOL_NO_PRIOR_STEPS, currentTextBlock(context), anbieterBlock(context), avatarBlock(context)]);
 }
 
-function faktencheckBlock(faktencheck: unknown): string {
-  if (faktencheck == null) return "";
-  return `## Faktencheck (Schritt 3) – umsetzen\n${JSON.stringify(faktencheck, null, 1).slice(0, MAX_JSON_CHARS)}`;
-}
-
-/**
- * Step 4 of the pipeline for an uploaded document: same system prompt (with the GEO
- * instruction saved under Globale Prompts), same tool, same normalisation.
- */
-export function geoTextToolSpec(context: GeoToolContext): ContentStepSpec {
-  const instruction = fillContentStepPrompt(
-    resolveContentStepPrompt("geo", context.geoPrompt),
-    contentStepPromptVariables({ organisationName: context.organisationName, page: null }),
-  );
+export function geoToolSpec(context: GeoToolContext) {
   return {
-    maxTokens: GEO_MAX_TOKENS,
-    system: geoSystemPrompt(context.settings, instruction),
-    user: joinPromptParts([
-      documentBlock(context),
-      currentTextBlock(context),
-      questionsBlock(context.questions),
-      faktencheckBlock(context.faktencheck),
-      anbieterBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      editorNotesBlock(context.notes),
-    ]),
+    system: geoToolSystemPrompt(context),
+    user: geoToolUserPrompt(context),
     tool: GEO_TOOL,
-    normalize: (json) => normalizeGeoOutput(json, context),
+    maxTokens: GEO_MAX_TOKENS,
   };
 }
 
-/** Textarea → notes: paragraphs separated by a blank line, at most 20. */
-export function splitNotes(text: string | null | undefined): string[] {
-  return (text ?? "")
-    .replace(/\r\n?/g, "\n")
-    .split(/\n\s*\n/)
-    .map((n) => n.trim().slice(0, GEO_TOOL_MAX_NOTES_CHARS))
-    .filter(Boolean)
-    .slice(0, 20);
-}
+// --- run -----------------------------------------------------------------------------------------
 
-/** Textarea → questions: one per line, leading bullets and numbers dropped, at most 40. */
-export function splitQuestions(text: string | null | undefined): string[] {
-  return (text ?? "")
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((q) => q.replace(/^\s*(?:[-*•]|\d{1,2}[.)])\s+/, "").trim().slice(0, 600))
-    .filter(Boolean)
-    .slice(0, 40);
-}
-
-/** Pasted Faktencheck JSON → object; a message when it is not JSON. Empty input is „none“. */
-export function parseFaktencheckJson(text: string | null | undefined): { ok: true; value: unknown | null } | { ok: false; message: string } {
-  const trimmed = (text ?? "").trim();
-  if (!trimmed) return { ok: true, value: null };
-  if (trimmed.length > GEO_TOOL_MAX_FAKTENCHECK_CHARS) {
-    return { ok: false, message: `Das Faktencheck-JSON ist zu lang (max. ${GEO_TOOL_MAX_FAKTENCHECK_CHARS.toLocaleString("de-DE")} Zeichen).` };
+/**
+ * Loads what the prompt reads: organisation name, Anbieterfakten, the chosen avatar and the
+ * GEO instruction from Globale Prompts. Nothing here is required; without Anbieterfakten the
+ * text is only restructured, without avatar it is reworked for nobody in particular. An
+ * avatar id of another organisation is refused.
+ */
+export async function loadGeoToolContext(service: SupabaseClient, request: GeoToolRequest): Promise<GeoToolContext> {
+  const [{ data: organisation }, anbieter, stepPrompts, avatarRow] = await Promise.all([
+    service.from("organisations").select("name").eq("id", request.organisationId).maybeSingle(),
+    loadContentAnbieterSources(service, request.organisationId),
+    loadContentStepPrompts(service),
+    request.avatarId ? loadContentAvatarRow(service, request.organisationId, request.avatarId) : Promise.resolve(null),
+  ]);
+  if (request.avatarId && !avatarRow) {
+    throw new ContentLlmError("Der gewählte Avatar gehört nicht zu dieser Organisation oder existiert nicht mehr. Bitte neu wählen.", false);
   }
-  try {
-    const value = JSON.parse(trimmed) as unknown;
-    if (!value || typeof value !== "object") return { ok: false, message: "Das Faktencheck-JSON muss ein Objekt mit „findings“ und „questions“ sein." };
-    return { ok: true, value };
-  } catch {
-    return { ok: false, message: "Das Faktencheck-Feld enthält kein gültiges JSON." };
-  }
+  const avatar = avatarRow ? avatarFromAgent(avatarRow) : null;
+  return {
+    organisationName: (organisation?.name as string | undefined)?.trim() || "",
+    fileName: request.fileName,
+    pageName: request.pageName?.trim() || null,
+    sections: anbieter.sections,
+    avatar: avatar ? { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } : null,
+    geoPrompt: stepPrompts.geo,
+    blocks: request.blocks,
+    title: request.title,
+    metaDescription: request.metaDescription,
+  };
 }
 
 export type GeoToolModelCall = (input: {
   models: string[];
   system: string;
   user: string;
-  tool: ContentStepSpec["tool"];
+  tool: ReturnType<typeof geoToolSpec>["tool"];
   maxTokens: number;
   timeoutMs?: number;
 }) => Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string }>;
 
 /**
- * Loads what the Texte pipeline loads for a page (confirmed settings, Anbieterfakten, the
- * configured or newest avatar) and builds the context around the uploaded blocks.
- * Settings are required like in the pipeline; Anbieterfakten may be empty here, the text
- * already exists and the rules then only mark unproven claims.
+ * One call on a loaded context; pure apart from `call`. An answer without blocks is an error,
+ * not the uploaded text handed back unchanged as if it had been reworked.
  */
-export async function loadGeoToolContext(service: SupabaseClient, payload: GeoToolPayload): Promise<{ context: GeoToolContext; avatarId: string | null }> {
-  const [{ data: organisation }, settingsRow, anbieter, stepPrompts] = await Promise.all([
-    service.from("organisations").select("name").eq("id", payload.organisationId).maybeSingle(),
-    loadContentSettings(service, payload.organisationId),
-    loadContentAnbieterSources(service, payload.organisationId),
-    loadContentStepPrompts(service),
-  ]);
-  if (!settingsRow) {
-    throw new ContentLlmError("Die Einstellungen für Texte sind für diese Organisation noch nicht bestätigt. Bitte zuerst unter Texte bestätigen.", false);
-  }
-
-  let avatarId = settingsRow.avatar_agent_id;
-  if (!avatarId) {
-    const [newest] = await loadContentAvatarOptions(service, payload.organisationId);
-    avatarId = newest?.id ?? null;
-  }
-  const avatarRow = avatarId ? await loadContentAvatarRow(service, payload.organisationId, avatarId) : null;
-  const avatar = avatarRow ? avatarFromAgent(avatarRow) : null;
-
-  return {
-    avatarId: avatarRow?.id ?? null,
-    context: {
-      organisationName: (organisation?.name as string | undefined)?.trim() || "",
-      fileName: payload.fileName,
-      pageName: payload.pageName,
-      sections: anbieter.sections,
-      settings: settingsFromRow(settingsRow),
-      avatar: avatar ? { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } : null,
-      notes: payload.notes,
-      questions: payload.questions,
-      faktencheck: payload.faktencheck ?? null,
-      blocks: payload.blocks,
-      title: payload.title,
-      metaDescription: payload.metaDescription,
-      geoPrompt: stepPrompts.geo,
-    },
-  };
-}
-
-/** Normalised model answer → what the job stores. */
-export function geoToolResult(
-  output: TextOutput,
-  call: { model: string; usage: { inputTokens: number; outputTokens: number } },
-  payload: Pick<GeoToolPayload, "fileName" | "pageName" | "blocks">,
-): GeoToolResult {
-  return {
-    blocks: output.blocks,
-    title: output.title,
-    meta_description: output.meta_description,
-    html: renderBlocksHtml(output.blocks),
-    model: call.model,
-    input_tokens: call.usage.inputTokens,
-    output_tokens: call.usage.outputTokens,
-    cost_eur: roundEur(estimateCostEur(call.model, call.usage)),
-    file_name: payload.fileName,
-    page_name: payload.pageName,
-    input_blocks: payload.blocks.length,
-  };
-}
-
-/**
- * One GEO run: context, one tool call on the write tier of the Texte models, usage event,
- * result. Throws `ContentLlmError` (with its retry hint) like a pipeline step.
- */
-export async function runGeoTextTool(
-  service: SupabaseClient,
-  payload: GeoToolPayload,
-  options: { timeoutMs?: number; call?: GeoToolModelCall } = {},
-): Promise<GeoToolResult> {
-  const { context, avatarId } = await loadGeoToolContext(service, payload);
-  const models = await loadContentModelConfig(service);
-  const spec = geoTextToolSpec(context);
+export async function runGeoOnContext(
+  context: GeoToolContext,
+  options: { models: string[]; call?: GeoToolModelCall; timeoutMs?: number },
+): Promise<{ result: GeoToolResult; usage: { model: string; inputTokens: number; outputTokens: number } }> {
+  const spec = geoToolSpec(context);
   const call = options.call ?? callContentTool;
   const answer = await call({
-    models: models.write,
+    models: options.models,
     system: spec.system,
     user: spec.user,
     tool: spec.tool,
     maxTokens: spec.maxTokens,
-    timeoutMs: options.timeoutMs,
+    timeoutMs: options.timeoutMs ?? GEO_TOOL_TIMEOUT_MS,
   });
-
-  await recordLlmUsageEvent(service, {
-    organisationId: payload.organisationId,
-    userId: payload.userId,
-    agentId: avatarId,
-    mode: GEO_TOOL_USAGE_MODE,
-    via: "direct",
-    model: answer.model,
-    inputTokens: answer.usage.inputTokens,
-    outputTokens: answer.usage.outputTokens,
-  });
-
-  return geoToolResult(normalizeGeoOutput(answer.json, context), answer, payload);
+  const raw = (answer.json as { blocks?: unknown } | null)?.blocks;
+  if (normalizeBlocks(raw).length === 0) {
+    throw new ContentLlmError("Das Modell hat keinen überarbeiteten Text geliefert. Bitte erneut versuchen.", true);
+  }
+  const output: TextOutput = normalizeGeoOutput(answer.json, context);
+  return {
+    usage: { model: answer.model, inputTokens: answer.usage.inputTokens, outputTokens: answer.usage.outputTokens },
+    result: {
+      blocks: output.blocks,
+      title: output.title,
+      meta_description: output.meta_description,
+      html: renderBlocksHtml(output.blocks),
+      model: answer.model,
+      input_tokens: answer.usage.inputTokens,
+      output_tokens: answer.usage.outputTokens,
+      cost_eur: roundEur(estimateCostEur(answer.model, answer.usage)),
+      file_name: context.fileName,
+      page_name: context.pageName,
+      avatar_name: context.avatar?.name ?? null,
+      input_blocks: context.blocks.length,
+    },
+  };
 }
 
-/** `jobs` row → the three states the GEO page polls for. */
-export function geoToolJobFromRow(row: { status: string; result: unknown; last_error: string | null }): GeoToolJob {
-  const result = (row.result as GeoToolResult | null) ?? null;
-  if (row.status === "succeeded") return { state: "done", result, error: null };
-  if (row.status === "dead") {
-    return { state: "error", result: null, error: row.last_error ?? "Die Verarbeitung ist fehlgeschlagen." };
-  }
-  return { state: "running", result: null, error: null };
+/** One run: context, one call on the write tier of the Texte models, one usage event, the result. */
+export async function runGeoTool(
+  service: SupabaseClient,
+  request: GeoToolRequest,
+  options: { call?: GeoToolModelCall; timeoutMs?: number } = {},
+): Promise<GeoToolResult> {
+  const [context, models] = await Promise.all([loadGeoToolContext(service, request), loadContentModelConfig(service)]);
+  const { result, usage } = await runGeoOnContext(context, { models: models.write, ...options });
+  await recordLlmUsageEvent(service, {
+    organisationId: request.organisationId,
+    userId: request.userId,
+    agentId: request.avatarId,
+    mode: GEO_TOOL_USAGE_MODE,
+    via: "direct",
+    model: usage.model,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  }).catch((error: unknown) => console.warn("[text-tool.geo] usage not recorded:", error instanceof Error ? error.message : error));
+  return result;
 }

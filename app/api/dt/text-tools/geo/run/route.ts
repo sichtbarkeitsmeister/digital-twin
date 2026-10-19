@@ -1,22 +1,10 @@
 import { contentError, contentOk, gateContentRoute } from "@/lib/dt/content/route-helpers";
-import { loadContentSettings } from "@/lib/dt/content/store";
-import {
-  GEO_TOOL_JOB_KIND,
-  GEO_TOOL_MAX_FAKTENCHECK_CHARS,
-  GEO_TOOL_MAX_NOTES_CHARS,
-  GEO_TOOL_MAX_QUESTIONS_CHARS,
-  geoToolPayloadSchema,
-  parseFaktencheckJson,
-  splitNotes,
-  splitQuestions,
-  type GeoToolStartResult,
-} from "@/lib/dt/text-tools/geo";
+import { ContentLlmError, llmErrorMessage } from "@/lib/dt/content/pipeline/llm";
+import { geoToolRequestSchema, runGeoTool } from "@/lib/dt/text-tools/geo";
 import { TEXT_TOOL_MAX_FILE_BYTES, blocksFromDocument, extractUploadedDocument } from "@/lib/dt/text-tools/ingest";
-import { kickJobsWorker } from "@/lib/jobs/kick-worker";
-import { enqueueJob } from "@/lib/jobs/queue";
 
-/** Reading a PDF or Word file can take a moment; the model call itself runs in the job. */
-export const maxDuration = 60;
+/** One Claude call rewrites the whole text (up to 12.000 tokens); the model gets 270 s of it. */
+export const maxDuration = 300;
 
 function field(form: FormData, name: string, max: number): string {
   const value = form.get(name);
@@ -24,9 +12,9 @@ function field(form: FormData, name: string, max: number): string {
 }
 
 /**
- * GEO tool: upload + inputs → one `text-tool.geo` job. Multipart form: `file` (.txt, .html,
- * .pdf, .docx), optional `pageName`, `notes`, `questions`, `faktencheck`; the organisation
- * comes as `organisationId` field or `?org=`.
+ * GEO tool: a file, an optional page name and an avatar → the reworked text in the answer.
+ * No job, nothing stored. Multipart form: `file` (.txt, .html, .pdf, .docx), optional
+ * `pageName` and `avatarId`; the organisation comes as `organisationId` field or `?org=`.
  */
 export async function POST(req: Request) {
   let form: FormData;
@@ -41,21 +29,9 @@ export async function POST(req: Request) {
   const { gate } = gated;
 
   const file = form.get("file");
-  if (!(file instanceof File)) return contentError("Bitte eine Datei auswählen (.txt, .html, .pdf oder .docx).", 400);
+  if (!(file instanceof File) || file.size === 0) return contentError("Bitte eine Datei auswählen (.txt, .html, .pdf oder .docx).", 400);
   if (file.size > TEXT_TOOL_MAX_FILE_BYTES) {
     return contentError(`„${file.name}“ ist zu groß (max. ${Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB).`, 400);
-  }
-
-  const faktencheck = parseFaktencheckJson(field(form, "faktencheck", GEO_TOOL_MAX_FAKTENCHECK_CHARS + 1));
-  if (!faktencheck.ok) return contentError(faktencheck.message, 400);
-
-  try {
-    const settings = await loadContentSettings(gate.service, gate.organisationId);
-    if (!settings) {
-      return contentError("Die Einstellungen für Texte sind für diese Organisation noch nicht bestätigt. Bitte zuerst unter Texte bestätigen.", 400);
-    }
-  } catch (error) {
-    return contentError(error instanceof Error ? error.message : "Einstellungen konnten nicht geladen werden.", 500);
   }
 
   const document = await extractUploadedDocument(file.name, new Uint8Array(await file.arrayBuffer()));
@@ -63,38 +39,23 @@ export async function POST(req: Request) {
   const ingested = blocksFromDocument(document.value);
   if (!ingested.ok) return contentError(ingested.message, 400);
 
-  const payload = geoToolPayloadSchema.safeParse({
+  const request = geoToolRequestSchema.safeParse({
     organisationId: gate.organisationId,
     userId: gate.userId,
     fileName: file.name.slice(0, 260),
     pageName: field(form, "pageName", 200).trim() || null,
+    avatarId: field(form, "avatarId", 80).trim() || null,
     blocks: ingested.value.blocks,
     title: ingested.value.title,
     metaDescription: ingested.value.metaDescription,
-    notes: splitNotes(field(form, "notes", GEO_TOOL_MAX_NOTES_CHARS * 5)),
-    questions: splitQuestions(field(form, "questions", GEO_TOOL_MAX_QUESTIONS_CHARS)),
-    faktencheck: faktencheck.value,
   });
-  if (!payload.success) return contentError("Der Text konnte nicht für die Verarbeitung vorbereitet werden.", 400);
+  if (!request.success) return contentError("Der Text konnte nicht für die Verarbeitung vorbereitet werden.", 400);
 
-  const job = await enqueueJob({
-    kind: GEO_TOOL_JOB_KIND,
-    organisationId: gate.organisationId,
-    payload: payload.data,
-    maxAttempts: 3,
-  });
-  if (!job.ok || !job.jobId) return contentError(`Die Verarbeitung konnte nicht gestartet werden: ${job.ok ? "kein Job" : job.error}`, 500);
-
-  kickJobsWorker(1);
-  const data: GeoToolStartResult = {
-    id: job.jobId,
-    status_url: `/api/dt/text-tools/geo/jobs/${job.jobId}`,
-    input: {
-      blocks: ingested.value.blocks.length,
-      chars: ingested.value.chars,
-      title: ingested.value.title,
-      format: document.value.format,
-    },
-  };
-  return contentOk(data, 202);
+  try {
+    return contentOk(await runGeoTool(gate.service, request.data));
+  } catch (error) {
+    console.error("[text-tool.geo] run failed:", error);
+    if (error instanceof ContentLlmError) return contentError(error.message, error.retryable ? 503 : 400);
+    return contentError(llmErrorMessage(error), 502);
+  }
 }

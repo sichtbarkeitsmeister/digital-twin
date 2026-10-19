@@ -1,35 +1,33 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Download, FileText, Loader2, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
-import { contentApi, contentQuery } from "@/components/dt/content/content-api";
-import { downloadContentExport } from "@/components/dt/content/download";
+import { contentQuery } from "@/components/dt/content/content-api";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
-import { DtField, DtInput, DtInputWrap, DtTextarea } from "@/components/dt/dt-field";
+import { DtField, DtInput, DtInputWrap } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
-import type { ContentApiResponse } from "@/lib/dt/content/types";
+import { DtSelect } from "@/components/dt/dt-select";
+import { contentExportFile } from "@/lib/dt/content/export";
 import { formatEur } from "@/lib/dt/content/presentation";
-import type { GeoToolJob, GeoToolResult, GeoToolStartResult } from "@/lib/dt/text-tools/geo";
+import { slugify } from "@/lib/dt/content/render";
+import type { ContentApiResponse } from "@/lib/dt/content/types";
+import type { GeoToolResult } from "@/lib/dt/text-tools/geo";
 import { TEXT_TOOL_ACCEPT, TEXT_TOOL_MAX_FILE_BYTES } from "@/lib/dt/text-tools/ingest";
-
-const POLL_MS = 4_000;
-/** After this long without a result the page says so instead of spinning forever. */
-const SLOW_AFTER_MS = 6 * 60_000;
 
 const cardClass =
   "relative overflow-hidden rounded-dt-lg border border-sbkm-navy/10 bg-white/55 shadow-dt backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.05]";
+const hintClass = "text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45";
 
-const FORMAT_LABELS: Record<string, string> = { txt: "Textdatei", html: "HTML", pdf: "PDF", docx: "Word" };
+/** Value of the „Ohne Avatar“ entry (the select needs a non-empty value). */
+const NO_AVATAR = "none";
 
 type Phase =
   | { kind: "idle" }
-  | { kind: "uploading" }
-  | { kind: "running"; jobId: string; startedAt: number; input: GeoToolStartResult["input"] }
-  | { kind: "done"; jobId: string; result: GeoToolResult; input: GeoToolStartResult["input"] }
+  | { kind: "running"; startedAt: number }
+  | { kind: "done"; result: GeoToolResult }
   | { kind: "error"; message: string };
 
 function Notice(props: { tone: "warn" | "error"; children: React.ReactNode }) {
@@ -49,60 +47,52 @@ function Notice(props: { tone: "warn" | "error"; children: React.ReactNode }) {
   );
 }
 
+/** The result as a file, built in the browser with the same rendering as the Texte export. */
+function saveFile(format: "html" | "txt", result: GeoToolResult) {
+  const name = (result.page_name || result.file_name.replace(/\.[a-z0-9]+$/i, "")).trim();
+  const base = slugify(name) || "text";
+  const file = contentExportFile(format, { slug: `${base}-geo`, title: result.title || name || "GEO-Text", html: result.html });
+  const url = URL.createObjectURL(new Blob([file.body], { type: file.contentType }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 /**
- * Verwaltung → GEO: one file in, step 4 of the Texte pipeline once, the result as HTML or
- * plain text out. The run is a background job; the card polls its status.
+ * Verwaltung → GEO: a file, an optional page name and an avatar in, one Claude call with the
+ * GEO prompt from Globale Prompts, the reworked text as HTML or .txt out. Nothing is stored;
+ * the request waits for the text (one to three minutes).
  */
 export function DtGeoTool(props: {
   organisationId: string;
   organisationName: string;
-  /** Confirmed Texte settings exist for the organisation; without them the run is refused. */
-  settingsConfirmed: boolean;
   /** „11 von 13 Abschnitten aus den Gesprächen · …“ or null without any Anbieterfakten. */
   anbieterHint: string | null;
-  avatarName: string | null;
+  /** The organisation's avatars, newest first. */
+  avatars: Array<{ id: string; name: string; role: string | null }>;
 }) {
   const { organisationId } = props;
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [pageName, setPageName] = useState("");
-  const [notes, setNotes] = useState("");
-  const [questions, setQuestions] = useState("");
-  const [faktencheck, setFaktencheck] = useState("");
-  const [showOptional, setShowOptional] = useState(false);
+  const [avatarId, setAvatarId] = useState<string>(props.avatars[0]?.id ?? NO_AVATAR);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const [exporting, setExporting] = useState<"html" | "txt" | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  // Poll the job while it runs.
+  // A second counter while the model works, so a long wait does not look like a hang.
   useEffect(() => {
     if (phase.kind !== "running") return;
-    const { jobId, input } = phase;
-    let cancelled = false;
-    const tick = async () => {
-      const res = await contentApi<GeoToolJob>(
-        `/api/dt/text-tools/geo/jobs/${encodeURIComponent(jobId)}?${contentQuery(organisationId)}`,
-      );
-      if (cancelled) return;
-      setNow(Date.now());
-      if (!res.ok) {
-        setPhase({ kind: "error", message: res.message });
-        return;
-      }
-      if (res.data.state === "done" && res.data.result) {
-        setPhase({ kind: "done", jobId, result: res.data.result, input });
-        toast.success("GEO-Text ist fertig.");
-      } else if (res.data.state === "error") {
-        setPhase({ kind: "error", message: res.data.error ?? "Die Verarbeitung ist fehlgeschlagen." });
-      }
-    };
-    const timer = window.setInterval(() => void tick(), POLL_MS);
-    void tick();
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [phase, organisationId]);
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [phase.kind]);
+
+  function resetResult() {
+    if (phase.kind === "done" || phase.kind === "error") setPhase({ kind: "idle" });
+  }
 
   function pickFile(next: File | undefined) {
     if (!next) return;
@@ -111,7 +101,7 @@ export function DtGeoTool(props: {
       return;
     }
     setFile(next);
-    if (phase.kind === "done" || phase.kind === "error") setPhase({ kind: "idle" });
+    resetResult();
   }
 
   async function run() {
@@ -119,44 +109,44 @@ export function DtGeoTool(props: {
       toast.error("Bitte zuerst eine Datei auswählen.");
       return;
     }
-    setPhase({ kind: "uploading" });
+    setNow(Date.now());
+    setPhase({ kind: "running", startedAt: Date.now() });
     const form = new FormData();
     form.set("organisationId", organisationId);
     form.set("file", file);
     form.set("pageName", pageName);
-    form.set("notes", notes);
-    form.set("questions", questions);
-    form.set("faktencheck", faktencheck);
-    let json: ContentApiResponse<GeoToolStartResult> | null = null;
+    if (avatarId !== NO_AVATAR) form.set("avatarId", avatarId);
+    let json: ContentApiResponse<GeoToolResult> | null = null;
     try {
       const res = await fetch(`/api/dt/text-tools/geo/run?${contentQuery(organisationId)}`, { method: "POST", body: form });
-      json = (await res.json().catch(() => null)) as ContentApiResponse<GeoToolStartResult> | null;
-      if (!json) json = { ok: false, message: `Unerwartete Antwort (${res.status}).` };
+      json = (await res.json().catch(() => null)) as ContentApiResponse<GeoToolResult> | null;
+      if (!json) {
+        json = {
+          ok: false,
+          message:
+            res.status === 504
+              ? "Das Modell hat nicht rechtzeitig geantwortet (Zeitlimit). Bitte erneut versuchen."
+              : `Unerwartete Antwort vom Server (${res.status}).`,
+        };
+      }
     } catch {
-      json = { ok: false, message: "Keine Verbindung. Bitte erneut versuchen." };
+      json = { ok: false, message: "Keine Verbindung zum Server. Bitte erneut versuchen." };
     }
     if (!json.ok) {
       setPhase({ kind: "error", message: json.message });
       return;
     }
-    setPhase({ kind: "running", jobId: json.data.id, startedAt: Date.now(), input: json.data.input });
+    setPhase({ kind: "done", result: json.data });
+    toast.success("GEO-Text ist fertig.");
   }
 
-  async function exportResult(format: "html" | "txt") {
-    if (phase.kind !== "done") return;
-    setExporting(format);
-    const base = (phase.result.page_name || phase.result.file_name.replace(/\.[a-z0-9]+$/i, "") || "geo").trim();
-    const res = await downloadContentExport(
-      `/api/dt/text-tools/geo/jobs/${encodeURIComponent(phase.jobId)}/export?${contentQuery(organisationId)}&format=${format}`,
-      `${base}-geo.${format}`,
-    );
-    if (!res.ok) toast.error(res.message);
-    setExporting(null);
-  }
-
-  const busy = phase.kind === "uploading" || phase.kind === "running";
-  const canRun = Boolean(file) && !busy && props.settingsConfirmed;
-  const texteHref = `/dashboard/verwaltung/texte?${contentQuery(organisationId)}`;
+  const running = phase.kind === "running";
+  const canRun = Boolean(file) && !running;
+  const seconds = running ? Math.max(0, Math.round((now - phase.startedAt) / 1000)) : 0;
+  const avatarOptions = [
+    ...props.avatars.map((a) => ({ value: a.id, label: a.name, description: a.role ?? undefined })),
+    { value: NO_AVATAR, label: "Ohne Avatar" },
+  ];
 
   return (
     <div className="grid gap-5">
@@ -165,26 +155,17 @@ export function DtGeoTool(props: {
         <header className="border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">
           <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Text für KI-Zitate überarbeiten</h2>
           <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-            Schritt 4 „GEO“ aus Texte, einmal auf eine hochgeladene Datei: Kernantwort nach vorn, jeder Abschnitt für sich
-            verständlich, Entitäten ausgeschrieben, Unbelegtes markiert. Anbieterfakten, Einstellungen und Avatar kommen aus
-            Texte für <span className="font-semibold">{props.organisationName}</span>.
+            Eigenständiges Werkzeug: die Anweisung kommt aus Globale Prompts → GEO, Fakten aus den Anbieterfakten und der
+            Leser aus dem gewählten Avatar von <span className="font-semibold">{props.organisationName}</span>. Keine
+            Seitenstruktur, keine Einstellungen aus Texte.
           </p>
         </header>
 
         <div className="grid gap-4 px-4 py-4 sm:px-5">
-          {!props.settingsConfirmed ? (
-            <Notice tone="error">
-              Die Einstellungen für Texte (Anrede, Branche, Tonalität, verbotene Wörter) sind für diese Organisation noch
-              nicht bestätigt.{" "}
-              <Link href={texteHref} className="font-semibold underline underline-offset-2">
-                Zu Texte
-              </Link>
-            </Notice>
-          ) : null}
-          {props.settingsConfirmed && !props.anbieterHint ? (
+          {!props.anbieterHint ? (
             <Notice tone="warn">
-              Keine Anbieterfakten vorhanden (weder Anbieter-Fragebogen noch ausgewertete Gespräche). Der Text wird nur
-              umgebaut; Angaben ohne Beleg bekommen den Marker „[BITTE PRÜFEN: …]“.
+              Keine Anbieterfakten vorhanden (weder Anbieter-Fragebogen noch ausgewertete Gespräche). Der Text wird
+              trotzdem überarbeitet, nur ohne Abgleich mit den Fakten.
             </Notice>
           ) : null}
 
@@ -202,7 +183,7 @@ export function DtGeoTool(props: {
               }}
             />
             <div className="flex flex-wrap items-center gap-2">
-              <DtPillButton type="button" size="sm" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
+              <DtPillButton type="button" size="sm" variant="outline" disabled={running} onClick={() => fileRef.current?.click()}>
                 <Upload className="size-3.5" aria-hidden />
                 {file ? "Andere Datei" : "Datei hochladen"}
               </DtPillButton>
@@ -212,7 +193,7 @@ export function DtGeoTool(props: {
                 </span>
               ) : null}
             </div>
-            <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
+            <p className={hintClass}>
               .txt, .html, .pdf oder .docx, höchstens {Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB. Überschriften werden aus
               H1/H2/H3 übernommen, bei reinem Text aus kurzen Zeilen geraten. Ein HTML-Export aus Texte kommt mit seinen
               Abschnitten zurück.
@@ -226,89 +207,45 @@ export function DtGeoTool(props: {
                   id="geo-page-name"
                   value={pageName}
                   maxLength={200}
-                  disabled={busy}
+                  disabled={running}
                   placeholder="z. B. Leistungen · Badsanierung"
                   onChange={(event) => setPageName(event.target.value)}
                 />
               </DtInputWrap>
-              <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-                Nur eine Beschriftung für das Modell und den Dateinamen des Exports.
+              <p className={hintClass}>Nur eine Beschriftung für das Modell und den Dateinamen des Exports.</p>
+            </DtField>
+            <DtField label="Avatar">
+              <DtSelect
+                value={avatarId}
+                onValueChange={(value) => {
+                  setAvatarId(value);
+                  resetResult();
+                }}
+                options={avatarOptions}
+                srLabel="Avatar"
+                disabled={running}
+                fullWidth
+              />
+              <p className={hintClass}>
+                {props.avatars.length === 0
+                  ? "Diese Organisation hat noch keinen Avatar; der Text wird ohne Wunschkunden überarbeitet."
+                  : "Der Wunschkunde, für den der Text überarbeitet wird."}
               </p>
             </DtField>
-            <DtField label="Redaktionelle Anmerkungen" htmlFor="geo-notes" optional>
-              <DtTextarea
-                id="geo-notes"
-                value={notes}
-                disabled={busy}
-                className="min-h-[88px]"
-                placeholder="Gelten vor allem anderen. Antworten darin zählen als bestätigte Fakten. Eine Leerzeile trennt Anmerkungen."
-                onChange={(event) => setNotes(event.target.value)}
-              />
-            </DtField>
           </div>
-
-          <div>
-            <button
-              type="button"
-              className="text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-white/85"
-              onClick={() => setShowOptional((v) => !v)}
-              aria-expanded={showOptional}
-            >
-              {showOptional ? "Weniger Felder" : "Fragen und Faktencheck (optional)"}
-            </button>
-          </div>
-          {showOptional ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <DtField label="Hauptfrage und Fan-out-Fragen" htmlFor="geo-questions" optional>
-                <DtTextarea
-                  id="geo-questions"
-                  value={questions}
-                  disabled={busy}
-                  className="min-h-[120px]"
-                  placeholder={"Eine Frage je Zeile; die erste ist die Hauptfrage.\nLeer: GEO arbeitet nur mit dem Text."}
-                  onChange={(event) => setQuestions(event.target.value)}
-                />
-                <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-                  Fragen, die der Text noch nicht beantwortet, werden als Frage-Überschrift mit Antwort ergänzt – nur aus
-                  den Anbieterfakten.
-                </p>
-              </DtField>
-              <DtField label="Faktencheck-JSON einfügen" htmlFor="geo-faktencheck" optional>
-                <DtTextarea
-                  id="geo-faktencheck"
-                  value={faktencheck}
-                  disabled={busy}
-                  className="min-h-[120px] font-mono text-xs"
-                  placeholder={'{"findings": [...], "questions": [...]}'}
-                  spellCheck={false}
-                  onChange={(event) => setFaktencheck(event.target.value)}
-                />
-                <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-                  Ergebnis eines Faktenchecks (Schritt 3) aus Texte. Ohne Faktencheck wird nichts gestrichen, Unbelegtes nur
-                  markiert.
-                </p>
-              </DtField>
-            </div>
-          ) : null}
 
           {phase.kind === "error" ? <Notice tone="error">{phase.message}</Notice> : null}
 
           <div className="flex flex-wrap items-center gap-3">
             <DtPillButton type="button" size="sm" disabled={!canRun} onClick={() => void run()}>
-              {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Sparkles className="size-3.5" aria-hidden />}
-              {phase.kind === "uploading" ? "Datei wird gelesen …" : phase.kind === "running" ? "GEO läuft …" : "Verarbeiten"}
+              {running ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Sparkles className="size-3.5" aria-hidden />}
+              {running ? "GEO läuft …" : "Verarbeiten"}
             </DtPillButton>
-            {phase.kind === "running" ? (
-              <span className="text-xs text-sbkm-ink-600 dark:text-white/60" aria-live="polite">
-                {FORMAT_LABELS[phase.input.format] ?? phase.input.format} gelesen: {phase.input.blocks}{" "}
-                {phase.input.blocks === 1 ? "Abschnitt" : "Abschnitte"}, {phase.input.chars.toLocaleString("de-DE")} Zeichen.
-                {now - phase.startedAt > SLOW_AFTER_MS
-                  ? " Das dauert ungewöhnlich lange – läuft der Hintergrund-Worker? Die Seite kann offen bleiben."
-                  : " Das Modell schreibt – meist zwei bis vier Minuten."}
+            {running ? (
+              <span className="text-xs tabular-nums text-sbkm-ink-600 dark:text-white/60" aria-live="polite">
+                {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")} · Das Modell überarbeitet den ganzen Text, meist ein
+                bis drei Minuten. Die Seite bitte offen lassen.
               </span>
-            ) : null}
-            {props.avatarName ? (
-              <span className="text-[11px] text-sbkm-ink-500 dark:text-white/45">Avatar: {props.avatarName}</span>
             ) : null}
           </div>
         </div>
@@ -320,17 +257,18 @@ export function DtGeoTool(props: {
             <div className="min-w-0">
               <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Ergebnis</h2>
               <p className="mt-0.5 truncate text-xs text-sbkm-ink-600 dark:text-white/60">
-                {phase.result.blocks.length} {phase.result.blocks.length === 1 ? "Abschnitt" : "Abschnitte"} · {phase.result.model} ·{" "}
+                {phase.result.blocks.length} {phase.result.blocks.length === 1 ? "Abschnitt" : "Abschnitte"}
+                {phase.result.avatar_name ? ` · Avatar: ${phase.result.avatar_name}` : ""} · {phase.result.model} ·{" "}
                 {formatEur(phase.result.cost_eur)}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <DtPillButton type="button" size="sm" variant="outline" disabled={exporting !== null} onClick={() => void exportResult("html")}>
-                {exporting === "html" ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Download className="size-3.5" aria-hidden />}
+              <DtPillButton type="button" size="sm" variant="outline" onClick={() => saveFile("html", phase.result)}>
+                <Download className="size-3.5" aria-hidden />
                 HTML herunterladen
               </DtPillButton>
-              <DtPillButton type="button" size="sm" variant="outline" disabled={exporting !== null} onClick={() => void exportResult("txt")}>
-                {exporting === "txt" ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FileText className="size-3.5" aria-hidden />}
+              <DtPillButton type="button" size="sm" variant="outline" onClick={() => saveFile("txt", phase.result)}>
+                <FileText className="size-3.5" aria-hidden />
                 Text (.txt) herunterladen
               </DtPillButton>
             </div>
