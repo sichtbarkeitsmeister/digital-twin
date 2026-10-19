@@ -10,6 +10,7 @@ import { contentApi } from "@/components/dt/content/content-api";
 import { DtTextarea } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { formatContentDate } from "@/lib/dt/content/presentation";
+import { CONTENT_STEP_PROMPTS_HREF } from "@/lib/dt/content/step-prompts";
 import { TEXTER_PROMPT_HREF } from "@/lib/dt/content/texter-prompt";
 import {
   CONTENT_TYPE_PROMPT_HELP,
@@ -27,7 +28,13 @@ import type { ContentTypePromptsResult } from "@/lib/dt/content/types";
 const cardClass =
   "relative overflow-hidden rounded-dt-lg border border-sbkm-navy/10 bg-white/55 shadow-dt backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.05]";
 
-const ENDPOINT = "/api/dt/content/type-prompts";
+/** Which set the card edits: Texte's or the SEO tool's own. Same card, separate rows. */
+export type ContentTypePromptsCardVariant = "texte" | "seo_tool";
+
+const ENDPOINTS: Record<ContentTypePromptsCardVariant, string> = {
+  texte: "/api/dt/content/type-prompts",
+  seo_tool: "/api/dt/text-tools/seo/type-prompts",
+};
 
 function samePrompts(a: ContentTypePrompts, b: ContentTypePrompts): boolean {
   return CONTENT_TYPE_PROMPT_KEYS.every((key) => a[key] === b[key]);
@@ -37,8 +44,14 @@ function samePrompts(a: ContentTypePrompts, b: ContentTypePrompts): boolean {
  * „Textvorlagen“: how the SEO step writes each page type. One set for the whole agency; a
  * page keeps its own type, the recipe only says how that type is written. Finished pages do
  * not change until someone reruns their SEO step.
+ *
+ * `variant="seo_tool"` shows the same card for the standalone SEO tool (Verwaltung → SEO),
+ * which has its own set: saving one never changes the other.
  */
-export function DtContentTypePromptsCard() {
+export function DtContentTypePromptsCard(props: { variant?: ContentTypePromptsCardVariant } = {}) {
+  const variant = props.variant ?? "texte";
+  const seoTool = variant === "seo_tool";
+  const ENDPOINT = ENDPOINTS[variant];
   const [state, setState] = useState<ContentTypePromptsResult | null>(null);
   const [draft, setDraft] = useState<ContentTypePrompts | null>(null);
   const [open, setOpen] = useState(false);
@@ -64,7 +77,7 @@ export function DtContentTypePromptsCard() {
     return () => {
       cancelled = true;
     };
-  }, [apply]);
+  }, [apply, ENDPOINT]);
 
   const dirty = useMemo(() => Boolean(state && draft && !samePrompts(state.prompts, draft)), [state, draft]);
   const custom = state ? hasCustomContentTypePrompts(state.prompts) : false;
@@ -80,7 +93,9 @@ export function DtContentTypePromptsCard() {
       }
       apply(res.data);
       toast.success("Textvorlagen gespeichert", {
-        description: "Gilt ab dem nächsten SEO-Schritt. Fertige Seiten ändern sich erst, wenn ihr SEO-Schritt neu läuft.",
+        description: seoTool
+          ? "Gilt ab dem nächsten Durchlauf des SEO-Werkzeugs. Die Textvorlagen unter Texte bleiben unverändert."
+          : "Gilt ab dem nächsten SEO-Schritt. Fertige Seiten ändern sich erst, wenn ihr SEO-Schritt neu läuft.",
       });
     } finally {
       setBusy(null);
@@ -111,8 +126,9 @@ export function DtContentTypePromptsCard() {
         <div className="grid gap-0.5">
           <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Textvorlagen</h2>
           <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
-            Wie der SEO-Schritt die sieben Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren
-            eigenen Seitentyp. Die allgemeinen Regeln stehen im Text-Prompt direkt darüber.
+            {seoTool
+              ? "Wie das SEO-Werkzeug die sieben Seitentypen schreibt. Eigene Vorlagen dieses Werkzeugs, für alle Organisationen: Änderungen hier ändern Texte nicht, Änderungen unter Texte ändern sie nicht."
+              : "Wie der SEO-Schritt die sieben Seitentypen schreibt. Gilt für alle Organisationen; jede Seite behält ihren eigenen Seitentyp. Die allgemeinen Regeln stehen im Text-Prompt direkt darüber."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -159,6 +175,17 @@ export function DtContentTypePromptsCard() {
               {state.hint}
             </p>
           ) : null}
+          {seoTool ? (
+            <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
+              Die Anweisung für den ganzen Text kommt aus{" "}
+              <Link href={CONTENT_STEP_PROMPTS_HREF} className="font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-white">
+                Globale Prompts → SEO
+              </Link>
+              . Die Vorlage hier sagt, was beim gewählten Seitentyp zusätzlich gilt; bei Widerspruch gilt sie. Das Werkzeug
+              hat kein Hauptsilo-Feld: „{CONTENT_TYPE_PROMPT_PILLAR_TOKEN}“ bleibt als Wort „Hauptsilo“ stehen. Das technische
+              Gerüst (H1, Hero-Platzhalter) bleibt. Gilt ab dem nächsten Durchlauf.
+            </p>
+          ) : (
           <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
             Die allgemeinen Regeln (Hormozi-Reihenfolge, Platzhalter, Abgrenzung der Seitentypen) stehen im Text-Prompt
             direkt darüber und unter{" "}
@@ -170,6 +197,7 @@ export function DtContentTypePromptsCard() {
             Gerüst des SEO-Schritts (H1, Hero-Platzhalter, Link-Marker) bleibt. Fertige Seiten ändern sich erst, wenn
             ihr SEO-Schritt neu läuft.
           </p>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             {CONTENT_TYPE_PROMPT_KEYS.map((key) => {
@@ -178,7 +206,7 @@ export function DtContentTypePromptsCard() {
               return (
                 <div key={key} className="grid gap-1.5">
                   <div className="flex items-baseline justify-between gap-2">
-                    <label htmlFor={`type-prompt-${key}`} className="text-sm font-semibold text-sbkm-navy dark:text-white">
+                    <label htmlFor={`type-prompt-${variant}-${key}`} className="text-sm font-semibold text-sbkm-navy dark:text-white">
                       {CONTENT_TYPE_PROMPT_LABELS[key]}
                     </label>
                     <span className="text-[11px] tabular-nums text-sbkm-ink-500 dark:text-white/45">
@@ -188,7 +216,7 @@ export function DtContentTypePromptsCard() {
                   </div>
                   <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">{CONTENT_TYPE_PROMPT_HELP[key]}</p>
                   <DtTextarea
-                    id={`type-prompt-${key}`}
+                    id={`type-prompt-${variant}-${key}`}
                     value={value}
                     maxLength={CONTENT_TYPE_PROMPT_MAX_CHARS}
                     rows={7}

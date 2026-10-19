@@ -1,7 +1,10 @@
 /**
- * Reads and writes the agency's writing recipes (`dt_content_type_prompts`). Always called
- * with the service client: the route checks access first, the job runner has none. A missing
- * table (migration not run) answers with the defaults so a page run never fails because of it.
+ * Reads and writes the writing recipes (`dt_content_type_prompts`). Always called with the
+ * service client: the route checks access first, the job runner has none. A missing table
+ * (migration not run) answers with the defaults so a page run never fails because of it.
+ *
+ * Two independent sets, one row each: `texte` (id `agency`, the SEO step of Texte) and
+ * `seo_tool` (id `seo_tool`, Verwaltung → SEO). Saving one never touches the other.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -18,8 +21,13 @@ export const CONTENT_TYPE_PROMPTS_MIGRATION_FILE = "database/migrations/20261010
 export const CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE = "database/migrations/20261015_dt_content_startseite_ueber_uns.sql";
 /** Adds the Hauptseite column, and allows that page type on `dt_content_pages`. */
 export const CONTENT_TYPE_PROMPTS_HAUPTSEITE_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
+/** Allows the second row (`seo_tool`) and seeds it with a copy of the Texte recipes. */
+export const SEO_TOOL_TYPE_PROMPTS_MIGRATION_FILE = "database/migrations/20261019_dt_seo_tool_type_prompts.sql";
 
-const ROW_ID = "agency";
+/** Which set of recipes: the SEO step of Texte or the standalone SEO tool. */
+export type ContentTypePromptsScope = "texte" | "seo_tool";
+
+const ROW_IDS: Record<ContentTypePromptsScope, string> = { texte: "agency", seo_tool: "seo_tool" };
 const COLUMNS = "hauptsilo, hauptseite, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
 /** Before 20261017: everything but the Hauptseite. */
 const WITHOUT_HAUPTSEITE_COLUMNS = "hauptsilo, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
@@ -51,7 +59,11 @@ function stateFromRow(
   };
 }
 
-export async function loadContentTypePrompts(service: SupabaseClient): Promise<ContentTypePromptsState> {
+export async function loadContentTypePrompts(
+  service: SupabaseClient,
+  scope: ContentTypePromptsScope = "texte",
+): Promise<ContentTypePromptsState> {
+  const ROW_ID = ROW_IDS[scope];
   const { data, error } = await service.from("dt_content_type_prompts").select(COLUMNS).eq("id", ROW_ID).maybeSingle();
   if (error) {
     if (isMissingContentTableError(error)) {
@@ -75,10 +87,13 @@ export async function loadContentTypePrompts(service: SupabaseClient): Promise<C
   return stateFromRow((data as Record<string, unknown> | null) ?? null, "db");
 }
 
-/** The recipes for a page run; any read problem means the defaults, never a failed step. */
-export async function loadContentTypePromptsForRun(service: SupabaseClient): Promise<ContentTypePrompts> {
+/** The recipes for a run; any read problem means the defaults, never a failed step. */
+export async function loadContentTypePromptsForRun(
+  service: SupabaseClient,
+  scope: ContentTypePromptsScope = "texte",
+): Promise<ContentTypePrompts> {
   try {
-    return (await loadContentTypePrompts(service)).prompts;
+    return (await loadContentTypePrompts(service, scope)).prompts;
   } catch (error) {
     console.warn("[content] type prompts not readable, defaults used:", error instanceof Error ? error.message : error);
     return { ...DEFAULT_CONTENT_TYPE_PROMPTS };
@@ -88,11 +103,12 @@ export async function loadContentTypePromptsForRun(service: SupabaseClient): Pro
 export async function saveContentTypePrompts(
   service: SupabaseClient,
   input: { prompts: ContentTypePrompts; userId: string; userEmail: string | null },
+  scope: ContentTypePromptsScope = "texte",
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const clean = normalizeContentTypePrompts(input.prompts);
   const { error } = await service.from("dt_content_type_prompts").upsert(
     {
-      id: ROW_ID,
+      id: ROW_IDS[scope],
       ...clean,
       updated_by: input.userId,
       updated_by_email: input.userEmail,
@@ -101,6 +117,13 @@ export async function saveContentTypePrompts(
     { onConflict: "id" },
   );
   if (!error) return { ok: true };
+  // The second row is refused by the old `id = 'agency'` check until the migration ran.
+  if (scope === "seo_tool" && (error.code === "23514" || /dt_content_type_prompts_id_check/i.test(error.message ?? ""))) {
+    return {
+      ok: false,
+      error: `Die Datenbank kennt die eigenen Textvorlagen des SEO-Werkzeugs noch nicht: Bitte ${SEO_TOOL_TYPE_PROMPTS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
+    };
+  }
   if (isMissingContentColumnError(error)) {
     return {
       ok: false,

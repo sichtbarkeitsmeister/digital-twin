@@ -59,7 +59,7 @@ export const CONTENT_STEP_PROMPT_META: Record<ContentStepPromptKey, { label: str
     label: "SEO",
     step: 2,
     description:
-      "Schritt 2: schreibt den Seitentext. Text-Prompt und Textvorlage des Seitentyps hängt der Code danach an; bei Widerspruch gilt die Textvorlage.",
+      "Schritt 2: schreibt den Seitentext. Text-Prompt und Textvorlage des Seitentyps hängt der Code danach an; bei Widerspruch gilt die Textvorlage. Gilt auch für das Werkzeug Verwaltung → SEO (dort mit dessen eigenen Textvorlagen, ohne Text-Prompt).",
   },
   faktencheck: {
     label: "Faktencheck",
