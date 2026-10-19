@@ -23,11 +23,6 @@ export function isGeoDashboardPath(pathname: string): boolean {
   return pathname === "/dashboard/verwaltung/geo" || pathname.startsWith("/dashboard/verwaltung/geo/");
 }
 
-/** Watermark tool (step 8 of Texte on an uploaded file) — same organisation list and access as Texte. */
-export function isWatermarkDashboardPath(pathname: string): boolean {
-  return pathname === "/dashboard/verwaltung/watermark-entfernung" || pathname.startsWith("/dashboard/verwaltung/watermark-entfernung/");
-}
-
 /** Organisation overview page with top-bar org selector. */
 export function isOrganisationDashboardPath(pathname: string): boolean {
   return pathname === "/dashboard/organisations";
@@ -55,7 +50,6 @@ export function isDashboardOrgBarPath(pathname: string): boolean {
     isTexteDashboardPath(pathname) ||
     isSeoTextDashboardPath(pathname) ||
     isGeoDashboardPath(pathname) ||
-    isWatermarkDashboardPath(pathname) ||
     isManageOrgBarPath(pathname) ||
     isOrganisationDashboardPath(pathname) ||
     isOnboardingDashboardPath(pathname)

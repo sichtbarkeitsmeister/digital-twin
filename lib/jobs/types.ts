@@ -7,7 +7,6 @@ export type JobKind =
   | "grounding.page"
   | "text-tool.geo"
   | "text-tool.seo"
-  | "text-tool.watermark"
   | "apollo.enrich"
   | "outreach.draft"
   | "outreach.send"
