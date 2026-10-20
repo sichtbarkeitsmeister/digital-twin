@@ -13,6 +13,7 @@ import {
   FolderUp,
   Inbox,
   PenLine,
+  Target,
   Shield,
   Sparkles,
   Users,
@@ -161,6 +162,12 @@ export function DashboardSidebar({
             href: "/dashboard/verwaltung/geo",
             icon: ScanSearch,
             match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/geo"),
+          },
+          {
+            label: "Hormozi",
+            href: "/dashboard/verwaltung/hormozi",
+            icon: Target,
+            match: (pathname: string) => pathname.startsWith("/dashboard/verwaltung/hormozi"),
           },
           {
             label: "Watermark Entfernung",

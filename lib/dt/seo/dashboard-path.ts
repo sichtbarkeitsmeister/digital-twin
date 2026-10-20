@@ -23,6 +23,11 @@ export function isGeoDashboardPath(pathname: string): boolean {
   return pathname === "/dashboard/verwaltung/geo" || pathname.startsWith("/dashboard/verwaltung/geo/");
 }
 
+/** Hormozi tool (the conversion layer on an uploaded file) — same organisation list and access as Texte. */
+export function isHormoziDashboardPath(pathname: string): boolean {
+  return pathname === "/dashboard/verwaltung/hormozi" || pathname.startsWith("/dashboard/verwaltung/hormozi/");
+}
+
 /** Organisation overview page with top-bar org selector. */
 export function isOrganisationDashboardPath(pathname: string): boolean {
   return pathname === "/dashboard/organisations";
@@ -50,6 +55,7 @@ export function isDashboardOrgBarPath(pathname: string): boolean {
     isTexteDashboardPath(pathname) ||
     isSeoTextDashboardPath(pathname) ||
     isGeoDashboardPath(pathname) ||
+    isHormoziDashboardPath(pathname) ||
     isManageOrgBarPath(pathname) ||
     isOrganisationDashboardPath(pathname) ||
     isOnboardingDashboardPath(pathname)

@@ -74,7 +74,8 @@ export const CONTENT_STEP_PROMPT_META: Record<ContentStepPromptKey, { label: str
   hormozi: {
     label: "Hormozi",
     step: 5,
-    description: "Schritt 5: Conversion-Schicht mit Hero-Satz, Value Equation und Handlungsaufforderungen.",
+    description:
+      "Schritt 5: Conversion-Schicht mit Hero-Satz, Value Equation und Handlungsaufforderungen. Gilt auch für das Werkzeug Verwaltung → Hormozi.",
   },
   vermenschlichung: {
     label: "Vermenschlichung",

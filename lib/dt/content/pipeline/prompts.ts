@@ -47,8 +47,8 @@ import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/d
 
 /**
  * Where a page of the prompt comes from: the Excel structure, the crawl, or — only in the
- * standalone SEO tool (lib/dt/text-tools/seo.ts) — an upload with a briefing form. The
- * third value never reaches `dt_content_pages`; it is a prompt-time label.
+ * standalone SEO and Hormozi tools (lib/dt/text-tools/seo.ts, hormozi.ts) — an upload with
+ * a form. The third value never reaches `dt_content_pages`; it is a prompt-time label.
  */
 export type ContentPipelinePageSource = ContentPageSource | "standalone";
 
@@ -360,8 +360,8 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 }
 
 // --- shared prompt parts ----------------------------------------------------------------------
-// Exported for the standalone GEO tool (lib/dt/text-tools/geo.ts), which builds the same
-// blocks around an uploaded text instead of a page of the pipeline.
+// Exported for the standalone GEO and Hormozi tools (lib/dt/text-tools/geo.ts, hormozi.ts),
+// which build the same blocks around an uploaded text instead of a page of the pipeline.
 
 export function anbieterBlock(context: Pick<ContentPipelineContext, "sections">): string {
   const filled = context.sections.filter((s) => s.current.trim());
@@ -958,9 +958,12 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
   };
 }
 
+/** Output size of the Hormozi rewrite; the standalone Hormozi tool uses the same budget. */
+export const HORMOZI_MAX_TOKENS = 12_000;
+
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
-    maxTokens: 12_000,
+    maxTokens: HORMOZI_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "hormozi"), context.settings),
     user: join([
       pageBlock(context),
