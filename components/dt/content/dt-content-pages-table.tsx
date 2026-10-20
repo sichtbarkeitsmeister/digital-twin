@@ -24,8 +24,8 @@ export function isContentPageSelectable(page: ContentPageSummary): boolean {
 const TYPE_OPTIONS = [...CONTENT_PAGE_TYPE_OPTIONS];
 
 /**
- * „Seitentyp“: a select for crawl pages whose type was guessed (same control and PATCH as
- * the drawer, not while the page runs); the label as text for pages with an Excel briefing.
+ * „Seitentyp“: a select on every row (same control and PATCH as the drawer), disabled
+ * while the page runs. Without a change handler the label stays as text.
  */
 function PageTypeCell(props: {
   page: ContentPageSummary;
@@ -33,12 +33,9 @@ function PageTypeCell(props: {
   busy: boolean;
 }) {
   const { page } = props;
-  if (!page.type_editable || !props.onChange) {
+  if (!props.onChange) {
     return (
-      <span
-        className="text-xs font-semibold text-sbkm-navy dark:text-white/85"
-        title={page.type_editable ? undefined : "aus der Seitenstruktur"}
-      >
+      <span className="text-xs font-semibold text-sbkm-navy dark:text-white/85">
         {contentPageTypeLabel(page.page_type)}
       </span>
     );
@@ -74,7 +71,7 @@ export function DtContentPagesTable(props: {
   onStop?: (page: ContentPageSummary) => void;
   /** Slug whose stop request is in flight. */
   stopping?: string | null;
-  /** „Seitentyp“ chosen in the table (crawl pages without Excel briefing). */
+  /** „Seitentyp“ chosen in the table (every page, not while it runs). */
   onTypeChange?: (page: ContentPageSummary, type: ContentPageType) => void;
   /** Slug whose type change is in flight. */
   changingType?: string | null;

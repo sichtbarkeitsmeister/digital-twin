@@ -6,8 +6,8 @@
  * - role: where the page sits in the Excel-Seitenstruktur (Startseite, Ebene 1 = pillar,
  *   Ebene 2 = supporting). Crawl pages have no role.
  * - type: which writing variant the SEO step uses. Derived from role, pillar and name;
- *   the editor may override it in the drawer. „Hauptseite“ (one offer without Unterseiten)
- *   is never derived or guessed: it is only ever chosen by hand.
+ *   the editor may override it in the table and in the drawer. „Hauptseite“ (one offer
+ *   without Unterseiten) is never derived or guessed: it is only ever chosen by hand.
  */
 
 export const CONTENT_PAGE_ROLES = ["startseite", "pillar", "supporting"] as const;

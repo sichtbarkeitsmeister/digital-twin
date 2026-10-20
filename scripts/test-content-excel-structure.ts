@@ -73,7 +73,6 @@ import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import { approveNeedsConfirm } from "../lib/dt/content/presentation";
 import { parseBlocksFromHtml, renderBlocksHtml } from "../lib/dt/content/render";
 import {
-  CONTENT_TYPE_LOCKED_MESSAGE,
   canEditContentPageType,
   contentPageTypeChangeBlocker,
   contentStructureOutline,
@@ -678,23 +677,23 @@ const excelPage: ContentPageRow = {
   findings: [], final_findings: [], unresolved: [], questions: [], notes: [], error: null, job_id: null, cost_eur: 0, started_by: null, created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:00:00Z",
 };
 const crawlPage: ContentPageRow = { ...excelPage, id: "p2", slug: "dach", source: "crawl", source_url: "https://x.de/dach", page_role: null, page_type: "unterseite" };
-assert.deepEqual(contentPageTypeChangeBlocker(excelPage), { status: 409, message: CONTENT_TYPE_LOCKED_MESSAGE });
-assert.equal(CONTENT_TYPE_LOCKED_MESSAGE, "Der Seitentyp kommt aus der Excel und kann hier nicht geändert werden.");
-assert.deepEqual(contentPageTypeChangeBlocker({ ...excelPage, page_type: "nicht_bearbeiten" })?.message, CONTENT_TYPE_LOCKED_MESSAGE, "nicht_bearbeiten from the Excel stays locked");
-assert.deepEqual(contentPageTypeChangeBlocker({ ...excelPage, state: "fertig" })?.message, CONTENT_TYPE_LOCKED_MESSAGE);
+assert.equal(contentPageTypeChangeBlocker(excelPage), null, "an Excel page may be changed by hand");
+assert.equal(contentPageTypeChangeBlocker({ ...excelPage, page_type: "nicht_bearbeiten" }), null, "nicht_bearbeiten from the Excel can be corrected");
+assert.equal(contentPageTypeChangeBlocker({ ...excelPage, state: "fertig" }), null, "also after a run");
 assert.equal(contentPageTypeChangeBlocker(crawlPage), null, "a crawl page may be changed");
 assert.equal(contentPageTypeChangeBlocker({ ...crawlPage, page_type: "nicht_bearbeiten" }), null, "a wrongly guessed Kontakt can be corrected");
 assert.equal(contentPageTypeChangeBlocker({ ...crawlPage, state: "fertig" }), null, "also after a run");
+assert.match(contentPageTypeChangeBlocker({ ...excelPage, state: "laeuft" })?.message ?? "", /läuft gerade/, "not while an Excel page runs");
 assert.match(contentPageTypeChangeBlocker({ ...crawlPage, state: "laeuft" })?.message ?? "", /läuft gerade/, "not while it runs");
-assert.equal(canEditContentPageType(excelPage), false);
+assert.equal(canEditContentPageType(excelPage), true);
 assert.equal(canEditContentPageType(crawlPage), true);
-assert.equal(pageBriefing(excelPage).type_editable, false, "the drawer shows a label for Excel pages");
+assert.equal(pageBriefing(excelPage).type_editable, true, "the drawer shows the select for Excel pages");
 assert.equal(pageBriefing(crawlPage).type_editable, true, "the drawer shows the select for crawl pages");
-assert.equal(pageSummary(crawlPage).type_editable, true, "a crawl page with a guessed type: select in the table");
-assert.equal(pageSummary(excelPage).type_editable, false, "a page from the Seitenstruktur: label only");
-assert.equal(pageSummary({ ...crawlPage, page_role: "supporting" }).type_editable, false, "a crawl page matched to an Excel row keeps the Excel type");
+assert.equal(pageSummary(crawlPage).type_editable, true, "a crawl page: select in the table");
+assert.equal(pageSummary(excelPage).type_editable, true, "a page from the Seitenstruktur: select in the table");
+assert.equal(pageSummary({ ...crawlPage, page_role: "supporting" }).type_editable, true, "a crawl page matched to an Excel row stays editable");
 assert.equal(pageSummary({ ...crawlPage, page_type: null }).type_editable, true, "also before a type is set");
-console.log("seitentyp lock: ok");
+console.log("seitentyp editable: ok");
 
 const geo = contentStepSpec(4, context());
 assert.match(geo.system, /GEO/);
