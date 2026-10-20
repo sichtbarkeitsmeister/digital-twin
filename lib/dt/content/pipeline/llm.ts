@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { callAnthropicFirstAvailable, extractToolUseInput } from "@/lib/ai/anthropic-helpers";
+import { reviveStringifiedToolInput } from "@/lib/ai/tolerant-json";
 import { resolveContentApiKey } from "@/lib/dt/content/model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 
@@ -92,7 +93,12 @@ export async function callContentTool(input: {
     );
   }
 
-  const json = extractToolUseInput(result.response, input.tool.name);
+  // Claude sometimes sends a nested parameter (the text sections, the findings) as a JSON
+  // string, often with an unescaped quote in it; read it back as the declared array/object.
+  const json = reviveStringifiedToolInput(
+    extractToolUseInput(result.response, input.tool.name),
+    input.tool.input_schema as Parameters<typeof reviveStringifiedToolInput>[1],
+  );
   if (!json) throw new ContentLlmError("Die KI-Antwort enthielt kein Ergebnis.", true);
   if (result.response.stop_reason === "max_tokens") {
     throw new ContentLlmError("Die KI-Antwort wurde abgeschnitten. Bitte den Schritt wiederholen.", false);
