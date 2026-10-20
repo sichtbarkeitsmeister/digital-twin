@@ -24,7 +24,6 @@ import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-fram
 import {
   CONTENT_PAGE_TYPE_LABELS,
   CONTENT_PAGE_TYPE_OPTIONS,
-  contentPageTypeLabel,
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
 import {
@@ -281,7 +280,7 @@ export function DtContentPageDrawer(props: {
     onClose();
   }
 
-  /** „Seitentyp“: the editor overrides what the Excel or the crawl guess derived. */
+  /** „Seitentyp“: the editor overrides the Excel briefing and the crawl guess. */
   async function changePageType(next: string) {
     if (!base || !review) return;
     setBusy("page_type");
@@ -538,37 +537,18 @@ export function DtContentPageDrawer(props: {
                             : "aus der Excel"}
                         </span>
                       </h3>
-                      {review.briefing.type_editable ? (
-                        <DtSelect
-                          label="Seitentyp"
-                          value={review.briefing.page_type ?? ""}
-                          onValueChange={(next) => void changePageType(next)}
-                          options={[...CONTENT_PAGE_TYPE_OPTIONS]}
-                          searchable={false}
-                          placeholder="Noch nicht bestimmt"
-                          disabled={Boolean(busy) || review.public.state === "laeuft"}
-                          elevated
-                          size="sm"
-                          fullWidth
-                        />
-                      ) : (
-                        <div className="grid gap-1">
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-sbkm-ink-500 dark:text-white/45">
-                            Seitentyp
-                          </span>
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span
-                              className="inline-flex rounded-pill bg-sbkm-navy/[0.06] px-2.5 py-1 text-xs font-bold text-sbkm-navy dark:bg-white/10 dark:text-white"
-                              data-testid="content-page-type-locked"
-                            >
-                              {contentPageTypeLabel(review.briefing.page_type)}
-                            </span>
-                            <span className="text-[11px] text-sbkm-ink-500 dark:text-white/45">
-                              aus der Excel – zum Ändern eine korrigierte Excel hochladen
-                            </span>
-                          </span>
-                        </div>
-                      )}
+                      <DtSelect
+                        label="Seitentyp"
+                        value={review.briefing.page_type ?? ""}
+                        onValueChange={(next) => void changePageType(next)}
+                        options={[...CONTENT_PAGE_TYPE_OPTIONS]}
+                        searchable={false}
+                        placeholder="Noch nicht bestimmt"
+                        disabled={Boolean(busy) || review.public.state === "laeuft"}
+                        elevated
+                        size="sm"
+                        fullWidth
+                      />
                       <dl className="grid gap-1 text-xs text-sbkm-ink-600 dark:text-white/65">
                         <div className="flex gap-2">
                           <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Hauptkeyword</dt>

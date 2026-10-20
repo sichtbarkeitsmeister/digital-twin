@@ -45,8 +45,9 @@ export type ContentPageSummary = {
   page_type: ContentPageType | null;
   page_role: ContentPageRole | null;
   /**
-   * Whether the table and the drawer offer the Seitentyp select: a crawl page whose type was
-   * guessed. Pages with an Excel briefing keep the Excel type (`canEditContentPageType`).
+   * Whether the table and the drawer offer the Seitentyp select. Always true: the Excel type
+   * and the crawl guess are suggestions the editor overrides (`canEditContentPageType`).
+   * A running page still disables the select until it is stopped.
    */
   type_editable: boolean;
   /** Real Google questions from the Excel (Spalte H). */
@@ -163,9 +164,8 @@ export type ContentPageBriefing = {
   from_excel: boolean;
   page_type: ContentPageType | null;
   /**
-   * Crawl pages: the editor may change the type (the guess from name and depth can be wrong).
-   * Excel pages (and crawl pages with an Excel briefing): locked, the Excel is the briefing;
-   * a corrected Excel changes the type.
+   * The editor may always change the type (Excel briefing and crawl guess are suggestions).
+   * A running page disables the select until it is stopped.
    */
   type_editable: boolean;
   page_role: ContentPageRole | null;

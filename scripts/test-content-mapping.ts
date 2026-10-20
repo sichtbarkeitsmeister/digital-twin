@@ -1086,7 +1086,7 @@ async function runVerbesserung() {
     ["<p>Überarbeitet</p>", "fertig", 9, 1.25, "crawl", "https://x.de/leistungen/dachsanierung/", "Dachsanierung vom Meister"],
     "text, state, step, cost, source and live URL (so the crawled text) stay",
   );
-  assert.equal(canEditContentPageType({ source: "crawl", page_role: dach.page_role as ContentPageRow["page_role"] }), false, "the Excel type is locked on the briefed row");
+  assert.equal(canEditContentPageType({ source: "crawl", page_role: dach.page_role as ContentPageRow["page_role"] }), true, "the Excel type stays editable on the briefed row");
   const tipps = rows.find((r) => r.slug === "tipps")!;
   assert.ok(tipps && tipps.page_role == null && tipps.keywords == null, "a crawled page the Excel does not name stays as it was");
 
@@ -1113,7 +1113,7 @@ async function runVerbesserung() {
     ["structure", null, "unterseite", "Fassadenreinigung", "Fassadenreinigung", ["Wie oft reinigen?"]],
     "created like „Neue Website“: source structure, no live URL, with its briefing",
   );
-  assert.equal(canEditContentPageType({ source: "structure" }), false, "the Excel type is locked");
+  assert.equal(canEditContentPageType({ source: "structure" }), true, "the Excel type stays editable");
   assert.ok(!rows.some((r) => r.slug === "leistungen"), "a page that was not asked for is not created");
   assert.deepEqual(contentStructurePlanResult(await loadContentStructurePlan(mem.client, ORG)).missing.map((p) => p.slug), ["leistungen"]);
 

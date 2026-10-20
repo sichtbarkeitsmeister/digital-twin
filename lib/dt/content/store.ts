@@ -555,7 +555,6 @@ export async function syncContentPagesFromStructure(
   return { synced: true, pages: written };
 }
 
-export const CONTENT_TYPE_LOCKED_MESSAGE = "Der Seitentyp kommt aus der Excel und kann hier nicht geändert werden.";
 export const CONTENT_TYPE_RUNNING_MESSAGE = "Die Seite läuft gerade – erst stoppen, dann den Seitentyp ändern.";
 
 /**
@@ -567,23 +566,25 @@ export function hasExcelBriefing(page: Pick<ContentPageRow, "source"> & Partial<
 }
 
 /**
- * Who may change „Seitentyp“: only crawl pages without an Excel briefing. The Excel is the
- * briefing; a wrong type there is fixed with a corrected Excel, never by hand in the drawer.
+ * Who may change „Seitentyp“: every page. The Excel briefing and the crawl guess are
+ * suggestions; the editor overrides either in the table and in the drawer. A running page
+ * is the only exception (`contentPageTypeChangeBlocker`).
  */
-export function canEditContentPageType(page: Pick<ContentPageRow, "source"> & Partial<Pick<ContentPageRow, "page_role">>): boolean {
-  return !hasExcelBriefing(page);
+export function canEditContentPageType(
+  page: Pick<ContentPageRow, "source"> & Partial<Pick<ContentPageRow, "page_role">>,
+): boolean {
+  return page.source === "crawl" || hasExcelBriefing(page);
 }
 
 /** Why the type cannot be changed right now (status and German message), or null when it can. */
 export function contentPageTypeChangeBlocker(
-  page: Pick<ContentPageRow, "source" | "state"> & Partial<ContentPageRow>,
+  page: Pick<ContentPageRow, "state"> & Partial<ContentPageRow>,
 ): { status: number; message: string } | null {
-  if (!canEditContentPageType(page)) return { status: 409, message: CONTENT_TYPE_LOCKED_MESSAGE };
   if (page.state === "laeuft") return { status: 409, message: CONTENT_TYPE_RUNNING_MESSAGE };
   return null;
 }
 
-/** „Seitentyp“ changed by hand in the drawer (crawl pages only; a running page waits). */
+/** „Seitentyp“ changed by hand in the table or the drawer (not while the page runs). */
 export async function updateContentPageType(
   service: SupabaseClient,
   page: ContentPageRow,

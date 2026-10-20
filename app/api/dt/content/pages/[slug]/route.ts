@@ -25,9 +25,8 @@ const patchSchema = z.object({
 });
 
 /**
- * „Seitentyp“ in the drawer. Only crawl pages: their type is a guess from name and depth and
- * the editor corrects it by hand (not while the page runs). Pages from the Excel keep the
- * type the Excel gave them; a corrected Excel is the way to change it.
+ * „Seitentyp“ in the table and in the drawer. Every page: the Excel type and the crawl guess
+ * are suggestions the editor overrides by hand (not while the page runs).
  */
 export async function PATCH(req: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
