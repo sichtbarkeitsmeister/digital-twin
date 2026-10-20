@@ -82,6 +82,7 @@
     "test:text-tools-geo": "tsx scripts/test-text-tools-geo.ts",
     "test:text-tools-hormozi": "tsx scripts/test-text-tools-hormozi.ts",
     "test:text-tools-seo": "tsx scripts/test-text-tools-seo.ts",
+    "test:tolerant-tool-input": "tsx scripts/test-tolerant-tool-input.ts",
     "test:text-tools-watermark": "tsx scripts/test-text-tools-watermark.ts",
     "xai:check": "tsx scripts/check-xai.ts",
     "types:generate": "tsx scripts/generate-types.ts",

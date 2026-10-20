@@ -4,6 +4,8 @@
  * Pure functions, safe for client components and tests.
  */
 
+import { parseJsonLenient } from "@/lib/ai/tolerant-json";
+
 export type ContentTextBlock = {
   id: string;
   /** Heading text without tags; null for blocks without a heading. */
@@ -90,7 +92,9 @@ function uniqueId(base: string, used: Set<string>): string {
  * LLM JSON → blocks. Accepts `{id, heading, level, html}` or `{id, heading, text}`; drops
  * empty blocks, fixes ids and levels, sanitizes HTML. Returns [] when nothing usable is there.
  */
-export function normalizeBlocks(raw: unknown): ContentTextBlock[] {
+export function normalizeBlocks(input: unknown): ContentTextBlock[] {
+  // A JSON string instead of the array (a known slip of the model) is read leniently.
+  const raw = typeof input === "string" ? parseJsonLenient(input) : input;
   if (!Array.isArray(raw)) return [];
   const used = new Set<string>();
   const blocks: ContentTextBlock[] = [];
