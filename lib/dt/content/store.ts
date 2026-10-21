@@ -652,7 +652,7 @@ export async function loadContentPageOutline(service: SupabaseClient, organisati
   }));
 }
 
-async function loadCrawledSitePages(service: SupabaseClient, organisationId: string): Promise<CrawledSitePage[]> {
+export async function loadCrawledSitePages(service: SupabaseClient, organisationId: string): Promise<CrawledSitePage[]> {
   // No text_content here (a few hundred KB per page); fetch failures have neither title nor h1.
   const base = () =>
     service

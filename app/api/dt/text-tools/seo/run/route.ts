@@ -1,6 +1,6 @@
 import { contentError, contentOk, gateContentRoute } from "@/lib/dt/content/route-helpers";
 import { ContentLlmError, llmErrorMessage } from "@/lib/dt/content/pipeline/llm";
-import { TEXT_TOOL_MAX_FILE_BYTES, blocksFromDocument, extractUploadedDocument } from "@/lib/dt/text-tools/ingest";
+import { readTextToolInput } from "@/lib/dt/text-tools/tool-input";
 import { isSeoToolPageType, materialTextFromBlocks, runSeoTool, seoToolRequestSchema } from "@/lib/dt/text-tools/seo";
 
 /** One Claude call writes the whole page (up to 12.000 tokens); the model gets 270 s of it. */
@@ -14,7 +14,7 @@ function field(form: FormData, name: string, max: number): string {
 /**
  * SEO tool: page name, page type, avatar and an optional file → the finished page text in
  * the answer. No job, nothing stored. Multipart form: `pageName`, `pageType`, optional
- * `avatarId` and `file` (.txt, .html, .pdf, .docx); the organisation comes as
+ * `avatarId` and `file` (.txt, .html, .pdf, .docx) or `crawlUrl` (a page of the organisation's crawl); the organisation comes as
  * `organisationId` field or `?org=`.
  */
 export async function POST(req: Request) {
@@ -34,20 +34,10 @@ export async function POST(req: Request) {
   const pageType = field(form, "pageType", 40).trim();
   if (!isSeoToolPageType(pageType)) return contentError("Bitte einen Seitentyp wählen.", 400);
 
-  let material: string | null = null;
-  let fileName: string | null = null;
-  const file = form.get("file");
-  if (file instanceof File && file.size > 0) {
-    if (file.size > TEXT_TOOL_MAX_FILE_BYTES) {
-      return contentError(`„${file.name}“ ist zu groß (max. ${Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB).`, 400);
-    }
-    const document = await extractUploadedDocument(file.name, new Uint8Array(await file.arrayBuffer()));
-    if (!document.ok) return contentError(document.message, 400);
-    const ingested = blocksFromDocument(document.value);
-    if (!ingested.ok) return contentError(ingested.message, 400);
-    material = materialTextFromBlocks(ingested.value.blocks);
-    fileName = file.name.slice(0, 260);
-  }
+  const input = await readTextToolInput(form, gate.service, gate.organisationId);
+  if (!input.ok) return contentError(input.message, 400);
+  const material = input.value ? materialTextFromBlocks(input.value.ingested.blocks) : null;
+  const fileName = input.value?.fileName ?? null;
 
   const request = seoToolRequestSchema.safeParse({
     organisationId: gate.organisationId,

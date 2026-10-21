@@ -1,7 +1,7 @@
 import { contentError, contentOk, gateContentRoute } from "@/lib/dt/content/route-helpers";
 import { ContentLlmError, llmErrorMessage } from "@/lib/dt/content/pipeline/llm";
 import { geoToolRequestSchema, runGeoTool } from "@/lib/dt/text-tools/geo";
-import { TEXT_TOOL_MAX_FILE_BYTES, blocksFromDocument, extractUploadedDocument } from "@/lib/dt/text-tools/ingest";
+import { TEXT_TOOL_MISSING_INPUT_MESSAGE, readTextToolInput } from "@/lib/dt/text-tools/tool-input";
 
 /** One Claude call rewrites the whole text (up to 12.000 tokens); the model gets 270 s of it. */
 export const maxDuration = 300;
@@ -13,7 +13,7 @@ function field(form: FormData, name: string, max: number): string {
 
 /**
  * GEO tool: a file, an optional page name and an avatar → the reworked text in the answer.
- * No job, nothing stored. Multipart form: `file` (.txt, .html, .pdf, .docx), optional
+ * No job, nothing stored. Multipart form: `file` (.txt, .html, .pdf, .docx) or `crawlUrl` (a page of the organisation's crawl), optional
  * `pageName` and `avatarId`; the organisation comes as `organisationId` field or `?org=`.
  */
 export async function POST(req: Request) {
@@ -28,26 +28,20 @@ export async function POST(req: Request) {
   if (!gated.ok) return gated.response;
   const { gate } = gated;
 
-  const file = form.get("file");
-  if (!(file instanceof File) || file.size === 0) return contentError("Bitte eine Datei auswählen (.txt, .html, .pdf oder .docx).", 400);
-  if (file.size > TEXT_TOOL_MAX_FILE_BYTES) {
-    return contentError(`„${file.name}“ ist zu groß (max. ${Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB).`, 400);
-  }
-
-  const document = await extractUploadedDocument(file.name, new Uint8Array(await file.arrayBuffer()));
-  if (!document.ok) return contentError(document.message, 400);
-  const ingested = blocksFromDocument(document.value);
-  if (!ingested.ok) return contentError(ingested.message, 400);
+  const input = await readTextToolInput(form, gate.service, gate.organisationId);
+  if (!input.ok) return contentError(input.message, 400);
+  if (!input.value) return contentError(TEXT_TOOL_MISSING_INPUT_MESSAGE, 400);
+  const { ingested } = input.value;
 
   const request = geoToolRequestSchema.safeParse({
     organisationId: gate.organisationId,
     userId: gate.userId,
-    fileName: file.name.slice(0, 260),
-    pageName: field(form, "pageName", 200).trim() || null,
+    fileName: input.value.fileName,
+    pageName: field(form, "pageName", 200).trim() || input.value.crawledPageName,
     avatarId: field(form, "avatarId", 80).trim() || null,
-    blocks: ingested.value.blocks,
-    title: ingested.value.title,
-    metaDescription: ingested.value.metaDescription,
+    blocks: ingested.blocks,
+    title: ingested.title,
+    metaDescription: ingested.metaDescription,
   });
   if (!request.success) return contentError("Der Text konnte nicht für die Verarbeitung vorbereitet werden.", 400);
 

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Download, FileText, Loader2, Sparkles, Upload } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertTriangle, Download, FileText, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -11,14 +11,15 @@ import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-fram
 import { DtField, DtInput, DtInputWrap } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
+import { DtTextToolSource, appendTextToolSource, type TextToolSourceValue } from "@/components/dt/text-tools/dt-text-tool-source";
+import { TEXT_TOOL_MAX_FILE_BYTES } from "@/lib/dt/text-tools/ingest";
 import { contentExportFile } from "@/lib/dt/content/export";
 import { CONTENT_PAGE_TYPE_LABELS } from "@/lib/dt/content/page-types";
 import { formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
 import type { ContentApiResponse } from "@/lib/dt/content/types";
 import type { HormoziToolBausteine, HormoziToolResult } from "@/lib/dt/text-tools/hormozi";
-import { TEXT_TOOL_ACCEPT, TEXT_TOOL_MAX_FILE_BYTES } from "@/lib/dt/text-tools/ingest";
-import { SEO_TOOL_PAGE_TYPE_OPTIONS, type SeoToolPageType } from "@/lib/dt/text-tools/seo";
+import { SEO_TOOL_PAGE_TYPE_OPTIONS, type SeoToolPageType, isSeoToolPageType } from "@/lib/dt/text-tools/seo";
 
 const cardClass =
   "relative overflow-hidden rounded-dt-lg border border-sbkm-navy/10 bg-white/55 shadow-dt backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.05]";
@@ -87,8 +88,9 @@ export function DtHormoziTool(props: {
   avatars: Array<{ id: string; name: string; role: string | null }>;
 }) {
   const { organisationId } = props;
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [source, setSource] = useState<TextToolSourceValue | null>(null);
+  /** The page name last filled in from a crawled page; a name typed by hand is never overwritten. */
+  const [autoName, setAutoName] = useState("");
   const [pageName, setPageName] = useState("");
   const [pageType, setPageType] = useState<SeoToolPageType>("unterseite");
   const [avatarId, setAvatarId] = useState<string>(props.avatars[0]?.id ?? "");
@@ -106,19 +108,21 @@ export function DtHormoziTool(props: {
     if (phase.kind === "done" || phase.kind === "error") setPhase({ kind: "idle" });
   }
 
-  function pickFile(next: File | undefined) {
-    if (!next) return;
-    if (next.size > TEXT_TOOL_MAX_FILE_BYTES) {
-      toast.error(`„${next.name}“ ist zu groß (max. ${Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB).`);
-      return;
-    }
-    setFile(next);
+  function chooseSource(next: TextToolSourceValue | null) {
+    setSource(next);
     resetResult();
+    if (next?.kind === "crawl") {
+      if (!pageName.trim() || pageName === autoName) {
+        setPageName(next.page.name);
+        setAutoName(next.page.name);
+      }
+      if (isSeoToolPageType(next.page.page_type)) setPageType(next.page.page_type);
+    }
   }
 
   async function run() {
-    if (!file) {
-      toast.error("Bitte zuerst eine Datei auswählen.");
+    if (!source) {
+      toast.error("Bitte zuerst eine Datei hochladen oder eine Seite aus dem Crawl wählen.");
       return;
     }
     if (!avatarId) {
@@ -129,7 +133,7 @@ export function DtHormoziTool(props: {
     setPhase({ kind: "running", startedAt: Date.now() });
     const form = new FormData();
     form.set("organisationId", organisationId);
-    form.set("file", file);
+    appendTextToolSource(form, source);
     form.set("pageName", pageName);
     form.set("pageType", pageType);
     form.set("avatarId", avatarId);
@@ -159,7 +163,7 @@ export function DtHormoziTool(props: {
 
   const hasAvatars = props.avatars.length > 0;
   const running = phase.kind === "running";
-  const canRun = Boolean(file) && Boolean(avatarId) && !running;
+  const canRun = Boolean(source) && Boolean(avatarId) && !running;
   const seconds = running ? Math.max(0, Math.round((now - phase.startedAt) / 1000)) : 0;
   const orgQuery = `org=${encodeURIComponent(organisationId)}`;
 
@@ -185,35 +189,22 @@ export function DtHormoziTool(props: {
             </Notice>
           ) : null}
 
-          <DtField label="Datei">
-            <input
-              ref={fileRef}
-              type="file"
-              accept={TEXT_TOOL_ACCEPT}
-              className="sr-only"
-              aria-label="Textdatei wählen"
-              onChange={(event) => {
-                const next = event.target.files?.[0];
-                event.target.value = "";
-                pickFile(next);
-              }}
+          <DtField label="Quelle">
+            <DtTextToolSource
+              tool="hormozi"
+              organisationId={organisationId}
+              value={source}
+              onChange={chooseSource}
+              disabled={running}
+              fileHint={
+                <>
+                  .txt, .html, .pdf oder .docx, höchstens {Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB. Überschriften werden aus
+                  H1/H2/H3 übernommen, bei reinem Text aus kurzen Zeilen geraten. Unter den ersten Abschnitt setzt das Werkzeug den
+                  Hero-Satz.
+                </>
+              }
+              crawlHint="Die Seite wird live gelesen, mit ihren Überschriften (wie eine hochgeladene .html-Datei); Seitenname und Seitentyp werden vorgeschlagen."
             />
-            <div className="flex flex-wrap items-center gap-2">
-              <DtPillButton type="button" size="sm" variant="outline" disabled={running} onClick={() => fileRef.current?.click()}>
-                <Upload className="size-3.5" aria-hidden />
-                {file ? "Andere Datei" : "Datei hochladen"}
-              </DtPillButton>
-              {file ? (
-                <span className="truncate text-xs text-sbkm-navy dark:text-white/85" title={file.name}>
-                  {file.name} · {Math.max(1, Math.round(file.size / 1024))} KB
-                </span>
-              ) : null}
-            </div>
-            <p className={hintClass}>
-              .txt, .html, .pdf oder .docx, höchstens {Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB. Überschriften werden aus
-              H1/H2/H3 übernommen, bei reinem Text aus kurzen Zeilen geraten. Unter den ersten Abschnitt setzt das Werkzeug den
-              Hero-Satz.
-            </p>
           </DtField>
 
           <div className="grid gap-4 sm:grid-cols-2">

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Download, FileText, Loader2, Sparkles, Upload, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertTriangle, Download, FileText, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -11,13 +11,14 @@ import { DtContentTypePromptsCard } from "@/components/dt/content/dt-content-typ
 import { DtField, DtInput, DtInputWrap } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
+import { DtTextToolSource, appendTextToolSource, type TextToolSourceValue } from "@/components/dt/text-tools/dt-text-tool-source";
+import { TEXT_TOOL_MAX_FILE_BYTES } from "@/lib/dt/text-tools/ingest";
 import { contentExportFile } from "@/lib/dt/content/export";
 import { CONTENT_PAGE_TYPE_LABELS } from "@/lib/dt/content/page-types";
 import { formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
 import type { ContentApiResponse } from "@/lib/dt/content/types";
-import { TEXT_TOOL_ACCEPT, TEXT_TOOL_MAX_FILE_BYTES } from "@/lib/dt/text-tools/ingest";
-import { SEO_TOOL_PAGE_TYPE_OPTIONS, type SeoToolPageType, type SeoToolResult } from "@/lib/dt/text-tools/seo";
+import { SEO_TOOL_PAGE_TYPE_OPTIONS, type SeoToolPageType, type SeoToolResult, isSeoToolPageType } from "@/lib/dt/text-tools/seo";
 
 const cardClass =
   "relative overflow-hidden rounded-dt-lg border border-sbkm-navy/10 bg-white/55 shadow-dt backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.05]";
@@ -76,8 +77,9 @@ export function DtSeoTool(props: {
   avatars: Array<{ id: string; name: string; role: string | null }>;
 }) {
   const { organisationId } = props;
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [source, setSource] = useState<TextToolSourceValue | null>(null);
+  /** The page name last filled in from a crawled page; a name typed by hand is never overwritten. */
+  const [autoName, setAutoName] = useState("");
   const [pageName, setPageName] = useState("");
   const [pageType, setPageType] = useState<SeoToolPageType>("unterseite");
   const [avatarId, setAvatarId] = useState<string>(props.avatars[0]?.id ?? NO_AVATAR);
@@ -95,14 +97,16 @@ export function DtSeoTool(props: {
     if (phase.kind === "done" || phase.kind === "error") setPhase({ kind: "idle" });
   }
 
-  function pickFile(next: File | undefined) {
-    if (!next) return;
-    if (next.size > TEXT_TOOL_MAX_FILE_BYTES) {
-      toast.error(`„${next.name}“ ist zu groß (max. ${Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB).`);
-      return;
-    }
-    setFile(next);
+  function chooseSource(next: TextToolSourceValue | null) {
+    setSource(next);
     resetResult();
+    if (next?.kind === "crawl") {
+      if (!pageName.trim() || pageName === autoName) {
+        setPageName(next.page.name);
+        setAutoName(next.page.name);
+      }
+      if (isSeoToolPageType(next.page.page_type)) setPageType(next.page.page_type);
+    }
   }
 
   async function run() {
@@ -114,7 +118,7 @@ export function DtSeoTool(props: {
     setPhase({ kind: "running", startedAt: Date.now() });
     const form = new FormData();
     form.set("organisationId", organisationId);
-    if (file) form.set("file", file);
+    appendTextToolSource(form, source);
     form.set("pageName", pageName);
     form.set("pageType", pageType);
     if (avatarId !== NO_AVATAR) form.set("avatarId", avatarId);
@@ -204,48 +208,21 @@ export function DtSeoTool(props: {
           </div>
 
           <DtField label="Material" optional>
-            <input
-              ref={fileRef}
-              type="file"
-              accept={TEXT_TOOL_ACCEPT}
-              className="sr-only"
-              aria-label="Datei mit Material wählen"
-              onChange={(event) => {
-                const next = event.target.files?.[0];
-                event.target.value = "";
-                pickFile(next);
-              }}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <DtPillButton type="button" size="sm" variant="outline" disabled={running} onClick={() => fileRef.current?.click()}>
-                <Upload className="size-3.5" aria-hidden />
-                {file ? "Andere Datei" : "Datei hochladen"}
-              </DtPillButton>
-              {file ? (
+            <DtTextToolSource
+              tool="seo"
+              organisationId={organisationId}
+              value={source}
+              onChange={chooseSource}
+              disabled={running}
+              fileHint={
                 <>
-                  <span className="truncate text-xs text-sbkm-navy dark:text-white/85" title={file.name}>
-                    {file.name} · {Math.max(1, Math.round(file.size / 1024))} KB
-                  </span>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-[11px] text-sbkm-ink-500 hover:text-sbkm-navy dark:text-white/45 dark:hover:text-white"
-                    disabled={running}
-                    onClick={() => {
-                      setFile(null);
-                      resetResult();
-                    }}
-                  >
-                    <X className="size-3" aria-hidden />
-                    Entfernen
-                  </button>
+                  Bisheriger Seitentext oder ein Briefing-Dokument: .txt, .html, .pdf oder .docx, höchstens{" "}
+                  {Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB. Dient nur zur Orientierung für Thema, Umfang und Begriffe;
+                  Fakten zählen nur, wenn sie in den Anbieterfakten stehen.
                 </>
-              ) : null}
-            </div>
-            <p className={hintClass}>
-              Bisheriger Seitentext oder ein Briefing-Dokument: .txt, .html, .pdf oder .docx, höchstens{" "}
-              {Math.round(TEXT_TOOL_MAX_FILE_BYTES / (1024 * 1024))} MB. Dient nur zur Orientierung für Thema, Umfang und Begriffe;
-              Fakten zählen nur, wenn sie in den Anbieterfakten stehen.
-            </p>
+              }
+              crawlHint="Ihr heutiger Text dient nur als Material (Thema, Umfang, Begriffe); Seitenname und Seitentyp werden vorgeschlagen."
+            />
           </DtField>
 
           <DtField label="Avatar">
