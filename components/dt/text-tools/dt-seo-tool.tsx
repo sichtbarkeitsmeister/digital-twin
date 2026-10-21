@@ -51,7 +51,7 @@ function Notice(props: { tone: "warn" | "error"; children: React.ReactNode }) {
 }
 
 function saveFile(format: "html" | "txt", result: SeoToolResult) {
-  const base = slugify(result.page_name) || "seo";
+  const base = slugify(result.page_name).replace(/-+$/, "") || "seo";
   const file = contentExportFile(format, { slug: `${base}-seo`, title: result.title || result.page_name, html: result.html });
   const url = URL.createObjectURL(new Blob([file.body], { type: file.contentType }));
   const link = document.createElement("a");

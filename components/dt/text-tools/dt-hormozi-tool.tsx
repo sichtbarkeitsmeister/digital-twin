@@ -61,7 +61,7 @@ function Notice(props: { tone: "warn" | "error"; children: React.ReactNode }) {
 /** The result as a file, built in the browser with the same rendering as the Texte export. */
 function saveFile(format: "html" | "txt", result: HormoziToolResult) {
   const name = (result.page_name || result.file_name.replace(/\.[a-z0-9]+$/i, "")).trim();
-  const base = slugify(name) || "text";
+  const base = slugify(name).replace(/-+$/, "") || "text";
   const file = contentExportFile(format, { slug: `${base}-hormozi`, title: result.title || name || "Hormozi-Text", html: result.html });
   const url = URL.createObjectURL(new Blob([file.body], { type: file.contentType }));
   const link = document.createElement("a");
