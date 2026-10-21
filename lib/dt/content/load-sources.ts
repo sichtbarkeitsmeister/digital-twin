@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { isMixAgent, mixOptionLabel, readMixInfo } from "@/lib/dt/agents/mix";
 import { isDefaultTwinAgent, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import {
   filledWorkshopSections,
@@ -21,13 +22,21 @@ export type ContentAvatarOption = {
   role: string | null;
   kind: string;
   createdAt: string;
+  /** The organisation's Mix: listed first, but never the preselected avatar. */
+  isMix: boolean;
+  /** What the dropdown shows: the name, for the Mix „Mix (aus {N} Zielgruppen)“. */
+  label: string;
 };
 
 export type ContentAvatarRow = {
   id: string;
   name: string;
   role: string | null;
+  slug: string | null;
   prompt_template: string | null;
+  /** The avatar's text when it runs on the global DigitalTwin prompt (see `avatarTextForContent`). */
+  prompt_append: string | null;
+  uses_global_prompt: boolean | null;
   avatar_data: unknown;
 };
 
@@ -143,27 +152,38 @@ export function anbieterSummary(sources: ContentAnbieterSources): ContentLocalSo
   return workshop || fragebogen ? { workshop, fragebogen } : null;
 }
 
-/** Avatars for the dropdown: enabled `dt_agents` of the org without SEO advisors, newest first. */
+/**
+ * Avatars for the dropdown: enabled `dt_agents` of the org without SEO advisors, newest first,
+ * with the Mix in front. Preselect with `defaultAvatarOptionId`: the newest avatar that is not
+ * the Mix.
+ */
 export async function loadContentAvatarOptions(
   supabase: SupabaseClient,
   organisationId: string,
 ): Promise<ContentAvatarOption[]> {
   const { data } = await supabase
     .from("dt_agents")
-    .select("id, name, role, kind, slug, created_at")
+    .select("id, name, role, kind, slug, created_at, avatar_data")
     .eq("organisation_id", organisationId)
     .eq("is_enabled", true)
     .order("created_at", { ascending: false });
 
-  return (data ?? [])
+  const options = (data ?? [])
     .filter((row) => !isSeoAdvisorAgent(row) && !isDefaultTwinAgent(row))
-    .map((row) => ({
-      id: row.id as string,
-      name: row.name as string,
-      role: (row.role as string | null) ?? null,
-      kind: row.kind as string,
-      createdAt: row.created_at as string,
-    }));
+    .map((row) => {
+      const isMix = isMixAgent(row);
+      const mix = isMix ? readMixInfo(row.avatar_data) : null;
+      return {
+        id: row.id as string,
+        name: row.name as string,
+        role: (row.role as string | null) ?? null,
+        kind: row.kind as string,
+        createdAt: row.created_at as string,
+        isMix,
+        label: mix ? mixOptionLabel(mix.sourceAgentIds.length) : (row.name as string),
+      };
+    });
+  return [...options.filter((option) => option.isMix), ...options.filter((option) => !option.isMix)];
 }
 
 export async function loadContentAvatarRow(
@@ -173,7 +193,7 @@ export async function loadContentAvatarRow(
 ): Promise<ContentAvatarRow | null> {
   const { data } = await supabase
     .from("dt_agents")
-    .select("id, name, role, prompt_template, avatar_data")
+    .select("id, name, role, slug, prompt_template, prompt_append, uses_global_prompt, avatar_data")
     .eq("organisation_id", organisationId)
     .eq("id", agentId)
     .maybeSingle();

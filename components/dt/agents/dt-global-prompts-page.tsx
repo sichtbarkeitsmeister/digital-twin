@@ -9,6 +9,7 @@ import {
 } from "@/components/dt/agents/dt-global-prompts-panel";
 import { DtContentStepPromptCards } from "@/components/dt/content/dt-content-step-prompt-cards";
 import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-card";
+import { DEFAULT_MIX_PROMPT } from "@/lib/dt/agents/mix-prompt";
 import { checklistToText } from "@/lib/dt/seo/seo-checklist";
 import { DEFAULT_AVATAR_GENERATOR_PROMPT } from "@/lib/dt/transcripts/avatar-generator-prompt";
 
@@ -16,10 +17,14 @@ const EMPTY_PROMPTS: GlobalPrompts = {
   default: "",
   seo_advisor: "",
   avatar_generator: DEFAULT_AVATAR_GENERATOR_PROMPT,
+  avatar_mix: DEFAULT_MIX_PROMPT,
 };
 
 /** Built-in defaults: an empty or missing row means this text at runtime. */
-const PROMPT_DEFAULTS: Partial<GlobalPrompts> = { avatar_generator: DEFAULT_AVATAR_GENERATOR_PROMPT };
+const PROMPT_DEFAULTS: Partial<GlobalPrompts> = {
+  avatar_generator: DEFAULT_AVATAR_GENERATOR_PROMPT,
+  avatar_mix: DEFAULT_MIX_PROMPT,
+};
 
 export function DtGlobalPromptsPage() {
   const [loading, setLoading] = useState(true);
@@ -48,6 +53,7 @@ export function DtGlobalPromptsPage() {
       default: globalJson.prompts.default ?? "",
       seo_advisor: globalJson.prompts.seo_advisor ?? "",
       avatar_generator: globalJson.prompts.avatar_generator?.trim() || DEFAULT_AVATAR_GENERATOR_PROMPT,
+      avatar_mix: globalJson.prompts.avatar_mix?.trim() || DEFAULT_MIX_PROMPT,
     };
     setSaved(next);
     setDrafts(next);

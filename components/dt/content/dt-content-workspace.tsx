@@ -20,6 +20,7 @@ import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settin
 import { DtContentTypePromptsCard } from "@/components/dt/content/dt-content-type-prompts-card";
 import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-card";
 import { CenteredModal } from "@/components/ui/centered-modal";
+import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
 import { CONTENT_PAGE_TYPE_LABELS, type ContentPageType } from "@/lib/dt/content/page-types";
@@ -93,7 +94,7 @@ export function DtContentWorkspace(props: {
     () =>
       (props.initialAvatarId && props.avatars.some((a) => a.id === props.initialAvatarId)
         ? props.initialAvatarId
-        : props.avatars[0]?.id) ?? "",
+        : defaultAvatarOptionId(props.avatars)) ?? "",
   );
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [starting, setStarting] = useState(false);
@@ -162,17 +163,16 @@ export function DtContentWorkspace(props: {
     return () => window.clearInterval(timer);
   }, [running, loadOverview]);
 
-  const avatarOptions = useMemo(
-    () =>
-      props.avatars.map((a, index) => ({
-        value: a.id,
-        label: a.name,
-        description: [a.role, index === 0 ? "neuester" : formatContentDate(a.createdAt).slice(0, 10)]
-          .filter(Boolean)
-          .join(" · "),
-      })),
-    [props.avatars],
-  );
+  const avatarOptions = useMemo(() => {
+    const newestId = defaultAvatarOptionId(props.avatars);
+    return props.avatars.map((a) => ({
+      value: a.id,
+      label: a.label,
+      description: [a.isMix ? null : a.role, a.id === newestId ? "neuester" : formatContentDate(a.createdAt).slice(0, 10)]
+        .filter(Boolean)
+        .join(" · "),
+    }));
+  }, [props.avatars]);
 
   const pages = useMemo(() => overview?.pages ?? [], [overview]);
   const visible = useMemo(() => filterContentPages(pages, filter), [pages, filter]);

@@ -195,7 +195,8 @@ export const CONTENT_HERO_BLOCK_ID = "hero";
 export const CONTENT_SELF_SCORE_MIN = 35;
 
 const MAX_SECTION_CHARS = 6_000;
-const MAX_AVATAR_CHARS = 5_000;
+/** The avatar's description (`avatarTextForContent`); fits nine in ten avatar texts whole. */
+const MAX_AVATAR_CHARS = 20_000;
 const MAX_OUTLINE_CHARS = 5_000;
 const MAX_EXISTING_TEXT_CHARS = 6_000;
 /** An upload in the standalone SEO tool is the whole briefing, so it may be longer than a crawl excerpt. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckSquare, Globe2, RotateCcw, Sparkles, UsersRound } from "lucide-react";
+import { Blend, CheckSquare, Globe2, RotateCcw, Sparkles, UsersRound } from "lucide-react";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
@@ -11,6 +11,7 @@ type GlobalPrompts = {
   default: string;
   seo_advisor: string;
   avatar_generator: string;
+  avatar_mix: string;
 };
 
 const PROMPT_META: Record<
@@ -35,10 +36,16 @@ const PROMPT_META: Record<
       "Erstellt im Transkripte-Schritt Avatar-Plan den avatar-spezifischen Teil jedes Avatars. Der globale DigitalTwin-Prompt steht zur Laufzeit davor.",
     icon: UsersRound,
   },
+  avatar_mix: {
+    title: "Mix-Avatar",
+    description:
+      "Erstellt unter Agenten den Mix aus den ausgewählten Zielgruppen-Avataren. Der globale DigitalTwin-Prompt steht zur Laufzeit davor.",
+    icon: Blend,
+  },
 };
 
 /** Prompts with a built-in default from code; their card gets „Auf Standard zurücksetzen“. */
-const RESETTABLE: Partial<Record<keyof GlobalPrompts, true>> = { avatar_generator: true };
+const RESETTABLE: Partial<Record<keyof GlobalPrompts, true>> = { avatar_generator: true, avatar_mix: true };
 
 export function DtGlobalPromptsPanel(props: {
   drafts: GlobalPrompts;
@@ -76,7 +83,7 @@ export function DtGlobalPromptsPanel(props: {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {(
-          ["default", "seo_advisor", "avatar_generator"] as const
+          ["default", "seo_advisor", "avatar_generator", "avatar_mix"] as const
         ).map((slug) => {
           const meta = PROMPT_META[slug];
           const Icon = meta.icon;
@@ -149,7 +156,7 @@ export function DtGlobalPromptsPanel(props: {
             </p>
             <p className="mt-0.5 text-sm text-sbkm-ink-600 dark:text-white/55">
               Standard-Checkliste für alle Organisationen ohne eigene Liste. Wird im SEO-Agent-Prompt
-              unter „SEO-Checkliste" eingefügt.
+              unter „SEO-Checkliste“ eingefügt.
             </p>
           </div>
         </div>

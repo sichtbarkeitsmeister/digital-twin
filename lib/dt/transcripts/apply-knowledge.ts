@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { MIX_AGENT_SLUG, isMixAgent } from "@/lib/dt/agents/mix";
 import { ensureSeoAdvisorAgent } from "@/lib/dt/seo/ensure-seo-agent";
 import { AVATAR_QUICK_ACTIONS } from "@/lib/dt/transcripts/avatar-value";
 import { ensureAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
@@ -92,13 +93,20 @@ type AgentRow = {
   kind: string;
   prompt_append: string | null;
   organisation_id: string;
+  avatar_data?: unknown;
 };
 
 export type TranscriptPersonaMatchAgent = {
   name: string;
   slug: string | null;
   kind: string;
+  avatar_data?: unknown;
 };
+
+/** The avatars a transcript persona is matched against: personas and Wunschkunden, never the Mix. */
+function isTranscriptMatchAgent(agent: { kind: string; slug: string | null; avatar_data?: unknown }): boolean {
+  return isProspectPersonaKind(agent.kind, agent.slug) && !isMixAgent(agent);
+}
 
 function findMatchingAgent<T extends { name: string }>(
   agents: T[],
@@ -117,7 +125,7 @@ export function personasAwaitingConfirmation(
   personas: DtTranscriptPersonaExtract[],
   agents: TranscriptPersonaMatchAgent[],
 ): DtTranscriptPersonaExtract[] {
-  const prospect = agents.filter((agent) => isProspectPersonaKind(agent.kind, agent.slug));
+  const prospect = agents.filter(isTranscriptMatchAgent);
   return personas.filter((persona) => !findMatchingAgent(prospect, persona));
 }
 
@@ -193,12 +201,10 @@ export async function applyTranscriptExtractToOrg(input: {
 
   const { data: agentRows } = await input.supabase
     .from("dt_agents")
-    .select("id,name,slug,kind,prompt_append,organisation_id")
+    .select("id,name,slug,kind,prompt_append,organisation_id,avatar_data")
     .eq("organisation_id", input.organisationId);
 
-  const prospectAgents = ((agentRows ?? []) as AgentRow[]).filter((a) =>
-    isProspectPersonaKind(a.kind, a.slug),
-  );
+  const prospectAgents = ((agentRows ?? []) as AgentRow[]).filter(isTranscriptMatchAgent);
 
   for (const persona of input.extract.personas) {
     const match = findMatchingAgent(prospectAgents, persona);
@@ -247,16 +253,16 @@ export async function createConfirmedTranscriptPersonas(input: {
 
   const { data: agentRows } = await input.supabase
     .from("dt_agents")
-    .select("id,name,slug,kind,prompt_append,organisation_id")
+    .select("id,name,slug,kind,prompt_append,organisation_id,avatar_data")
     .eq("organisation_id", input.organisationId);
 
   const allAgents = (agentRows ?? []) as AgentRow[];
-  const prospectAgents = allAgents.filter((agent) =>
-    isProspectPersonaKind(agent.kind, agent.slug),
-  );
-  const usedSlugs = new Set(
-    allAgents.map((agent) => agent.slug).filter((slug): slug is string => Boolean(slug)),
-  );
+  const prospectAgents = allAgents.filter(isTranscriptMatchAgent);
+  // `mix` stays reserved for the Mix: a persona with that slug would count as the Mix.
+  const usedSlugs = new Set([
+    MIX_AGENT_SLUG,
+    ...allAgents.map((agent) => agent.slug).filter((slug): slug is string => Boolean(slug)),
+  ]);
 
   for (const persona of input.personas) {
     if (!wanted.has(normalizePersonaKey(persona.name))) continue;

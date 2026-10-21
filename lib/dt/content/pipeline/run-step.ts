@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
 import {
   loadContentAnbieterSources,
   loadContentAvatarOptions,
@@ -109,8 +110,7 @@ async function loadContext(
 
   let avatarId = settingsRow.avatar_agent_id;
   if (!avatarId) {
-    const [newest] = await loadContentAvatarOptions(service, page.organisation_id);
-    avatarId = newest?.id ?? null;
+    avatarId = defaultAvatarOptionId(await loadContentAvatarOptions(service, page.organisation_id));
   }
   const avatarRow = avatarId ? await loadContentAvatarRow(service, page.organisation_id, avatarId) : null;
   const avatar = avatarRow ? avatarFromAgent(avatarRow) : null;

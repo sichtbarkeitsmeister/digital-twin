@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Blend,
   Bot,
   Globe,
   LineChart,
@@ -27,6 +28,7 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/dt/cn";
 import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
+import { isMixAgent, readMixInfo } from "@/lib/dt/agents/mix";
 import { isSeoAdvisorAgent, isSurveyPersonaAgent } from "@/lib/dt/agents/seo-advisor";
 
 export type DtAgentListItemRow = {
@@ -44,6 +46,8 @@ export type DtAgentListItemRow = {
   uses_global_prompt: boolean;
   source_survey_id?: string | null;
   source_survey_response_id?: string | null;
+  avatar_data?: unknown;
+  updated_at?: string | null;
 };
 
 function agentIcon(kind: string, slug: string): LucideIcon {
@@ -75,6 +79,14 @@ function AgentMetaBadges(props: {
 }) {
   return (
     <>
+      {isMixAgent(props.agent) ? (
+        <Badge
+          variant="outline"
+          className="shrink-0 border-sbkm-mint/40 bg-sbkm-mint/10 text-[10px] text-sbkm-navy dark:text-sbkm-mint"
+        >
+          Mix
+        </Badge>
+      ) : null}
       {props.agent.is_default ? (
         <Badge variant="secondary" className="shrink-0 text-[10px]">
           Standard
@@ -124,6 +136,7 @@ function AgentActions(props: {
   onDeleteChats?: () => void;
   onDelete: () => void;
   onRequestChange: () => void;
+  onRebuildMix?: () => void;
   compact?: boolean;
 }) {
   if (!props.canDirectlyEdit) {
@@ -158,7 +171,20 @@ function AgentActions(props: {
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-2">
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {props.onRebuildMix ? (
+        <DtPillButton
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={props.busy}
+          className="w-full gap-1.5 whitespace-nowrap sm:w-auto"
+          onClick={props.onRebuildMix}
+        >
+          <Blend className="size-4" aria-hidden />
+          Mix neu erstellen
+        </DtPillButton>
+      ) : null}
       {props.alwaysOn ? (
         <span className="hidden text-xs font-medium text-sbkm-ink-500 sm:inline dark:text-white/45">
           Immer aktiv
@@ -235,6 +261,10 @@ export function DtAgentListItem(props: {
   onDeleteChats?: () => void;
   onDelete: () => void;
   onRequestChange: () => void;
+  /** Only on the Mix row, for those who may create agents: opens „Mix-Agent“. */
+  onRebuildMix?: () => void;
+  /** A source avatar of the Mix was deleted or changed after the Mix was generated. */
+  mixOutdated?: boolean;
   onSourceSaved?: (source: {
     sourceSurveyId: string;
     sourceSurveyResponseId: string;
@@ -259,6 +289,7 @@ export function DtAgentListItem(props: {
   const Icon = agentIcon(agent.kind, agent.slug);
   const isSeoAdvisor = isSeoAdvisorAgent(agent);
   const isSurveyPersona = isSurveyPersonaAgent(agent);
+  const mixInfo = isMixAgent(agent) ? readMixInfo(agent.avatar_data) : null;
 
   if (props.isEditing) {
     const quickActionsOnly = Boolean(props.quickActionsOnly);
@@ -428,6 +459,16 @@ export function DtAgentListItem(props: {
           <p className="mt-0.5 min-w-0 break-words text-xs text-sbkm-ink-600 dark:text-white/55 sm:text-sm">
             {agent.role ?? agentKindLabel(agent.kind, agent.slug)}
           </p>
+          {mixInfo && mixInfo.sourceNames.length > 0 ? (
+            <p className="mt-0.5 min-w-0 break-words text-xs text-sbkm-ink-500 dark:text-white/45">
+              aus: {mixInfo.sourceNames.join(", ")}
+            </p>
+          ) : null}
+          {props.mixOutdated && props.onRebuildMix ? (
+            <p className="mt-1.5 inline-block rounded-lg border border-amber-500/30 bg-amber-50 px-2 py-1 text-xs text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
+              Quell-Avatare haben sich geändert. Mix neu erstellen?
+            </p>
+          ) : null}
         </div>
       </div>
       <AgentActions
@@ -443,6 +484,7 @@ export function DtAgentListItem(props: {
         onDeleteChats={props.onDeleteChats}
         onDelete={props.onDelete}
         onRequestChange={props.onRequestChange}
+        onRebuildMix={props.onRebuildMix}
         compact={props.compact}
       />
     </div>

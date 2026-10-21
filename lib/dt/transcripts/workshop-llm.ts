@@ -5,6 +5,7 @@ import {
   extractToolUseInput,
 } from "@/lib/ai/anthropic-helpers";
 import { resolveSurveyActionModels } from "@/lib/ai/survey-model-config";
+import { generateCheckedMixWith, type CheckedMix, type MixSource } from "@/lib/dt/agents/mix-generator";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
 import {
@@ -194,4 +195,13 @@ export function generateCheckedAvatar(input: {
   deadline?: number;
 }): Promise<GenerateAvatarResult & { errors: string[]; fixRounds: number }> {
   return generateCheckedAvatarWith({ ...input, call: callTool });
+}
+
+/** The Mix under Agenten, on the same helper and models as the avatar generator; see `generateCheckedMixWith`. */
+export function generateCheckedMix(input: {
+  system: string;
+  sources: readonly MixSource[];
+  deadline?: number;
+}): Promise<CheckedMix> {
+  return generateCheckedMixWith({ ...input, call: callTool });
 }

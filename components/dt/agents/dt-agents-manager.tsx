@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { LayoutGroup } from "framer-motion";
-import { FileSearch, Plus, Users } from "lucide-react";
+import { Blend, FileSearch, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { DtAgentEditRequestModal } from "@/components/dt/agents/dt-agent-edit-request-modal";
@@ -18,11 +18,19 @@ import {
   type DtAgentListItemRow,
 } from "@/components/dt/agents/dt-agent-list-item";
 import { DtAgentCreateWizard } from "@/components/dt/agents/dt-agent-create-wizard";
+import { DtAgentMixDialog } from "@/components/dt/agents/dt-agent-mix-dialog";
 import { DtAgentsSidebar } from "@/components/dt/agents/dt-agents-sidebar";
 import { quickActionsFromForm } from "@/components/dt/agents/dt-agent-form-fields";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import type { DtAgentEditRequestRow } from "@/lib/dt/agent-edit-requests";
+import {
+  findMixAgent,
+  isMixAgent,
+  isMixOutdated,
+  mixSourceCandidates,
+  readMixInfo,
+} from "@/lib/dt/agents/mix";
 import { filterAgentsHiddenFromOrgMembers, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { isProtectedSeoAdvisorAgent } from "@/lib/dt/delete-agent-policy";
 import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
@@ -149,6 +157,9 @@ export function DtAgentsManager(props: {
   }, [searchParams, props.organisations, orgReady, orgId]);
 
   const [createWizardOpen, setCreateWizardOpen] = useState(false);
+  const [mixDialogOpen, setMixDialogOpen] = useState(false);
+  /** New key per opening, so the dialog starts with a fresh preselection. */
+  const [mixDialogKey, setMixDialogKey] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [quickActionsOnly, setQuickActionsOnly] = useState(false);
   const [editValues, setEditValues] = useState(agentFormValuesFromRow({
@@ -198,6 +209,14 @@ export function DtAgentsManager(props: {
   const editingAgent = useMemo(
     () => agents.find((a) => a.id === editingId) ?? null,
     [agents, editingId],
+  );
+
+  const mixAgent = useMemo(() => findMixAgent(agents), [agents]);
+  const mixInfo = useMemo(() => (mixAgent ? readMixInfo(mixAgent.avatar_data) : null), [mixAgent]);
+  const mixOutdated = Boolean(mixInfo && isMixOutdated(mixInfo, agents));
+  const mixCandidates = useMemo(
+    () => mixSourceCandidates(agents).map((a) => ({ id: a.id, name: a.name, role: a.role })),
+    [agents],
   );
 
   const applyManageJson = useCallback((manageJson: {
@@ -320,6 +339,11 @@ export function DtAgentsManager(props: {
     setEditingId(null);
     setQuickActionsOnly(false);
     writeAgentQuery(null);
+  }
+
+  function openMixDialog() {
+    setMixDialogKey((key) => key + 1);
+    setMixDialogOpen(true);
   }
 
   async function deleteAgentChats(
@@ -495,12 +519,14 @@ export function DtAgentsManager(props: {
   const canDisableAgent = (agent: AgentRow) =>
     !agent.is_enabled || agents.filter((a) => a.is_enabled).length > 1;
 
+  // What the SEO-Berater reads as Wunschkunden; the Mix is not one of them.
   const orgWunschkunden = agents
     .filter(
       (a) =>
         (a.kind === "wunschkunde" || a.kind === "persona") &&
         a.slug !== "default" &&
-        !a.is_default,
+        !a.is_default &&
+        !isMixAgent(a),
     )
     .map((a) => ({
       id: a.id,
@@ -601,6 +627,10 @@ export function DtAgentsManager(props: {
                     toast.success("Fragebogen-Herkunft gespeichert.");
                   }}
                   onRequestChange={() => setRequestAgent(agent)}
+                  onRebuildMix={
+                    canDirectlyEdit && agent.id === mixAgent?.id ? openMixDialog : undefined
+                  }
+                  mixOutdated={agent.id === mixAgent?.id && mixOutdated}
                   canDisable={canDisableAgent(agent)}
                   alwaysOn={isProtectedAlwaysOn(agent)}
                   organisationId={orgId}
@@ -687,6 +717,19 @@ export function DtAgentsManager(props: {
                 Neuer Agent
               </DtPillButton>
             ) : null}
+            {canDirectlyEdit && !initialLoading && !mixAgent ? (
+              <DtPillButton
+                type="button"
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                disabled={busy}
+                onClick={openMixDialog}
+              >
+                <Blend className="size-4" aria-hidden />
+                Mix-Agent erstellen
+              </DtPillButton>
+            ) : null}
             {showAdminChrome ? (
               <Link
                 href={contextHref}
@@ -723,6 +766,24 @@ export function DtAgentsManager(props: {
           void refresh(true);
         }}
       />
+
+      {canDirectlyEdit ? (
+        <DtAgentMixDialog
+          key={mixDialogKey}
+          open={mixDialogOpen}
+          organisationId={orgId}
+          organisationName={orgName}
+          candidates={mixCandidates}
+          rebuild={Boolean(mixAgent)}
+          preselectedIds={mixInfo?.sourceAgentIds ?? null}
+          onClose={() => setMixDialogOpen(false)}
+          onSaved={({ created }) => {
+            setMixDialogOpen(false);
+            toast.success(created ? "Mix wurde erstellt." : "Mix wurde neu erstellt.");
+            void refresh(true);
+          }}
+        />
+      ) : null}
 
       <DtAgentEditRequestModal
         open={Boolean(requestAgent)}

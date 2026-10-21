@@ -11,6 +11,7 @@ import { DtField, DtInput, DtInputWrap } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { DtTextToolSource, appendTextToolSource, type TextToolSourceValue } from "@/components/dt/text-tools/dt-text-tool-source";
+import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
 import { TEXT_TOOL_MAX_FILE_BYTES } from "@/lib/dt/text-tools/ingest";
 import { contentExportFile } from "@/lib/dt/content/export";
 import { formatEur } from "@/lib/dt/content/presentation";
@@ -73,15 +74,15 @@ export function DtGeoTool(props: {
   organisationName: string;
   /** „11 von 13 Abschnitten aus den Gesprächen · …“ or null without any Anbieterfakten. */
   anbieterHint: string | null;
-  /** The organisation's avatars, newest first. */
-  avatars: Array<{ id: string; name: string; role: string | null }>;
+  /** The organisation's avatars, newest first, the Mix in front. */
+  avatars: Array<{ id: string; name: string; role: string | null; isMix?: boolean }>;
 }) {
   const { organisationId } = props;
   const [source, setSource] = useState<TextToolSourceValue | null>(null);
   /** The page name last filled in from a crawled page; a name typed by hand is never overwritten. */
   const [autoName, setAutoName] = useState("");
   const [pageName, setPageName] = useState("");
-  const [avatarId, setAvatarId] = useState<string>(props.avatars[0]?.id ?? NO_AVATAR);
+  const [avatarId, setAvatarId] = useState<string>(defaultAvatarOptionId(props.avatars) ?? NO_AVATAR);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [now, setNow] = useState(() => Date.now());
 

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { MIX_PROMPT_MIGRATION_FILE, MIX_PROMPT_NAME, MIX_PROMPT_SLUG } from "@/lib/dt/agents/mix-prompt";
 import { requireAuthUser } from "@/lib/dt/db";
 import { isPlatformAdmin } from "@/lib/dt/org-access";
 
 import { SURVEY_AGENT_GLOBAL_PROMPT_SLUGS } from "@/lib/dt/survey-agent-global-prompts";
 import {
   AVATAR_GENERATOR_PROMPT_MIGRATION_FILE,
+  AVATAR_GENERATOR_PROMPT_NAME,
   AVATAR_GENERATOR_PROMPT_SLUG,
 } from "@/lib/dt/transcripts/avatar-generator-prompt";
 
@@ -15,7 +17,14 @@ const GLOBAL_PROMPT_SLUGS = [
   "seo_advisor",
   ...SURVEY_AGENT_GLOBAL_PROMPT_SLUGS,
   AVATAR_GENERATOR_PROMPT_SLUG,
+  MIX_PROMPT_SLUG,
 ] as const;
+
+/** Prompts added by a migration of their own: name and file for the hint when it has not run. */
+const PROMPT_MIGRATIONS: Partial<Record<(typeof GLOBAL_PROMPT_SLUGS)[number], { name: string; file: string }>> = {
+  [AVATAR_GENERATOR_PROMPT_SLUG]: { name: AVATAR_GENERATOR_PROMPT_NAME, file: AVATAR_GENERATOR_PROMPT_MIGRATION_FILE },
+  [MIX_PROMPT_SLUG]: { name: MIX_PROMPT_NAME, file: MIX_PROMPT_MIGRATION_FILE },
+};
 
 const patchSchema = z.object({
   slug: z.enum(GLOBAL_PROMPT_SLUGS),
@@ -77,13 +86,13 @@ export async function PATCH(req: Request) {
 
   if (error) {
     // Before the migration the function does not accept the slug, or the row is missing.
-    const missingMigration =
-      parsed.data.slug === AVATAR_GENERATOR_PROMPT_SLUG && /invalid_slug|template_not_found/.test(error.message ?? "");
+    const migration = PROMPT_MIGRATIONS[parsed.data.slug];
+    const missingMigration = migration && /invalid_slug|template_not_found/.test(error.message ?? "") ? migration : null;
     return NextResponse.json(
       {
         ok: false,
         message: missingMigration
-          ? `Die Datenbank kennt den Prompt „Anbieter-Avatare“ noch nicht: Bitte ${AVATAR_GENERATOR_PROMPT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin gilt der Standard.`
+          ? `Die Datenbank kennt den Prompt „${missingMigration.name}“ noch nicht: Bitte ${missingMigration.file} einmal im Supabase SQL Editor ausführen. Bis dahin gilt der Standard.`
           : error.message || "Speichern fehlgeschlagen.",
       },
       { status: 500 },
