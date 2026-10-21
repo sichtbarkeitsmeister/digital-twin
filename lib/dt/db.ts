@@ -158,42 +158,32 @@ export async function listDtChats(params: {
   return (data ?? []) as DtChatRow[];
 }
 
+export type DtAgentManageRow = DtAgentRow & {
+  template_id: string | null;
+  prompt_template: string;
+  prompt_append: string | null;
+  is_default: boolean;
+  uses_global_prompt: boolean;
+  source_survey_id: string | null;
+  source_survey_response_id: string | null;
+  /** Agenten marks the Mix as outdated when a source avatar changed after it was generated. */
+  updated_at: string;
+};
+
 export async function loadAgentsForOrgManage(
   organisationId: string,
   client?: Awaited<ReturnType<typeof createClient>>,
-): Promise<
-  Array<
-    DtAgentRow & {
-      template_id: string | null;
-      prompt_template: string;
-      prompt_append: string | null;
-      is_default: boolean;
-      uses_global_prompt: boolean;
-      source_survey_id: string | null;
-      source_survey_response_id: string | null;
-    }
-  >
-> {
+): Promise<DtAgentManageRow[]> {
   const supabase = client ?? (await createClient());
   const { data } = await supabase
     .from("dt_agents")
     .select(
-      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,is_default,uses_global_prompt,source_survey_id,source_survey_response_id",
+      "id,organisation_id,template_id,slug,name,role,kind,quick_actions,is_enabled,position,prompt_template,prompt_append,is_default,uses_global_prompt,source_survey_id,source_survey_response_id,avatar_data,updated_at",
     )
     .eq("organisation_id", organisationId)
     .order("position", { ascending: true })
     .order("name", { ascending: true });
-  return (data ?? []) as Array<
-    DtAgentRow & {
-      template_id: string | null;
-      prompt_template: string;
-      prompt_append: string | null;
-      is_default: boolean;
-      uses_global_prompt: boolean;
-      source_survey_id: string | null;
-      source_survey_response_id: string | null;
-    }
-  >;
+  return (data ?? []) as DtAgentManageRow[];
 }
 
 export async function subscribeDtAgentTemplate(params: {

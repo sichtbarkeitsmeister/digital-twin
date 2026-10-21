@@ -67,7 +67,7 @@ async function HormoziPageContent({ searchParams }: { searchParams: { org?: stri
           organisationId={organisationId}
           organisationName={organisation.name}
           anbieterHint={describeAnbieterSources(anbieterSummary(anbieter))}
-          avatars={avatars.map((a) => ({ id: a.id, name: a.name, role: a.role }))}
+          avatars={avatars.map((a) => ({ id: a.id, name: a.label, role: a.isMix ? null : a.role, isMix: a.isMix }))}
         />
       </div>
     </OrganisationPageShell>

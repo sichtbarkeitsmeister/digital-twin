@@ -76,6 +76,7 @@
     "test:meeting-transcripts": "tsx scripts/test-meeting-transcripts.ts",
     "test:workshop-corpus": "tsx scripts/test-workshop-corpus.ts",
     "test:avatar-generator": "tsx scripts/test-avatar-generator.ts",
+    "test:avatar-mix": "tsx scripts/test-avatar-mix.ts",
     "test:organisation-document-title": "tsx scripts/test-organisation-document-title.ts",
     "test:text-mode-prompt": "tsx scripts/test-text-mode-prompt.ts",
     "test:content-excel-structure": "tsx scripts/test-content-excel-structure.ts",

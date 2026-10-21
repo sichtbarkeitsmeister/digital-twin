@@ -272,6 +272,51 @@ function nameKey(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLocaleLowerCase("de-DE");
 }
 
+/** Rule 2: each required heading is there, in this order (others may stand in between). */
+export function requiredHeadingErrors(prompt: string, required: readonly string[]): string[] {
+  const errors: string[] = [];
+  const headings = avatarPromptHeadings(prompt);
+  let lastFound: { heading: string; index: number } | null = null;
+  for (const heading of required) {
+    const index = headings.indexOf(headingKey(heading));
+    if (index < 0) {
+      errors.push(`Pflichtblock fehlt: „## ${heading}“.`);
+      continue;
+    }
+    if (lastFound && index < lastFound.index) {
+      errors.push(`„## ${heading}“ steht vor „## ${lastFound.heading}“. Die Reihenfolge der Pflichtblöcke ist fest.`);
+    }
+    lastFound = { heading, index };
+  }
+  return errors;
+}
+
+/** Rule 3: no placeholder in brackets. */
+export function placeholderErrors(prompt: string): string[] {
+  const placeholders = [...new Set(prompt.match(PLACEHOLDER_RE) ?? [])];
+  if (placeholders.length === 0) return [];
+  return [`Platzhalter in eckigen Klammern: ${placeholders.slice(0, 5).map(quoted).join(", ")}${placeholders.length > 5 ? " …" : ""}.`];
+}
+
+/** Rule 4: no „–“ or „—“. */
+export function dashErrors(prompt: string): string[] {
+  return DASH_RE.test(prompt) ? ["Gedankenstrich im Text („–“ oder „—“)."] : [];
+}
+
+/** Rule 9: 4 to 6 Quick Actions, none from the persona's view (Ich, Mir, Mich, Mein). */
+export function quickActionErrors(actions: readonly string[]): string[] {
+  const errors: string[] = [];
+  if (actions.length < AVATAR_QUICK_ACTIONS_MIN || actions.length > AVATAR_QUICK_ACTIONS_MAX) {
+    errors.push(`${actions.length} Quick Actions statt ${AVATAR_QUICK_ACTIONS_MIN} bis ${AVATAR_QUICK_ACTIONS_MAX}.`);
+  }
+  for (const action of actions) {
+    if (PERSONA_START_RE.test(action)) {
+      errors.push(`Quick Action aus Sicht der Persona: ${quoted(action)}. Quick Actions sind aus Sicht des Mitarbeiters.`);
+    }
+  }
+  return errors;
+}
+
 /**
  * The rules a finished avatar part must pass before it is saved. Returns the errors in
  * German, one per broken rule (empty when everything holds).
@@ -300,28 +345,13 @@ export function validateAvatarResult(
   }
 
   // 2
-  const headings = avatarPromptHeadings(prompt);
-  let lastFound: { heading: string; index: number } | null = null;
-  for (const required of AVATAR_REQUIRED_HEADINGS) {
-    const index = headings.indexOf(headingKey(required));
-    if (index < 0) {
-      errors.push(`Pflichtblock fehlt: „## ${required}“.`);
-      continue;
-    }
-    if (lastFound && index < lastFound.index) {
-      errors.push(`„## ${required}“ steht vor „## ${lastFound.heading}“. Die Reihenfolge der Pflichtblöcke ist fest.`);
-    }
-    lastFound = { heading: required, index };
-  }
+  errors.push(...requiredHeadingErrors(prompt, AVATAR_REQUIRED_HEADINGS));
 
   // 3
-  const placeholders = [...new Set(prompt.match(PLACEHOLDER_RE) ?? [])];
-  if (placeholders.length > 0) {
-    errors.push(`Platzhalter in eckigen Klammern: ${placeholders.slice(0, 5).map(quoted).join(", ")}${placeholders.length > 5 ? " …" : ""}.`);
-  }
+  errors.push(...placeholderErrors(prompt));
 
   // 4
-  if (DASH_RE.test(prompt)) errors.push("Gedankenstrich im Text („–“ oder „—“).");
+  errors.push(...dashErrors(prompt));
 
   // 5
   const hedgeMatches = [...prompt.matchAll(HEDGE_RE)];
@@ -358,15 +388,7 @@ export function validateAvatarResult(
   }
 
   // 9
-  const actions = result.avatarData.quickActions;
-  if (actions.length < AVATAR_QUICK_ACTIONS_MIN || actions.length > AVATAR_QUICK_ACTIONS_MAX) {
-    errors.push(`${actions.length} Quick Actions statt ${AVATAR_QUICK_ACTIONS_MIN} bis ${AVATAR_QUICK_ACTIONS_MAX}.`);
-  }
-  for (const action of actions) {
-    if (PERSONA_START_RE.test(action)) {
-      errors.push(`Quick Action aus Sicht der Persona: ${quoted(action)}. Quick Actions sind aus Sicht des Mitarbeiters.`);
-    }
-  }
+  errors.push(...quickActionErrors(result.avatarData.quickActions));
 
   // 10
   const name = result.avatarData.name.trim();

@@ -69,7 +69,7 @@ export async function POST(
 
   const { data: agents } = await auth.supabase
     .from("dt_agents")
-    .select("name,slug,kind")
+    .select("name,slug,kind,avatar_data")
     .eq("organisation_id", row.organisation_id);
   const pendingPersonas = personasAwaitingConfirmation(
     personas,
@@ -77,6 +77,7 @@ export async function POST(
       name: typeof agent.name === "string" ? agent.name : "",
       slug: typeof agent.slug === "string" ? agent.slug : null,
       kind: typeof agent.kind === "string" ? agent.kind : "",
+      avatar_data: agent.avatar_data,
     })),
   );
 

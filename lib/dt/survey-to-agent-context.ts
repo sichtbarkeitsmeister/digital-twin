@@ -11,6 +11,7 @@ import {
 } from "@/lib/surveys/ranking-answer";
 import { formatTextListAnswerForDisplay } from "@/lib/surveys/text-list-answer";
 import type { SurveyField, SurveyStep } from "@/lib/surveys/types";
+import { MIX_AGENT_SLUG, isMixAgent } from "@/lib/dt/agents/mix";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export type SurveyFieldQuestionRow = {
@@ -130,37 +131,43 @@ export type PersonaReferenceExample = {
 
 const PROMPT_EXCERPT_MAX = 500;
 
+/** The reference example among recent personas: the longest own prompt, never a Mix. */
+export function pickPersonaReferenceRows<
+  T extends { slug?: string | null; avatar_data?: unknown; prompt_template?: string | null },
+>(rows: readonly T[] | null): T[] {
+  return (rows ?? [])
+    .filter((row) => !isMixAgent(row))
+    .sort((a, b) => (b.prompt_template?.length ?? 0) - (a.prompt_template?.length ?? 0))
+    .slice(0, 1);
+}
+
 export async function loadPersonaReferenceExamples(
   organisationId: string,
 ): Promise<PersonaReferenceExample[]> {
   const supabase = createServiceClient();
 
+  // The Mix stays out of the query too, so it does not take one of the five places.
   const { data: orgAgents } = await supabase
     .from("dt_agents")
     .select("name, role, slug, prompt_template, avatar_data")
     .eq("organisation_id", organisationId)
     .eq("kind", "persona")
+    .neq("slug", MIX_AGENT_SLUG)
     .order("updated_at", { ascending: false })
     .limit(5);
 
-  const sorted = (orgAgents ?? []).sort(
-    (a, b) => (b.prompt_template?.length ?? 0) - (a.prompt_template?.length ?? 0),
-  );
-
-  let picked = sorted.slice(0, 1);
+  let picked = pickPersonaReferenceRows(orgAgents);
 
   if (picked.length === 0) {
     const { data: fallback } = await supabase
       .from("dt_agents")
       .select("name, role, slug, prompt_template, avatar_data")
       .eq("kind", "persona")
+      .neq("slug", MIX_AGENT_SLUG)
       .order("updated_at", { ascending: false })
       .limit(5);
 
-    const fallbackSorted = (fallback ?? []).sort(
-      (a, b) => (b.prompt_template?.length ?? 0) - (a.prompt_template?.length ?? 0),
-    );
-    picked = fallbackSorted.slice(0, 1);
+    picked = pickPersonaReferenceRows(fallback);
   }
 
   return picked.map((row) => ({

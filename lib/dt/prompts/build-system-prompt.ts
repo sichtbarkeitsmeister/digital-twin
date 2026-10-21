@@ -6,6 +6,7 @@ import {
 import { buildDtChatStaticSystemText, buildProspectStaticSystemText } from "@/lib/dt/prompts/system-static";
 import { PASTED_URL_PROMPT_HINT_DE } from "@/lib/shared/pasted-url-context";
 import { buildDtGeoGroundingText } from "@/lib/dt/prompts/geo-grounding";
+import { isProspectPersonaKind } from "@/lib/dt/prompts/prospect-persona-kind";
 import { formatSeoChecklist } from "@/lib/dt/seo/seo-checklist";
 import { resolveTextModeInstructions } from "@/lib/dt/prompts/text-mode";
 import { resolveGroundingModeInstructions } from "@/lib/dt/prompts/grounding-mode";
@@ -29,17 +30,7 @@ export type DtPromptOrg = {
   sitemap_url?: string | null;
 };
 
-/**
- * Interviewed prospect (Wunschkunde / Umfrage-Persona / Default-DigitalTwin).
- * Not staff/SEO voice — matches the global DigitalTwin Wunschkunden-Prompt.
- */
-export function isProspectPersonaKind(
-  kind?: string | null,
-  _slug?: string | null,
-): boolean {
-  void _slug;
-  return kind === "wunschkunde" || kind === "persona";
-}
+export { isProspectPersonaKind };
 
 export function buildDtSystemPrompt(input: {
   agent: DtPromptAgent;

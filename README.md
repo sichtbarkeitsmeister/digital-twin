@@ -586,6 +586,12 @@ Anhänge liegen im Bucket `dt-chat-attachments`.
 
 Ein ausgefüllter Fragebogen kann einen Avatar erzeugen. Das läuft über Claude, bei langen Texten als Auftrag im Hintergrund (Anthropic Message Batches), damit das Zeitlimit von Vercel nicht abreißt. Der Assistent, der Fragebögen vorschlägt und ändert, liegt unter `app/api/ai/`.
 
+### Mix-Avatar
+
+Unter **Agenten** legt ein Plattform-Admin mit **Mix-Agent erstellen** (neben „Neuer Agent“) je Organisation einen Mix an: einen neutralen Interessenten, der für mehrere Zielgruppen-Avatare zugleich steht. Im Fenster **Mix-Agent** wählt man mindestens zwei aktive Zielgruppen-Avatare (Persona oder Wunschkunde, nicht SEO-Berater oder Standard-Twin). Claude (dasselbe Modell wie bei „Anbieter-Avatare“) bekommt Name, Rolle und Avatar-Teil jedes gewählten Avatars und schreibt mit dem globalen Prompt **Mix-Avatar** (Globale Prompts, Slug `avatar_mix`; leer oder fehlend gilt der Standard aus `lib/dt/agents/mix-prompt.ts`) den avatar-spezifischen Teil. Vor dem Speichern prüft der Code Anker, alle Mix-Blöcke in ihrer Reihenfolge, Platzhalter in eckigen Klammern, Gedankenstriche und 4 bis 6 Quick Actions aus Sicht des Mitarbeiters. Bei einem Verstoß läuft Claude ein zweites Mal mit den Fehlern; scheitert auch das, kommt eine Fehlermeldung und nichts wird gespeichert.
+
+Der Mix ist ein normaler Agent (Name „Mix“, Slug `mix`, Rolle „Mix aus N Zielgruppen“, `avatar_data.mix` mit Quell-Avataren und Zeitpunkt) und lässt sich bearbeiten, ein- und ausschalten und löschen wie jeder andere. Er steht im Chat und in den Avatar-Auswahlen von Texte, SEO, GEO und Hormozi, dort ganz oben als „Mix (aus N Zielgruppen)“; vorausgewählt bleibt der neueste Zielgruppen-Avatar. **Mix neu erstellen** an seiner Zeile ersetzt den Prompt im selben Agenten, die Chats bleiben. Wurde ein Quell-Avatar seitdem geändert oder gelöscht, zeigt die Zeile „Quell-Avatare haben sich geändert. Mix neu erstellen?“. Das Wunschkunden-Wissen des SEO-Beraters, die Referenzbeispiele für Fragebogen → Agent und der Abgleich der Transkripte lassen den Mix aus. Migration einmal im Supabase SQL Editor ausführen: `database/migrations/20261021_dt_avatar_mix_prompt.sql`. Test: `npm run test:avatar-mix`.
+
 ### SEO
 
 1. Jemand startet im SEO-Modus einen Bericht oder einen Crawl.

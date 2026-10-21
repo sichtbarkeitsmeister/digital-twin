@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
 import {
   loadContentAnbieterSources,
   loadContentAvatarOptions,
@@ -66,8 +67,7 @@ export async function PUT(req: Request) {
 
   let agentId = parsed.data.agentId ?? null;
   if (!agentId) {
-    const [newest] = await loadContentAvatarOptions(gate.service, gate.organisationId);
-    agentId = newest?.id ?? null;
+    agentId = defaultAvatarOptionId(await loadContentAvatarOptions(gate.service, gate.organisationId));
   }
   const avatarRow = agentId
     ? await loadContentAvatarRow(gate.service, gate.organisationId, agentId)

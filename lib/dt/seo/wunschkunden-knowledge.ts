@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { isMixAgent } from "@/lib/dt/agents/mix";
 import { isDefaultTwinAgent, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import { hasAvatarGlobalPromptAnchor } from "@/lib/dt/prompts/avatar-global-prompt-anchor";
 import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "@/lib/dt/prompts/digital-twin-global-prompt";
@@ -37,6 +38,7 @@ type AgentKnowledgeRow = {
   uses_global_prompt?: boolean | null;
   source_survey_id: string | null;
   source_survey_response_id: string | null;
+  avatar_data?: unknown;
 };
 
 type SurveyRow = {
@@ -58,17 +60,19 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-/** Avatars the SEO advisor should treat as Wunschkunden of this organisation. */
+/** Avatars the SEO advisor should treat as Wunschkunden of this organisation (not the Mix of them). */
 export function isSeoWunschkundeSourceAgent(agent: {
   kind?: string | null;
   slug?: string | null;
   is_enabled?: boolean | null;
   is_default?: boolean | null;
+  avatar_data?: unknown;
 }): boolean {
   if (agent.is_enabled === false) return false;
   if (isSeoAdvisorAgent(agent)) return false;
   if (isDefaultTwinAgent(agent)) return false;
   if (agent.is_default) return false;
+  if (isMixAgent(agent)) return false;
   return isProspectPersonaKind(agent.kind, agent.slug);
 }
 
@@ -427,7 +431,7 @@ export async function loadWunschkundeProfilesForSeo(
   const { data: agents, error: agentError } = await supabase
     .from("dt_agents")
     .select(
-      "id, name, role, kind, slug, is_enabled, is_default, prompt_append, prompt_template, uses_global_prompt, source_survey_id, source_survey_response_id",
+      "id, name, role, kind, slug, is_enabled, is_default, prompt_append, prompt_template, uses_global_prompt, source_survey_id, source_survey_response_id, avatar_data",
     )
     .eq("organisation_id", organisationId)
     .eq("is_enabled", true)
