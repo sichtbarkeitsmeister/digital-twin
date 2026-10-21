@@ -318,6 +318,8 @@ Die sechs Textwerkzeuge im Überblick:
 
 Anrede, Branche und Tonalität werden daraus vorgefüllt. Was schon in den Gesprächen steht, bleibt; der Fragebogen füllt nur Lücken.
 
+**Avatar.** Der gewählte Avatar geht mit Name, Rolle und seinem eigenen Text in jeden Schritt von Texte und in die Werkzeuge SEO, GEO und Hormozi. Bei Avataren auf dem globalen DigitalTwin-Prompt (aus Fragebögen, Transkripten, der Mix) ist das `prompt_append`, bei Avataren mit eigenem Prompt `prompt_template`. Blöcke, die nur den Chat steuern (Anker, Anrede, Gesprächskanal, Datum, Verhaltensregeln im Gespräch, „Wer mit dir spricht“, „Was du kannst“), fallen weg; Platzhalter älterer Avatare wie `{{alter}}` werden aus `avatar_data` gefüllt. Höchstens 20.000 Zeichen je Avatar, der Rest wird gekürzt (`lib/dt/agents/avatar-text.ts`).
+
 | Name | Was er bedeutet |
 |---|---|
 | `ANTHROPIC_DT_CONTENT_API_KEY` | Eigener Anthropic-Schlüssel nur für Texte. In der [Anthropic Console](https://console.anthropic.com/settings/keys) einen neuen Schlüssel anlegen und in Vercel unter **Settings → Environment Variables** eintragen (lokal in `.env.local`). Nur der Server kennt ihn; der Browser nie. Nie mit `NEXT_PUBLIC_` beginnen. Texte fällt nicht auf `ANTHROPIC_API_KEY` zurück, sonst liefe die Abrechnung wieder mit dem übrigen Verbrauch zusammen. |

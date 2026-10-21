@@ -13,7 +13,8 @@
  * the reader the text is written for, not the client's business.
  */
 
-import { isMixAgent, mixTextForContent } from "@/lib/dt/agents/mix";
+import { avatarTextForContent } from "@/lib/dt/agents/avatar-text";
+import { isMixAgent } from "@/lib/dt/agents/mix";
 import type { AnbieterItem } from "@/lib/dt/transcripts/workshop-model";
 
 export const CONTENT_ANREDEN = ["Sie", "Du"] as const;
@@ -202,6 +203,7 @@ export type DtAgentForContent = {
   slug?: string | null;
   prompt_template?: string | null;
   prompt_append?: string | null;
+  uses_global_prompt?: boolean | null;
   avatar_data?: unknown;
 };
 
@@ -596,18 +598,19 @@ export function suggestTextSettings(
 
 /**
  * `dt_agents` row → `avatar` object for the pipeline prompts.
- * Row columns win over same-named keys inside `avatar_data`.
+ * Row columns win over same-named keys inside `avatar_data`. `beschreibung` is the avatar's
+ * own text as the tools read it (`avatarTextForContent`): prompt_append for avatars on the
+ * global DigitalTwin prompt, prompt_template for avatars with their own prompt.
  */
 export function avatarFromAgent(row: DtAgentForContent): ContentAvatar {
   const extra = isRecord(row.avatar_data) ? { ...row.avatar_data } : {};
-  const mix = isMixAgent(row);
-  // The Mix's sources are bookkeeping for Agenten; its text lives in prompt_append.
-  if (mix) delete extra.mix;
+  // The Mix's sources are bookkeeping for Agenten, nothing the text is written for.
+  if (isMixAgent(row)) delete extra.mix;
   return {
     ...extra,
     name: row.name.trim(),
     role: (row.role ?? "").trim(),
-    beschreibung: mix ? mixTextForContent(row.prompt_append) : (row.prompt_template ?? "").trim(),
+    beschreibung: avatarTextForContent(row),
   };
 }
 

@@ -34,8 +34,9 @@ export type ContentAvatarRow = {
   role: string | null;
   slug: string | null;
   prompt_template: string | null;
-  /** Read for the Mix, whose text lives here (see `avatarFromAgent`). */
+  /** The avatar's text when it runs on the global DigitalTwin prompt (see `avatarTextForContent`). */
   prompt_append: string | null;
+  uses_global_prompt: boolean | null;
   avatar_data: unknown;
 };
 
@@ -192,7 +193,7 @@ export async function loadContentAvatarRow(
 ): Promise<ContentAvatarRow | null> {
   const { data } = await supabase
     .from("dt_agents")
-    .select("id, name, role, slug, prompt_template, prompt_append, avatar_data")
+    .select("id, name, role, slug, prompt_template, prompt_append, uses_global_prompt, avatar_data")
     .eq("organisation_id", organisationId)
     .eq("id", agentId)
     .maybeSingle();

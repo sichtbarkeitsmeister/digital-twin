@@ -11,6 +11,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { reviveStringifiedToolInput } from "@/lib/ai/tolerant-json";
+import { avatarSpecificText } from "@/lib/dt/agents/avatar-text";
 import {
   MIX_AGENT_NAME,
   MIX_AGENT_SLUG,
@@ -123,16 +124,6 @@ function text(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-/**
- * The avatar part of a source as the chat uses it: `prompt_append` on the global DigitalTwin
- * prompt, otherwise its own prompt (same rule as `resolveAvatarSpecificPrompt`).
- */
-export function mixSourceText(agent: Pick<MixAgentRow, "prompt_template" | "prompt_append" | "uses_global_prompt">): string {
-  const append = agent.prompt_append?.trim() ?? "";
-  if (agent.uses_global_prompt && append) return append;
-  return agent.prompt_template?.trim() || append;
-}
-
 export type MixSourceSelection =
   | { ok: true; sources: MixSource[]; mix: MixAgentRow | null }
   | { ok: false; message: string };
@@ -171,7 +162,7 @@ export function selectMixSources(agents: readonly MixAgentRow[], requestedIds: r
   return {
     ok: true,
     mix: findMixAgent(agents),
-    sources: picked.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role, text: mixSourceText(agent) })),
+    sources: picked.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role, text: avatarSpecificText(agent) })),
   };
 }
 

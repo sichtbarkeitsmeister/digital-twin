@@ -109,26 +109,6 @@ export function isMixOutdated(
   });
 }
 
-/** Blocks of the Mix text that only steer the chat: the anchor and the Anrede towards the employee. */
-const MIX_CHAT_ONLY_HEADINGS = new Set(["ANKER: GLOBALER DIGITALTWIN-PROMPT", "ANREDE"]);
-
-/**
- * The Mix as Texte, SEO, GEO and Hormozi read it: its text (`prompt_append`; `prompt_template`
- * is only „Avatar: Mix“) without the blocks that only steer the chat and without the `---` lines.
- */
-export function mixTextForContent(promptAppend: string | null | undefined): string {
-  return (promptAppend ?? "")
-    .replace(/\r\n/g, "\n")
-    .split(/\n(?=[ \t]*##[ \t])/)
-    .filter((section) => {
-      const heading = section.match(/^[ \t]*##[ \t]+(.+?)[ \t]*$/m)?.[1] ?? "";
-      return !MIX_CHAT_ONLY_HEADINGS.has(heading.replace(/\s+/g, " ").toLocaleUpperCase("de-DE"));
-    })
-    .map((section) => section.replace(/^[ \t]*---[ \t]*$/gm, "").trim())
-    .filter(Boolean)
-    .join("\n\n");
-}
-
 /**
  * The avatar a dropdown preselects: the newest Zielgruppen avatar. The Mix is listed first but
  * only chosen by hand; it is the default only while it is the sole avatar.

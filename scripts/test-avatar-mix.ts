@@ -18,9 +18,9 @@ import {
   mixOptionLabel,
   mixRole,
   mixSourceCandidates,
-  mixTextForContent,
   readMixInfo,
 } from "../lib/dt/agents/mix";
+import { avatarTextForContent } from "../lib/dt/agents/avatar-text";
 import {
   MIX_REQUIRED_HEADINGS,
   MIX_TOOL,
@@ -659,14 +659,14 @@ async function testDropdowns() {
 async function testToolsReadTheMix() {
   // Texte, SEO, GEO and Hormozi read the Mix text, not „Avatar: Mix“, and without the blocks
   // that only steer the chat (anchor, Anrede towards the employee).
-  const forContent = mixTextForContent(VALID_MIX);
+  const forContent = avatarTextForContent({ name: "Mix", prompt_append: VALID_MIX, uses_global_prompt: true });
   assert.ok(forContent.startsWith("## WER DU BIST\nDu stehst für diese Zielgruppen:"));
   assert.match(forContent, /## WO SICH DIE ZIELGRUPPEN UNTERSCHEIDEN\n- Hausverwalterin/);
   assert.ok(forContent.endsWith("- Abblocken bei: Fachbegriffen zu Farbsystemen"));
   for (const chatOnly of ["ANKER", "ANREDE", "duzt du", "Trainingssituation", "\n---"]) {
     assert.equal(forContent.includes(chatOnly), false, `content text must not contain ${chatOnly}`);
   }
-  assert.equal(mixTextForContent(null), "");
+  assert.equal(avatarTextForContent({ name: "Mix", prompt_template: "Avatar: Mix", prompt_append: null, uses_global_prompt: true }), "");
 
   const storedMix = {
     ...MIX,
@@ -686,12 +686,16 @@ async function testToolsReadTheMix() {
   assert.equal("mix" in avatar, false, "the source list stays in Agenten");
   const block = avatarBlock({ avatar: { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } });
   assert.match(block, /^## Avatar \(Wunschkunde, für den der Text geschrieben wird\)\nName: Mix\nRolle: Mix aus 2 Zielgruppen\n## WER DU BIST/);
+  // Up to 20,000 characters of the description reach the prompt; longer ones are cut there.
+  const long = (chars: number) => avatarBlock({ avatar: { name: "Mix", role: "", beschreibung: "x".repeat(chars) } });
+  assert.equal(long(20_000).endsWith("x".repeat(20_000)), true);
+  assert.equal(long(25_000).endsWith(`${"x".repeat(20_000)}\n… (gekürzt)`), true);
 
-  // Every other avatar reads as before: its prompt_template.
+  // The same rule for every avatar on the global prompt: its prompt_append, not the stub.
   const annaRow = await loadContentAvatarRow(db.client, ORG, ANNA_ID);
   assert.ok(annaRow);
   const anna = avatarFromAgent(annaRow);
-  assert.equal(anna.beschreibung, "Avatar: Anna Becker");
+  assert.equal(anna.beschreibung, ANNA_TEXT.slice(ANNA_TEXT.indexOf("## WER DU BIST")));
   assert.equal(anna.icon, "🏢");
   console.log("Texte, SEO, GEO, Hormozi read the Mix text: ok");
 }

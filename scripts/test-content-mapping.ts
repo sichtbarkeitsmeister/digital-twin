@@ -345,6 +345,113 @@ assert.deepEqual(avatarFromAgent({ name: "X", role: null, prompt_template: null,
   beschreibung: "",
 });
 
+// An avatar on the global DigitalTwin prompt (survey, transcript, Avatar-Plan): its text is in
+// prompt_append, prompt_template only holds the stub. The chat-only blocks stay out.
+const globalAvatar = avatarFromAgent({
+  name: "Julia Berg",
+  role: "Hausverwalterin",
+  prompt_template: "Avatar: Julia Berg",
+  uses_global_prompt: true,
+  prompt_append: [
+    "## ANKER: GLOBALER DIGITALTWIN-PROMPT",
+    "Dieser Text ist nur der avatar-spezifische Teil.",
+    "---",
+    "## ANREDE",
+    "Im Gespräch mit deinem Gesprächspartner duzt du ganz normal.",
+    "---",
+    "## GESPRÄCHSKANAL: TELEFONAT",
+    "Du rufst an.",
+    "---",
+    "## WER DU BIST",
+    "Du bist Julia Berg, {{alter}} Jahre alt.",
+    "---",
+    "## DEINE SPRACHE",
+    "- Wörter: Treppenhaus, Termin",
+  ].join("\n"),
+  avatar_data: { alter: 52, source: "transcript" },
+});
+assert.equal(globalAvatar.beschreibung, "## WER DU BIST\nDu bist Julia Berg, 52 Jahre alt.\n\n## DEINE SPRACHE\n- Wörter: Treppenhaus, Termin");
+assert.equal(globalAvatar.source, "transcript");
+assert.equal(
+  avatarFromAgent({ name: "X", prompt_template: "Avatar: X", prompt_append: null, uses_global_prompt: true }).beschreibung,
+  "",
+  "a stub is no description",
+);
+// Older avatars go on right below the anchor's three lines, without a heading of their own.
+assert.equal(
+  avatarFromAgent({
+    name: "Sergej",
+    prompt_template: "Avatar: Sergej",
+    uses_global_prompt: true,
+    prompt_append: [
+      "## ANKER: GLOBALER DIGITALTWIN-PROMPT",
+      "Dieser Text ist nur der avatar-spezifische Teil (Persönlichkeit, Situation, Sprachstil).",
+      "Die verbindlichen Regeln stehen im globalen DigitalTwin-Prompt.",
+      "Bei Widerspruch gilt der globale Prompt — nicht dieser Avatar-Teil.",
+      "",
+      "Ich heiße Sergej.",
+      "",
+      "**Situation:** Mein Vater hat ein Haus in Hannover.",
+    ].join("\n"),
+  }).beschreibung,
+  "Ich heiße Sergej.\n\n**Situation:** Mein Vater hat ein Haus in Hannover.",
+);
+// Legacy prompts with `#` headings: a chat-only `##` block ends at the next `#` heading.
+assert.equal(
+  avatarFromAgent({
+    name: "Uwe",
+    role: "Bauherr",
+    uses_global_prompt: false,
+    prompt_template: "## AKTUELLES DATUM\nHeute ist {{current_date}}.\n\nDu bist {{name}}, {{rolle_kurz}}.\n\n# ROLLENDEFINITION\nDu bist {{name}}, {{rolle_kurz}}, und baust ein Haus.",
+  }).beschreibung,
+  "# ROLLENDEFINITION\nDu bist Uwe, Bauherr, und baust ein Haus.",
+);
+assert.equal(
+  avatarFromAgent({ name: "X", prompt_template: "Avatar-spezifischer Teil in den zusätzlichen Anweisungen.", prompt_append: "Du bist X.", uses_global_prompt: true }).beschreibung,
+  "Du bist X.",
+);
+
+// An avatar with its own prompt: prompt_template, without the blocks that only steer the
+// chat, markers removed, placeholders of older avatars filled (unknown ones stay).
+const ownPrompt = avatarFromAgent({
+  name: "Petra",
+  role: "Erbin",
+  uses_global_prompt: false,
+  prompt_template: [
+    "## AKTUELLES DATUM",
+    "Heute ist {{current_date}}. Du bist {{name_clean}}, {{rolle_kurz}}.",
+    "",
+    "## WER DU BIST",
+    "Du bist {{name_clean}}, {{rolle_kurz}}, {{disg}}-Typ, {{unbekannt}}.",
+    "",
+    "## WICHTIGE VERHALTENSREGELN IM GESPRÄCH",
+    "- Du bist Interessent, kein Kunde.",
+    "",
+    "## WER MIT DIR SPRICHT",
+    "Der User ist ein Mitarbeiter.",
+    "",
+    "## WAS DU KANNST — ERKENNE SELBST WAS GEFRAGT IST",
+    "**MEINUNG GEBEN:** Antworte authentisch.",
+    "",
+    "## REAKTION AUF PROBLEME UND VERZÖGERUNGEN",
+    "Du bleibst ruhig.",
+    "<!-- DT_TRANSCRIPT_PERSONA_START -->",
+    "## Aus Kundeninterviews",
+    "### Petra",
+    "Priorität: A",
+    "<!-- DT_TRANSCRIPT_PERSONA_END -->",
+  ].join("\n"),
+  avatar_data: { disg: "S" },
+});
+assert.equal(
+  ownPrompt.beschreibung,
+  [
+    "## WER DU BIST\nDu bist Petra, Erbin, S-Typ, {{unbekannt}}.",
+    "## REAKTION AUF PROBLEME UND VERZÖGERUNGEN\nDu bleibst ruhig.",
+    "## Aus Kundeninterviews\n### Petra\nPriorität: A",
+  ].join("\n\n"),
+);
+
 // --- presentation ---------------------------------------------------------------------------
 assert.equal(contentStateMeta("braucht_sie").tone, "orange");
 assert.equal(contentStateMeta("laeuft").tone, "blue");
