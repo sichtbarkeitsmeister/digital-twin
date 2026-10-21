@@ -28,8 +28,8 @@ export type UploadedDocument = {
   kind: UploadedDocumentKind;
   /** Plain text (kind `text`) or an HTML document / fragment (kind `html`). */
   content: string;
-  /** What the file was read as, for the UI („PDF“, „Word“ …). */
-  format: "txt" | "html" | "pdf" | "docx";
+  /** What the file was read as, for the UI („PDF“, „Word“ …); `web` is a page of the crawled website. */
+  format: "txt" | "html" | "pdf" | "docx" | "web";
 };
 
 export type IngestResult<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -203,10 +203,51 @@ type FinishedDrafts = { blocks: ContentTextBlock[]; total: number; chars: number
  * the output has the one H1 the pipeline expects. Only the first block may be level 1.
  * `total` and `chars` are measured before `normalizeBlocks`, which caps blocks and HTML.
  */
-function finishDrafts(drafts: Draft[]): FinishedDrafts {
-  const filled = splitLongDrafts(drafts)
+type RawSection = { id: string; heading: string; level: 1 | 2 | 3; html: string };
+
+/**
+ * A crawled web page often has more sections than the tools take. Instead of refusing it,
+ * sections are folded together until `limit` is met: first every H3 into the section above
+ * it (its heading becomes a bold line), then the shortest section into its predecessor.
+ * Text is never dropped. The first section (the H1) always stays first.
+ */
+export function fitSectionsToLimit<T extends RawSection>(sections: readonly T[], limit: number): T[] {
+  const out = sections.map((s) => ({ ...s }));
+  const fold = (index: number) => {
+    const target = out[index - 1]!;
+    const source = out[index]!;
+    const heading = source.heading ? `<p><strong>${escapeHtml(source.heading)}</strong></p>` : "";
+    target.html = [target.html, heading, source.html].filter(Boolean).join("\n");
+    out.splice(index, 1);
+  };
+  for (let i = out.length - 1; i >= 1 && out.length > limit; i -= 1) {
+    if (out[i]!.level === 3) fold(i);
+  }
+  while (out.length > limit && out.length > 1) {
+    let shortest = 1;
+    for (let i = 2; i < out.length; i += 1) {
+      if (plainLength(out[i]!.html) + out[i]!.heading.length < plainLength(out[shortest]!.html) + out[shortest]!.heading.length) shortest = i;
+    }
+    fold(shortest);
+  }
+  return out.map((s, index) => ({ ...s, id: `abschnitt-${index + 1}` }));
+}
+
+/**
+ * On a web page, teaser text or breadcrumbs often come before the H1. The tools need the H1
+ * first, so the first H1 section moves to the front; everything else keeps its order.
+ */
+export function h1First<T extends { heading: string | null; level: 1 | 2 | 3 }>(sections: readonly T[]): T[] {
+  const index = sections.findIndex((s) => s.level === 1 && s.heading);
+  if (index <= 0) return [...sections];
+  return [sections[index]!, ...sections.slice(0, index), ...sections.slice(index + 1)];
+}
+
+function finishDrafts(drafts: Draft[], options: { fit?: boolean } = {}): FinishedDrafts {
+  const split = splitLongDrafts(drafts)
     .map((d) => ({ ...d, html: d.parts.join("\n").trim() }))
     .filter((d) => d.heading || d.html);
+  const filled = options.fit ? h1First(split) : split;
   const hasH1 = filled.some((d) => d.level === 1 && d.heading);
   const raw = filled.map((d, index) => {
     let level: 1 | 2 | 3 = d.level;
@@ -219,9 +260,10 @@ function finishDrafts(drafts: Draft[]): FinishedDrafts {
     }
     return { id: `abschnitt-${index + 1}`, heading: d.heading ?? "", level, html: d.html };
   });
-  const chars = raw.reduce((sum, b) => sum + b.heading.length + plainLength(b.html), 0);
+  const sections = options.fit && raw.length > TEXT_TOOL_MAX_BLOCKS ? fitSectionsToLimit(raw, TEXT_TOOL_MAX_BLOCKS) : raw;
+  const chars = sections.reduce((sum, b) => sum + b.heading.length + plainLength(b.html), 0);
   // `normalizeBlocks` sanitizes the HTML again and fixes empty ids/levels like LLM output.
-  return { blocks: normalizeBlocks(raw), total: raw.length, chars };
+  return { blocks: normalizeBlocks(sections), total: sections.length, chars };
 }
 
 function cleanHeading(text: string): string {
@@ -406,7 +448,15 @@ function textToDrafts(text: string): Draft[] {
  * Text or HTML → blocks. An HTML export of Texte (`<section data-block-id>`) is taken back
  * as it is, ids included; any other HTML and all plain text go through the heuristics above.
  */
-export function blocksFromDocument(doc: Pick<UploadedDocument, "kind" | "content">): IngestResult<IngestedText> {
+/**
+ * `fitToLimit` (crawled web pages only): more than 40 sections are folded together instead of
+ * refused (`fitSectionsToLimit`). Uploads keep the strict limit, so a person decides there.
+ */
+export function blocksFromDocument(
+  doc: Pick<UploadedDocument, "kind" | "content">,
+  options: { fitToLimit?: boolean } = {},
+): IngestResult<IngestedText> {
+  const fit = { fit: options.fitToLimit === true };
   let finished: FinishedDrafts;
   let title: string | null = null;
   let metaDescription: string | null = null;
@@ -424,12 +474,12 @@ export function blocksFromDocument(doc: Pick<UploadedDocument, "kind" | "content
       metaDescription = cleanHeading($('head > meta[name="description"]').first().attr("content") ?? "") || null;
     } else {
       const parsed = htmlToDrafts(doc.content);
-      finished = finishDrafts(parsed.drafts);
+      finished = finishDrafts(parsed.drafts, fit);
       title = parsed.title;
       metaDescription = parsed.metaDescription;
     }
   } else {
-    finished = finishDrafts(textToDrafts(doc.content));
+    finished = finishDrafts(textToDrafts(doc.content), fit);
   }
 
   const { blocks, total, chars } = finished;
