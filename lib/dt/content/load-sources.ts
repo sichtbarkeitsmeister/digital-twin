@@ -32,7 +32,10 @@ export type ContentAvatarRow = {
   id: string;
   name: string;
   role: string | null;
+  slug: string | null;
   prompt_template: string | null;
+  /** Read for the Mix, whose text lives here (see `avatarFromAgent`). */
+  prompt_append: string | null;
   avatar_data: unknown;
 };
 
@@ -189,7 +192,7 @@ export async function loadContentAvatarRow(
 ): Promise<ContentAvatarRow | null> {
   const { data } = await supabase
     .from("dt_agents")
-    .select("id, name, role, prompt_template, avatar_data")
+    .select("id, name, role, slug, prompt_template, prompt_append, avatar_data")
     .eq("organisation_id", organisationId)
     .eq("id", agentId)
     .maybeSingle();

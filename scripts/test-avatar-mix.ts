@@ -18,6 +18,7 @@ import {
   mixOptionLabel,
   mixRole,
   mixSourceCandidates,
+  mixTextForContent,
   readMixInfo,
 } from "../lib/dt/agents/mix";
 import {
@@ -40,7 +41,9 @@ import {
   resolveMixPrompt,
 } from "../lib/dt/agents/mix-prompt";
 import { loadMixPrompt } from "../lib/dt/agents/mix-prompt-db";
-import { loadContentAvatarOptions } from "../lib/dt/content/load-sources";
+import { loadContentAvatarOptions, loadContentAvatarRow } from "../lib/dt/content/load-sources";
+import { avatarFromAgent } from "../lib/dt/content/mapping";
+import { avatarBlock } from "../lib/dt/content/pipeline/prompts";
 import { AVATAR_GLOBAL_PROMPT_ANCHOR } from "../lib/dt/prompts/avatar-global-prompt-anchor";
 import { isSeoWunschkundeSourceAgent, loadWunschkundeProfilesForSeo } from "../lib/dt/seo/wunschkunden-knowledge";
 import { pickPersonaReferenceRows } from "../lib/dt/survey-to-agent-context";
@@ -168,14 +171,20 @@ type Row = Record<string, unknown>;
 type RpcCall = { fn: string; args: Record<string, unknown> };
 type RpcAnswer = { data: unknown; error: { message: string } | null };
 
-/** Supabase stand-in: filters by eq/neq/is/in/limit, answers rpc through `rpc`. */
+/** Supabase stand-in: filters by eq/neq/is/in/limit, returns only the selected columns, answers rpc through `rpc`. */
 function fakeDb(tables: Record<string, Row[]>, rpc: (call: RpcCall) => RpcAnswer = () => ({ data: null, error: null })) {
   const calls: RpcCall[] = [];
   const client = {
     from(table: string) {
       let rows = [...(tables[table] ?? [])];
+      let columns: string[] | null = null;
+      const project = (row: Row): Row =>
+        columns ? Object.fromEntries(columns.filter((column) => column in row).map((column) => [column, row[column]])) : row;
       const query = {
-        select: () => query,
+        select: (list?: string) => {
+          columns = list && list.trim() !== "*" ? list.split(",").map((column) => column.trim()) : null;
+          return query;
+        },
         eq: (field: string, value: unknown) => {
           rows = rows.filter((row) => row[field] === value);
           return query;
@@ -197,9 +206,9 @@ function fakeDb(tables: Record<string, Row[]>, rpc: (call: RpcCall) => RpcAnswer
           rows = rows.slice(0, count);
           return query;
         },
-        maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
+        maybeSingle: () => Promise.resolve({ data: rows[0] ? project(rows[0]) : null, error: null }),
         then: (resolve: (value: { data: Row[]; error: null }) => unknown, reject?: (reason: unknown) => unknown) =>
-          Promise.resolve({ data: rows, error: null }).then(resolve, reject),
+          Promise.resolve({ data: rows.map(project), error: null }).then(resolve, reject),
       };
       return query;
     },
@@ -647,6 +656,46 @@ async function testDropdowns() {
   console.log("avatar dropdowns: Mix first, preselection unchanged: ok");
 }
 
+async function testToolsReadTheMix() {
+  // Texte, SEO, GEO and Hormozi read the Mix text, not „Avatar: Mix“, and without the blocks
+  // that only steer the chat (anchor, Anrede towards the employee).
+  const forContent = mixTextForContent(VALID_MIX);
+  assert.ok(forContent.startsWith("## WER DU BIST\nDu stehst für diese Zielgruppen:"));
+  assert.match(forContent, /## WO SICH DIE ZIELGRUPPEN UNTERSCHEIDEN\n- Hausverwalterin/);
+  assert.ok(forContent.endsWith("- Abblocken bei: Fachbegriffen zu Farbsystemen"));
+  for (const chatOnly of ["ANKER", "ANREDE", "duzt du", "Trainingssituation", "\n---"]) {
+    assert.equal(forContent.includes(chatOnly), false, `content text must not contain ${chatOnly}`);
+  }
+  assert.equal(mixTextForContent(null), "");
+
+  const storedMix = {
+    ...MIX,
+    organisation_id: ORG,
+    prompt_template: "Avatar: Mix",
+    prompt_append: VALID_MIX,
+    avatar_data: { mix: MIX_INFO, icon: "🧩" },
+  };
+  const db = fakeDb({ dt_agents: [storedMix, { ...ANNA, organisation_id: ORG }] });
+  const mixRow = await loadContentAvatarRow(db.client, ORG, MIX_ID);
+  assert.ok(mixRow);
+  const avatar = avatarFromAgent(mixRow);
+  assert.equal(avatar.name, "Mix");
+  assert.equal(avatar.role, "Mix aus 2 Zielgruppen");
+  assert.equal(avatar.beschreibung, forContent);
+  assert.equal(avatar.icon, "🧩");
+  assert.equal("mix" in avatar, false, "the source list stays in Agenten");
+  const block = avatarBlock({ avatar: { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } });
+  assert.match(block, /^## Avatar \(Wunschkunde, für den der Text geschrieben wird\)\nName: Mix\nRolle: Mix aus 2 Zielgruppen\n## WER DU BIST/);
+
+  // Every other avatar reads as before: its prompt_template.
+  const annaRow = await loadContentAvatarRow(db.client, ORG, ANNA_ID);
+  assert.ok(annaRow);
+  const anna = avatarFromAgent(annaRow);
+  assert.equal(anna.beschreibung, "Avatar: Anna Becker");
+  assert.equal(anna.icon, "🏢");
+  console.log("Texte, SEO, GEO, Hormozi read the Mix text: ok");
+}
+
 async function main() {
   testIsMixAgent();
   testSources();
@@ -659,6 +708,7 @@ async function main() {
   testOutdated();
   await testExclusions();
   await testDropdowns();
+  await testToolsReadTheMix();
   console.log("avatar mix: all ok");
 }
 

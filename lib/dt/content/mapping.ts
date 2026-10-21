@@ -13,6 +13,7 @@
  * the reader the text is written for, not the client's business.
  */
 
+import { isMixAgent, mixTextForContent } from "@/lib/dt/agents/mix";
 import type { AnbieterItem } from "@/lib/dt/transcripts/workshop-model";
 
 export const CONTENT_ANREDEN = ["Sie", "Du"] as const;
@@ -198,7 +199,9 @@ export type ContentAvatar = {
 export type DtAgentForContent = {
   name: string;
   role?: string | null;
+  slug?: string | null;
   prompt_template?: string | null;
+  prompt_append?: string | null;
   avatar_data?: unknown;
 };
 
@@ -596,12 +599,15 @@ export function suggestTextSettings(
  * Row columns win over same-named keys inside `avatar_data`.
  */
 export function avatarFromAgent(row: DtAgentForContent): ContentAvatar {
-  const extra = isRecord(row.avatar_data) ? row.avatar_data : {};
+  const extra = isRecord(row.avatar_data) ? { ...row.avatar_data } : {};
+  const mix = isMixAgent(row);
+  // The Mix's sources are bookkeeping for Agenten; its text lives in prompt_append.
+  if (mix) delete extra.mix;
   return {
     ...extra,
     name: row.name.trim(),
     role: (row.role ?? "").trim(),
-    beschreibung: (row.prompt_template ?? "").trim(),
+    beschreibung: mix ? mixTextForContent(row.prompt_append) : (row.prompt_template ?? "").trim(),
   };
 }
 
