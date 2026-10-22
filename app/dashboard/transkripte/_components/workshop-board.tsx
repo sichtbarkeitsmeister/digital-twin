@@ -191,7 +191,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [anbieterNote, setAnbieterNote] = useState("");
   const [avatarNote, setAvatarNote] = useState("");
-  const [countText, setCountText] = useState(String(AVATAR_COUNT_MIN));
+  /** Empty = KI wählt die Anzahl; eine Zahl ist Override. */
+  const [countText, setCountText] = useState("");
   // A count the user typed survives a reload of the Bestand until the next plan.
   const countTouched = useRef(false);
   /** Edited answers to the Rückfragen, per avatar and question; untouched ones keep the Vorschlag. */
@@ -205,9 +206,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     setAvatarPlan(plan);
     setTitles(Object.fromEntries(plan.avatars.map((avatar) => [avatar.key, avatar.title])));
     setNotWanted(plan.notWanted);
-    if (!countTouched.current) {
-      setCountText(String(Math.min(AVATAR_COUNT_MAX, Math.max(AVATAR_COUNT_MIN, plan.avatars.length))));
-    }
+    // Untouched = auto: keep the field empty. A typed override stays via countTouched.
+    if (!countTouched.current) setCountText("");
   }, []);
 
   const refresh = useCallback(async () => {
@@ -358,7 +358,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
         toast.error(message);
         return;
       }
-      if (body.action === "plan") countTouched.current = false;
+      // Auto plan: back to empty. Override: keep the typed count for the next run.
+      if (body.action === "plan" && body.count == null) countTouched.current = false;
       applyPlan(result.json.avatarPlan);
       if (body.instruction) setAvatarNote(result.json.avatarPlan.revisionNote ?? "");
       toast.success(success);
@@ -502,9 +503,13 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const missingSummaries = sources
     .map((source, index) => ({ id: source.id, label: sourceLabel(source, index), hasSummary: source.hasSummary }))
     .filter((source) => !source.hasSummary);
-  const countValue = Number.parseInt(countText, 10);
+  const countTrimmed = countText.trim();
+  const countAuto = countTrimmed === "";
+  const countValue = Number.parseInt(countTrimmed, 10);
   const countValid =
-    Number.isInteger(countValue) && countValue >= AVATAR_COUNT_MIN && countValue <= AVATAR_COUNT_MAX;
+    countAuto ||
+    (Number.isInteger(countValue) && countValue >= AVATAR_COUNT_MIN && countValue <= AVATAR_COUNT_MAX);
+  const planCountBody = countAuto ? {} : { count: countValue };
   const pendingAvatars = (avatarPlan?.avatars ?? []).filter(
     (avatar) => !avatar.agentId && avatar.generator?.status !== "rueckfragen",
   );
@@ -714,9 +719,10 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
             {avatarPlan ? statusBadge(avatarPlan.status) : null}
           </div>
           <CardDescription>
-            Wie viele Avatare, Arbeitstitel, und wen ihr nicht als Kunden wollt. Grundlage sind nur
-            die gespeicherten Zusammenfassungen der Gespräche und der Anbieterstand. Fälle sind
-            Belege, keine eigenen Avatare. Nach der Freigabe erstellt „Avatar erstellen“ jeden
+            Die KI schlägt vor, wie viele Avatare die Zusammenfassungen hergeben, dazu Arbeitstitel
+            und wen ihr nicht als Kunden wollt. Anzahl kannst du optional überschreiben.
+            Grundlage sind nur die gespeicherten Zusammenfassungen und der Anbieterstand. Fälle
+            sind Belege, keine eigenen Avatare. Nach der Freigabe erstellt „Avatar erstellen“ jeden
             Avatar direkt in Agenten.
           </CardDescription>
         </CardHeader>
@@ -724,7 +730,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
           <div className="flex flex-wrap items-end gap-2">
             <div className="grid gap-1">
               <label htmlFor="avatar-plan-count" className="text-xs font-medium text-secondary">
-                Anzahl Avatare
+                Anzahl Avatare (optional)
               </label>
               <Input
                 id="avatar-plan-count"
@@ -733,12 +739,14 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                 min={AVATAR_COUNT_MIN}
                 max={AVATAR_COUNT_MAX}
                 step={1}
+                placeholder="KI"
                 value={countText}
                 onChange={(event) => {
                   countTouched.current = true;
                   setCountText(event.target.value);
                 }}
                 aria-invalid={!countValid}
+                aria-describedby="avatar-plan-count-hint"
                 className="h-9 w-24"
               />
             </div>
@@ -750,7 +758,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               }
               onClick={() =>
                 void postAvatars(
-                  { action: "plan", count: countValue },
+                  { action: "plan", ...planCountBody },
                   "plan",
                   "Avatar-Plan liegt vor. Bitte prüfen.",
                 )
@@ -772,7 +780,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               }
               onClick={() =>
                 void postAvatars(
-                  { action: "plan", instruction: avatarNote.trim(), count: countValue },
+                  { action: "plan", instruction: avatarNote.trim(), ...planCountBody },
                   "plan-revise",
                   "Der Plan ist an die Änderung angepasst. Bitte prüfen.",
                 )
@@ -810,9 +818,14 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               </Button>
             ) : null}
           </div>
+          <p id="avatar-plan-count-hint" className="text-xs text-secondary">
+            Leer lassen: die KI wählt {AVATAR_COUNT_MIN}–{AVATAR_COUNT_MAX} nach klar getrennten
+            Gruppen. Eine Zahl erzwingt genau diese Anzahl.
+          </p>
           {!countValid ? (
             <p className="text-sm text-destructive">
-              Anzahl Avatare: eine ganze Zahl von {AVATAR_COUNT_MIN} bis {AVATAR_COUNT_MAX}.
+              Anzahl Avatare: leer (KI) oder eine ganze Zahl von {AVATAR_COUNT_MIN} bis{" "}
+              {AVATAR_COUNT_MAX}.
             </p>
           ) : null}
           {missingSummaries.length > 0 ? (

@@ -40,8 +40,11 @@ export type ProposeAvatarPlanInput = {
   /** The saved Anbieter points; they go along with the summaries when any has text. */
   anbieterItems?: AnbieterItem[];
   previous: WorkshopAvatar[];
-  /** Exactly this many avatars (1 to 6). */
-  count: number;
+  /**
+   * Exact count when set (clamped to {@link AVATAR_PLAN_MIN}…{@link AVATAR_PLAN_MAX}).
+   * Omit or pass `null` so the model chooses how many clear groups the summaries support.
+   */
+  count?: number | null;
   instruction?: string;
   notWanted?: string;
   call: WorkshopToolCall;
@@ -55,16 +58,27 @@ export type ProposeAvatarPlanResult = {
   model: string | null;
 };
 
+function resolveFixedCount(raw: number | null | undefined): number | null {
+  if (raw == null || !Number.isFinite(raw)) return null;
+  return Math.min(AVATAR_PLAN_MAX, Math.max(AVATAR_PLAN_MIN, Math.round(raw)));
+}
+
 /**
- * The Avatar-Plan: exactly `count` avatars from the saved summaries (and the Anbieter points);
- * the raw wording is never sent. One retry when the model returns another number.
+ * The Avatar-Plan from the saved summaries (and the Anbieter points); the raw wording is never
+ * sent. With a fixed `count`, exactly that many avatars; without, the model picks a count in
+ * {@link AVATAR_PLAN_MIN}…{@link AVATAR_PLAN_MAX}. One retry when the answer is out of range.
  */
 export async function proposeAvatarPlanWith(input: ProposeAvatarPlanInput): Promise<ProposeAvatarPlanResult> {
-  const count = Math.min(AVATAR_PLAN_MAX, Math.max(AVATAR_PLAN_MIN, Math.round(input.count)));
+  const fixedCount = resolveFixedCount(input.count);
+  const auto = fixedCount == null;
   const call = input.call;
+  const minItems = auto ? AVATAR_PLAN_MIN : fixedCount;
+  const maxItems = auto ? AVATAR_PLAN_MAX : fixedCount;
   const tool: Anthropic.Tool = {
     name: "submit_avatar_plan",
-    description: `Avatar-Plan mit genau ${count} Avataren.`,
+    description: auto
+      ? `Avatar-Plan mit ${AVATAR_PLAN_MIN} bis ${AVATAR_PLAN_MAX} Avataren (Anzahl nach klar getrennten Gruppen).`
+      : `Avatar-Plan mit genau ${fixedCount} Avataren.`,
     input_schema: {
       type: "object",
       properties: {
@@ -74,13 +88,14 @@ export async function proposeAvatarPlanWith(input: ProposeAvatarPlanInput): Prom
         },
         hinweis: {
           type: "string",
-          description:
-            "Nur wenn die Zusammenfassungen weniger klar getrennte Gruppen hergeben als verlangt: kurz, welche Avatare sich überschneiden und warum. Sonst leer.",
+          description: auto
+            ? "Nur wenn du Gruppen zusammengelegt oder knapper getrennt hast als die Zusammenfassungen hergeben: kurz warum. Sonst leer."
+            : "Nur wenn die Zusammenfassungen weniger klar getrennte Gruppen hergeben als verlangt: kurz, welche Avatare sich überschneiden und warum. Sonst leer.",
         },
         avatars: {
           type: "array",
-          minItems: count,
-          maxItems: count,
+          minItems,
+          maxItems,
           items: {
             type: "object",
             properties: {
@@ -110,21 +125,34 @@ export async function proposeAvatarPlanWith(input: ProposeAvatarPlanInput): Prom
     input.instruction ?? "",
     describeAvatarStand({ notWanted: input.notWanted ?? "", avatars: input.previous }),
   );
+  const countRule = auto
+    ? `Du wählst die Anzahl selbst: so viele Avatare, wie die Zusammenfassungen klar getrennte Gruppen hergeben, mindestens ${AVATAR_PLAN_MIN}, höchstens ${AVATAR_PLAN_MAX}.
+Regel für die Aufteilung: Würde das Unternehmen zu zwei Gruppen dieselben Worte sagen? Wenn ja, gehören sie zusammen. Wenn nein, sind es getrennte Avatare.
+Keine künstliche Aufteilung nur um mehr Avatare zu füllen. Lieber weniger klare Gruppen als erzwungene Überschneidungen.
+Hinweis bleibt leer, außer du hast bewusst knapper getrennt oder zusammengelegt als die Quellen nahelegen.`
+    : `Du lieferst genau ${fixedCount} ${fixedCount === 1 ? "Avatar" : "Avatare"}, nicht mehr und nicht weniger.
+Regel für die Aufteilung: Würde das Unternehmen zu zwei Gruppen dieselben Worte sagen? Wenn ja, gehören sie zusammen. Wenn nein, sind es getrennte Avatare.
+Geben die Zusammenfassungen weniger klar getrennte Gruppen her als ${fixedCount}, lieferst du trotzdem ${fixedCount} Avatare: teile die stärkste Gruppe nach einem echten Unterschied aus den Zusammenfassungen (Anlass, Entscheider, Lage) und schreibe in hinweis, welche Avatare sich überschneiden. Sonst bleibt hinweis leer.`;
+  const revisionLine = revision
+    ? auto
+      ? "Liegt eine Anweisung bei, passt du Titel, Abgrenzung, Fälle und bei Bedarf die Anzahl daran an (weiterhin innerhalb der erlaubten Spanne). Nichts darüber hinaus erfinden."
+      : `Liegt eine Anweisung bei, passt du Titel, Abgrenzung und Fälle daran an. Die Anzahl bleibt ${fixedCount}. Nichts darüber hinaus erfinden.`
+    : "";
   const system = `Du liest die gespeicherten Zusammenfassungen ALLER Gespräche als einen Bestand, von alt nach neu, dazu den Anbieterstand, wenn er mitgeliefert wird. Das ist deine einzige Quelle.
 Wird derselbe Punkt später schärfer oder anders gesagt, gilt nur die spätere Aussage. Nichts erfinden.
 
 Du schlägst Avatare vor, legst aber keine Texte an.
-Du lieferst genau ${count} ${count === 1 ? "Avatar" : "Avatare"}, nicht mehr und nicht weniger.
-Regel für die Aufteilung: Würde das Unternehmen zu zwei Gruppen dieselben Worte sagen? Wenn ja, gehören sie zusammen. Wenn nein, sind es getrennte Avatare.
-Geben die Zusammenfassungen weniger klar getrennte Gruppen her als ${count}, lieferst du trotzdem ${count} Avatare: teile die stärkste Gruppe nach einem echten Unterschied aus den Zusammenfassungen (Anlass, Entscheider, Lage) und schreibe in hinweis, welche Avatare sich überschneiden. Sonst bleibt hinweis leer.
+${countRule}
 Fallbeispiele sind Belege unter dem Avatar, niemals eigene Avatare.
 Menschen, die sie nicht als Kunden wollen, gehören nach notWanted.
 Schmerz, Traumergebnis, Dringlichkeit, Hürde, Aufwand und Zeit schreibst du hier nicht aus.
 Titel sind Arbeitstitel der Zielgruppe, keine Personennamen aus einem einzelnen Fall.
-${revision ? "Liegt eine Anweisung bei, passt du Titel, Abgrenzung und Fälle daran an. Die Anzahl bleibt " + count + ". Nichts darüber hinaus erfinden." : ""}`;
+${revisionLine}`;
   const user = [
     `Organisation: ${input.organisationName}`,
-    `Anzahl Avatare: ${count}`,
+    auto
+      ? `Anzahl Avatare: selbst wählen (${AVATAR_PLAN_MIN}–${AVATAR_PLAN_MAX}, nach klar getrennten Gruppen)`
+      : `Anzahl Avatare: ${fixedCount}`,
     "",
     buildSummaryCorpusPrompt(input.sources, input.anbieterItems ?? []),
     revision ? `\n${revision}` : "",
@@ -134,13 +162,17 @@ ${revision ? "Liegt eine Anweisung bei, passt du Titel, Abgrenzung und Fälle da
   let model: string | null = null;
   let json: unknown = null;
   let avatars: WorkshopAvatar[] = [];
+  const inRange = (n: number) => n >= AVATAR_PLAN_MIN && n <= AVATAR_PLAN_MAX;
+  const ok = (n: number) => (auto ? inRange(n) : n === fixedCount);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const result = await call({
       system,
       user:
         attempt === 0
           ? user
-          : `${user}\n\nDer letzte Vorschlag hatte ${avatars.length} statt ${count} Avatare. Liefere genau ${count}.`,
+          : auto
+            ? `${user}\n\nDer letzte Vorschlag hatte ${avatars.length} Avatare. Liefere zwischen ${AVATAR_PLAN_MIN} und ${AVATAR_PLAN_MAX}, passend zu klar getrennten Gruppen.`
+            : `${user}\n\nDer letzte Vorschlag hatte ${avatars.length} statt ${fixedCount} Avatare. Liefere genau ${fixedCount}.`,
       tool,
       maxTokens: 16_384,
     });
@@ -148,12 +180,18 @@ ${revision ? "Liegt eine Anweisung bei, passt du Titel, Abgrenzung und Fälle da
     usage.outputTokens += result.usage.outputTokens;
     model = result.model ?? model;
     json = result.json;
-    avatars = normalizeAvatarPlan((json as { avatars?: unknown }).avatars, input.previous).slice(0, count);
-    if (avatars.length === count) break;
+    const normalized = normalizeAvatarPlan((json as { avatars?: unknown }).avatars, input.previous);
+    avatars = auto ? normalized.slice(0, AVATAR_PLAN_MAX) : normalized.slice(0, fixedCount);
+    if (ok(avatars.length)) break;
   }
-  if (avatars.length !== count) {
+  if (!ok(avatars.length)) {
+    if (auto) {
+      throw new Error(
+        `Der Vorschlag hatte ${avatars.length} Avatare (erlaubt: ${AVATAR_PLAN_MIN}–${AVATAR_PLAN_MAX}). Bitte erneut vorschlagen.`,
+      );
+    }
     throw new Error(
-      `Der Vorschlag hatte ${avatars.length} statt ${count} ${count === 1 ? "Avatar" : "Avatare"}. Bitte erneut vorschlagen.`,
+      `Der Vorschlag hatte ${avatars.length} statt ${fixedCount} ${fixedCount === 1 ? "Avatar" : "Avatare"}. Bitte erneut vorschlagen.`,
     );
   }
   const record = json as { notWanted?: unknown; hinweis?: unknown };

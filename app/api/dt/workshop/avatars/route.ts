@@ -42,7 +42,10 @@ const bodySchema = z.object({
   organisationId: z.string().uuid(),
   action: z.enum(["plan", "approve", "generate", "save_draft"]),
   avatarKey: z.string().min(1).max(48).optional(),
-  /** „Anzahl Avatare“ of the plan. */
+  /**
+   * Override for „Anzahl Avatare“. Omit so the model chooses within
+   * {@link AVATAR_PLAN_MIN}…{@link AVATAR_PLAN_MAX} from the summaries.
+   */
   count: z.number().int().min(AVATAR_PLAN_MIN).max(AVATAR_PLAN_MAX).optional(),
   notWanted: z.string().max(2000).optional(),
   instruction: z.string().trim().max(4_000).optional(),
@@ -129,7 +132,8 @@ export async function POST(req: Request) {
 
     if (action === "plan") {
       const instruction = parsed.data.instruction?.trim() ?? "";
-      const count = parsed.data.count ?? Math.max(AVATAR_PLAN_MIN, state.avatarPlan.avatars.length);
+      // Omit count → KI picks how many; a number is a hard override.
+      const count = parsed.data.count ?? null;
       const result = await proposeAvatarPlan({
         organisationName,
         sources: state.sources,
