@@ -16,6 +16,7 @@ export function DashboardPrefetcher({
       "/dashboard/onboarding",
       "/dashboard/ansprechpartner",
       "/dashboard/organisations",
+      "/dashboard/firmenprofil",
     ];
 
     if (isPlatformAdmin) {
