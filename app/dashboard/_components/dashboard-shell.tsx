@@ -18,6 +18,7 @@ export function DashboardShell({
   canViewDtUsage,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
+  pendingCompanyProfileEditsCount,
 }: {
   children: React.ReactNode;
   isPlatformAdmin: boolean;
@@ -25,6 +26,7 @@ export function DashboardShell({
   canViewDtUsage?: boolean;
   pendingSurveyQuestionsCount?: number;
   pendingAgentEditRequestsCount?: number;
+  pendingCompanyProfileEditsCount?: number;
 }) {
   return (
     <DtPageShell variant="dashboard" className="min-h-screen">
@@ -41,6 +43,7 @@ export function DashboardShell({
                 canViewDtUsage={canViewDtUsage ?? false}
                 pendingSurveyQuestionsCount={pendingSurveyQuestionsCount ?? 0}
                 pendingAgentEditRequestsCount={pendingAgentEditRequestsCount ?? 0}
+                pendingCompanyProfileEditsCount={pendingCompanyProfileEditsCount ?? 0}
               />
             </div>
           </div>

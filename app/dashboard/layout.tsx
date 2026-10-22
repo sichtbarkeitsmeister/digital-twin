@@ -7,6 +7,7 @@ import { DashboardShell } from "@/app/dashboard/_components/dashboard-shell";
 import { userCanManageAnyDtAgents } from "@/lib/dt/org-access";
 import { userCanViewAnyDtUsage } from "@/lib/dt/usage/access";
 import { countPendingDtAgentEditRequests } from "@/lib/dt/agent-edit-requests";
+import { countUnreviewedCompanyProfileEdits } from "@/lib/dt/company-profile";
 
 export default function DashboardLayout({
   children,
@@ -52,6 +53,7 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     canViewDtUsage,
     pendingSurveyQuestionsCount,
     pendingAgentEditRequestsCount,
+    pendingCompanyProfileEditsCount,
   ] = await Promise.all([
     isPlatformAdmin ? Promise.resolve(true) : userCanManageAnyDtAgents(user.id),
     isPlatformAdmin ? Promise.resolve(true) : userCanViewAnyDtUsage(user.id),
@@ -65,6 +67,9 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
     isPlatformAdmin
       ? countPendingDtAgentEditRequests(supabase)
       : Promise.resolve(0),
+    isPlatformAdmin
+      ? countUnreviewedCompanyProfileEdits(supabase)
+      : Promise.resolve(0),
   ]);
 
   return (
@@ -74,6 +79,7 @@ async function DashboardLayoutContent({ children }: { children: React.ReactNode 
       canViewDtUsage={canViewDtUsage}
       pendingSurveyQuestionsCount={pendingSurveyQuestionsCount}
       pendingAgentEditRequestsCount={pendingAgentEditRequestsCount}
+      pendingCompanyProfileEditsCount={pendingCompanyProfileEditsCount}
     >
       {children}
     </DashboardShell>

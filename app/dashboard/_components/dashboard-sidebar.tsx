@@ -12,6 +12,7 @@ import {
   FileText,
   FolderUp,
   Inbox,
+  Landmark,
   PenLine,
   Target,
   Shield,
@@ -83,12 +84,14 @@ export function DashboardSidebar({
   canViewDtUsage,
   pendingSurveyQuestionsCount,
   pendingAgentEditRequestsCount,
+  pendingCompanyProfileEditsCount,
 }: {
   isPlatformAdmin: boolean;
   canManageDtAgents: boolean;
   canViewDtUsage: boolean;
   pendingSurveyQuestionsCount: number;
   pendingAgentEditRequestsCount: number;
+  pendingCompanyProfileEditsCount: number;
 }) {
   const mainItems: NavItem[] = [
     { label: "Posteingang", href: "/dashboard/inbox", icon: Inbox },
@@ -103,6 +106,12 @@ export function DashboardSidebar({
       href: "/dashboard/ansprechpartner",
       icon: Phone,
       match: (pathname: string) => pathname.startsWith("/dashboard/ansprechpartner"),
+    },
+    {
+      label: "Firmenprofil",
+      href: "/dashboard/firmenprofil",
+      icon: Landmark,
+      match: (pathname: string) => pathname.startsWith("/dashboard/firmenprofil"),
     },
     { label: "Organisation", href: "/dashboard/organisations", icon: Building2 },
   ];
@@ -205,6 +214,13 @@ export function DashboardSidebar({
       icon: ClipboardList,
       showDot: pendingAgentEditRequestsCount > 0,
       match: (pathname: string) => pathname.startsWith("/dashboard/admin/agent-requests"),
+    },
+    {
+      label: "Firmenprofil-Änderungen",
+      href: "/dashboard/admin/company-edits",
+      icon: Landmark,
+      showDot: pendingCompanyProfileEditsCount > 0,
+      match: (pathname: string) => pathname.startsWith("/dashboard/admin/company-edits"),
     },
     {
       label: "Plattform-Übersicht",
