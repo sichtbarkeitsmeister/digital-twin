@@ -1,27 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import {
-  ArrowRight,
-  Bot,
-  ClipboardList,
-  ExternalLink,
-  Globe,
-  MessageCircle,
-  Sparkles,
-} from "lucide-react";
+import { ArrowRight, Bot, ClipboardList, MessageCircle } from "lucide-react";
 
-import { formatOrgDate } from "@/lib/dashboard/organisation-ui";
 import type { OrgOverview } from "@/lib/dashboard/org-overview";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { OrgSeoReportModal } from "@/app/dashboard/_components/organisations/org-seo-report-modal";
-import { OrgSeoReportsList } from "@/app/dashboard/_components/organisations/org-seo-reports-list";
 import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
 
 const container = {
@@ -44,23 +30,6 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return new Intl.NumberFormat("de-DE").format(n);
-}
-
-function crawlStatusLabel(status: string): string {
-  switch (status) {
-    case "queued":
-      return "Warteschlange";
-    case "running":
-      return "Läuft";
-    case "done":
-      return "Fertig";
-    case "error":
-      return "Fehler";
-    case "cancelled":
-      return "Abgebrochen";
-    default:
-      return status;
-  }
 }
 
 function agentKindLabel(kind: string): string | null {
@@ -179,59 +148,15 @@ export function OrgOverviewPanel(props: {
   memberCount: number;
   pendingInviteCount: number;
   canViewUsage: boolean;
-  canViewSeoReports?: boolean;
-  canManageSeo?: boolean;
   canViewSeoAdvisor?: boolean;
-  /** Hide SEO Modus link when the page header already shows it */
-  hideSeoCta?: boolean;
 }) {
   const { overview, organisationId } = props;
-  const canViewSeoReports = props.canViewSeoReports ?? false;
-  const canManageSeo = props.canManageSeo ?? false;
   const canViewSeoAdvisor = props.canViewSeoAdvisor ?? false;
-  const router = useRouter();
-  const [reportModalId, setReportModalId] = useState<string | null>(null);
-  const [seoEnabled, setSeoEnabled] = useState(overview.config.seoEnabled);
-  const [enablingSeo, setEnablingSeo] = useState(false);
-  const [seoEnableError, setSeoEnableError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setSeoEnabled(overview.config.seoEnabled);
-  }, [overview.config.seoEnabled]);
-
-  async function enableSeoNow() {
-    if (!canManageSeo || enablingSeo) return;
-    setEnablingSeo(true);
-    setSeoEnableError(null);
-    try {
-      const res = await fetch(`/api/dt/org-config/${organisationId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seoEnabled: true }),
-      });
-      const json = (await res.json()) as { ok?: boolean; message?: string };
-      if (!json.ok) {
-        setSeoEnableError(json.message ?? "Aktivierung fehlgeschlagen.");
-        return;
-      }
-      setSeoEnabled(true);
-      router.refresh();
-    } catch (err) {
-      setSeoEnableError(err instanceof Error ? err.message : "Aktivierung fehlgeschlagen.");
-    } finally {
-      setEnablingSeo(false);
-    }
-  }
   const visibleAgents = canViewSeoAdvisor
     ? overview.agents
     : filterAgentsHiddenFromOrgMembers(overview.agents);
   const enabledAgents = visibleAgents.filter((a) => a.isEnabled);
   const orgQuery = encodeURIComponent(organisationId);
-  const seoHref = `/dashboard/verwaltung/seo?org=${orgQuery}&tab=chat`;
-
-  const hasSeoData =
-    overview.seoReport != null || overview.seoMonthly.periodMonth != null;
-  const hasSeoMonthly = overview.seoMonthly.periodMonth != null;
   const usageEmpty =
     props.canViewUsage && overview.usage && overview.usage.messages === 0;
 
@@ -273,224 +198,6 @@ export function OrgOverviewPanel(props: {
                 <ArrowRight className="size-3.5" />
               </Link>
             </Button>
-          </div>
-        </OverviewCard>
-      </motion.div>
-
-      <motion.div variants={item}>
-        <OverviewCard>
-          <CardHeaderRow
-            title="SEO"
-            description="Reports, Aufgaben und Kennzahlen"
-            href={props.hideSeoCta || !canManageSeo ? undefined : seoHref}
-            linkLabel={props.hideSeoCta || !canManageSeo ? undefined : "SEO Modus"}
-          />
-          <div className="grid gap-4 p-4 sm:p-5">
-            <div className="flex flex-wrap items-center gap-2">
-              {seoEnabled ? (
-                <Badge className="bg-sbkm-navy text-white dark:bg-sbkm-mint dark:text-sbkm-navy">
-                  Aktiv
-                </Badge>
-              ) : (
-                <>
-                  <Badge variant="outline">Inaktiv</Badge>
-                  {canManageSeo ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={enablingSeo}
-                      className="h-7 active:scale-[0.98]"
-                      onClick={() => void enableSeoNow()}
-                    >
-                      {enablingSeo ? "Aktiviere…" : "SEO aktivieren"}
-                    </Button>
-                  ) : null}
-                </>
-              )}
-              {seoEnableError ? (
-                <span className="text-xs text-red-600 dark:text-red-400">{seoEnableError}</span>
-              ) : null}
-              {overview.config.websiteUrl ? (
-                <a
-                  href={overview.config.websiteUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-sbkm-navy/[0.04] dark:hover:bg-white/5"
-                >
-                  <Globe className="size-3" aria-hidden />
-                  Website
-                  <ExternalLink className="size-3" aria-hidden />
-                </a>
-              ) : null}
-              {overview.config.ga4Connected ? (
-                <Badge variant="secondary" className="text-[10px]">
-                  GA4
-                </Badge>
-              ) : null}
-              {overview.config.gscConnected ? (
-                <Badge variant="secondary" className="text-[10px]">
-                  GSC
-                </Badge>
-              ) : null}
-              {overview.config.focusKeyword ? (
-                <span
-                  className="max-w-xs truncate text-xs text-secondary"
-                  title={overview.config.focusKeyword}
-                >
-                  Fokus:{" "}
-                  <span className="font-medium text-primary">
-                    {overview.config.focusKeyword}
-                  </span>
-                </span>
-              ) : null}
-            </div>
-
-            {!hasSeoData ? (
-              <div className="grid gap-3 rounded-xl border border-dashed border-sbkm-navy/15 px-4 py-10 text-center dark:border-white/15">
-                <div className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-sbkm-mint/15 dark:bg-sbkm-mint/10">
-                  <Sparkles className="size-5 text-sbkm-navy dark:text-sbkm-mint" aria-hidden />
-                </div>
-                <div className="grid gap-1">
-                  <p className="text-sm font-semibold tracking-tight text-primary">
-                    Noch keine SEO-Daten
-                  </p>
-                  <p className="mx-auto max-w-sm text-xs text-secondary">
-                    {canManageSeo
-                      ? "Starte im SEO Modus einen Report oder Crawl — Kennzahlen und Maßnahmen erscheinen dann hier."
-                      : canViewSeoReports
-                        ? "Sobald ein SEO-Report für deine Organisation fertig ist, findest du ihn hier."
-                        : "SEO-Reports werden vom Team erstellt und erscheinen hier, sobald sie verfügbar sind."}
-                  </p>
-                </div>
-                {canManageSeo ? (
-                  <Button asChild size="sm" className="mx-auto w-fit active:scale-[0.98]">
-                    <Link href={seoHref}>
-                      SEO Modus öffnen
-                      <ArrowRight className="size-3.5" />
-                    </Link>
-                  </Button>
-                ) : null}
-              </div>
-            ) : (
-              <div
-                className={cn(
-                  "grid gap-4",
-                  hasSeoMonthly && "lg:grid-cols-2 lg:items-start",
-                )}
-              >
-                <div className="grid gap-3">
-                  {overview.seoReport ? (
-                    <div className="flex flex-col gap-3 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-3 sm:flex-row sm:items-start sm:justify-between dark:border-white/8 dark:bg-white/[0.03]">
-                      <div className="min-w-0 grid gap-1.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-medium text-primary">Letzter Report</span>
-                          <Badge
-                            variant={
-                              overview.seoReport.state === "done"
-                                ? "secondary"
-                                : overview.seoReport.state === "error" ||
-                                    overview.seoReport.state === "cancelled"
-                                  ? "destructive"
-                                  : "outline"
-                            }
-                          >
-                            {overview.seoReport.stateLabel}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-secondary">
-                          {formatOrgDate(
-                            overview.seoReport.finishedAt ?? overview.seoReport.createdAt,
-                          )}
-                          {overview.seoReport.actionCount > 0
-                            ? ` · ${overview.seoReport.actionCount} Maßnahme${overview.seoReport.actionCount === 1 ? "" : "n"}`
-                            : ""}
-                        </p>
-                        {overview.seoReport.ownerDelivery ? (
-                          <p className="text-xs text-secondary">
-                            {overview.seoReport.ownerDelivery.label}
-                          </p>
-                        ) : null}
-                        {overview.seoReport.state === "error" && overview.seoReport.stateMessage ? (
-                          <p className="text-xs font-medium text-red-600 dark:text-red-400">
-                            {overview.seoReport.stateMessage}
-                          </p>
-                        ) : null}
-                      </div>
-                      {(overview.seoReport.state === "done" ||
-                        overview.seoReport.state === "error") &&
-                      canViewSeoReports ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 shrink-0 transition-transform duration-150 active:scale-[0.98]"
-                          onClick={() => setReportModalId(overview.seoReport!.id)}
-                        >
-                          {overview.seoReport.state === "error"
-                            ? "Fehlerdetails ansehen"
-                            : "Report ansehen"}
-                          <ArrowRight className="size-3.5" />
-                        </Button>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {canViewSeoReports ? (
-                    <OrgSeoReportsList
-                      organisationId={organisationId}
-                      excludeReportId={overview.seoReport?.id}
-                      onOpenReport={setReportModalId}
-                    />
-                  ) : null}
-
-                  {overview.lastCrawl ? (
-                    <p className="text-xs text-secondary">
-                      Crawl: {crawlStatusLabel(overview.lastCrawl.status)}
-                      {overview.lastCrawl.pagesCrawled > 0
-                        ? ` · ${overview.lastCrawl.pagesCrawled} Seiten`
-                        : ""}
-                      {overview.lastCrawl.finishedAt
-                        ? ` · ${formatOrgDate(overview.lastCrawl.finishedAt)}`
-                        : ""}
-                    </p>
-                  ) : null}
-                </div>
-
-                {hasSeoMonthly ? (
-                  <div className="grid gap-2">
-                    <p className="text-xs font-medium text-primary">
-                      {formatOrgDate(`${overview.seoMonthly.periodMonth}T12:00:00`)}
-                      {overview.seoMonthly.aiClicksMomPct != null ? (
-                        <span
-                          className={cn(
-                            "ml-2 tabular-nums",
-                            overview.seoMonthly.aiClicksMomPct >= 0
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : "text-red-600 dark:text-red-400",
-                          )}
-                        >
-                          MoM {overview.seoMonthly.aiClicksMomPct >= 0 ? "+" : ""}
-                          {overview.seoMonthly.aiClicksMomPct}%
-                        </span>
-                      ) : null}
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <MetricCell label="KI-Klicks" value={overview.seoMonthly.aiClicks ?? "—"} />
-                      <MetricCell
-                        label="Gesamt-Klicks"
-                        value={overview.seoMonthly.totalClicks ?? "—"}
-                      />
-                      <MetricCell
-                        label="Impressionen"
-                        value={overview.seoMonthly.impressions ?? "—"}
-                      />
-                      <MetricCell label="Top 10" value={overview.seoMonthly.rankingsTop10 ?? "—"} />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            )}
           </div>
         </OverviewCard>
       </motion.div>
@@ -626,12 +333,6 @@ export function OrgOverviewPanel(props: {
           {props.pendingInviteCount} offene Einladung{props.pendingInviteCount === 1 ? "" : "en"}
         </motion.p>
       ) : null}
-
-      <OrgSeoReportModal
-        open={reportModalId != null}
-        reportId={reportModalId}
-        onClose={() => setReportModalId(null)}
-      />
     </motion.section>
   );
 }

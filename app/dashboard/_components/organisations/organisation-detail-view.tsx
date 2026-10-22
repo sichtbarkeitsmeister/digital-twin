@@ -4,7 +4,7 @@ import { ArrowRight, Calendar, ClipboardPenLine, Crown, Mail, Users } from "luci
 
 import { loadOrgOverview } from "@/lib/dashboard/org-overview";
 import { canViewDtUsage } from "@/lib/dt/usage/access";
-import { isOrgOwner, isPlatformAdmin } from "@/lib/dt/org-access";
+import { isPlatformAdmin } from "@/lib/dt/org-access";
 import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
 import { organisationSurveyOpenHref } from "@/lib/dt/organisation-survey-open-href";
 import { createClient } from "@/lib/supabase/server";
@@ -102,8 +102,6 @@ export async function OrganisationDetailView({
   const canRenameOrganisation = platformAdmin || myOrgRole === "owner";
   const canTransferOwnership = myOrgRole === "owner" || platformAdmin;
   const canViewUsage = await canViewDtUsage(supabase, userId);
-  const canViewSeoReports =
-    platformAdmin || (await isOrgOwner(supabase, userId, organisationId));
   const canManageSeo = platformAdmin;
 
   const overview = await loadOrgOverview(organisationId, {
@@ -231,10 +229,7 @@ export async function OrganisationDetailView({
           memberCount={members.length}
           pendingInviteCount={invites.length}
           canViewUsage={canViewUsage}
-          canViewSeoReports={canViewSeoReports}
-          canManageSeo={canManageSeo}
           canViewSeoAdvisor={platformAdmin}
-          hideSeoCta
         />
 
         {canRenameOrganisation ? (
