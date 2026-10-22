@@ -101,7 +101,8 @@ export function DtAgentsReadOnlyBanner() {
         Agenten werden von uns gepflegt
       </p>
       <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/60">
-        Sie können Schnelltests direkt speichern. Andere Anpassungen reichen Sie als
+        Über „Ansehen“ sehen Sie, wie Ihr Avatar eingestellt ist — und können ihn im Chat
+        erleben. Schnelltests speichern Sie direkt. Andere Anpassungen reichen Sie als
         Änderungswunsch ein — wir prüfen sie in der Regel innerhalb von 1–2 Werktagen.
       </p>
     </div>

@@ -22,6 +22,11 @@ export function DtAgentFormFields(props: {
   values: DtAgentFormValues;
   onChange: (patch: Partial<DtAgentFormValues>) => void;
   disabled?: boolean;
+  /**
+   * Customer / preview mode: fields stay readable (no muted opacity) and cannot be changed.
+   * Prefer this over `disabled` when the goal is to show how the avatar is set up.
+   */
+  readOnly?: boolean;
   /** Hide the per-org prompt field (prompt is managed globally). */
   hidePrompt?: boolean;
   /** Replacement copy shown instead of the prompt when it is hidden. */
@@ -45,6 +50,7 @@ export function DtAgentFormFields(props: {
     values,
     onChange,
     disabled,
+    readOnly,
     hidePrompt,
     promptNote,
     hideEnabled,
@@ -55,10 +61,13 @@ export function DtAgentFormFields(props: {
     appendHint,
     globalPromptPreview,
   } = props;
-  const inputClass =
-    "h-10 w-full rounded-pill border border-sbkm-navy/15 px-3 text-sm disabled:opacity-60 dark:border-white/15 dark:bg-white/5 dark:text-white";
+  const locked = Boolean(disabled || readOnly);
+  const inputClass = readOnly
+    ? "h-10 w-full rounded-pill border border-sbkm-navy/15 bg-white/80 px-3 text-sm dark:border-white/15 dark:bg-white/5 dark:text-white"
+    : "h-10 w-full rounded-pill border border-sbkm-navy/15 px-3 text-sm disabled:opacity-60 dark:border-white/15 dark:bg-white/5 dark:text-white";
 
   function handleGlobalSyncToggle(next: boolean) {
+    if (readOnly) return;
     if (!next && !values.prompt.trim() && globalPromptPreview?.trim()) {
       onChange({ usesGlobalPrompt: false, prompt: globalPromptPreview.trim() });
       return;
@@ -72,7 +81,8 @@ export function DtAgentFormFields(props: {
         <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">Name</span>
         <input
           value={values.name}
-          disabled={disabled}
+          disabled={locked}
+          readOnly={readOnly}
           onChange={(e) => onChange({ name: e.target.value })}
           className={inputClass}
           placeholder="z. B. Marketing-Berater"
@@ -82,7 +92,8 @@ export function DtAgentFormFields(props: {
         <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">Rolle</span>
         <input
           value={values.role}
-          disabled={disabled}
+          disabled={locked}
+          readOnly={readOnly}
           onChange={(e) => onChange({ role: e.target.value })}
           className={inputClass}
           placeholder="Kurzbeschreibung für Nutzer"
@@ -103,7 +114,7 @@ export function DtAgentFormFields(props: {
             </div>
             <DtAgentStatusToggle
               enabled={values.usesGlobalPrompt}
-              disabled={disabled}
+              disabled={locked}
               label="Mit globalem Prompt synchronisieren"
               onChange={handleGlobalSyncToggle}
               compact
@@ -134,7 +145,8 @@ export function DtAgentFormFields(props: {
               </span>
               <Textarea
                 value={values.prompt}
-                disabled={disabled}
+                disabled={locked}
+                readOnly={readOnly}
                 onChange={(e) => onChange({ prompt: e.target.value })}
                 className="min-h-[140px] text-sm"
                 placeholder="Wie soll der Agent antworten?"
@@ -152,7 +164,8 @@ export function DtAgentFormFields(props: {
           <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">System-Prompt</span>
           <Textarea
             value={values.prompt}
-            disabled={disabled}
+            disabled={locked}
+            readOnly={readOnly}
             onChange={(e) => onChange({ prompt: e.target.value })}
             className="min-h-[140px] text-sm"
             placeholder="Wie soll der Agent antworten?"
@@ -167,7 +180,8 @@ export function DtAgentFormFields(props: {
           </span>
           <Textarea
             value={values.promptAppend}
-            disabled={disabled}
+            disabled={locked}
+            readOnly={readOnly}
             onChange={(e) => onChange({ promptAppend: e.target.value })}
             className="min-h-[180px] text-sm"
             placeholder={
@@ -191,7 +205,7 @@ export function DtAgentFormFields(props: {
         <DtAgentQuickActionsField
           actions={quickActionsFromForm(values.quick)}
           onChange={(actions) => onChange({ quick: actions.join("\n") })}
-          disabled={disabled}
+          disabled={locked}
         />
       )}
       <label className="grid gap-1 text-sm">
@@ -200,7 +214,8 @@ export function DtAgentFormFields(props: {
           type="number"
           min={0}
           max={999}
-          disabled={disabled}
+          disabled={locked}
+          readOnly={readOnly}
           value={values.position}
           onChange={(e) => onChange({ position: Number(e.target.value) || 0 })}
           className={`${inputClass} w-24`}
@@ -210,8 +225,11 @@ export function DtAgentFormFields(props: {
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
             checked={values.enabled}
-            disabled={disabled}
-            onCheckedChange={(v) => onChange({ enabled: v === true })}
+            disabled={locked}
+            onCheckedChange={(v) => {
+              if (readOnly) return;
+              onChange({ enabled: v === true });
+            }}
           />
           <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">Agent aktiv</span>
         </label>

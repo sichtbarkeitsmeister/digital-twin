@@ -3,6 +3,7 @@
 import {
   Blend,
   Bot,
+  Eye,
   Globe,
   LineChart,
   MessageSquareOff,
@@ -131,6 +132,7 @@ function AgentActions(props: {
   alwaysOn?: boolean;
   canDisable: boolean;
   onStartEdit: () => void;
+  onStartView?: () => void;
   onStartQuickActionsEdit?: () => void;
   onToggleEnabled: (next: boolean) => void;
   onDeleteChats?: () => void;
@@ -142,6 +144,19 @@ function AgentActions(props: {
   if (!props.canDirectlyEdit) {
     return (
       <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {props.onStartView ? (
+          <DtPillButton
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={props.busy}
+            className="gap-1.5"
+            onClick={props.onStartView}
+          >
+            <Eye className="size-4" aria-hidden />
+            Ansehen
+          </DtPillButton>
+        ) : null}
         {props.onStartQuickActionsEdit ? (
           <DtPillButton
             type="button"
@@ -251,9 +266,12 @@ export function DtAgentListItem(props: {
   isEditing: boolean;
   /** When true, only Schnelltests are editable (org/customer view). */
   quickActionsOnly?: boolean;
+  /** Customer view: show settings read-only (no Speichern). */
+  viewOnly?: boolean;
   editValues: DtAgentFormValues;
   onEditValuesChange: (patch: Partial<DtAgentFormValues>) => void;
   onStartEdit: () => void;
+  onStartView?: () => void;
   onStartQuickActionsEdit?: () => void;
   onSaveEdit: () => void;
   onCancelEdit: () => void;
@@ -290,9 +308,41 @@ export function DtAgentListItem(props: {
   const isSeoAdvisor = isSeoAdvisorAgent(agent);
   const isSurveyPersona = isSurveyPersonaAgent(agent);
   const mixInfo = isMixAgent(agent) ? readMixInfo(agent.avatar_data) : null;
+  const supportsAppend =
+    agent.is_default ||
+    agent.uses_global_prompt ||
+    Boolean(agent.prompt_append?.trim()) ||
+    isSurveyPersona ||
+    isSeoAdvisor;
+  const hidePrompt = !agent.is_default && (agent.uses_global_prompt || isSurveyPersona);
+  const promptNote =
+    !agent.is_default && (agent.uses_global_prompt || isSurveyPersona) && !isSeoAdvisor
+      ? props.viewOnly
+        ? "Gemeinsame Regeln gelten für alle Avatare. Unten sehen Sie den Prompt dieses Avatars."
+        : "Gemeinsame Regeln stehen unter Verwaltung → Globale Prompts. Unten bearbeitest du nur den Prompt für diesen Avatar."
+      : !agent.is_default && isSeoAdvisor
+        ? props.viewOnly
+          ? "Unten liegt das Anbieter-Wissen dieser Organisation für den SEO-Berater."
+          : "Gemeinsame SEO-Regeln stehen unter Verwaltung → Globale Prompts. Unten liegt das Anbieter-Wissen dieser Organisation."
+        : undefined;
+  const appendLabel = isSeoAdvisor
+    ? "Anbieter-Wissen / Zusätzliche Anweisungen"
+    : isSurveyPersona || (agent.uses_global_prompt && !agent.is_default)
+      ? "Prompt"
+      : undefined;
+  const appendHint = isSeoAdvisor
+    ? props.viewOnly
+      ? "Unternehmensfakten und Ergänzungen, mit denen der SEO-Berater arbeitet."
+      : "Unternehmensfakten aus dem Anbieter-Fragebogen (1:1) plus optionale Ergänzungen. Wunschkunden kommen automatisch aus den Avataren dieser Organisation — nicht hier einfügen."
+    : isSurveyPersona || (agent.uses_global_prompt && !agent.is_default)
+      ? props.viewOnly
+        ? "So ist dieser Avatar eingestellt — im Chat spricht er in dieser Rolle."
+        : "Persona-Text aus der Umfrage. Im Chat wird er auf den globalen DigitalTwin-Prompt gelegt."
+      : undefined;
 
   if (props.isEditing) {
     const quickActionsOnly = Boolean(props.quickActionsOnly);
+    const viewOnly = Boolean(props.viewOnly) && !quickActionsOnly;
     return (
       <motion.div
         layout="position"
@@ -303,8 +353,16 @@ export function DtAgentListItem(props: {
         )}
       >
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-sbkm-navy dark:text-white">
-          <Pencil className="size-4 text-sbkm-mint" aria-hidden />
-          {quickActionsOnly ? `Schnelltests für ${agent.name}` : `${agent.name} bearbeiten`}
+          {viewOnly ? (
+            <Eye className="size-4 text-sbkm-mint" aria-hidden />
+          ) : (
+            <Pencil className="size-4 text-sbkm-mint" aria-hidden />
+          )}
+          {quickActionsOnly
+            ? `Schnelltests für ${agent.name}`
+            : viewOnly
+              ? `${agent.name} — so ist der Avatar eingestellt`
+              : `${agent.name} bearbeiten`}
         </div>
         {quickActionsOnly ? (
           <div className="grid gap-3">
@@ -325,49 +383,26 @@ export function DtAgentListItem(props: {
           </div>
         ) : (
           <>
+        {viewOnly ? (
+          <p className="mb-3 rounded-2xl border border-sbkm-navy/10 bg-white/70 px-3 py-2 text-xs text-sbkm-ink-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+            Nur Ansicht. Schnelltests speichern Sie direkt; andere Anpassungen über „Änderung
+            vorschlagen“.
+          </p>
+        ) : null}
         <DtAgentFormFields
           values={props.editValues}
           onChange={props.onEditValuesChange}
-          disabled={props.busy}
-          supportsGlobalSync={agent.is_default}
-          supportsAppend={
-            agent.is_default ||
-            agent.uses_global_prompt ||
-            Boolean(agent.prompt_append?.trim()) ||
-            isSurveyPersona ||
-            isSeoAdvisor
-          }
-          // Survey personas: only one editable prompt field (below).
-          // Shared rules live under Verwaltung → Globale Prompts — not a second textarea.
-          hidePrompt={
-            !agent.is_default &&
-            (agent.uses_global_prompt || isSurveyPersona)
-          }
-          promptNote={
-            !agent.is_default &&
-            (agent.uses_global_prompt || isSurveyPersona) &&
-            !isSeoAdvisor
-              ? "Gemeinsame Regeln stehen unter Verwaltung → Globale Prompts. Unten bearbeitest du nur den Prompt für diesen Avatar."
-              : !agent.is_default && isSeoAdvisor
-                ? "Gemeinsame SEO-Regeln stehen unter Verwaltung → Globale Prompts. Unten liegt das Anbieter-Wissen dieser Organisation."
-                : undefined
-          }
-          appendLabel={
-            isSeoAdvisor
-              ? "Anbieter-Wissen / Zusätzliche Anweisungen"
-              : isSurveyPersona || (agent.uses_global_prompt && !agent.is_default)
-                ? "Prompt"
-                : undefined
-          }
-          appendHint={
-            isSeoAdvisor
-              ? "Unternehmensfakten aus dem Anbieter-Fragebogen (1:1) plus optionale Ergänzungen. Wunschkunden kommen automatisch aus den Avataren dieser Organisation — nicht hier einfügen."
-              : isSurveyPersona || (agent.uses_global_prompt && !agent.is_default)
-                ? "Persona-Text aus der Umfrage. Im Chat wird er auf den globalen DigitalTwin-Prompt gelegt."
-                : undefined
-          }
+          disabled={props.busy && !viewOnly}
+          readOnly={viewOnly}
+          supportsGlobalSync={viewOnly ? false : agent.is_default}
+          supportsAppend={supportsAppend}
+          hidePrompt={hidePrompt}
+          promptNote={promptNote}
+          appendLabel={appendLabel}
+          appendHint={appendHint}
           globalPromptPreview={props.globalPromptPreview}
-          hideEnabled={props.alwaysOn}
+          hideEnabled={props.alwaysOn || viewOnly}
+          hideQuickActions={false}
         />
         {agent.source_survey_id && !isSeoAdvisor && !props.editValues.promptAppend.trim() ? (
           <p className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
@@ -376,7 +411,7 @@ export function DtAgentListItem(props: {
           </p>
         ) : null}
         <div className="mt-4 grid gap-3">
-          {props.canDirectlyEdit ? (
+          {props.canDirectlyEdit && !viewOnly ? (
             <DtAgentSurveyCoverageCheck
               agentId={agent.id}
               agentName={agent.name}
@@ -412,12 +447,31 @@ export function DtAgentListItem(props: {
             />
           ) : null}
           <div className="flex flex-wrap gap-2">
-            <DtPillButton type="button" size="sm" disabled={props.busy} onClick={props.onSaveEdit}>
-              Speichern
-            </DtPillButton>
-            <DtPillButton type="button" size="sm" variant="ghost" onClick={props.onCancelEdit}>
-              Abbrechen
-            </DtPillButton>
+            {viewOnly ? (
+              <>
+                <DtPillButton
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={props.busy || props.pendingReview}
+                  onClick={props.onRequestChange}
+                >
+                  Änderung vorschlagen
+                </DtPillButton>
+                <DtPillButton type="button" size="sm" variant="ghost" onClick={props.onCancelEdit}>
+                  Schließen
+                </DtPillButton>
+              </>
+            ) : (
+              <>
+                <DtPillButton type="button" size="sm" disabled={props.busy} onClick={props.onSaveEdit}>
+                  Speichern
+                </DtPillButton>
+                <DtPillButton type="button" size="sm" variant="ghost" onClick={props.onCancelEdit}>
+                  Abbrechen
+                </DtPillButton>
+              </>
+            )}
           </div>
         </div>
           </>
@@ -479,6 +533,7 @@ export function DtAgentListItem(props: {
         alwaysOn={props.alwaysOn}
         canDisable={props.canDisable}
         onStartEdit={props.onStartEdit}
+        onStartView={props.onStartView}
         onStartQuickActionsEdit={props.onStartQuickActionsEdit}
         onToggleEnabled={props.onToggleEnabled}
         onDeleteChats={props.onDeleteChats}

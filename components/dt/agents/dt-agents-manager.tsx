@@ -153,6 +153,7 @@ export function DtAgentsManager(props: {
     setOrgId(fromUrl);
     setEditingId(null);
     setQuickActionsOnly(false);
+    setViewOnly(false);
     setInitialLoading(true);
   }, [searchParams, props.organisations, orgReady, orgId]);
 
@@ -162,6 +163,8 @@ export function DtAgentsManager(props: {
   const [mixDialogKey, setMixDialogKey] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [quickActionsOnly, setQuickActionsOnly] = useState(false);
+  /** Customer: open agent settings as read-only preview. */
+  const [viewOnly, setViewOnly] = useState(false);
   const [editValues, setEditValues] = useState(agentFormValuesFromRow({
     name: "",
     role: null,
@@ -186,7 +189,9 @@ export function DtAgentsManager(props: {
     const row = agents.find((a) => a.id === agentFromUrl);
     if (!row) return;
     setEditingId(row.id);
-    setQuickActionsOnly(!canDirectlyEdit);
+    // Customers land on the read-only settings view; staff on full edit.
+    setQuickActionsOnly(false);
+    setViewOnly(!canDirectlyEdit);
     setEditValues(agentFormValuesFromRow(row));
   }, [searchParams, agents, editingId, canDirectlyEdit]);
 
@@ -328,9 +333,10 @@ export function DtAgentsManager(props: {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  function startEdit(agent: AgentRow, mode: "full" | "quickActions" = "full") {
+  function startEdit(agent: AgentRow, mode: "full" | "quickActions" | "view" = "full") {
     setEditingId(agent.id);
     setQuickActionsOnly(mode === "quickActions");
+    setViewOnly(mode === "view");
     setEditValues(agentFormValuesFromRow(agent));
     writeAgentQuery(agent.id);
   }
@@ -338,6 +344,7 @@ export function DtAgentsManager(props: {
   function cancelEdit() {
     setEditingId(null);
     setQuickActionsOnly(false);
+    setViewOnly(false);
     writeAgentQuery(null);
   }
 
@@ -424,13 +431,14 @@ export function DtAgentsManager(props: {
     if (editingId === agent.id) {
       setEditingId(null);
       setQuickActionsOnly(false);
+      setViewOnly(false);
       writeAgentQuery(null);
     }
     await refresh(true);
   }
 
   async function saveEdit() {
-    if (!editingId) return;
+    if (!editingId || viewOnly) return;
     setBusy(true);
     const body: Record<string, unknown> = quickActionsOnly
       ? { quickActions: quickActionsFromForm(editValues.quick) }
@@ -479,6 +487,7 @@ export function DtAgentsManager(props: {
     const savedQuickActionsOnly = quickActionsOnly;
     setEditingId(null);
     setQuickActionsOnly(false);
+    setViewOnly(false);
     writeAgentQuery(null);
     toast.success(savedQuickActionsOnly ? "Schnelltests gespeichert." : "Agent gespeichert.");
     await refresh(true);
@@ -599,9 +608,11 @@ export function DtAgentsManager(props: {
                   pendingReview={Boolean(pendingByAgentId.get(agent.id))}
                   isEditing={editingId === agent.id}
                   quickActionsOnly={quickActionsOnly && editingId === agent.id}
+                  viewOnly={viewOnly && editingId === agent.id}
                   editValues={editValues}
                   onEditValuesChange={(patch) => setEditValues((v) => ({ ...v, ...patch }))}
                   onStartEdit={() => startEdit(agent)}
+                  onStartView={canDirectlyEdit ? undefined : () => startEdit(agent, "view")}
                   onStartQuickActionsEdit={
                     canDirectlyEdit ? undefined : () => startEdit(agent, "quickActions")
                   }
@@ -699,7 +710,7 @@ export function DtAgentsManager(props: {
                 {initialLoading ? (
                   <span className="inline-block h-4 w-full max-w-md animate-pulse rounded bg-sbkm-navy/10 dark:bg-white/10" />
                 ) : (
-                  "Schnelltests direkt speichern. Andere Änderungen als Anfrage einreichen."
+                  "Einstellungen ansehen und im Chat erleben. Schnelltests direkt speichern — andere Änderungen als Anfrage."
                 )}
               </p>
             ) : null}
