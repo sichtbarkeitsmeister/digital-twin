@@ -1,6 +1,6 @@
 /**
- * Avatar-Plan and avatar generator: exact count, summaries only, the ten rules of a finished
- * avatar part, and what reaches Agenten (nothing while Rückfragen are open).
+ * Avatar-Plan and avatar generator: exact or auto count, summaries only, the ten rules of a
+ * finished avatar part, and what reaches Agenten (nothing while Rückfragen are open).
  * Run: npx tsx scripts/test-avatar-generator.ts
  */
 import assert from "node:assert/strict";
@@ -34,6 +34,8 @@ import {
   type WorkshopToolCall,
 } from "../lib/dt/transcripts/avatar-plan-llm";
 import {
+  AVATAR_PLAN_MAX,
+  AVATAR_PLAN_MIN,
   normalizeGeneratorState,
   type WorkshopAvatar,
   type WorkshopSource,
@@ -269,11 +271,54 @@ async function testPlanCountAndInput() {
     /1 statt 3 Avatare/,
   );
 
-  // The count is clamped to 1 to 6.
-  const clamp = fakeCall([planJson(6)]);
-  const clamped = await proposeAvatarPlanWith({ organisationName: "X", sources: SOURCES, previous: [], count: 9, call: clamp.call });
-  assert.equal(clamped.avatars.length, 6);
-  console.log("plan: exact count, summaries only: ok");
+  // The count is clamped to AVATAR_PLAN_MIN…MAX.
+  const clamp = fakeCall([planJson(AVATAR_PLAN_MAX)]);
+  const clamped = await proposeAvatarPlanWith({
+    organisationName: "X",
+    sources: SOURCES,
+    previous: [],
+    count: AVATAR_PLAN_MAX + 3,
+    call: clamp.call,
+  });
+  assert.equal(clamped.avatars.length, AVATAR_PLAN_MAX);
+  assert.match(clamp.calls[0]!.user, new RegExp(`Anzahl Avatare: ${AVATAR_PLAN_MAX}`));
+
+  // Auto: omit count → model picks within bounds; schema allows the full range.
+  const auto = fakeCall([planJson(4)]);
+  const autoPlan = await proposeAvatarPlanWith({
+    organisationName: "X",
+    sources: SOURCES,
+    previous: [],
+    call: auto.call,
+  });
+  assert.equal(autoPlan.avatars.length, 4);
+  assert.match(auto.calls[0]!.user, /Anzahl Avatare: selbst wählen/);
+  assert.match(auto.calls[0]!.system, /Du wählst die Anzahl selbst/);
+  const autoSchema = auto.calls[0]!.tool.input_schema as {
+    properties: { avatars: { minItems: number; maxItems: number } };
+  };
+  assert.equal(autoSchema.properties.avatars.minItems, AVATAR_PLAN_MIN);
+  assert.equal(autoSchema.properties.avatars.maxItems, AVATAR_PLAN_MAX);
+
+  // Auto with null count is the same as omit.
+  const autoNull = fakeCall([planJson(2)]);
+  const autoNullPlan = await proposeAvatarPlanWith({
+    organisationName: "X",
+    sources: SOURCES,
+    previous: [],
+    count: null,
+    call: autoNull.call,
+  });
+  assert.equal(autoNullPlan.avatars.length, 2);
+
+  // Auto out of range after retry → error.
+  const autoWrong = fakeCall([{ notWanted: "", hinweis: "", avatars: [] }]);
+  await assert.rejects(
+    proposeAvatarPlanWith({ organisationName: "X", sources: SOURCES, previous: [], call: autoWrong.call }),
+    new RegExp(`0 Avatare \\(erlaubt: ${AVATAR_PLAN_MIN}–${AVATAR_PLAN_MAX}\\)`),
+  );
+
+  console.log("plan: exact/auto count, summaries only: ok");
 }
 
 function expectOnly(result: AvatarGeneratorResult, pattern: RegExp, otherAgentNames: string[] = []) {
