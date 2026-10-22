@@ -7,7 +7,13 @@ import {
   type AvatarValueKey,
 } from "@/lib/dt/transcripts/avatar-value";
 import { buildCurrentAnbieterMarkdown } from "@/lib/dt/transcripts/anbieter-markdown";
+import {
+  AVATAR_PLAN_MAX,
+  AVATAR_PLAN_MIN,
+} from "@/lib/dt/transcripts/avatar-plan-bounds";
 import { normalizePersonaKey, slugFromPersonaName } from "@/lib/dt/transcripts/sanitize";
+
+export { AVATAR_PLAN_MAX, AVATAR_PLAN_MIN };
 
 export const WORKSHOP_CORPUS_START = "<!-- DT_WORKSHOP_CORPUS_START -->";
 export const WORKSHOP_CORPUS_END = "<!-- DT_WORKSHOP_CORPUS_END -->";
@@ -146,10 +152,6 @@ export type AvatarPlanState = {
   hinweis: string;
   avatars: WorkshopAvatar[];
 };
-
-/** Bounds of „Anzahl Avatare“ in the Avatar-Plan. */
-export const AVATAR_PLAN_MIN = 1;
-export const AVATAR_PLAN_MAX = 6;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
