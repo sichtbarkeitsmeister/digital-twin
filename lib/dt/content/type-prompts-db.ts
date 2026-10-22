@@ -1,7 +1,8 @@
 /**
  * Reads and writes the writing recipes (`dt_content_type_prompts`). Always called with the
  * service client: the route checks access first, the job runner has none. A missing table
- * (migration not run) answers with the defaults so a page run never fails because of it.
+ * (migration not run) answers with the defaults so a page run never fails because of it;
+ * any other read error is thrown, so a run never writes with recipes it could not read.
  *
  * Two independent sets, one row each: `texte` (id `agency`, the SEO step of Texte) and
  * `seo_tool` (id `seo_tool`, Verwaltung → SEO). Saving one never touches the other.
@@ -87,17 +88,15 @@ export async function loadContentTypePrompts(
   return stateFromRow((data as Record<string, unknown> | null) ?? null, "db");
 }
 
-/** The recipes for a run; any read problem means the defaults, never a failed step. */
+/**
+ * The recipes for a run. Defaults where nothing is saved or the migration has not run; a
+ * failed read throws, so the step is retried instead of writing with the default recipes.
+ */
 export async function loadContentTypePromptsForRun(
   service: SupabaseClient,
   scope: ContentTypePromptsScope = "texte",
 ): Promise<ContentTypePrompts> {
-  try {
-    return (await loadContentTypePrompts(service, scope)).prompts;
-  } catch (error) {
-    console.warn("[content] type prompts not readable, defaults used:", error instanceof Error ? error.message : error);
-    return { ...DEFAULT_CONTENT_TYPE_PROMPTS };
-  }
+  return (await loadContentTypePrompts(service, scope)).prompts;
 }
 
 export async function saveContentTypePrompts(

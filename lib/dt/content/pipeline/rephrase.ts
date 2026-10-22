@@ -169,7 +169,7 @@ export function parseRephrasedChunk(answer: string, chunk: readonly ContentTextB
     .map((b) => ({ ...b, html: sanitizeBlockHtml(b.html) }))
     .filter((b) => b.html.trim());
   if (blocks.length === 0 && chunk.length === 1 && /<(p|ul|ol)[\s>]/i.test(text)) {
-    const body = text.replace(/^\s*<h[1-3][^>]*>[\s\S]*?<\/h[1-3]>/i, "");
+    const body = text.replace(/^\s*<h[1-4][^>]*>[\s\S]*?<\/h[1-4]>/i, "");
     const html = sanitizeBlockHtml(body);
     if (html.trim()) blocks = [{ ...chunk[0]!, html }];
   }

@@ -9,6 +9,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { isPlatformSettingMissingError } from "@/lib/dt/content/step-prompts";
+
 export const TEXTER_PROMPT_MIGRATION_FILE = "database/migrations/20261016_dt_texter_prompt.sql";
 export const TEXTER_PROMPT_MAX_CHARS = 40_000;
 export const TEXTER_PROMPT_HREF = "/dashboard/verwaltung/globale-prompts#texter-prompt";
@@ -100,7 +102,10 @@ export function isDefaultTexterPrompt(value: string | null | undefined): boolean
   return resolveTexterPrompt(value) === DEFAULT_TEXTER_PROMPT;
 }
 
-/** The prompt a page run reads. Any problem means the default, never a failed step. */
+/**
+ * The prompt a page run reads. The default only where nothing is saved (no row, no column,
+ * an empty text); a failed read throws, so the step is retried instead of running without it.
+ */
 export async function loadTexterPrompt(supabase: SupabaseClient): Promise<string> {
   const { data, error } = await supabase
     .from("dt_platform_settings")
@@ -108,8 +113,8 @@ export async function loadTexterPrompt(supabase: SupabaseClient): Promise<string
     .eq("id", "default")
     .maybeSingle();
   if (error) {
-    console.warn("[dt/texter-prompt] load:", error.message);
-    return DEFAULT_TEXTER_PROMPT;
+    if (isPlatformSettingMissingError(error)) return DEFAULT_TEXTER_PROMPT;
+    throw new Error(`Der Text-Prompt (Globale Prompts) konnte nicht gelesen werden: ${error.message}`);
   }
   const stored = typeof data?.texter_prompt === "string" ? data.texter_prompt : null;
   return resolveTexterPrompt(stored);

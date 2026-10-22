@@ -321,9 +321,20 @@ export function heroBlock(blocks: readonly ContentTextBlock[]): ContentTextBlock
 }
 
 /**
- * The SEO step's text must carry the hero placeholder right under the H1. The model's own
- * hero block is reset to the placeholder (no real hero before Hormozi); a missing one is
- * inserted; the first block is the H1.
+ * The SEO step's text starts with the H1: the first block is the page title, whatever level
+ * the model gave it. Everything after it (hero, summary, heading levels) is up to the step
+ * instruction under Globale Prompts.
+ */
+export function firstBlockAsH1(blocks: readonly ContentTextBlock[]): ContentTextBlock[] {
+  if (blocks.length === 0) return [];
+  const [first, ...others] = blocks;
+  return [{ ...first!, level: 1 }, ...others];
+}
+
+/**
+ * Verwaltung → SEO and Hormozi: the text carries the hero placeholder right under the H1.
+ * The model's own hero block is reset to the placeholder (no real hero before Hormozi); a
+ * missing one is inserted; the first block is the H1. Texte leaves the hero to its prompts.
  */
 export function ensureHeroPlaceholder(blocks: readonly ContentTextBlock[]): ContentTextBlock[] {
   const placeholder: ContentTextBlock = { id: CONTENT_HERO_BLOCK_ID, heading: CONTENT_HERO_PLACEHOLDER, level: 2, html: "" };
@@ -334,8 +345,8 @@ export function ensureHeroPlaceholder(blocks: readonly ContentTextBlock[]): Cont
 }
 
 /**
- * Later rewrites must not lose the hero block (GEO/Lektorat keep the placeholder, Hormozi
- * fills it). When the model dropped it, the previous version returns right after the H1.
+ * Verwaltung → GEO and Hormozi: a rewrite must not lose the hero block. When the model
+ * dropped it, the previous version returns right after the H1.
  */
 export function keepHeroBlock(blocks: readonly ContentTextBlock[], previous: readonly ContentTextBlock[]): ContentTextBlock[] {
   const before = heroBlock(previous);
@@ -345,8 +356,8 @@ export function keepHeroBlock(blocks: readonly ContentTextBlock[], previous: rea
 }
 
 /**
- * Hormozi's hero: one sentence as a paragraph, no heading, so the H1 stays the only H1 and
- * no H2 carries marketing copy. A sentence the model put into the heading moves into the body.
+ * Verwaltung → Hormozi: the hero is one sentence as a paragraph, no heading. A sentence the
+ * model put into the heading moves into the body.
  */
 export function settleHeroSentence(blocks: readonly ContentTextBlock[]): ContentTextBlock[] {
   return blocks.map((b) => {
@@ -543,19 +554,23 @@ export const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte f�
 Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`;
 
+/**
+ * The answer format of every text step. It says how a text is handed over, not how it is
+ * built: structure, headings and their levels come from the step instruction.
+ */
 const BLOCKS_SCHEMA = {
   type: "array",
   description:
-    "Der komplette Text als geordnete Abschnitte. Der erste Abschnitt trägt die H1 (level 1), danach H2 (level 2), bei Bedarf H3 (level 3). Bestehende ids beibehalten.",
+    "Der komplette Text als geordnete Abschnitte, in der Reihenfolge der Seite. Jede Überschrift beginnt einen eigenen Abschnitt. Der erste Abschnitt ist die H1. Bestehende ids beibehalten.",
   items: {
     type: "object",
     properties: {
-      id: { type: "string", description: "Kurze, stabile Kennung in Kleinbuchstaben, z. B. hero, zusammenfassung, einleitung, ablauf. Bestehende ids beibehalten." },
+      id: { type: "string", description: "Kurze, stabile Kennung in Kleinbuchstaben (Buchstaben, Ziffern, Bindestrich). Bestehende ids beibehalten." },
       heading: { type: "string", description: "Überschrift ohne HTML. Leer, wenn der Abschnitt keine hat." },
-      level: { type: "integer", enum: [1, 2, 3] },
+      level: { type: "integer", enum: [1, 2, 3, 4], description: "Ebene der Überschrift: 1 = H1 (nur der erste Abschnitt), 2 = H2, 3 = H3, 4 = H4." },
       html: {
         type: "string",
-        description: "Fließtext als HTML mit <p>, <ul>/<ol>/<li>, <strong>, <em>. Keine Überschrift hier, kein <section>, kein <div>, keine <a>-Tags (interne Links als [LINK: Seitenname]).",
+        description: "Fließtext als HTML mit <p>, <ul>/<ol>/<li>, <strong>, <em>. Keine Überschrift hier (eine Unterüberschrift ist ein eigener Abschnitt), kein <section>, kein <div>, keine <a>-Tags (interne Links als [LINK: Seitenname]).",
       },
     },
     required: ["id", "heading", "level", "html"],
@@ -862,7 +877,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
     },
     normalize: (json, ctx): TextOutput => {
       const out = normalizeTextOutput(json, ctx);
-      return { ...out, blocks: ensureHeroPlaceholder(out.blocks) };
+      return { ...out, blocks: firstBlockAsH1(out.blocks) };
     },
   };
 }
@@ -917,14 +932,11 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
 /** Output size of the GEO rewrite; the standalone GEO tool uses the same budget. */
 export const GEO_MAX_TOKENS = 12_000;
 
-const DEFAULT_GEO_INSTRUCTION = resolveContentStepPrompt("geo", null);
-
 /**
- * System prompt of step 4. The standalone GEO tool (Verwaltung → GEO) sends exactly this
- * prompt, so an uploaded text is reworked by the same rules as a page of the pipeline. The
- * instruction is the saved GEO text from Globale Prompts (or the default), already filled.
+ * System prompt of step 4: the saved GEO text from Globale Prompts (or the default), already
+ * filled, plus the locked rules. The standalone GEO tool builds its own (`geoToolSystemPrompt`).
  */
-export function geoSystemPrompt(settings: ContentTextSettings, instruction: string = DEFAULT_GEO_INSTRUCTION): string {
+export function geoSystemPrompt(settings: ContentTextSettings, instruction: string): string {
   return stepSystem(instruction, settings);
 }
 
@@ -934,7 +946,7 @@ export const GEO_TOOL: Anthropic.Tool = {
   input_schema: TEXT_TOOL_SCHEMA,
 };
 
-/** Step 4's answer → text; a dropped hero block comes back from the previous text. */
+/** Verwaltung → GEO: the answer → text; a dropped hero block comes back from the previous text. */
 export function normalizeGeoOutput(json: unknown, context: ContentCurrentText): TextOutput {
   const out = normalizeTextOutput(json, context);
   return { ...out, blocks: keepHeroBlock(out.blocks, context.blocks) };
@@ -947,15 +959,15 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
     user: join([
       pageBlock(context),
       currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1) – Fragen, die der Text abdecken muss"),
-      outputBlock(context, CONTENT_STEP_FAKTENCHECK, "Faktencheck (Schritt 3) – umsetzen"),
+      outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1)"),
+      outputBlock(context, CONTENT_STEP_FAKTENCHECK, "Faktencheck (Schritt 3)"),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
       notesBlock(context),
     ]),
     tool: GEO_TOOL,
-    normalize: normalizeGeoOutput,
+    normalize: normalizeTextOutput,
   };
 }
 
@@ -969,7 +981,7 @@ function hormozi(context: ContentPipelineContext): ContentStepSpec {
     user: join([
       pageBlock(context),
       currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1) – hormozi, conversion_goal und usable_facts"),
+      outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1)"),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
@@ -977,13 +989,10 @@ function hormozi(context: ContentPipelineContext): ContentStepSpec {
     ]),
     tool: {
       name: "submit_hormozi_text",
-      description: "Der Seitentext mit Hero-Satz, Value Equation und geschärften Handlungsaufforderungen.",
+      description: "Der überarbeitete Seitentext in Abschnitten.",
       input_schema: TEXT_TOOL_SCHEMA,
     },
-    normalize: (json, ctx): TextOutput => {
-      const out = normalizeTextOutput(json, ctx);
-      return { ...out, blocks: settleHeroSentence(keepHeroBlock(out.blocks, ctx.blocks)) };
-    },
+    normalize: normalizeTextOutput,
   };
 }
 
@@ -1019,7 +1028,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
     ]),
     tool: {
       name: "submit_vermenschlichung_text",
-      description: "Der sprachlich überarbeitete Seitentext in Abschnitten mit Selbstbewertung.",
+      description: "Der überarbeitete Seitentext in Abschnitten, mit Selbstbewertung.",
       input_schema: {
         type: "object",
         properties: {
@@ -1034,12 +1043,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
       },
     },
     normalize: (json, ctx): VermenschlichungOutput => {
-      const out = normalizeTextOutput(json, ctx);
-      return {
-        ...out,
-        blocks: keepHeroBlock(out.blocks, ctx.blocks),
-        self_score: normalizeSelfScore(rec(json).self_score),
-      };
+      return { ...normalizeTextOutput(json, ctx), self_score: normalizeSelfScore(rec(json).self_score) };
     },
     retryHint: (output) => {
       const out = output as VermenschlichungOutput;
@@ -1048,7 +1052,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
       const detail = SELF_SCORE_KEYS.map((key) => `${key} ${out.self_score![key]}`).join(", ");
       return [
         "## Zweiter Versuch",
-        `Der erste Versuch bewertete sich selbst mit ${sum} von 50 (${detail}). Das reicht nicht. Nimm den folgenden ersten Versuch als Ausgangspunkt und überarbeite ihn gründlicher nach denselben Regeln: kürzere Sätze, aktiver, konkreter, keine Floskeln, wechselnder Rhythmus. Fakten, Struktur, ids, Keywords, Platzhalter und Marker bleiben.`,
+        `Der erste Versuch bewertete sich selbst mit ${sum} von 50 (${detail}). Das reicht nicht. Nimm den folgenden ersten Versuch als Ausgangspunkt und überarbeite ihn gründlicher nach der Anweisung dieses Schritts.`,
         blocksToPromptText(out.blocks),
       ].join("\n");
     },
@@ -1082,8 +1086,7 @@ function lektorat(context: ContentPipelineContext): ContentStepSpec {
     },
     normalize: (json, ctx): LektoratOutput => {
       const out = normalizeTextOutput(json, ctx);
-      const blocks = keepHeroBlock(out.blocks, ctx.blocks);
-      return { ...out, blocks, final_findings: normalizeFindings(rec(json).final_findings, blockIds(blocks)) };
+      return { ...out, final_findings: normalizeFindings(rec(json).final_findings, blockIds(out.blocks)) };
     },
   };
 }
@@ -1094,7 +1097,7 @@ function endabnahme(context: ContentPipelineContext): ContentStepSpec {
     system: `${BASE_RULES}
 
 Schritt 9 Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
-unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein nicht gefüllter Hero („${CONTENT_HERO_PLACEHOLDER}“), eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und „Zuletzt aktualisiert: [DATUM]“.
+unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein anderer Platzhalter, den ein früherer Schritt füllen sollte, eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und „Zuletzt aktualisiert: [DATUM]“.
 summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.`,
     user: join([
       pageBlock(context),

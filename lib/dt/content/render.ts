@@ -10,8 +10,8 @@ export type ContentTextBlock = {
   id: string;
   /** Heading text without tags; null for blocks without a heading. */
   heading: string | null;
-  /** 1 only for the first block (page title), otherwise 2 or 3. */
-  level: 1 | 2 | 3;
+  /** 1 only for the first block (page title), otherwise 2, 3 or 4. */
+  level: 1 | 2 | 3 | 4;
   /** Body HTML (paragraphs, lists, emphasis). Never contains the heading. */
   html: string;
 };
@@ -113,8 +113,8 @@ export function normalizeBlocks(input: unknown): ContentTextBlock[] {
     const level: ContentTextBlock["level"] =
       blocks.length === 0 && (rawLevel === 1 || !Number.isFinite(rawLevel))
         ? 1
-        : rawLevel === 3
-          ? 3
+        : rawLevel === 3 || rawLevel === 4
+          ? rawLevel
           : 2;
     const idBase = typeof rec.id === "string" && rec.id.trim() ? rec.id.trim().toLowerCase() : heading || "abschnitt";
     blocks.push({ id: uniqueId(idBase, used), heading: heading || null, level, html: bodyHtml });
@@ -140,14 +140,14 @@ export function parseBlocksFromHtml(html: string): ContentTextBlock[] {
   const used = new Set<string>();
   for (const match of html.matchAll(SECTION_RE)) {
     const inner = match[2] ?? "";
-    const headingMatch = inner.match(/^\s*<h([1-3])>([\s\S]*?)<\/h\1>/i);
+    const headingMatch = inner.match(/^\s*<h([1-4])>([\s\S]*?)<\/h\1>/i);
     const level = (headingMatch ? Number(headingMatch[1]) : 2) as ContentTextBlock["level"];
     const heading = headingMatch ? decodeEntities(headingMatch[2] ?? "").trim() : null;
     const body = headingMatch ? inner.slice(headingMatch[0].length) : inner;
     blocks.push({
       id: uniqueId(match[1]!.trim(), used),
       heading: heading || null,
-      level: level === 1 || level === 3 ? level : 2,
+      level: level === 1 || level === 3 || level === 4 ? level : 2,
       html: body.trim(),
     });
   }
@@ -193,6 +193,7 @@ export function htmlToMarkdown(html: string): string {
     .replace(/<h1>([\s\S]*?)<\/h1>/gi, "# $1\n\n")
     .replace(/<h2>([\s\S]*?)<\/h2>/gi, "## $1\n\n")
     .replace(/<h3>([\s\S]*?)<\/h3>/gi, "### $1\n\n")
+    .replace(/<h4>([\s\S]*?)<\/h4>/gi, "#### $1\n\n")
     .replace(/<ol>([\s\S]*?)<\/ol>/gi, (_, items: string) => {
       let n = 0;
       return `${items.replace(/<li>([\s\S]*?)<\/li>/gi, (_m, li: string) => `${++n}. ${li.trim()}\n`)}\n`;
@@ -218,7 +219,7 @@ export function htmlToMarkdown(html: string): string {
 export function htmlToPlainText(html: string): string {
   let out = html.replace(/<section\b[^>]*>|<\/section>/gi, "\n");
   out = out
-    .replace(/<h[1-3]>([\s\S]*?)<\/h[1-3]>/gi, "\n$1\n\n")
+    .replace(/<h[1-4]>([\s\S]*?)<\/h[1-4]>/gi, "\n$1\n\n")
     .replace(/<ol>([\s\S]*?)<\/ol>/gi, (_, items: string) => {
       let n = 0;
       return `\n${items.replace(/<li>([\s\S]*?)<\/li>/gi, (_m, li: string) => `${++n}. ${li.trim()}\n`)}\n`;

@@ -58,6 +58,7 @@ import {
 } from "../lib/dt/content/pipeline/rephrase";
 import { contentGapQuestions, findContentGapsInHtml, gapQuestion, hasContentGap } from "../lib/dt/content/pipeline/gaps";
 import { stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
+import { contentStepPromptPreview } from "../lib/dt/content/pipeline/step-preview";
 import {
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
@@ -89,12 +90,14 @@ import {
   CONTENT_STEP_PROMPT_MAX_CHARS,
   DEFAULT_CONTENT_STEP_PROMPTS,
   fillContentStepPrompt,
+  isPlatformSettingMissingError,
+  loadContentStepPrompts,
   normalizeStoredContentStepPrompts,
   resolveContentStepPrompt,
   resolveContentStepPrompts,
 } from "../lib/dt/content/step-prompts";
 import { briefingPatchFor, planImprovementStructure } from "../lib/dt/content/structure-plan";
-import { DEFAULT_TEXTER_PROMPT } from "../lib/dt/content/texter-prompt";
+import { DEFAULT_TEXTER_PROMPT, loadTexterPrompt } from "../lib/dt/content/texter-prompt";
 import {
   CONTENT_TYPE_PROMPT_HELP,
   CONTENT_TYPE_PROMPT_KEYS,
@@ -106,7 +109,7 @@ import {
   normalizeContentTypePrompts,
   renderContentTypePrompt,
 } from "../lib/dt/content/type-prompts";
-import { loadContentTypePrompts, saveContentTypePrompts } from "../lib/dt/content/type-prompts-db";
+import { loadContentTypePrompts, loadContentTypePromptsForRun, saveContentTypePrompts } from "../lib/dt/content/type-prompts-db";
 import { parseWebsiteStructure } from "../lib/dt/seo/website-structure";
 
 // --- cells ------------------------------------------------------------------------------------
@@ -764,31 +767,107 @@ assert.equal(normalized.deferred_questions[0]?.link_to, "Seniorenumzug");
 assert.equal(normalized.hormozi.moeglicher_beweis, "kein belegter Beweis");
 console.log("analyse normalisation: ok");
 
-// --- hero placeholder through the steps ---------------------------------------------------------
+// --- layout belongs to the step instructions: no hero or heading rule in the Texte code -------
 
 const h1 = { id: "intro", heading: "Privatumzug Köln", level: 1 as const, html: "" };
 const body = { id: "ablauf", heading: "Wie läuft der Umzug ab?", level: 2 as const, html: "<p>So.</p>" };
+const detail = { id: "festpreis", heading: "Was ist im Festpreis enthalten?", level: 4 as const, html: "<p>Alles.</p>" };
+const subheadline = { id: "subheadline", heading: "Entspannt umziehen in Köln", level: 2 as const, html: "" };
+
+// SEO: the model's layout stays; only the first block becomes the H1.
+const seoOut = contentStepSpec(2, context()).normalize({ title: "T", meta_description: "M", blocks: [{ ...h1, level: 2 }, subheadline, body, detail] }, context()) as TextOutput;
+assert.deepEqual(
+  seoOut.blocks.map((b) => [b.id, b.level]),
+  [["intro", 1], ["subheadline", 2], ["ablauf", 2], ["festpreis", 4]],
+  "no hero placeholder is inserted, an H4 stays an H4",
+);
+const seoPatch = stepPatchFor(contentStepDefinition(2)!, seoOut);
+assert.doesNotMatch(String(seoPatch.pagePatch.html), /HERO/);
+assert.match(String(seoPatch.pagePatch.html), /<section data-block-id="festpreis"><h4>Was ist im Festpreis enthalten\?<\/h4>/);
+assert.equal(seoPatch.halted, false);
+const ownHero = { id: "hero", heading: "Entspannt umziehen", level: 2 as const, html: "<p>Ohne Chaos.</p>" };
+assert.deepEqual(
+  (contentStepSpec(2, context()).normalize({ title: "", meta_description: "", blocks: [h1, ownHero, body] }, context()) as TextOutput).blocks[1],
+  ownHero,
+  "a hero the SEO instruction asks for is kept as written",
+);
+
+// GEO … Lektorat take the text as the model returns it: nothing comes back, no heading moves.
+for (const step of [4, 5, 6, 7]) {
+  const ctx = context({}, { blocks: [h1, ownHero, body] });
+  const answer = {
+    title: "",
+    meta_description: "",
+    blocks: [h1, { ...ownHero, heading: "Ihr Umzug ohne Stress" }, detail],
+    self_score: { direktheit: 8, rhythmus: 8, vertrauen: 8, natuerlichkeit: 8, dichte: 8 },
+    final_findings: [],
+  };
+  const out = contentStepSpec(step, ctx).normalize(answer, ctx) as TextOutput;
+  assert.deepEqual(
+    out.blocks.map((b) => [b.id, b.heading, b.level]),
+    [["intro", "Privatumzug Köln", 1], ["hero", "Ihr Umzug ohne Stress", 2], ["festpreis", "Was ist im Festpreis enthalten?", 4]],
+    `step ${step} keeps the layout of its answer`,
+  );
+}
+
+// The answer format allows H1–H4 and names no layout; the user message and the retry add no step rules.
+for (const step of [2, 4, 5, 6, 7]) {
+  const tool = JSON.stringify(contentStepSpec(step, context()).tool);
+  assert.match(tool, /"enum":\[1,2,3,4\]/, `step ${step} may answer with an H4`);
+  assert.doesNotMatch(tool, /hero|Hero-Satz|zusammenfassung, einleitung/, `step ${step}: no layout in the answer format`);
+}
+assert.match(contentStepSpec(4, context({}, { outputs: { 1: { main_keyword: "x" }, 3: { findings: [] } } })).user, /## Analyse \(Schritt 1\)\n[\s\S]*## Faktencheck \(Schritt 3\)\n/);
+assert.doesNotMatch(contentStepSpec(4, context({}, { outputs: { 3: { findings: [] } } })).user, /umsetzen/);
+assert.doesNotMatch(contentStepSpec(9, context()).system, /\[HERO/, "the Endabnahme no longer looks for the old hero placeholder");
+
+// Verwaltung → SEO, GEO and Hormozi keep their own hero rules (lib/dt/text-tools).
 const seoBlocks = ensureHeroPlaceholder([{ ...h1, level: 2 }, { id: "hero", heading: "Toller Hero", level: 2, html: "<p>nein</p>" }, body]);
 assert.deepEqual(
   seoBlocks.map((b) => [b.id, b.heading, b.level, b.html]),
   [["intro", "Privatumzug Köln", 1, ""], ["hero", CONTENT_HERO_PLACEHOLDER, 2, ""], ["ablauf", "Wie läuft der Umzug ab?", 2, "<p>So.</p>"]],
-  "SEO never writes a real hero and the first block is the H1",
+  "the tools' hero placeholder replaces a written hero; the first block is the H1",
 );
-const seoOut = contentStepSpec(2, context()).normalize({ title: "T", meta_description: "M", blocks: [h1, body] }, context()) as TextOutput;
-assert.equal(seoOut.blocks[1]?.id, "hero", "a missing hero block is inserted");
-const seoPatch = stepPatchFor(contentStepDefinition(2)!, seoOut);
-assert.match(String(seoPatch.pagePatch.html), /data-block-id="hero"><h2>\[HERO – wird in Schritt 5 gefuellt\]<\/h2>/);
-assert.equal(seoPatch.halted, false);
-
 const kept = keepHeroBlock([h1, body], seoBlocks);
-assert.equal(kept[1]?.id, "hero", "a later step that drops the hero gets it back");
+assert.equal(kept[1]?.id, "hero", "a tool rewrite that drops the hero gets it back");
 assert.equal(kept[1]?.heading, CONTENT_HERO_PLACEHOLDER);
 const filled = settleHeroSentence([h1, { id: "hero", heading: "Entspannt umziehen, ohne Chaos.", level: 2, html: "" }, body]);
-assert.deepEqual([filled[1]?.heading, filled[1]?.html], [null, "<p><strong>Entspannt umziehen, ohne Chaos.</strong></p>"], "Hormozi's hero is a sentence, not an H2");
-const hormoziOut = contentStepSpec(5, context({}, { blocks: seoBlocks })).normalize({ title: "", meta_description: "", blocks: [h1, { id: "hero", heading: "", level: 2, html: "<p>Ihr Umzug ohne Stress.</p>" }, body] }, context({}, { blocks: seoBlocks })) as TextOutput;
-assert.equal(hormoziOut.blocks[1]?.html, "<p>Ihr Umzug ohne Stress.</p>");
-assert.deepEqual(parseBlocksFromHtml(String(stepPatchFor(contentStepDefinition(5)!, hormoziOut).pagePatch.html)).map((b) => b.id), ["intro", "hero", "ablauf"]);
-console.log("hero: ok");
+assert.deepEqual([filled[1]?.heading, filled[1]?.html], [null, "<p><strong>Entspannt umziehen, ohne Chaos.</strong></p>"], "the Hormozi tool's hero is a sentence, not an H2");
+console.log("layout from the step instructions: ok");
+
+// --- Globale Prompts → „Vollständigen Prompt ansehen“ ------------------------------------------
+
+{
+  const typePrompts = { ...DEFAULT_CONTENT_TYPE_PROMPTS };
+  const hormoziPreview = contentStepPromptPreview({
+    key: "hormozi",
+    pageType: "unterseite",
+    stepPrompts: { hormozi: "Eigene Hormozi-Anweisung für {{firmenname}}." },
+    texterPrompt: DEFAULT_TEXTER_PROMPT,
+    typePrompts,
+  });
+  assert.equal(hormoziPreview.step, 5);
+  assert.match(hormoziPreview.system, /^Eigene Hormozi-Anweisung für \[Firmenname\]\.\n\nDu arbeitest für eine Agentur/, "the saved text first, then the locked rules");
+  assert.match(hormoziPreview.system, /Branchenregel Dienstleistung & Handwerk/);
+  assert.match(hormoziPreview.user, /## Aktueller Text/);
+  assert.equal(hormoziPreview.tool.name, "submit_hormozi_text");
+  assert.deepEqual([hormoziPreview.retry, hormoziPreview.retryBelow], [null, null]);
+
+  const seoPreview = contentStepPromptPreview({ key: "seo", pageType: "ratgeber", stepPrompts: {}, texterPrompt: "Eigener Text-Prompt.", typePrompts });
+  assert.match(seoPreview.system, /^Schritt 2 SEO:/, "nothing saved: the default instruction");
+  assert.match(seoPreview.system, /Allgemeine Regeln \(jeder Seitentyp\):\nEigener Text-Prompt\./);
+  assert.match(seoPreview.system, /Mindestens 5 Frage-Überschriften/, "the chosen page type fills the variables");
+  assert.match(seoPreview.system, /Ratgeberartikel/, "and picks the Textvorlage");
+  assert.equal(
+    contentStepPromptPreview({ key: "seo", pageType: "ratgeber", stepPrompts: { seo: "" }, texterPrompt: "Eigener Text-Prompt.", typePrompts }).system,
+    seoPreview.system,
+    "an empty draft previews the default, like saving it empty",
+  );
+
+  const retryPreview = contentStepPromptPreview({ key: "vermenschlichung", pageType: "unterseite", stepPrompts: {}, texterPrompt: "x", typePrompts });
+  assert.match(retryPreview.retry ?? "", /^## Zweiter Versuch/);
+  assert.equal(retryPreview.retryBelow, 35);
+  console.log("prompt preview: ok");
+}
 
 // --- halting rules ------------------------------------------------------------------------------
 
@@ -810,6 +889,8 @@ assert.throws(() => stepPatchFor(contentStepDefinition(4)!, { blocks: [], title:
 const vermenschlichungSpec = contentStepSpec(6, context({}, { blocks: seoBlocks }));
 const weak = vermenschlichungSpec.normalize({ title: "", meta_description: "", blocks: seoBlocks, self_score: { direktheit: 5, rhythmus: 6, vertrauen: 7, natuerlichkeit: 6, dichte: 6 } }, context({}, { blocks: seoBlocks })) as VermenschlichungOutput;
 assert.match(vermenschlichungSpec.retryHint!(weak) ?? "", /30 von 50/, "a weak self-score asks for one more attempt");
+assert.doesNotMatch(vermenschlichungSpec.retryHint!(weak) ?? "", /kürzere Sätze|Floskeln/, "the retry refers to the step instruction and adds no rules of its own");
+assert.doesNotMatch(vermenschlichungSpec.retryHint!(weak) ?? "", /kürzere Sätze|Floskeln/, "the retry refers to the step instruction, it adds no rules of its own");
 const strong = vermenschlichungSpec.normalize({ title: "", meta_description: "", blocks: seoBlocks, self_score: { direktheit: 8, rhythmus: 8, vertrauen: 7, natuerlichkeit: 8, dichte: 7 } }, context({}, { blocks: seoBlocks })) as VermenschlichungOutput;
 assert.equal(vermenschlichungSpec.retryHint!(strong), null);
 assert.ok(vermenschlichungSpec.score!(strong) > vermenschlichungSpec.score!(weak));
@@ -1153,7 +1234,41 @@ async function runTypePromptsWithoutHauptseite() {
   console.log("textvorlagen without hauptseite column: ok");
 }
 
+/** Saved prompts: the defaults only where nothing can be saved yet; a failed read stops the step. */
+async function runSavedPromptReads() {
+  const client = (result: { data: unknown; error: { code?: string; message: string } | null }) =>
+    ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => result }) }) }) }) as unknown as Parameters<typeof loadContentStepPrompts>[0];
+  const timeout = { code: "57014", message: "canceling statement due to statement timeout" };
+
+  assert.deepEqual(await loadContentStepPrompts(client({ data: null, error: null })), DEFAULT_CONTENT_STEP_PROMPTS, "no row: the defaults");
+  assert.equal((await loadContentStepPrompts(client({ data: { content_step_prompts: { seo: "Eigene SEO-Anweisung" } }, error: null }))).seo, "Eigene SEO-Anweisung");
+  assert.deepEqual(
+    await loadContentStepPrompts(client({ data: null, error: { code: "42703", message: "column dt_platform_settings.content_step_prompts does not exist" } })),
+    DEFAULT_CONTENT_STEP_PROMPTS,
+    "migration not run: nothing can be saved, so the defaults are right",
+  );
+  await assert.rejects(
+    loadContentStepPrompts(client({ data: null, error: timeout })),
+    /Die Schritt-Prompts \(Globale Prompts\) konnten nicht gelesen werden: canceling statement/,
+    "a failed read never runs a step with the defaults",
+  );
+  assert.equal(
+    await loadTexterPrompt(client({ data: null, error: { code: "PGRST204", message: "Could not find the 'texter_prompt' column of 'dt_platform_settings' in the schema cache" } })),
+    DEFAULT_TEXTER_PROMPT,
+  );
+  await assert.rejects(loadTexterPrompt(client({ data: null, error: timeout })), /Der Text-Prompt \(Globale Prompts\) konnte nicht gelesen werden/);
+  assert.deepEqual(
+    await loadContentTypePromptsForRun(client({ data: null, error: { code: "PGRST205", message: "Could not find the table 'public.dt_content_type_prompts' in the schema cache" } })),
+    DEFAULT_CONTENT_TYPE_PROMPTS,
+  );
+  await assert.rejects(loadContentTypePromptsForRun(client({ data: null, error: timeout })), /Textvorlagen konnten nicht geladen werden/);
+  assert.equal(isPlatformSettingMissingError(timeout), false);
+  assert.equal(isPlatformSettingMissingError({ code: "42P01", message: 'relation "public.dt_platform_settings" does not exist' }), true);
+  console.log("saved prompt reads: ok");
+}
+
 runTypePromptsWithoutHauptseite()
+  .then(() => runSavedPromptReads())
   .then(() => runXai())
   .then(() => console.log("OK: content excel structure tests passed"))
   .catch((error) => {

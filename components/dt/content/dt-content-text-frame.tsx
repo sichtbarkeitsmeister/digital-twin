@@ -15,6 +15,7 @@ function buildSrcDoc(html: string, highlightBlockIds: string[]): string {
     h1{font-size:26px;line-height:1.25;font-weight:700;margin:0 0 16px}
     h2{font-size:19px;line-height:1.35;font-weight:700;margin:28px 0 10px}
     h3{font-size:16px;font-weight:600;margin:20px 0 6px}
+    h4{font-size:15px;font-weight:600;margin:16px 0 4px}
     p{margin:0 0 12px}
     ul,ol{margin:0 0 12px;padding-left:22px}
     li{margin:4px 0}

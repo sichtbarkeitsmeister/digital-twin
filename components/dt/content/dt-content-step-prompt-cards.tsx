@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ListOrdered, Loader2, RotateCcw, Save } from "lucide-react";
+import { Eye, ListOrdered, Loader2, RotateCcw, Save, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
@@ -16,8 +16,10 @@ import {
   type ContentStepPromptKey,
   type ContentStepPrompts,
 } from "@/lib/dt/content/step-prompts";
+import { CONTENT_TYPE_PROMPT_KEYS, CONTENT_TYPE_PROMPT_LABELS, type ContentTypePromptKey } from "@/lib/dt/content/type-prompts";
 
 const ENDPOINT = "/api/dt/platform-settings/content-step-prompts";
+const PREVIEW_ENDPOINT = `${ENDPOINT}/preview`;
 
 type StepPromptsResponse = {
   ok?: boolean;
@@ -27,7 +29,35 @@ type StepPromptsResponse = {
   persisted?: boolean;
 };
 
+type PreviewResponse = {
+  ok?: boolean;
+  message?: string;
+  step?: number;
+  system?: string;
+  user?: string;
+  tool?: { name: string; description?: string; input_schema: unknown };
+  retry?: string | null;
+  retryBelow?: number | null;
+};
+
 const NO_CUSTOM = Object.fromEntries(CONTENT_STEP_PROMPT_KEYS.map((key) => [key, false])) as Record<ContentStepPromptKey, boolean>;
+
+/** One part of the full prompt, folded so the long ones do not fill the page. */
+function PreviewPart(props: { title: string; text: string; open?: boolean }) {
+  return (
+    <details open={props.open} className="grid gap-1">
+      <summary className="cursor-pointer text-xs font-semibold text-sbkm-navy dark:text-white">
+        {props.title}{" "}
+        <span className="font-normal tabular-nums text-sbkm-ink-500 dark:text-white/45">
+          · {props.text.length.toLocaleString("de-DE")} Zeichen
+        </span>
+      </summary>
+      <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-sbkm-navy/[0.04] p-3 font-mono text-[11px] leading-relaxed text-sbkm-ink-600 dark:bg-white/5 dark:text-white/70">
+        {props.text}
+      </pre>
+    </details>
+  );
+}
 
 /** `{{name}}` placeholders a text uses, so the card can explain them. */
 function usedVariables(text: string): string[] {
@@ -47,6 +77,9 @@ function StepPromptCard(props: {
   const meta = CONTENT_STEP_PROMPT_META[stepKey];
   const [draft, setDraft] = useState(props.saved);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [pageType, setPageType] = useState<ContentTypePromptKey>("unterseite");
 
   useEffect(() => {
     setDraft(props.saved);
@@ -56,6 +89,27 @@ function StepPromptCard(props: {
   const tooLong = draft.length > CONTENT_STEP_PROMPT_MAX_CHARS;
   const variables = usedVariables(draft);
   const disabled = props.loading || busy || !props.persisted;
+
+  /** The full prompt for an example page, with the draft as it is in the box (saved or not). */
+  async function loadPreview(type: ContentTypePromptKey = pageType) {
+    if (previewBusy) return;
+    setPreviewBusy(true);
+    try {
+      const res = await fetch(PREVIEW_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: stepKey, prompt: draft, page_type: type }),
+      });
+      const json = (await res.json().catch(() => null)) as PreviewResponse | null;
+      if (!json?.ok || typeof json.system !== "string") {
+        toast.error(json?.message ?? "Die Vorschau konnte nicht erstellt werden.");
+        return;
+      }
+      setPreview(json);
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
 
   async function save(next?: string) {
     if (busy || !props.persisted) return;
@@ -131,6 +185,16 @@ function StepPromptCard(props: {
             type="button"
             size="sm"
             variant="outline"
+            disabled={props.loading || previewBusy || tooLong}
+            onClick={() => void loadPreview()}
+          >
+            {previewBusy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Eye className="size-3.5" aria-hidden />}
+            {preview ? "Vorschau aktualisieren" : "Vollständigen Prompt ansehen"}
+          </DtPillButton>
+          <DtPillButton
+            type="button"
+            size="sm"
+            variant="outline"
             disabled={disabled || (!props.custom && !dirty)}
             onClick={() => {
               if (!window.confirm(`Den ${meta.label}-Prompt auf den Standard zurücksetzen? Eigene Formulierungen gehen verloren.`)) return;
@@ -146,6 +210,60 @@ function StepPromptCard(props: {
           </DtPillButton>
         </div>
       </div>
+      {preview && typeof preview.system === "string" ? (
+        <div className="grid gap-3 rounded-xl border border-sbkm-navy/10 p-3 dark:border-white/10">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="max-w-2xl text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/55">
+              So erhält die KI Schritt {preview.step} für eine Beispielseite{dirty ? ", mit dem noch nicht gespeicherten Text" : ""}.
+              Angaben in [eckigen Klammern] füllt ein Lauf mit den Daten der Seite. Die Branchenregel richtet sich nach der
+              Branche der Organisation (hier: Dienstleistung & Handwerk).
+            </p>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-sbkm-ink-600 dark:text-white/55">
+                Seitentyp
+                <select
+                  value={pageType}
+                  disabled={previewBusy}
+                  onChange={(event) => {
+                    const next = event.target.value as ContentTypePromptKey;
+                    setPageType(next);
+                    void loadPreview(next);
+                  }}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:border-sbkm-mint/45 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30"
+                >
+                  {CONTENT_TYPE_PROMPT_KEYS.map((key) => (
+                    <option key={key} value={key}>
+                      {CONTENT_TYPE_PROMPT_LABELS[key]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => setPreview(null)}
+                className="rounded-md p-1 text-sbkm-ink-500 hover:bg-sbkm-navy/5 dark:text-white/55 dark:hover:bg-white/10"
+                aria-label="Vorschau schließen"
+              >
+                <X className="size-4" aria-hidden />
+              </button>
+            </div>
+          </div>
+          <PreviewPart title="Systemprompt" text={preview.system} open />
+          <PreviewPart title="Nachricht an die KI" text={preview.user ?? ""} />
+          {preview.retry ? (
+            <PreviewPart
+              title={`Zweiter Versuch (nur bei einer Selbstbewertung unter ${preview.retryBelow ?? ""} von 50, an die Nachricht angehängt)`}
+              text={preview.retry}
+            />
+          ) : null}
+          {preview.tool ? (
+            <PreviewPart
+              title={`Antwortformat (fest im Code): ${preview.tool.name}`}
+              text={JSON.stringify({ description: preview.tool.description, input_schema: preview.tool.input_schema }, null, 2)}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </DtGlassCard>
   );
 }
@@ -206,9 +324,11 @@ export function DtContentStepPromptCards() {
             Schritt-Prompts für Texte
           </h2>
           <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
-            Die Anweisung je Schritt. Der Code hängt danach immer die festen Regeln, die Vorgaben der Organisation
-            (Anrede, Branche, Tonalität, verbotene Wörter), Seite, Fakten, Avatar und Anmerkungen sowie das
-            Antwortformat an. Leer gespeichert gilt der Standard. Änderungen gelten ab dem nächsten Lauf.
+            Die Anweisung je Schritt. Aufbau, Überschriften und Hero der Seite bestimmt allein diese Anweisung. Der
+            Code hängt danach die festen Regeln, die Vorgaben der Organisation (Anrede, Branche, Tonalität, verbotene
+            Wörter), Seite, Fakten, Avatar und Anmerkungen sowie das Antwortformat an; „Vollständigen Prompt ansehen“
+            zeigt alles zusammen. Leer gespeichert gilt der Standard. Änderungen gelten ab dem nächsten Schritt, auch
+            für Seiten, die gerade laufen.
           </p>
         </div>
         {loading ? <Loader2 className="ml-auto size-4 shrink-0 animate-spin text-sbkm-ink-500" aria-label="Lädt" /> : null}

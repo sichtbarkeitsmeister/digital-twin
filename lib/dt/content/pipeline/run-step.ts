@@ -86,7 +86,9 @@ async function loadContext(
   steps: ContentStepRow[],
 ): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
   // The editable texts (Texter prompt, Textvorlagen, step instructions) are read for every
-  // step, so a save under Globale Prompts reaches the next step without a deploy.
+  // step, so a save under Globale Prompts reaches the next step without a deploy. A failed
+  // read throws: the job retries the step (the page shows why) instead of running it with
+  // the built-in defaults while saved texts exist.
   const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),

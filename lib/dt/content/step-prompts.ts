@@ -208,7 +208,24 @@ export function fillContentStepPrompt(template: string, variables: Readonly<Reco
   return template.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (match, name: string) => variables[name.toLowerCase()] ?? match);
 }
 
-/** The instructions a run reads. Any problem means the defaults, never a failed step. */
+/**
+ * A read of `dt_platform_settings` that failed because the table or the column is not there
+ * yet (migration not run). Nothing can have been saved then, so the default is the right
+ * answer. Any other error is a failed read.
+ */
+export function isPlatformSettingMissingError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return (
+    ["42703", "42P01", "PGRST204", "PGRST205"].includes(error.code ?? "") ||
+    /column .+ does not exist|relation .+ does not exist|could not find the .+ in the schema cache/i.test(error.message ?? "")
+  );
+}
+
+/**
+ * The instructions a run reads. Defaults only where nothing is saved (no row, no column, an
+ * empty text). A failed read throws: a step must not quietly run with the built-in prompts
+ * while saved ones exist; the job retries it and the page shows why.
+ */
 export async function loadContentStepPrompts(supabase: SupabaseClient): Promise<ContentStepPrompts> {
   const { data, error } = await supabase
     .from("dt_platform_settings")
@@ -216,8 +233,8 @@ export async function loadContentStepPrompts(supabase: SupabaseClient): Promise<
     .eq("id", "default")
     .maybeSingle();
   if (error) {
-    console.warn("[dt/content-step-prompts] load:", error.message);
-    return { ...DEFAULT_CONTENT_STEP_PROMPTS };
+    if (isPlatformSettingMissingError(error)) return { ...DEFAULT_CONTENT_STEP_PROMPTS };
+    throw new Error(`Die Schritt-Prompts (Globale Prompts) konnten nicht gelesen werden: ${error.message}`);
   }
   return resolveContentStepPrompts((data as { content_step_prompts?: unknown } | null)?.content_step_prompts);
 }

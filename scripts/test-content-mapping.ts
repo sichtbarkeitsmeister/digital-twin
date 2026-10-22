@@ -547,6 +547,21 @@ assert.match(html, /^<section data-block-id="intro"><h1>Entrümpelung Düsseldor
 assert.deepEqual(parseBlocksFromHtml(html), normalized, "render → parse round-trips");
 assert.deepEqual(extractContentBlocks(html).map((b) => b.id), ["intro", "intro-2", "faq"], "drawer sees the same blocks");
 
+// H3 and H4 stay what the step instruction asked for; a second H1 or an unknown level is an H2.
+const deep = normalizeBlocks([
+  { id: "t", heading: "Titel", level: 1, html: "" },
+  { id: "a", heading: "Abschnitt", level: 2, html: "<p>a</p>" },
+  { id: "b", heading: "Unterabschnitt", level: 3, html: "<p>b</p>" },
+  { id: "c", heading: "Detail", level: 4, html: "<p>c</p>" },
+  { id: "d", heading: "Noch ein H1", level: 1, html: "<p>d</p>" },
+]);
+assert.deepEqual(deep.map((b) => b.level), [1, 2, 3, 4, 2]);
+const deepHtml = renderBlocksHtml(deep);
+assert.match(deepHtml, /<section data-block-id="c"><h4>Detail<\/h4>/);
+assert.deepEqual(parseBlocksFromHtml(deepHtml), deep, "an H4 round-trips through the stored HTML");
+assert.match(htmlToMarkdown(deepHtml), /\n#### Detail\n/);
+assert.match(htmlToPlainText(deepHtml), /\nDetail\n\nc\n/);
+
 const edited = replaceBlockText(html, "intro-2", "Ablauf\nNur noch ein Satz.\n\nUnd <b>kein</b> HTML.")!;
 assert.match(edited, /<h2>Ablauf<\/h2>\n<p>Nur noch ein Satz.<\/p>\n<p>Und &lt;b&gt;kein&lt;\/b&gt; HTML.<\/p>/, "heading kept once, text escaped");
 assert.equal(replaceBlockText(html, "nope", "x"), null);
