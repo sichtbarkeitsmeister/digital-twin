@@ -21,6 +21,10 @@ import {
   anbieterHasSavedPoints,
   buildCurrentAnbieterMarkdown,
 } from "@/lib/dt/transcripts/anbieter-markdown";
+import {
+  AVATAR_PLAN_MAX,
+  AVATAR_PLAN_MIN,
+} from "@/lib/dt/transcripts/avatar-plan-bounds";
 import { markdownDownloadName } from "@/lib/dt/transcripts/markdown-file";
 
 export const WORKSHOP_CHANGED_EVENT = "dt-workshop-changed";
@@ -112,9 +116,9 @@ type AvatarPlan = {
 
 type GenerateOutcome = "created" | "updated" | "rueckfragen" | "invalid" | "failed";
 
-/** Bounds of „Anzahl Avatare“, the same as AVATAR_PLAN_MIN/MAX on the server. */
-const AVATAR_COUNT_MIN = 1;
-const AVATAR_COUNT_MAX = 6;
+/** Bounds of „Anzahl Avatare“ — shared with the server (`AVATAR_PLAN_*`). */
+const AVATAR_COUNT_MIN = AVATAR_PLAN_MIN;
+const AVATAR_COUNT_MAX = AVATAR_PLAN_MAX;
 
 function formatSpoken(iso: string | null): string {
   if (!iso) return "ohne Datum";
