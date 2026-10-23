@@ -99,6 +99,7 @@ assert.deepEqual(
 );
 assert.equal(existing.faq.length, 1);
 assert.equal(existing.faq[0]!.question, "In welchem Gebiet arbeitet die Beispiel Bau GmbH?");
+assert.equal(existing.faq[0]!.answer, "Die Beispiel Bau GmbH arbeitet in Hamm und Umgebung.", "the standard line after the FAQ is not part of the answer");
 
 // --- v1.7 structure of the old page -----------------------------------------------------------
 const codes = checkExistingPageStructure(EXISTING_PAGE_HTML, { pageUrl: PAGE_URL, websiteUrl: `${SITE}/` }).map((i) => i.code);

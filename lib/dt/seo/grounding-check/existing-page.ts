@@ -430,6 +430,9 @@ function readHtml(book: EntityBook, html: string, sourceUrl: string, organisatio
 }
 
 /** FAQ from FAQPage JSON-LD and from the visible „FAQ“ / „Häufige Fragen“ section. */
+/** Page furniture that follows the last FAQ or Abgrenzung paragraph (standard line, dates, review notice). */
+const PAGE_FURNITURE = /grounding page standard|zuletzt (aktualisiert|von einem menschen geprüft)|fakten geprüft von|^(erstellt|stand|verifiziert|geprüft)\s*:/i;
+
 function readFaq(html: string, nodes: JsonLdNode[], sourceUrl: string): GroundingFaq[] {
   const out: GroundingFaq[] = [];
   const push = (question: string, answer: string) => {
@@ -479,7 +482,7 @@ function readFaq(html: string, nodes: JsonLdNode[], sourceUrl: string): Groundin
       }
       continue;
     }
-    if (faqLevel && question && text) answer.push(text);
+    if (faqLevel && question && text && !PAGE_FURNITURE.test(text)) answer.push(text);
   }
   flush();
   return out.slice(0, 20);
@@ -500,7 +503,7 @@ function readDisambiguation(book: EntityBook, html: string, organisationName: st
       }
       continue;
     }
-    if (current && text) book.addDisambiguation(current, text);
+    if (current && text && !PAGE_FURNITURE.test(text)) book.addDisambiguation(current, text);
   }
 }
 
