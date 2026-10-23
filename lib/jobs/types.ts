@@ -5,6 +5,8 @@ export type JobKind =
   | "seo.crawl"
   | "content.page"
   | "grounding.page"
+  | "seo.grounding_check"
+  | "seo.grounding_schedule"
   | "apollo.enrich"
   | "outreach.draft"
   | "outreach.send"

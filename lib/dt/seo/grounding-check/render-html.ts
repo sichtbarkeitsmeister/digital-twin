@@ -21,9 +21,11 @@ import {
   isLocalBusinessType,
   isVisibleOnlyKey,
   monthLabel,
+  normaliseSourceUrl,
   organisationEntity,
   visibleEntities,
 } from "@/lib/dt/seo/grounding-check/fact-model";
+import type { CrawledUrlEntry } from "@/lib/dt/seo/grounding-check/types";
 import { looseName, normalizeDateValue, normalizeNumber, normalizePhone, parseGermanAddress } from "@/lib/dt/seo/grounding-check/normalize";
 
 /** Where review-stamp.ts puts the review notice. */
@@ -110,6 +112,21 @@ function absoluteUrl(value: string): string {
 function isoDateOrNull(value: string): string | null {
   const iso = normalizeDateValue(value);
   return /^\d{4}(-\d{2}){0,2}$/.test(iso) ? iso : null;
+}
+
+/** Titles of the crawled pages under the URLs the facts cite. */
+export function sourceTitlesFor(model: GroundingFactModel, crawled: CrawledUrlEntry[]): Record<string, string> {
+  const byKey = new Map(crawled.filter((c) => c.ok && c.title).map((c) => [normaliseSourceUrl(c.url), (c as { title: string }).title]));
+  const out: Record<string, string> = {};
+  const urls = [
+    ...model.entities.flatMap((e) => [e.definitionSourceUrl, ...e.facts.map((f) => f.sourceUrl)]),
+    ...model.faq.map((f) => f.sourceUrl),
+  ].filter((u): u is string => Boolean(u));
+  for (const url of urls) {
+    const title = byKey.get(normaliseSourceUrl(url));
+    if (title) out[url] = title;
+  }
+  return out;
 }
 
 // --- visible HTML ------------------------------------------------------------------------------

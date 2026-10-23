@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import { callAnthropicFirstAvailable, extractToolUseInput } from "@/lib/ai/anthropic-helpers";
+import {
+  callAnthropicFirstAvailable,
+  extractToolUseInput,
+  isForcedToolChoiceUnsupportedError,
+} from "@/lib/ai/anthropic-helpers";
 import { reviveStringifiedToolInput } from "@/lib/ai/tolerant-json";
 import { resolveContentApiKey } from "@/lib/dt/content/model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
@@ -70,19 +74,29 @@ export async function callContentTool(input: {
   }
 
   const anthropic = new Anthropic({ apiKey });
-  let result: Awaited<ReturnType<typeof callAnthropicFirstAvailable>>;
-  try {
-    result = await callAnthropicFirstAvailable({
+  const call = (forced: boolean) =>
+    callAnthropicFirstAvailable({
       anthropic,
       models: input.models,
       maxTokens: input.maxTokens,
       timeoutMs: input.timeoutMs ?? STEP_TIMEOUT_MS,
       stream: true,
-      system: input.system,
+      system: forced
+        ? input.system
+        : `${input.system}\n\nAntworte ausschließlich, indem du das Werkzeug „${input.tool.name}“ genau einmal aufrufst.`,
       tools: [input.tool],
-      toolChoice: { type: "tool", name: input.tool.name },
+      toolChoice: forced ? { type: "tool", name: input.tool.name } : { type: "auto" },
       messages: [{ role: "user", content: input.user }],
     });
+  let result: Awaited<ReturnType<typeof callAnthropicFirstAvailable>>;
+  try {
+    try {
+      result = await call(true);
+    } catch (error) {
+      // Models that refuse a forced tool_choice still call the tool when asked to.
+      if (!isForcedToolChoiceUnsupportedError(error)) throw error;
+      result = await call(false);
+    }
   } catch (error) {
     throw new ContentLlmError(llmErrorMessage(error), isRetryableLlmError(error));
   }

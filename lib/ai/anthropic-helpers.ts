@@ -334,6 +334,16 @@ export function isAnthropicBetaHeaderError(error: unknown): boolean {
   return /anthropic-beta/i.test(blob) && /unexpected value/i.test(blob);
 }
 
+/**
+ * Newer models (Opus 5.5, Sonnet 5.5, Fable 5.1) reject a forced tool_choice
+ * (`any` / `tool`) with 400; the call has to ask for the tool with `auto` instead.
+ */
+export function isForcedToolChoiceUnsupportedError(error: unknown): boolean {
+  const status = error && typeof error === "object" ? (error as { status?: unknown }).status : null;
+  const blob = anthropicErrorBlob(error);
+  return status === 400 && /tool_choice/i.test(blob) && /not supported/i.test(blob);
+}
+
 type AnthropicStreamDelta = {
   type?: string;
   text?: string;

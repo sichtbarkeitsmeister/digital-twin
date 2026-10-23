@@ -13,6 +13,7 @@ import {
   classifyKeyPage,
   extractJsonLdBlocks,
   homepageLinks,
+  profileLinks,
   selectKeyPages,
 } from "../lib/dt/seo/grounding-check/crawl";
 import { evaluateAiCrawlerAccess, isPathAllowed, parseRobotsTxt } from "../lib/dt/seo/grounding-check/robots";
@@ -91,6 +92,12 @@ assert.equal(links.find((l) => l.url === `${site}/leistungen`)?.inNav, true);
 assert.equal(links.find((l) => l.url === `${site}/ueber-uns`)?.inNav, false);
 assert.ok(!links.some((l) => l.url.includes("extern.de")));
 assert.deepEqual(extractJsonLdBlocks(homeHtml), ['{"@type":"Organization","name":"Beispiel GmbH"}']);
+
+const profiles = profileLinks(
+  `<footer><a href="https://www.linkedin.com/company/beispiel/">LinkedIn</a><a href="https://www.facebook.com/sharer/sharer.php?u=x">Teilen</a><a href="https://www.instagram.com/">Instagram</a><a href="https://example.com/">x</a></footer>`,
+  `${site}/`,
+);
+assert.deepEqual(profiles, ["https://www.linkedin.com/company/beispiel/"], "own profiles only, no share buttons or bare hosts");
 
 // --- robots.txt -------------------------------------------------------------------------------
 const robots = `

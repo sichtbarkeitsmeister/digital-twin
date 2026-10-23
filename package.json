@@ -72,6 +72,7 @@
     "test:grounding-check-diff": "tsx scripts/test-grounding-check-diff.ts",
     "test:grounding-check-mirror": "tsx scripts/test-grounding-check-mirror.ts",
     "test:grounding-check-llms": "tsx scripts/test-grounding-check-llms.ts",
+    "test:grounding-check-decision": "tsx scripts/test-grounding-check-decision.ts",
     "test:dt-next-steps": "tsx scripts/test-dt-next-steps.ts",
     "test:web-research": "tsx scripts/test-web-research.ts",
     "test:help-assistant": "tsx scripts/test-help-assistant.ts",

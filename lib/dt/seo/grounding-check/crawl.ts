@@ -206,6 +206,26 @@ export function homepageLinks(html: string, pageUrl: string, origin: string): In
   return parsed.links.map((url, i) => ({ url, inNav: nav.has(url), order: nav.has(url) ? i : 1_000 + i }));
 }
 
+const PROFILE_HOSTS = /(^|\.)(linkedin\.com|xing\.com|instagram\.com|facebook\.com|youtube\.com|tiktok\.com|x\.com|twitter\.com|pinterest\.[a-z.]+|wikipedia\.org|wikidata\.org)$/i;
+
+/** Links to the organisation's own profiles (page text has no URLs, so they are listed for quoting). */
+export function profileLinks(html: string, pageUrl: string): string[] {
+  const $ = cheerio.load(html);
+  const out = new Set<string>();
+  $("a[href]").each((_, el) => {
+    try {
+      const u = new URL($(el).attr("href") ?? "", pageUrl);
+      if (!/^https?:$/.test(u.protocol) || !PROFILE_HOSTS.test(u.hostname)) return;
+      if (/\/(sharer|share|intent|dialog)\b/i.test(u.pathname) || u.pathname.length <= 1) return;
+      u.hash = "";
+      out.add(u.toString());
+    } catch {
+      /* ignore */
+    }
+  });
+  return [...out].slice(0, 12);
+}
+
 function footerText(html: string): string {
   const $ = cheerio.load(html);
   $("script, style, noscript").remove();
@@ -353,13 +373,18 @@ export async function collectWebsite(
 
   const homeParsed = parsePage(home.body, home.finalUrl, origin);
   const footer = footerText(home.body);
+  const profiles = profileLinks(home.body, home.finalUrl);
   const pages: CrawledKeyPage[] = [
     {
       url: homeUrl,
       finalUrl: home.finalUrl,
       category: "home",
       title: homeParsed.title,
-      text: clipText([homeParsed.text_content, footer ? `[Footer] ${footer}` : ""].filter(Boolean).join("\n")),
+      text: clipText(
+        [homeParsed.text_content, footer ? `[Footer] ${footer}` : "", profiles.length > 0 ? `[Profile] ${profiles.join(" ")}` : ""]
+          .filter(Boolean)
+          .join("\n"),
+      ),
       source: "live",
       jsonLd: extractJsonLdBlocks(home.body),
     },
