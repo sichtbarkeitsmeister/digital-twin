@@ -80,9 +80,25 @@ function isLegalNavLabel(text: string): boolean {
   );
 }
 
+/** „Grounding“ anywhere, or exactly the footer label the standard suggests („Fakten“). */
 function isGroundingNavLabel(text: string): boolean {
   const t = normalizeLinkText(text);
-  return t === "grounding" || t.includes("grounding");
+  return t.includes("grounding") || t === "fakten" || t === "facts" || t === "unternehmensfakten";
+}
+
+type Cheerio$ = ReturnType<typeof cheerio.load>;
+
+/** nav/ul blocks inside `rootEl` that already link Impressum or Datenschutz. */
+function legalNavBlocks($: Cheerio$, rootEl: Parameters<Cheerio$>[0]) {
+  return $(rootEl)
+    .find("ul, nav, .elementor-nav-menu, menu")
+    .toArray()
+    .filter((el) =>
+      $(el)
+        .find("a")
+        .toArray()
+        .some((a) => isLegalNavLabel($(a).text())),
+    );
 }
 
 /**
@@ -102,19 +118,8 @@ export function extractGroundingUrlFromFooterHtml(
   for (const scope of scopes) {
     const roots = $(scope).toArray();
     for (const rootEl of roots) {
-      const root = $(rootEl);
-
       // Prefer nav/ul blocks that already contain Impressum/Datenschutz.
-      const legalBlocks = root
-        .find("ul, nav, .elementor-nav-menu, menu")
-        .toArray()
-        .filter((el) => {
-          const texts = $(el)
-            .find("a")
-            .toArray()
-            .map((a) => normalizeLinkText($(a).text()));
-          return texts.some(isLegalNavLabel);
-        });
+      const legalBlocks = legalNavBlocks($, rootEl);
 
       const searchRoots = legalBlocks.length > 0 ? legalBlocks : [rootEl];
 
@@ -137,6 +142,53 @@ export function extractGroundingUrlFromFooterHtml(
   }
 
   return null;
+}
+
+function comparableUrl(raw: string, base: string): string | null {
+  try {
+    const u = new URL(raw, base);
+    const path = u.pathname.replace(/\/+$/, "") || "/";
+    return `${u.hostname.toLowerCase().replace(/^www\./, "")}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+export type FooterGroundingLink = {
+  /** A footer link points to the grounding page. */
+  inFooter: boolean;
+  /** … in the same block as Impressum/Datenschutz (where the standard wants it). */
+  nextToLegal: boolean;
+  /** Link text as shown, e.g. „Fakten“. */
+  label: string | null;
+};
+
+/**
+ * Hint for the reviewer: is the grounding page linked in the footer next to Impressum and
+ * Datenschutz? Pure helper for unit tests.
+ */
+export function inspectFooterGroundingLink(html: string, baseUrl: string, groundingUrl: string): FooterGroundingLink {
+  const target = comparableUrl(groundingUrl, baseUrl);
+  const result: FooterGroundingLink = { inFooter: false, nextToLegal: false, label: null };
+  if (!target) return result;
+  const $ = cheerio.load(html);
+  const pointsToTarget = (a: Parameters<Cheerio$>[0]) => {
+    const href = ($(a).attr("href") ?? "").trim();
+    return Boolean(href) && comparableUrl(href, baseUrl) === target;
+  };
+
+  for (const rootEl of $("footer, [role='contentinfo']").toArray()) {
+    for (const block of legalNavBlocks($, rootEl)) {
+      const hit = $(block).find("a").toArray().find(pointsToTarget);
+      if (hit) return { inFooter: true, nextToLegal: true, label: normalizeLinkText($(hit).text()) || null };
+    }
+    const hit = $(rootEl).find("a").toArray().find(pointsToTarget);
+    if (hit && !result.inFooter) {
+      result.inFooter = true;
+      result.label = normalizeLinkText($(hit).text()) || null;
+    }
+  }
+  return result;
 }
 
 export type DiscoverGroundingPageResult =

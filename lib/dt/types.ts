@@ -85,6 +85,52 @@ export type DtGroundingPageRow = {
 
 export type DtGroundingRunState = "nicht_begonnen" | "laeuft" | "in_arbeit" | "braucht_sie" | "fertig";
 
+/** Grounding check („Website prüfen“), migration 20261023_dt_grounding_runs.sql. */
+export type DtGroundingRunTrigger = "manual" | "schedule";
+export type DtGroundingRunStatus = "running" | "up_to_date" | "draft" | "approved" | "rejected" | "uploaded" | "failed";
+export type DtGroundingRunStep = "crawl" | "extract" | "compare" | "generate" | "done";
+export type DtGroundingRunDecision = "create" | "update_required" | "refresh_only" | "up_to_date";
+
+export type DtGroundingRunRow = {
+  id: string;
+  organisation_id: string;
+  trigger: DtGroundingRunTrigger;
+  status: DtGroundingRunStatus;
+  step: DtGroundingRunStep;
+  decision: DtGroundingRunDecision | null;
+  grounding_url_checked: string | null;
+  llms_txt_url_checked: string | null;
+  crawled_urls: unknown;
+  crawl_snapshot: unknown | null;
+  fact_model: unknown | null;
+  existing_fact_model: unknown | null;
+  diff: unknown | null;
+  open_points: unknown;
+  hints: unknown | null;
+  validation: unknown | null;
+  draft_html: string | null;
+  draft_llms_txt: string | null;
+  standard_version: string;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_eur: number | string;
+  job_id: string | null;
+  error: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_checklist: unknown | null;
+  reviewer_name: string | null;
+  review_note: string | null;
+  uploaded_at: string | null;
+  uploaded_by: string | null;
+  uploaded_url: string | null;
+};
+
 export type DtGroundingStepRow = {
   id: string;
   page_id: string;

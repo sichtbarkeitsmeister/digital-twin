@@ -248,7 +248,7 @@ export function parsePage(html: string, pageUrl: string, origin: string): Parsed
   };
 }
 
-function decodeHtml(buf: ArrayBuffer, contentType: string): string {
+export function decodeHtml(buf: ArrayBuffer, contentType: string): string {
   const bytes = new Uint8Array(buf);
   let charset = /charset=["']?([\w-]+)/i.exec(contentType)?.[1]?.toLowerCase();
 
