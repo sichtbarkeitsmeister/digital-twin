@@ -190,6 +190,8 @@ Jede Zeile ist eine **Umgebungsvariable**: ein Name und ein geheimer Wert. Lokal
 | `ANTHROPIC_DT_TITLE_MODEL` | Optionales günstigeres Modell für automatische Chat-Titel. |
 | `ANTHROPIC_DT_SURVEY_MODEL` | Modell, das aus einem Fragebogen einen Avatar schreibt. Standard: Sonnet. |
 | `ANTHROPIC_DT_SURVEY_MAX_TOKENS` | Wie lang diese Antwort werden darf. Standard ist hoch angesetzt, weil die Texte lang sind. |
+| `ANTHROPIC_DT_GROUNDING_MODEL` | Modell für Grounding: den Website-Abgleich („Website prüfen“) und den Grounding-Agenten. Leer: Der Website-Abgleich nimmt `ANTHROPIC_DT_SEO_MODEL`, der Grounding-Agent die Modelle von Texte. |
+| `ANTHROPIC_DT_GROUNDING_API_KEY` | Eigener Claude-Schlüssel für Grounding, damit die Kosten in der Anthropic Console für sich stehen. Leer: `ANTHROPIC_DT_CONTENT_API_KEY`, sonst `ANTHROPIC_API_KEY`. |
 | `ANTHROPIC_SURVEY_CHAT_MODEL` | Modell für die DigitalTwin-Hilfe im Gespräch (früher Fragebogen-Assistent). |
 | `ANTHROPIC_SURVEY_ACTION_MODEL` | Modell, wenn der Assistent den Fragebogen wirklich ändert. |
 | `ANTHROPIC_SURVEY_MODEL` | Älterer Ersatz nur für das Aktions-Modell. |
@@ -399,7 +401,7 @@ Die Datenbank ist der Speicher. Tabellen sind Listen (Firmen, Nutzer, Chats, …
 1. In Supabase den **SQL Editor** öffnen.
 2. Den kompletten Inhalt von `database/schema.sql` einfügen und ausführen.  
    Das legt den Sockel an: Profile, Firmen, Mitglieder, Einladungen, Fragebögen und Antworten.
-3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 86 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
+3. Danach **jede Datei** in `database/migrations/` ausführen, sortiert nach dem Datum am Anfang des Dateinamens, die älteste zuerst. Es sind 98 Dateien. Eine neuere Datei setzt voraus, dass die älteren schon liefen.
 4. In Supabase unter **Database → Extensions** prüfen, dass `pg_cron` und `pg_net` an sind. Die Job-Migration schaltet sie ein. `pg_cron` ist die Uhr, `pg_net` ist der Anruf von der Datenbank zur Website.
 5. Prüfen, dass bei den Tabellen **RLS** aktiv ist (Row Level Security).
 
@@ -559,6 +561,24 @@ Inhaber einer Firma dürfen fertige SEO-Berichte lesen. Den SEO-Arbeitsplatz sel
 | `/dashboard/verwaltung/watermark-entfernung` | Watermark Entfernung: eigenständig, ohne Organisation; Datei hochladen, Ergebnis als HTML oder .txt herunterladen. Nur Plattform-Admins. |
 | `/dashboard/admin/jobs` | Job-Liste. |
 
+
+### SEO Modus → Grounding: „Website prüfen“
+
+Oben im Tab **Grounding** steht die Karte **Website-Abgleich**. Sie prüft für die gewählte Firma, ob es eine Grounding Page gibt und ob sie noch zur Website passt. Sie veröffentlicht nichts auf der Website des Kunden.
+
+1. **Website prüfen** startet die Prüfung im Hintergrund. Das dauert ein paar Minuten. Solange steht dort „Prüfung läuft“ mit dem aktuellen Schritt.
+2. Danach zeigt die Karte das Ergebnis: **Aktuell** (nichts zu tun), **Aktualisierung empfohlen** (Website und Grounding Page weichen ab, oder die Seite erfüllt Standard v1.7 nicht), **Keine Grounding Page** oder **Entwurf wartet auf Prüfung**.
+3. **Was sich ändert**: Neu, Geändert, Entfällt und Unverändert (zugeklappt). Jeder Eintrag verlinkt die Seite der Website, die ihn belegt. Darunter stehen die Befunde zum Standard v1.7, die **Offenen Punkte** (was die Website nicht sagt oder nur intern bekannt ist; das kommt nicht auf die Seite) und die **Hinweise**: Ist die Grounding Page im Footer neben Impressum und Datenschutz verlinkt? Sperrt die robots.txt KI-Crawler (GPTBot, OAI-SearchBot, ChatGPT-User, PerplexityBot, ClaudeBot, Google-Extended)? Gibt es eine llms.txt?
+4. **Entwurf**: eine Vorschau der grounding.html, dazu grounding.html und llms.txt zum Bearbeiten und „Fakten auf der Seite ein- oder ausschalten“. Darüber steht die technische Prüfung: JSON-LD gültig, HTML und JSON-LD gleich, jeder Fakt mit Quelle. Bewertungen der eigenen Firma sind zunächst ausgeschaltet.
+5. **Prüfen und freigeben**: die sechs Prüfpunkte des Standards abhaken (Faktische Richtigkeit, Aktualität, Nachprüfbarkeit und Quellenqualität, Identifikation der Entität, Übereinstimmung, Redaktionelle Freigabe), den eigenen Namen eintragen (vorbelegt), dann **Freigeben** oder **Ablehnen**. Erst die Freigabe schreibt den Prüfhinweis „Fakten geprüft von Sichtbarkeitsmeister GmbH · Zuletzt von einem Menschen geprüft: …“ mit dem heutigen Datum in die Seite und dieselben Werte als reviewedBy und lastReviewed ins JSON-LD. Der Name der prüfenden Person bleibt intern am Lauf.
+6. Nach der Freigabe: **grounding.html** und **llms.txt** herunterladen und von Hand hochladen (grounding.html unter der Grounding-URL, llms.txt ins Stammverzeichnis der Domain). Dann **Als hochgeladen markieren**. Das trägt beim Hub Upload-Datum, Prüfdatum und Prüfer ein, und der Drei-Monats-Rhythmus beginnt neu.
+
+Ist der Inhalt gleich, aber die Prüfung fällig, heißt das Ergebnis **Nur Daten auffrischen**: Der Entwurf ist die Live-Seite mit neuem dateModified und neuem „Stand“. Auch er braucht die Freigabe.
+
+**Verlauf** listet alle Prüfungen mit Datum, Auslöser (manuell oder automatisch), Ergebnis und Status. Automatische Prüfungen schicken keine Mail; ihr Entwurf erscheint nur hier.
+
+Einmal im Supabase SQL Editor ausführen: `database/migrations/20261023_dt_grounding_runs.sql`. Fehlt sie, nennt die Karte den Dateinamen.
+
 ---
 
 ## 10. Was im Hintergrund passiert
@@ -611,6 +631,7 @@ Der Tab **Grounding** im SEO-Modus verwaltet je Firma die Grounding Pages nach d
 - **Freigabe dokumentieren** setzt Prüfer und Prüfdatum; die Seite gilt dann als freigegeben (v1.7). Ein Prüfdatum in der Zukunft wird abgelehnt. Wird `dateModified` später neuer als `lastReviewed`, zeigt die Karte „nach Prüfung geändert“.
 - **Agent**: Im SEO-Chat und beim `geo_advisor` steht der Block „Grounding Pages (Tool-Kontext)“ im System-Prompt (auch im Agent-Kontext sichtbar). Mit dem Werkzeug `update_grounding_page` meldet der Agent je Seite URL, Status, `dateModified`, `lastReviewed`, Prüfer und Version zurück ins Tool.
 - **Grounding-Agent (Entwurf in vier Schritten)**: Eine ganze Grounding Page passt nicht in einen Chat-Zug (Vercel bricht nach 300 s ab). Deshalb baut der Tab **Grounding** jede Seite wie Texte als Hintergrund-Job `grounding.page` (`lib/dt/seo/grounding-run/`, `lib/jobs/handlers/grounding-page.ts`): **1 Fakten sammeln** (Anbieter-Fragebogen und Gespräche, Onboarding, gecrawlte Website-Seiten, bestehende Live-Seite, Wunschkunden-Wortwahl → Faktenbasis mit Quelle je Fakt; beim Hub zusätzlich Vorschläge für Entitätsseiten), **2 Faktencheck** (Befunde mit Vorschlag; hält mit „Braucht Sie“ an, wenn nur der Kunde eine Frage beantworten kann – Antworten im Tab eintragen oder „Ohne Antworten weiter“, dann bleiben unbelegte Fakten weg), **3 Seite bauen** (vollständige HTML-Datei: H1 = Entität, Lead, H2 mit Entitätsnamen, `<dl class="data-grid">`, Quellen und Stand, JSON-LD-Spiegelung, Standard-Zeile v1.6, kein Prüfhinweis), **4 Endprüfung** (Checkliste des Standards, korrigiert selbst, nennt, was ein Mensch prüfen muss). Danach steht die Seite auf „Entwurf fertig“: HTML-Datei und `llms.txt` herunterladen (`/api/dt/seo/grounding/pages/[id]/export`), auf der Website einfügen, Fakten prüfen, „Freigabe dokumentieren“. Vorgeschlagene Entitätsseiten legt ein Klick an; „Mit Anmerkung neu bauen“ wiederholt ab Schritt 3, „Neu erstellen“ beginnt von vorn. Zustände wie bei Texte: „Entwurf läuft“, „Pausiert“ (mit Grund, „Weiterlaufen lassen“), „Braucht Sie“, „Entwurf fertig“; ein toter Job wird beim Laden des Tabs repariert. Ergebnisse: `dt_grounding_pages` (Faktenbasis, Fragen, Befunde, HTML, Kosten) und `dt_grounding_steps` — **Migration `database/migrations/20261013_dt_grounding_drafts.sql` einmal ausführen**, sonst meldet der Tab das mit Dateinamen. Schlüssel: `ANTHROPIC_DT_GROUNDING_API_KEY`, sonst `ANTHROPIC_DT_CONTENT_API_KEY`, sonst `ANTHROPIC_API_KEY`; Modell wie Texte (`content_model` / `content_check_model`), Überschreibung mit `ANTHROPIC_DT_GROUNDING_MODEL`. Jeder Schritt schreibt Tokens und Kosten in `dt_grounding_steps` und `dt_llm_usage_events` (`mode = grounding.<Schritt>`).
+- **Website-Abgleich („Website prüfen“)**: Job `seo.grounding_check` (`lib/dt/seo/grounding-check/`, `lib/jobs/handlers/seo-grounding-check.ts`), ein Lauf je Zeile in `dt_grounding_runs`, höchstens einer gleichzeitig je Firma. Vier Schritte, jeder an der Zeile gespeichert; was nicht mehr in den Worker-Aufruf passt, läuft beim nächsten weiter. **1 Website lesen**: Grounding Page über den Hub, sonst Footer-Link und übliche Pfade; llms.txt; höchstens 35 Seiten derselben Domain (Startseite, Impressum, Kontakt, Über uns, Team, Leistungen mit direkten Unterseiten, Standorte, FAQ, Referenzen; Links aus dem Hauptmenü zählen als Leistungen). Zeilen aus `dt_site_pages`, die jünger als 7 Tage sind, werden genommen, der Rest live geladen; das Impressum immer, obwohl die SEO-Analyse es auslässt. Jede Anfrage und jede Weiterleitung läuft durch `checkSafePublicUrl`. **2 Fakten erfassen** (Claude): Entitäten mit Klasse der Ontologie V2 und Schema.org-Typ, jeder Fakt mit Quell-URL und wörtlichem Zitat; die App prüft, dass das Zitat auf der Seite steht, sonst wird daraus ein offener Punkt. Fragebogen, Onboarding und Wunschkunden-Wissen dienen nur als Gegenprobe. **3 Vergleichen**: die bestehende Seite (JSON-LD, `<dl>`-Listen, FAQ) und ihre llms.txt werden ins selbe Faktenmodell gelesen; Telefon, E-Mail, URLs, Adressen, Daten, Personen und Leistungen vergleicht der Code, Claude nur die Bedeutung von Beschreibungen und FAQ. Dazu die Befunde zum Standard v1.7 (fehlende Prüfangaben, alte Einleitungsbox, „Konfidenz“, fehlende Abgrenzung oder FAQ, JSON-LD ohne Gegenstück auf der Seite). Ergebnis: `create`, `update_required`, `refresh_only` oder `up_to_date`. **4 Entwurf**: grounding.html aus einer Vorlage (statisch, ohne JavaScript, JSON-LD mit Organization `<origin>/#organization`, LocalBusiness, Person, Service, FAQPage, BreadcrumbList, WebPage) und llms.txt im Hausstil von sichtbarkeitsmeister.de/llms.txt; Claude schreibt nur Titel, Meta-Description und Einleitung. Danach prüft der Code die Dateien. Die Regeln des Standards stehen an einer Stelle: `lib/dt/prompts/grounding-page-standard.ts`. Modell `ANTHROPIC_DT_GROUNDING_MODEL`, sonst `ANTHROPIC_DT_SEO_MODEL`; Schlüssel wie beim Grounding-Agenten; Tokens in `dt_llm_usage_events` (`mode = grounding_check.<Schritt>`). Automatisch: pg_cron `dt_grounding_schedule_daily` stellt täglich den Job `seo.grounding_schedule` an. Er startet eine Prüfung, wenn der Hub bald fällig, überfällig oder ohne Datum ist oder es keine Grounding Page gibt, und kein Lauf offen ist (läuft, Entwurf, freigegeben). Je Fälligkeitsfenster gibt es einen Lauf, eine überfällige Seite wird monatlich erneut geprüft, eine Firma ohne Seite alle drei Monate; höchstens 10 je Tag.
 - **Schalter „Grounding Page“ im SEO-Chat** (Kopfzeile, `lib/dt/prompts/grounding-mode.ts`): für Bestand, Faktenlage, Planung der Entitätsseiten und Fragen zur Freigabe. Die Seite selbst baut der Chat nicht; er verweist auf „Entwurf erstellen“ im Tab. Der Schalter wird per `groundingMode` an `/api/dt/chats/[chatId]/messages`, `/api/dt/ghost/chat`, n8n und den Agent-Kontext (`groundingMode=1`) übergeben; „Text“ und „Grounding Page“ schließen sich aus. Der Tab öffnet den Chat mit `?tab=chat&grounding=1`.
 - **Tab Grounding**: Status, Hub, Entitätsseiten, llms.txt, je Seite der Entwurf des Agenten. Menschliche Schritte: „Von Seite lesen“, Fragen beantworten, „Freigabe dokumentieren“ (Prüfer + Prüfdatum) und „Entfernen“.
 - **Soft-404**: Leitet eine Website unbekannte Pfade (z. B. `/grounding/`) mit Status 200 auf die Startseite um, gilt das nicht als Fund. Die Startseite kann nicht als Grounding Page erfasst werden, und „Von Seite lesen“ übernimmt kein Datum von einer Weiterleitung auf die Startseite.
@@ -644,13 +665,15 @@ Alle Mails gehen über SMTP (`lib/email/mailer.ts`). Versandversuche stehen in d
 
 ### Jobs
 
-Es gibt drei Job-Arten:
+Diese Job-Arten gibt es:
 
 | Art | Was sie tut |
 |---|---|
 | `seo.crawl` | Arbeitet die Warteschlange der Website-Prüfung ab. |
 | `leadinfo.normalize` | Macht aus einem rohen Leadinfo-Ereignis einen lesbaren Eintrag. |
 | `grounding.page` | Erstellt eine Grounding Page unter **SEO Modus → Grounding** in vier Schritten (1 Fakten sammeln, 2 Faktencheck, 3 Seite bauen, 4 Endprüfung); hält an, wenn der Faktencheck Fragen an den Kunden hat, und endet mit der HTML-Datei zur menschlichen Prüfung. Ergebnisse in `dt_grounding_pages` und `dt_grounding_steps`. |
+| `seo.grounding_check` | Website-Abgleich unter **SEO Modus → Grounding** („Website prüfen“): Website lesen, Fakten erfassen, mit der Grounding Page vergleichen, bei Bedarf Entwurf (grounding.html und llms.txt) zur menschlichen Prüfung. Ergebnisse in `dt_grounding_runs`. Veröffentlicht nichts. |
+| `seo.grounding_schedule` | Täglicher Durchlauf (pg_cron `dt_grounding_schedule_daily`): stellt für fällige Firmen ohne offenen Lauf eine automatische `seo.grounding_check` an. |
 | `content.page` | Schreibt den Text einer Seite unter **Verwaltung → Texte**: so viele Schritte, wie in einen Aufruf passen (1 Analyse, 2 SEO, 3 Faktencheck, 4 GEO, 5 Hormozi, 6 Vermenschlichung, 7 Lektorat, 8 Watermark Entfernung, 9 Endabnahme), dann stellt er sich für den Rest wieder an. Er hält an, sobald eine Angabe fehlt (Fragen des Faktenchecks oder ein Platzhalter im Text, „Braucht Sie“), und nach der Endabnahme bis zur Freigabe. Jeder Fehler – auch ein unterbrochener Worker – zählt als Versuch; nach drei Versuchen pausiert die Seite mit Grund. Ergebnisse liegen in `dt_content_pages` und `dt_content_steps`. Fakten kommen aus dem Anbieter-Fragebogen und aus den ausgewerteten Gesprächen. |
 
 Ein Job, der zu oft scheitert, bleibt als fehlgeschlagen liegen und ist unter **Jobs** sichtbar.
@@ -719,6 +742,8 @@ Zuerst immer den Probelauf. Danach `OLD_SUPABASE_SERVICE_ROLE_KEY` entfernen.
 | SEO-Bericht startet nicht | `N8N_DT_SEO_REPORT_WEBHOOK`, `APP_BASE_URL` (muss aus dem Internet erreichbar sein), `DT_INTERNAL_WEBHOOK_SECRET` ist in Vercel und in n8n gleich. |
 | Crawl bleibt stehen | In Supabase `app_settings`: `app_base_url` und `jobs_worker_token`. Der Token muss `JOBS_WORKER_TOKEN` gleichen. Extensions `pg_cron` und `pg_net` müssen an sein. Danach die Seite **Jobs**. |
 | Texte-Seite steht auf „Wartet … auf den Start“ | Gleiche Ursache wie beim Crawl: `app_settings` und `JOBS_WORKER_TOKEN`. Steht dort „erneuter Versuch“ oder „Fehler in Schritt“, steht der Grund daneben (`ANTHROPIC_DT_CONTENT_API_KEY`, Ratenlimit, Zeitlimit). |
+| „Website prüfen“ bleibt auf „Prüfung läuft“ | Gleiche Ursache wie beim Crawl: `app_settings` und `JOBS_WORKER_TOKEN`. Ein abgebrochener Job wird beim nächsten Laden als „Fehlgeschlagen“ mit Grund angezeigt; danach neu starten. |
+| Freigabe im Website-Abgleich geht nicht | Die technische Prüfung meldet einen Fehler (z. B. Fakt im HTML, der im JSON-LD fehlt). Die Meldung steht über der Vorschau; im HTML korrigieren oder die Fakten neu erzeugen. |
 | Jemand sieht eine Firma oder einen Bericht nicht | Plattform-Rolle und Firmen-Rolle (Abschnitt 3). SEO-Modus ist nur für Plattform-Admins. Berichte auch für den Inhaber. |
 | Upload scheitert | Die Buckets `dt-chat-attachments` und `ai-chat-attachments` existieren nur, wenn die Migrationen liefen. |
 | Änderung an der Datenbank ist im Code unbekannt | `npm run types:generate` und die neue Datei mit committen. |
@@ -783,12 +808,12 @@ Man muss sie nicht auswendig lernen. Sie sind nach Thema sortiert.
 |---|---|
 | `lib/supabase/` | Verbindung zur Datenbank: Browser, Server, Service-Role, Türsteher. |
 | `lib/dt/` | DigitalTwin: Chat, Avatare, Prompts, Onboarding, SEO, Transkripte. |
-| `lib/dt/seo/` | SEO-Berichte, Crawl, Search Console, Aufgaben. |
+| `lib/dt/seo/` | SEO-Berichte, Crawl, Search Console, Aufgaben, Grounding (`grounding-check/` ist der Website-Abgleich). |
 | `lib/dt/onboarding/` | Onboarding inklusive Verschlüsselung der Zugangsdaten. |
 | `lib/ai/` | DigitalTwin-Hilfe, Fragebogen-Aktionen und Claude-Helfer. `lib/help/` hält das Handbuch des Assistenten. |
 | `lib/surveys/` | Fragebogen-Regeln, Typen, Speichern. |
 | `lib/email/` | SMTP, Vorlagen, Einladung, Willkommen, Versand-Protokoll. |
-| `lib/jobs/` | Die zwei Hintergrund-Jobs und die Warteschlange. |
+| `lib/jobs/` | Die Hintergrund-Jobs und die Warteschlange. |
 | `lib/dashboard/` | Firmen-Übersicht und Plattform-Admin. |
 | `lib/types/supabase.ts` | Aus der Datenbank erzeugte Typen. Nicht von Hand pflegen. |
 | `lib/app-url.ts` | Baut aus `APP_BASE_URL` die Links in Mails. |
