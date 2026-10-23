@@ -12,8 +12,10 @@ import {
   MAX_KEY_PAGES,
   classifyKeyPage,
   extractJsonLdBlocks,
+  homePageText,
   homepageLinks,
   profileLinks,
+  readableText,
   selectKeyPages,
 } from "../lib/dt/seo/grounding-check/crawl";
 import { evaluateAiCrawlerAccess, isPathAllowed, parseRobotsTxt } from "../lib/dt/seo/grounding-check/robots";
@@ -98,6 +100,23 @@ const profiles = profileLinks(
   `${site}/`,
 );
 assert.deepEqual(profiles, ["https://www.linkedin.com/company/beispiel/"], "own profiles only, no share buttons or bare hosts");
+
+const homeText = homePageText("x".repeat(20_000), "Musterstraße 12, 59065 Hamm", ["https://www.linkedin.com/company/beispiel/"]);
+assert.ok(homeText.startsWith("[Profile] https://www.linkedin.com/company/beispiel/\n[Footer] Musterstraße 12"), "profiles and footer survive clipping");
+assert.ok(homeText.length <= 12_000);
+assert.equal(homePageText("Nur Text", "", []), "Nur Text");
+
+const wordpress = `<html><body><header><nav><a href="/">Start</a><a href="/leistungen/">Leistungen</a></nav></header>
+<div class="content"><h1>Impressum</h1><p>Beispiel Bau GmbH</p><ul><li>Von-Galen-Straße 40</li><li>59063 Hamm</li></ul>
+<p>Geschäftsführerin:<br>Anna Muster</p><span>Tel.</span><span>02381 1</span><script>var x = 1;</script></div>
+<footer><p>Standort in Hamm</p></footer></body></html>`;
+const readable = readableText(wordpress);
+assert.ok(readable.includes("Von-Galen-Straße 40\n59063 Hamm"), "block elements do not glue numbers");
+assert.ok(readable.includes("Geschäftsführerin:\nAnna Muster"));
+assert.ok(!readable.includes("Leistungen"), "menus are dropped");
+assert.ok(!readable.includes("Standort in Hamm"), "footer is read separately");
+assert.ok(!readable.includes("var x"));
+assert.ok(readableText(wordpress, { stripChrome: false }).includes("Standort in Hamm"));
 
 // --- robots.txt -------------------------------------------------------------------------------
 const robots = `

@@ -11,7 +11,7 @@ import { decideGroundingCheck } from "../lib/dt/seo/grounding-check/decision";
 import { computeGroundingDiff, buildSemanticRequest } from "../lib/dt/seo/grounding-check/diff";
 import { normaliseSourceUrl, normalizeExtractedFactModel } from "../lib/dt/seo/grounding-check/fact-model";
 import { groundingCheckModels } from "../lib/dt/seo/grounding-check/model";
-import { normalizeSemanticVerdicts } from "../lib/dt/seo/grounding-check/prompts";
+import { extractSpec, normalizeSemanticVerdicts } from "../lib/dt/seo/grounding-check/prompts";
 import { shouldScheduleGroundingCheck } from "../lib/dt/seo/grounding-check/schedule";
 import { GROUNDING_REVIEW_CHECKLIST } from "../lib/dt/prompts/grounding-page-standard";
 import { PAGE_URL, SITE, websiteModel } from "./grounding-check-fixtures";
@@ -160,6 +160,26 @@ const verdicts = normalizeSemanticVerdicts(
 );
 assert.deepEqual(verdicts.entityMatches, []);
 assert.deepEqual(verdicts.definitionVerdicts.map((v) => v.id), ["organisation:definition"]);
+
+// --- extraction prompt: pages in order, site-wide JSON-LD once, internal data marked -----------
+const siteWide = '{"@type":"Organization","name":"Beispiel Bau GmbH"}';
+const spec = extractSpec({
+  organisationName: "Beispiel Bau GmbH",
+  websiteUrl: `${SITE}/`,
+  today: "2026-10-23",
+  pages: [
+    { url: `${SITE}/`, category: "home", title: "Start", text: "Willkommen", jsonLd: [siteWide] },
+    { url: impressum, category: "impressum", title: "Impressum", text: "HRB 12345", jsonLd: [siteWide] },
+  ],
+  internal: { anbieter: "Gegründet 2001", onboarding: "", wunschkunden: "" },
+  existingFacts: ["- Beispiel Bau GmbH / Telefon: 02381 1"],
+});
+assert.equal(spec.user.split(siteWide).length - 1, 1, "repeated JSON-LD is sent once");
+assert.ok(spec.user.indexOf("URL: " + impressum) < spec.user.indexOf(`URL: ${SITE}/\n`), "Impressum first");
+assert.match(spec.user, /Interne Daten \(keine Quelle für die Seite/);
+assert.match(spec.user, /bestehenden Grounding Page \(nur zum Gegenprüfen/);
+assert.match(spec.system, /Organization Entity Class: /, "ontology rules are in the prompt");
+assert.equal(spec.tool.name, "submit_fact_model");
 
 // --- models, checklist, tool_choice fallback --------------------------------------------------
 assert.deepEqual(groundingCheckModels({ ANTHROPIC_DT_GROUNDING_MODEL: "model-a", ANTHROPIC_DT_SEO_MODEL: "model-b" }), ["model-a", "model-b"]);

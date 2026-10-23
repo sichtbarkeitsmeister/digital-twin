@@ -154,11 +154,15 @@ function pagesBlock(pages: SnapshotPage[]): string {
   const sorted = [...pages].sort((a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category));
   let budget = TOTAL_PAGE_CHARS;
   const blocks: string[] = [];
+  // Site-wide JSON-LD (Yoast, Rank Math …) repeats on every page: send each block once.
+  const seenJsonLd = new Set<string>();
   for (const page of sorted) {
     if (budget <= 500) break;
     const text = clip(page.text, Math.min(PAGE_CHARS[page.category] ?? DEFAULT_PAGE_CHARS, budget));
     budget -= text.length;
-    const jsonLd = page.jsonLd.length > 0 ? `\nJSON-LD der Seite:\n${clip(page.jsonLd.join("\n"), 3_000)}` : "";
+    const fresh = page.jsonLd.filter((block) => !seenJsonLd.has(block));
+    for (const block of fresh) seenJsonLd.add(block);
+    const jsonLd = fresh.length > 0 ? `\nJSON-LD der Seite:\n${clip(fresh.join("\n"), 3_000)}` : "";
     blocks.push(`### ${page.title?.trim() || page.url}\nURL: ${page.url}\nArt: ${page.category}\n${text}${jsonLd}`);
   }
   return blocks.join("\n\n");

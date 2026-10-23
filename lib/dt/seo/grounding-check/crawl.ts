@@ -39,6 +39,8 @@ export const KEY_PAGE_LIMITS: Record<KeyPageCategory, number> = {
 export const MAX_KEY_PAGES = 35;
 /** dt_site_pages rows younger than this are used instead of a live fetch. */
 export const SITE_PAGE_FRESH_MS = 7 * 24 * 60 * 60 * 1000;
+/** Always fetched live (cache only as fallback): the fact-dense pages. */
+const LIVE_CATEGORIES = new Set<KeyPageCategory>(["impressum", "contact"]);
 const PAGE_TEXT_LIMIT = 12_000;
 const JSON_LD_LIMIT = 6_000;
 const PAGE_TIMEOUT_MS = 10_000;
@@ -226,10 +228,42 @@ export function profileLinks(html: string, pageUrl: string): string[] {
   return [...out].slice(0, 12);
 }
 
+const BLOCK_SELECTOR =
+  "p, div, li, dt, dd, h1, h2, h3, h4, h5, h6, td, th, tr, section, article, address, blockquote, br, figcaption, span.elementor-icon-list-text";
+
+/**
+ * Readable text of a page or fragment: line breaks between block elements (cheerio's
+ * .text() glues „Straße 40“ and „59063 Hamm“ into „4059063“), no menus.
+ */
+export function readableText(html: string, opts: { stripChrome?: boolean } = {}): string {
+  const $ = cheerio.load(html);
+  $("script, style, noscript, template, svg, iframe, form, button, select").remove();
+  if (opts.stripChrome !== false) $("header, nav, footer, [role='navigation'], [role='banner'], .menu, .sub-menu").remove();
+  $(BLOCK_SELECTOR).each((_, el) => {
+    $(el).append("\n");
+  });
+  const scope = $("main").length ? "main" : $("body").length ? "body" : null;
+  return (scope ? $(scope).text() : $.root().text())
+    .split("\n")
+    .map((line) => line.replace(/[ \t\u00a0]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Text of the homepage: profile links and footer (address, phone) first, so clipping a
+ * long page never drops them.
+ */
+export function homePageText(main: string | null | undefined, footer: string, profiles: string[]): string {
+  const extras = [profiles.length > 0 ? `[Profile] ${profiles.join(" ")}` : "", footer ? `[Footer] ${footer}` : ""].filter(Boolean).join("\n");
+  const room = Math.max(0, PAGE_TEXT_LIMIT - extras.length - 1);
+  return [extras, clipText(main).slice(0, room)].filter(Boolean).join("\n");
+}
+
 function footerText(html: string): string {
   const $ = cheerio.load(html);
-  $("script, style, noscript").remove();
-  return $("footer").text().replace(/\s+/g, " ").trim().slice(0, 2_500);
+  const footer = $("footer").toArray().map((el) => $.html(el)).join("\n");
+  return footer ? readableText(`<body>${footer}</body>`, { stripChrome: false }).replace(/\n/g, " · ").slice(0, 2_500) : "";
 }
 
 export type CrawledKeyPage = {
@@ -380,11 +414,7 @@ export async function collectWebsite(
       finalUrl: home.finalUrl,
       category: "home",
       title: homeParsed.title,
-      text: clipText(
-        [homeParsed.text_content, footer ? `[Footer] ${footer}` : "", profiles.length > 0 ? `[Profile] ${profiles.join(" ")}` : ""]
-          .filter(Boolean)
-          .join("\n"),
-      ),
+      text: homePageText(readableText(home.body) || homeParsed.text_content, footer, profiles),
       source: "live",
       jsonLd: extractJsonLdBlocks(home.body),
     },
@@ -395,21 +425,26 @@ export async function collectWebsite(
   const results = await mapLimit(rest, CONCURRENCY, async (target): Promise<CrawledKeyPage | CrawlFailure> => {
     const row = cache.get(target.url);
     const fresh = row?.crawled_at && now - new Date(row.crawled_at).getTime() < SITE_PAGE_FRESH_MS;
-    if (row && fresh && (row.text_content ?? "").trim().length >= 120) {
-      return {
-        url: target.url,
-        finalUrl: row.final_url || row.url,
-        category: target.category,
-        title: row.title ?? row.h1,
-        text: clipText(row.text_content),
-        source: "cache",
-        jsonLd: [],
-      };
-    }
+    const cached: CrawledKeyPage | null =
+      row && fresh && (row.text_content ?? "").trim().length >= 120
+        ? {
+            url: target.url,
+            finalUrl: row.final_url || row.url,
+            category: target.category,
+            title: row.title ?? row.h1,
+            text: clipText(row.text_content),
+            source: "cache",
+            jsonLd: [],
+          }
+        : null;
+    // Stored text glues block elements („Straße 4059063 Hamm“): Impressum and Kontakt carry
+    // the core facts, so they are read live and the cache only stands in when that fails.
+    if (cached && !LIVE_CATEGORIES.has(target.category)) return cached;
     if (Date.now() + PAGE_TIMEOUT_MS > input.deadline) {
-      return { url: target.url, category: target.category, reason: "Zeitlimit des Durchlaufs erreicht" };
+      return cached ?? { url: target.url, category: target.category, reason: "Zeitlimit des Durchlaufs erreicht" };
     }
     const res = await safeFetchText(target.url, { accept: HTML_ACCEPT, timeoutMs: PAGE_TIMEOUT_MS });
+    if (cached && (!res || !res.ok || !/html/i.test(res.contentType))) return cached;
     if (!res) return { url: target.url, category: target.category, reason: "nicht erreichbar" };
     if (!res.ok) return { url: target.url, category: target.category, reason: `HTTP ${res.status}` };
     if (!/html/i.test(res.contentType)) return { url: target.url, category: target.category, reason: "kein HTML" };
@@ -420,7 +455,7 @@ export async function collectWebsite(
       finalUrl: res.finalUrl,
       category: target.category,
       title: parsed.title,
-      text: clipText(parsed.text_content),
+      text: clipText(readableText(res.body) || parsed.text_content),
       source: "live",
       jsonLd: extractJsonLdBlocks(res.body),
     };
