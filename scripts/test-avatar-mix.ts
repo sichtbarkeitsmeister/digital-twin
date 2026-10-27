@@ -71,7 +71,12 @@ const ANNA_TEXT = `${AVATAR_GLOBAL_PROMPT_ANCHOR}
 Du bist Anna Becker, 46 Jahre alt, Hausverwalterin aus Mülheim. Die Treppenhäuser deiner Objekte sind seit Jahren nicht gestrichen.`;
 const BERND_TEXT = "Du bist Bernd Schulz, 58 Jahre alt, und willst die Fassade deines Hauses vor dem Verkauf streichen lassen.";
 const CLARA_TEXT = "Du bist Clara Weiß und suchst einen Maler für dein Ladenlokal.";
-const QUICK_ACTIONS = ["Erstgespräch durchspielen", "Angebotstext testen", "Einwand zum Preis üben", "Terminzusage formulieren"];
+const QUICK_ACTIONS = [
+  "Stell dich bitte vor",
+  "Woher kennt ihr uns?",
+  "Was belastet euch gerade am meisten?",
+  "Wie können wir euch helfen?",
+];
 
 function agent(partial: Partial<MixAgentRow> & Pick<MixAgentRow, "id" | "name">): MixAgentRow {
   return {
@@ -382,11 +387,25 @@ function testValidation() {
   expectOnly(mixResult({ promptTemplate: VALID_MIX.replace("ein Festpreis\n", "ein Festpreis – sofort\n") }), /Gedankenstrich/);
   expectOnly(mixResult({ promptTemplate: VALID_MIX.replace("ein Festpreis\n", "ein Festpreis — sofort\n") }), /Gedankenstrich/);
   expectOnly(mixResult({ quickActions: QUICK_ACTIONS.slice(0, 3) }), /3 Quick Actions statt 4 bis 6/);
-  expectOnly(mixResult({ quickActions: [...QUICK_ACTIONS, "Rückruf üben", "Festpreis erklären", "Referenz zeigen"] }), /7 Quick Actions statt 4 bis 6/);
+  expectOnly(
+    mixResult({
+      quickActions: [
+        ...QUICK_ACTIONS,
+        "Was hält euch vom Anfragen ab?",
+        "Wann braucht ihr eine Entscheidung?",
+        "Was wäre euch ein guter erster Schritt?",
+      ],
+    }),
+    /7 Quick Actions statt 4 bis 6/,
+  );
   for (const persona of ["Ich brauche ein Angebot", "Mir ist das zu teuer", "Mich ruft keiner zurück", "Meine Fassade bröckelt"]) {
     expectOnly(mixResult({ quickActions: [...QUICK_ACTIONS.slice(0, 3), persona] }), /Quick Action aus Sicht der Persona/);
   }
-  assert.deepEqual(validateMixResult(mixResult({ quickActions: [...QUICK_ACTIONS, "Mitarbeiterfrage testen"] })), []);
+  expectOnly(mixResult({ quickActions: [...QUICK_ACTIONS.slice(0, 3), "Einwand zum Preis üben"] }), /Übungsauftrag/);
+  assert.deepEqual(
+    validateMixResult(mixResult({ quickActions: [...QUICK_ACTIONS, "Was erwartest du von uns?"] })),
+    [],
+  );
 
   // Normalising tidies what the model keeps getting wrong: a code fence, text before the
   // anchor, dashes; Quick Actions sent as a JSON string are read back.

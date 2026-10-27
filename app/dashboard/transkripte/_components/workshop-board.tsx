@@ -1036,7 +1036,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                           </div>
                           <label className="grid gap-1 text-sm">
                             <span className="text-xs font-medium text-secondary">
-                              Quick Actions (eine pro Zeile, 4 bis 6)
+                              Schnelltests (eine pro Zeile, 4 bis 6 — Fragen an den Avatar)
                             </span>
                             <Textarea
                               value={draftForm(avatar).quickActions}

@@ -141,10 +141,10 @@ Du bist nur vormittags erreichbar und antwortest abends auf E-Mails.
 - Was du als Druck empfindest und abblockst: Rabatte mit Frist`;
 
 const QUICK_ACTIONS = [
-  "Angebot für drei Treppenhäuser vorstellen",
-  "Starttermin zusagen",
-  "Einwand zum Preis beantworten",
-  "Referenzobjekt in Mülheim zeigen",
+  "Stell dich bitte vor",
+  "Woher kennst du uns?",
+  "Was ist gerade dein Schmerzpunkt?",
+  "Was weißt du schon über uns?",
 ];
 
 const META = {
@@ -388,14 +388,34 @@ function testValidationRules() {
   );
   assert.match(hedgeErrors[0] ?? "", /zum Beispiel in „Manchmal bist du gereizt, weil/);
 
-  // 9 Quick Actions: 4 to 6, from the employee's view
+  // 9 Quick Actions: 4 to 6, spoken to the avatar (not training tasks / not persona-Ich)
   expectOnly(finished({}, { quickActions: QUICK_ACTIONS.slice(0, 3) }), /3 Quick Actions statt 4 bis 6/);
-  expectOnly(finished({}, { quickActions: [...QUICK_ACTIONS, "A", "B", "C"] }), /7 Quick Actions statt 4 bis 6/);
+  expectOnly(
+    finished({}, {
+      quickActions: [
+        ...QUICK_ACTIONS,
+        "Was hält dich vom Anfragen ab?",
+        "Wann brauchst du eine Entscheidung?",
+        "Was wäre dir ein guter erster Schritt?",
+      ],
+    }),
+    /7 Quick Actions statt 4 bis 6/,
+  );
   for (const persona of ["Ich brauche dringend Hilfe", "Mir ist das zu teuer", "Mich nervt das", "Mein Treppenhaus ist kaputt", "Meine Mieter beschweren sich"]) {
     expectOnly(finished({}, { quickActions: [...QUICK_ACTIONS.slice(0, 3), persona] }), /Quick Action aus Sicht der Persona/);
   }
+  for (const task of ["Einwand zur Einzelbewertung entkräften", "Erstkontakt per E-Mail simulieren", "Reaktion auf Skepsis trainieren"]) {
+    expectOnly(finished({}, { quickActions: [...QUICK_ACTIONS.slice(0, 3), task] }), /Übungsauftrag/);
+  }
+  expectOnly(
+    finished({}, { quickActions: [...QUICK_ACTIONS.slice(0, 3), "Angebot für drei Treppenhäuser"] }),
+    /keine Gesprächsansprache/,
+  );
   assert.deepEqual(
-    validateAvatarResult(finished({}, { quickActions: [...QUICK_ACTIONS.slice(0, 3), "Meinung zum Angebot einholen"] }), { otherAgentNames: [] }),
+    validateAvatarResult(
+      finished({}, { quickActions: [...QUICK_ACTIONS.slice(0, 3), "Was hält dich vom Anfragen ab?"] }),
+      { otherAgentNames: [] },
+    ),
     [],
   );
 
