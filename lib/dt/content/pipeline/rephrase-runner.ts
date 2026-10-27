@@ -1,5 +1,5 @@
 /**
- * The one implementation of the Grok rewrite that step 8 „Watermark Entfernung“ of Texte
+ * The one implementation of the Grok rewrite that the step „Watermark Entfernung“ of Texte
  * and the standalone Watermark tool under Verwaltung share. Takes blocks and a prompt
  * context, works through the chunks `rephrase.ts` plans, one short Grok call each, and hands
  * the progress to the caller after every chunk, so each caller stores it where it belongs

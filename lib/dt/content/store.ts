@@ -16,6 +16,7 @@ import {
   type ContentBriefingPage,
   type ContentPageKeywords,
 } from "@/lib/dt/content/excel-structure";
+import { readContentFreshness, reviewFreshness } from "@/lib/dt/content/freshness";
 import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
 import type { ContentAnrede, ContentTextSettings } from "@/lib/dt/content/mapping";
 import { cleanTextSettings } from "@/lib/dt/content/mapping";
@@ -28,6 +29,7 @@ import {
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
 import {
+  CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
   CONTENT_STEP_LEKTORAT,
@@ -47,6 +49,7 @@ import { parseWebsiteStructure, type WebsiteStructureNode } from "@/lib/dt/seo/w
 import type {
   ContentAction,
   ContentFinding,
+  ContentFreshness,
   ContentOverview,
   ContentPageBriefing,
   ContentPageSource,
@@ -96,6 +99,8 @@ export type ContentPageRow = {
   unresolved: ContentFinding[];
   questions: ContentQuestion[];
   notes: string[];
+  /** State of the Aktualitätsprüfung (updates, the one send-back to GEO); `{}` until it ran. */
+  freshness: ContentFreshness;
   error: string | null;
   job_id: string | null;
   cost_eur: number | string;
@@ -138,10 +143,15 @@ export type ContentSettingsRow = {
 const BRIEFING_COLUMNS =
   "page_role, page_type, pillar_name, estimated_traffic, keywords, h1_options, user_questions, ki_prompt, internal_link_targets";
 
-export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at`;
+/**
+ * `freshness` is read everywhere on purpose: without the migration 20261027 the step numbers
+ * of stored pages are the old ones, so every read fails with the migration's name
+ * (`contentDbErrorMessage`) instead of showing wrong steps or running the wrong one.
+ */
+export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, freshness, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** Light projection for the overview table (no HTML). */
-const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, error, job_id, cost_eur, started_by, created_at, updated_at`;
+const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, freshness, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** What the prompts see of the other pages (cannibalisation, deferred questions). */
 const OUTLINE_COLUMNS = "slug, name, path, level, source, page_role, page_type, pillar_name, main_keyword, keywords";
@@ -157,11 +167,16 @@ export const CONTENT_MIGRATION_FILE = "database/migrations/20261006_dt_content_p
 export const CONTENT_SOURCE_MIGRATION_FILE = "database/migrations/20261008_dt_content_pages_source.sql";
 export const CONTENT_BRIEFING_MIGRATION_FILE = "database/migrations/20261009_dt_content_excel_briefing.sql";
 export const CONTENT_NINE_STEPS_MIGRATION_FILE = "database/migrations/20261011_dt_content_nine_steps.sql";
+/**
+ * Ten steps (Aktualitätsprüfung as step 5): widens the step CHECKs, renumbers stored steps
+ * 5 … 9 to 6 … 10 and adds `dt_content_pages.freshness`. Must run before the code is deployed.
+ */
+export const CONTENT_AKTUALITAET_MIGRATION_FILE = "database/migrations/20261027_dt_content_aktualitaet.sql";
 export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
 /** The latest migration that lists every page type in the CHECK of `dt_content_pages.page_type`. */
 export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
 
-/** 23514 on the step CHECK: the database still allows steps 1 … 8 only (migration 20261011 never ran). */
+/** 23514 on the step CHECK: the database still allows fewer steps than the code has (migration 20261027 never ran). */
 export function isContentStepRangeError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   return error.code === "23514" && /step_check|\bstep\b/i.test(error.message ?? "");
@@ -186,6 +201,11 @@ export function isMissingContentTableError(error: { code?: string; message?: str
   return error.code === "PGRST205" || /schema cache|does not exist/i.test(error.message ?? "");
 }
 
+/** `column dt_content_pages.freshness does not exist` (select) or PGRST204 (write): the Aktualitätsprüfung migration never ran. */
+export function isMissingFreshnessColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  return Boolean(error) && isMissingContentColumnError(error) && /freshness/i.test(error?.message ?? "");
+}
+
 /** `column dt_content_pages.source does not exist` (select) or PGRST204 (write): the source migration never ran. */
 export function isMissingContentColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
@@ -199,7 +219,10 @@ export function isMissingContentColumnError(error: { code?: string; message?: st
 
 export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
   if (isContentStepRangeError(error)) {
-    return `Die Datenbank kennt nur acht Schritte: Bitte ${CONTENT_NINE_STEPS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+    return `Die Datenbank kennt noch nicht alle ${CONTENT_STEP_COUNT} Schritte (Aktualitätsprüfung): Bitte ${CONTENT_AKTUALITAET_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+  }
+  if (isMissingFreshnessColumnError(error)) {
+    return `Die Datenbank ist noch nicht auf ${CONTENT_STEP_COUNT} Schritte mit Aktualitätsprüfung umgestellt: Bitte ${CONTENT_AKTUALITAET_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin läuft in Texte kein Schritt.`;
   }
   if (isContentBrancheCheckError(error)) {
     return `Die Datenbank erlaubt für die Branche noch nur drei feste Werte: Bitte ${CONTENT_BRANCHE_TEXT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
@@ -272,6 +295,7 @@ function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
     unresolved: asArray<ContentFinding>(raw.unresolved),
     questions: asArray<ContentQuestion>(raw.questions),
     notes: asArray<string>(raw.notes).filter((n) => typeof n === "string"),
+    freshness: readContentFreshness(raw.freshness),
   };
 }
 
@@ -368,6 +392,31 @@ export async function loadContentPages(
     .limit(MAX_PAGES);
   if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
   return ((data ?? []) as unknown as Record<string, unknown>[]).map(normalizePageRow);
+}
+
+/**
+ * Steps from `fromStep` on back to pending, their outputs and costs gone (the page keeps its
+ * cost). „Mit Anmerkung wiederholen“ and the Aktualitätsprüfung's send-back to GEO use it.
+ */
+export async function resetContentStepsFrom(service: SupabaseClient, pageId: string, fromStep: number): Promise<void> {
+  const { error } = await service
+    .from("dt_content_steps")
+    .update({
+      status: "pending",
+      output: null,
+      error: null,
+      model: null,
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_eur: 0,
+      started_at: null,
+      finished_at: null,
+      approved_by: null,
+      approved_at: null,
+    })
+    .eq("page_id", pageId)
+    .gte("step", fromStep);
+  if (error) throw new Error(contentDbErrorMessage(error, "Schritte konnten nicht zurückgesetzt werden"));
 }
 
 /** Throws on a database error: an empty list would restart the pipeline at step 1. */
@@ -1191,6 +1240,7 @@ export function buildReview(
     final_findings: page.final_findings,
     unresolved: page.unresolved,
     questions: page.state === "braucht_sie" ? page.questions : [],
+    freshness: reviewFreshness(page.freshness),
     steps: stepList(steps),
     actions: pageActions(page),
   };

@@ -1,5 +1,5 @@
 /**
- * Step 8 „Watermark Entfernung“ on Grok, the pure parts. The page is rewritten in small
+ * The step „Watermark Entfernung“ on Grok, the pure parts. The page is rewritten in small
  * groups of sections, one short Grok call each, and the progress is saved on the step row
  * after every group. A job tick that runs out of time hands the step back half done; the
  * next tick continues where it stopped. `run-step.ts` drives the calls, `prompts.ts` builds

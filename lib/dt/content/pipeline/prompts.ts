@@ -1,7 +1,9 @@
 /**
- * Prompts, tool schemas and output normalisation for the eight steps, ported from the
- * rules of the old Step-by-Step-Content-Agent (step1_analyse … step5_vermenschlichung).
- * Pure: no Supabase, no Anthropic client. `run-step.ts` wires them to the model.
+ * Prompts, tool schemas and output normalisation for the steps, ported from the rules of the
+ * old Step-by-Step-Content-Agent (step1_analyse … step5_vermenschlichung). The
+ * Aktualitätsprüfung (two calls, web search) has its own module, `aktualitaet.ts`, built from
+ * the helpers exported here. Pure: no Supabase, no Anthropic client. `run-step.ts` wires them
+ * to the model.
  *
  * Every step receives the same context blocks: the page with its Excel briefing, the
  * Anbieterfakten (only source of facts), the confirmed settings (Anrede, Branche,
@@ -25,9 +27,15 @@ import {
 } from "@/lib/dt/content/page-types";
 import { REPHRASE_SYSTEM, rephraseChunkHtml } from "@/lib/dt/content/pipeline/rephrase";
 import {
+  CONTENT_STEP_AKTUALITAET,
   CONTENT_STEP_ANALYSE,
+  CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_GEO,
+  CONTENT_STEP_HORMOZI,
   CONTENT_STEP_LEKTORAT,
+  CONTENT_STEP_SEO,
+  CONTENT_STEP_VERMENSCHLICHUNG,
   CONTENT_STEP_WATERMARK,
 } from "@/lib/dt/content/pipeline/steps";
 import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
@@ -35,6 +43,7 @@ import {
   CONTENT_FLOSKELN,
   CONTENT_FUELLWOERTER,
   CONTENT_HERO_PLACEHOLDER,
+  CONTENT_HERO_PLACEHOLDER_LEGACY,
   KEEP_RULES,
   fillContentStepPrompt,
   resolveContentStepPrompt,
@@ -43,7 +52,7 @@ import {
 } from "@/lib/dt/content/step-prompts";
 import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
-import type { ContentFinding, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
+import type { ContentFinding, ContentFreshness, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
 
 /**
  * Where a page of the prompt comes from: the Excel structure, the crawl, or — only in the
@@ -97,9 +106,16 @@ export type ContentPipelineContext = {
   stepPrompts?: Partial<ContentStepPrompts>;
   /** Human notes from "Mit Anmerkung wiederholen", oldest first. */
   notes: string[];
+  /**
+   * The Aktualitätsprüfung's state on this page (`dt_content_pages.freshness`). GEO reads its
+   * `pending_sections` after a send-back; the standalone tools have none.
+   */
+  freshness?: ContentFreshness;
+  /** Open points on the page (`dt_content_pages.findings`); the Endabnahme lists the ones still open. */
+  openFindings?: ContentFinding[];
   /** Normalised outputs of earlier steps, by step number. */
   outputs: Partial<Record<number, unknown>>;
-  /** Current text (page HTML parsed into blocks); empty before step 2. */
+  /** Current text (page HTML parsed into blocks); empty before the SEO step. */
   blocks: ContentTextBlock[];
   title: string | null;
   metaDescription: string | null;
@@ -189,7 +205,7 @@ export type ContentStepSpec = {
 };
 
 // Defined with the editable step defaults (step-prompts.ts), which quote them; kept importable from here.
-export { CONTENT_FLOSKELN, CONTENT_FUELLWOERTER, CONTENT_HERO_PLACEHOLDER, KEEP_RULES };
+export { CONTENT_FLOSKELN, CONTENT_FUELLWOERTER, CONTENT_HERO_PLACEHOLDER, CONTENT_HERO_PLACEHOLDER_LEGACY, KEEP_RULES };
 export const CONTENT_HERO_BLOCK_ID = "hero";
 /** Sum of the five self-scores (1–10 each) under which the Vermenschlichung tries once more. */
 export const CONTENT_SELF_SCORE_MIN = 35;
@@ -282,7 +298,7 @@ export function normalizeQuestions(raw: unknown, knownBlockIds: ReadonlySet<stri
     if (!question) continue;
     const blockId = str(r.block_id, 80);
     out.push({
-      kind: ["fact", "decision", "missing"].includes(String(r.kind)) ? String(r.kind) : "fact",
+      kind: ["fact", "decision", "missing", "outdated"].includes(String(r.kind)) ? String(r.kind) : "fact",
       question,
       field: str(r.field, 80) || null,
       placeholder: str(r.placeholder, 200) || null,
@@ -435,7 +451,7 @@ function sourceLine(page: ContentPipelinePage): string {
   return "Crawl der bestehenden Website (kein Briefing, Keywords und Fragen werden hier erarbeitet)";
 }
 
-function pageBlock(context: ContentPipelineContext): string {
+export function pageBlock(context: ContentPipelineContext): string {
   const { page } = context;
   const standalone = page.source === "standalone";
   const briefing = briefingLabel(page);
@@ -507,7 +523,7 @@ export const REPHRASE_OWN_VORGABEN = [
   "Anrede (Sie oder Du) und Tonalität wie im gelieferten Text beibehalten.",
 ].join("\n");
 
-function notesBlock(context: RephrasePromptContext): string {
+export function notesBlock(context: RephrasePromptContext): string {
   return formatNotes([
     ...(context.page?.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
     ...context.notes.map((n) => clip(n, 2_000)),
@@ -543,7 +559,7 @@ export const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte f�
 Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`;
 
-const BLOCKS_SCHEMA = {
+export const BLOCKS_SCHEMA = {
   type: "array",
   description:
     "Der komplette Text als geordnete Abschnitte. Der erste Abschnitt trägt die H1 (level 1), danach H2 (level 2), bei Bedarf H3 (level 3). Bestehende ids beibehalten.",
@@ -577,7 +593,7 @@ const FINDINGS_SCHEMA = {
   },
 } as const;
 
-const TEXT_PROPERTIES = {
+export const TEXT_PROPERTIES = {
   title: { type: "string", description: "Title-Tag, max. 60 Zeichen. Leer lassen, wenn unverändert." },
   meta_description: { type: "string", description: "Meta-Description, max. 155 Zeichen. Leer lassen, wenn unverändert." },
   blocks: BLOCKS_SCHEMA,
@@ -615,7 +631,7 @@ export function contentStepPromptVariables(context: {
     mindest_fragen: ratgeber ? "5" : "3",
     abschluss: ratgeber
       ? "Zum Schluss ein weicher nächster Schritt (Abschnitt id „naechster-schritt“): weiterlesen, unverbindlich fragen – ohne Dringlichkeit, nur Kontaktwege aus den Fakten."
-      : "Handlungsaufforderung am Ende (Abschnitt id „kontakt“): nur Kontaktwege, die in den Fakten stehen. Schritt 5 schärft sie.",
+      : `Handlungsaufforderung am Ende (Abschnitt id „kontakt“): nur Kontaktwege, die in den Fakten stehen. Schritt ${CONTENT_STEP_HORMOZI} (Hormozi) schärft sie.`,
     firmenname: context.organisationName || "[Firmenname]",
     cta_regel: ratgeber
       ? "Ratgeberartikel: Problem–Lösung-Zyklus, am Ende ein weicher nächster Schritt (weiterlesen, unverbindlich fragen). Kein harter Verkauf, keine Dringlichkeit."
@@ -624,7 +640,7 @@ export function contentStepPromptVariables(context: {
 }
 
 /** The step's own instruction: the text saved under Globale Prompts, or the default; page parts filled in. */
-function stepInstruction(context: ContentPipelineContext, key: ContentStepPromptKey): string {
+export function stepInstruction(context: ContentPipelineContext, key: ContentStepPromptKey): string {
   return fillContentStepPrompt(resolveContentStepPrompt(key, context.stepPrompts?.[key]), contentStepPromptVariables(context));
 }
 
@@ -633,11 +649,11 @@ function stepInstruction(context: ContentPipelineContext, key: ContentStepPrompt
  * after it — the locked rules, step-specific blocks (SEO: Texter prompt and Textvorlage) and
  * the Branchenregel. The user message and the tool schema stay with the spec.
  */
-function stepSystem(instruction: string, settings: ContentTextSettings, extra: readonly string[] = []): string {
+export function stepSystem(instruction: string, settings: ContentTextSettings, extra: readonly string[] = []): string {
   return join([instruction, BASE_RULES, ...extra, brancheRules(settings)]);
 }
 
-// --- the eight steps ---------------------------------------------------------------------------
+// --- the steps ---------------------------------------------------------------------------------
 
 function analyse(context: ContentPipelineContext): ContentStepSpec {
   const { page } = context;
@@ -647,7 +663,7 @@ function analyse(context: ContentPipelineContext): ContentStepSpec {
     maxTokens: 6_000,
     system: `${BASE_RULES}
 
-Schritt 1 Analyse: Du legst fest, wonach Menschen suchen, wenn sie diese Seite brauchen, welche Fragen sie dabei haben, was die Seite leisten muss und welche Fakten dafür belegt sind. Du schreibst die Seite NICHT.
+Schritt ${CONTENT_STEP_ANALYSE} Analyse: Du legst fest, wonach Menschen suchen, wenn sie diese Seite brauchen, welche Fragen sie dabei haben, was die Seite leisten muss und welche Fakten dafür belegt sind. Du schreibst die Seite NICHT.
 
 Suchintention: intent.primary ist genau einer von ${CONTENT_INTENTS.join(" | ")}; modifiers aus ${CONTENT_INTENT_MODIFIERS.join(" | ")} (mehrere möglich, ymyl = Gesundheit, Recht, Geld). journey_phase: ${CONTENT_JOURNEY_PHASES.join(" | ")}. conversion_goal: ${CONTENT_CONVERSION_GOALS.join(" | ")}. content_angle: ${CONTENT_ANGLES.join(" | ")}. Nur diese Werte.
 Keywords: ${
@@ -849,7 +865,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
     ]),
     user: join([
       pageBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1)"),
+      outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE})`),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
@@ -920,7 +936,7 @@ export const GEO_MAX_TOKENS = 12_000;
 const DEFAULT_GEO_INSTRUCTION = resolveContentStepPrompt("geo", null);
 
 /**
- * System prompt of step 4. The standalone GEO tool (Verwaltung → GEO) sends exactly this
+ * System prompt of the GEO step. The standalone GEO tool (Verwaltung → GEO) sends exactly this
  * prompt, so an uploaded text is reworked by the same rules as a page of the pipeline. The
  * instruction is the saved GEO text from Globale Prompts (or the default), already filled.
  */
@@ -934,10 +950,36 @@ export const GEO_TOOL: Anthropic.Tool = {
   input_schema: TEXT_TOOL_SCHEMA,
 };
 
-/** Step 4's answer → text; a dropped hero block comes back from the previous text. */
+/** The GEO step's answer → text; a dropped hero block comes back from the previous text. */
 export function normalizeGeoOutput(json: unknown, context: ContentCurrentText): TextOutput {
   const out = normalizeTextOutput(json, context);
   return { ...out, blocks: keepHeroBlock(out.blocks, context.blocks) };
+}
+
+/**
+ * The outdated Abschnitte the Aktualitätsprüfung sent back to GEO (once per run). Its own
+ * block, not the editor's notes: the notes are confirmed facts, these are proposals with
+ * web sources. Empty when nothing waits.
+ */
+export function freshnessSendBackBlock(context: Pick<ContentPipelineContext, "freshness">): string {
+  const sections = context.freshness?.pending_sections ?? [];
+  if (sections.length === 0) return "";
+  return [
+    "## Aktualitätsprüfung – bitte umsetzen",
+    `Die Aktualitätsprüfung (Schritt ${CONTENT_STEP_AKTUALITAET}) hat diese Abschnitte als veraltet gemeldet. Überarbeite sie nach dem Vorschlag; öffentliche Fakten aus den genannten Quellen dürfen dafür in den Text, Angaben über den Kunden weiter nur aus den Anbieterfakten. Quellen und URLs gehören nicht in den Text. Danach prüft die Aktualitätsprüfung den Text noch einmal.`,
+    ...sections.map((section, i) =>
+      [
+        `${i + 1}. Abschnitt „${section.section}“${section.block_id ? ` (id ${section.block_id})` : ""}`,
+        section.problem ? `Problem: ${section.problem}` : "",
+        section.suggestion ? `Vorschlag: ${section.suggestion}` : "",
+        section.sources.length > 0
+          ? `Quellen: ${section.sources.map((src) => (src.title ? `${src.title} – ${src.url}` : src.url)).join("; ")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    ),
+  ].join("\n\n");
 }
 
 function geo(context: ContentPipelineContext): ContentStepSpec {
@@ -947,8 +989,9 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
     user: join([
       pageBlock(context),
       currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1) – Fragen, die der Text abdecken muss"),
-      outputBlock(context, CONTENT_STEP_FAKTENCHECK, "Faktencheck (Schritt 3) – umsetzen"),
+      outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – Fragen, die der Text abdecken muss`),
+      outputBlock(context, CONTENT_STEP_FAKTENCHECK, `Faktencheck (Schritt ${CONTENT_STEP_FAKTENCHECK}) – umsetzen`),
+      freshnessSendBackBlock(context),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
@@ -969,7 +1012,7 @@ function hormozi(context: ContentPipelineContext): ContentStepSpec {
     user: join([
       pageBlock(context),
       currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, "Analyse (Schritt 1) – hormozi, conversion_goal und usable_facts"),
+      outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – hormozi, conversion_goal und usable_facts`),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
@@ -1088,18 +1131,26 @@ function lektorat(context: ContentPipelineContext): ContentStepSpec {
   };
 }
 
+/** Open points still on the page when the Endabnahme runs (the Aktualitätsprüfung's ones survive the later rewrites). */
+function openFindingsBlock(context: Pick<ContentPipelineContext, "openFindings">): string {
+  const findings = context.openFindings ?? [];
+  if (findings.length === 0) return "";
+  return `## Offene Punkte aus früheren Schritten (z. B. Aktualitätsprüfung) – in unresolved übernehmen, solange sie zutreffen\n${JSON.stringify(findings, null, 1).slice(0, MAX_OUTPUT_CHARS)}`;
+}
+
 function endabnahme(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 3_000,
     system: `${BASE_RULES}
 
-Schritt 9 Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
-unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein nicht gefüllter Hero („${CONTENT_HERO_PLACEHOLDER}“), eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und „Zuletzt aktualisiert: [DATUM]“.
+Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
+unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein nicht gefüllter Hero („${CONTENT_HERO_PLACEHOLDER}“ oder „${CONTENT_HERO_PLACEHOLDER_LEGACY}“), eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite, ein offener Punkt der Aktualitätsprüfung. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und „Zuletzt aktualisiert: [DATUM]“.
 summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.`,
     user: join([
       pageBlock(context),
       currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_LEKTORAT, "Lektorat (Schritt 7) – gemeldete Befunde"),
+      outputBlock(context, CONTENT_STEP_LEKTORAT, `Lektorat (Schritt ${CONTENT_STEP_LEKTORAT}) – gemeldete Befunde`),
+      openFindingsBlock(context),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
@@ -1124,10 +1175,10 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
   };
 }
 
-// --- step 8: every sentence rephrased, on Grok ------------------------------------------------
+// --- Watermark Entfernung: every sentence rephrased, on Grok -----------------------------------
 
 /**
- * Step 8 runs on Grok (xAI, see `xai.ts` and `rephrase.ts`), not on Claude, and not through
+ * The Watermark step runs on Grok (xAI, see `xai.ts` and `rephrase.ts`), not on Claude, and not through
  * a tool-forced JSON answer: one chunk of sections goes in as HTML and comes back as HTML.
  * This builds the prompt for one chunk; the same settings and notes as every other step.
  * The Watermark tool under Verwaltung builds its chunks with this very function (without
@@ -1145,19 +1196,22 @@ export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: reado
 }
 
 const SPECS: Record<number, (context: ContentPipelineContext) => ContentStepSpec> = {
-  1: analyse,
-  2: seo,
-  3: faktencheck,
-  4: geo,
-  5: hormozi,
-  6: vermenschlichung,
-  7: lektorat,
-  9: endabnahme,
+  [CONTENT_STEP_ANALYSE]: analyse,
+  [CONTENT_STEP_SEO]: seo,
+  [CONTENT_STEP_FAKTENCHECK]: faktencheck,
+  [CONTENT_STEP_GEO]: geo,
+  [CONTENT_STEP_HORMOZI]: hormozi,
+  [CONTENT_STEP_VERMENSCHLICHUNG]: vermenschlichung,
+  [CONTENT_STEP_LEKTORAT]: lektorat,
+  [CONTENT_STEP_ENDABNAHME]: endabnahme,
 };
 
 export function contentStepSpec(step: number, context: ContentPipelineContext): ContentStepSpec {
   if (step === CONTENT_STEP_WATERMARK) {
     throw new Error(`Schritt ${step} läuft in Abschnittsgruppen auf Grok (rephraseChunkPrompt), nicht als Tool-Aufruf.`);
+  }
+  if (step === CONTENT_STEP_AKTUALITAET) {
+    throw new Error(`Schritt ${step} läuft in zwei Aufrufen mit Websuche (aktualitaet.ts), nicht als einzelner Tool-Aufruf.`);
   }
   const build = SPECS[step];
   if (!build) throw new Error(`Unbekannter Schritt ${step}.`);

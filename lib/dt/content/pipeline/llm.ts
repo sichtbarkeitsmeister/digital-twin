@@ -2,12 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import {
   callAnthropicFirstAvailable,
+  extractAnthropicText,
   extractToolUseInput,
   isForcedToolChoiceUnsupportedError,
 } from "@/lib/ai/anthropic-helpers";
 import { reviveStringifiedToolInput } from "@/lib/ai/tolerant-json";
-import { resolveContentApiKey } from "@/lib/dt/content/model-config";
+import { CONTENT_API_KEY_ENV, resolveContentApiKey } from "@/lib/dt/content/model-config";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
+import { DT_WEB_RESEARCH_TOOLS, sumServerToolUsage, type DtWebResearchUsage } from "@/lib/dt/seo/web-research";
 
 /** Pipeline error with a hint whether the job runner should try again later. */
 export class ContentLlmError extends Error {
@@ -118,4 +120,135 @@ export async function callContentTool(input: {
     throw new ContentLlmError("Die KI-Antwort wurde abgeschnitten. Bitte den Schritt wiederholen.", false);
   }
   return { json, usage: sumAnthropicUsage(result.response.usage), model: result.model };
+}
+
+// --- web research (Aktualitätsprüfung) ------------------------------------------------------------
+
+/** Rounds of one research call: the server tools may pause a long turn (`pause_turn`). */
+const MAX_RESEARCH_ROUNDS = 4;
+/** A round that starts with less than this left would only run into the time limit. */
+const MIN_RESEARCH_ROUND_MS = 10_000;
+
+export type ContentResearchCall = {
+  model: string;
+  usage: { inputTokens: number; outputTokens: number };
+  web: DtWebResearchUsage;
+};
+
+export type ContentResearchResult = {
+  /** What the model wrote across all rounds (the research protocol). */
+  text: string;
+  /** Every content block of every round: search and fetch results, citations. */
+  blocks: unknown[];
+  calls: ContentResearchCall[];
+  model: string;
+};
+
+function errorDetail(error: unknown): string {
+  const inner = error && typeof error === "object" ? (error as { error?: { error?: { message?: unknown }; message?: unknown } }).error : null;
+  const message =
+    (typeof inner?.error?.message === "string" && inner.error.message) ||
+    (typeof inner?.message === "string" && inner.message) ||
+    (error instanceof Error ? error.message : "");
+  return message.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+/**
+ * The research call failed. A request the API refuses (4xx other than rate limits) means the
+ * web search cannot run for this key: the step stops with that reason instead of passing the
+ * text as „aktuell“ unchecked.
+ */
+export function researchErrorMessage(error: unknown): string {
+  const status = anthropicStatus(error);
+  const detail = errorDetail(error);
+  const aboutWebTools = /web[_ ]?(search|fetch)|websuche|server tool/i.test(detail);
+  if ((status === 401 || status === 403) && !aboutWebTools) return llmErrorMessage(error);
+  if (status != null && status >= 400 && status < 500 && !isRetryableLlmError(error)) {
+    return `Die Websuche ist für den Texte-Schlüssel nicht verfügbar (Fehler ${status}${detail ? `: ${detail}` : ""}). Ohne Websuche prüft die Aktualitätsprüfung nichts und lässt die Seite nicht als „aktuell“ durch. Bitte in der Anthropic Console die Websuche für die Organisation des Schlüssels ${CONTENT_API_KEY_ENV} freischalten und dann „Weiterlaufen lassen“.`;
+  }
+  return llmErrorMessage(error);
+}
+
+/**
+ * One research turn with Anthropic's server tools (web search, web fetch), tool_choice auto:
+ * the model searches, reads and writes its protocol. A forced tool would forbid the searches,
+ * which is why the structured result is a second call (`callContentTool`). Paused turns are
+ * continued with the same model; every round is billed and reported through `onCall` at once,
+ * so the usage is recorded even when a later round fails.
+ */
+export async function callContentResearch(input: {
+  models: string[];
+  system: string;
+  user: string;
+  maxTokens: number;
+  timeoutMs: number;
+  /** Defaults to the Texte key. */
+  apiKey?: string | null;
+  onCall?: (call: ContentResearchCall) => Promise<void> | void;
+  /** Tests hand in a stub client; no network. */
+  anthropic?: Anthropic;
+}): Promise<ContentResearchResult> {
+  let anthropic = input.anthropic;
+  if (!anthropic) {
+    const apiKey = input.apiKey ?? resolveContentApiKey();
+    if (!apiKey) {
+      throw new ContentLlmError("Der KI-Zugang für Texte ist nicht eingerichtet (Schlüssel fehlt). Bitte die Technik informieren.", false);
+    }
+    anthropic = new Anthropic({ apiKey });
+  }
+
+  const deadline = Date.now() + input.timeoutMs;
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: input.user }];
+  const blocks: unknown[] = [];
+  const calls: ContentResearchCall[] = [];
+  const texts: string[] = [];
+  let models = input.models;
+
+  for (let round = 0; round < MAX_RESEARCH_ROUNDS; round++) {
+    const remaining = deadline - Date.now();
+    if (remaining < MIN_RESEARCH_ROUND_MS) {
+      throw new ContentLlmError("Die Websuche der Aktualitätsprüfung hat das Zeitlimit erreicht. Der Schritt wird später erneut versucht.", true);
+    }
+    let result: Awaited<ReturnType<typeof callAnthropicFirstAvailable>>;
+    try {
+      result = await callAnthropicFirstAvailable({
+        anthropic,
+        models,
+        maxTokens: input.maxTokens,
+        timeoutMs: remaining,
+        stream: true,
+        system: input.system,
+        tools: DT_WEB_RESEARCH_TOOLS,
+        toolChoice: { type: "auto" },
+        messages,
+      });
+    } catch (error) {
+      throw new ContentLlmError(researchErrorMessage(error), isRetryableLlmError(error));
+    }
+    if (!result) throw new ContentLlmError("Das KI-Modell ist nicht verfügbar. Bitte die Technik informieren.", false);
+
+    const { response } = result;
+    // A paused turn continues on the model that started it.
+    models = [result.model];
+    const call: ContentResearchCall = {
+      model: result.model,
+      usage: sumAnthropicUsage(response.usage),
+      web: sumServerToolUsage(response.usage),
+    };
+    calls.push(call);
+    await input.onCall?.(call);
+    blocks.push(...response.content);
+    const said = extractAnthropicText(response).trim();
+    if (said) texts.push(said);
+
+    if (response.stop_reason === "pause_turn") {
+      messages.push({ role: "assistant", content: response.content });
+      continue;
+    }
+    if (response.stop_reason === "max_tokens") {
+      throw new ContentLlmError("Die Recherche der Aktualitätsprüfung wurde abgeschnitten. Bitte den Schritt wiederholen.", false);
+    }
+    return { text: texts.join("\n\n"), blocks, calls, model: result.model };
+  }
+  throw new ContentLlmError("Die Websuche der Aktualitätsprüfung wurde nicht fertig. Der Schritt wird später erneut versucht.", true);
 }

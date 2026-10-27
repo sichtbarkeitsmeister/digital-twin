@@ -6,14 +6,16 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { EMPTY_CONTENT_FRESHNESS } from "@/lib/dt/content/freshness";
 import {
   CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_GEO,
   CONTENT_STEP_LEKTORAT,
 } from "@/lib/dt/content/pipeline/steps";
 import { htmlToMarkdown, replaceBlockText } from "@/lib/dt/content/render";
-import { rerunStepFor, waitingStepFor, type ContentPageRow } from "@/lib/dt/content/store";
+import { rerunStepFor, resetContentStepsFrom, waitingStepFor, type ContentPageRow } from "@/lib/dt/content/store";
 import { enqueueJob } from "@/lib/jobs/queue";
 
 export const CONTENT_JOB_KIND = "content.page";
@@ -79,26 +81,6 @@ async function enqueuePageJob(
     .eq("id", page.id);
   if (error) return { ok: false, status: 500, message: error.message };
   return { ok: true, jobId };
-}
-
-async function resetStepsFrom(service: SupabaseClient, pageId: string, fromStep: number): Promise<void> {
-  await service
-    .from("dt_content_steps")
-    .update({
-      status: "pending",
-      output: null,
-      error: null,
-      model: null,
-      input_tokens: 0,
-      output_tokens: 0,
-      cost_eur: 0,
-      started_at: null,
-      finished_at: null,
-      approved_by: null,
-      approved_at: null,
-    })
-    .eq("page_id", pageId)
-    .gte("step", fromStep);
 }
 
 /** "Texte erstellen" / "Weiterlaufen lassen": continue at the first unfinished step. */
@@ -265,6 +247,7 @@ const RESET_PATCH = {
   unresolved: [],
   questions: [],
   notes: [],
+  freshness: EMPTY_CONTENT_FRESHNESS,
   error: null,
   job_id: null,
   cost_eur: 0,
@@ -274,8 +257,9 @@ const RESET_PATCH = {
 
 /**
  * "Zurücksetzen": the page as if it had never been started — text, steps, questions, notes,
- * cost. The Excel briefing (keywords, questions, page type) stays; the main keyword from the
- * Excel comes back, one the Analyse found goes.
+ * the Aktualitätsprüfung's updates and send-back, cost. The Excel briefing (keywords,
+ * questions, page type) stays; the main keyword from the Excel comes back, one the Analyse
+ * found goes.
  */
 export async function resetContentPage(service: SupabaseClient, page: ContentPageRow): Promise<ActionResult> {
   const killed = await killPageJobs(service, page.id);
@@ -360,6 +344,16 @@ export async function resetContentTool(
   };
 }
 
+/**
+ * What a rerun from `step` does to the Aktualitätsprüfung's state: from GEO or earlier it
+ * starts over (the next check may send the text back to GEO once more); later only a send-back
+ * still waiting for GEO is dropped, since GEO does not run again.
+ */
+export function freshnessForRerun(page: Pick<ContentPageRow, "freshness">, step: number): ContentPageRow["freshness"] {
+  if (step <= CONTENT_STEP_GEO) return EMPTY_CONTENT_FRESHNESS;
+  return { ...page.freshness, pending_sections: [] };
+}
+
 /** "Mit Anmerkung wiederholen": note becomes a standing instruction, pipeline restarts at `step`. */
 export async function rerunContentStep(
   service: SupabaseClient,
@@ -375,11 +369,16 @@ export async function rerunContentStep(
   if (step < 1 || step > CONTENT_STEP_COUNT || step > maxStep) {
     return { ok: false, status: 400, message: `Schritt ${step} kann hier nicht wiederholt werden.` };
   }
-  await resetStepsFrom(service, page.id, step);
+  try {
+    await resetContentStepsFrom(service, page.id, step);
+  } catch (error) {
+    return { ok: false, status: 500, message: error instanceof Error ? error.message : "Schritte konnten nicht zurückgesetzt werden." };
+  }
   return enqueuePageJob(service, page, userId, {
     notes: [...page.notes, note.trim()].slice(-20),
     step,
     released: false,
+    freshness: freshnessForRerun(page, step),
     ...(step <= CONTENT_STEP_FAKTENCHECK ? { questions: [], findings: [] } : {}),
     ...(step <= CONTENT_STEP_LEKTORAT ? { final_findings: [] } : {}),
     ...(step < CONTENT_STEP_ENDABNAHME ? { unresolved: [] } : {}),

@@ -1,8 +1,9 @@
 /**
  * The step instructions of Texte that are editable under Globale Prompts: SEO, Faktencheck,
- * GEO, Hormozi, Vermenschlichung and Lektorat. Each one is only the step's own instruction;
- * the code still adds the locked rules (`BASE_RULES`, Branchenregel), for SEO the Texter
- * prompt and the Textvorlage of the page type, the user message and the tool schema.
+ * GEO, Aktualitätsprüfung, Hormozi, Vermenschlichung and Lektorat. Each one is only the
+ * step's own instruction; the code still adds the locked rules (`BASE_RULES`, Branchenregel),
+ * for SEO the Texter prompt and the Textvorlage of the page type, for the Aktualitätsprüfung
+ * its fixed source and customer-fact rules, the user message and the tool schema.
  *
  * Stored platform-wide in `dt_platform_settings.content_step_prompts` (JSON, one key per
  * step). NULL, a missing key or an empty text means the default below, which is the
@@ -15,11 +16,22 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  CONTENT_STEP_AKTUALITAET,
+  CONTENT_STEP_ANALYSE,
+  CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_GEO,
+  CONTENT_STEP_HORMOZI,
+  CONTENT_STEP_LEKTORAT,
+  CONTENT_STEP_SEO,
+  CONTENT_STEP_VERMENSCHLICHUNG,
+} from "@/lib/dt/content/pipeline/steps";
+
 export const CONTENT_STEP_PROMPTS_MIGRATION_FILE = "database/migrations/20261017_dt_content_step_prompts_verbesserung.sql";
 export const CONTENT_STEP_PROMPT_MAX_CHARS = 20_000;
 export const CONTENT_STEP_PROMPTS_HREF = "/dashboard/verwaltung/globale-prompts#schritt-prompts";
 
-export const CONTENT_STEP_PROMPT_KEYS = ["seo", "faktencheck", "geo", "hormozi", "vermenschlichung", "lektorat"] as const;
+export const CONTENT_STEP_PROMPT_KEYS = ["seo", "faktencheck", "geo", "aktualitaet", "hormozi", "vermenschlichung", "lektorat"] as const;
 export type ContentStepPromptKey = (typeof CONTENT_STEP_PROMPT_KEYS)[number];
 export type ContentStepPrompts = Record<ContentStepPromptKey, string>;
 
@@ -27,8 +39,21 @@ export function isContentStepPromptKey(value: unknown): value is ContentStepProm
   return typeof value === "string" && (CONTENT_STEP_PROMPT_KEYS as readonly string[]).includes(value);
 }
 
-/** The SEO step leaves this heading; Hormozi (step 5) replaces it with the hero sentence. */
-export const CONTENT_HERO_PLACEHOLDER = "[HERO – wird in Schritt 5 gefuellt]";
+/**
+ * The SEO step leaves this heading; Hormozi replaces it with the hero sentence. It names the
+ * step, not its number, so it stays right when steps are added.
+ */
+export const CONTENT_HERO_PLACEHOLDER = "[HERO – wird von Hormozi gefuellt]";
+/**
+ * The placeholder as pages written before the Aktualitätsprüfung carry it (Hormozi was step 5
+ * then). Still recognised everywhere: `isHeroPlaceholder` matches any „[HERO …]“, the prompts
+ * name both, and the Aktualitätsprüfung keeps either untouched.
+ */
+export const CONTENT_HERO_PLACEHOLDER_LEGACY = "[HERO – wird in Schritt 5 gefuellt]";
+/** Both spellings, newest first. */
+export const CONTENT_HERO_PLACEHOLDERS = [CONTENT_HERO_PLACEHOLDER, CONTENT_HERO_PLACEHOLDER_LEGACY] as const;
+/** For prompts: „[HERO – …]“ in either spelling. */
+const HERO_PLACEHOLDER_TEXT = `„${CONTENT_HERO_PLACEHOLDER}“ (ältere Seiten: „${CONTENT_HERO_PLACEHOLDER_LEGACY}“)`;
 
 /** Phrases the Vermenschlichung replaces (the old floskeln list). */
 export const CONTENT_FLOSKELN = [
@@ -57,35 +82,40 @@ export const KEEP_RULES =
 export const CONTENT_STEP_PROMPT_META: Record<ContentStepPromptKey, { label: string; step: number; description: string }> = {
   seo: {
     label: "SEO",
-    step: 2,
+    step: CONTENT_STEP_SEO,
     description:
-      "Schritt 2: schreibt den Seitentext. Text-Prompt und Textvorlage des Seitentyps hängt der Code danach an; bei Widerspruch gilt die Textvorlage. Gilt auch für das Werkzeug Verwaltung → SEO (dort mit dessen eigenen Textvorlagen, ohne Text-Prompt).",
+      `Schritt ${CONTENT_STEP_SEO}: schreibt den Seitentext. Text-Prompt und Textvorlage des Seitentyps hängt der Code danach an; bei Widerspruch gilt die Textvorlage. Gilt auch für das Werkzeug Verwaltung → SEO (dort mit dessen eigenen Textvorlagen, ohne Text-Prompt).`,
   },
   faktencheck: {
     label: "Faktencheck",
-    step: 3,
-    description: "Schritt 3: prüft jeden Satz gegen die Anbieterfakten und stellt Fragen an den Kunden.",
+    step: CONTENT_STEP_FAKTENCHECK,
+    description: `Schritt ${CONTENT_STEP_FAKTENCHECK}: prüft jeden Satz gegen die Anbieterfakten und stellt Fragen an den Kunden.`,
   },
   geo: {
     label: "GEO",
-    step: 4,
-    description: "Schritt 4: überarbeitet den Text für KI-Suchsysteme. Gilt auch für das Werkzeug Verwaltung → GEO.",
+    step: CONTENT_STEP_GEO,
+    description: `Schritt ${CONTENT_STEP_GEO}: überarbeitet den Text für KI-Suchsysteme. Gilt auch für das Werkzeug Verwaltung → GEO.`,
+  },
+  aktualitaet: {
+    label: "Aktualitätsprüfung",
+    step: CONTENT_STEP_AKTUALITAET,
+    description: `Schritt ${CONTENT_STEP_AKTUALITAET}: prüft jede zeitkritische Aussage mit der Websuche, korrigiert veraltete öffentliche Fakten mit Quelle, fragt den Kunden bei eigenen Angaben und gibt einen veralteten Abschnitt einmal an GEO zurück. Quellen- und Kundenfakten-Regeln hängt der Code fest an.`,
   },
   hormozi: {
     label: "Hormozi",
-    step: 5,
+    step: CONTENT_STEP_HORMOZI,
     description:
-      "Schritt 5: Conversion-Schicht mit Hero-Satz, Value Equation und Handlungsaufforderungen. Gilt auch für das Werkzeug Verwaltung → Hormozi.",
+      `Schritt ${CONTENT_STEP_HORMOZI}: Conversion-Schicht mit Hero-Satz, Value Equation und Handlungsaufforderungen. Gilt auch für das Werkzeug Verwaltung → Hormozi.`,
   },
   vermenschlichung: {
     label: "Vermenschlichung",
-    step: 6,
-    description: "Schritt 6: ändert nur die Formulierung, nicht Inhalt, Struktur oder Fakten.",
+    step: CONTENT_STEP_VERMENSCHLICHUNG,
+    description: `Schritt ${CONTENT_STEP_VERMENSCHLICHUNG}: ändert nur die Formulierung, nicht Inhalt, Struktur oder Fakten.`,
   },
   lektorat: {
     label: "Lektorat",
-    step: 7,
-    description: "Schritt 7: Rechtschreibung, Grammatik und letzte Prüfung vor der Watermark Entfernung.",
+    step: CONTENT_STEP_LEKTORAT,
+    description: `Schritt ${CONTENT_STEP_LEKTORAT}: Rechtschreibung, Grammatik und letzte Prüfung vor der Watermark Entfernung.`,
   },
 };
 
@@ -98,11 +128,11 @@ export const CONTENT_STEP_PROMPT_VARIABLES: Record<string, string> = {
   cta_regel: "Regel für Handlungsaufforderungen: ohne harten Verkauf bei Ratgeberartikeln, sonst mit Nutzen und nächstem Schritt",
 };
 
-const SEO_DEFAULT = `Schritt 2 SEO: Du schreibst den vollständigen Seitentext auf Basis der Analyse (Schritt 1) und der belegten Fakten.
+const SEO_DEFAULT = `Schritt ${CONTENT_STEP_SEO} SEO: Du schreibst den vollständigen Seitentext auf Basis der Analyse (Schritt ${CONTENT_STEP_ANALYSE}) und der belegten Fakten.
 
 Festes Gerüst, in dieser Reihenfolge:
 1. H1 (erster Abschnitt, level 1): kurz, das Hauptkeyword steht vorn. Enthält eine H1-Option {{briefing}} das Hauptkeyword, nimm sie wörtlich; sonst formulierst du selbst.
-2. Direkt darunter ein Abschnitt mit id „hero“, level 2, Überschrift exakt „${CONTENT_HERO_PLACEHOLDER}“ und leerem html. Du schreibst keinen echten Hero; Schritt 5 füllt ihn.
+2. Direkt darunter ein Abschnitt mit id „hero“, level 2, Überschrift exakt „${CONTENT_HERO_PLACEHOLDER}“ und leerem html. Du schreibst keinen echten Hero; Schritt ${CONTENT_STEP_HORMOZI} (Hormozi) füllt ihn.
 3. Abschnitt id „zusammenfassung“ (H2, z. B. „Das Wichtigste in Kürze“ oder die main_question als Frage): 60–80 Wörter, beantwortet die main_question direkt im ersten Satz, enthält 3–4 belegte Fakten, taugt als Snippet.
 4. Abschnitt id „einleitung“ (H2): 100–150 Wörter Einstieg aus Sicht des Avatars (sein Anliegen, was ihn hier erwartet).
 5. Danach H2/H3 im Wechsel aus Frage-Überschriften (aus fanout_questions, Spalte H zuerst, als echte Frage formuliert) und beschreibenden Überschriften. Die ersten 1–2 Sätze unter einer Frage-Überschrift beantworten die Frage direkt. Kein FAQ-Block am Ende: die Fragen SIND die Überschriften. Mindestens {{mindest_fragen}} Frage-Überschriften.
@@ -118,12 +148,12 @@ Regeln:
 - Länge: so lang, wie die belegten Fakten tragen, typisch 700–1.400 Wörter. Kein Füllmaterial, konkrete Sätze statt Allgemeinplätze.
 - title: Title-Tag mit Hauptkeyword, max. 60 Zeichen. meta_description: max. 155 Zeichen, Nutzen plus Hauptkeyword.`;
 
-const FAKTENCHECK_DEFAULT = `Schritt 3 Faktencheck: Du prüfst jeden Satz des aktuellen Texts gegen die Anbieterfakten und die Anmerkungen der Redaktion.
-Ein finding ist jede Aussage, die nicht belegt ist, den Fakten widerspricht, eine erfundene oder gerundete Zahl enthält, ein verbotenes Wort enthält, die Anrede bricht, einen unbelegten Superlativ oder ein Versprechen macht oder gegen die Branchenregel verstößt. severity high = falsch oder rechtlich riskant, medium = unbelegt, low = unscharf. Der Platzhalter „${CONTENT_HERO_PLACEHOLDER}“ ist gewollt und kein Befund; [LINK: …]-Marker sind gewollt.
+const FAKTENCHECK_DEFAULT = `Schritt ${CONTENT_STEP_FAKTENCHECK} Faktencheck: Du prüfst jeden Satz des aktuellen Texts gegen die Anbieterfakten und die Anmerkungen der Redaktion.
+Ein finding ist jede Aussage, die nicht belegt ist, den Fakten widerspricht, eine erfundene oder gerundete Zahl enthält, ein verbotenes Wort enthält, die Anrede bricht, einen unbelegten Superlativ oder ein Versprechen macht oder gegen die Branchenregel verstößt. severity high = falsch oder rechtlich riskant, medium = unbelegt, low = unscharf. Der Hero-Platzhalter ${HERO_PLACEHOLDER_TEXT} ist gewollt und kein Befund; [LINK: …]-Marker sind gewollt.
 Eine question stellst du nur, wenn allein der Kunde die Antwort kennt (Zahl stimmt? Leistung wird angeboten? Kontaktweg? Preis für den Platzhalter?). Jeder Platzhalter [BITTE PRÜFEN: …] im Text wird eine question mit kind „missing“. blocking = true, wenn der Text ohne Antwort nicht veröffentlicht werden darf. Was du selbst durch Streichen lösen kannst, ist keine Frage, sondern ein finding mit Vorschlag.
 Beantwortet eine Anmerkung der Redaktion eine Frage bereits, stellst du sie nicht noch einmal.`;
 
-const GEO_DEFAULT = `Schritt 4 GEO (Generative Engine Optimization): Du überarbeitest den Text so, dass KI-Suchsysteme ihn verstehen und zitieren können. Du erfindest keine Fakten und fügst keine hinzu.
+const GEO_DEFAULT = `Schritt ${CONTENT_STEP_GEO} GEO (Generative Engine Optimization): Du überarbeitest den Text so, dass KI-Suchsysteme ihn verstehen und zitieren können. Du erfindest keine Fakten und fügst keine hinzu.
 Zuerst setzt du die Befunde des Faktenchecks um: Unbelegtes streichen oder durch [BITTE PRÜFEN: …] ersetzen; offene Fragen so umschreiben, dass der Text ohne die Antwort auskommt. Antworten in den Anmerkungen der Redaktion sind bestätigte Fakten und werden eingearbeitet.
 Dann:
 - Die Kernantwort steht in den ersten 100–150 Wörtern (Zusammenfassung und Einleitung). Ankündigungen wie „In diesem Artikel erfahren Sie …“ streichen.
@@ -134,7 +164,24 @@ Dann:
 - Als letzter Abschnitt id „stand“ ohne Überschrift: „Zuletzt aktualisiert: [DATUM]“ als <p>.
 ${KEEP_RULES} Title und Meta-Description nur ändern, wenn der Faktencheck es verlangt.`;
 
-const HORMOZI_DEFAULT = `Schritt 5 Hormozi (Conversion-Schicht): Du machst den Text überzeugend, ohne die SEO- und GEO-Struktur zu ersetzen.
+const AKTUALITAET_DEFAULT = `Schritt ${CONTENT_STEP_AKTUALITAET} Aktualitätsprüfung: Du prüfst, ob die zeitkritischen Aussagen des Texts heute noch stimmen, und hältst den Text aktuell. Du schreibst den Text nicht um.
+Zeitkritisch sind vor allem:
+- Gesetze, Verordnungen, Fristen und Stichtage
+- Förderprogramme und Zuschüsse mit ihren Beträgen und Bedingungen
+- Normen und Standards (DIN, EN, ISO, VDE …) und ihre gültige Fassung
+- Technikgenerationen und Produktstände
+- Statistiken, Zahlen und Marktwerte aus fremden Quellen
+- Jahreszahlen und Zeitwörter wie „2024“, „aktuell“, „neu“, „derzeit“, „seit Kurzem“
+- Vorgaben von Google und KI-Anbietern (Suchrichtlinien, KI-Crawler, KI-Suche)
+Vorgehen:
+1. Liste zuerst alle zeitkritischen Aussagen mit der id ihres Abschnitts. Plane die Suchen vorab und bündle verwandte Aussagen in einer Suche.
+2. Prüfe jede Aussage mit gezielten Suchen; lies die Primärquelle mit dem Web-Abruf, wenn das Suchergebnis allein nicht reicht.
+3. Stufe jede Aussage ein: aktuell (stimmt laut Quelle), aktualisiert (öffentlicher Fakt ist veraltet, du korrigierst ihn), frage (Angabe über den Kunden, nur er kann sie bestätigen), abschnitt_veraltet (ein ganzer Abschnitt ist überholt und lässt sich nicht mit einer kleinen Änderung retten).
+4. Aktualisieren heißt: die kleinste mögliche Änderung – eine Zahl, ein Datum, ein Name, ein Halbsatz – mit Quelle. Satzbau, Ton und Länge bleiben.
+5. Angaben über den Kunden (Preise, Leistungen, Team, Öffnungszeiten, Referenzen, alles aus den Anbieterfakten) änderst du nie. Zeigt eine Quelle, dass eine davon nicht mehr stimmt, stellst du eine Frage an den Kunden; ohne solchen Hinweis fragst du nicht.
+6. Nichts erfinden: Was du nicht mit einer Quelle belegen kannst, bleibt, wie es ist. Keine neuen Aussagen, keine neuen Abschnitte, kein Umschreiben.`;
+
+const HORMOZI_DEFAULT = `Schritt ${CONTENT_STEP_HORMOZI} Hormozi (Conversion-Schicht): Du machst den Text überzeugend, ohne die SEO- und GEO-Struktur zu ersetzen.
 - Hero: Der Abschnitt „hero“ bekommt statt des Platzhalters genau EINEN Satz – das Traumergebnis oder der gelöste Hauptschmerz des Avatars (hormozi.traumziel / hormozi.hauptschmerz aus der Analyse), in der bestätigten Anrede. heading bleibt leer, der Satz steht als <p>. Die H1 bleibt unverändert.
 - Value Equation nur aus hormozi der Analyse und den Anbieterfakten: Traumergebnis, Erfolgswahrscheinlichkeit (nur mit echten, belegten Beweisen – sonst weglassen), Zeit bis zum Ergebnis, Aufwand für den Kunden. In die bestehenden Abschnitte einweben; keine neuen Überschriftenebenen, keine neuen Abschnitte.
 - Handlungsaufforderungen: konkretes Angebot plus Grund, jetzt zu handeln, mit den Kontaktwegen aus den Fakten. Verknappung, Garantien und Fristen nur, wenn sie in den Anbieterfakten stehen.
@@ -142,7 +189,7 @@ const HORMOZI_DEFAULT = `Schritt 5 Hormozi (Conversion-Schicht): Du machst den T
 - Keine Erfolgsversprechen, keine unbelegten Superlative, keine erfundenen Zahlen oder Referenzen.
 ${KEEP_RULES} Überschriftenebenen bleiben, Title und Meta-Description bleiben.`;
 
-const VERMENSCHLICHUNG_DEFAULT = `Schritt 6 Vermenschlichung: Du änderst nur die Formulierung – nicht Inhalt, Struktur, Reihenfolge oder Fakten.
+const VERMENSCHLICHUNG_DEFAULT = `Schritt ${CONTENT_STEP_VERMENSCHLICHUNG} Vermenschlichung: Du änderst nur die Formulierung – nicht Inhalt, Struktur, Reihenfolge oder Fakten.
 - Sätze höchstens etwa 20 Wörter, Sprachniveau B2, aktiv, Verben statt Substantivketten, keine Füllwörter.
 - Den Leser mit der bestätigten Anrede ansprechen; Überschriften bleiben neutral (kein „Ich“, kein „Wir“ in Überschriften).
 - KI-Muster entfernen: Dreierlisten als Reflex, „nicht X, sondern Y“, „Doch was bedeutet das konkret?“, gleichförmiger Satzrhythmus, vages „Die Gründe sind vielfältig“, absolute „immer/jeder/nie“ ohne Beleg, fette Mini-Überschriften mitten im Absatz.
@@ -152,7 +199,7 @@ const VERMENSCHLICHUNG_DEFAULT = `Schritt 6 Vermenschlichung: Du änderst nur di
 ${KEEP_RULES} Der Hero-Satz bleibt ein Satz. Title und Meta-Description bleiben.
 self_score: Bewerte den fertigen Text ehrlich von 1 bis 10 in direktheit (sagt sofort, was Sache ist), rhythmus (Satzlängen wechseln), vertrauen (belegt statt behauptet), natuerlichkeit (klingt nach Mensch), dichte (kein Satz ohne Inhalt).`;
 
-const LEKTORAT_DEFAULT = `Schritt 7 Lektorat: Du korrigierst Rechtschreibung, Grammatik, Zeichensetzung und Satzbau. Du glättest Wiederholungen und Füllwörter. Du änderst keine Fakten, keine Struktur und keine Reihenfolge; ids bleiben.
+const LEKTORAT_DEFAULT = `Schritt ${CONTENT_STEP_LEKTORAT} Lektorat: Du korrigierst Rechtschreibung, Grammatik, Zeichensetzung und Satzbau. Du glättest Wiederholungen und Füllwörter. Du änderst keine Fakten, keine Struktur und keine Reihenfolge; ids bleiben.
 Prüfe noch einmal: Anrede durchgehend, kein verbotenes Wort, Tonalität getroffen, Branchenregel eingehalten, Frage-Überschriften noch Fragen, Hauptkeyword in H1 und Zusammenfassung. Was du nicht selbst beheben darfst (fehlende Fakten, offene Entscheidungen, stehengebliebene Platzhalter, ein nicht gefüllter Hero), meldest du als final_findings.
 ${KEEP_RULES}`;
 
@@ -161,6 +208,7 @@ export const DEFAULT_CONTENT_STEP_PROMPTS: ContentStepPrompts = {
   seo: SEO_DEFAULT,
   faktencheck: FAKTENCHECK_DEFAULT,
   geo: GEO_DEFAULT,
+  aktualitaet: AKTUALITAET_DEFAULT,
   hormozi: HORMOZI_DEFAULT,
   vermenschlichung: VERMENSCHLICHUNG_DEFAULT,
   lektorat: LEKTORAT_DEFAULT,
@@ -193,7 +241,7 @@ export function normalizeStoredContentStepPrompts(raw: unknown): Partial<Content
   return out;
 }
 
-/** All six instructions a run uses: the saved one when it is non-empty, the default otherwise. */
+/** All seven instructions a run uses: the saved one when it is non-empty, the default otherwise. */
 export function resolveContentStepPrompts(raw: unknown): ContentStepPrompts {
   return { ...DEFAULT_CONTENT_STEP_PROMPTS, ...normalizeStoredContentStepPrompts(raw) };
 }

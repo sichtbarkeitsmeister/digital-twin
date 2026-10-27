@@ -13,7 +13,7 @@
  *   - text: the uploaded file, split into blocks by `ingest.ts`, with the hero placeholder
  *     inserted after the first block, because an uploaded text has none.
  *
- * Model tier (write), token budget and the output normalisation are those of Texte step 5.
+ * Model tier (write), token budget and the output normalisation are those of Texte's Hormozi step.
  * `hormoziToolSpec` and the helpers are pure; `runHormoziTool` loads the context and calls
  * the model (injectable for tests).
  */
@@ -245,7 +245,7 @@ function normalizeBausteine(raw: unknown): HormoziToolBausteine {
   };
 }
 
-/** The model's answer → text as Texte step 5 normalises it (hero kept, hero sentence as <p>) plus the building blocks. */
+/** The model's answer → text as Texte's Hormozi step normalises it (hero kept, hero sentence as <p>) plus the building blocks. */
 export function normalizeHormoziToolOutput(json: unknown, current: ContentCurrentText): TextOutput & { hormozi: HormoziToolBausteine } {
   const out = normalizeTextOutput(json, current);
   return {

@@ -24,6 +24,7 @@ import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
 import { CONTENT_PAGE_TYPE_LABELS, type ContentPageType } from "@/lib/dt/content/page-types";
+import { CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
 import {
   EMPTY_CONTENT_PAGE_FILTER,
   anyContentPageRunning,
@@ -367,7 +368,7 @@ export function DtContentWorkspace(props: {
           : filterActive
             ? "Seiten in der gefilterten Tabelle anhaken – nur angehakte Seiten bekommen Texte."
             : "Seiten in der Tabelle anhaken – nur angehakte Seiten bekommen Texte."
-        : "Läuft im Hintergrund durch neun Schritte. Die Seite meldet sich, wenn sie Sie braucht.";
+        : `Läuft im Hintergrund durch ${CONTENT_STEP_COUNT} Schritte. Die Seite meldet sich, wenn sie Sie braucht.`;
 
   return (
     <div className="grid gap-5">

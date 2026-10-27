@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ChevronDown,
   Download,
+  ExternalLink,
   FileText,
   Loader2,
   MessageCircleQuestion,
@@ -21,11 +22,13 @@ import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { downloadContentExport } from "@/components/dt/content/download";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
+import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
 import {
   CONTENT_PAGE_TYPE_LABELS,
   CONTENT_PAGE_TYPE_OPTIONS,
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
+import { CONTENT_STEP_AKTUALITAET, CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
 import {
   CONTENT_APPROVE_OPEN_ITEMS_CONFIRM,
   approveNeedsConfirm,
@@ -73,6 +76,19 @@ function openFindings(review: ContentReview): ContentFinding[] {
     out.push(f);
   }
   return out;
+}
+
+/** The Aktualitätsprüfung ran on this page (or left something behind): the drawer shows its section. */
+function showFreshness(review: ContentReview): boolean {
+  const step = review.steps.find((s) => s.step === CONTENT_STEP_AKTUALITAET);
+  const { freshness } = review;
+  return (
+    step?.status === "done" ||
+    step?.status === "waiting" ||
+    freshness.updates.length > 0 ||
+    freshness.sendbacks > 0 ||
+    freshness.pending_sections.length > 0
+  );
 }
 
 type Mode = { kind: "edit"; action: ContentAction } | { kind: "rerun"; action: ContentAction } | null;
@@ -457,8 +473,8 @@ export function DtContentPageDrawer(props: {
                         <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                         <p>
                           Diese Seite wurde mit einer älteren Schrittfolge begonnen (Recherche, Gliederung, Rohtext … oder
-                          die Endabnahme als Schritt 8). Die aktuellen neun Schritte passen nicht dazu: bitte „Zurücksetzen“
-                          und neu starten.
+                          die Endabnahme als Schritt 8). Die aktuellen {CONTENT_STEP_COUNT} Schritte passen nicht dazu: bitte
+                          „Zurücksetzen“ und neu starten.
                         </p>
                       </div>
                     ) : null}
@@ -664,6 +680,51 @@ export function DtContentPageDrawer(props: {
                         </ul>
                       )}
                     </section>
+
+                    {showFreshness(review) ? (
+                      <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
+                        <h3 className={sectionTitleClass}>
+                          Aktualität
+                          <span className="tabular-nums">{review.freshness.updates.length}</span>
+                        </h3>
+                        {review.freshness.updates.length === 0 ? (
+                          <p className="text-sm text-sbkm-ink-600 dark:text-white/60">Keine Aussage musste aktualisiert werden.</p>
+                        ) : (
+                          <ul className="grid gap-2.5">
+                            {review.freshness.updates.map((u, i) => (
+                              <li
+                                key={`${u.block_id}-${i}`}
+                                className="grid gap-1.5 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-3 dark:border-white/8 dark:bg-white/[0.03]"
+                              >
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                                  Aktualisiert · Abschnitt „{u.section || u.block_id}“
+                                </p>
+                                <p className="text-xs leading-relaxed text-sbkm-navy dark:text-white/85">
+                                  <span className="text-sbkm-ink-500 line-through dark:text-white/45">{u.old_text}</span>
+                                  {" → "}
+                                  <span className="font-semibold">{u.new_text}</span>
+                                </p>
+                                {isWebUrl(u.source_url) ? (
+                                  <a
+                                    href={u.source_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex min-w-0 items-center gap-1 text-xs font-medium text-sbkm-navy underline-offset-2 hover:underline dark:text-white"
+                                    title={u.source_url}
+                                  >
+                                    <span className="truncate">{freshnessSourceLabel({ url: u.source_url, title: u.source_title })}</span>
+                                    <ExternalLink className="size-3 shrink-0" aria-hidden />
+                                  </a>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
+                          {freshnessSendBackLine(review.freshness)}
+                        </p>
+                      </section>
+                    ) : null}
 
                     <section className="grid gap-1 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <h3 className={sectionTitleClass}>Kosten</h3>

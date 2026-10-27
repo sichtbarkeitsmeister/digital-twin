@@ -1,16 +1,16 @@
 /**
- * The standalone Watermark tool (Verwaltung → Watermark Entfernung): step 8 of the Texte
+ * The standalone Watermark tool (Verwaltung → Watermark Entfernung): the Watermark step of the Texte
  * pipeline on an uploaded text. It belongs to no organisation and needs nothing but the
  * Grok key: no Texte settings, no page row, no background job, no database.
  *
  * The browser drives the run. `prepareWatermarkDocument` turns the upload into sections and
- * plans the Grok calls exactly like step 8 (`planRephraseChunks`); the browser then sends
+ * plans the Grok calls exactly like the Watermark step (`planRephraseChunks`); the browser then sends
  * one chunk at a time to the chunk route, which rewrites it with `rephraseWatermarkChunk`
- * through the runner step 8 uses (`runRephraseOnBlocks`, same prompt, same model order, same
+ * through the runner the Watermark step uses (`runRephraseOnBlocks`, same prompt, same model order, same
  * parsing). The finished text is assembled and downloaded in the browser
  * (`watermark-export.ts`).
  *
- * Grok (xAI) only, like step 8: without `XAI_API_KEY` the routes answer with the German
+ * Grok (xAI) only, like the Watermark step: without `XAI_API_KEY` the routes answer with the German
  * message, never with Claude.
  */
 
@@ -39,7 +39,7 @@ export type WatermarkDocument = {
   title: string | null;
   chars: number;
   blocks: ContentTextBlock[];
-  /** Block ids of each Grok call, in order, planned like step 8. */
+  /** Block ids of each Grok call, in order, planned like the Watermark step. */
   chunks: string[][];
   /** How many blocks get rewritten (headings-only and one-liners stay as they are). */
   total: number;
@@ -108,7 +108,7 @@ export type WatermarkChunkOptions = {
 };
 
 /**
- * One chunk of a Watermark run on Grok, through the runner step 8 uses. Never throws a model
+ * One chunk of a Watermark run on Grok, through the runner the Watermark step uses. Never throws a model
  * error: the German message, the retry hint and the slow models come back as a failure, so
  * the route can hand all three to the browser.
  */

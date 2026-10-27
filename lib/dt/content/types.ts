@@ -118,6 +118,10 @@ export type ContentFinding = {
 };
 
 export type ContentQuestion = {
+  /**
+   * „fact“, „decision“, „missing“ (Faktencheck, placeholder gaps) or „outdated“ (the
+   * Aktualitätsprüfung found a customer fact that may no longer be true).
+   */
   kind: string;
   question: string;
   field?: string | null;
@@ -129,6 +133,54 @@ export type ContentQuestion = {
   excerpt?: string | null;
   blocking: boolean;
 };
+
+/** A web source the Aktualitätsprüfung used. Internal: never part of the page text or an export. */
+export type ContentFreshnessSource = { url: string; title: string | null };
+
+/** One public fact the Aktualitätsprüfung corrected in the text. */
+export type ContentFreshnessUpdate = {
+  block_id: string;
+  /** Name of the Abschnitt when the check ran (its heading, else its id). */
+  section: string;
+  old_text: string;
+  new_text: string;
+  reason: string;
+  source_url: string;
+  source_title: string | null;
+  /** ISO time of the check. */
+  at: string;
+};
+
+/** A whole Abschnitt the Aktualitätsprüfung found outdated: the problem, a proposal, the sources. */
+export type ContentFreshnessSection = {
+  block_id: string | null;
+  section: string;
+  problem: string;
+  suggestion: string;
+  sources: ContentFreshnessSource[];
+};
+
+/**
+ * `dt_content_pages.freshness`: what the Aktualitätsprüfung did on this page, kept across
+ * its one send-back to GEO. Cleared by „Zurücksetzen“ and by „Mit Anmerkung wiederholen“
+ * from GEO or earlier.
+ */
+export type ContentFreshness = {
+  /** How often the text went back to GEO (0 or 1); a second outdated finding becomes an open point. */
+  sendbacks: number;
+  updates: ContentFreshnessUpdate[];
+  /** Waiting for GEO („## Aktualitätsprüfung – bitte umsetzen“); emptied when GEO finishes. */
+  pending_sections: ContentFreshnessSection[];
+  /** What went back to GEO the one time (for the drawer). */
+  sent_back_sections: ContentFreshnessSection[];
+  /** Still outdated after the send-back: listed as open points instead. */
+  converted_sections: ContentFreshnessSection[];
+  /** Customer questions of the first check; asked after the second one, since GEO rewrites in between. */
+  carried_questions: ContentQuestion[];
+};
+
+/** What the drawer shows under „Aktualität“. */
+export type ContentReviewFreshness = Omit<ContentFreshness, "carried_questions">;
 
 export type ContentStepStatus = "done" | "running" | "waiting" | "pending" | "error" | "skipped";
 
@@ -204,6 +256,8 @@ export type ContentReview = {
   final_findings: ContentFinding[];
   unresolved: ContentFinding[];
   questions: ContentQuestion[];
+  /** Updates with their sources and the send-back to GEO; the sources stay in the app, never in an export. */
+  freshness: ContentReviewFreshness;
   steps: ContentStep[];
   actions: ContentAction[];
 };

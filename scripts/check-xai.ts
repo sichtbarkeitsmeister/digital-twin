@@ -1,5 +1,5 @@
 /**
- * Checks the Grok (xAI) access that Texte step 8 uses, with the real key:
+ * Checks the Grok (xAI) access that Texte's Watermark Entfernung step uses, with the real key:
  *   1. is the key accepted (GET /v1/models), and which grok models does it see,
  *   2. does the configured model answer a tiny request, and how long does it take.
  *

@@ -12,6 +12,7 @@
  */
 
 import type { ContentPageType } from "@/lib/dt/content/page-types";
+import { CONTENT_STEP_HORMOZI } from "@/lib/dt/content/pipeline/steps";
 
 export const CONTENT_TYPE_PROMPT_KEYS = ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const;
 export type ContentTypePromptKey = (typeof CONTENT_TYPE_PROMPT_KEYS)[number];
@@ -96,7 +97,7 @@ Struktur:
 
 Besondere Regeln: Immer zurück zur Silo-Seite „[Hauptsilo]“ verlinken (Marker [LINK: [Hauptsilo]], Ankertext = Silo-Thema) und 2–3 Links zu verwandten Unterseiten. Grundlagenfragen an passende Ratgeber verlinken statt ausschreiben. Keine Inhalte aus anderen Unterseiten übernehmen. Detailtiefe vor Breite.`,
   ratgeber:
-    "Seitentyp Ratgeberartikel: informationell. Aufbau Problem → Lösung → Vertrauen → nächster Schritt. Kein harter Verkauf, keine drängenden Handlungsaufforderungen (Schritt 5 nutzt den Ratgeber-Zyklus). Mindestens 5 Frage-Überschriften. Am Ende ein Abschnitt id „autor“ mit Autor- oder Prüfhinweis: nur mit einem Namen, der in den Anbieterfakten steht; sonst der Platzhalter [BITTE PRÜFEN: Autor oder fachliche Prüfung ergänzen]. Kein erfundener Autor.",
+    `Seitentyp Ratgeberartikel: informationell. Aufbau Problem → Lösung → Vertrauen → nächster Schritt. Kein harter Verkauf, keine drängenden Handlungsaufforderungen (Hormozi, Schritt ${CONTENT_STEP_HORMOZI}, nutzt den Ratgeber-Zyklus). Mindestens 5 Frage-Überschriften. Am Ende ein Abschnitt id „autor“ mit Autor- oder Prüfhinweis: nur mit einem Namen, der in den Anbieterfakten steht; sonst der Platzhalter [BITTE PRÜFEN: Autor oder fachliche Prüfung ergänzen]. Kein erfundener Autor.`,
   standort: `Seitentyp Standortseite. Fokus ist die Leistung an diesem Ort, nicht die Leistung von Grund auf. Eine Seite, bei der man den Ortsnamen austauschen könnte, ist keine Standortseite. Verlinkt auf das Hauptsilo „[Hauptsilo]“ (Marker [LINK: [Hauptsilo]]), wenn eines angegeben ist.
 
 Pflicht-Inputs: Leistung und Ort; echter Standort vor Ort oder Anfahrt vom Hauptsitz; Referenzen oder Stimmen aus diesem Ort, falls in den Fakten; Ansprechpartner vor Ort, falls vorhanden; verwandte Leistungs- und Silo-Seiten. Fehlt etwas, Platzhalter. Nichts dazuerfinden und keine Web-Recherche: nur Fakten aus den Anbieterfakten, den Anmerkungen und dem Briefing. Weniger als ein klarer lokaler Bezug und keine lokalen Referenzen: den Mangel als Platzhalter benennen, keine erfundene Lokalität.
