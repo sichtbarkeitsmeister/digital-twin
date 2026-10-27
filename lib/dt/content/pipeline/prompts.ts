@@ -1148,9 +1148,17 @@ function openFindingsBlock(context: Pick<ContentPipelineContext, "openFindings">
   return `## Offene Punkte aus früheren Schritten (z. B. Aktualitätsprüfung) – in unresolved übernehmen, solange sie zutreffen\n${JSON.stringify(findings, null, 1).slice(0, MAX_OUTPUT_CHARS)}`;
 }
 
+/**
+ * Output budget of the Endabnahme. It carries the open points of earlier steps into
+ * `unresolved`: with GEO switched off for the page the Faktencheck's findings are still open
+ * too (a real page: 13 of them plus 8 from the Lektorat, about 3,500 tokens), and 3,000 cut
+ * the answer off. Only what is written is billed.
+ */
+export const ENDABNAHME_MAX_TOKENS = 8_000;
+
 function endabnahme(context: ContentPipelineContext): ContentStepSpec {
   return {
-    maxTokens: 3_000,
+    maxTokens: ENDABNAHME_MAX_TOKENS,
     system: `${BASE_RULES}
 
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.

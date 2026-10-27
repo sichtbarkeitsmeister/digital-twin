@@ -727,6 +727,15 @@ console.log("GEO off / Aktualitätsprüfung: ok");
   const geo = contentStepSpec(CONTENT_STEP_GEO, noCheck).user;
   assert.doesNotMatch(geo, /Faktencheck \(Schritt 3\)/, "no empty Faktencheck block");
   assert.doesNotMatch(geo, /undefined/);
+  // GEO off keeps the Faktencheck's findings open: the Endabnahme must have room to carry them.
+  // A real page (Allround, Lastenradträger) had 13 of them plus 8 from the Lektorat; 3,000 tokens cut it off.
+  const carried = Array.from({ length: 30 }, (_, i) => ({
+    ...finding(`Befund ${i + 1}: Lieferzeit im Text weicht von den Anbieterfakten ab`),
+    problem: "Der Text nennt 2–3 Wochen außerhalb der Saison und 6–12 Wochen in der Saison; die Anbieterfakten nennen 1–4 Wochen (Standard) und 6–8 Wochen (Sonderanfertigungen).",
+    proposal: "Die Angaben aus den Anbieterfakten übernehmen oder den Kunden fragen, welche Werte gelten.",
+  }));
+  const budget = contentStepSpec(CONTENT_STEP_ENDABNAHME, context({ openFindings: carried })).maxTokens;
+  assert.ok(budget >= (JSON.stringify(carried).length / 3) * 1.2, `30 carried findings fit the Endabnahme's ${budget} tokens`);
   const endabnahme = contentStepSpec(CONTENT_STEP_ENDABNAHME, context({ outputs: {} })).user;
   assert.doesNotMatch(endabnahme, /undefined|Lektorat \(Schritt/, "Lektorat off too: its block is left out");
   assert.match(contentStepSpec(CONTENT_STEP_GEO, context({ outputs: { 3: { findings: [finding("x")], questions: [] } } })).user, /Faktencheck \(Schritt 3\)/, "with its output the block is there");
