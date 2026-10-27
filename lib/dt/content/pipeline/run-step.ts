@@ -1,6 +1,7 @@
 /**
  * Executes one pipeline step for a page: loads the context, calls the model, stores the
  * result on `dt_content_steps` and `dt_content_pages`. Called by the `content.page` job.
+ * A step the editor switched off for the page goes through `skipContentStep` instead.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -31,12 +32,24 @@ import {
   contentStepSpec,
   type ContentPipelineContext,
   type ContentStepSpec,
+  type FaktencheckOutput,
   type TextOutput,
 } from "@/lib/dt/content/pipeline/prompts";
 import { readRephraseProgress, rephraseBlockCount, type RephraseProgress } from "@/lib/dt/content/pipeline/rephrase";
 import { runRephraseOnBlocks } from "@/lib/dt/content/pipeline/rephrase-runner";
-import { stepPatchFor } from "@/lib/dt/content/pipeline/step-patch";
-import { CONTENT_STEP_AKTUALITAET, contentStepDefinition, type ContentStepDefinition } from "@/lib/dt/content/pipeline/steps";
+import {
+  liveTextFailureMessage,
+  skippedStepPatch,
+  stepPatchFor,
+  type LiveTextImport,
+} from "@/lib/dt/content/pipeline/step-patch";
+import {
+  CONTENT_STEP_AKTUALITAET,
+  CONTENT_STEP_FAKTENCHECK,
+  contentStepDefinition,
+  contentStepSkippable,
+  type ContentStepDefinition,
+} from "@/lib/dt/content/pipeline/steps";
 import { estimateCostEur, estimateWebSearchCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
@@ -54,6 +67,7 @@ import { loadContentStepPrompts } from "@/lib/dt/content/step-prompts";
 import { loadTexterPrompt } from "@/lib/dt/content/texter-prompt";
 import { loadContentTypePromptsForRun } from "@/lib/dt/content/type-prompts-db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
+import { loadCrawledPageInput } from "@/lib/dt/text-tools/crawl-source";
 
 export type StepOutcome = {
   step: number;
@@ -67,6 +81,8 @@ export type StepOutcome = {
    * continues it in the next tick, without counting a failed attempt.
    */
   partial?: boolean;
+  /** The editor switched the step off: marked „skipped“, no model call, 0 €. */
+  skipped?: boolean;
   model: string;
   costEur: number;
 };
@@ -430,7 +446,12 @@ async function runAktualitaetStep(input: {
     return { step: def.step, halted: true, discarded: true, model, costEur: progress.cost_eur };
   }
 
-  const { pagePatch, stepStatus, halted, resetFrom } = stepPatchFor(def, output, page);
+  // With GEO switched off the Faktencheck's findings are still open; the patch keeps them.
+  const faktencheck = context.outputs[CONTENT_STEP_FAKTENCHECK] as Partial<FaktencheckOutput> | undefined;
+  const { pagePatch, stepStatus, halted, resetFrom } = stepPatchFor(def, output, {
+    ...page,
+    faktencheck_findings: Array.isArray(faktencheck?.findings) ? faktencheck.findings : [],
+  });
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
   await upsertStep(service, page, def.step, {
     status: stepStatus,
@@ -528,6 +549,57 @@ async function runRephraseStep(input: {
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
   if (error) throw new Error(`Seite konnte nicht gespeichert werden: ${error.message}`);
   return { step: def.step, halted, model: run.model, costEur: progress.cost_eur };
+}
+
+type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
+/**
+ * SEO switched off on a crawl page: the live page as the text tools read it (live HTML with
+ * headings, else the stored crawl text). Any failure is final for this attempt: the page
+ * pauses with the reason instead of going on without a text.
+ */
+async function loadLiveText(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  fetchImpl: FetchLike | undefined,
+): Promise<LiveTextImport> {
+  const allowed = contentStepSkippable(page, "seo");
+  if (!allowed.ok || !page.source_url) {
+    throw new ContentLlmError(liveTextFailureMessage("Die Seite stammt nicht (mehr) aus dem Crawl der Website"), false);
+  }
+  const loaded = await loadCrawledPageInput(service, page.organisation_id, page.source_url, fetchImpl ? { fetchImpl } : {});
+  if (!loaded.ok) throw new ContentLlmError(liveTextFailureMessage(loaded.message), false);
+  return { source: loaded.value.source, url: loaded.value.url, ingested: loaded.value.ingested };
+}
+
+/**
+ * The run reached a step the editor switched off (`skipsContentStep`): no model, no usage
+ * event, 0 €. The row becomes „skipped“, the page moves on to it with its text unchanged,
+ * except where `skippedStepPatch` says (SEO: the live text, Hormozi: no empty hero). Saved
+ * progress of an earlier attempt (Watermark chunks, the Aktualitätsprüfung's research) is
+ * dropped. Like every step, nothing is written when the page was stopped or reset meanwhile.
+ */
+export async function skipContentStep(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  steps: readonly ContentStepRow[],
+  step: number,
+  options: { fetchImpl?: FetchLike; now?: Date } = {},
+): Promise<StepOutcome> {
+  const def = contentStepDefinition(step);
+  if (!def) throw new ContentLlmError(`Unbekannter Schritt ${step}.`, false);
+
+  const live = def.key === "seo" ? await loadLiveText(service, page, options.fetchImpl) : null;
+  if (!(await pageStillRunning(service, page.id))) {
+    return { step, halted: true, discarded: true, skipped: true, model: "", costEur: 0 };
+  }
+
+  const row = steps.find((s) => s.step === step);
+  const { stepRow, pagePatch, halted } = skippedStepPatch(def, page, { live, paidBefore: num(row?.cost_eur), now: options.now });
+  await upsertStep(service, page, step, stepRow);
+  const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id).eq("state", "laeuft");
+  if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
+  return { step, halted, skipped: true, model: "", costEur: 0 };
 }
 
 /** Pause the page with the error visible in the table and drawer. */

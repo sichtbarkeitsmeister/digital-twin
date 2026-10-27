@@ -38,7 +38,7 @@ import {
   CONTENT_STEP_VERMENSCHLICHUNG,
   CONTENT_STEP_WATERMARK,
 } from "@/lib/dt/content/pipeline/steps";
-import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
+import { blocksToPromptText, escapeHtml, htmlToPlainText, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
 import {
   CONTENT_FLOSKELN,
   CONTENT_FUELLWOERTER,
@@ -330,6 +330,16 @@ export function normalizeTextOutput(json: unknown, context: ContentCurrentText):
 export function isHeroPlaceholder(block: ContentTextBlock | null | undefined): boolean {
   if (!block) return false;
   return /\[HERO\b/i.test(`${block.heading ?? ""} ${block.html}`);
+}
+
+/**
+ * The hero section as the SEO step leaves it: nothing but the placeholder (either spelling,
+ * in the heading or the body). A hero Hormozi filled, or one an editor wrote into, is not.
+ */
+export function isEmptyHeroPlaceholder(block: ContentTextBlock | null | undefined): boolean {
+  if (!block) return false;
+  const text = `${block.heading ?? ""} ${htmlToPlainText(block.html)}`.replace(/\s+/g, " ").trim();
+  return /^\[\s*HERO\b[^\]]*\]$/i.test(text);
 }
 
 export function heroBlock(blocks: readonly ContentTextBlock[]): ContentTextBlock | null {

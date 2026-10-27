@@ -184,6 +184,11 @@ export function freshnessSendBackLine(freshness: ContentReviewFreshness): string
     const base = `Einmal an GEO zurückgegeben${sent > 0 ? ` (${n(sent, "veralteter Abschnitt", "veraltete Abschnitte")})` : ""} und danach erneut geprüft.`;
     return open > 0 ? `${base} ${n(open, "Abschnitt ist", "Abschnitte sind")} weiter veraltet und ${open === 1 ? "steht" : "stehen"} unter „Offene Punkte“.` : base;
   }
+  // GEO switched off for the page: nothing goes back, outdated Abschnitte are open points at once.
+  const open = freshness.converted_sections.length;
+  if (open > 0) {
+    return `Nicht an GEO zurückgegeben (GEO ist abgeschaltet): ${n(open, "veralteter Abschnitt steht", "veraltete Abschnitte stehen")} unter „Offene Punkte“.`;
+  }
   return "Nicht an GEO zurückgegeben.";
 }
 

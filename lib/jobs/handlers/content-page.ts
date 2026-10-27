@@ -2,22 +2,30 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { interruptedStepMessage } from "@/lib/dt/content/job-state";
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
-import { markContentStepError, markContentStepRetry, runContentStep } from "@/lib/dt/content/pipeline/run-step";
+import {
+  markContentStepError,
+  markContentStepRetry,
+  runContentStep,
+  skipContentStep,
+} from "@/lib/dt/content/pipeline/run-step";
 import {
   CONTENT_STEP_AKTUALITAET,
   CONTENT_STEP_COUNT,
   contentStepDefinition,
   nextContentStep,
+  skipsContentStep,
 } from "@/lib/dt/content/pipeline/steps";
 import { loadContentPageById, loadContentSteps, type ContentPageRow } from "@/lib/dt/content/store";
 import { stepBudgetMs } from "@/lib/jobs/schedule";
 import { createServiceClient } from "@/lib/supabase/service";
 
-import type { JobHandler, JobHandlerResult } from "../types";
+import type { JobHandler, JobHandlerResult, JobRow } from "../types";
 
 /** A full page needs most of the worker budget. Shorter steps can start later in the tick. */
 const LONG_STEP_MS = 150_000;
 const SHORT_STEP_MS = 45_000;
+/** A skipped SEO fetches the live page (at most 15 s); every other skip is a few writes. */
+const LIVE_TEXT_MS = 20_000;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -41,15 +49,40 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
   const pageId = (job.payload as { pageId?: string }).pageId;
   if (!pageId) return { ok: false, error: "Missing pageId", retryable: false };
 
-  const lastAttempt = job.attempts + 1 >= job.max_attempts;
   let service: SupabaseClient;
   try {
     service = createServiceClient();
   } catch (error) {
-    return { ok: false, error: errorMessage(error), retryable: !lastAttempt };
+    return { ok: false, error: errorMessage(error), retryable: job.attempts + 1 < job.max_attempts };
   }
+  return runContentPageSteps({ service, job, pageId, deadline });
+};
 
-  const limit = deadline ?? Date.now() + LONG_STEP_MS;
+/** The step runners; the test swaps them for stubs (no model, no network). */
+export type ContentPageStepRunners = {
+  runStep: typeof runContentStep;
+  skipStep: typeof skipContentStep;
+};
+
+/**
+ * The step loop of one wake-up. A step the editor switched off for the page
+ * (`skip_steps`) is marked „skipped“ here, before the time budget is checked: a skip makes
+ * no model call (SEO: one fetch of the live page) and must not wait for a tick that has
+ * 150 s left, nor count as a step that needs one. It goes through the same failure handling
+ * as a step (a failed live-text import pauses the page) and the loop goes on.
+ */
+export async function runContentPageSteps(input: {
+  service: SupabaseClient;
+  job: Pick<JobRow, "id" | "attempts" | "max_attempts">;
+  pageId: string;
+  deadline?: number;
+  runners?: Partial<ContentPageStepRunners>;
+}): Promise<JobHandlerResult> {
+  const { service, job, pageId } = input;
+  const runStep = input.runners?.runStep ?? runContentStep;
+  const skipStep = input.runners?.skipStep ?? skipContentStep;
+  const lastAttempt = job.attempts + 1 >= job.max_attempts;
+  const limit = input.deadline ?? Date.now() + LONG_STEP_MS;
   let continued: JobHandlerResult | null = null;
   let page: ContentPageRow | null = null;
   let next: number | null = null;
@@ -88,27 +121,46 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
         return { ok: false, error: message, retryable: true };
       }
 
+      // Switched off by the editor and still to run (pending, error, no row): marked in passing.
+      const skip = skipsContentStep(page.skip_steps, next, steps.find((s) => s.step === next));
+
       // Watermark Entfernung works in chunks and resumes where it stopped, so a short remainder is
       // enough for it. The Aktualitätsprüfung is long: web research plus the whole text; when the
       // budget runs out between the two it hands back `partial` and resumes with its saved research.
-      const def = contentStepDefinition(next);
-      const needed =
-        def?.provider === "xai"
-          ? SHORT_STEP_MS
-          : def?.step === CONTENT_STEP_AKTUALITAET || def?.writesText
-            ? LONG_STEP_MS
-            : SHORT_STEP_MS;
-      const budget = stepBudgetMs(Date.now(), limit, needed);
-      if (budget == null) {
-        return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true } };
+      let budget: number | undefined;
+      if (skip) {
+        const needed = contentStepDefinition(next)?.key === "seo" ? LIVE_TEXT_MS : 0;
+        if (Date.now() + needed >= limit) {
+          return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true } };
+        }
+      } else {
+        const def = contentStepDefinition(next);
+        const needed =
+          def?.provider === "xai"
+            ? SHORT_STEP_MS
+            : def?.step === CONTENT_STEP_AKTUALITAET || def?.writesText
+              ? LONG_STEP_MS
+              : SHORT_STEP_MS;
+        const stepBudget = stepBudgetMs(Date.now(), limit, needed);
+        if (stepBudget == null) {
+          return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true } };
+        }
+        budget = stepBudget;
       }
 
       try {
-        const outcome = await runContentStep(service, page, steps, next, budget);
+        const outcome = skip ? await skipStep(service, page, steps, next) : await runStep(service, page, steps, next, budget);
         if (outcome.halted) {
           return {
             ok: true,
-            result: { step: next, halted: true, discarded: outcome.discarded ?? false, model: outcome.model, costEur: outcome.costEur },
+            result: {
+              step: next,
+              halted: true,
+              discarded: outcome.discarded ?? false,
+              ...(skip ? { skippedByUser: true } : {}),
+              model: outcome.model,
+              costEur: outcome.costEur,
+            },
           };
         }
         if (outcome.partial) {
@@ -116,7 +168,11 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
           continued = { ok: true, reschedule: true, result: { step: next, partial: true, model: outcome.model } };
           continue;
         }
-        continued = { ok: true, reschedule: true, result: { step: next, model: outcome.model, costEur: outcome.costEur } };
+        continued = {
+          ok: true,
+          reschedule: true,
+          result: skip ? { step: next, skippedByUser: true } : { step: next, model: outcome.model, costEur: outcome.costEur },
+        };
       } catch (error) {
         const message = errorMessage(error);
         // Database hiccups while saving are worth another try; a rejected key or a cut-off
@@ -142,4 +198,4 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
   }
 
   return continued ?? { ok: true, reschedule: true, result: { deferred: true } };
-};
+}

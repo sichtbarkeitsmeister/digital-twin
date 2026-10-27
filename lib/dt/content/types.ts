@@ -6,6 +6,7 @@
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
 import type { ContentPageRole, ContentPageType } from "@/lib/dt/content/page-types";
+import type { ContentSkippableStepKey, ContentStepKey } from "@/lib/dt/content/pipeline/steps";
 import type { ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 
 export type ContentPageState =
@@ -50,6 +51,8 @@ export type ContentPageSummary = {
    * A running page still disables the select until it is stopped.
    */
   type_editable: boolean;
+  /** How many steps the editor switched off for this page (`skip_steps`); the table notes „N übersprungen“. */
+  skipped_count: number;
   /** Real Google questions from the Excel (Spalte H). */
   user_questions: number;
   started: boolean;
@@ -186,10 +189,20 @@ export type ContentStepStatus = "done" | "running" | "waiting" | "pending" | "er
 
 export type ContentStep = {
   step: number;
+  /** Stable key (`skip_steps` stores these). */
+  key: ContentStepKey;
   name: string;
   status: ContentStepStatus | string;
   exists: boolean;
   cost_eur: number;
+  /** The editor may switch this step off for this page (never Analyse and Endabnahme; SEO only on crawl pages). */
+  skippable: boolean;
+  /** Why the switch is locked („Läuft immer …“, „Nur bei Seiten von der Website …“); null when it is not. */
+  reason_locked: string | null;
+  /** The step is on the page's `skip_steps`: the switch shows it off. Not the row status (migration 20261027 also wrote „skipped“). */
+  skipped_by_user: boolean;
+  /** Skipped SEO on a crawl page: the live text became the starting text („Übersprungen – Live-Text übernommen“). */
+  live_text: boolean;
 };
 
 export type ContentActionKind =
@@ -207,6 +220,8 @@ export type ContentAction = {
   kind: ContentActionKind;
   step?: number;
   label: string;
+  /** Shown but not usable, with this reason (a rerun from a step the editor switched off). */
+  disabled_reason?: string;
 };
 
 /** What the Excel briefing (or the crawl guess) knows about a page; shown compactly in the drawer. */
@@ -258,6 +273,8 @@ export type ContentReview = {
   questions: ContentQuestion[];
   /** Updates with their sources and the send-back to GEO; the sources stay in the app, never in an export. */
   freshness: ContentReviewFreshness;
+  /** Steps the editor switched off for this page, in step order. */
+  skip_steps: ContentSkippableStepKey[];
   steps: ContentStep[];
   actions: ContentAction[];
 };
@@ -417,7 +434,7 @@ export type ContentTypePromptsResult = {
   hint: string | null;
 };
 
-/** `PATCH /api/dt/content/pages/[slug]`: the editor changed the page type. */
+/** `PATCH /api/dt/content/pages/[slug]`: the editor changed the page type or the steps switched off. */
 export type ContentPagePatchResult = { review: ContentReview; overview: ContentOverview };
 
 /** `POST /api/dt/content/crawl/import` */
