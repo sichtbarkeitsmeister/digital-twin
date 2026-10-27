@@ -10,12 +10,14 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  Lock,
   MessageCircleQuestion,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
+import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
@@ -31,8 +33,10 @@ import {
 import { CONTENT_STEP_AKTUALITAET, CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
 import {
   CONTENT_APPROVE_OPEN_ITEMS_CONFIRM,
+  CONTENT_SKIP_NOTE,
   approveNeedsConfirm,
   contentActionLabel,
+  contentSkipWarnings,
   contentStepStatusLabel,
   extractContentBlocks,
   formatEur,
@@ -44,6 +48,7 @@ import type {
   ContentPagePatchResult,
   ContentPageRunThroughResult,
   ContentReview,
+  ContentStep,
 } from "@/lib/dt/content/types";
 
 const textareaClass =
@@ -314,6 +319,30 @@ export function DtContentPageDrawer(props: {
     onChangedRef.current();
   }
 
+  /**
+   * „Schritte“: one switch per step, saved at once like the Seitentyp. The whole list goes to
+   * the server; it only affects steps the run has not reached yet.
+   */
+  async function toggleStep(step: ContentStep, run: boolean) {
+    if (!base || !review) return;
+    const next = run
+      ? review.skip_steps.filter((key) => key !== step.key)
+      : [...review.skip_steps.filter((key) => key !== step.key), step.key];
+    setBusy("skip_steps");
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, {
+      method: "PATCH",
+      body: { organisationId, skip_steps: next },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    toast.success(run ? `${step.name} läuft wieder` : `${step.name} wird übersprungen`);
+    onChangedRef.current();
+  }
+
   async function runThrough() {
     if (!base) return;
     setBusy("run_through");
@@ -529,7 +558,7 @@ export function DtContentPageDrawer(props: {
                                     "bg-sbkm-navy/[0.06] text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60",
                                 )}
                               >
-                                {contentStepStatusLabel(s.status)}
+                                {contentStepStatusLabel(s.status, { liveText: s.live_text })}
                               </span>
                               <span className="w-14 text-right tabular-nums text-sbkm-ink-600 dark:text-white/60">
                                 {s.cost_eur > 0 ? formatEur(s.cost_eur) : "—"}
@@ -565,6 +594,69 @@ export function DtContentPageDrawer(props: {
                         size="sm"
                         fullWidth
                       />
+                      <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
+                        <p className="text-xs font-semibold text-sbkm-navy dark:text-white">Schritte</p>
+                        <ul className="grid gap-1">
+                          {review.steps.map((s) => {
+                            const alwaysRuns = s.key === "analyse" || s.key === "endabnahme";
+                            // A step the page can no longer skip (SEO after it lost its live URL) can still be switched back on.
+                            const locked = !s.skippable && !s.skipped_by_user;
+                            return (
+                              <li key={s.key} className="grid gap-0.5">
+                                <div className="flex items-center justify-between gap-2 text-xs">
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <span className="w-4 shrink-0 text-right tabular-nums text-sbkm-ink-500 dark:text-white/40">
+                                      {s.step}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "truncate",
+                                        s.skipped_by_user
+                                          ? "text-sbkm-ink-500 line-through dark:text-white/40"
+                                          : "text-sbkm-navy dark:text-white/85",
+                                      )}
+                                    >
+                                      {s.name}
+                                    </span>
+                                  </span>
+                                  {alwaysRuns ? (
+                                    <span
+                                      className="inline-flex shrink-0 items-center gap-1 text-[11px] text-sbkm-ink-500 dark:text-white/45"
+                                      title={s.reason_locked ?? undefined}
+                                    >
+                                      <Lock className="size-3" aria-hidden />
+                                      läuft immer
+                                    </span>
+                                  ) : (
+                                    <DtAgentStatusToggle
+                                      compact
+                                      enabled={!s.skipped_by_user}
+                                      disabled={Boolean(busy) || Boolean(jobId) || review.public.state === "laeuft" || locked}
+                                      onChange={(run) => void toggleStep(s, run)}
+                                      label={s.skipped_by_user ? `${s.name} wieder einschalten` : `${s.name} überspringen`}
+                                    />
+                                  )}
+                                </div>
+                                {!alwaysRuns && !s.skippable && s.reason_locked ? (
+                                  <p className="ml-6 text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
+                                    {s.reason_locked}
+                                  </p>
+                                ) : null}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        {contentSkipWarnings(review.skip_steps).map((warning) => (
+                          <p
+                            key={warning}
+                            className="flex gap-1.5 text-[11px] leading-snug text-orange-700 dark:text-orange-300"
+                          >
+                            <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
+                            {warning}
+                          </p>
+                        ))}
+                        <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">{CONTENT_SKIP_NOTE}</p>
+                      </div>
                       <dl className="grid gap-1 text-xs text-sbkm-ink-600 dark:text-white/65">
                         <div className="flex gap-2">
                           <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Hauptkeyword</dt>
@@ -812,40 +904,51 @@ export function DtContentPageDrawer(props: {
 
                 {!mode ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    {actions.map((action, index) => (
-                      <DtPillButton
-                        key={`${action.kind}-${action.step ?? ""}`}
-                        size="sm"
-                        variant={
-                          action.kind === "approve"
-                            ? "mint"
-                            : RIGHT_ACTIONS.has(action.kind)
-                              ? "ghost"
-                              : "outline"
-                        }
-                        disabled={
-                          Boolean(busy) ||
-                          (Boolean(jobId) && !["stop", "reset", "delete"].includes(action.kind))
-                        }
-                        onClick={() => onAction(action)}
-                        className={cn(
-                          // export / reset / delete sit on the right; the first of them takes the margin
-                          RIGHT_ACTIONS.has(action.kind) &&
-                            actions.findIndex((a) => RIGHT_ACTIONS.has(a.kind)) === index &&
-                            "sm:ml-auto",
-                          (action.kind === "reset" || action.kind === "delete") && "text-red-700 dark:text-red-300",
-                        )}
-                      >
-                        {busy === action.kind ? (
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                        ) : action.kind === "export" ? (
-                          <Download className="size-3.5" aria-hidden />
-                        ) : action.kind === "export_txt" ? (
-                          <FileText className="size-3.5" aria-hidden />
-                        ) : null}
-                        {contentActionLabel(action.kind)}
-                      </DtPillButton>
-                    ))}
+                    {actions.map((action, index) => {
+                      const button = (
+                        <DtPillButton
+                          key={`${action.kind}-${action.step ?? ""}`}
+                          size="sm"
+                          variant={
+                            action.kind === "approve"
+                              ? "mint"
+                              : RIGHT_ACTIONS.has(action.kind)
+                                ? "ghost"
+                                : "outline"
+                          }
+                          disabled={
+                            Boolean(busy) ||
+                            Boolean(action.disabled_reason) ||
+                            (Boolean(jobId) && !["stop", "reset", "delete"].includes(action.kind))
+                          }
+                          onClick={() => onAction(action)}
+                          className={cn(
+                            // export / reset / delete sit on the right; the first of them takes the margin
+                            RIGHT_ACTIONS.has(action.kind) &&
+                              actions.findIndex((a) => RIGHT_ACTIONS.has(a.kind)) === index &&
+                              "sm:ml-auto",
+                            (action.kind === "reset" || action.kind === "delete") && "text-red-700 dark:text-red-300",
+                          )}
+                        >
+                          {busy === action.kind ? (
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                          ) : action.kind === "export" ? (
+                            <Download className="size-3.5" aria-hidden />
+                          ) : action.kind === "export_txt" ? (
+                            <FileText className="size-3.5" aria-hidden />
+                          ) : null}
+                          {contentActionLabel(action.kind)}
+                        </DtPillButton>
+                      );
+                      // A disabled button shows no tooltip: the reason sits on a wrapper.
+                      return action.disabled_reason ? (
+                        <span key={`${action.kind}-${action.step ?? ""}`} title={action.disabled_reason} className="inline-flex">
+                          {button}
+                        </span>
+                      ) : (
+                        button
+                      );
+                    })}
                   </div>
                 ) : null}
               </footer>

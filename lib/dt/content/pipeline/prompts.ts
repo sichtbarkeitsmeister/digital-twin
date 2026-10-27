@@ -38,7 +38,7 @@ import {
   CONTENT_STEP_VERMENSCHLICHUNG,
   CONTENT_STEP_WATERMARK,
 } from "@/lib/dt/content/pipeline/steps";
-import { blocksToPromptText, escapeHtml, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
+import { blocksToPromptText, escapeHtml, htmlToPlainText, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
 import {
   CONTENT_FLOSKELN,
   CONTENT_FUELLWOERTER,
@@ -330,6 +330,16 @@ export function normalizeTextOutput(json: unknown, context: ContentCurrentText):
 export function isHeroPlaceholder(block: ContentTextBlock | null | undefined): boolean {
   if (!block) return false;
   return /\[HERO\b/i.test(`${block.heading ?? ""} ${block.html}`);
+}
+
+/**
+ * The hero section as the SEO step leaves it: nothing but the placeholder (either spelling,
+ * in the heading or the body). A hero Hormozi filled, or one an editor wrote into, is not.
+ */
+export function isEmptyHeroPlaceholder(block: ContentTextBlock | null | undefined): boolean {
+  if (!block) return false;
+  const text = `${block.heading ?? ""} ${htmlToPlainText(block.html)}`.replace(/\s+/g, " ").trim();
+  return /^\[\s*HERO\b[^\]]*\]$/i.test(text);
 }
 
 export function heroBlock(blocks: readonly ContentTextBlock[]): ContentTextBlock | null {
@@ -1138,9 +1148,17 @@ function openFindingsBlock(context: Pick<ContentPipelineContext, "openFindings">
   return `## Offene Punkte aus früheren Schritten (z. B. Aktualitätsprüfung) – in unresolved übernehmen, solange sie zutreffen\n${JSON.stringify(findings, null, 1).slice(0, MAX_OUTPUT_CHARS)}`;
 }
 
+/**
+ * Output budget of the Endabnahme. It carries the open points of earlier steps into
+ * `unresolved`: with GEO switched off for the page the Faktencheck's findings are still open
+ * too (a real page: 13 of them plus 8 from the Lektorat, about 3,500 tokens), and 3,000 cut
+ * the answer off. Only what is written is billed.
+ */
+export const ENDABNAHME_MAX_TOKENS = 8_000;
+
 function endabnahme(context: ContentPipelineContext): ContentStepSpec {
   return {
-    maxTokens: 3_000,
+    maxTokens: ENDABNAHME_MAX_TOKENS,
     system: `${BASE_RULES}
 
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.

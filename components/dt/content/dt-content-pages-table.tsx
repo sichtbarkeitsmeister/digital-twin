@@ -193,7 +193,17 @@ export function DtContentPagesTable(props: {
                 </td>
                 <td className="border-b border-sbkm-navy/8 px-3 py-3 align-middle dark:border-white/8">
                   <div className="grid gap-1">
-                    <DtContentStatusBadge state={page.state} released={page.released} className="w-fit" />
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <DtContentStatusBadge state={page.state} released={page.released} className="w-fit" />
+                      {page.skipped_count > 0 ? (
+                        <span
+                          className="text-[11px] text-sbkm-ink-500 dark:text-white/45"
+                          title="Im Seitenfenster unter „Schritte“ abgeschaltet: diese Schritte laufen für die Seite nicht"
+                        >
+                          {page.skipped_count} übersprungen
+                        </span>
+                      ) : null}
+                    </span>
                     {page.detail && (page.state === "laeuft" || needsYou || page.state === "in_arbeit") ? (
                       <span
                         className={cn(

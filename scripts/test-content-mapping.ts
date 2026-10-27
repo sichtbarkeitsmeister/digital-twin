@@ -593,7 +593,7 @@ const base: ContentPageRow = {
   id: "p1", organisation_id: "o1", slug: "keller", name: "Keller", path: "/keller", level: 1, position: 0, source: "structure", source_url: null, crawled_at: null, main_keyword: null,
   page_role: "pillar", page_type: "hauptsilo", pillar_name: null, estimated_traffic: null, keywords: null, h1_options: [], user_questions: [], ki_prompt: null, internal_link_targets: [],
   state: "nicht_begonnen", step: null, released: false, released_at: null, title: null, meta_description: null, html: "", markdown: "",
-  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], freshness: EMPTY_CONTENT_FRESHNESS, error: null, job_id: null, cost_eur: "0", started_by: null,
+  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], freshness: EMPTY_CONTENT_FRESHNESS, skip_steps: [], error: null, job_id: null, cost_eur: "0", started_by: null,
   created_at: "2026-10-06T10:00:00Z", updated_at: "2026-10-06T10:00:00Z",
 };
 const q = questions[0]!;
@@ -910,6 +910,7 @@ function memoryClient() {
       return this;
     }
     eq(col: string, value: unknown) { this.filters.push((row) => row[col] === value); return this; }
+    neq(col: string, value: unknown) { this.filters.push((row) => row[col] !== value); return this; }
     not(col: string, op: string, value: unknown) {
       if (op === "is" && value === null) this.filters.push((row) => row[col] != null);
       return this;

@@ -34,8 +34,14 @@ import {
   CONTENT_STEP_FAKTENCHECK,
   CONTENT_STEP_LEKTORAT,
   CONTENT_STEPS,
+  contentStepByKey,
   contentStepName,
+  contentStepSkippable,
+  contentStepSkippedByUser,
   hasLegacyContentSteps,
+  isContentSkippableStepKey,
+  normalizeSkipSteps,
+  type ContentSkippableStepKey,
 } from "@/lib/dt/content/pipeline/steps";
 import { CONTENT_ACTION_LABELS, formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
@@ -101,6 +107,11 @@ export type ContentPageRow = {
   notes: string[];
   /** State of the Aktualitätsprüfung (updates, the one send-back to GEO); `{}` until it ran. */
   freshness: ContentFreshness;
+  /**
+   * Steps the editor switched off for this page, by key, in step order (migration 20261028).
+   * Belongs to the page like `page_type`: „Zurücksetzen“ keeps it, no upload or sync writes it.
+   */
+  skip_steps: ContentSkippableStepKey[];
   error: string | null;
   job_id: string | null;
   cost_eur: number | string;
@@ -147,11 +158,13 @@ const BRIEFING_COLUMNS =
  * `freshness` is read everywhere on purpose: without the migration 20261027 the step numbers
  * of stored pages are the old ones, so every read fails with the migration's name
  * (`contentDbErrorMessage`) instead of showing wrong steps or running the wrong one.
+ * `skip_steps` likewise (20261028): a runner that cannot read it would run steps the editor
+ * switched off, and pay for them.
  */
-export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, freshness, error, job_id, cost_eur, started_by, created_at, updated_at`;
+export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** Light projection for the overview table (no HTML). */
-const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, freshness, error, job_id, cost_eur, started_by, created_at, updated_at`;
+const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** What the prompts see of the other pages (cannibalisation, deferred questions). */
 const OUTLINE_COLUMNS = "slug, name, path, level, source, page_role, page_type, pillar_name, main_keyword, keywords";
@@ -172,13 +185,22 @@ export const CONTENT_NINE_STEPS_MIGRATION_FILE = "database/migrations/20261011_d
  * 5 … 9 to 6 … 10 and adds `dt_content_pages.freshness`. Must run before the code is deployed.
  */
 export const CONTENT_AKTUALITAET_MIGRATION_FILE = "database/migrations/20261027_dt_content_aktualitaet.sql";
+/** `dt_content_pages.skip_steps` with its CHECK: the steps switched off per page. Must run before the code is deployed. */
+export const CONTENT_SKIP_STEPS_MIGRATION_FILE = "database/migrations/20261028_dt_content_skip_steps.sql";
 export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
 /** The latest migration that lists every page type in the CHECK of `dt_content_pages.page_type`. */
 export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
 
+/** 23514 on the skip_steps CHECK: the database does not allow a key the code offers (migration 20261028 outdated). */
+export function isContentSkipStepsCheckError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return error.code === "23514" && /skip_steps/i.test(error.message ?? "");
+}
+
 /** 23514 on the step CHECK: the database still allows fewer steps than the code has (migration 20261027 never ran). */
 export function isContentStepRangeError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
+  if (isContentSkipStepsCheckError(error)) return false;
   return error.code === "23514" && /step_check|\bstep\b/i.test(error.message ?? "");
 }
 
@@ -206,6 +228,11 @@ export function isMissingFreshnessColumnError(error: { code?: string; message?: 
   return Boolean(error) && isMissingContentColumnError(error) && /freshness/i.test(error?.message ?? "");
 }
 
+/** `column dt_content_pages.skip_steps does not exist` (select) or PGRST204 (write): migration 20261028 never ran. */
+export function isMissingSkipStepsColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  return Boolean(error) && isMissingContentColumnError(error) && /skip_steps/i.test(error?.message ?? "");
+}
+
 /** `column dt_content_pages.source does not exist` (select) or PGRST204 (write): the source migration never ran. */
 export function isMissingContentColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
@@ -218,6 +245,12 @@ export function isMissingContentColumnError(error: { code?: string; message?: st
 }
 
 export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
+  if (isMissingSkipStepsColumnError(error)) {
+    return `Die Datenbank kennt noch keine abgeschalteten Schritte je Seite: Bitte ${CONTENT_SKIP_STEPS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin läuft in Texte kein Schritt.`;
+  }
+  if (isContentSkipStepsCheckError(error)) {
+    return `Die Datenbank kennt noch nicht alle Schritte, die sich abschalten lassen: Bitte ${CONTENT_SKIP_STEPS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+  }
   if (isContentStepRangeError(error)) {
     return `Die Datenbank kennt noch nicht alle ${CONTENT_STEP_COUNT} Schritte (Aktualitätsprüfung): Bitte ${CONTENT_AKTUALITAET_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
@@ -296,6 +329,7 @@ function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
     questions: asArray<ContentQuestion>(raw.questions),
     notes: asArray<string>(raw.notes).filter((n) => typeof n === "string"),
     freshness: readContentFreshness(raw.freshness),
+    skip_steps: normalizeSkipSteps(raw.skip_steps),
   };
 }
 
@@ -644,6 +678,44 @@ export async function updateContentPageType(
   const { error } = await service.from("dt_content_pages").update({ page_type: pageType }).eq("id", page.id);
   return error
     ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Seitentyp konnte nicht gespeichert werden") }
+    : { ok: true };
+}
+
+export const CONTENT_SKIP_RUNNING_MESSAGE = "Die Seite läuft gerade – erst stoppen, dann Schritte ab- oder einschalten.";
+
+/**
+ * The new list of switched-off steps for „Schritte“ in the page window, or why it is refused:
+ * not while the page runs (409, like the Seitentyp), only keys that can be switched off, SEO
+ * only on a crawl page. A key already on the list may stay (a page that lost its live URL can
+ * still switch other steps). Stored deduplicated in step order.
+ */
+export function planContentSkipSteps(
+  page: Pick<ContentPageRow, "state" | "source" | "source_url" | "skip_steps">,
+  requested: readonly string[],
+): { ok: true; skipSteps: ContentSkippableStepKey[] } | { ok: false; status: number; message: string } {
+  if (page.state === "laeuft") return { ok: false, status: 409, message: CONTENT_SKIP_RUNNING_MESSAGE };
+  for (const key of requested) {
+    if (isContentSkippableStepKey(key) && page.skip_steps.includes(key)) continue;
+    const check = contentStepSkippable(page, key);
+    if (check.ok) continue;
+    const name = contentStepByKey(key)?.name;
+    const reason = check.reason.replace(/\.?$/, ".");
+    return { ok: false, status: 400, message: name ? `„${name}“ lässt sich für diese Seite nicht abschalten. ${reason}` : reason };
+  }
+  return { ok: true, skipSteps: normalizeSkipSteps(requested) };
+}
+
+/** „Schritte“ in the page window: one switch per step, each change saved at once. */
+export async function updateContentSkipSteps(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  requested: readonly string[],
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const plan = planContentSkipSteps(page, requested);
+  if (!plan.ok) return { ok: false, status: plan.status, error: plan.message };
+  const { error } = await service.from("dt_content_pages").update({ skip_steps: plan.skipSteps }).eq("id", page.id).neq("state", "laeuft");
+  return error
+    ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Schritte konnten nicht gespeichert werden") }
     : { ok: true };
 }
 
@@ -1073,6 +1145,7 @@ export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}):
     page_type: page.page_type,
     page_role: page.page_role,
     type_editable: canEditContentPageType(page),
+    skipped_count: page.skip_steps.length,
     user_questions: page.user_questions.length,
     started: page.state !== "nicht_begonnen",
     state: page.state,
@@ -1123,6 +1196,14 @@ export function rerunStepFor(page: ContentPageRow): number {
   return page.step ?? 1;
 }
 
+export const CONTENT_SKIPPED_RERUN_MESSAGE = "Schritt ist für diese Seite abgeschaltet – erst wieder einschalten.";
+
+/** „Mit Anmerkung wiederholen“ from `step`; disabled with the reason when the editor switched that step off. */
+function rerunAction(page: Pick<ContentPageRow, "skip_steps">, step: number): ContentAction {
+  const action: ContentAction = { kind: "rerun_with_note", step, label: "Mit Anmerkung wiederholen" };
+  return contentStepSkippedByUser(page.skip_steps, step) ? { ...action, disabled_reason: CONTENT_SKIPPED_RERUN_MESSAGE } : action;
+}
+
 /**
  * „Zurücksetzen“ is offered on every started page and „Löschen“ on every page: the way out
  * of any state, and the way to prune a table, by hand.
@@ -1148,7 +1229,7 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
       return [
         { kind: "approve", step: waitingStepFor(page), label: "Freigeben" },
         { kind: "edit", step: waitingStepFor(page), label: "Abschnitt ändern" },
-        { kind: "rerun_with_note", step: rerunStepFor(page), label: "Mit Anmerkung wiederholen" },
+        rerunAction(page, rerunStepFor(page)),
         ...exportAction,
         reset,
         remove,
@@ -1157,7 +1238,7 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
       return [
         { kind: "run_through", label: "Weiterlaufen lassen" },
         ...(page.html ? [{ kind: "edit" as const, step: rerunStepFor(page), label: "Abschnitt ändern" }] : []),
-        { kind: "rerun_with_note", step: rerunStepFor(page), label: "Mit Anmerkung wiederholen" },
+        rerunAction(page, rerunStepFor(page)),
         ...exportAction,
         reset,
         remove,
@@ -1168,7 +1249,7 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
         : [
             { kind: "approve", step: CONTENT_STEP_ENDABNAHME, label: "Freigeben" },
             { kind: "edit", step: CONTENT_STEP_LEKTORAT, label: "Abschnitt ändern" },
-            { kind: "rerun_with_note", step: CONTENT_STEP_LEKTORAT, label: "Mit Anmerkung wiederholen" },
+            rerunAction(page, CONTENT_STEP_LEKTORAT),
             ...exportAction,
             reset,
             remove,
@@ -1178,16 +1259,36 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
   }
 }
 
-export function stepList(steps: ContentStepRow[]): ContentStep[] {
+/** Whether a skipped row took over the live text (SEO switched off on a crawl page). */
+function tookLiveText(row: Pick<ContentStepRow, "status" | "output"> | undefined): boolean {
+  const output = row?.output;
+  return row?.status === "skipped" && Boolean(output) && typeof output === "object" && (output as { live_text?: unknown }).live_text === true;
+}
+
+/**
+ * The steps for the drawer: status and cost of each row, and for the „Schritte“ switches
+ * whether the editor may switch the step off on this page. `skipped_by_user` follows
+ * `skip_steps`, not the row: a row the migration 20261027 marked „skipped“ is no choice.
+ */
+export function stepList(
+  steps: readonly ContentStepRow[],
+  page: Pick<ContentPageRow, "source" | "source_url" | "skip_steps">,
+): ContentStep[] {
   return CONTENT_STEPS.map((def) => {
     const row = steps.find((s) => s.step === def.step);
     const status: ContentStepStatus = row?.status ?? "pending";
+    const skippable = contentStepSkippable(page, def.key);
     return {
       step: def.step,
+      key: def.key,
       name: def.name,
       status,
       exists: Boolean(row) && status !== "pending",
       cost_eur: num(row?.cost_eur),
+      skippable: skippable.ok,
+      reason_locked: skippable.reason,
+      skipped_by_user: contentStepSkippedByUser(page.skip_steps, def.step),
+      live_text: tookLiveText(row),
     };
   });
 }
@@ -1241,7 +1342,8 @@ export function buildReview(
     unresolved: page.unresolved,
     questions: page.state === "braucht_sie" ? page.questions : [],
     freshness: reviewFreshness(page.freshness),
-    steps: stepList(steps),
+    skip_steps: page.skip_steps,
+    steps: stepList(steps, page),
     actions: pageActions(page),
   };
 }

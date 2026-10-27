@@ -9,8 +9,8 @@ import { rephraseProgressLabel } from "@/lib/dt/content/pipeline/rephrase";
 import {
   CONTENT_STEP_COUNT,
   contentStepName,
-  nextContentStep,
   runningPageDetail,
+  upcomingContentStep,
 } from "@/lib/dt/content/pipeline/steps";
 import { JOB_LOCK_TTL_MS } from "@/lib/jobs/schedule";
 import type { JobStatus } from "@/lib/jobs/types";
@@ -81,16 +81,18 @@ function shortError(error: string | null): string {
  * Header line of a page in `laeuft`. Without job information this is the old text; with it,
  * a parked retry, an unclaimed job or a dead worker no longer read as „läuft“.
  * `steps` is null when the step rows were not loaded (then `page.step` is the best guess).
+ * Steps the editor switched off (`skip_steps`) are never announced as the next one.
  */
 export function describeRunningPage(
-  page: { step: number | null; error: string | null },
+  page: { step: number | null; error: string | null; skip_steps?: readonly string[] },
   steps: readonly { step: number; status: string; output?: unknown }[] | null,
   verdict: ContentJobVerdict | null,
 ): string {
   const current = page.step;
-  const upcoming = steps ? (nextContentStep(steps) ?? current) : current;
+  const skipSteps = page.skip_steps ?? [];
+  const upcoming = steps ? (upcomingContentStep(steps, skipSteps) ?? current) : current;
   const plain = steps
-    ? runningPageDetail(current, steps)
+    ? runningPageDetail(current, steps, skipSteps)
     : stepLabel(current)
       ? `${stepLabel(current)} läuft`
       : "Startet …";

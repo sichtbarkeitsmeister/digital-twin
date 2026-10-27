@@ -13,9 +13,16 @@ import {
   CONTENT_STEP_FAKTENCHECK,
   CONTENT_STEP_GEO,
   CONTENT_STEP_LEKTORAT,
+  contentStepSkippedByUser,
 } from "@/lib/dt/content/pipeline/steps";
 import { htmlToMarkdown, replaceBlockText } from "@/lib/dt/content/render";
-import { rerunStepFor, resetContentStepsFrom, waitingStepFor, type ContentPageRow } from "@/lib/dt/content/store";
+import {
+  CONTENT_SKIPPED_RERUN_MESSAGE,
+  rerunStepFor,
+  resetContentStepsFrom,
+  waitingStepFor,
+  type ContentPageRow,
+} from "@/lib/dt/content/store";
 import { enqueueJob } from "@/lib/jobs/queue";
 
 export const CONTENT_JOB_KIND = "content.page";
@@ -83,7 +90,11 @@ async function enqueuePageJob(
   return { ok: true, jobId };
 }
 
-/** "Texte erstellen" / "Weiterlaufen lassen": continue at the first unfinished step. */
+/**
+ * "Texte erstellen" / "Weiterlaufen lassen": continue at the first unfinished step. An error
+ * row goes back to pending; when the editor has switched that step off meanwhile, the runner
+ * skips it now instead of trying it again.
+ */
 export async function startContentRun(
   service: SupabaseClient,
   page: ContentPageRow,
@@ -105,6 +116,7 @@ export async function startContentRun(
  * a placeholder after a text step): accept the text as it is and continue with the next
  * step; nothing is filled in or removed, so a placeholder still in the text stops the page
  * again. After the Endabnahme that stopped for a placeholder, and on a finished page: release.
+ * A skipped SEO whose live text held a placeholder stops the same way; its row stays „skipped“.
  */
 export async function approveContentStep(
   service: SupabaseClient,
@@ -118,7 +130,8 @@ export async function approveContentStep(
       .from("dt_content_steps")
       .update({ status: "done", approved_by: userId, approved_at: now })
       .eq("page_id", page.id)
-      .eq("step", step);
+      .eq("step", step)
+      .neq("status", "skipped");
     if (step === CONTENT_STEP_ENDABNAHME) {
       const { error } = await service
         .from("dt_content_pages")
@@ -354,7 +367,12 @@ export function freshnessForRerun(page: Pick<ContentPageRow, "freshness">, step:
   return { ...page.freshness, pending_sections: [] };
 }
 
-/** "Mit Anmerkung wiederholen": note becomes a standing instruction, pipeline restarts at `step`. */
+/**
+ * "Mit Anmerkung wiederholen": note becomes a standing instruction, pipeline restarts at `step`.
+ * Every row from `step` on goes back to pending (also „skipped“ ones), and the runner applies
+ * the page's current `skip_steps` again. Starting AT a step the editor switched off is refused:
+ * it would only be skipped, with the note unread.
+ */
 export async function rerunContentStep(
   service: SupabaseClient,
   page: ContentPageRow,
@@ -368,6 +386,9 @@ export async function rerunContentStep(
   const maxStep = Math.max(rerunStepFor(page), page.step ?? 1);
   if (step < 1 || step > CONTENT_STEP_COUNT || step > maxStep) {
     return { ok: false, status: 400, message: `Schritt ${step} kann hier nicht wiederholt werden.` };
+  }
+  if (contentStepSkippedByUser(page.skip_steps, step)) {
+    return { ok: false, status: 409, message: CONTENT_SKIPPED_RERUN_MESSAGE };
   }
   try {
     await resetContentStepsFrom(service, page.id, step);
