@@ -9,7 +9,7 @@
  *   - text: the uploaded file, split into blocks by `ingest.ts`.
  *
  * Tool schema (`submit_geo_text`), model tier (write) and the output normalisation are those
- * of Texte step 4. `geoToolSpec` and the helpers are pure; `runGeoTool` loads the context and
+ * of Texte's GEO step. `geoToolSpec` and the helpers are pure; `runGeoTool` loads the context and
  * calls the model (injectable for tests).
  */
 

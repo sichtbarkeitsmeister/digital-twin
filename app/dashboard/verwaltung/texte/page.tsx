@@ -5,6 +5,7 @@ import { OrganisationPageShell } from "@/app/dashboard/_components/organisations
 import { DtContentWorkspace } from "@/components/dt/content/dt-content-workspace";
 import { loadContentAnbieterSources, loadContentAvatarOptions } from "@/lib/dt/content/load-sources";
 import { sectionsForSuggestion, suggestTextSettings } from "@/lib/dt/content/mapping";
+import { CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
 import { loadContentSettings, settingsFromRow } from "@/lib/dt/content/store";
 import { loadDtSeoOrganisations } from "@/lib/dt/load-seo-organisations";
 import { createClient } from "@/lib/supabase/server";
@@ -58,7 +59,7 @@ async function TextePageContent({ searchParams }: { searchParams: { org?: string
         <div className="grid gap-1">
           <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">Texte</h1>
           <p className="text-xs text-secondary sm:text-sm">
-            Seitentexte für <span className="font-semibold">{organisation.name}</span> in neun Schritten
+            Seitentexte für <span className="font-semibold">{organisation.name}</span> in {CONTENT_STEP_COUNT} Schritten
             schreiben lassen, prüfen und freigeben.
           </p>
         </div>

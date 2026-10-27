@@ -11,10 +11,22 @@ import {
   loadContentAvatarOptions,
   loadContentAvatarRow,
 } from "@/lib/dt/content/load-sources";
+import { readAktualitaetProgress, type AktualitaetProgress } from "@/lib/dt/content/freshness";
 import { avatarFromAgent } from "@/lib/dt/content/mapping";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
-import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
+import {
+  aktualitaetNeedsNoResult,
+  aktualitaetResearchPrompt,
+  aktualitaetTextKey,
+  aktualitaetWriteSpec,
+  inspectResearchBlocks,
+  researchFromCall,
+  researchProblem,
+  unchangedAktualitaetOutput,
+  type AktualitaetOutput,
+} from "@/lib/dt/content/pipeline/aktualitaet";
+import { ContentLlmError, callContentResearch, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import {
   contentStepSpec,
   type ContentPipelineContext,
@@ -24,8 +36,8 @@ import {
 import { readRephraseProgress, rephraseBlockCount, type RephraseProgress } from "@/lib/dt/content/pipeline/rephrase";
 import { runRephraseOnBlocks } from "@/lib/dt/content/pipeline/rephrase-runner";
 import { stepPatchFor } from "@/lib/dt/content/pipeline/step-patch";
-import { contentStepDefinition, type ContentStepDefinition } from "@/lib/dt/content/pipeline/steps";
-import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
+import { CONTENT_STEP_AKTUALITAET, contentStepDefinition, type ContentStepDefinition } from "@/lib/dt/content/pipeline/steps";
+import { estimateCostEur, estimateWebSearchCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
   contentDbErrorMessage,
@@ -33,6 +45,7 @@ import {
   loadContentPageOutline,
   loadContentSettings,
   num,
+  resetContentStepsFrom,
   settingsFromRow,
   type ContentPageRow,
   type ContentStepRow,
@@ -49,8 +62,9 @@ export type StepOutcome = {
   /** The page was stopped or reset while the model was answering; nothing was saved. */
   discarded?: boolean;
   /**
-   * The step saved its progress but is not done (step 8 ran out of job budget between two
-   * chunks): the job continues it in the next tick, without counting a failed attempt.
+   * The step saved its progress but is not done (Watermark Entfernung ran out of job budget
+   * between two chunks, the Aktualitätsprüfung between its research and its result): the job
+   * continues it in the next tick, without counting a failed attempt.
    */
   partial?: boolean;
   model: string;
@@ -62,6 +76,13 @@ const EXISTING_TEXT_MAX_CHARS = 6_000;
 /** A second attempt inside one step (Vermenschlichung) needs this much of the budget left. */
 const MIN_RETRY_MS = 60_000;
 const DEFAULT_STEP_TIMEOUT_MS = 240_000;
+/** The Aktualitätsprüfung's web research may use this much of a tick; the result call needs the rest. */
+const AKTUALITAET_RESEARCH_MAX_MS = 150_000;
+/**
+ * The result call writes the whole text (like GEO). With less budget than this left after the
+ * research, it waits for the next tick; the research is saved and not paid twice.
+ */
+const AKTUALITAET_WRITE_MIN_MS = 100_000;
 
 /** The current text of a page taken over from the crawl, or null (structure pages, no crawl row). */
 async function loadExistingText(service: SupabaseClient, page: ContentPageRow): Promise<string | null> {
@@ -149,6 +170,8 @@ async function loadContext(
       texterPrompt,
       stepPrompts,
       notes: page.notes,
+      freshness: page.freshness,
+      openFindings: page.findings,
       outputs,
       blocks: parseBlocksFromHtml(page.html),
       title: page.title,
@@ -176,7 +199,8 @@ type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: nu
 /**
  * One tool call on Claude, plus the step's own second attempt when its `retryHint` asks for
  * one and enough of the budget is left. Both calls are billed; the better-scored output is
- * kept. Step 8 does not come through here (see `runRephraseStep`).
+ * kept. Watermark Entfernung does not come through here (see `runRephraseStep`); the
+ * Aktualitätsprüfung uses it for its result call only.
  */
 async function callStep(
   spec: ContentStepSpec,
@@ -231,6 +255,9 @@ export async function runContentStep(
   if (def.provider === "xai") {
     return runRephraseStep({ service, page, def, steps, context, avatarId, timeoutMs });
   }
+  if (def.step === CONTENT_STEP_AKTUALITAET) {
+    return runAktualitaetStep({ service, page, def, steps, context, avatarId, timeoutMs });
+  }
   const models = await loadContentModelConfig(service);
   const spec = contentStepSpec(step, context);
   const { output, calls } = await callStep(spec, context, models[def.tier], timeoutMs);
@@ -284,6 +311,146 @@ export async function runContentStep(
   return { step, halted, model, costEur };
 }
 
+/**
+ * The Aktualitätsprüfung in two calls (`aktualitaet.ts`): the web research with web search and
+ * web fetch, then the tool-forced result that may only cite what the research returned. The
+ * research and its cost are saved in the step row as soon as they are in, so a job budget that
+ * runs out before the result (`partial`) or a failed result call does not search again. Every
+ * call is recorded with its tokens and searches; the searches are billed on the step and the
+ * page like the tokens. A send-back to GEO resets GEO and this step and the job goes on.
+ */
+async function runAktualitaetStep(input: {
+  service: SupabaseClient;
+  page: ContentPageRow;
+  def: ContentStepDefinition;
+  steps: ContentStepRow[];
+  context: ContentPipelineContext;
+  avatarId: string | null;
+  timeoutMs: number | undefined;
+}): Promise<StepOutcome> {
+  const { service, page, def, context } = input;
+  const deadline = Date.now() + (input.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS);
+  const progress: AktualitaetProgress = readAktualitaetProgress(
+    input.steps.find((s) => s.step === def.step)?.output,
+    aktualitaetTextKey(context),
+  );
+  const models = (await loadContentModelConfig(service))[def.tier];
+  let model = progress.models[progress.models.length - 1] ?? models[0] ?? "";
+
+  const bill = async (call: { model: string; usage: { inputTokens: number; outputTokens: number }; web?: { webSearchRequests: number; webFetchRequests: number } }) => {
+    const searches = call.web?.webSearchRequests ?? 0;
+    const fetches = call.web?.webFetchRequests ?? 0;
+    progress.calls += 1;
+    progress.input_tokens += call.usage.inputTokens;
+    progress.output_tokens += call.usage.outputTokens;
+    progress.web_search_requests += searches;
+    progress.web_fetch_requests += fetches;
+    progress.cost_eur = roundEur(progress.cost_eur + estimateCostEur(call.model, call.usage) + estimateWebSearchCostEur(searches));
+    progress.models = [...progress.models, call.model].slice(-10);
+    model = call.model;
+    await recordLlmUsageEvent(service, {
+      organisationId: page.organisation_id,
+      userId: page.started_by,
+      agentId: input.avatarId,
+      mode: `content.${def.step}`,
+      via: "direct",
+      model: call.model,
+      inputTokens: call.usage.inputTokens,
+      outputTokens: call.usage.outputTokens,
+      webSearchRequests: searches,
+      webFetchRequests: fetches,
+    });
+  };
+  const saveProgress = (patch: Partial<ContentStepRow> = {}) =>
+    upsertStep(service, page, def.step, {
+      output: progress as unknown as Record<string, unknown>,
+      model,
+      input_tokens: progress.input_tokens,
+      output_tokens: progress.output_tokens,
+      cost_eur: progress.cost_eur,
+      error: null,
+      ...patch,
+    });
+
+  if (!progress.research) {
+    const prompt = aktualitaetResearchPrompt(context);
+    const billedBefore = progress.calls;
+    let result: Awaited<ReturnType<typeof callContentResearch>>;
+    try {
+      result = await callContentResearch({
+        models,
+        system: prompt.system,
+        user: prompt.user,
+        maxTokens: prompt.maxTokens,
+        timeoutMs: Math.min(AKTUALITAET_RESEARCH_MAX_MS, deadline - Date.now()),
+        onCall: bill,
+      });
+    } catch (error) {
+      // Rounds that were answered are paid: their cost stays on the step for the page total.
+      if (progress.calls > billedBefore && (await pageStillRunning(service, page.id))) {
+        await saveProgress().catch((err) => console.error("[content] research cost not stored", err));
+      }
+      throw error;
+    }
+    if (!(await pageStillRunning(service, page.id))) {
+      return { step: def.step, halted: true, discarded: true, model, costEur: progress.cost_eur };
+    }
+    const inspection = inspectResearchBlocks(result.blocks);
+    const research = researchFromCall(result.text, inspection, {
+      searches: result.calls.reduce((sum, call) => sum + call.web.webSearchRequests, 0),
+      fetches: result.calls.reduce((sum, call) => sum + call.web.webFetchRequests, 0),
+    });
+    const problem = researchProblem(research, inspection);
+    if (problem) {
+      // Never „alles aktuell“ without a source: the step fails visibly, the cost stays recorded.
+      await saveProgress();
+      throw new ContentLlmError(problem.message, problem.retryable);
+    }
+    progress.research = research;
+    if (deadline - Date.now() < AKTUALITAET_WRITE_MIN_MS) {
+      await saveProgress({ status: "pending", finished_at: null });
+      return { step: def.step, halted: false, partial: true, model, costEur: 0 };
+    }
+    await saveProgress({ status: "running" });
+  }
+
+  const research = progress.research;
+  if (!research) throw new ContentLlmError("Die Recherche der Aktualitätsprüfung fehlt. Der Schritt wird erneut versucht.", true);
+  let output: AktualitaetOutput;
+  if (aktualitaetNeedsNoResult(research)) {
+    output = unchangedAktualitaetOutput(context, research);
+  } else {
+    const spec = aktualitaetWriteSpec(context, research);
+    const { output: written, calls } = await callStep(spec, context, models, Math.max(30_000, deadline - Date.now()));
+    for (const call of calls) await bill(call);
+    output = written as AktualitaetOutput;
+  }
+
+  if (!(await pageStillRunning(service, page.id))) {
+    return { step: def.step, halted: true, discarded: true, model, costEur: progress.cost_eur };
+  }
+
+  const { pagePatch, stepStatus, halted, resetFrom } = stepPatchFor(def, output, page);
+  pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
+  await upsertStep(service, page, def.step, {
+    status: stepStatus,
+    output: output as unknown as Record<string, unknown>,
+    model,
+    input_tokens: progress.input_tokens,
+    output_tokens: progress.output_tokens,
+    cost_eur: progress.cost_eur,
+    error: null,
+    finished_at: new Date().toISOString(),
+  });
+  const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
+  if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
+  if (resetFrom != null) {
+    // Send-back: GEO reworks the outdated Abschnitte, then this step checks once more.
+    await resetContentStepsFrom(service, page.id, resetFrom);
+  }
+  return { step: def.step, halted, model, costEur: progress.cost_eur };
+}
+
 /** Stopped or reset while the model was answering? Then nothing more is saved for this page. */
 async function pageStillRunning(service: SupabaseClient, pageId: string): Promise<boolean> {
   const { data, error } = await service.from("dt_content_pages").select("state").eq("id", pageId).maybeSingle();
@@ -291,8 +458,8 @@ async function pageStillRunning(service: SupabaseClient, pageId: string): Promis
 }
 
 /**
- * Step 8 on Grok, in chunks (`rephrase-runner.ts`, shared with the Watermark tool under
- * Verwaltung). Each group of sections is one short call; the rewritten HTML lands in the
+ * Watermark Entfernung on Grok, in chunks (`rephrase-runner.ts`, shared with the Watermark
+ * tool under Verwaltung). Each group of sections is one short call; the rewritten HTML lands in the
  * step row's output after every call, so a worker that dies or a job budget that runs out
  * loses at most one chunk. With little budget left the step hands back `partial`, the job
  * reschedules without a failed attempt, and the next tick resumes with the chunks still
@@ -381,8 +548,8 @@ export async function markContentStepError(
     .update({ state: "in_arbeit", step, error: text, job_id: null })
     .eq("id", page.id);
   if (error) {
-    // The step number itself may be what the database rejects (steps 1 … 8 only, migration
-    // 20261011 not run): pause the page anyway, with the reason, on its last stored step.
+    // The step number itself may be what the database rejects (fewer steps allowed, migration
+    // 20261027 not run): pause the page anyway, with the reason, on its last stored step.
     await service
       .from("dt_content_pages")
       .update({ state: "in_arbeit", error: contentDbErrorMessage(error, text).slice(0, 500), job_id: null })

@@ -1,7 +1,7 @@
 /**
  * Watermark tool: chunk planning, merging by id, the shared Grok runner with a stubbed
  * `fetch` (no network, no database), pausing and resuming, the prompt wiring that must
- * match step 8 of Texte, and the standalone flow (plan → one call per chunk → export). Run: npx tsx scripts/test-text-tools-watermark.ts
+ * match the Watermark step of Texte, and the standalone flow (plan → one call per chunk → export). Run: npx tsx scripts/test-text-tools-watermark.ts
  */
 import assert from "node:assert/strict";
 
@@ -141,7 +141,7 @@ function testMergeById() {
   console.log("merge by id: ok");
 }
 
-// --- prompt: same as step 8, nothing from the menu label -------------------------------------------
+// --- prompt: same as the Watermark step of Texte, nothing from the menu label --------------------
 
 function testPromptMatchesStepEight() {
   const chunk = uploadBlocks().filter(needsRephrase);
@@ -171,12 +171,12 @@ function testPromptMatchesStepEight() {
   // Vorgaben keep the text's own address and tone instead of naming any organisation's.
   const standalone = rephraseChunkPrompt({ notes: [] }, chunk);
   assert.equal(standalone.system, REPHRASE_SYSTEM);
-  assert.equal(standalone.user.split("\n\n## Vorgaben")[0], tool.user.split("\n\n## Vorgaben")[0], "same sections block as step 8");
+  assert.equal(standalone.user.split("\n\n## Vorgaben")[0], tool.user.split("\n\n## Vorgaben")[0], "same sections block as the Watermark step");
   assert.ok(standalone.user.endsWith(REPHRASE_OWN_VORGABEN));
   assert.doesNotMatch(standalone.user, /Branche|Verbotene Wörter|## Anmerkungen/);
   assert.doesNotMatch(standalone.user, forbidden);
   assert.doesNotMatch(REPHRASE_OWN_VORGABEN, forbidden);
-  console.log("prompt matches step 8: ok");
+  console.log("prompt matches the Watermark step: ok");
 }
 
 // --- the runner on a stubbed Grok ------------------------------------------------------------------
@@ -392,7 +392,7 @@ function testPrepareDocument() {
   assert.equal(doc.fileName, "praxis.docx");
   assert.equal(doc.format, "docx");
   assert.equal(doc.total, 3);
-  assert.deepEqual(doc.chunks, planRephraseChunks(blocks).map((c) => c.map((b) => b.id)), "planned exactly like step 8");
+  assert.deepEqual(doc.chunks, planRephraseChunks(blocks).map((c) => c.map((b) => b.id)), "planned exactly like the Watermark step");
   assert.equal(doc.chunks.flat().length, doc.total, "every rewritable block is in exactly one call");
 
   const big = bigBlocks(9, 20);
@@ -506,7 +506,7 @@ async function testBrowserRunAndExport() {
     if (result.ok) for (const b of result.value.blocks) rewritten[b.id] = b.html;
   }
   const merged = mergeWatermarkBlocks(doc.blocks, rewritten);
-  assert.deepEqual(merged, rephrasedBlocks(doc.blocks, rewritten), "same merge rule as step 8");
+  assert.deepEqual(merged, rephrasedBlocks(doc.blocks, rewritten), "same merge rule as the Watermark step");
   assert.deepEqual(merged.map((b) => [b.id, b.heading]), blocks.map((b) => [b.id, b.heading]), "headings and order unchanged");
   assert.equal(merged.filter((b, i) => b.html !== blocks[i]!.html).length, doc.total, "exactly the planned blocks changed");
 

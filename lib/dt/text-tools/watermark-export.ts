@@ -9,7 +9,7 @@ import { renderBlocksHtml, slugify, type ContentTextBlock } from "@/lib/dt/conte
 
 export type WatermarkExportFormat = "html" | "txt";
 
-/** Every block with its rewritten body when there is one; same rule as `rephrasedBlocks` of step 8. */
+/** Every block with its rewritten body when there is one; same rule as `rephrasedBlocks` of the Watermark step. */
 export function mergeWatermarkBlocks(blocks: readonly ContentTextBlock[], rewritten: Readonly<Record<string, string>>): ContentTextBlock[] {
   return blocks.map((block) => (rewritten[block.id]?.trim() ? { ...block, html: rewritten[block.id]! } : block));
 }

@@ -3,7 +3,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { interruptedStepMessage } from "@/lib/dt/content/job-state";
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 import { markContentStepError, markContentStepRetry, runContentStep } from "@/lib/dt/content/pipeline/run-step";
-import { CONTENT_STEP_COUNT, contentStepDefinition, nextContentStep } from "@/lib/dt/content/pipeline/steps";
+import {
+  CONTENT_STEP_AKTUALITAET,
+  CONTENT_STEP_COUNT,
+  contentStepDefinition,
+  nextContentStep,
+} from "@/lib/dt/content/pipeline/steps";
 import { loadContentPageById, loadContentSteps, type ContentPageRow } from "@/lib/dt/content/store";
 import { stepBudgetMs } from "@/lib/jobs/schedule";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -83,9 +88,16 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
         return { ok: false, error: message, retryable: true };
       }
 
-      // Step 8 works in chunks and resumes where it stopped, so a short remainder is enough for it.
+      // Watermark Entfernung works in chunks and resumes where it stopped, so a short remainder is
+      // enough for it. The Aktualitätsprüfung is long: web research plus the whole text; when the
+      // budget runs out between the two it hands back `partial` and resumes with its saved research.
       const def = contentStepDefinition(next);
-      const needed = def?.provider === "xai" ? SHORT_STEP_MS : def?.writesText ? LONG_STEP_MS : SHORT_STEP_MS;
+      const needed =
+        def?.provider === "xai"
+          ? SHORT_STEP_MS
+          : def?.step === CONTENT_STEP_AKTUALITAET || def?.writesText
+            ? LONG_STEP_MS
+            : SHORT_STEP_MS;
       const budget = stepBudgetMs(Date.now(), limit, needed);
       if (budget == null) {
         return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true } };

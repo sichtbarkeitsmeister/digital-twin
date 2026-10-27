@@ -6,7 +6,8 @@
  * A gap is
  *   [BITTE PRÜFEN: …]   [QUELLE BITTE ERGÄNZEN]   [PREIS BITTE PRÜFEN UND ANPASSEN…]
  * Not a gap (wanted markers): [LINK: …], [DATUM], [FOTO: …] and the hero placeholder
- * „[HERO – wird in Schritt 5 gefuellt]“, which step 5 replaces.
+ * „[HERO – …]“ (today „[HERO – wird von Hormozi gefuellt]“, on older pages „[HERO – wird in
+ * Schritt 5 gefuellt]“), which the Hormozi step replaces.
  */
 
 import { htmlToPlainText, parseBlocksFromHtml, type ContentTextBlock } from "@/lib/dt/content/render";

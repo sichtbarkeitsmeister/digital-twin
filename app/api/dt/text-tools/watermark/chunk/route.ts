@@ -9,7 +9,7 @@ export const maxDuration = 300;
 
 /**
  * Watermark tool, one request per chunk: the chunk's sections → the same sections with new
- * body text, from one Grok call through the runner of Texte step 8. Failures answer with
+ * body text, from one Grok call through the runner of Texte's Watermark Entfernung step. Failures answer with
  * `{ ok: false, message, retryable, slowModels }` so the browser can retry or stop.
  */
 export async function POST(req: Request) {

@@ -22,7 +22,7 @@ function missingColumn(message: string): boolean {
   return /content_step_prompts|schema cache/i.test(message) && /does not exist|schema cache/i.test(message);
 }
 
-/** What the six cards show: the effective text per step and which ones are own texts. */
+/** What the cards show (one per key of `CONTENT_STEP_PROMPT_KEYS`): the effective text per step and which ones are own texts. */
 function payload(stored: unknown, persisted: boolean, message: string | null) {
   const own = normalizeStoredContentStepPrompts(stored);
   return {

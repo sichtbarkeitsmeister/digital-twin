@@ -85,6 +85,7 @@
     "test:organisation-document-title": "tsx scripts/test-organisation-document-title.ts",
     "test:text-mode-prompt": "tsx scripts/test-text-mode-prompt.ts",
     "test:content-excel-structure": "tsx scripts/test-content-excel-structure.ts",
+    "test:content-aktualitaet": "tsx scripts/test-content-aktualitaet.ts",
     "test:text-tools-geo": "tsx scripts/test-text-tools-geo.ts",
     "test:text-tools-hormozi": "tsx scripts/test-text-tools-hormozi.ts",
     "test:text-tools-seo": "tsx scripts/test-text-tools-seo.ts",

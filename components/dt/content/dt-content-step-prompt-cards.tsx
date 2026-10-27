@@ -151,7 +151,7 @@ function StepPromptCard(props: {
 }
 
 /**
- * The six editable step instructions of Texte (Globale Prompts, under the Text-Prompt).
+ * The editable step instructions of Texte (Globale Prompts, under the Text-Prompt), one card per key of `CONTENT_STEP_PROMPT_KEYS`.
  * Each card saves on its own; an empty text or „Auf Standard zurücksetzen“ means the
  * built-in instruction. The locked rules, Text-Prompt and Textvorlagen stay in code.
  */

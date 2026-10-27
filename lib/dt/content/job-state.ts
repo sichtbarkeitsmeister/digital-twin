@@ -4,6 +4,7 @@
  * rows and repairs pages whose job will never come back.
  */
 
+import { aktualitaetProgressLabel } from "@/lib/dt/content/freshness";
 import { rephraseProgressLabel } from "@/lib/dt/content/pipeline/rephrase";
 import {
   CONTENT_STEP_COUNT,
@@ -95,9 +96,10 @@ export function describeRunningPage(
       : "Startet …";
 
   if (!verdict || verdict.kind === "running") {
-    // Step 8 reports how many sections are rewritten, so a long page does not look stuck.
+    // Watermark Entfernung reports how many sections are rewritten, the Aktualitätsprüfung that
+    // its web research is done, so a long step does not look stuck.
     const row = steps?.find((s) => s.step === current && (s.status === "running" || s.status === "pending"));
-    const progress = row ? rephraseProgressLabel(row.output) : null;
+    const progress = row ? (rephraseProgressLabel(row.output) ?? aktualitaetProgressLabel(row.output)) : null;
     return progress && plain.endsWith("läuft") ? `${plain} (${progress})` : plain;
   }
 

@@ -82,7 +82,7 @@ function testSystemPromptUsesGlobalHormoziPrompt() {
     ),
   );
   assert.equal(spec.system, `${instruction}\n\n${HORMOZI_TOOL_RULES}`, "instruction first, then the fixed rules, nothing else");
-  assert.match(spec.system, /^Schritt 5 Hormozi/);
+  assert.match(spec.system, /^Schritt 6 Hormozi/);
   assert.ok(spec.system.includes(UNTERSEITE_CTA), "{{cta_regel}} for an Unterseite");
   assert.ok(!spec.system.includes(RATGEBER_CTA));
   assert.doesNotMatch(spec.system, /\{\{/, "no unfilled variable");
@@ -111,7 +111,7 @@ function testSystemPromptUsesGlobalHormoziPrompt() {
   assert.ok(bausteine.required.every((k) => bausteine.properties[k]?.type === "string"));
   assert.deepEqual(schema.required, ["title", "meta_description", "blocks", "hormozi"]);
   assert.equal(spec.maxTokens, HORMOZI_MAX_TOKENS);
-  assert.equal(HORMOZI_MAX_TOKENS, 12_000, "same budget as Texte step 5");
+  assert.equal(HORMOZI_MAX_TOKENS, 12_000, "same budget as Texte's Hormozi step");
   assert.match(CONTENT_STEP_PROMPT_META.hormozi.description, /Gilt auch für das Werkzeug Verwaltung → Hormozi\.$/);
   console.log("system prompt from Globale Prompts, cta_regel per page type: ok");
 }
@@ -124,7 +124,7 @@ function testSavedGlobalHormoziPromptWins() {
     spec.system.startsWith(`Eigene Hormozi-Anweisung für Praxis Dr. Test: ${UNTERSEITE_CTA} {{unbekannt}}\n\n`),
     spec.system.slice(0, 160),
   );
-  assert.doesNotMatch(spec.system, /Schritt 5 Hormozi/, "the default instruction is replaced");
+  assert.doesNotMatch(spec.system, /Schritt 6 Hormozi/, "the default instruction is replaced");
   assert.ok(spec.system.endsWith(HORMOZI_TOOL_RULES));
   assert.match(hormoziToolSpec(toolContext({ hormoziPrompt: own, pageType: "ratgeber" })).system, /^Eigene Hormozi-Anweisung für Praxis Dr\. Test: Ratgeberartikel:/);
   assert.equal(hormoziToolSpec(toolContext({ hormoziPrompt: "   " })).system, hormoziToolSpec(toolContext()).system, "empty means the default");
@@ -276,7 +276,7 @@ function testHeroPlaceholderAfterFirstBlock() {
   console.log("hero placeholder after the first block, no level change: ok");
 }
 
-/** The answer → text as Texte step 5 normalises it: a sentence in the heading moves into a <p>. */
+/** The answer → text as Texte's Hormozi step normalises it: a sentence in the heading moves into a <p>. */
 function testHeroSentenceSettled() {
   const current = { blocks: hormoziToolInputBlocks(uploadBlocks), title: null, metaDescription: null };
   const inHeading = normalizeHormoziToolOutput(

@@ -1,5 +1,5 @@
 /**
- * Texte: the Excel briefing parser, page types, the eight new steps and their halting rules.
+ * Texte: the Excel briefing parser, page types, the steps and their halting rules.
  * Run: npm run test:content-excel-structure
  */
 import assert from "node:assert/strict";
@@ -32,6 +32,7 @@ import {
 } from "../lib/dt/content/page-types";
 import {
   CONTENT_HERO_PLACEHOLDER,
+  CONTENT_HERO_PLACEHOLDER_LEGACY,
   brancheRules,
   contentStepSpec,
   ensureHeroPlaceholder,
@@ -58,10 +59,18 @@ import {
 } from "../lib/dt/content/pipeline/rephrase";
 import { contentGapQuestions, findContentGapsInHtml, gapQuestion, hasContentGap } from "../lib/dt/content/pipeline/gaps";
 import { stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
+import { aktualitaetSystemPrompt } from "../lib/dt/content/pipeline/aktualitaet";
+import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import {
+  CONTENT_STEP_AKTUALITAET,
+  CONTENT_STEP_ANALYSE,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_GEO,
+  CONTENT_STEP_HORMOZI,
   CONTENT_STEP_LEKTORAT,
+  CONTENT_STEP_SEO,
+  CONTENT_STEP_VERMENSCHLICHUNG,
   CONTENT_STEP_WATERMARK,
   CONTENT_STEPS,
   contentStepDefinition,
@@ -460,7 +469,7 @@ console.log("crawl without excel: ok");
 }
 console.log("verbesserung plan: ok");
 
-// --- the eight steps ----------------------------------------------------------------------------
+// --- the ten steps ------------------------------------------------------------------------------
 
 assert.deepEqual(
   CONTENT_STEPS.map((s) => [s.step, s.name, s.tier, s.writesText, s.provider]),
@@ -469,17 +478,23 @@ assert.deepEqual(
     [2, "SEO", "write", true, "anthropic"],
     [3, "Faktencheck", "check", false, "anthropic"],
     [4, "GEO", "write", true, "anthropic"],
-    [5, "Hormozi", "write", true, "anthropic"],
-    [6, "Vermenschlichung", "write", true, "anthropic"],
-    [7, "Lektorat", "check", true, "anthropic"],
-    [8, "Watermark Entfernung", "write", true, "xai"],
-    [9, "Endabnahme", "check", false, "anthropic"],
+    [5, "Aktualitätsprüfung", "write", true, "anthropic"],
+    [6, "Hormozi", "write", true, "anthropic"],
+    [7, "Vermenschlichung", "write", true, "anthropic"],
+    [8, "Lektorat", "check", true, "anthropic"],
+    [9, "Watermark Entfernung", "write", true, "xai"],
+    [10, "Endabnahme", "check", false, "anthropic"],
   ],
 );
-assert.deepEqual([CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_LEKTORAT, CONTENT_STEP_WATERMARK, CONTENT_STEP_ENDABNAHME], [3, 7, 8, 9]);
-assert.equal(hasLegacyContentSteps([{ step: 8, name: "Endabnahme" }]), true, "the eight-step order is legacy now");
-assert.equal(hasLegacyContentSteps([{ step: 8, name: "Watermark Entfernung" }, { step: 9, name: "Endabnahme" }]), false);
-assert.equal(runningPageDetail(2, [{ step: 1, status: "done" }, { step: 2, status: "done" }]), "Schritt 3 von 9 startet: Faktencheck");
+assert.deepEqual(
+  [CONTENT_STEP_ANALYSE, CONTENT_STEP_SEO, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_GEO, CONTENT_STEP_AKTUALITAET, CONTENT_STEP_HORMOZI, CONTENT_STEP_VERMENSCHLICHUNG, CONTENT_STEP_LEKTORAT, CONTENT_STEP_WATERMARK, CONTENT_STEP_ENDABNAHME],
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+);
+assert.ok(CONTENT_STEPS.every((s, i) => s.step === i + 1), "the step numbers have no gap");
+assert.equal(hasLegacyContentSteps([{ step: 8, name: "Endabnahme" }]), true, "the eight-step order is legacy");
+assert.equal(hasLegacyContentSteps([{ step: 8, name: "Watermark Entfernung" }, { step: 9, name: "Endabnahme" }]), true, "the nine-step order without migration is legacy too");
+assert.equal(hasLegacyContentSteps([{ step: 9, name: "Watermark Entfernung" }, { step: 10, name: "Endabnahme" }]), false);
+assert.equal(runningPageDetail(2, [{ step: 1, status: "done" }, { step: 2, status: "done" }]), "Schritt 3 von 10 startet: Faktencheck");
 assert.equal(hasLegacyContentSteps([{ step: 1, name: "Recherche" }, { step: 2, name: "Gliederung" }]), true);
 assert.equal(hasLegacyContentSteps([{ step: 1, name: "Analyse" }, { step: 3, name: "Faktencheck" }]), false);
 assert.equal(hasLegacyContentSteps([]), false);
@@ -510,6 +525,7 @@ const context = (patch: Partial<ContentPipelineContext["page"]> = {}, extra: Par
   avatar: { name: "Familie Berg", role: "Privatkunde", beschreibung: "Zieht mit zwei Kindern innerhalb Kölns um." },
   typePrompts: { ...DEFAULT_CONTENT_TYPE_PROMPTS },
   notes: ["Keine Preise nennen."],
+  freshness: EMPTY_CONTENT_FRESHNESS,
   outputs: {},
   blocks: [],
   title: null,
@@ -581,9 +597,10 @@ assert.match(seoCustom.system, /Bei Widerspruch gewinnt die Seitentyp-Vorlage/, 
 assert.match(seoCustom.system, /Tatsachen \(Leistungen, Zahlen, Namen, Preise/, "the locked rules stay");
 assert.match(seoCustom.system, new RegExp(CONTENT_HERO_PLACEHOLDER.replace(/[[\]]/g, "\\$&")), "the hero placeholder stays");
 assert.match(contentStepSpec(2, context({ page_type: "unterseite", pillar_name: "Privatumzug" }, { typePrompts: saved })).system, /Marker \[LINK: Privatumzug\]/, "each page still writes with its own type");
-for (const step of [1, 3, 4, 5, 6, 7, 9]) {
+for (const step of [CONTENT_STEP_ANALYSE, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_GEO, CONTENT_STEP_HORMOZI, CONTENT_STEP_VERMENSCHLICHUNG, CONTENT_STEP_LEKTORAT, CONTENT_STEP_ENDABNAHME]) {
   assert.doesNotMatch(contentStepSpec(step, customContext).system, /Hausrezept/, `step ${step} does not read the recipes`);
 }
+assert.doesNotMatch(aktualitaetSystemPrompt(customContext), /Hausrezept/, "the Aktualitätsprüfung does not read the recipes");
 
 // Hauptseite: its own recipe, used by the SEO step for that type (and by nothing else).
 assert.equal(CONTENT_TYPE_PROMPT_LABELS.hauptseite, "Hauptseite");
@@ -609,7 +626,7 @@ console.log("textvorlagen: ok");
 // --- editable step prompts (Globale Prompts) ------------------------------------------------------
 
 {
-  assert.deepEqual([...CONTENT_STEP_PROMPT_KEYS], ["seo", "faktencheck", "geo", "hormozi", "vermenschlichung", "lektorat"]);
+  assert.deepEqual([...CONTENT_STEP_PROMPT_KEYS], ["seo", "faktencheck", "geo", "aktualitaet", "hormozi", "vermenschlichung", "lektorat"]);
   for (const key of CONTENT_STEP_PROMPT_KEYS) {
     const text = DEFAULT_CONTENT_STEP_PROMPTS[key];
     assert.ok(text.length > 200 && text.length <= CONTENT_STEP_PROMPT_MAX_CHARS, `${key}: a real default within the limit`);
@@ -650,21 +667,33 @@ console.log("textvorlagen: ok");
   assert.equal(contentStepSpec(2, context({}, { stepPrompts: { seo: "  \n " } })).system, contentStepSpec(2, context()).system);
   assert.match(contentStepSpec(2, context()).system, /^Schritt 2 SEO: /, "the default instruction leads the system prompt");
 
-  // Each of the six reads its own text, the others keep their default; Analyse and Endabnahme are not editable.
+  // Each of the seven reads its own text, the others keep their default; Analyse and Endabnahme are not editable.
   const allOwn = Object.fromEntries(CONTENT_STEP_PROMPT_KEYS.map((key) => [key, `EIGEN-${key}`]));
-  const steps: Record<string, number> = { seo: 2, faktencheck: 3, geo: 4, hormozi: 5, vermenschlichung: 6, lektorat: 7 };
+  const steps: Record<string, number> = {
+    seo: CONTENT_STEP_SEO,
+    faktencheck: CONTENT_STEP_FAKTENCHECK,
+    geo: CONTENT_STEP_GEO,
+    aktualitaet: CONTENT_STEP_AKTUALITAET,
+    hormozi: CONTENT_STEP_HORMOZI,
+    vermenschlichung: CONTENT_STEP_VERMENSCHLICHUNG,
+    lektorat: CONTENT_STEP_LEKTORAT,
+  };
+  // The Aktualitätsprüfung has no single tool spec (two calls); both calls share this system prompt.
+  const systemOf = (key: string, ctx: ContentPipelineContext) =>
+    key === "aktualitaet" ? aktualitaetSystemPrompt(ctx) : contentStepSpec(steps[key]!, ctx).system;
   for (const key of CONTENT_STEP_PROMPT_KEYS) {
-    const spec = contentStepSpec(steps[key]!, context({}, { stepPrompts: { [key]: `EIGEN-${key}` } }));
-    assert.ok(spec.system.startsWith(`EIGEN-${key}\n\nDu arbeitest für eine Agentur`), `${key}: the saved text, then BASE_RULES`);
-    assert.ok(spec.system.endsWith(brancheRules(context().settings)), `${key}: the Branchenregel stays`);
+    const system = systemOf(key, context({}, { stepPrompts: { [key]: `EIGEN-${key}` } }));
+    assert.ok(system.startsWith(`EIGEN-${key}\n\nDu arbeitest für eine Agentur`), `${key}: the saved text, then BASE_RULES`);
+    assert.ok(system.endsWith(brancheRules(context().settings)), `${key}: the Branchenregel stays`);
     for (const other of CONTENT_STEP_PROMPT_KEYS.filter((k) => k !== key)) {
-      assert.doesNotMatch(contentStepSpec(steps[other]!, context({}, { stepPrompts: { [key]: `EIGEN-${key}` } })).system, new RegExp(`EIGEN-${key}`), `${other} does not read ${key}`);
+      assert.doesNotMatch(systemOf(other, context({}, { stepPrompts: { [key]: `EIGEN-${key}` } })), new RegExp(`EIGEN-${key}`), `${other} does not read ${key}`);
     }
   }
-  assert.equal(contentStepSpec(3, context({}, { stepPrompts: allOwn })).tool.name, "submit_faktencheck", "the parser keeps its schema");
-  assert.doesNotMatch(contentStepSpec(1, context({}, { stepPrompts: allOwn })).system, /EIGEN-/, "Analyse is not editable");
-  assert.equal(contentStepSpec(9, context({}, { stepPrompts: allOwn })).system, contentStepSpec(9, context()).system, "Endabnahme is not editable");
-  assert.throws(() => contentStepSpec(8, context({}, { stepPrompts: allOwn })), /Grok/, "Watermark Entfernung stays on the Grok rephrase prompt");
+  assert.equal(contentStepSpec(CONTENT_STEP_FAKTENCHECK, context({}, { stepPrompts: allOwn })).tool.name, "submit_faktencheck", "the parser keeps its schema");
+  assert.doesNotMatch(contentStepSpec(CONTENT_STEP_ANALYSE, context({}, { stepPrompts: allOwn })).system, /EIGEN-/, "Analyse is not editable");
+  assert.equal(contentStepSpec(CONTENT_STEP_ENDABNAHME, context({}, { stepPrompts: allOwn })).system, contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, "Endabnahme is not editable");
+  assert.throws(() => contentStepSpec(CONTENT_STEP_WATERMARK, context({}, { stepPrompts: allOwn })), /Grok/, "Watermark Entfernung stays on the Grok rephrase prompt");
+  assert.throws(() => contentStepSpec(CONTENT_STEP_AKTUALITAET, context()), /zwei Aufrufen mit Websuche/, "the Aktualitätsprüfung has no single tool spec");
 }
 console.log("step prompts: ok");
 
@@ -674,7 +703,7 @@ const excelPage: ContentPageRow = {
   id: "p1", organisation_id: "o1", slug: "privatumzug", name: "Privatumzug", path: "/privatumzug", level: 1, position: 1, source: "structure", source_url: null, crawled_at: null,
   main_keyword: null, page_role: "pillar", page_type: "hauptsilo", pillar_name: null, estimated_traffic: null, keywords: null, h1_options: [], user_questions: [], ki_prompt: null, internal_link_targets: [],
   state: "nicht_begonnen", step: null, released: false, released_at: null, title: null, meta_description: null, html: "", markdown: "",
-  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], error: null, job_id: null, cost_eur: 0, started_by: null, created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:00:00Z",
+  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], freshness: EMPTY_CONTENT_FRESHNESS, error: null, job_id: null, cost_eur: 0, started_by: null, created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:00:00Z",
 };
 const crawlPage: ContentPageRow = { ...excelPage, id: "p2", slug: "dach", source: "crawl", source_url: "https://x.de/dach", page_role: null, page_type: "unterseite" };
 assert.equal(contentPageTypeChangeBlocker(excelPage), null, "an Excel page may be changed by hand");
@@ -700,26 +729,30 @@ assert.match(geo.system, /GEO/);
 assert.match(geo.system, /Zuletzt aktualisiert: \[DATUM\]/);
 assert.match(geo.system, /QUELLE BITTE ERGÄNZEN/);
 assert.match(geo.system, /120–180 Wörter/);
-const hormozi = contentStepSpec(5, context());
+const hormozi = contentStepSpec(CONTENT_STEP_HORMOZI, context());
 assert.match(hormozi.system, /Hero/);
 assert.match(hormozi.system, /Value Equation/);
 assert.match(hormozi.system, /H1 bleibt unverändert/);
-assert.match(contentStepSpec(5, context({ page_type: "ratgeber" })).system, /Kein harter Verkauf/);
-const vermenschlichung = contentStepSpec(6, context());
+assert.match(contentStepSpec(CONTENT_STEP_HORMOZI, context({ page_type: "ratgeber" })).system, /Kein harter Verkauf/);
+assert.match(hormozi.system, /^Schritt 6 Hormozi/);
+const vermenschlichung = contentStepSpec(CONTENT_STEP_VERMENSCHLICHUNG, context());
 assert.match(vermenschlichung.system, /Floskeln/);
 assert.match(vermenschlichung.system, /In der heutigen schnelllebigen Zeit/);
 assert.match(vermenschlichung.system, /höchstens 3 im ganzen Text/);
 assert.match(vermenschlichung.system, /self_score/);
 assert.ok(vermenschlichung.retryHint && vermenschlichung.score, "the Vermenschlichung may try once more");
-assert.match(contentStepSpec(7, context()).system, /Lektorat/);
-assert.throws(() => contentStepSpec(8, context()), /Grok/, "step 8 has no tool spec");
-assert.match(contentStepSpec(9, context()).system, /Endabnahme/);
-for (const step of [3, 7, 9]) {
+assert.match(contentStepSpec(CONTENT_STEP_LEKTORAT, context()).system, /^Schritt 8 Lektorat/);
+assert.throws(() => contentStepSpec(CONTENT_STEP_WATERMARK, context()), /Grok/, "Watermark Entfernung has no tool spec");
+assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, /Endabnahme/);
+for (const step of [CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_LEKTORAT, CONTENT_STEP_ENDABNAHME]) {
   assert.match(contentStepSpec(step, context()).user, /Avatar \(Wunschkunde/, `step ${step} still gets the avatar`);
   assert.match(contentStepSpec(step, context()).user, /Anbieterfakten/, `step ${step} still gets the facts`);
 }
-assert.match(contentStepSpec(9, context()).system, /Schritt 9 Endabnahme/);
-assert.throws(() => contentStepSpec(10, context()), /Unbekannter Schritt/);
+assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, /Schritt 10 Endabnahme/);
+assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, new RegExp(CONTENT_HERO_PLACEHOLDER_LEGACY.replace(/[[\]]/g, "\\$&")), "the Endabnahme still knows the old hero placeholder");
+assert.match(contentStepSpec(CONTENT_STEP_SEO, context()).system, /Schritt 6 \(Hormozi\) füllt ihn/, "the SEO default names Hormozi's new number");
+assert.match(contentStepSpec(CONTENT_STEP_FAKTENCHECK, context()).system, new RegExp(CONTENT_HERO_PLACEHOLDER_LEGACY.replace(/[[\]]/g, "\\$&")), "the Faktencheck accepts both hero placeholders");
+assert.throws(() => contentStepSpec(11, context()), /Unbekannter Schritt/);
 console.log("step specs: ok");
 
 // --- Analyse normalisation: the Excel wins, Spalte H never falls off ---------------------------
@@ -777,7 +810,8 @@ assert.deepEqual(
 const seoOut = contentStepSpec(2, context()).normalize({ title: "T", meta_description: "M", blocks: [h1, body] }, context()) as TextOutput;
 assert.equal(seoOut.blocks[1]?.id, "hero", "a missing hero block is inserted");
 const seoPatch = stepPatchFor(contentStepDefinition(2)!, seoOut);
-assert.match(String(seoPatch.pagePatch.html), /data-block-id="hero"><h2>\[HERO – wird in Schritt 5 gefuellt\]<\/h2>/);
+assert.match(String(seoPatch.pagePatch.html), /data-block-id="hero"><h2>\[HERO – wird von Hormozi gefuellt\]<\/h2>/, "the new placeholder names the step, not its number");
+assert.doesNotMatch(CONTENT_HERO_PLACEHOLDER, /\d/);
 assert.equal(seoPatch.halted, false);
 
 const kept = keepHeroBlock([h1, body], seoBlocks);
@@ -785,9 +819,14 @@ assert.equal(kept[1]?.id, "hero", "a later step that drops the hero gets it back
 assert.equal(kept[1]?.heading, CONTENT_HERO_PLACEHOLDER);
 const filled = settleHeroSentence([h1, { id: "hero", heading: "Entspannt umziehen, ohne Chaos.", level: 2, html: "" }, body]);
 assert.deepEqual([filled[1]?.heading, filled[1]?.html], [null, "<p><strong>Entspannt umziehen, ohne Chaos.</strong></p>"], "Hormozi's hero is a sentence, not an H2");
-const hormoziOut = contentStepSpec(5, context({}, { blocks: seoBlocks })).normalize({ title: "", meta_description: "", blocks: [h1, { id: "hero", heading: "", level: 2, html: "<p>Ihr Umzug ohne Stress.</p>" }, body] }, context({}, { blocks: seoBlocks })) as TextOutput;
+const hormoziOut = contentStepSpec(CONTENT_STEP_HORMOZI, context({}, { blocks: seoBlocks })).normalize({ title: "", meta_description: "", blocks: [h1, { id: "hero", heading: "", level: 2, html: "<p>Ihr Umzug ohne Stress.</p>" }, body] }, context({}, { blocks: seoBlocks })) as TextOutput;
 assert.equal(hormoziOut.blocks[1]?.html, "<p>Ihr Umzug ohne Stress.</p>");
-assert.deepEqual(parseBlocksFromHtml(String(stepPatchFor(contentStepDefinition(5)!, hormoziOut).pagePatch.html)).map((b) => b.id), ["intro", "hero", "ablauf"]);
+assert.deepEqual(parseBlocksFromHtml(String(stepPatchFor(contentStepDefinition(CONTENT_STEP_HORMOZI)!, hormoziOut).pagePatch.html)).map((b) => b.id), ["intro", "hero", "ablauf"]);
+// A page written before the renumbering still carries the old placeholder: Hormozi fills it all the same.
+const legacyHero = [h1, { id: "hero", heading: CONTENT_HERO_PLACEHOLDER_LEGACY, level: 2 as const, html: "" }, body];
+const fromLegacy = contentStepSpec(CONTENT_STEP_HORMOZI, context({}, { blocks: legacyHero })).normalize({ title: "", meta_description: "", blocks: [h1, { id: "hero", heading: "Entspannt umziehen.", level: 2, html: "" }, body] }, context({}, { blocks: legacyHero })) as TextOutput;
+assert.deepEqual([fromLegacy.blocks[1]?.heading, fromLegacy.blocks[1]?.html], [null, "<p><strong>Entspannt umziehen.</strong></p>"]);
+assert.equal(keepHeroBlock([h1, body], legacyHero)[1]?.heading, CONTENT_HERO_PLACEHOLDER_LEGACY, "a dropped legacy hero comes back unchanged");
 console.log("hero: ok");
 
 // --- halting rules ------------------------------------------------------------------------------
@@ -807,7 +846,7 @@ assert.deepEqual([release.halted, release.pagePatch.state, release.pagePatch.rel
 const geoPatch = stepPatchFor(contentStepDefinition(4)!, { blocks: seoBlocks, title: "T", meta_description: "M" });
 assert.deepEqual(geoPatch.pagePatch.findings, [], "the rewrite after the Faktencheck settles its findings");
 assert.throws(() => stepPatchFor(contentStepDefinition(4)!, { blocks: [], title: null, meta_description: null }), /keinen Text/);
-const vermenschlichungSpec = contentStepSpec(6, context({}, { blocks: seoBlocks }));
+const vermenschlichungSpec = contentStepSpec(CONTENT_STEP_VERMENSCHLICHUNG, context({}, { blocks: seoBlocks }));
 const weak = vermenschlichungSpec.normalize({ title: "", meta_description: "", blocks: seoBlocks, self_score: { direktheit: 5, rhythmus: 6, vertrauen: 7, natuerlichkeit: 6, dichte: 6 } }, context({}, { blocks: seoBlocks })) as VermenschlichungOutput;
 assert.match(vermenschlichungSpec.retryHint!(weak) ?? "", /30 von 50/, "a weak self-score asks for one more attempt");
 const strong = vermenschlichungSpec.normalize({ title: "", meta_description: "", blocks: seoBlocks, self_score: { direktheit: 8, rhythmus: 8, vertrauen: 7, natuerlichkeit: 8, dichte: 7 } }, context({}, { blocks: seoBlocks })) as VermenschlichungOutput;
@@ -838,6 +877,7 @@ console.log("halting rules: ok");
     "a [BITTE PRÜFEN: …] is a gap, named by its Abschnitt, with its sentence",
   );
   assert.equal(hasContentGap("[LINK: Seniorenumzug] [DATUM] [FOTO: Team] " + CONTENT_HERO_PLACEHOLDER), false, "wanted markers are no gap");
+  assert.equal(hasContentGap(CONTENT_HERO_PLACEHOLDER_LEGACY), false, "the old hero placeholder is no gap either");
   assert.equal(hasContentGap("Quelle: [QUELLE BITTE ERGÄNZEN]"), true);
   assert.equal(hasContentGap("Preis: [PREIS BITTE PRÜFEN UND ANPASSEN: ab 99 €]"), true);
   assert.equal(hasContentGap("[bitte prüfen: Gründungsjahr]"), true, "spelling does not matter");
@@ -863,10 +903,12 @@ console.log("halting rules: ok");
     }],
   );
   assert.equal(halted.pagePatch.html, gapHtml, "the text is saved as it is: the placeholder stays");
-  for (const step of [4, 5, 6, 7]) {
-    const out = step === 7 ? { ...seoWithGap, final_findings: [] } : seoWithGap;
+  for (const step of [CONTENT_STEP_GEO, CONTENT_STEP_HORMOZI, CONTENT_STEP_VERMENSCHLICHUNG, CONTENT_STEP_LEKTORAT]) {
+    const out = step === CONTENT_STEP_LEKTORAT ? { ...seoWithGap, final_findings: [] } : seoWithGap;
     assert.equal(stepPatchFor(contentStepDefinition(step)!, out).halted, true, `step ${step} stops for the placeholder`);
   }
+  const aktualitaetWithGap = { ...seoWithGap, checked: [], updates: [], questions: [], outdated_sections: [], findings: [], research: { searches: 1, fetches: 0, sources: 1, claims: 1, search_limit_hit: false } };
+  assert.equal(stepPatchFor(contentStepDefinition(CONTENT_STEP_AKTUALITAET)!, aktualitaetWithGap).halted, true, "the Aktualitätsprüfung is gap-checked too");
   assert.equal(stepPatchFor(contentStepDefinition(CONTENT_STEP_WATERMARK)!, seoWithGap).halted, false, "Watermark Entfernung goes on; the Endabnahme right after it checks");
 
   // [LINK: …], [DATUM] and the hero placeholder do not stop anything.
@@ -912,8 +954,8 @@ console.log("halting rules: ok");
   const waitingPage: ContentPageRow = { ...excelPage, state: "braucht_sie", step: 5, html: gapHtml, questions: halted.pagePatch.questions as ContentPageRow["questions"] };
   assert.equal(pageDetail(waitingPage), "Abschnitt „Was kostet ein Privatumzug?“ braucht eine Angabe");
   assert.deepEqual(pageActions(waitingPage).filter((a) => a.step != null).map((a) => [a.kind, a.step]), [["approve", 5], ["edit", 5], ["rerun_with_note", 5]]);
-  assert.equal(rerunStepFor({ ...waitingPage, step: 9 }), 7, "after the Endabnahme a rerun starts at the Lektorat");
-  assert.deepEqual(pageActions({ ...waitingPage, step: 9 }).find((a) => a.kind === "approve")?.step, 9);
+  assert.equal(rerunStepFor({ ...waitingPage, step: CONTENT_STEP_ENDABNAHME }), CONTENT_STEP_LEKTORAT, "after the Endabnahme a rerun starts at the Lektorat");
+  assert.deepEqual(pageActions({ ...waitingPage, step: CONTENT_STEP_ENDABNAHME }).find((a) => a.kind === "approve")?.step, CONTENT_STEP_ENDABNAHME);
 
   // „Freigeben“ asks first while questions or open points are listed.
   assert.equal(approveNeedsConfirm({ questions: [q("Kosten")], findings: [] }), true);
@@ -940,7 +982,7 @@ assert.deepEqual(outline.split("\n"), [
 ], "the own silo first, the page itself left out");
 console.log("outline: ok");
 
-// --- step 8: every sentence rephrased on Grok, in chunks, nothing else ---------------------------
+// --- Watermark Entfernung: every sentence rephrased on Grok, in chunks, nothing else -------------
 
 const questionBlock = { id: "kosten", heading: "Was kostet ein Privatumzug?", level: 2 as const, html: "<p>Der Preis hängt vom Umfang ab und richtet sich nach Volumen und Weg. [BITTE PRÜFEN: Preisbeispiel]</p>" };
 const heroSentence = { id: "hero", heading: null, level: 2 as const, html: "<p><strong>Ihr Umzug ohne Stress.</strong></p>" };
@@ -949,8 +991,8 @@ const stand = { id: "stand", heading: null, level: 2 as const, html: "<p>Zuletzt
 const beforeRephrase = [h1, heroSentence, questionBlock, longBody, stand];
 const rephraseContext = context({}, { blocks: beforeRephrase, title: "Privatumzug Köln | Steiner", metaDescription: "Meta." });
 
-assert.throws(() => contentStepSpec(CONTENT_STEP_WATERMARK, rephraseContext), /Grok/, "step 8 is not a tool-forced spec");
-assert.equal(contentStepDefinition(CONTENT_STEP_WATERMARK)?.provider, "xai", "step 8 runs on Grok");
+assert.throws(() => contentStepSpec(CONTENT_STEP_WATERMARK, rephraseContext), /Grok/, "the Watermark step is not a tool-forced spec");
+assert.equal(contentStepDefinition(CONTENT_STEP_WATERMARK)?.provider, "xai", "the Watermark step runs on Grok");
 assert.equal(CONTENT_STEPS.filter((s) => s.provider === "xai").length, 1, "no other step runs on Grok");
 
 const chunks = planRephraseChunks(beforeRephrase);
@@ -1015,10 +1057,10 @@ const finished = rephrasedBlocks(beforeRephrase, { kosten: "<p>Neu.</p>", ablauf
 assert.deepEqual(finished.map((b) => b.html), ["", heroSentence.html, "<p>Neu.</p>", "<p>Neu 2.</p>", stand.html]);
 const patch8 = stepPatchFor(contentStepDefinition(CONTENT_STEP_WATERMARK)!, { blocks: finished, title: "T", meta_description: "M" });
 assert.match(String(patch8.pagePatch.html), /Was kostet ein Privatumzug\?/);
-assert.deepEqual([patch8.halted, patch8.pagePatch.findings], [false, []]);
+assert.deepEqual([patch8.halted, patch8.pagePatch.findings], [false, undefined], "the open points of the Aktualitätsprüfung stay on the page until the Endabnahme");
 assert.equal(
-  describeRunningPage({ step: 8, error: null }, [{ step: 7, status: "done" }, { step: 8, status: "running", output: progress }], { kind: "running" }),
-  "Schritt 8 von 9: Watermark Entfernung läuft (1 von 2 Abschnitten)",
+  describeRunningPage({ step: CONTENT_STEP_WATERMARK, error: null }, [{ step: CONTENT_STEP_LEKTORAT, status: "done" }, { step: CONTENT_STEP_WATERMARK, status: "running", output: progress }], { kind: "running" }),
+  "Schritt 9 von 10: Watermark Entfernung läuft (1 von 2 Abschnitten)",
   "the status line shows the chunk progress",
 );
 assert.deepEqual([priceForModel("grok-4.7").inputUsd, priceForModel("grok-4.7").outputUsd, priceForModel("grok-4").inputUsd, priceForModel("grok-4").outputUsd], [2, 6, 3, 15]);
@@ -1039,7 +1081,7 @@ assert.deepEqual(resolveXaiModels({ XAI_DT_CONTENT_MODEL: "grok-5" })[0], "grok-
 assert.deepEqual(rephraseModelOrder(["a", "b", "c"], ["a"]), ["b", "c", "a"], "a slow model goes last");
 assert.deepEqual(rephraseModelOrder(["a", "b"], ["a", "b"]), ["a", "b"], "never no candidate");
 assert.deepEqual(readRephraseProgress({ version: 1, rewritten: {}, slow_models: ["grok-4", 3] }, 1).slow_models, ["grok-4"]);
-console.log("step 8: ok");
+console.log("watermark step: ok");
 
 async function runXai() {
   const neverFetch = async (): Promise<Response> => {
