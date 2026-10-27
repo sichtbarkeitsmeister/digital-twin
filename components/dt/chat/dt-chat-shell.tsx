@@ -132,7 +132,6 @@ export function DtChatShell(props: {
   const [attachments, setAttachments] = useState<DtAttachmentDraft[]>([]);
   const [personaTesting, setPersonaTesting] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
-  const [textMode, setTextMode] = useState(false);
   const [groundingMode, setGroundingMode] = useState(Boolean(props.initialGroundingMode));
   const [previewFile, setPreviewFile] = useState<DtChatPreviewFile | null>(null);
   const closePreview = useCallback(() => setPreviewFile(null), []);
@@ -223,11 +222,6 @@ export function DtChatShell(props: {
   const groundingActive = groundingMode && groundingAvailable;
   const handleGroundingToggle = (next: boolean) => {
     setGroundingMode(next);
-    if (next) setTextMode(false);
-  };
-  const handleTextModeToggle = (next: boolean) => {
-    setTextMode(next);
-    if (next) setGroundingMode(false);
   };
   const showChatAuthors = Boolean(
     activeChat &&
@@ -267,7 +261,7 @@ export function DtChatShell(props: {
       : "default";
   const contextHref =
     props.isPlatformAdmin && selectedOrgId && selectedAgentId
-      ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}${textMode ? "&textMode=1" : ""}${groundingActive ? "&groundingMode=1" : ""}`
+      ? `/dashboard/verwaltung/agent-kontext?org=${encodeURIComponent(selectedOrgId)}&agent=${encodeURIComponent(selectedAgentId)}&mode=${contextMode}${groundingActive ? "&groundingMode=1" : ""}`
       : null;
 
   const refreshChats = useCallback(async () => {
@@ -966,7 +960,6 @@ export function DtChatShell(props: {
             content: text,
             history,
             attachments: outgoingAttachments,
-            textMode,
             groundingMode: groundingActive,
           }),
           signal: controller.signal,
@@ -1005,7 +998,6 @@ export function DtChatShell(props: {
           content: text,
           attachments: outgoingAttachments,
           ghostMode: false,
-          textMode,
           groundingMode: groundingActive,
         }),
         signal: controller.signal,
@@ -1561,8 +1553,6 @@ export function DtChatShell(props: {
                   disabled={!selectedAgentId || (isInitialLoading && !ghostMode)}
                   ghostMode={ghostMode}
                   onGhostModeChange={handleGhostToggle}
-                  textMode={textMode}
-                  onTextModeChange={handleTextModeToggle}
                   attachments={attachments}
                   agentName={displayAgentName}
                   personaTestingAvailable={personaTestingAvailable}

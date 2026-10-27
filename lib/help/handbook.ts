@@ -71,7 +71,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Menü und Wege (für alle)",
     audience: "all",
     lines: [
-      "Chat mit den KI-Figuren: Startseite / oder /dashboard/digital-twin. Oben die Figur wählen (Avatar, Team, SEO-Berater). Dateien lassen sich anhängen; „Text“ schaltet den Textmodus für Flyer, Social-Posts und Infos ein.",
+      "Chat mit den KI-Figuren: Startseite / oder /dashboard/digital-twin. Oben die Figur wählen (Avatar, Team, SEO-Berater). Dateien lassen sich anhängen.",
       "Posteingang: /dashboard/inbox — Einladung in eine Firma annehmen.",
       "Onboarding: /dashboard/onboarding — Unterlagen, Zugänge (Hoster, SMTP, CMS), Mitbewerber, IT-Kontakt und Medien einer Firma. Es gibt einen Upload-Link, den der Kunde ohne Login öffnen kann (/onboarding/upload/[token]).",
       "Ansprechpartner: /dashboard/ansprechpartner — Kontakte von Sichtbarkeitsmeister.",
