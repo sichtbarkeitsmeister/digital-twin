@@ -152,6 +152,11 @@ const research = {
 };
 
 const byId = (out: { blocks: readonly ContentTextBlock[] }, id: string) => out.blocks.find((b) => b.id === id)!;
+/** The unchanged text with only the given questions: what the step would save. */
+const outputWithout = (questions: AktualitaetOutput["questions"]): AktualitaetOutput => ({
+  ...unchangedAktualitaetOutput(context(), research),
+  questions: questions.filter((q) => q.block_id !== "foerderung"),
+});
 const original = (id: string) => blocks.find((b) => b.id === id)!;
 
 // --- normalisation: the rules in code ----------------------------------------------------------
@@ -241,9 +246,11 @@ const original = (id: string) => blocks.find((b) => b.id === id)!;
   assert.deepEqual(
     out.questions.map((q) => [q.kind, q.block_id, q.blocking]),
     [["outdated", "preise", true], ["outdated", "team", true], ["outdated", "team", true]],
-    "each blocked change becomes a question for the customer (the model's own question and the code's for the same sentence count once)",
+    "each blocked change becomes a question for the customer, with the source of the attempted change",
   );
-  assert.match(out.questions[1]!.question, /„Seit 1998“.*„Seit 1999“/);
+  assert.ok(out.questions.every((q) => /\(Quelle: https:\/\//.test(q.question)), "every question names the source it rests on");
+  assert.match(out.questions[1]!.question, /„Seit 1998“.*„Seit 1999“.*\(Quelle: https:\/\/www\.gesetze-im-internet\.de\/geg\/\)$/);
+  assert.deepEqual(out.unasked_questions.map((q) => q.block_id), ["preise"], "the model's question without a source is recorded, not asked");
   assert.equal(out.questions[1]!.section, "Unser Team");
   assert.match(out.questions[1]!.excerpt ?? "", /Seit 1998 arbeiten 12 Meister/);
 
@@ -256,6 +263,30 @@ const original = (id: string) => blocks.find((b) => b.id === id)!;
   assert.equal(customerFactReason({ old_text: "gegründet 1998", new_text: "gegründet 1999" }, "", facts), "Zahl aus den Anbieterfakten");
   assert.equal(customerFactReason({ old_text: "Kundenberater Herr Kühn", new_text: "Frau Lang" }, "", facts), "Text aus den Anbieterfakten");
   assert.equal(customerFactReason({ old_text: "Seit 2024 gilt", new_text: "Seit 2026 gilt" }, "Seit 2024 gilt das GEG.", facts), null);
+}
+
+{
+  // Questions to the customer need a hint from the web: a routine „Stimmt das noch?“ is not asked.
+  const out = normalizeAktualitaetOutput(
+    {
+      blocks,
+      questions: [
+        { kind: "outdated", question: "Sind die Öffnungszeiten noch aktuell?", block_id: "team", excerpt: "Öffnungszeiten: Mo–Fr 8–17 Uhr.", placeholder: "", source_url: "" },
+        { kind: "outdated", question: "Gibt es die Kooperation noch?", block_id: "preise", excerpt: "x", placeholder: "", source_url: "https://forum.example/thread/1" },
+        { kind: "outdated", question: "Das Förderprogramm der KfW für Praxen wurde eingestellt. Bieten Sie die Förderberatung noch an?", block_id: "foerderung", excerpt: "Die KfW zahlt aktuell", placeholder: "", source_url: "kfw.de/foerderung/heizung" },
+      ],
+    },
+    context(),
+    research,
+  );
+  assert.deepEqual(out.questions.map((q) => [q.block_id, q.kind]), [["foerderung", "outdated"]], "only the question backed by a source from the research is asked");
+  assert.match(out.questions[0]!.question, /Förderberatung noch an\? \(Quelle: https:\/\/www\.kfw\.de\/foerderung\/heizung\/\)$/);
+  assert.deepEqual(out.unasked_questions.map((q) => q.question), ["Sind die Öffnungszeiten noch aktuell?", "Gibt es die Kooperation noch?"], "no source or a source outside the research: recorded, not asked");
+  const page = stepPatchFor(contentStepDefinition(CONTENT_STEP_AKTUALITAET)!, outputWithout(out.questions), { html: renderBlocksHtml(blocks), freshness: {} });
+  assert.equal(page.halted, false, "routine questions alone never stop the page");
+  const schemaQuestion = (AKTUALITAET_TOOL.input_schema as { properties: { questions: { items: { required: string[] } } } }).properties.questions.items.required;
+  assert.ok(schemaQuestion.includes("source_url"));
+  assert.match(AKTUALITAET_RULES, /Ohne solchen Hinweis gibt es keine Frage/);
 }
 
 {
@@ -679,6 +710,7 @@ console.log("migration: ok");
   for (const part of [/Gesetze, Verordnungen, Fristen/, /Förderprogramme/, /Normen und Standards/, /Technikgenerationen/, /Statistiken/, /„2024“, „aktuell“, „neu“/, /Google und KI-Anbietern/, /Plane die Suchen vorab/, /aktuell[\s\S]*aktualisiert[\s\S]*frage[\s\S]*abschnitt_veraltet/, /kleinste mögliche Änderung/, /Angaben über den Kunden/, /Nichts erfinden/]) {
     assert.match(instruction, part, `the default covers ${part}`);
   }
+  assert.match(instruction, /ohne solchen Hinweis fragst du nicht/);
   assert.ok(!instruction.includes(AKTUALITAET_RULES.slice(0, 40)), "the fixed rules stay in code");
   assert.equal(resolveContentStepPrompt("aktualitaet", null), instruction);
   assert.equal(resolveContentStepPrompt("aktualitaet", "  "), instruction);

@@ -178,7 +178,7 @@ Vorgehen:
 2. Prüfe jede Aussage mit gezielten Suchen; lies die Primärquelle mit dem Web-Abruf, wenn das Suchergebnis allein nicht reicht.
 3. Stufe jede Aussage ein: aktuell (stimmt laut Quelle), aktualisiert (öffentlicher Fakt ist veraltet, du korrigierst ihn), frage (Angabe über den Kunden, nur er kann sie bestätigen), abschnitt_veraltet (ein ganzer Abschnitt ist überholt und lässt sich nicht mit einer kleinen Änderung retten).
 4. Aktualisieren heißt: die kleinste mögliche Änderung – eine Zahl, ein Datum, ein Name, ein Halbsatz – mit Quelle. Satzbau, Ton und Länge bleiben.
-5. Angaben über den Kunden (Preise, Leistungen, Team, Öffnungszeiten, Referenzen, alles aus den Anbieterfakten) änderst du nie. Wirken sie veraltet, stellst du eine Frage an den Kunden.
+5. Angaben über den Kunden (Preise, Leistungen, Team, Öffnungszeiten, Referenzen, alles aus den Anbieterfakten) änderst du nie. Zeigt eine Quelle, dass eine davon nicht mehr stimmt, stellst du eine Frage an den Kunden; ohne solchen Hinweis fragst du nicht.
 6. Nichts erfinden: Was du nicht mit einer Quelle belegen kannst, bleibt, wie es ist. Keine neuen Aussagen, keine neuen Abschnitte, kein Umschreiben.`;
 
 const HORMOZI_DEFAULT = `Schritt ${CONTENT_STEP_HORMOZI} Hormozi (Conversion-Schicht): Du machst den Text überzeugend, ohne die SEO- und GEO-Struktur zu ersetzen.

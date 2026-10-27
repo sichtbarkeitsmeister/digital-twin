@@ -80,8 +80,17 @@ export type AktualitaetOutput = TextOutput & {
   checked: AktualitaetCheck[];
   /** Changes that passed every rule; they are in `blocks` (or title / meta description). */
   updates: AktualitaetUpdate[];
-  /** For the customer: the model's own and every customer fact it tried to change. */
+  /**
+   * For the customer, each backed by a source from the research: the model's questions with
+   * one, and every customer fact it tried to change. They stop the page as „Braucht Sie“.
+   */
   questions: ContentQuestion[];
+  /**
+   * The model's questions without such a source („Stimmen die Öffnungszeiten noch?“): kept in
+   * the step's record, never asked. Without a hint that a fact changed, the Faktencheck's
+   * check against the Anbieterfakten stands.
+   */
+  unasked_questions: ContentQuestion[];
   /** Outdated Abschnitte with at least one source from the research. */
   outdated_sections: ContentFreshnessSection[];
   /** Rejected changes and other open points of this check. */
@@ -98,7 +107,7 @@ export type AktualitaetOutput = TextOutput & {
  */
 export const AKTUALITAET_RULES = `Feste Regeln der Aktualitätsprüfung:
 - Abweichend von der Regel oben dürfen in diesem Schritt öffentliche Fakten (Gesetze, Fristen, Förderungen, Normen, Statistiken, Technikstände, Vorgaben von Google und KI-Anbietern) mit einer Quelle aus der Websuche aktualisiert werden. Alles über den Kunden kommt weiter nur aus den Anbieterfakten und den Anmerkungen der Redaktion.
-- Kundenangaben ändert dieser Schritt nie: Preise, Leistungen, Team, Öffnungszeiten, Referenzen, Gründungsjahr und alles, was aus den Anbieterfakten stammt. Wirkt eine davon veraltet, wird daraus eine Frage an den Kunden.
+- Kundenangaben ändert dieser Schritt nie: Preise, Leistungen, Team, Öffnungszeiten, Referenzen, Gründungsjahr und alles, was aus den Anbieterfakten stammt. Zeigt eine Quelle aus der Websuche, dass eine davon nicht mehr stimmt, wird daraus eine Frage an den Kunden mit dieser Quelle (source_url). Ohne solchen Hinweis gibt es keine Frage: keine Routinefragen („Stimmt das noch?“, „Hat sich das Team verändert?“), keine Vorschläge für zusätzliche Inhalte, keine Fragen zur Schreibweise.
 - Als Quelle zählen nur URLs, die die Websuche oder der Web-Abruf in diesem Schritt geliefert hat. Bevorzugt: Gesetzestexte, Behörden und Ministerien, Kammern und Verbände, Normungsstellen, Hersteller. Foren, unbekannte Blogs, Vergleichs- und Ratgeberportale ohne Impressum und KI-generierte Seiten zählen nicht. Eine Änderung ohne gültige Quelle wird verworfen.
 - Kleinste mögliche Änderung: eine Zahl, ein Datum, ein Name, ein Halbsatz. Ist ein ganzer Abschnitt überholt, meldest du ihn als veraltet; er geht dann einmal an GEO zurück.
 - Nur Abschnitte, die eine Änderung nennt, dürfen sich ändern; jeder andere Abschnitt bleibt wörtlich, wie er ist.
@@ -201,7 +210,7 @@ export const AKTUALITAET_TOOL: Anthropic.Tool = {
       },
       questions: {
         type: "array",
-        description: "Fragen an den Kunden: Angaben über ihn, die veraltet wirken (kind „outdated“).",
+        description: "Fragen an den Kunden: nur Angaben über ihn, die laut einer Quelle aus „Erlaubte Quellen“ nicht mehr stimmen (kind „outdated“). Keine Routinefragen ohne Hinweis.",
         items: {
           type: "object",
           properties: {
@@ -210,8 +219,9 @@ export const AKTUALITAET_TOOL: Anthropic.Tool = {
             block_id: { type: "string" },
             excerpt: { type: "string", description: "Der Satz aus dem Text, um den es geht." },
             placeholder: { type: "string", description: "Was die Websuche dazu nahelegt, oder leer." },
+            source_url: { type: "string", description: "URL aus „Erlaubte Quellen“, die zeigt, dass die Angabe nicht mehr stimmt. Ohne solche Quelle keine Frage." },
           },
-          required: ["kind", "question", "block_id", "excerpt", "placeholder"],
+          required: ["kind", "question", "block_id", "excerpt", "placeholder", "source_url"],
         },
       },
       outdated_sections: {
@@ -273,7 +283,7 @@ export function aktualitaetWriteSpec(
         "- blocks: der vollständige Text mit allen Abschnitten und ids, geändert nur an den Stellen aus updates.",
         "- checked: jede zeitkritische Aussage mit Einstufung (aktuell, aktualisiert, frage, abschnitt_veraltet) und der belegenden URL.",
         "- updates: jede Änderung mit block_id, old_text (wörtlich), new_text, reason, source_url (aus „Erlaubte Quellen“) und source_title.",
-        "- questions: Kundenangaben, die veraltet wirken, als Frage an den Kunden (kind „outdated“), mit block_id und dem Satz.",
+        "- questions: nur Kundenangaben, die laut einer Quelle aus „Erlaubte Quellen“ nicht mehr stimmen, als Frage an den Kunden (kind „outdated“), mit source_url, block_id und dem Satz. Keine Routinefragen ohne solchen Hinweis, keine Vorschläge, keine Fragen zur Schreibweise.",
         "- outdated_sections: ganze Abschnitte, die überholt sind, mit Problem, Vorschlag und Quellen aus „Erlaubte Quellen“.",
         "Title und Meta-Description bleiben, außer eine Änderung betrifft sie.",
       ].join("\n"),
@@ -639,14 +649,21 @@ function rejectedChange(
   };
 }
 
+/** The source a question rests on, at the end of its text, so the editor can show it to the customer. */
+function withSource(question: string, source: ContentFreshnessSource): string {
+  const text = question.trim().replace(/\s*\(Quelle:[^)]*\)\s*$/, "");
+  return `${text} (Quelle: ${source.url})`.slice(0, 800);
+}
+
 function outdatedQuestion(
   change: { old_text: string; new_text: string },
   block: ContentTextBlock | null,
   sentence: string,
+  source: ContentFreshnessSource,
 ): ContentQuestion {
   return {
     kind: "outdated",
-    question: `Stimmt diese Angabe noch: „${change.old_text}“?${change.new_text ? ` Die Websuche legt „${change.new_text}“ nahe.` : ""}`.slice(0, 800),
+    question: withSource(`Stimmt diese Angabe noch: „${change.old_text}“?${change.new_text ? ` Die Websuche legt „${change.new_text}“ nahe.` : ""}`, source),
     field: null,
     placeholder: change.new_text || null,
     block_id: block?.id ?? null,
@@ -693,7 +710,16 @@ export function normalizeAktualitaetOutput(
   const keywords = pageKeywords(context);
   const facts = customerFactContext(context);
   const findings: ContentFinding[] = [];
-  const questions: ContentQuestion[] = normalizeQuestions(r.questions, new Set(byId.keys()));
+  // Questions to the customer only with a source showing the fact changed; the rest is recorded, not asked.
+  const questions: ContentQuestion[] = [];
+  const unasked: ContentQuestion[] = [];
+  for (const item of Array.isArray(r.questions) ? r.questions.slice(0, 20) : []) {
+    const question = normalizeQuestions([item], new Set(byId.keys()))[0];
+    if (!question) continue;
+    const source = allowedSource(str(rec(item).source_url, 2_000));
+    if (source) questions.push({ ...question, question: withSource(question.question, source) });
+    else unasked.push(question);
+  }
 
   // 1. Each proposed change on its own: source, place, size, customer fact.
   type Candidate = AktualitaetUpdate & { target: string };
@@ -736,7 +762,7 @@ export function normalizeAktualitaetOutput(
     const sentence = sentenceOf(whole, change.old_text);
     const customer = customerFactReason(change, sentence, facts);
     if (customer) {
-      questions.push(outdatedQuestion(change, block, sentence));
+      questions.push(outdatedQuestion(change, block, sentence, source));
       continue;
     }
     candidates.push({
@@ -860,6 +886,7 @@ export function normalizeAktualitaetOutput(
     checked,
     updates,
     questions: dedupeQuestions(questions),
+    unasked_questions: unasked,
     outdated_sections: outdated,
     findings,
     research: researchSummary(research),
@@ -901,6 +928,7 @@ export function unchangedAktualitaetOutput(
     checked: [],
     updates: [],
     questions: [],
+    unasked_questions: [],
     outdated_sections: [],
     findings: [],
     research: researchSummary(research),
