@@ -9,9 +9,9 @@ import { cn } from "@/components/dt/cn";
 const MAX_QUICK_ACTIONS = 12;
 
 const SUGGESTIONS = [
-  "Was bietet ihr an?",
-  "Wie läuft die Zusammenarbeit ab?",
-  "Welche nächsten Schritte empfiehlst du?",
+  "Stell dich bitte vor",
+  "Woher kennst du uns?",
+  "Was ist gerade dein Schmerzpunkt?",
 ] as const;
 
 export function DtAgentQuickActionsField(props: {
@@ -60,7 +60,8 @@ export function DtAgentQuickActionsField(props: {
         <div>
           <p className="text-sm font-semibold text-sbkm-navy dark:text-white">Schnelltests</p>
           <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/55">
-            Vorschlags-Chips über dem Chat-Eingabefeld — in der Kundenansicht sichtbar
+            Gesprächsstarter an den Avatar (z.&nbsp;B. „Stell dich bitte vor“) — Chips über dem
+            Chat-Eingabefeld
           </p>
         </div>
         <span className="shrink-0 text-xs tabular-nums text-sbkm-ink-500 dark:text-white/40">

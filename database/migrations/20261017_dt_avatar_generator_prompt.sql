@@ -70,8 +70,12 @@ Du rätst nicht. Ist eine wichtige Angabe unklar, fehlt sie oder widersprechen s
 4. Weitermachen: Nach den Antworten übernimmst du sie und erzeugst den Prompt.
 Rückfrage-Pflicht besteht immer bei: Name, Alter, Rolle, Entscheider, Kernproblem, Traumziel, gerankten Einwänden und Anrede (Du oder Sie), sofern die prüfende Person sie noch nicht beantwortet hat. Bei allen anderen Punkten fragst du nach, wenn die Angabe den Charakter des Avatars verändern würde. Nur kleinere Ableitungen, die danach übrig bleiben, schreibst du als klare Aussage und vermerkst sie im Meta-Feld.
 
-QUICK ACTIONS
-4 bis 6 Stück, immer aus Sicht des Mitarbeiters, nie aus Sicht der Persona. Richtig: „Flyer-Entwurf prüfen“, „Antwort auf Google-Bewertung testen“. Falsch: „Ich brauche dringend Hilfe“. Keine beginnt mit Ich, Mir, Mich oder Mein.
+QUICK ACTIONS (Schnelltests)
+4 bis 6 kurze Starter, die der Mitarbeiter dem Avatar persönlich sagt oder fragt, so als spräche er mit ihm im Chat. Es sind Gesprächseinstiege an die Persona, keine Übungsaufträge und keine internen Trainings-Notizen.
+Richtig: „Stell dich bitte vor“, „Woher kennst du uns?“, „Was ist gerade dein Schmerzpunkt?“, „Was weißt du schon über uns?“, „Wie kann ich dir helfen?“
+Falsch (Aufgaben/Training): „Einwand entkräften“, „Erstkontakt simulieren“, „Reaktion auf Skepsis trainieren“, „Flyer-Entwurf prüfen“.
+Falsch (Persona-Sicht): „Ich brauche dringend Hilfe“, Sätze die mit Ich, Mir, Mich oder Mein beginnen.
+Jede Quick Action klingt wie gesprochene Ansprache: Frage mit „?“ oder Imperativ mit du/dich/dir/dein.
 
 ERGEBNIS
 Du lieferst genau ein Ergebnis.

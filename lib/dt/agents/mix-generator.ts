@@ -107,7 +107,8 @@ export const MIX_TOOL: Anthropic.Tool = {
         minItems: AVATAR_QUICK_ACTIONS_MIN,
         maxItems: AVATAR_QUICK_ACTIONS_MAX,
         items: { type: "string" },
-        description: "4 bis 6, aus Sicht des Mitarbeiters, passend für alle Zielgruppen. Keine beginnt mit Ich, Mir, Mich oder Mein.",
+        description:
+          "4 bis 6 Gesprächsstarter an den Mix-Avatar (z. B. „Stell dich bitte vor“, „Was belastet euch?“). Keine Übungsaufträge. Keine beginnt mit Ich, Mir, Mich oder Mein.",
       },
       icon: { type: "string", description: "Ein Emoji." },
     },

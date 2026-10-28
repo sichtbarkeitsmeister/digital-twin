@@ -122,7 +122,8 @@ export const AVATAR_GENERATOR_TOOL: Anthropic.Tool = {
             minItems: AVATAR_QUICK_ACTIONS_MIN,
             maxItems: AVATAR_QUICK_ACTIONS_MAX,
             items: { type: "string" },
-            description: "4 bis 6, aus Sicht des Mitarbeiters. Keine beginnt mit Ich, Mir, Mich oder Mein.",
+            description:
+              "4 bis 6 Gesprächsstarter an den Avatar (z. B. „Stell dich bitte vor“, „Woher kennst du uns?“). Keine Übungsaufträge wie „Einwand üben“. Keine beginnt mit Ich, Mir, Mich oder Mein.",
           },
         },
         required: ["name", "role", "icon", "quick_actions"],
@@ -252,6 +253,12 @@ const GLOBAL_RULE_RES: Array<{ re: RegExp; label: string }> = [
   { re: /(?<!\p{L})Sätzen?\s+pro\s+(?:Antwort|Nachricht)/iu, label: "Sätze pro Antwort" },
 ];
 const PERSONA_START_RE = /^[\s"'„“‚‘»«(]*(ich|mir|mich|mein|meine|meinen|meinem|meiner|meines)(?!\p{L})/iu;
+/** Staff training tasks — not something you say to the avatar in chat. */
+const QUICK_ACTION_TASK_RE =
+  /(?<!\p{L})(üben|trainieren|simulieren|entkräften|durchspielen|durchgehen|proben|drillen)(?!\p{L})/iu;
+/** Conversational address: a question, or “you” / a short imperative to the avatar. */
+const QUICK_ACTION_CONVERSATION_RE =
+  /\?|(?<!\p{L})(du|dich|dir|dein|deine|deinen|deinem|deiner|deines|euch|euer|eure)(?!\p{L})|^(stell|beschreib|erklär|erzähl|sag|zeig|nenn|fass)(?!\p{L})/iu;
 
 function quoted(value: string): string {
   return `„${value.length > 80 ? `${value.slice(0, 79)}…` : value}“`;
@@ -303,15 +310,34 @@ export function dashErrors(prompt: string): string[] {
   return DASH_RE.test(prompt) ? ["Gedankenstrich im Text („–“ oder „—“)."] : [];
 }
 
-/** Rule 9: 4 to 6 Quick Actions, none from the persona's view (Ich, Mir, Mich, Mein). */
+/**
+ * Rule 9: 4 to 6 Quick Actions — spoken prompts to the avatar (questions / “du”),
+ * not training tasks, and not from the persona's view (Ich, Mir, Mich, Mein).
+ */
 export function quickActionErrors(actions: readonly string[]): string[] {
   const errors: string[] = [];
   if (actions.length < AVATAR_QUICK_ACTIONS_MIN || actions.length > AVATAR_QUICK_ACTIONS_MAX) {
     errors.push(`${actions.length} Quick Actions statt ${AVATAR_QUICK_ACTIONS_MIN} bis ${AVATAR_QUICK_ACTIONS_MAX}.`);
   }
   for (const action of actions) {
-    if (PERSONA_START_RE.test(action)) {
-      errors.push(`Quick Action aus Sicht der Persona: ${quoted(action)}. Quick Actions sind aus Sicht des Mitarbeiters.`);
+    const trimmed = action.trim();
+    if (!trimmed) continue;
+    if (PERSONA_START_RE.test(trimmed)) {
+      errors.push(
+        `Quick Action aus Sicht der Persona: ${quoted(trimmed)}. Quick Actions stellt der Mitarbeiter dem Avatar.`,
+      );
+      continue;
+    }
+    if (QUICK_ACTION_TASK_RE.test(trimmed)) {
+      errors.push(
+        `Quick Action klingt wie Übungsauftrag: ${quoted(trimmed)}. Formuliere eine Frage oder Ansprache an den Avatar (z. B. „Was hält dich gerade zurück?“).`,
+      );
+      continue;
+    }
+    if (!QUICK_ACTION_CONVERSATION_RE.test(trimmed)) {
+      errors.push(
+        `Quick Action ist keine Gesprächsansprache: ${quoted(trimmed)}. Richtig z. B. „Stell dich bitte vor“ oder „Woher kennst du uns?“.`,
+      );
     }
   }
   return errors;
@@ -328,7 +354,7 @@ export function quickActionErrors(actions: readonly string[]): string[] {
  *  6 WER DU BIST names an exact age („34 Jahre“)
  *  7 no age span („Mitte 40“, „30 bis 40 Jahre“)
  *  8 no global rule (Markdown, Emojis, number of sentences)
- *  9 4 to 6 Quick Actions, none from the persona's view (Ich, Mir, Mich, Mein)
+ *  9 4 to 6 Quick Actions as spoken prompts to the avatar (not training tasks / not persona-Ich)
  * 10 the name is not taken by another agent of the organisation
  */
 export function validateAvatarResult(
@@ -495,7 +521,7 @@ const CHECKED_RULES = [
   `Nie diese Wörter: ${AVATAR_HEDGE_WORDS.join(", ")}.`,
   "„## WER DU BIST“ nennt ein exaktes Alter wie „34 Jahre“, keine Spanne wie „Mitte 40“ oder „30 bis 40 Jahre“.",
   "Keine globalen Regeln: nicht Markdown, nicht Emojis, keine Satzanzahl wie „3 Sätze“ oder „Sätze pro Antwort“.",
-  "4 bis 6 Quick Actions aus Sicht des Mitarbeiters, keine beginnt mit Ich, Mir, Mich oder Mein.",
+  "4 bis 6 Quick Actions als Gesprächsstarter an den Avatar (z. B. „Stell dich bitte vor“, „Woher kennst du uns?“), keine Übungsaufträge wie „Einwand üben“, keine Sätze mit Ich/Mir/Mich/Mein.",
   "Der Name ist bei dieser Organisation noch nicht vergeben.",
 ];
 

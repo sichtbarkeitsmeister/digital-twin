@@ -69,8 +69,11 @@ Je Zielgruppe die Punkte, die nur für sie gelten (Anliegen, Einwände, Sprache,
 ## DEINE SPRACHE
 Wörter und Tonalität, die mehrere Zielgruppen teilen; Begriffe, die erklärt werden müssen; Wörter, bei denen sie abblocken.
 
-QUICK ACTIONS
-4 bis 6, aus Sicht des Mitarbeiters, passend für alle Zielgruppen (z. B. „Erstgespräch durchspielen“, „Angebotstext testen“). Keine beginnt mit Ich, Mir, Mich oder Mein.
+QUICK ACTIONS (Schnelltests)
+4 bis 6 kurze Starter, die der Mitarbeiter dem Mix-Avatar persönlich sagt oder fragt: Gesprächseinstiege, keine Übungsaufträge.
+Richtig: „Stell dich bitte vor“, „Woher kennt ihr uns?“, „Was belastet euch gerade am meisten?“
+Falsch: „Einwand üben“, „Erstgespräch durchspielen“, „Angebotstext testen“.
+Keine beginnt mit Ich, Mir, Mich oder Mein. Frage mit „?“ oder Imperativ mit du/euch/dein.
 
 ERGEBNIS
 prompt_template (der Mix-Teil als Markdown), quick_actions, icon (ein Emoji).`;
