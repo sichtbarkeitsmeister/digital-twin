@@ -31,6 +31,37 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** What this worker may do with a page whose row points at another job (`job_id`). */
+export type ContentPageOwnership =
+  /** The page's job is finished or gone: this job takes the page over. */
+  | "adopt"
+  /** This job was ended meanwhile („Stoppen“, „Zurücksetzen“): leave the page alone. */
+  | "job_ended"
+  /** Another live job runs the page (stopped and started again): leave it to that one. */
+  | "other_job";
+
+/**
+ * Whose page is it? „Stoppen“ ends the job in the database, but its worker stays inside the
+ * model call until the answer comes back. When the page was started again meanwhile, a new job
+ * owns it; the old worker used to save its answer, point the page back at itself and go on,
+ * and the overview then paused the page as „Abgebrochen“ because that job was ended. Now only
+ * a page whose job is finished or gone is adopted.
+ */
+export async function contentPageOwnership(
+  service: SupabaseClient,
+  jobId: string,
+  pageJobId: string | null,
+): Promise<ContentPageOwnership> {
+  const ids = [jobId, ...(pageJobId ? [pageJobId] : [])];
+  const { data, error } = await service.from("jobs").select("id, status").in("id", ids);
+  if (error) throw new Error(`Jobs konnten nicht geladen werden: ${error.message}`);
+  const status = new Map(((data ?? []) as { id: string; status: string }[]).map((row) => [row.id, row.status]));
+  const live = (id: string | null) => id != null && (status.get(id) === "pending" || status.get(id) === "running");
+  if (!live(jobId)) return "job_ended";
+  if (live(pageJobId)) return "other_job";
+  return "adopt";
+}
+
 /**
  * Content pipeline for one page (kind: content.page).
  * Payload: { pageId: uuid, organisationId: uuid }
@@ -93,9 +124,18 @@ export async function runContentPageSteps(input: {
       if (!page) return { ok: true, result: { skipped: "page_missing" } };
       if (page.state !== "laeuft") return { ok: true, result: { skipped: page.state } };
       if (page.job_id !== job.id) {
-        // Only one pending/running job per page exists (dedupe index), so whatever the row
-        // points to is finished. Adopt the page instead of leaving it „läuft“ without an owner.
-        await service.from("dt_content_pages").update({ job_id: job.id }).eq("id", pageId).eq("state", "laeuft");
+        // A page whose job is finished is adopted instead of being left „läuft“ without an owner.
+        // A page another live job runs, or a job that was stopped meanwhile, is left alone.
+        const ownership = await contentPageOwnership(service, job.id, page.job_id);
+        if (ownership !== "adopt") return { ok: true, result: { skipped: ownership } };
+        const { data: adopted, error: adoptError } = await service
+          .from("dt_content_pages")
+          .update({ job_id: job.id })
+          .eq("id", pageId)
+          .eq("state", "laeuft")
+          .select("id");
+        if (adoptError) throw new Error(`Seite konnte nicht übernommen werden: ${adoptError.message}`);
+        if (!adopted?.length) return { ok: true, result: { skipped: "not_running" } };
         page = { ...page, job_id: job.id };
       }
 
@@ -105,7 +145,8 @@ export async function runContentPageSteps(input: {
         const { error } = await service
           .from("dt_content_pages")
           .update({ state: "fertig", job_id: null })
-          .eq("id", pageId);
+          .eq("id", pageId)
+          .eq("job_id", job.id);
         if (error) throw new Error(`Seite konnte nicht abgeschlossen werden: ${error.message}`);
         return { ok: true, result: { finished: true } };
       }

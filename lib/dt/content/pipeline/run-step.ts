@@ -297,14 +297,9 @@ export async function runContentStep(
     });
   }
 
-  // „Stoppen“ or „Zurücksetzen“ while the model was answering: the cost is recorded above,
-  // the result must not land on a page that is no longer running (or no longer exists).
-  const { data: live, error: liveError } = await service
-    .from("dt_content_pages")
-    .select("state")
-    .eq("id", page.id)
-    .maybeSingle();
-  if (!liveError && live?.state !== "laeuft") {
+  // „Stoppen“, „Zurücksetzen“ or a new start while the model was answering: the cost is
+  // recorded above, the result must not land on a page that is no longer this job's.
+  if (!(await pageStillOurs(service, page))) {
     return { step, halted: true, discarded: true, model, costEur };
   }
 
@@ -403,12 +398,12 @@ async function runAktualitaetStep(input: {
       });
     } catch (error) {
       // Rounds that were answered are paid: their cost stays on the step for the page total.
-      if (progress.calls > billedBefore && (await pageStillRunning(service, page.id))) {
+      if (progress.calls > billedBefore && (await pageStillOurs(service, page))) {
         await saveProgress().catch((err) => console.error("[content] research cost not stored", err));
       }
       throw error;
     }
-    if (!(await pageStillRunning(service, page.id))) {
+    if (!(await pageStillOurs(service, page))) {
       return { step: def.step, halted: true, discarded: true, model, costEur: progress.cost_eur };
     }
     const inspection = inspectResearchBlocks(result.blocks);
@@ -442,7 +437,7 @@ async function runAktualitaetStep(input: {
     output = written as AktualitaetOutput;
   }
 
-  if (!(await pageStillRunning(service, page.id))) {
+  if (!(await pageStillOurs(service, page))) {
     return { step: def.step, halted: true, discarded: true, model, costEur: progress.cost_eur };
   }
 
@@ -472,10 +467,20 @@ async function runAktualitaetStep(input: {
   return { step: def.step, halted, model, costEur: progress.cost_eur };
 }
 
-/** Stopped or reset while the model was answering? Then nothing more is saved for this page. */
-async function pageStillRunning(service: SupabaseClient, pageId: string): Promise<boolean> {
-  const { data, error } = await service.from("dt_content_pages").select("state").eq("id", pageId).maybeSingle();
-  return Boolean(error) || data?.state === "laeuft";
+/**
+ * Stopped, reset or started again while the model was answering? Then this worker saves
+ * nothing more for the page: it must still run, and still under this worker's job
+ * (`page.job_id` as the step loop adopted it). „Stoppen“ ends the job but not the model call
+ * in flight; when the page was started again meanwhile, the new job owns it. A read error
+ * counts as yes, as before: the save itself then fails visibly.
+ */
+export async function pageStillOurs(
+  service: SupabaseClient,
+  page: Pick<ContentPageRow, "id" | "job_id">,
+): Promise<boolean> {
+  const { data, error } = await service.from("dt_content_pages").select("state, job_id").eq("id", page.id).maybeSingle();
+  if (error) return true;
+  return data?.state === "laeuft" && (page.job_id == null || data.job_id === page.job_id);
 }
 
 /**
@@ -529,7 +534,7 @@ async function runRephraseStep(input: {
       }),
     save: (_progress, info) =>
       saveProgress(info.model, info.reason === "paused" ? { status: "pending", finished_at: null } : { status: "running" }),
-    stillWanted: () => pageStillRunning(service, page.id),
+    stillWanted: () => pageStillOurs(service, page),
   });
   if (run.state === "partial") {
     return { step: def.step, halted: false, partial: true, model: run.model, costEur: 0 };
@@ -590,7 +595,7 @@ export async function skipContentStep(
   if (!def) throw new ContentLlmError(`Unbekannter Schritt ${step}.`, false);
 
   const live = def.key === "seo" ? await loadLiveText(service, page, options.fetchImpl) : null;
-  if (!(await pageStillRunning(service, page.id))) {
+  if (!(await pageStillOurs(service, page))) {
     return { step, halted: true, discarded: true, skipped: true, model: "", costEur: 0 };
   }
 
@@ -602,13 +607,18 @@ export async function skipContentStep(
   return { step, halted, skipped: true, model: "", costEur: 0 };
 }
 
-/** Pause the page with the error visible in the table and drawer. */
+/**
+ * Pause the page with the error visible in the table and drawer. Not when the page is no
+ * longer this job's (stopped, or started again under a new job): the failure of a stopped
+ * worker must not pause the new run.
+ */
 export async function markContentStepError(
   service: SupabaseClient,
   page: ContentPageRow,
   step: number,
   message: string,
 ): Promise<void> {
+  if (!(await pageStillOurs(service, page))) return;
   const text = message.slice(0, 500);
   await upsertStep(service, page, step, {
     status: "error",
@@ -640,6 +650,7 @@ export async function markContentStepRetry(
   step: number,
   message: string,
 ): Promise<void> {
+  if (!(await pageStillOurs(service, page))) return;
   const text = message.slice(0, 500);
   await upsertStep(service, page, step, {
     status: "pending",
