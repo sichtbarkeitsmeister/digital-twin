@@ -11,6 +11,8 @@ import {
 import {
   CONTENT_STEP_AKTUALITAET,
   CONTENT_STEP_COUNT,
+  CONTENT_STEP_ENDABNAHME,
+  CONTENT_STEP_FAKTENCHECK,
   contentStepDefinition,
   nextContentStep,
   skipsContentStep,
@@ -24,6 +26,12 @@ import type { JobHandler, JobHandlerResult, JobRow } from "../types";
 /** A full page needs most of the worker budget. Shorter steps can start later in the tick. */
 const LONG_STEP_MS = 150_000;
 const SHORT_STEP_MS = 45_000;
+/**
+ * Steps that write no text but whose answer grows with the page: the Faktencheck's findings and
+ * questions (up to 12,000 tokens) and the Endabnahme's open points (up to 8,000). Started with
+ * a short remainder they would run into the time limit; they wait for a long slot instead.
+ */
+const LONG_CHECK_STEPS: ReadonlySet<number> = new Set([CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_ENDABNAHME]);
 /** A skipped SEO fetches the live page (at most 15 s); every other skip is a few writes. */
 const LIVE_TEXT_MS = 20_000;
 
@@ -168,6 +176,7 @@ export async function runContentPageSteps(input: {
       // Watermark Entfernung works in chunks and resumes where it stopped, so a short remainder is
       // enough for it. The Aktualitätsprüfung is long: web research plus the whole text; when the
       // budget runs out between the two it hands back `partial` and resumes with its saved research.
+      // Faktencheck and Endabnahme write no text, but their lists can be as long (LONG_CHECK_STEPS).
       let budget: number | undefined;
       if (skip) {
         const needed = contentStepDefinition(next)?.key === "seo" ? LIVE_TEXT_MS : 0;
@@ -179,7 +188,7 @@ export async function runContentPageSteps(input: {
         const needed =
           def?.provider === "xai"
             ? SHORT_STEP_MS
-            : def?.step === CONTENT_STEP_AKTUALITAET || def?.writesText
+            : def?.step === CONTENT_STEP_AKTUALITAET || def?.writesText || (def != null && LONG_CHECK_STEPS.has(def.step))
               ? LONG_STEP_MS
               : SHORT_STEP_MS;
         const stepBudget = stepBudgetMs(Date.now(), limit, needed);
