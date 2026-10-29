@@ -89,6 +89,7 @@
     "test:content-skip-steps": "tsx scripts/test-content-skip-steps.ts",
     "test:content-job-ownership": "tsx scripts/test-content-job-ownership.ts",
     "test:content-step-budgets": "tsx scripts/test-content-step-budgets.ts",
+    "test:content-model-params": "tsx scripts/test-content-model-params.ts",
     "test:text-tools-geo": "tsx scripts/test-text-tools-geo.ts",
     "test:text-tools-hormozi": "tsx scripts/test-text-tools-hormozi.ts",
     "test:text-tools-seo": "tsx scripts/test-text-tools-seo.ts",

@@ -498,6 +498,11 @@ export async function callAnthropicFirstAvailable(input: {
   toolChoice?: Anthropic.Messages.ToolChoice;
   /** Extra request headers (PDF document blocks need pdfs-2024-09-25). */
   headers?: Record<string, string | null | undefined>;
+  /**
+   * Per-model request settings: a fallback model may need others than the first (a thinking
+   * setting one model requires and another rejects, an output budget for another tokenizer).
+   */
+  modelParams?: (model: string) => { maxTokens?: number; thinking?: Anthropic.Messages.ThinkingConfigParam };
 }): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
   const useStream = input.stream ?? input.maxTokens >= STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
@@ -529,11 +534,13 @@ export async function callAnthropicFirstAvailable(input: {
     const createMessage = async (
       headers: Record<string, string | null | undefined> | undefined,
     ): Promise<Anthropic.Message> => {
+      const params = input.modelParams?.(model);
       const body = {
         model,
-        max_tokens: input.maxTokens,
+        max_tokens: params?.maxTokens ?? input.maxTokens,
         system: input.system,
         messages: input.messages,
+        ...(params?.thinking ? { thinking: params.thinking } : {}),
         ...toolParams,
       };
       if (useStream) {

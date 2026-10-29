@@ -24,6 +24,30 @@ export class ContentLlmError extends Error {
 
 const STEP_TIMEOUT_MS = 240_000;
 
+/**
+ * Claude Sonnet 5.5 counts the same German text as about 30 % more tokens than Sonnet 4.6, for
+ * which the step budgets are sized (A/B on 29.10.: 1.31× on the same steps). Without the extra
+ * room its Lektorat was cut off at 12,000 tokens.
+ */
+export const SONNET_5_5_BUDGET_FACTOR = 1.35;
+
+/** No extended thinking on Claude Sonnet 5.5. SDK 0.95's types predate `between_tools`. */
+const BETWEEN_TOOLS_THINKING = { type: "between_tools" } as unknown as Anthropic.Messages.ThinkingConfigParam;
+
+/**
+ * What a model needs beyond the shared request. Claude Sonnet 5.5 thinks unless told otherwise
+ * and the thinking counts toward max_tokens (its Analyse was cut off after 45 s); `between_tools`
+ * is its setting for no extended thinking. It rejects `disabled` and every other model rejects
+ * `between_tools`, so the setting goes to Sonnet 5.5 only. Other models get the request as before.
+ */
+export function contentModelParams(
+  model: string,
+  maxTokens: number,
+): { maxTokens: number; thinking?: Anthropic.Messages.ThinkingConfigParam } {
+  if (!/sonnet-5-5/i.test(model)) return { maxTokens };
+  return { maxTokens: Math.round(maxTokens * SONNET_5_5_BUDGET_FACTOR), thinking: BETWEEN_TOOLS_THINKING };
+}
+
 function anthropicStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
   const status = (error as { status?: unknown }).status;
@@ -66,21 +90,28 @@ export async function callContentTool(input: {
   apiKey?: string | null;
   /** Name of the tool in error messages („Texte“, „Grounding“). */
   toolLabel?: string;
+  /** Tests hand in a stub client; no network. */
+  anthropic?: Anthropic;
 }): Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string }> {
-  const apiKey = input.apiKey ?? resolveContentApiKey();
-  if (!apiKey) {
-    throw new ContentLlmError(
-      `Der KI-Zugang für ${input.toolLabel ?? "Texte"} ist nicht eingerichtet (Schlüssel fehlt). Bitte die Technik informieren.`,
-      false,
-    );
+  let anthropic = input.anthropic;
+  if (!anthropic) {
+    const apiKey = input.apiKey ?? resolveContentApiKey();
+    if (!apiKey) {
+      throw new ContentLlmError(
+        `Der KI-Zugang für ${input.toolLabel ?? "Texte"} ist nicht eingerichtet (Schlüssel fehlt). Bitte die Technik informieren.`,
+        false,
+      );
+    }
+    anthropic = new Anthropic({ apiKey });
   }
 
-  const anthropic = new Anthropic({ apiKey });
+  const client = anthropic;
   const call = (forced: boolean) =>
     callAnthropicFirstAvailable({
-      anthropic,
+      anthropic: client,
       models: input.models,
       maxTokens: input.maxTokens,
+      modelParams: (model) => contentModelParams(model, input.maxTokens),
       timeoutMs: input.timeoutMs ?? STEP_TIMEOUT_MS,
       stream: true,
       system: forced
@@ -215,6 +246,7 @@ export async function callContentResearch(input: {
         anthropic,
         models,
         maxTokens: input.maxTokens,
+        modelParams: (model) => contentModelParams(model, input.maxTokens),
         timeoutMs: remaining,
         stream: true,
         system: input.system,

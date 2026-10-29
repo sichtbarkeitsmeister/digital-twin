@@ -8,10 +8,13 @@
 type Price = { match: RegExp; inputUsd: number; outputUsd: number };
 
 const PRICES_USD_PER_MTOK: Price[] = [
+  { match: /opus-5-5/i, inputUsd: 4, outputUsd: 20 },
   { match: /opus-4-[5-9]|opus-[5-9]/i, inputUsd: 5, outputUsd: 25 },
   { match: /opus/i, inputUsd: 15, outputUsd: 75 },
   { match: /haiku-4|haiku-[5-9]/i, inputUsd: 1, outputUsd: 5 },
   { match: /3-5-haiku|haiku-3/i, inputUsd: 0.8, outputUsd: 4 },
+  // Sonnet 5 and 5.5 cost less per token than Sonnet 4.x but count the same text as more tokens.
+  { match: /sonnet-5/i, inputUsd: 2, outputUsd: 10 },
   { match: /sonnet/i, inputUsd: 3, outputUsd: 15 },
   // xAI (Watermark Entfernung) per the xAI price list: the fast models, grok-4.7, other Grok models like grok-4.
   { match: /grok-4(-1)?-fast/i, inputUsd: 0.2, outputUsd: 0.5 },
