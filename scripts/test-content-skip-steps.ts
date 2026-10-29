@@ -74,154 +74,18 @@ import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
 import type { ContentFinding } from "../lib/dt/content/types";
 import { runContentPageSteps } from "../lib/jobs/handlers/content-page";
 
+import { FakeDb, type FakeRow } from "./fake-supabase";
+
 const ORG = "11111111-1111-4111-8111-111111111111";
 const PAGE_ID = "22222222-2222-4222-8222-222222222222";
 const JOB_ID = "33333333-3333-4333-8333-333333333333";
 const LIVE_URL = "https://praxis.de/implantate";
 
-// --- an in-memory Supabase: just what the content code calls ------------------------------------
+// --- the in-memory database, with this page's rows at hand -----------------------------------
 
-type Row = Record<string, unknown>;
+type Row = FakeRow;
 
-type FakeResult = { data: unknown; error: null };
-
-/** Thenable like a PostgREST builder: awaiting it runs the query on the in-memory tables. */
-class FakeQuery {
-  private op: "select" | "insert" | "upsert" | "update" | "delete" = "select";
-  private payload: Row | Row[] | null = null;
-  private conflict: string[] = [];
-  private filters: Array<(row: Row) => boolean> = [];
-  private mode: "many" | "maybe" | "single" = "many";
-  private orderBy: { column: string; ascending: boolean } | null = null;
-
-  constructor(
-    private readonly db: FakeDb,
-    private readonly table: string,
-  ) {}
-
-  select(): this {
-    return this;
-  }
-  insert(payload: Row | Row[]): this {
-    this.op = "insert";
-    this.payload = payload;
-    return this;
-  }
-  upsert(payload: Row | Row[], options: { onConflict?: string } = {}): this {
-    this.op = "upsert";
-    this.payload = payload;
-    this.conflict = (options.onConflict ?? "id").split(",").map((c) => c.trim());
-    return this;
-  }
-  update(payload: Row): this {
-    this.op = "update";
-    this.payload = payload;
-    return this;
-  }
-  delete(): this {
-    this.op = "delete";
-    return this;
-  }
-  eq(column: string, value: unknown): this {
-    this.filters.push((row) => row[column] === value);
-    return this;
-  }
-  neq(column: string, value: unknown): this {
-    this.filters.push((row) => row[column] !== value);
-    return this;
-  }
-  in(column: string, values: unknown[]): this {
-    this.filters.push((row) => values.includes(row[column]));
-    return this;
-  }
-  gte(column: string, value: number): this {
-    this.filters.push((row) => Number(row[column]) >= value);
-    return this;
-  }
-  is(column: string, value: unknown): this {
-    this.filters.push((row) => (row[column] ?? null) === value);
-    return this;
-  }
-  not(column: string, _op: string, value: unknown): this {
-    this.filters.push((row) => (row[column] ?? null) !== value);
-    return this;
-  }
-  or(): this {
-    return this;
-  }
-  limit(): this {
-    return this;
-  }
-  order(column: string, options: { ascending?: boolean } = {}): this {
-    this.orderBy = { column, ascending: options.ascending !== false };
-    return this;
-  }
-  maybeSingle(): this {
-    this.mode = "maybe";
-    return this;
-  }
-  single(): this {
-    this.mode = "single";
-    return this;
-  }
-  then<A = FakeResult, B = never>(
-    resolve?: ((value: FakeResult) => A | PromiseLike<A>) | null,
-    reject?: ((reason: unknown) => B | PromiseLike<B>) | null,
-  ): Promise<A | B> {
-    return Promise.resolve(this.run()).then(resolve, reject);
-  }
-
-  private run(): FakeResult {
-    const rows = this.db.rows(this.table);
-    const matches = rows.filter((row) => this.filters.every((f) => f(row)));
-    this.db.log.push({ table: this.table, op: this.op, payload: this.payload });
-    switch (this.op) {
-      case "insert": {
-        for (const row of [this.payload].flat() as Row[]) rows.push({ ...row });
-        return { data: null, error: null };
-      }
-      case "upsert": {
-        for (const row of [this.payload].flat() as Row[]) {
-          const existing = rows.find((r) => this.conflict.every((c) => r[c] === row[c]));
-          if (existing) Object.assign(existing, row);
-          else rows.push({ ...row });
-        }
-        return { data: null, error: null };
-      }
-      case "update":
-        for (const row of matches) Object.assign(row, this.payload);
-        return { data: null, error: null };
-      case "delete":
-        this.db.tables[this.table] = rows.filter((row) => !matches.includes(row));
-        return { data: null, error: null };
-      default: {
-        const sorted = [...matches].map((row) => structuredClone(row));
-        if (this.orderBy) {
-          const { column, ascending } = this.orderBy;
-          sorted.sort((a, b) => (Number(a[column]) - Number(b[column])) * (ascending ? 1 : -1));
-        }
-        if (this.mode === "many") return { data: sorted, error: null };
-        return { data: sorted[0] ?? null, error: null };
-      }
-    }
-  }
-}
-
-class FakeDb {
-  tables: Record<string, Row[]> = {};
-  log: Array<{ table: string; op: string; payload: unknown }> = [];
-  constructor(init: Record<string, Row[]> = {}) {
-    for (const [table, rows] of Object.entries(init)) this.tables[table] = rows.map((r) => structuredClone(r));
-  }
-  rows(table: string): Row[] {
-    return (this.tables[table] ??= []);
-  }
-  from(table: string): FakeQuery {
-    return new FakeQuery(this, table);
-  }
-  get service(): never {
-    return this as never;
-  }
+class FakeContentDb extends FakeDb {
   page(): Row {
     return this.rows("dt_content_pages").find((p) => p.id === PAGE_ID)!;
   }
@@ -312,7 +176,7 @@ const textBlocks = (hero: ContentTextBlock | null): ContentTextBlock[] => [
 const placeholderHero: ContentTextBlock = { id: "hero", heading: CONTENT_HERO_PLACEHOLDER, level: 2, html: "" };
 
 /** Records every step the runner hands to the model; the real step would bill and save. */
-function stubRunner(db: FakeDb, calls: number[]) {
+function stubRunner(db: FakeContentDb, calls: number[]) {
   return async (_service: unknown, page: ContentPageRow, _steps: readonly ContentStepRow[], step: number): Promise<StepOutcome> => {
     calls.push(step);
     const existing = db.step(step);
@@ -418,7 +282,7 @@ console.log("progress line: ok");
 
 async function runnerTests() {
   {
-    const db = new FakeDb({ dt_content_pages: [pageRow({ skip_steps: ["seo", "geo", "hormozi", "watermark"] })], dt_site_pages: [SITE_ROW] });
+    const db = new FakeContentDb({ dt_content_pages: [pageRow({ skip_steps: ["seo", "geo", "hormozi", "watermark"] })], dt_site_pages: [SITE_ROW] });
     const calls: number[] = [];
     const result = await runContentPageSteps({
       service: db.service,
@@ -447,7 +311,7 @@ async function runnerTests() {
 
   {
     // Little time left: skips still happen at once; the next real step waits for the next tick.
-    const db = new FakeDb({
+    const db = new FakeContentDb({
       dt_content_pages: [pageRow({ step: 2, skip_steps: ["faktencheck", "geo"] })],
       dt_content_steps: [stepRow(1), stepRow(2)],
     });
@@ -473,7 +337,7 @@ async function runnerTests() {
     // Done rows and the Aktualitätsprüfung the migration 20261027 skipped stay as they are.
     const migrated = stepRow(CONTENT_STEP_AKTUALITAET, { status: "skipped", output: null, model: null, cost_eur: 0, started_at: null, finished_at: null });
     const doneCheck = stepRow(CONTENT_STEP_FAKTENCHECK, { output: { findings: [], questions: [] } });
-    const db = new FakeDb({
+    const db = new FakeContentDb({
       dt_content_pages: [pageRow({ step: 5, skip_steps: ["faktencheck", "aktualitaet", "hormozi"] })],
       dt_content_steps: [stepRow(1), stepRow(2), doneCheck, stepRow(4), migrated],
     });
@@ -486,7 +350,7 @@ async function runnerTests() {
 
   {
     // An error row the editor switched off before „Weiterlaufen lassen“: skipped, not retried.
-    const db = new FakeDb({
+    const db = new FakeContentDb({
       dt_content_pages: [pageRow({ step: 3, skip_steps: ["faktencheck"] })],
       dt_content_steps: [stepRow(1), stepRow(2), stepRow(3, { status: "pending", error: "Überlastet", output: null, cost_eur: 0 })],
     });
@@ -499,7 +363,7 @@ async function runnerTests() {
     // Watermark progress of an earlier attempt: dropped; the text stays as before the step; what it cost stays counted.
     const html = renderBlocksHtml(textBlocks(null));
     const progress = { chunks_done: 1, chunks: 3, blocks: [{ id: "intro", heading: "Umformuliert", level: 1, html: "<p>x</p>" }] };
-    const db = new FakeDb({
+    const db = new FakeContentDb({
       dt_content_pages: [pageRow({ step: 9, html, cost_eur: 1, skip_steps: ["watermark"] })],
       dt_content_steps: [...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => stepRow(n)), stepRow(9, { status: "pending", output: progress, cost_eur: 0.12, model: "grok-4" })],
     });
@@ -512,7 +376,7 @@ async function runnerTests() {
 
   {
     // Stopped or reset while the loop ran: nothing is written.
-    const db = new FakeDb({ dt_content_pages: [pageRow({ state: "in_arbeit", skip_steps: ["geo"] })] });
+    const db = new FakeContentDb({ dt_content_pages: [pageRow({ state: "in_arbeit", skip_steps: ["geo"] })] });
     const outcome = await skipContentStep(db.service, pageRow({ skip_steps: ["geo"] }), [], CONTENT_STEP_GEO);
     assert.deepEqual([outcome.halted, outcome.discarded], [true, true]);
     assert.equal(db.step(CONTENT_STEP_GEO), undefined);
@@ -526,7 +390,7 @@ async function runnerTests() {
 async function seoTests() {
   const steps = [stepRow(1)];
   {
-    const db = new FakeDb({ dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })], dt_site_pages: [SITE_ROW] });
+    const db = new FakeContentDb({ dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })], dt_site_pages: [SITE_ROW] });
     const outcome = await skipContentStep(db.service, pageRow({ step: 1, skip_steps: ["seo"] }), steps, CONTENT_STEP_SEO, { fetchImpl: liveFetch as never });
     assert.deepEqual([outcome.halted, outcome.skipped], [false, true]);
     const row = db.step(CONTENT_STEP_SEO)!;
@@ -549,13 +413,13 @@ async function seoTests() {
   {
     // Hormozi off too: nobody would fill a hero, so none is added.
     const both = pageRow({ step: 1, skip_steps: ["seo", "hormozi"] });
-    const db = new FakeDb({ dt_content_pages: [both], dt_site_pages: [SITE_ROW] });
+    const db = new FakeContentDb({ dt_content_pages: [both], dt_site_pages: [SITE_ROW] });
     await skipContentStep(db.service, both, steps, CONTENT_STEP_SEO, { fetchImpl: liveFetch as never });
     assert.deepEqual(parseBlocksFromHtml(String(db.page().html)).map((b) => b.heading), ["Implantate in Krefeld", "Ablauf"]);
   }
   {
     // Live page down: the stored crawl text.
-    const db = new FakeDb({ dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })], dt_site_pages: [SITE_ROW] });
+    const db = new FakeContentDb({ dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })], dt_site_pages: [SITE_ROW] });
     await skipContentStep(db.service, pageRow({ step: 1, skip_steps: ["seo"] }), steps, CONTENT_STEP_SEO, { fetchImpl: deadFetch as never });
     assert.deepEqual(db.step(CONTENT_STEP_SEO)!.output, { skipped_by: "user", live_text: true, source: "crawl", url: LIVE_URL });
     assert.match(String(db.page().html), /Feste Zähne an einem Tag/);
@@ -564,7 +428,7 @@ async function seoTests() {
   {
     // A placeholder in the live text stops the page like after any text step; the row stays „skipped“.
     const withGap = SITE_ROW.text_content + "\nPreis: [BITTE PRÜFEN: Preis pro Implantat]";
-    const db = new FakeDb({ dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })], dt_site_pages: [{ ...SITE_ROW, text_content: withGap }] });
+    const db = new FakeContentDb({ dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })], dt_site_pages: [{ ...SITE_ROW, text_content: withGap }] });
     const outcome = await skipContentStep(db.service, pageRow({ step: 1, skip_steps: ["seo"] }), steps, CONTENT_STEP_SEO, { fetchImpl: deadFetch as never });
     assert.equal(outcome.halted, true);
     assert.equal(db.page().state, "braucht_sie");
@@ -573,7 +437,7 @@ async function seoTests() {
   }
   {
     // Neither live HTML nor crawl text: the page pauses with the reason, never an empty text.
-    const db = new FakeDb({
+    const db = new FakeContentDb({
       dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })],
       dt_content_steps: [stepRow(1)],
       dt_site_pages: [{ ...SITE_ROW, text_content: "", h1: null, title: null }],
@@ -596,7 +460,7 @@ async function seoTests() {
   }
   {
     // The page left the crawl (no live URL): an error with the reason, no fetch.
-    const db = new FakeDb({ dt_content_pages: [pageRow({ source: "structure", source_url: null, skip_steps: ["seo"] })] });
+    const db = new FakeContentDb({ dt_content_pages: [pageRow({ source: "structure", source_url: null, skip_steps: ["seo"] })] });
     await assert.rejects(
       skipContentStep(db.service, pageRow({ source: "structure", source_url: null, skip_steps: ["seo"] }), [], CONTENT_STEP_SEO, { fetchImpl: liveFetch as never }),
       (error: unknown) => error instanceof ContentLlmError && !error.retryable && error.message.startsWith(LIVE_TEXT_FAILURE_PREFIX),
@@ -753,7 +617,7 @@ console.log("Faktencheck off and the others: ok");
 // --- 9. rerun, actions, review, summary, warnings --------------------------------------------------
 
 async function actionTests() {
-  const db = new FakeDb({ dt_content_pages: [pageRow({ state: "in_arbeit", step: CONTENT_STEP_HORMOZI, skip_steps: ["hormozi"] })] });
+  const db = new FakeContentDb({ dt_content_pages: [pageRow({ state: "in_arbeit", step: CONTENT_STEP_HORMOZI, skip_steps: ["hormozi"] })] });
   const page = pageRow({ state: "in_arbeit", step: CONTENT_STEP_HORMOZI, html: "<p>x</p>", skip_steps: ["hormozi"] });
   const refused = await rerunContentStep(db.service, page, CONTENT_STEP_HORMOZI, "Kürzer bitte", "u1");
   assert.deepEqual(refused, { ok: false, status: 409, message: CONTENT_SKIPPED_RERUN_MESSAGE });
@@ -830,7 +694,7 @@ console.log("PATCH validation: ok");
 
 async function keepTests() {
   {
-    const db = new FakeDb({
+    const db = new FakeContentDb({
       dt_content_pages: [pageRow({ state: "fertig", step: 10, html: "<p>x</p>", skip_steps: ["geo", "watermark"], page_type: "ratgeber" })],
       dt_content_steps: [stepRow(1), stepRow(4, { status: "skipped", output: { skipped_by: "user" } })],
       jobs: [],
@@ -841,7 +705,7 @@ async function keepTests() {
     assert.equal(db.rows("dt_content_steps").length, 0);
   }
   {
-    const db = new FakeDb({
+    const db = new FakeContentDb({
       dt_content_pages: [
         { ...pageRow({ slug: "implantate", source: "structure", source_url: null, skip_steps: ["geo"] }), structure_uploaded_at: "2026-10-01T00:00:00Z" },
         { ...pageRow({ id: "p-dach", slug: "dach", path: "/dach", source: "structure", source_url: null, skip_steps: ["hormozi"] }) },

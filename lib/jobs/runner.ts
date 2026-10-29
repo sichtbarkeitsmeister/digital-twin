@@ -151,6 +151,13 @@ async function markReschedule(
     .eq("status", "running");
 }
 
+/**
+ * A job ended from outside while its handler ran („Stoppen“ in Texte sets it `dead`) stays
+ * ended: its worker cannot be interrupted mid-call, but its outcome must not turn it back into
+ * „succeeded“ (hiding the stop) or „pending“ (running a stopped job again).
+ */
+const ENDED_FROM_OUTSIDE = "dead";
+
 async function markSucceeded(
   job: JobRow,
   result: Record<string, unknown> | null,
@@ -167,7 +174,8 @@ async function markSucceeded(
       locked_by: null,
       last_error: null,
     })
-    .eq("id", job.id);
+    .eq("id", job.id)
+    .neq("status", ENDED_FROM_OUTSIDE);
 }
 
 async function markFailed(
@@ -198,7 +206,8 @@ async function markFailed(
       locked_at: null,
       locked_by: null,
     })
-    .eq("id", job.id);
+    .eq("id", job.id)
+    .neq("status", ENDED_FROM_OUTSIDE);
 }
 
 async function markSeoCrawlDead(job: JobRow, errorMessage: string) {
