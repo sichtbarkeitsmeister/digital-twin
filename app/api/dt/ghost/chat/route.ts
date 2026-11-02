@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { callDtAnthropicChat, dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
 import { jsonKeepaliveResponse } from "@/lib/dt/json-keepalive";
+import { dtChatModelDeadline } from "@/lib/dt/chat/time-budget";
 import {
   createdFilesToGhostMetadata,
   dtAttachmentInboundSchema,
@@ -16,6 +17,7 @@ import { requireAuthUser } from "@/lib/dt/db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { createServiceClient } from "@/lib/supabase/service";
 
+// Keep in sync with DT_CHAT_ROUTE_MAX_DURATION_MS (lib/dt/chat/time-budget.ts).
 export const maxDuration = 300;
 
 const historySchema = z.object({
@@ -46,6 +48,7 @@ const bodySchema = z
   });
 
 export async function POST(req: Request) {
+  const requestStartedAt = Date.now();
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
     return NextResponse.json({ ok: false, message: "Nicht angemeldet." }, { status: 401 });
@@ -86,6 +89,7 @@ export async function POST(req: Request) {
         system: assembled.system,
         messages,
         mode: "ghost",
+        timeBudget: { deadlineAt: dtChatModelDeadline(requestStartedAt) },
       });
 
       if (direct.usage.inputTokens > 0 || direct.usage.outputTokens > 0) {

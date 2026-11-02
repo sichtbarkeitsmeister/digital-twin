@@ -35,6 +35,7 @@ import {
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { jsonKeepaliveResponse } from "@/lib/dt/json-keepalive";
+import { dtChatModelDeadline } from "@/lib/dt/chat/time-budget";
 import {
   isGroundingHtmlBuildRequest,
   isGroundingStatusRequest,
@@ -51,6 +52,7 @@ import {
 import type { DtChatMode } from "@/lib/dt/types";
 import { createServiceClient } from "@/lib/supabase/service";
 
+// Keep in sync with DT_CHAT_ROUTE_MAX_DURATION_MS (lib/dt/chat/time-budget.ts).
 export const maxDuration = 300;
 
 async function storedGroundingTurn(
@@ -266,6 +268,7 @@ const bodySchema = z
   });
 
 export async function POST(req: Request, context: { params: Promise<{ chatId: string }> }) {
+  const requestStartedAt = Date.now();
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
     return NextResponse.json({ ok: false, message: "Nicht angemeldet." }, { status: 401 });
@@ -601,6 +604,7 @@ export async function POST(req: Request, context: { params: Promise<{ chatId: st
       mode: chat.mode as DtChatMode,
       retrieval:
         chat.mode === "seo" ? { organisationId: chat.organisation_id } : undefined,
+      timeBudget: { deadlineAt: dtChatModelDeadline(requestStartedAt) },
     });
   } catch (err) {
     console.error("[dt/chat/messages] Anthropic failed:", err);

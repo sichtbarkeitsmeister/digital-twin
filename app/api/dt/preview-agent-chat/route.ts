@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { callDtAnthropicChat, dtChatFailureUserMessage } from "@/lib/dt/anthropic-chat";
+import { dtChatModelDeadline } from "@/lib/dt/chat/time-budget";
 import { requireAuthUser } from "@/lib/dt/db";
 import { canManageDtAgents } from "@/lib/dt/org-access";
 import { buildDtSystemPrompt } from "@/lib/dt/prompts/build-system-prompt";
@@ -9,6 +10,7 @@ import { DEFAULT_DIGITAL_TWIN_GLOBAL_PROMPT } from "@/lib/dt/prompts/digital-twi
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { createServiceClient } from "@/lib/supabase/service";
 
+// Keep in sync with DT_CHAT_ROUTE_MAX_DURATION_MS (lib/dt/chat/time-budget.ts).
 export const maxDuration = 300;
 
 const historySchema = z.object({
@@ -30,6 +32,7 @@ const bodySchema = z.object({
  * Does not create dt_agents / dt_chats rows.
  */
 export async function POST(req: Request) {
+  const requestStartedAt = Date.now();
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
     return NextResponse.json({ ok: false, message: "Nicht angemeldet." }, { status: 401 });
@@ -113,6 +116,7 @@ export async function POST(req: Request) {
       system,
       messages,
       mode: "ghost",
+      timeBudget: { deadlineAt: dtChatModelDeadline(requestStartedAt) },
     });
 
     if (direct.usage.inputTokens > 0 || direct.usage.outputTokens > 0) {

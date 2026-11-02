@@ -32,6 +32,13 @@ import { DtOrgWebsiteButton } from "@/components/dt/dt-org-website-button";
 import { DtThemeToggle } from "@/components/dt/dt-theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { readDtLastChatId, writeDtLastChatId } from "@/lib/dt/client-storage";
+import {
+  dtChatJsonFailureMessage,
+  dtChatSendFailureStatus,
+  dtChatStateAfterFailedSend,
+  dtChatThrownFailureMessage,
+  postDtChatJson,
+} from "@/lib/dt/chat/chat-response";
 import { emojiForAgent, extractAgentDisg } from "@/lib/dt/agent-display";
 import {
   readSelectedOrganisationId,
@@ -356,7 +363,7 @@ export function DtChatShell(props: {
       chatId: string,
       options?: { expectedOrgId?: string; notifyOnMismatch?: boolean },
     ) => {
-      const rejectStale = (message: string) => {
+      const rejectStale = (message: string): false => {
         writeDtLastChatId(null, props.seoMode);
         if (options?.notifyOnMismatch) setStatus(message);
         return false;
@@ -402,7 +409,8 @@ export function DtChatShell(props: {
       setAttachmentsByMessage(map);
       if (json.chat?.agent_id) setSelectedAgentId(json.chat.agent_id);
       writeDtLastChatId(chatId, props.seoMode);
-      return true;
+      // The loaded messages, so a failed send can check what the server saved.
+      return json.messages ?? [];
     },
     [props.seoMode],
   );
@@ -942,6 +950,28 @@ export function DtChatShell(props: {
     abortRef.current = controller;
     let persistedChatId: string | null = ghostMode ? null : selectedChatId;
 
+    // A send failed in transport. Reload the chat: the server usually saved the message
+    // before the model ran, and the reply too if the connection broke only afterwards.
+    const showSendFailure = async (message: string) => {
+      const reloaded = persistedChatId
+        ? await loadChat(persistedChatId).catch(() => false as const)
+        : false;
+      if (reloaded === false) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      }
+      const state = reloaded === false
+        ? { userSaved: false, replyArrived: false }
+        : dtChatStateAfterFailedSend(reloaded, text || "(Anhang)");
+      if (state.replyArrived) {
+        setStatus(null);
+        void refreshChats();
+        return;
+      }
+      setStatus(
+        dtChatSendFailureStatus({ message, userSaved: state.userSaved, grounding: groundingActive }),
+      );
+    };
+
     try {
       if (ghostMode) {
         const history = messages
@@ -951,28 +981,32 @@ export function DtChatShell(props: {
             content: m.content,
           }));
 
-        const res = await fetch("/api/dt/ghost/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        const sent = await postDtChatJson<{
+          ok?: boolean;
+          assistantMessage?: DtChatMessageItem;
+          via?: string;
+          message?: string;
+        }>(
+          "/api/dt/ghost/chat",
+          {
             organisationId: selectedOrgId,
             agentId: selectedAgentId,
             content: text,
             history,
             attachments: outgoingAttachments,
             groundingMode: groundingActive,
-          }),
-          signal: controller.signal,
-        });
-        const json = (await res.json()) as {
-          ok?: boolean;
-          assistantMessage?: DtChatMessageItem;
-          via?: string;
-          message?: string;
-        };
+          },
+          controller.signal,
+        );
+        if (!sent.ok) {
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+          setStatus(sent.failure.message);
+          return;
+        }
+        const json = sent.json;
         if (!json.ok) {
           setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-          setStatus(json.message ?? "Antwort fehlgeschlagen.");
+          setStatus(dtChatJsonFailureMessage(json, sent.status));
           return;
         }
         setMessages((prev) => {
@@ -991,18 +1025,7 @@ export function DtChatShell(props: {
         return;
       }
 
-      const res = await fetch(`/api/dt/chats/${chatId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: text,
-          attachments: outgoingAttachments,
-          ghostMode: false,
-          groundingMode: groundingActive,
-        }),
-        signal: controller.signal,
-      });
-      const json = (await res.json()) as {
+      const sent = await postDtChatJson<{
         ok?: boolean;
         userMessage?: DtChatMessageItem;
         assistantMessage?: DtChatMessageItem;
@@ -1010,7 +1033,21 @@ export function DtChatShell(props: {
         titleSuggestion?: string | null;
         via?: string;
         message?: string;
-      };
+      }>(
+        `/api/dt/chats/${chatId}/messages`,
+        {
+          content: text,
+          attachments: outgoingAttachments,
+          ghostMode: false,
+          groundingMode: groundingActive,
+        },
+        controller.signal,
+      );
+      if (!sent.ok) {
+        await showSendFailure(sent.failure.message);
+        return;
+      }
+      const json = sent.json;
 
       if (!json.ok) {
         setMessages((prev) => {
@@ -1018,7 +1055,7 @@ export function DtChatShell(props: {
           if (json.userMessage) next.push(json.userMessage);
           return next;
         });
-        setStatus(json.message ?? "Antwort fehlgeschlagen.");
+        setStatus(dtChatJsonFailureMessage(json, sent.status));
         return;
       }
 
@@ -1065,20 +1102,8 @@ export function DtChatShell(props: {
       if ((err as Error).name === "AbortError") {
         setStatus("Antwort gestoppt.");
       } else {
-        let kept = false;
-        if (persistedChatId) {
-          kept = await loadChat(persistedChatId).catch(() => false);
-        }
-        if (!kept) {
-          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-        }
-        setStatus(
-          groundingActive
-            ? kept
-              ? "Die Verbindung ist abgebrochen. Die Nachricht bleibt im Chat. Entwurf und HTML-Datei liegen im Tab Grounding."
-              : "Die Verbindung ist abgebrochen. Entwurf und HTML-Datei liegen im Tab Grounding."
-            : "Netzwerkfehler — bitte erneut versuchen.",
-        );
+        console.error("[dt-chat] send failed", err);
+        await showSendFailure(dtChatThrownFailureMessage(err));
       }
     } finally {
       for (const u of previewCleanup) URL.revokeObjectURL(u);

@@ -1,9 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import {
+  AnthropicTimeoutError,
   callAnthropicFirstAvailable,
   extractAnthropicText,
 } from "@/lib/ai/anthropic-helpers";
+import { DT_CHAT_MODEL_BUDGET_MS, formatDtChatDuration } from "@/lib/dt/chat/time-budget";
 import { fallbackDtChatTitle } from "@/lib/dt/chat-title";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
 import {
@@ -609,6 +611,7 @@ export function dtChatFailureDetail(err: unknown): string | null {
 }
 
 export function dtChatFailureUserMessage(err: unknown): string {
+  if (err instanceof DtChatTimeBudgetError) return err.message;
   const chunks: string[] = [];
   if (err instanceof Error && err.message) chunks.push(err.message);
   if (err && typeof err === "object") {
@@ -704,12 +707,87 @@ class DtAnswerAccumulator {
     else this.append(part);
   }
 
-  finish(resp: Anthropic.Message, continuation: boolean): string {
+  hasText(): boolean {
+    return this.text.trim().length > 0;
+  }
+
+  finish(resp: Anthropic.Message, continuation: boolean, note?: string): string {
     this.add(extractAnthropicText(resp), continuation);
     if (resp.stop_reason === "max_tokens") this.append(DT_TRUNCATED_ANSWER_NOTE);
+    if (note) this.append(note);
     return this.text || "Keine Antwort erhalten.";
   }
+
+  /** The turn ends without a final model response (time ran out). */
+  finishWithNote(note: string): string {
+    this.append(note);
+    return this.text;
+  }
 }
+
+/** `stop_reason` stored on a reply that the time budget ended. */
+export const DT_TIME_BUDGET_STOP_REASON = "time_budget";
+
+/** A round is only started with at least this much time left (prefill of a large SEO prompt alone takes 10–20 s). */
+const DT_MIN_ROUND_MS = 20_000;
+/** With less time left, the turn stops researching and writes its answer from what it has. */
+const DT_WRAP_UP_MS = 75_000;
+/** Sizing the wrap-up answer: time for the prompt prefill, then a conservative writing speed. */
+const DT_WRAP_UP_PREFILL_MS = 15_000;
+const DT_WRAP_UP_TOKENS_PER_SECOND = 40;
+const DT_WRAP_UP_MIN_TOKENS = 1_024;
+
+const DT_WRAP_UP_TIME_PROMPT =
+  "Systemhinweis: Die Zeit für diese Antwort ist fast aufgebraucht. Rufe keine Werkzeuge mehr auf. Schreibe jetzt die Antwort aus dem, was du bisher herausgefunden hast, kompakt und in sich abgeschlossen. Nenne am Ende kurz, was offen geblieben ist, und biete an, in der nächsten Nachricht weiterzumachen.";
+
+const DT_WRAP_UP_ROUNDS_PROMPT =
+  "Systemhinweis: Die Werkzeug-Aufrufe für diese Antwort sind aufgebraucht. Rufe keine Werkzeuge mehr auf und schreibe jetzt die Antwort aus dem bisherigen Stand.";
+
+function dtTimeBudgetCutNote(elapsed: string): string {
+  return `(Aus Zeitgründen wurde diese Antwort nach ${elapsed} beendet. Mit „weiter“ geht es an dieser Stelle weiter; große Aufgaben am besten in kleineren Schritten stellen.)`;
+}
+
+function dtTimeBudgetWrapUpNote(elapsed: string): string {
+  return `(Aus Zeitgründen wurde die Recherche nach ${elapsed} beendet und die Antwort aus dem bisherigen Stand geschrieben. Mit „weiter“ lässt sie sich fortsetzen.)`;
+}
+
+/** The turn ran out of time before the model wrote anything usable. */
+export class DtChatTimeBudgetError extends Error {
+  constructor(elapsed: string) {
+    super(
+      `Die KI hat in ${elapsed} keine Antwort fertig bekommen und wurde vor dem Zeitlimit des Servers gestoppt. Bitte die Aufgabe in kleinere Schritte teilen, z. B. erst die Gliederung, dann Abschnitt für Abschnitt.`,
+    );
+    this.name = "DtChatTimeBudgetError";
+  }
+}
+
+/** Output that still fits the time left. */
+function dtWrapUpMaxTokens(remainingMs: number, cap: number): number {
+  const writingSeconds = Math.max(0, (remainingMs - DT_WRAP_UP_PREFILL_MS) / 1000);
+  const fits = Math.floor(writingSeconds * DT_WRAP_UP_TOKENS_PER_SECOND);
+  return Math.min(cap, Math.max(DT_WRAP_UP_MIN_TOKENS, fits));
+}
+
+/** Adds a text block to the last (user) message for this one request; `convo` stays unchanged. */
+function withTrailingUserNote(
+  convo: Anthropic.MessageParam[],
+  note: string,
+): Anthropic.MessageParam[] {
+  const last = convo[convo.length - 1];
+  if (!last || last.role !== "user") return convo;
+  const blocks: Anthropic.ContentBlockParam[] =
+    typeof last.content === "string" ? [{ type: "text", text: last.content }] : [...last.content];
+  return [...convo.slice(0, -1), { role: "user", content: [...blocks, { type: "text", text: note }] }];
+}
+
+export type DtChatTimeBudget = {
+  /** Epoch ms by which the model loop must be done (`dtChatModelDeadline`). */
+  deadlineAt: number;
+  /** A round is only started with at least this much time left. */
+  minRoundMs?: number;
+  /** With less time left, the turn stops using tools and writes its answer. */
+  wrapUpMs?: number;
+};
 
 export async function callDtAnthropicChat(params: {
   system: string;
@@ -717,7 +795,18 @@ export async function callDtAnthropicChat(params: {
   mode: DtChatMode;
   /** When provided (SEO mode), enables on-demand website-content retrieval tools. */
   retrieval?: { organisationId: string };
+  /**
+   * When the model loop must be done. Routes pass `dtChatModelDeadline(requestStart)`;
+   * without it the loop gets `DT_CHAT_MODEL_BUDGET_MS` from this call on.
+   */
+  timeBudget?: DtChatTimeBudget;
 }): Promise<DtAnthropicChatResult> {
+  const startedAt = Date.now();
+  const deadlineAt = params.timeBudget?.deadlineAt ?? startedAt + DT_CHAT_MODEL_BUDGET_MS;
+  const minRoundMs = params.timeBudget?.minRoundMs ?? DT_MIN_ROUND_MS;
+  const wrapUpMs = params.timeBudget?.wrapUpMs ?? DT_WRAP_UP_MS;
+  const remainingMs = () => deadlineAt - Date.now();
+
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY fehlt.");
@@ -745,24 +834,31 @@ export async function callDtAnthropicChat(params: {
     : [DT_CREATE_FILE_TOOL];
   const createdFiles: DtCreatedChatFile[] = [];
 
+  // Every round declares the same tools: history with tool calls needs them, and the
+  // last round turns them off with tool_choice "none" instead of leaving them out.
   const createRound = async (input: {
     convo: Anthropic.MessageParam[];
-    tools?: Anthropic.ToolUnion[];
-  }): Promise<{ response: Anthropic.Message; model: string }> => {
+    toolChoice?: Anthropic.Messages.ToolChoice;
+    maxTokens?: number;
+  }): Promise<{ response: Anthropic.Message; model: string; timedOut: boolean }> => {
     const result = await callAnthropicFirstAvailable({
       anthropic: client,
       models,
-      maxTokens: max_tokens,
+      maxTokens: input.maxTokens ?? max_tokens,
       system,
       messages: input.convo,
-      tools: input.tools,
-      timeoutMs: roundTimeoutMs,
+      tools,
+      toolChoice: input.toolChoice,
+      // Never past the turn's deadline. A round cut off there still returns what it wrote.
+      timeoutMs: Math.max(1, Math.min(roundTimeoutMs, remainingMs())),
+      stream: true,
+      partialOnTimeout: true,
       headers: betaHeaders,
     });
     if (!result) {
       throw new Error("Kein verfügbares Anthropic-Modell.");
     }
-    return result;
+    return { response: result.response, model: result.model, timedOut: result.timedOut === true };
   };
 
   const runTool = async (name: string, input: unknown): Promise<string> => {
@@ -799,27 +895,89 @@ export async function callDtAnthropicChat(params: {
   // True while the current round continues text that the limit cut off.
   let continuing = false;
 
-  const finish = (resp: Anthropic.Message): DtAnthropicChatResult => ({
+  const finish = (resp: Anthropic.Message, note?: string): DtAnthropicChatResult => ({
     text: appendWebResearchNotes(
-      answer.finish(resp, continuing),
+      answer.finish(resp, continuing, note),
       inspectWebResearchBlocks(seenBlocks),
     ),
     model: usedModel,
-    stopReason: resp.stop_reason ?? null,
+    stopReason: note ? DT_TIME_BUDGET_STOP_REASON : (resp.stop_reason ?? null),
     usage: { ...totalUsage, ...webUsage },
     createdFiles,
   });
 
+  const recordRound = (round: { response: Anthropic.Message; model: string }) => {
+    usedModel = round.model;
+    totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(round.response.usage));
+    webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(round.response.usage));
+    seenBlocks.push(...round.response.content);
+  };
+
+  // Time is up: keep what the turn wrote (and any files it made), or say why there is nothing.
+  // Text from a round cut off mid-stream counts; a tool call it was writing is dropped.
+  const stopForTime = (cutRound?: Anthropic.Message): DtAnthropicChatResult => {
+    if (cutRound) answer.add(extractAnthropicText(cutRound), continuing);
+    const elapsed = formatDtChatDuration(Date.now() - startedAt);
+    if (!answer.hasText() && createdFiles.length === 0) {
+      throw new DtChatTimeBudgetError(elapsed);
+    }
+    return {
+      text: appendWebResearchNotes(
+        answer.finishWithNote(dtTimeBudgetCutNote(elapsed)),
+        inspectWebResearchBlocks(seenBlocks),
+      ),
+      model: usedModel,
+      stopReason: DT_TIME_BUDGET_STOP_REASON,
+      usage: { ...totalUsage, ...webUsage },
+      createdFiles,
+    };
+  };
+
+  /** Last round: no more tools, the model writes its answer from what the turn has. */
+  const wrapUp = async (reason: "time" | "rounds"): Promise<DtAnthropicChatResult> => {
+    const remaining = remainingMs();
+    if (remaining < minRoundMs) return stopForTime();
+    // After pause_turn the history ends on the paused server tool call, which the API
+    // resumes on its own; a user message there would break it. Only a user turn is steered.
+    const steer = convo[convo.length - 1]?.role === "user";
+    const elapsed = formatDtChatDuration(Date.now() - startedAt);
+    let round: Awaited<ReturnType<typeof createRound>>;
+    try {
+      round = await createRound({
+        convo: steer
+          ? withTrailingUserNote(
+              convo,
+              reason === "time" ? DT_WRAP_UP_TIME_PROMPT : DT_WRAP_UP_ROUNDS_PROMPT,
+            )
+          : convo,
+        toolChoice: steer ? { type: "none" } : undefined,
+        maxTokens: reason === "time" ? dtWrapUpMaxTokens(remaining, max_tokens) : undefined,
+      });
+    } catch (err) {
+      if (err instanceof AnthropicTimeoutError) return stopForTime();
+      throw err;
+    }
+    recordRound(round);
+    if (round.timedOut) return stopForTime(round.response);
+    return finish(round.response, reason === "time" ? dtTimeBudgetWrapUpNote(elapsed) : undefined);
+  };
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const roundResult = await createRound({
-      convo,
-      tools,
-    });
+    const remaining = remainingMs();
+    if (remaining < minRoundMs) return stopForTime();
+    // Too little time for another research round: answer from what the turn has.
+    if (round > 0 && remaining < wrapUpMs) return wrapUp("time");
+
+    let roundResult: Awaited<ReturnType<typeof createRound>>;
+    try {
+      roundResult = await createRound({ convo });
+    } catch (err) {
+      if (err instanceof AnthropicTimeoutError) return stopForTime();
+      throw err;
+    }
+    recordRound(roundResult);
     const resp = roundResult.response;
-    usedModel = roundResult.model;
-    totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(resp.usage));
-    webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(resp.usage));
-    seenBlocks.push(...resp.content);
+    if (roundResult.timedOut) return stopForTime(resp);
 
     // Server tools (web search / fetch) may pause a long turn: keep the text so far,
     // hand the content back unchanged and let the model continue.
@@ -883,14 +1041,7 @@ export async function callDtAnthropicChat(params: {
     convo.push({ role: "user", content: toolResults });
   }
 
-  const finalRound = await createRound({ convo });
-  usedModel = finalRound.model;
-  const finalResp = finalRound.response;
-  totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(finalResp.usage));
-  webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(finalResp.usage));
-  seenBlocks.push(...finalResp.content);
-
-  return finish(finalResp);
+  return wrapUp("rounds");
 }
 
 /** Sync truncation fallback (migration / callers without Anthropic). Prefer `resolveDtAutoTitleAfterTurn`. */

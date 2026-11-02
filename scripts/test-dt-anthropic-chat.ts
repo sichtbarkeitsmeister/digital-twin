@@ -2,6 +2,8 @@
  * Tests for DT chat Anthropic request shaping (history trim + message normalize).
  * Run: npx tsx scripts/test-dt-anthropic-chat.ts
  */
+import "./support/stub-server-only";
+
 import assert from "node:assert/strict";
 
 import {
@@ -116,7 +118,7 @@ function testFailureMessages() {
   );
   assert.equal(
     dtChatFailureUserMessage(new Error("unknown")),
-    "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.",
+    "KI-Antwort fehlgeschlagen (unknown). Bitte erneut versuchen.",
   );
   assert.equal(
     dtChatFailureUserMessage({
