@@ -6,8 +6,6 @@
 import "./support/stub-server-only";
 
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 
 import {
   callDtAnthropicChat,
@@ -15,111 +13,33 @@ import {
   DtChatTimeBudgetError,
   dtChatFailureUserMessage,
 } from "../lib/dt/anthropic-chat";
-
-type RequestBody = {
-  max_tokens: number;
-  tools?: Array<{ name: string }>;
-  tool_choice?: { type: string };
-  messages: Array<{ role: string; content: unknown }>;
-};
-
-/** One fake API response; `stall` keeps the stream open until the client gives up. */
-type Reply = { events: Array<Record<string, unknown>>; stall?: boolean };
-type Handler = (body: RequestBody, index: number) => Reply;
-
-const seen: RequestBody[] = [];
-let handler: Handler = () => ({ events: [] });
-
-function messageStart(): Record<string, unknown> {
-  return {
-    type: "message_start",
-    message: {
-      id: "msg_test",
-      type: "message",
-      role: "assistant",
-      model: "claude-test",
-      content: [],
-      stop_reason: null,
-      stop_sequence: null,
-      usage: { input_tokens: 100, output_tokens: 1 },
-    },
-  };
-}
-
-function textReply(text: string, stopReason = "end_turn"): Reply {
-  return {
-    events: [
-      messageStart(),
-      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
-      { type: "content_block_stop", index: 0 },
-      { type: "message_delta", delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 20 } },
-      { type: "message_stop" },
-    ],
-  };
-}
-
-function createFileReply(id: string): Reply {
-  const input = JSON.stringify({ filename: `notiz-${id}.md`, format: "markdown", content: "# Notiz\n\nInhalt." });
-  return {
-    events: [
-      messageStart(),
-      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id, name: "create_file", input: {} } },
-      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: input } },
-      { type: "content_block_stop", index: 0 },
-      { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 30 } },
-      { type: "message_stop" },
-    ],
-  };
-}
-
-async function startFakeApi(): Promise<{ url: string; close: () => Promise<void> }> {
-  const server = http.createServer((req, res) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      const body = JSON.parse(raw) as RequestBody;
-      seen.push(body);
-      const reply = handler(body, seen.length - 1);
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      for (const event of reply.events) {
-        res.write(`event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`);
-      }
-      if (!reply.stall) res.end();
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  return {
-    url: `http://127.0.0.1:${port}`,
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      }),
-  };
-}
+import {
+  createFileReply,
+  type FakeAnthropicApi,
+  startFakeAnthropicApi,
+  textReply,
+} from "./support/fake-anthropic-api";
 
 const userTurn = [{ role: "user" as const, content: "Optimiere die Unterseite." }];
 
-async function testNormalTurnUnchanged() {
-  seen.length = 0;
-  handler = () => textReply("Fertige Antwort.");
+async function testNormalTurnUnchanged(api: FakeAnthropicApi) {
+  api.seen.length = 0;
+  api.handle(() => textReply("Fertige Antwort."));
   const out = await callDtAnthropicChat({ system: "Test", messages: userTurn, mode: "default" });
   assert.equal(out.text, "Fertige Antwort.");
   assert.equal(out.stopReason, "end_turn");
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0]?.tool_choice, undefined);
+  assert.equal(api.seen.length, 1);
+  assert.equal(api.seen[0]?.tool_choice, undefined);
   console.log("normal turn unchanged: ok");
 }
 
-async function testCutRoundKeepsText() {
-  seen.length = 0;
-  handler = () => {
+async function testCutRoundKeepsText(api: FakeAnthropicApi) {
+  api.seen.length = 0;
+  api.handle(() => {
     const reply = textReply("Erster Teil der Antwort.");
     // Header, text block and one delta, then silence: the model is still writing.
     return { events: reply.events.slice(0, 3), stall: true };
-  };
+  });
   const started = Date.now();
   const out = await callDtAnthropicChat({
     system: "Test",
@@ -136,9 +56,9 @@ async function testCutRoundKeepsText() {
   console.log("cut round keeps its text: ok");
 }
 
-async function testNothingWrittenThrowsClearError() {
-  seen.length = 0;
-  handler = () => ({ events: [], stall: true });
+async function testNothingWrittenThrowsClearError(api: FakeAnthropicApi) {
+  api.seen.length = 0;
+  api.handle(() => ({ events: [], stall: true }));
   await assert.rejects(
     callDtAnthropicChat({
       system: "Test",
@@ -157,9 +77,9 @@ async function testNothingWrittenThrowsClearError() {
   console.log("nothing written gives a clear error: ok");
 }
 
-async function testWrapUpRoundWhenTimeRunsLow() {
-  seen.length = 0;
-  handler = (body, index) => (index === 0 ? createFileReply("tu_1") : textReply("Kurze Antwort aus dem Stand."));
+async function testWrapUpRoundWhenTimeRunsLow(api: FakeAnthropicApi) {
+  api.seen.length = 0;
+  api.handle((body, index) => (index === 0 ? createFileReply("tu_1") : textReply("Kurze Antwort aus dem Stand.")));
   const out = await callDtAnthropicChat({
     system: "Test",
     messages: userTurn,
@@ -167,8 +87,8 @@ async function testWrapUpRoundWhenTimeRunsLow() {
     // Every round after the first is already inside the wrap-up window.
     timeBudget: { deadlineAt: Date.now() + 5_000, minRoundMs: 100, wrapUpMs: 10_000 },
   });
-  assert.equal(seen.length, 2);
-  const wrap = seen[1]!;
+  assert.equal(api.seen.length, 2);
+  const wrap = api.seen[1]!;
   assert.deepEqual(wrap.tool_choice, { type: "none" }, "last round may not call tools");
   assert.ok((wrap.tools ?? []).some((t) => t.name === "create_file"), "tools stay declared");
   assert.equal(wrap.max_tokens, 1_024, "output sized to the time left");
@@ -184,13 +104,14 @@ async function testWrapUpRoundWhenTimeRunsLow() {
   console.log("wrap-up round when time runs low: ok");
 }
 
-async function testRoundLimitEndsWithoutTools() {
-  seen.length = 0;
-  handler = (body, index) =>
-    body.tool_choice?.type === "none" ? textReply("Zusammenfassung.") : createFileReply(`tu_${index}`);
+async function testRoundLimitEndsWithoutTools(api: FakeAnthropicApi) {
+  api.seen.length = 0;
+  api.handle((body, index) =>
+    body.tool_choice?.type === "none" ? textReply("Zusammenfassung.") : createFileReply(`tu_${index}`),
+  );
   const out = await callDtAnthropicChat({ system: "Test", messages: userTurn, mode: "default" });
-  assert.equal(seen.length, 7, "six tool rounds and one final round");
-  const final = seen[6]!;
+  assert.equal(api.seen.length, 7, "six tool rounds and one final round");
+  const final = api.seen[6]!;
   assert.deepEqual(final.tool_choice, { type: "none" });
   assert.ok((final.tools ?? []).length > 0, "tools stay declared next to tool calls in history");
   assert.equal(out.text, "Zusammenfassung.");
@@ -199,16 +120,16 @@ async function testRoundLimitEndsWithoutTools() {
 }
 
 async function main() {
-  const api = await startFakeApi();
+  const api = await startFakeAnthropicApi();
   process.env.ANTHROPIC_API_KEY = "test-key";
   process.env.ANTHROPIC_BASE_URL = api.url;
   delete process.env.ANTHROPIC_DT_PERSONA_MODEL;
   try {
-    await testNormalTurnUnchanged();
-    await testCutRoundKeepsText();
-    await testNothingWrittenThrowsClearError();
-    await testWrapUpRoundWhenTimeRunsLow();
-    await testRoundLimitEndsWithoutTools();
+    await testNormalTurnUnchanged(api);
+    await testCutRoundKeepsText(api);
+    await testNothingWrittenThrowsClearError(api);
+    await testWrapUpRoundWhenTimeRunsLow(api);
+    await testRoundLimitEndsWithoutTools(api);
     console.log("all dt chat time budget tests passed");
   } finally {
     await api.close();

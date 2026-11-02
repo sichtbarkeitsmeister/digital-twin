@@ -2,7 +2,9 @@ import type { DtChatMode } from "@/lib/dt/types";
 
 export function resolveDtAnthropicModel(mode: DtChatMode): string {
   if (mode === "seo") {
-    return process.env.ANTHROPIC_DT_SEO_MODEL?.trim() || "claude-sonnet-4-6";
+    // Sonnet 5.5 writes about three times faster than Sonnet 4.6 (Texte steps: 151 vs 52 output
+    // tokens/s), which keeps long SEO answers inside the route's time limit.
+    return process.env.ANTHROPIC_DT_SEO_MODEL?.trim() || "claude-sonnet-5-5";
   }
   if (mode === "ghost") {
     return process.env.ANTHROPIC_DT_GHOST_MODEL?.trim() || "claude-haiku-4-5-20251001";

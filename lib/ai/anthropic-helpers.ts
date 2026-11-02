@@ -367,6 +367,8 @@ type AnthropicStreamDelta = {
   citation?: Anthropic.TextCitation;
   stop_reason?: Anthropic.Message["stop_reason"];
   stop_sequence?: string | null;
+  /** Newer models: why a `refusal` stopped (`{ type, category, explanation }`). */
+  stop_details?: unknown;
 };
 
 type AnthropicStreamEvent = {
@@ -464,6 +466,10 @@ export async function readAnthropicMessageStream(
       if (event.delta) {
         message.stop_reason = event.delta.stop_reason ?? message.stop_reason;
         message.stop_sequence = event.delta.stop_sequence ?? message.stop_sequence;
+        // SDK 0.95's Message type predates stop_details; keep it for refusal handling.
+        if (event.delta.stop_details != null) {
+          (message as { stop_details?: unknown }).stop_details = event.delta.stop_details;
+        }
       }
       const usage = event.usage;
       if (usage && message.usage) {

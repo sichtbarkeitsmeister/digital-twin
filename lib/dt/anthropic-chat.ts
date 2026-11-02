@@ -5,6 +5,7 @@ import {
   callAnthropicFirstAvailable,
   extractAnthropicText,
 } from "@/lib/ai/anthropic-helpers";
+import { anthropicModelParams } from "@/lib/ai/anthropic-model-params";
 import { DT_CHAT_MODEL_BUDGET_MS, formatDtChatDuration } from "@/lib/dt/chat/time-budget";
 import { fallbackDtChatTitle } from "@/lib/dt/chat-title";
 import { resolveDtAnthropicModel } from "@/lib/dt/resolve-model";
@@ -573,7 +574,10 @@ export function dtAnthropicBetaHeaders(
   return { "anthropic-beta": "pdfs-2024-09-25" };
 }
 
-/** Primary model, then a live fallback if that id was retired (404). */
+/**
+ * Primary model, then fallbacks: the next one answers if an id was retired (404) or, in a chat
+ * round, if the model declined the request (`refusal`; SEO: Sonnet 5.5, then Sonnet 4.6).
+ */
 export function dtAnthropicModelsForMode(mode: DtChatMode): string[] {
   const primary = resolveDtAnthropicModel(mode);
   const fallbacks =
@@ -611,7 +615,7 @@ export function dtChatFailureDetail(err: unknown): string | null {
 }
 
 export function dtChatFailureUserMessage(err: unknown): string {
-  if (err instanceof DtChatTimeBudgetError) return err.message;
+  if (err instanceof DtChatTimeBudgetError || err instanceof DtChatRefusalError) return err.message;
   const chunks: string[] = [];
   if (err instanceof Error && err.message) chunks.push(err.message);
   if (err && typeof err === "object") {
@@ -761,6 +765,25 @@ export class DtChatTimeBudgetError extends Error {
   }
 }
 
+const DT_REFUSAL_NOTE =
+  "(Die KI hat die Antwort an dieser Stelle abgebrochen: Ein Sicherheitsfilter von Anthropic hat angeschlagen. Bitte die Anfrage anders formulieren.)";
+
+/** `stop_details.category` of a declined response ("cyber", "general_harms", …), if any. */
+export function dtRefusalCategory(resp: Anthropic.Message): string | null {
+  const details = (resp as { stop_details?: { category?: unknown } | null }).stop_details;
+  return typeof details?.category === "string" ? details.category : null;
+}
+
+/** Every model declined the request (Anthropic safety filters, `stop_reason: "refusal"`). */
+export class DtChatRefusalError extends Error {
+  constructor(category: string | null) {
+    super(
+      `Die KI hat diese Anfrage abgelehnt: Ein Sicherheitsfilter von Anthropic hat angeschlagen${category ? ` (Kategorie „${category}“)` : ""}. Bitte die Anfrage anders formulieren.`,
+    );
+    this.name = "DtChatRefusalError";
+  }
+}
+
 /** Output that still fits the time left. */
 function dtWrapUpMaxTokens(remainingMs: number, cap: number): number {
   const writingSeconds = Math.max(0, (remainingMs - DT_WRAP_UP_PREFILL_MS) / 1000);
@@ -834,17 +857,21 @@ export async function callDtAnthropicChat(params: {
     : [DT_CREATE_FILE_TOOL];
   const createdFiles: DtCreatedChatFile[] = [];
 
-  // Every round declares the same tools: history with tool calls needs them, and the
-  // last round turns them off with tool_choice "none" instead of leaving them out.
-  const createRound = async (input: {
+  type RoundInput = {
     convo: Anthropic.MessageParam[];
     toolChoice?: Anthropic.Messages.ToolChoice;
     maxTokens?: number;
-  }): Promise<{ response: Anthropic.Message; model: string; timedOut: boolean }> => {
-    const result = await callAnthropicFirstAvailable({
+  };
+
+  // Every round declares the same tools: history with tool calls needs them, and the
+  // last round turns them off with tool_choice "none" instead of leaving them out.
+  // (Sonnet 5.5 also rejects a replayed thinking block once the tool set changed.)
+  const callRound = (roundModels: string[], input: RoundInput) => {
+    const maxTokens = input.maxTokens ?? max_tokens;
+    return callAnthropicFirstAvailable({
       anthropic: client,
-      models,
-      maxTokens: input.maxTokens ?? max_tokens,
+      models: roundModels,
+      maxTokens,
       system,
       messages: input.convo,
       tools,
@@ -854,11 +881,48 @@ export async function callDtAnthropicChat(params: {
       stream: true,
       partialOnTimeout: true,
       headers: betaHeaders,
+      // Sonnet 5.5: no extended thinking (`between_tools`) and room for its larger token counts.
+      modelParams: (model) => anthropicModelParams(model, maxTokens),
     });
+  };
+
+  const createRound = async (
+    input: RoundInput,
+  ): Promise<{
+    response: Anthropic.Message;
+    model: string;
+    timedOut: boolean;
+    /** Usage of an attempt a model declined; it is billed too. */
+    declinedUsage?: Anthropic.Usage;
+  }> => {
+    let result = await callRound(models, input);
     if (!result) {
       throw new Error("Kein verfügbares Anthropic-Modell.");
     }
-    return { response: result.response, model: result.model, timedOut: result.timedOut === true };
+    let declinedUsage: Anthropic.Usage | undefined;
+    // Sonnet 5.5's safety filters decline some requests Sonnet 4.6 answers. The next model in
+    // the list gets the same round once; it runs without the declining model's thinking blocks.
+    if (result.response.stop_reason === "refusal") {
+      const later = models.slice(models.indexOf(result.model) + 1);
+      if (later.length > 0 && remainingMs() >= minRoundMs) {
+        console.warn("[dt] model declined the round, retrying on the next model", {
+          model: result.model,
+          category: dtRefusalCategory(result.response),
+          next: later[0],
+        });
+        const retry = await callRound(later, input);
+        if (retry) {
+          declinedUsage = result.response.usage;
+          result = retry;
+        }
+      }
+    }
+    return {
+      response: result.response,
+      model: result.model,
+      timedOut: result.timedOut === true,
+      declinedUsage,
+    };
   };
 
   const runTool = async (name: string, input: unknown): Promise<string> => {
@@ -906,8 +970,13 @@ export async function callDtAnthropicChat(params: {
     createdFiles,
   });
 
-  const recordRound = (round: { response: Anthropic.Message; model: string }) => {
+  const recordRound = (round: {
+    response: Anthropic.Message;
+    model: string;
+    declinedUsage?: Anthropic.Usage;
+  }) => {
     usedModel = round.model;
+    if (round.declinedUsage) totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(round.declinedUsage));
     totalUsage = mergeUsage(totalUsage, sumAnthropicUsage(round.response.usage));
     webUsage = mergeWebResearchUsage(webUsage, sumServerToolUsage(round.response.usage));
     seenBlocks.push(...round.response.content);
@@ -928,6 +997,24 @@ export async function callDtAnthropicChat(params: {
       ),
       model: usedModel,
       stopReason: DT_TIME_BUDGET_STOP_REASON,
+      usage: { ...totalUsage, ...webUsage },
+      createdFiles,
+    };
+  };
+
+  // Every model declined: keep what earlier rounds wrote, or say why there is nothing.
+  const finishDeclined = (resp: Anthropic.Message): DtAnthropicChatResult => {
+    answer.add(extractAnthropicText(resp), continuing);
+    if (!answer.hasText() && createdFiles.length === 0) {
+      throw new DtChatRefusalError(dtRefusalCategory(resp));
+    }
+    return {
+      text: appendWebResearchNotes(
+        answer.finishWithNote(DT_REFUSAL_NOTE),
+        inspectWebResearchBlocks(seenBlocks),
+      ),
+      model: usedModel,
+      stopReason: "refusal",
       usage: { ...totalUsage, ...webUsage },
       createdFiles,
     };
@@ -959,6 +1046,7 @@ export async function callDtAnthropicChat(params: {
     }
     recordRound(round);
     if (round.timedOut) return stopForTime(round.response);
+    if (round.response.stop_reason === "refusal") return finishDeclined(round.response);
     return finish(round.response, reason === "time" ? dtTimeBudgetWrapUpNote(elapsed) : undefined);
   };
 
@@ -978,6 +1066,7 @@ export async function callDtAnthropicChat(params: {
     recordRound(roundResult);
     const resp = roundResult.response;
     if (roundResult.timedOut) return stopForTime(resp);
+    if (resp.stop_reason === "refusal") return finishDeclined(resp);
 
     // Server tools (web search / fetch) may pause a long turn: keep the text so far,
     // hand the content back unchanged and let the model continue.

@@ -165,9 +165,10 @@ function testBetaHeadersOnlyForPdf() {
   const seoModels = dtAnthropicModelsForMode("seo");
   assert.equal(
     seoModels[0],
-    process.env.ANTHROPIC_DT_SEO_MODEL?.trim() || "claude-sonnet-4-6",
+    process.env.ANTHROPIC_DT_SEO_MODEL?.trim() || "claude-sonnet-5-5",
   );
-  assert.equal(seoModels.includes("claude-sonnet-4-6"), true);
+  // Sonnet 4.6 right after the primary: it takes over rounds Sonnet 5.5 declines.
+  assert.equal(seoModels[1], "claude-sonnet-4-6");
   assert.equal(seoModels.includes("claude-sonnet-5"), true);
   console.log("beta headers and model fallbacks: ok");
 }
