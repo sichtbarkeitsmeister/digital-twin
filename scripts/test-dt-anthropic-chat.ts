@@ -2,6 +2,8 @@
  * Tests for DT chat Anthropic request shaping (history trim + message normalize).
  * Run: npx tsx scripts/test-dt-anthropic-chat.ts
  */
+import "./support/stub-server-only";
+
 import assert from "node:assert/strict";
 
 import {
@@ -116,7 +118,7 @@ function testFailureMessages() {
   );
   assert.equal(
     dtChatFailureUserMessage(new Error("unknown")),
-    "KI-Antwort fehlgeschlagen. Bitte erneut versuchen.",
+    "KI-Antwort fehlgeschlagen (unknown). Bitte erneut versuchen.",
   );
   assert.equal(
     dtChatFailureUserMessage({
@@ -163,9 +165,10 @@ function testBetaHeadersOnlyForPdf() {
   const seoModels = dtAnthropicModelsForMode("seo");
   assert.equal(
     seoModels[0],
-    process.env.ANTHROPIC_DT_SEO_MODEL?.trim() || "claude-sonnet-4-6",
+    process.env.ANTHROPIC_DT_SEO_MODEL?.trim() || "claude-sonnet-5-5",
   );
-  assert.equal(seoModels.includes("claude-sonnet-4-6"), true);
+  // Sonnet 4.6 right after the primary: it takes over rounds Sonnet 5.5 declines.
+  assert.equal(seoModels[1], "claude-sonnet-4-6");
   assert.equal(seoModels.includes("claude-sonnet-5"), true);
   console.log("beta headers and model fallbacks: ok");
 }

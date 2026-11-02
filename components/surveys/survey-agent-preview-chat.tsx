@@ -6,6 +6,11 @@ import { Check, ClipboardList, Loader2, MessageCircle, Send, Trash2 } from "luci
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  dtChatJsonFailureMessage,
+  dtChatThrownFailureMessage,
+  postDtChatJson,
+} from "@/lib/dt/chat/chat-response";
 import type { SurveyExamQuestion } from "@/lib/dt/survey-exam-questions";
 import { cn } from "@/lib/utils";
 
@@ -129,25 +134,25 @@ export function SurveyAgentPreviewChat(props: {
       }
 
       try {
-        const res = await fetch("/api/dt/preview-agent-chat", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            organisationId: props.organisationId,
-            name: props.agentName,
-            role: props.agentRole,
-            promptTemplate: props.promptTemplate,
-            content: text,
-            history,
-          }),
-        });
-        const json = (await res.json()) as {
+        const sent = await postDtChatJson<{
           ok?: boolean;
           reply?: string;
           message?: string;
-        };
+        }>("/api/dt/preview-agent-chat", {
+          organisationId: props.organisationId,
+          name: props.agentName,
+          role: props.agentRole,
+          promptTemplate: props.promptTemplate,
+          content: text,
+          history,
+        });
+        if (!sent.ok) {
+          setError(sent.failure.message);
+          return;
+        }
+        const json = sent.json;
         if (!json.ok || !json.reply?.trim()) {
-          setError(json.message ?? "Antwort fehlgeschlagen.");
+          setError(dtChatJsonFailureMessage(json, sent.status));
           return;
         }
         setMessages((prev) => [
@@ -158,8 +163,9 @@ export function SurveyAgentPreviewChat(props: {
             content: json.reply!.trim(),
           },
         ]);
-      } catch {
-        setError("Netzwerkfehler — bitte erneut versuchen.");
+      } catch (err) {
+        console.error("[survey-preview-chat] send failed", err);
+        setError(dtChatThrownFailureMessage(err));
       } finally {
         setBusy(false);
       }

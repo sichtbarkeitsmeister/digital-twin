@@ -313,6 +313,19 @@ function isAbortError(error: unknown): boolean {
   return name === "AbortError" || /aborted|abort|timeout/i.test(message);
 }
 
+/** The request ran into `timeoutMs` before the model produced a usable reply. */
+export class AnthropicTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(
+      `KI-Generierung hat das Zeitlimit (${Math.round(timeoutMs / 1000)}s) überschritten. Bitte erneut versuchen — bei sehr großen Fragebögen ggf. erneut klicken.`,
+    );
+    this.name = "AnthropicTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 function anthropicErrorBlob(error: unknown): string {
   const chunks: string[] = [];
   if (error instanceof Error && error.message) chunks.push(error.message);
@@ -354,6 +367,8 @@ type AnthropicStreamDelta = {
   citation?: Anthropic.TextCitation;
   stop_reason?: Anthropic.Message["stop_reason"];
   stop_sequence?: string | null;
+  /** Newer models: why a `refusal` stopped (`{ type, category, explanation }`). */
+  stop_details?: unknown;
 };
 
 type AnthropicStreamEvent = {
@@ -369,6 +384,9 @@ type AnthropicStreamEvent = {
   };
 };
 
+/** Holds the message while it is still streaming, so a caller can keep it when the stream is cut. */
+export type AnthropicStreamProgress = { message: Anthropic.Message | null };
+
 /**
  * Build a Message from the raw SSE stream.
  * The SDK's `messages.stream().finalMessage()` throws when a `message_delta`
@@ -376,6 +394,7 @@ type AnthropicStreamEvent = {
  */
 export async function readAnthropicMessageStream(
   stream: AsyncIterable<{ type: string }>,
+  progress?: AnthropicStreamProgress,
 ): Promise<Anthropic.Message> {
   let message: Anthropic.Message | null = null;
   const toolJson: string[] = [];
@@ -391,6 +410,8 @@ export async function readAnthropicMessageStream(
           output_tokens: 0,
         },
       };
+      // Same object as `message`: later deltas mutate it in place.
+      if (progress) progress.message = message;
       continue;
     }
     if (!message) continue;
@@ -445,6 +466,10 @@ export async function readAnthropicMessageStream(
       if (event.delta) {
         message.stop_reason = event.delta.stop_reason ?? message.stop_reason;
         message.stop_sequence = event.delta.stop_sequence ?? message.stop_sequence;
+        // SDK 0.95's Message type predates stop_details; keep it for refusal handling.
+        if (event.delta.stop_details != null) {
+          (message as { stop_details?: unknown }).stop_details = event.delta.stop_details;
+        }
       }
       const usage = event.usage;
       if (usage && message.usage) {
@@ -503,7 +528,13 @@ export async function callAnthropicFirstAvailable(input: {
    * setting one model requires and another rejects, an output budget for another tokenizer).
    */
   modelParams?: (model: string) => { maxTokens?: number; thinking?: Anthropic.Messages.ThinkingConfigParam };
-}): Promise<{ response: Anthropic.Messages.Message; model: string } | null> {
+  /**
+   * Streaming only: when `timeoutMs` cuts the stream after the model started writing,
+   * return what arrived so far (`timedOut: true`, `stop_reason: null`) instead of throwing.
+   * Blocks the cut may have left incomplete (a tool call mid-JSON) are the caller's to drop.
+   */
+  partialOnTimeout?: boolean;
+}): Promise<{ response: Anthropic.Messages.Message; model: string; timedOut?: boolean } | null> {
   const useStream = input.stream ?? input.maxTokens >= STREAM_REQUIRED_MAX_TOKENS;
   let lastError: unknown = null;
   const toolParams = {
@@ -514,9 +545,12 @@ export async function callAnthropicFirstAvailable(input: {
   for (const model of input.models) {
     const controller = input.timeoutMs ? new AbortController() : null;
     let streamHandle: { abort: () => void } | null = null;
+    const progress: AnthropicStreamProgress = { message: null };
+    let timerFired = false;
     const timer =
       controller && input.timeoutMs
         ? setTimeout(() => {
+            timerFired = true;
             try {
               streamHandle?.abort();
             } catch {
@@ -552,31 +586,43 @@ export async function callAnthropicFirstAvailable(input: {
         if (typeof abortable.abort === "function") {
           streamHandle = { abort: () => abortable.abort?.() };
         }
-        return readAnthropicMessageStream(stream);
+        return readAnthropicMessageStream(stream, progress);
       }
       return input.anthropic.messages.create(body, requestOptions(headers));
     };
 
     try {
+      let response: Anthropic.Message;
       try {
-        const response = await createMessage(input.headers);
-        return { response, model };
+        response = await createMessage(input.headers);
       } catch (error) {
         // A retired beta flag rejects the request before the model runs.
         // One retry without that header still answers plain chat turns.
         if (!isAnthropicBetaHeaderError(error)) throw error;
-        const response = await createMessage({
+        response = await createMessage({
           ...(input.headers ?? {}),
           "anthropic-beta": null,
         });
-        return { response, model };
       }
+      // The SDK ends an aborted stream quietly, so a stream the timer cut returns here
+      // as a message without stop_reason. Earlier callers get it as before, now flagged.
+      if (timerFired && response.stop_reason == null) {
+        if (input.partialOnTimeout && response.content.length === 0) {
+          throw new AnthropicTimeoutError(input.timeoutMs ?? 0);
+        }
+        return { response, model, timedOut: true };
+      }
+      return { response, model };
     } catch (error) {
+      if (error instanceof AnthropicTimeoutError) throw error;
       lastError = error;
-      if (isAbortError(error)) {
-        throw new Error(
-          `KI-Generierung hat das Zeitlimit (${Math.round((input.timeoutMs ?? 0) / 1000)}s) überschritten. Bitte erneut versuchen — bei sehr großen Fragebögen ggf. erneut klicken.`,
-        );
+      // After the timer fired, whatever broke (aborted fetch, empty stream) is the timeout.
+      if (timerFired || isAbortError(error)) {
+        const partial = progress.message;
+        if (timerFired && input.partialOnTimeout && partial && partial.content.length > 0) {
+          return { response: { ...partial, stop_reason: null }, model, timedOut: true };
+        }
+        throw new AnthropicTimeoutError(input.timeoutMs ?? 0);
       }
       if (isAnthropicModelNotFoundError(error)) continue;
       throw error;
