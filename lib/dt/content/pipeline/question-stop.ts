@@ -240,13 +240,13 @@ export function planQuestionStop(input: {
 }
 
 /**
- * What the answers pass works in once the stop is passed: the decided questions plus every page
+ * What the answers pass works in once the stop is passed: the decided questions plus every
  * question still undecided (over the limit, or new since the stop asked) as a drop, so no
  * placeholder of an unasked question stays in the text. The steps already left an open point
  * („Offene Frage (nicht gestellt)“) for each.
  */
-export function questionStopPassItems(plan: Pick<ContentQuestionStopPlan, "ask" | "overflow" | "handled">): ContentHandledQuestion[] {
-  const open = [...plan.ask, ...plan.overflow].filter((q) => !plan.handled.some((h) => h.id === q.id));
+export function questionStopPassItems(plan: Pick<ContentQuestionStopPlan, "ask" | "overflow" | "newFirma" | "handled">): ContentHandledQuestion[] {
+  const open = [...plan.ask, ...plan.overflow, ...plan.newFirma].filter((q) => !plan.handled.some((h) => h.id === q.id));
   return [...plan.handled, ...open.map((q) => handledFrom(q, "drop", null, "offen"))];
 }
 
