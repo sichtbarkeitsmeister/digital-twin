@@ -533,7 +533,7 @@ async function testBrowserRunAndExport() {
  */
 async function testRunnerEmptyAnswers() {
   const blocks = bigBlocks(4, 120);
-  const empty = (model: string) =>
+  const empty = () =>
     new Response(JSON.stringify({ choices: [{ finish_reason: null, message: { content: "" } }], usage: { prompt_tokens: 90, completion_tokens: 0 } }), { status: 200 });
   const seen: Array<{ model: string; ids: string[] }> = [];
   // The first model returns nothing for the group and for section 2 alone; the second model can do section 2.
@@ -544,7 +544,7 @@ async function testRunnerEmptyAnswers() {
     seen.push({ model: body.model, ids });
     const hard = ids.includes(blocks[1]!.id);
     const alwaysEmpty = ids.includes(blocks[2]!.id);
-    if (alwaysEmpty || (hard && body.model === MODELS[0])) return empty(body.model);
+    if (alwaysEmpty || (hard && body.model === MODELS[0])) return empty();
     return new Response(
       JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: ids.map((id) => `<section data-block-id="${id}"><h2>x</h2><p>Neu ${id}.</p></section>`).join("") } }], usage: { prompt_tokens: 100, completion_tokens: 40 } }),
       { status: 200 },
