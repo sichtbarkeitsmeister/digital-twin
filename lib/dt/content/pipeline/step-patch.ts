@@ -1,14 +1,17 @@
 /**
  * What a step's normalised output means for the page row. Pure, so the halting rules are
- * testable without Supabase: every text step replaces the HTML, the Endabnahme stops for the
- * release, and a page that still needs a fact only the customer knows stops as „Braucht Sie“.
+ * testable without Supabase: every text step replaces the HTML and the Endabnahme stops for
+ * the release.
  *
- * That last rule is decided here in code, not by the model: after the Faktencheck, after
- * every step that writes text (SEO, GEO, Aktualitätsprüfung, Hormozi, Vermenschlichung,
- * Lektorat) and in the Endabnahme, the saved text is scanned for placeholders (`gaps.ts`).
- * Each placeholder, and every question of the Faktencheck or the Aktualitätsprüfung (also
- * the ones marked non-blocking), becomes an entry of `questions` naming its Abschnitt; while
- * there is one, the page does not go on and never becomes „fertig“ on its own.
+ * Questions for the customer are collected, not asked, while the page runs (decided here in
+ * code, not by the model): after the Faktencheck, after every step that writes text (SEO,
+ * GEO, Aktualitätsprüfung, Hormozi, Vermenschlichung, Lektorat) the saved text is scanned for
+ * placeholders (`gaps.ts`), and those with the questions of the Faktencheck or the
+ * Aktualitätsprüfung go through `planContentQuestions` (`questions.ts`): known ones are
+ * dropped, company questions go into the organisation's pool (`firmaQuestions`), at most three
+ * stay on the page (`questions`), the rest become open points. No step 2–8 stops for them; the
+ * page stops once, before the Watermark Entfernung (`question-stop.ts`). The only early stop is
+ * a „grundlegend“ question of the Faktencheck. The Endabnahme lists what is left as open points.
  *
  * The Aktualitätsprüfung may also send the text back to GEO, once per run (`planFreshness`):
  * the step then asks the runner to reset GEO and itself (`resetFrom`) and the job goes on.
@@ -27,7 +30,7 @@ import {
   readContentFreshness,
 } from "@/lib/dt/content/freshness";
 import type { AktualitaetOutput } from "@/lib/dt/content/pipeline/aktualitaet";
-import { contentGapQuestions } from "@/lib/dt/content/pipeline/gaps";
+import { contentGapQuestions, findContentGaps } from "@/lib/dt/content/pipeline/gaps";
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 import {
   ensureHeroPlaceholder,
@@ -38,6 +41,17 @@ import {
   type LektoratOutput,
   type TextOutput,
 } from "@/lib/dt/content/pipeline/prompts";
+import {
+  isTextPlaceholder,
+  loose,
+  overflowFindings,
+  planContentQuestions,
+  questionPlanRecord,
+  sourceFindings,
+  wishConflictFindings,
+  type ContentKnowledge,
+  type ContentQuestionPlan,
+} from "@/lib/dt/content/pipeline/questions";
 import { roundEur } from "@/lib/dt/content/pricing";
 import {
   CONTENT_STEP_AKTUALITAET,
@@ -51,6 +65,7 @@ import {
   CONTENT_STEP_VERMENSCHLICHUNG,
   type ContentStepDefinition,
 } from "@/lib/dt/content/pipeline/steps";
+import { phoneDigits } from "@/lib/dt/contact-data";
 import { htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import type { ContentPageRow, ContentStepRow } from "@/lib/dt/content/store";
 import type { IngestedText } from "@/lib/dt/text-tools/ingest";
@@ -59,6 +74,10 @@ import type { ContentFinding, ContentFreshness, ContentQuestion } from "@/lib/dt
 export type StepPatch = {
   /** Columns of `dt_content_pages` to update (without the cost, which the caller adds). */
   pagePatch: Record<string, unknown>;
+  /** Company questions of this step for the organisation's pool (`dt_content_org_questions`). */
+  firmaQuestions?: ContentQuestion[];
+  /** What the step row records of the question plan (asked, company, unasked, suppressed). */
+  questionPlan?: Record<string, unknown>;
   stepStatus: ContentStepRow["status"];
   /** The job stops after this step (questions for the customer, the release). */
   halted: boolean;
@@ -79,8 +98,55 @@ export const GAP_CHECKED_TEXT_STEPS: ReadonlySet<number> = new Set([
   CONTENT_STEP_LEKTORAT,
 ]);
 
-export function textPatch(out: TextOutput): Record<string, unknown> {
-  const html = renderBlocksHtml(out.blocks);
+/**
+ * „[BITTE PRÜFEN: Datum der Veröffentlichung]“ (some saved prompts ask for it) is the date the web
+ * team sets on publishing: the wanted marker [DATUM], not a question for the customer.
+ */
+const PUBLICATION_DATE_PLACEHOLDER_RE =
+  /\[\s*BITTE\s+PR(?:Ü|UE)FEN\s*:\s*(?:(?:Datum|Stand)\s+der\s+Ver(?:ö|oe)ffentlichung|Ver(?:ö|oe)ffentlichungsdatum|Datum|Stand|Datum\s+der\s+letzten\s+Aktualisierung)\s*\]/giu;
+
+export function withDateMarker(blocks: readonly ContentTextBlock[]): ContentTextBlock[] {
+  return blocks.map((b) => {
+    const html = b.html.replace(PUBLICATION_DATE_PLACEHOLDER_RE, "[DATUM]");
+    const heading = b.heading?.replace(PUBLICATION_DATE_PLACEHOLDER_RE, "[DATUM]") ?? null;
+    return html === b.html && heading === (b.heading ?? null) ? b : { ...b, html, heading };
+  });
+}
+
+const PHONE_IN_TEXT_RE = /(?:\+\s?49|\b0)[\d\s/().\u2011-]{5,}\d/g;
+
+/**
+ * Phone numbers of the Kontaktdaten (bestätigt) in exactly their spelling: a number in the text
+ * with the same digits but another grouping („0511 / 554 785 85“) gets the confirmed spelling.
+ * Only text, never an attribute (a tel: link keeps its form).
+ */
+export function withContactSpelling(blocks: readonly ContentTextBlock[], knowledge?: ContentKnowledge): ContentTextBlock[] {
+  const confirmed = (["telefon", "mobil"] as const)
+    .map((key) => knowledge?.values[key])
+    .filter((v): v is { value: string; source: "kontaktdaten" } => v?.source === "kontaktdaten" && Boolean(v.value.trim()))
+    .map((v) => ({ spelling: v.value.trim(), digits: phoneDigits(v.value) }))
+    .filter((v) => v.digits.length >= 6);
+  if (confirmed.length === 0) return [...blocks];
+  const fix = (text: string) =>
+    text.replace(PHONE_IN_TEXT_RE, (match) => {
+      const trimmed = match.replace(/[\s/(.-]+$/, "");
+      const hit = confirmed.find((c) => c.digits === phoneDigits(trimmed));
+      return hit && trimmed !== hit.spelling ? hit.spelling + match.slice(trimmed.length) : match;
+    });
+  const fixHtml = (html: string) =>
+    html
+      .split(/(<[^>]*>)/)
+      .map((part) => (part.startsWith("<") ? part : fix(part)))
+      .join("");
+  return blocks.map((b) => {
+    const html = fixHtml(b.html);
+    const heading = b.heading == null ? b.heading : fix(b.heading);
+    return html === b.html && heading === b.heading ? b : { ...b, html, heading };
+  });
+}
+
+export function textPatch(out: TextOutput, knowledge?: ContentKnowledge): Record<string, unknown> {
+  const html = renderBlocksHtml(withContactSpelling(withDateMarker(out.blocks), knowledge));
   return { html, markdown: htmlToMarkdown(html), title: out.title, meta_description: out.meta_description };
 }
 
@@ -90,24 +156,48 @@ export function savedBlocks(pagePatch: Record<string, unknown>): ContentTextBloc
 }
 
 /**
- * The open questions go on the page in any case (an empty list clears old ones); with at
- * least one, the page stops as „Braucht Sie“ and this step waits for „Freigeben“.
+ * The questions after a step: the page's own (at most three, an empty list clears old ones)
+ * go on the page, company questions are handed back for the pool, questions over the limit
+ * become open points. Nothing stops here; the caller stops only for a „grundlegend“ question.
  */
-export function settleQuestions(
+export function collectQuestions(
   pagePatch: Record<string, unknown>,
   blocks: readonly ContentTextBlock[],
-  modelQuestions: readonly ContentQuestion[] = [],
-): boolean {
-  const questions = contentGapQuestions(blocks, modelQuestions);
-  pagePatch.questions = questions;
-  if (questions.length === 0) return false;
-  pagePatch.state = "braucht_sie";
-  pagePatch.job_id = null;
-  return true;
+  input: { step: number; modelQuestions?: readonly ContentQuestion[]; current?: Pick<StepPatchCurrent, "questions" | "knowledge"> },
+): ContentQuestionPlan {
+  const plan = planContentQuestions({
+    candidates: contentGapQuestions(blocks, input.modelQuestions ?? []),
+    existing: input.current?.questions ?? [],
+    knowledge: input.current?.knowledge,
+    blocks,
+    step: input.step,
+  });
+  pagePatch.questions = plan.page;
+  return plan;
 }
 
-function loose(text: string | null | undefined): string {
-  return (text ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+/** Open points for the questions over the limit and for wish conflicts, added once to the page's open points. */
+function withOverflow(findings: readonly ContentFinding[], plan: ContentQuestionPlan): ContentFinding[] {
+  const seen = new Set(findings.map(findingKey));
+  return [
+    ...findings,
+    ...[...overflowFindings(plan.overflow), ...wishConflictFindings(plan.wishConflicts), ...sourceFindings(plan.sources)].filter((f) => !seen.has(findingKey(f))),
+  ];
+}
+
+/** Every placeholder still in the text at the Endabnahme, as an open point (unless the model named it). */
+export function placeholderFindings(blocks: readonly ContentTextBlock[], listed: readonly ContentFinding[]): ContentFinding[] {
+  const said = listed.map((f) => loose(`${f.title} ${f.problem} ${f.proposal}`));
+  return findContentGaps(blocks)
+    .filter((gap) => !said.some((text) => text.includes(loose(gap.placeholder))))
+    .map((gap) => ({
+      title: "Platzhalter offen",
+      problem: `Abschnitt „${gap.section}“: ${gap.placeholder} – „${gap.excerpt}“`,
+      proposal: "Angabe ergänzen (Abschnitt ändern) oder den Satz streichen.",
+      severity: "high",
+      severity_label: "Wichtig",
+      block_id: gap.block_id,
+    }));
 }
 
 export type FreshnessPlan = {
@@ -189,6 +279,10 @@ export type StepPatchCurrent = {
   skip_steps?: readonly string[];
   /** The Faktencheck's findings as its row holds them (the Aktualitätsprüfung keeps them while GEO is off). */
   faktencheck_findings?: readonly ContentFinding[];
+  /** The page's collected questions before this step. */
+  questions?: readonly ContentQuestion[];
+  /** What is known already: Kontaktdaten, the pool, notes, Anbieterfakten (`buildContentKnowledge`). */
+  knowledge?: ContentKnowledge;
 };
 
 /**
@@ -206,6 +300,7 @@ export function stepPatchFor(
   let stepStatus: ContentStepRow["status"] = "done";
   let halted = false;
   let resetFrom: number | undefined;
+  let plan: ContentQuestionPlan | null = null;
   const stop = () => {
     stepStatus = "waiting";
     halted = true;
@@ -219,45 +314,58 @@ export function stepPatchFor(
     }
     case CONTENT_STEP_FAKTENCHECK: {
       const out = output as FaktencheckOutput;
-      pagePatch.findings = out.findings;
-      if (settleQuestions(pagePatch, parseBlocksFromHtml(current.html), out.questions)) stop();
+      plan = collectQuestions(pagePatch, parseBlocksFromHtml(current.html), { step: def.step, modelQuestions: out.questions, current });
+      pagePatch.findings = withOverflow(out.findings, plan);
+      // The only early stop: the page's main topic itself is in doubt.
+      if (plan.grundlegend) {
+        pagePatch.state = "braucht_sie";
+        pagePatch.job_id = null;
+        stop();
+      }
       break;
     }
     case CONTENT_STEP_AKTUALITAET: {
       const out = output as AktualitaetOutput;
       if (out.blocks.length === 0) throw new ContentLlmError("Die Aktualitätsprüfung lieferte keinen Text.", true);
-      Object.assign(pagePatch, textPatch(out));
+      Object.assign(pagePatch, textPatch(out, current.knowledge));
       const geoSkipped = current.skip_steps?.includes("geo") ?? false;
-      const plan = planFreshness(readContentFreshness(current.freshness), out, now.toISOString(), { geoSkipped });
-      pagePatch.freshness = plan.freshness;
+      const freshness = planFreshness(readContentFreshness(current.freshness), out, now.toISOString(), { geoSkipped });
+      pagePatch.freshness = freshness.freshness;
       // Normally GEO has worked the Faktencheck's findings in and cleared them. With GEO off they
       // are still open: the ones still on the page (not edited away) stay in front of this check's.
       const faktencheck = new Set((current.faktencheck_findings ?? []).map(findingKey));
       const kept = geoSkipped ? (current.findings ?? []).filter((f) => faktencheck.has(findingKey(f))) : [];
-      pagePatch.findings = [...kept, ...plan.findings];
-      if (plan.sendBack) {
+      pagePatch.findings = [...kept, ...freshness.findings];
+      if (freshness.sendBack) {
         // GEO reworks the outdated Abschnitte, then this step checks again; nobody is asked yet.
         resetFrom = CONTENT_STEP_GEO;
         break;
       }
-      if (settleQuestions(pagePatch, savedBlocks(pagePatch), plan.questions)) stop();
+      // Its questions (each with a source) join the page's one stop instead of stopping now.
+      plan = collectQuestions(pagePatch, savedBlocks(pagePatch), { step: def.step, modelQuestions: freshness.questions, current });
+      pagePatch.findings = withOverflow(pagePatch.findings as ContentFinding[], plan);
       break;
     }
     case CONTENT_STEP_LEKTORAT: {
       const out = output as LektoratOutput;
       if (out.blocks.length === 0) throw new ContentLlmError("Das Lektorat lieferte keinen Text.", true);
-      Object.assign(pagePatch, textPatch(out));
+      Object.assign(pagePatch, textPatch(out, current.knowledge));
       pagePatch.final_findings = out.final_findings;
-      if (settleQuestions(pagePatch, savedBlocks(pagePatch))) stop();
+      plan = collectQuestions(pagePatch, savedBlocks(pagePatch), { step: def.step, current });
+      if (plan.overflow.length > 0 || plan.wishConflicts.length > 0 || plan.sources.length > 0) pagePatch.findings = withOverflow(current.findings ?? [], plan);
       break;
     }
     case CONTENT_STEP_ENDABNAHME: {
       const out = output as EndabnahmeOutput;
-      pagePatch.unresolved = out.unresolved;
+      // The page asked once, before the Watermark Entfernung. What is still open now (a
+      // placeholder left, a question not answered) is listed for the release, not asked again.
+      const left = placeholderFindings(parseBlocksFromHtml(current.html), out.unresolved);
+      const unanswered = overflowFindings((current.questions ?? []).filter((q) => !isTextPlaceholder(q.placeholder)));
+      pagePatch.unresolved = [...out.unresolved, ...left, ...unanswered];
+      pagePatch.questions = [];
       pagePatch.released = false;
       pagePatch.job_id = null;
-      // „Fertig“ only without a placeholder left; otherwise the same list as after any step.
-      if (!settleQuestions(pagePatch, parseBlocksFromHtml(current.html))) pagePatch.state = "fertig";
+      pagePatch.state = "fertig";
       stop();
       break;
     }
@@ -265,7 +373,7 @@ export function stepPatchFor(
       if (def.writesText) {
         const out = output as TextOutput;
         if (out.blocks.length === 0) throw new ContentLlmError("Die KI hat keinen Text geliefert.", true);
-        Object.assign(pagePatch, textPatch(out));
+        Object.assign(pagePatch, textPatch(out, current.knowledge));
         if (def.step === CONTENT_STEP_GEO) {
           // GEO works the Faktencheck's findings in; they are settled then. The open points the
           // Aktualitätsprüfung leaves after it stay on the page until the Endabnahme.
@@ -274,11 +382,23 @@ export function stepPatchFor(
           const freshness = readContentFreshness(current.freshness);
           if (freshness.pending_sections.length > 0) pagePatch.freshness = { ...freshness, pending_sections: [] };
         }
-        if (GAP_CHECKED_TEXT_STEPS.has(def.step) && settleQuestions(pagePatch, savedBlocks(pagePatch))) stop();
+        if (GAP_CHECKED_TEXT_STEPS.has(def.step)) {
+          plan = collectQuestions(pagePatch, savedBlocks(pagePatch), { step: def.step, current });
+          if (plan.overflow.length > 0 || plan.wishConflicts.length > 0 || plan.sources.length > 0) {
+            const base = def.step === CONTENT_STEP_GEO ? [] : (current.findings ?? []);
+            pagePatch.findings = withOverflow(base, plan);
+          }
+        }
       }
     }
   }
-  return resetFrom == null ? { pagePatch, stepStatus, halted } : { pagePatch, stepStatus, halted, resetFrom };
+  const result: StepPatch = { pagePatch, stepStatus, halted };
+  if (resetFrom != null) result.resetFrom = resetFrom;
+  if (plan) {
+    if (plan.firma.length > 0) result.firmaQuestions = plan.firma;
+    result.questionPlan = questionPlanRecord(plan);
+  }
+  return result;
 }
 
 // --- a step the editor switched off ----------------------------------------------------------
@@ -310,7 +430,7 @@ export type SkippedStepPatch = {
   stepRow: Partial<ContentStepRow> & { output: SkippedStepOutput };
   /** Columns of `dt_content_pages`, including `step`. */
   pagePatch: Record<string, unknown>;
-  /** The live text still holds a placeholder: the page stops as „Braucht Sie“ like after any text step. */
+  /** Always false since the one stop before the Watermark Entfernung; kept for the runner's outcome. */
   halted: boolean;
 };
 
@@ -330,13 +450,14 @@ export type SkippedStepPatch = {
  */
 export function skippedStepPatch(
   def: ContentStepDefinition,
-  page: Pick<ContentPageRow, "html" | "title" | "meta_description" | "skip_steps" | "cost_eur">,
-  options: { live?: LiveTextImport | null; paidBefore?: number; now?: Date } = {},
+  page: Pick<ContentPageRow, "html" | "title" | "meta_description" | "skip_steps" | "cost_eur"> & Partial<Pick<ContentPageRow, "questions">>,
+  options: { live?: LiveTextImport | null; paidBefore?: number; now?: Date; knowledge?: ContentKnowledge } = {},
 ): SkippedStepPatch {
   const at = (options.now ?? new Date()).toISOString();
   const output: SkippedStepOutput = { skipped_by: "user" };
   const pagePatch: Record<string, unknown> = { step: def.step, error: null };
-  let halted = false;
+  // A skip never stops the page: placeholders of the live text wait for the stop before the Watermark Entfernung.
+  const halted = false;
 
   if (def.key === "seo") {
     const live = options.live;
@@ -347,7 +468,8 @@ export function skippedStepPatch(
       pagePatch,
       textPatch({ blocks, title: live.ingested.title || page.title, meta_description: live.ingested.metaDescription || page.meta_description }),
     );
-    halted = settleQuestions(pagePatch, savedBlocks(pagePatch));
+    // The live text's placeholders are collected like after any text step; nothing stops here.
+    collectQuestions(pagePatch, savedBlocks(pagePatch), { step: def.step, current: { questions: page.questions, knowledge: options.knowledge } });
     Object.assign(output, { live_text: true, source: live.source, url: live.url });
   } else if (def.key === "hormozi") {
     const blocks = parseBlocksFromHtml(page.html);

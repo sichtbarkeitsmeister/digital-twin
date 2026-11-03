@@ -2,10 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { interruptedStepMessage } from "@/lib/dt/content/job-state";
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
+import { questionStopDue } from "@/lib/dt/content/pipeline/question-stop";
 import {
   markContentStepError,
   markContentStepRetry,
   runContentStep,
+  runQuestionStop,
   skipContentStep,
 } from "@/lib/dt/content/pipeline/run-step";
 import {
@@ -34,6 +36,8 @@ const SHORT_STEP_MS = 45_000;
 const LONG_CHECK_STEPS: ReadonlySet<number> = new Set([CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_ENDABNAHME]);
 /** A skipped SEO fetches the live page (at most 15 s); every other skip is a few writes. */
 const LIVE_TEXT_MS = 20_000;
+/** The stop before the Watermark Entfernung: at most one short call on a few Abschnitte. */
+const QUESTION_STOP_MS = 90_000;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -101,6 +105,7 @@ export const contentPageHandler: JobHandler = async ({ job, deadline }) => {
 export type ContentPageStepRunners = {
   runStep: typeof runContentStep;
   skipStep: typeof skipContentStep;
+  questionStop: typeof runQuestionStop;
 };
 
 /**
@@ -120,6 +125,7 @@ export async function runContentPageSteps(input: {
   const { service, job, pageId } = input;
   const runStep = input.runners?.runStep ?? runContentStep;
   const skipStep = input.runners?.skipStep ?? skipContentStep;
+  const questionStop = input.runners?.questionStop ?? runQuestionStop;
   const lastAttempt = job.attempts + 1 >= job.max_attempts;
   const limit = input.deadline ?? Date.now() + LONG_STEP_MS;
   let continued: JobHandlerResult | null = null;
@@ -127,7 +133,8 @@ export async function runContentPageSteps(input: {
   let next: number | null = null;
 
   try {
-    for (let ran = 0; ran < CONTENT_STEP_COUNT; ran++) {
+    // One turn per step, plus the stop for questions before the Watermark Entfernung.
+    for (let ran = 0; ran < CONTENT_STEP_COUNT + 2; ran++) {
       page = await loadContentPageById(service, pageId);
       if (!page) return { ok: true, result: { skipped: "page_missing" } };
       if (page.state !== "laeuft") return { ok: true, result: { skipped: page.state } };
@@ -168,6 +175,33 @@ export async function runContentPageSteps(input: {
         }
         await markContentStepRetry(service, page, next, message);
         return { ok: false, error: message, retryable: true };
+      }
+
+      // The page's one stop for questions comes before the Watermark Entfernung (or, with that
+      // switched off, before the Endabnahme): ask once, or work the known answers in, then go on.
+      if (questionStopDue(page.question_stop, steps, next)) {
+        // Deciding is a few reads and writes; only a model call for the answers needs a long slot,
+        // and the stop itself says so (`deferred`) before it changes anything.
+        const stopBudget = Math.min(QUESTION_STOP_MS, Math.max(0, limit - Date.now()));
+        try {
+          const outcome = await questionStop(service, page, steps, stopBudget);
+          if (outcome.deferred) {
+            return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true, questionStop: "pass" } };
+          }
+          if (outcome.halted) {
+            return { ok: true, result: { step: next, halted: true, questionStop: outcome.action, discarded: outcome.discarded ?? false } };
+          }
+          continued = { ok: true, reschedule: true, result: { questionStop: outcome.action, costEur: outcome.costEur } };
+          continue;
+        } catch (error) {
+          const message = errorMessage(error);
+          const retryable = error instanceof ContentLlmError ? error.retryable : true;
+          if (!retryable || lastAttempt) {
+            await markContentStepError(service, page, next, `Antworten einarbeiten: ${message}`);
+            return { ok: false, error: message, retryable: false };
+          }
+          return { ok: false, error: message, retryable: true };
+        }
       }
 
       // Switched off by the editor and still to run (pending, error, no row): marked in passing.

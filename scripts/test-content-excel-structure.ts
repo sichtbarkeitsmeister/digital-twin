@@ -117,6 +117,7 @@ import {
 } from "../lib/dt/content/type-prompts";
 import { loadContentTypePrompts, saveContentTypePrompts } from "../lib/dt/content/type-prompts-db";
 import { parseWebsiteStructure } from "../lib/dt/seo/website-structure";
+import type { ContentQuestion } from "../lib/dt/content/types";
 
 // --- cells ------------------------------------------------------------------------------------
 
@@ -703,7 +704,7 @@ const excelPage: ContentPageRow = {
   id: "p1", organisation_id: "o1", slug: "privatumzug", name: "Privatumzug", path: "/privatumzug", level: 1, position: 1, source: "structure", source_url: null, crawled_at: null,
   main_keyword: null, page_role: "pillar", page_type: "hauptsilo", pillar_name: null, estimated_traffic: null, keywords: null, h1_options: [], user_questions: [], ki_prompt: null, internal_link_targets: [],
   state: "nicht_begonnen", step: null, released: false, released_at: null, title: null, meta_description: null, html: "", markdown: "",
-  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], freshness: EMPTY_CONTENT_FRESHNESS, skip_steps: [], client_wishes: "", error: null, job_id: null, cost_eur: 0, started_by: null, created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:00:00Z",
+  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], freshness: EMPTY_CONTENT_FRESHNESS, skip_steps: [], client_wishes: "", question_stop: { handled: [] }, error: null, job_id: null, cost_eur: 0, started_by: null, created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:00:00Z",
 };
 const crawlPage: ContentPageRow = { ...excelPage, id: "p2", slug: "dach", source: "crawl", source_url: "https://x.de/dach", page_role: null, page_type: "unterseite" };
 assert.equal(contentPageTypeChangeBlocker(excelPage), null, "an Excel page may be changed by hand");
@@ -835,10 +836,13 @@ const blocking: FaktencheckOutput = {
   findings: [],
   questions: [{ kind: "fact", question: "Stimmt der Festpreis?", blocking: true }],
 };
+// Since the one stop before the Watermark Entfernung: the Faktencheck collects its questions, it stops only for a „grundlegend“ one.
 const halt = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, blocking);
-assert.deepEqual([halt.halted, halt.stepStatus, halt.pagePatch.state, halt.pagePatch.job_id], [true, "waiting", "braucht_sie", null], "blocking questions stop the page for the customer");
+assert.deepEqual([halt.halted, halt.stepStatus, halt.pagePatch.state, (halt.pagePatch.questions as unknown[]).length], [false, "done", undefined, 1], "a question is collected, the page goes on");
 const soft = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [{ kind: "fact", question: "Egal", blocking: false }] });
-assert.deepEqual([soft.halted, soft.stepStatus, soft.pagePatch.state], [true, "waiting", "braucht_sie"], "a non-blocking question stops the page too");
+assert.deepEqual([soft.halted, soft.stepStatus, soft.pagePatch.state], [false, "done", undefined], "a non-blocking one too");
+const basic = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [{ kind: "fact", question: "Bieten Sie Umzüge überhaupt an?", blocking: true, grundlegend: true }] });
+assert.deepEqual([basic.halted, basic.stepStatus, basic.pagePatch.state, basic.pagePatch.job_id], [true, "waiting", "braucht_sie", null], "a „grundlegend“ question stops the page right after the Faktencheck");
 const clean = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [] }, { html: renderBlocksHtml(seoBlocks) });
 assert.deepEqual([clean.halted, clean.stepStatus, clean.pagePatch.state, clean.pagePatch.questions], [false, "done", undefined, []], "no question, no placeholder: the page goes on");
 const release = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" });
@@ -885,30 +889,30 @@ console.log("halting rules: ok");
   assert.equal(gapQuestion("[PREIS BITTE PRÜFEN UND ANPASSEN…]"), "Welcher Preis gilt hier?");
   assert.equal(gapQuestion("[BITTE PRÜFEN: Stimmt die Zahl 1.800?]"), "Stimmt die Zahl 1.800?");
 
-  // After a text step: a placeholder stops the page and names the block.
+  // After a text step: a placeholder is collected as a question naming its block; the page goes on.
   const seoWithGap = { blocks: parseBlocksFromHtml(gapHtml), title: "T", meta_description: "M" };
   const halted = stepPatchFor(contentStepDefinition(2)!, seoWithGap);
-  assert.deepEqual([halted.halted, halted.stepStatus, halted.pagePatch.state, halted.pagePatch.job_id], [true, "waiting", "braucht_sie", null]);
+  assert.deepEqual([halted.halted, halted.stepStatus, halted.pagePatch.state, halted.pagePatch.job_id], [false, "done", undefined, undefined]);
   assert.deepEqual(
-    halted.pagePatch.questions,
+    (halted.pagePatch.questions as ContentQuestion[]).map((q) => ({ kind: q.kind, question: q.question, placeholder: q.placeholder, block_id: q.block_id, section: q.section, excerpt: q.excerpt, scope: q.scope })),
     [{
       kind: "missing",
       question: "Festpreis für 3 Zimmer – was soll hier stehen?",
-      field: null,
       placeholder: "[BITTE PRÜFEN: Festpreis für 3 Zimmer]",
       block_id: "kosten",
       section: "Was kostet ein Privatumzug?",
       excerpt: "Eine 3-Zimmer-Wohnung kostet [BITTE PRÜFEN: Festpreis für 3 Zimmer].",
-      blocking: true,
+      scope: "seite",
     }],
   );
   assert.equal(halted.pagePatch.html, gapHtml, "the text is saved as it is: the placeholder stays");
   for (const step of [CONTENT_STEP_GEO, CONTENT_STEP_HORMOZI, CONTENT_STEP_VERMENSCHLICHUNG, CONTENT_STEP_LEKTORAT]) {
     const out = step === CONTENT_STEP_LEKTORAT ? { ...seoWithGap, final_findings: [] } : seoWithGap;
-    assert.equal(stepPatchFor(contentStepDefinition(step)!, out).halted, true, `step ${step} stops for the placeholder`);
+    const patch = stepPatchFor(contentStepDefinition(step)!, out);
+    assert.deepEqual([patch.halted, (patch.pagePatch.questions as unknown[]).length], [false, 1], `step ${step} collects the placeholder, no stop`);
   }
   const aktualitaetWithGap = { ...seoWithGap, checked: [], updates: [], questions: [], outdated_sections: [], findings: [], research: { searches: 1, fetches: 0, sources: 1, claims: 1, search_limit_hit: false } };
-  assert.equal(stepPatchFor(contentStepDefinition(CONTENT_STEP_AKTUALITAET)!, aktualitaetWithGap).halted, true, "the Aktualitätsprüfung is gap-checked too");
+  assert.equal(stepPatchFor(contentStepDefinition(CONTENT_STEP_AKTUALITAET)!, aktualitaetWithGap).halted, false, "the Aktualitätsprüfung collects too");
   assert.equal(stepPatchFor(contentStepDefinition(CONTENT_STEP_WATERMARK)!, seoWithGap).halted, false, "Watermark Entfernung goes on; the Endabnahme right after it checks");
 
   // [LINK: …], [DATUM] and the hero placeholder do not stop anything.
@@ -929,19 +933,20 @@ console.log("halting rules: ok");
     },
     { html: gapHtml },
   );
-  assert.equal(fakten.halted, true);
+  assert.equal(fakten.halted, false, "collected for the stop before the Watermark Entfernung");
   assert.deepEqual(
     (fakten.pagePatch.questions as Array<{ block_id: string; section: string; blocking: boolean }>).map((q) => [q.block_id, q.section, q.blocking]),
     [["ablauf", "Wie läuft der Umzug ab?", true], ["kosten", "Was kostet ein Privatumzug?", true]],
   );
   const placeholderOnly = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [] }, { html: gapHtml });
-  assert.equal(placeholderOnly.halted, true, "a placeholder the Faktencheck did not ask about still stops the page");
+  assert.deepEqual([placeholderOnly.halted, (placeholderOnly.pagePatch.questions as unknown[]).length], [false, 1], "a placeholder the Faktencheck did not ask about is still collected");
   const unlocated = contentGapQuestions(parseBlocksFromHtml(gapHtml), [{ kind: "missing", question: "Festpreis für 3 Zimmer?", blocking: true }]);
   assert.deepEqual(unlocated.map((q) => [q.block_id, q.section]), [["kosten", "Was kostet ein Privatumzug?"]], "a question without block gets the placeholder's Abschnitt");
 
-  // Endabnahme: never „fertig“ while a placeholder is left.
+  // Endabnahme: a placeholder left after the stop is an open point for the release, not a question again.
   const endGap = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" }, { html: gapHtml });
-  assert.deepEqual([endGap.halted, endGap.pagePatch.state, endGap.pagePatch.released, (endGap.pagePatch.questions as unknown[]).length], [true, "braucht_sie", false, 1]);
+  assert.deepEqual([endGap.halted, endGap.pagePatch.state, endGap.pagePatch.released, (endGap.pagePatch.questions as unknown[]).length], [true, "fertig", false, 0]);
+  assert.deepEqual((endGap.pagePatch.unresolved as Array<{ title: string; block_id: string }>).map((f) => [f.title, f.block_id]), [["Platzhalter offen", "kosten"]]);
   const endClean = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" }, { html: renderBlocksHtml(markersOnly) });
   assert.deepEqual([endClean.pagePatch.state, endClean.pagePatch.questions], ["fertig", []]);
 
@@ -962,7 +967,7 @@ console.log("halting rules: ok");
   assert.equal(approveNeedsConfirm({ questions: [], findings: [{ title: "x" }] }), true);
   assert.equal(approveNeedsConfirm({ questions: [], findings: [] }), false);
 }
-console.log("gaps stop the page: ok");
+console.log("gaps are collected for the one stop: ok");
 
 // --- the outline of the other pages ----------------------------------------------------------
 

@@ -11,7 +11,6 @@ import {
   FileText,
   Loader2,
   Lock,
-  MessageCircleQuestion,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +21,7 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { downloadContentExport } from "@/components/dt/content/download";
+import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-questions-panel";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
@@ -788,42 +788,17 @@ export function DtContentPageDrawer(props: {
                       )}
                     </section>
 
-                    <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
-                      <h3 className={sectionTitleClass}>
-                        Fragen an den Kunden
-                        <span className="tabular-nums">{questions.length}</span>
-                      </h3>
-                      {questions.length === 0 ? (
-                        <p className="text-sm text-sbkm-ink-600 dark:text-white/60">Keine Fragen offen.</p>
-                      ) : (
-                        <ul className="grid gap-2.5">
-                          {questions.map((q, i) => (
-                            <li key={`${q.question}-${i}`} className="grid gap-1.5">
-                              {q.section || q.block_id ? (
-                                <p className="ml-6 text-[11px] font-semibold uppercase tracking-wider text-orange-700 dark:text-orange-300">
-                                  Abschnitt „{q.section || q.block_id}“
-                                </p>
-                              ) : null}
-                              <p className="flex gap-2 text-sm font-medium leading-snug text-sbkm-navy dark:text-white">
-                                <MessageCircleQuestion className="mt-0.5 size-4 shrink-0 text-orange-600 dark:text-orange-300" aria-hidden />
-                                {q.question}
-                              </p>
-                              {q.excerpt ? (
-                                <blockquote className="ml-6 border-l-2 border-sbkm-navy/15 pl-2.5 text-xs italic text-sbkm-ink-600 dark:border-white/20 dark:text-white/60">
-                                  {q.excerpt}
-                                </blockquote>
-                              ) : null}
-                              {q.blocking ? (
-                                <p className="ml-6 inline-flex items-center gap-1 text-[11px] font-semibold text-orange-700 dark:text-orange-300">
-                                  <AlertTriangle className="size-3" aria-hidden />
-                                  Muss vor dem Weiterlaufen geklärt werden
-                                </p>
-                              ) : null}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </section>
+                    <DtContentQuestionsPanel
+                      organisationId={organisationId}
+                      pageBase={base ?? ""}
+                      review={review}
+                      disabled={Boolean(busy) || Boolean(jobId)}
+                      onReview={(next, nextJob) => {
+                        setReview(next);
+                        if (nextJob) setJobId(nextJob);
+                        onChangedRef.current();
+                      }}
+                    />
 
                     {showFreshness(review) ? (
                       <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">

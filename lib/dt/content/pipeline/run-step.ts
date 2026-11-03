@@ -7,7 +7,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
-import { loadContactPromptData } from "@/lib/dt/contact-data-store";
+import { contactPromptData } from "@/lib/dt/contact-data";
+import { loadOrgContactData } from "@/lib/dt/contact-data-store";
+import { addOrgQuestions, customerAnswersFromPool, loadOrgQuestions } from "@/lib/dt/content/org-questions";
+import {
+  ANSWERS_MAX_TOKENS,
+  ANSWERS_TOOL,
+  ANSWERS_USAGE_MODE,
+  answerTargets,
+  answersPassPrompt,
+  applyDrops,
+  normalizeAnswersOutput,
+} from "@/lib/dt/content/pipeline/answers";
+import { planQuestionStop, questionStopOutcome, questionStopPassItems, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
+import { buildContentKnowledge, customerAnswerNote } from "@/lib/dt/content/pipeline/questions";
 import { parseClientWishes } from "@/lib/dt/content/client-wishes";
 import {
   loadContentAnbieterSources,
@@ -44,6 +57,7 @@ import {
   skippedStepPatch,
   stepPatchFor,
   type LiveTextImport,
+  type StepPatch,
 } from "@/lib/dt/content/pipeline/step-patch";
 import {
   CONTENT_STEP_AKTUALITAET,
@@ -53,7 +67,7 @@ import {
   type ContentStepDefinition,
 } from "@/lib/dt/content/pipeline/steps";
 import { estimateCostEur, estimateWebSearchCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { parseBlocksFromHtml } from "@/lib/dt/content/render";
+import { htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/content/render";
 import {
   contentDbErrorMessage,
   contentStructureOutline,
@@ -91,6 +105,8 @@ export type StepOutcome = {
 
 /** How much of the live page's text the prompts see (pages taken over from the crawl). */
 const EXISTING_TEXT_MAX_CHARS = 6_000;
+/** „Antworten einarbeiten“ with a model call starts only with this much of the job's budget left. */
+const ANSWERS_MIN_MS = 60_000;
 /** A second attempt inside one step (Vermenschlichung) needs this much of the budget left. */
 const MIN_RETRY_MS = 60_000;
 const DEFAULT_STEP_TIMEOUT_MS = 240_000;
@@ -127,7 +143,7 @@ async function loadContext(
   // The editable texts (Texter prompt, Textvorlagen, step instructions) are read for every
   // step, so a save under Globale Prompts reaches the next step without a deploy. So are the
   // client data: the Kontaktdaten and the Kundenwünsche (settings row and page row).
-  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts, contact] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts, contactData, pool] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
     loadContentAnbieterSources(service, page.organisation_id),
@@ -136,8 +152,10 @@ async function loadContext(
     loadContentTypePromptsForRun(service),
     loadTexterPrompt(service),
     loadContentStepPrompts(service),
-    loadContactPromptData(service, page.organisation_id),
+    loadOrgContactData(service, page.organisation_id),
+    loadOrgQuestions(service, page.organisation_id),
   ]);
+  const contact = contactPromptData(contactData.data, { ansprechpartnerRole: contactData.columns.firstContact?.role ?? null });
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind noch nicht bestätigt.", false);
   }
@@ -191,6 +209,13 @@ async function loadContext(
       stepPrompts,
       notes: page.notes,
       contact,
+      customerAnswers: customerAnswersFromPool(pool),
+      knowledge: buildContentKnowledge({
+        contact: contactData.data,
+        pool,
+        notes: page.notes,
+        anbieterText: anbieter.sections.map((s) => s.current).join("\n"),
+      }),
       wishes: {
         organisation: parseClientWishes(settingsRow.client_wishes),
         page: parseClientWishes(page.client_wishes),
@@ -220,6 +245,21 @@ async function upsertStep(
 }
 
 type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string };
+
+/**
+ * After a step's patch: its company questions go into the organisation's pool, and the step row
+ * records what the question rules did (asked, company, unasked, suppressed).
+ */
+async function settleQuestionPlan(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  patch: Pick<StepPatch, "firmaQuestions" | "questionPlan">,
+  output: unknown,
+): Promise<Record<string, unknown>> {
+  if (patch.firmaQuestions?.length) await addOrgQuestions(service, page.organisation_id, page.slug, patch.firmaQuestions);
+  const stored = (output && typeof output === "object" ? output : {}) as Record<string, unknown>;
+  return patch.questionPlan ? { ...stored, question_plan: patch.questionPlan } : stored;
+}
 
 /**
  * One tool call on Claude, plus the step's own second attempt when its `retryHint` asks for
@@ -312,12 +352,14 @@ export async function runContentStep(
     return { step, halted: true, discarded: true, model, costEur };
   }
 
-  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output, page);
+  const patch = stepPatchFor(def, output, { ...page, knowledge: context.knowledge });
+  const { pagePatch, stepStatus, halted } = patch;
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + costEur);
+  const storedOutput = await settleQuestionPlan(service, page, patch, output);
 
   await upsertStep(service, page, step, {
     status: stepStatus,
-    output: output as Record<string, unknown>,
+    output: storedOutput,
     model,
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
@@ -421,6 +463,7 @@ async function runAktualitaetStep(input: {
       fetches: result.calls.reduce((sum, call) => sum + call.web.webFetchRequests, 0),
     });
     const problem = researchProblem(research, inspection);
+    if (problem) console.warn("[content] research not usable, protocol:", research.text.slice(0, 1500));
     if (problem) {
       // Never „alles aktuell“ without a source: the step fails visibly, the cost stays recorded.
       await saveProgress();
@@ -452,14 +495,17 @@ async function runAktualitaetStep(input: {
 
   // With GEO switched off the Faktencheck's findings are still open; the patch keeps them.
   const faktencheck = context.outputs[CONTENT_STEP_FAKTENCHECK] as Partial<FaktencheckOutput> | undefined;
-  const { pagePatch, stepStatus, halted, resetFrom } = stepPatchFor(def, output, {
+  const patch = stepPatchFor(def, output, {
     ...page,
+    knowledge: context.knowledge,
     faktencheck_findings: Array.isArray(faktencheck?.findings) ? faktencheck.findings : [],
   });
+  const { pagePatch, stepStatus, halted, resetFrom } = patch;
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
+  const storedOutput = await settleQuestionPlan(service, page, patch, output);
   await upsertStep(service, page, def.step, {
     status: stepStatus,
-    output: output as unknown as Record<string, unknown>,
+    output: storedOutput,
     model,
     input_tokens: progress.input_tokens,
     output_tokens: progress.output_tokens,
@@ -530,6 +576,8 @@ async function runRephraseStep(input: {
   const run = await runRephraseOnBlocks(context, context.blocks, {
     progress,
     deadline,
+    // A section Grok gives no text for keeps its wording and becomes an open point (31.10.).
+    keepOnEmpty: true,
     onUsage: (usage) =>
       recordLlmUsageEvent(service, {
         organisationId: page.organisation_id,
@@ -557,7 +605,22 @@ async function runRephraseStep(input: {
     title: context.title,
     meta_description: context.metaDescription,
   };
-  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output, page);
+  // Watermark Entfernung writes text but is no gap-checked step: no question plan here.
+  const { pagePatch, stepStatus, halted } = stepPatchFor(def, output, { ...page, knowledge: context.knowledge });
+  if (progress.kept?.length) {
+    const names = new Map(context.blocks.map((b) => [b.id, b.heading?.trim() || b.id]));
+    pagePatch.findings = [
+      ...page.findings,
+      ...progress.kept.map((k) => ({
+        title: "Abschnitt nicht umformuliert",
+        problem: `Grok hat für den Abschnitt „${names.get(k.block_id) ?? k.block_id}“ keinen Text geliefert (auch einzeln und mit den anderen Grok-Modellen). Er steht so da, wie das Lektorat ihn gelassen hat. ${k.reason}`.trim(),
+        proposal: "Abschnitt so lassen oder von Hand umformulieren (Abschnitt ändern).",
+        severity: "low",
+        severity_label: "Hinweis",
+        block_id: k.block_id,
+      })),
+    ];
+  }
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
   await saveProgress(run.model, { status: stepStatus, finished_at: new Date().toISOString() });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
@@ -671,4 +734,145 @@ export async function markContentStepRetry(
     .update({ step, error: text })
     .eq("id", page.id)
     .eq("state", "laeuft");
+}
+
+// --- the page's one stop for questions, before the Watermark Entfernung ----------------------------
+
+export type QuestionStopOutcome = {
+  /** ask: the page stopped as „Braucht Sie“; pass: answers were worked in; go_on: nothing to do. */
+  action: "ask" | "pass" | "go_on";
+  halted: boolean;
+  discarded?: boolean;
+  /** The pass needs a model call and the job's budget is too short: nothing changed, next tick. */
+  deferred?: boolean;
+  model: string;
+  costEur: number;
+};
+
+/**
+ * The stop (`question-stop.ts`): what only the customer knows stops the page once, with one
+ * merged list; known answers and the customer's answers go through the short pass
+ * „Antworten einarbeiten“ (`answers.ts`, usage `content.answers`, cost on the page and in
+ * `question_stop.pass`, no step row). Afterwards the run goes on with the Watermark Entfernung.
+ */
+export async function runQuestionStop(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  steps: ContentStepRow[],
+  timeoutMs?: number,
+  options: { callTool?: typeof callContentTool; now?: Date; context?: ContentPipelineContext; models?: string[] } = {},
+): Promise<QuestionStopOutcome> {
+  const at = (options.now ?? new Date()).toISOString();
+  // Tests hand in the context (the loader reads the survey service); the job always loads it fresh.
+  const { context, avatarId } = options.context ? { context: options.context, avatarId: null } : await loadContext(service, page, steps);
+  const knowledge = context.knowledge ?? buildContentKnowledge({});
+  const stop = readQuestionStop(page.question_stop);
+  const blocks = parseBlocksFromHtml(page.html);
+  const decisions = stop.handled.filter((h) => h.source === "kunde");
+  const plan = planQuestionStop({ blocks, questions: page.questions, knowledge, decisions, slug: page.slug });
+
+  if (stop.status !== "answered") {
+    const outcome = questionStopOutcome(plan);
+    if (outcome === "ask") {
+      if (plan.newFirma.length > 0) await addOrgQuestions(service, page.organisation_id, page.slug, plan.newFirma);
+      if (!(await pageStillOurs(service, page))) return { action: "ask", halted: true, discarded: true, model: "", costEur: 0 };
+      const { error } = await service
+        .from("dt_content_pages")
+        .update({
+          state: "braucht_sie",
+          job_id: null,
+          questions: plan.ask,
+          question_stop: { status: "waiting", at, asked: plan.ask.length + plan.askPool.length + plan.newFirma.length, handled: plan.handled },
+        })
+        .eq("id", page.id);
+      if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
+      return { action: "ask", halted: true, model: "", costEur: 0 };
+    }
+    if (outcome === "go_on") {
+      const { error } = await service
+        .from("dt_content_pages")
+        .update({ questions: [], question_stop: { status: "done", at, asked: 0, handled: [] } })
+        .eq("id", page.id)
+        .eq("state", "laeuft");
+      if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
+      return { action: "go_on", halted: false, model: "", costEur: 0 };
+    }
+  }
+
+  // „Antworten einarbeiten“: drops in code, answers through one short call on the affected Abschnitte.
+  // Page questions never asked (over the limit) go like „Ohne Angabe weiter“.
+  const handled = questionStopPassItems(plan);
+  const dropped = applyDrops(blocks, handled);
+  const forModel = [...handled.filter((h) => h.action === "answer" && h.answer), ...dropped.unresolved];
+  const targets = answerTargets(dropped.blocks, forModel);
+  let result = { blocks: dropped.blocks, changed: dropped.changed, fallback: [] as string[], rejected: [] as Array<{ block_id: string; reason: string }> };
+  let costEur = 0;
+  let model = "";
+  let usage = { inputTokens: 0, outputTokens: 0 };
+  if (targets.size > 0 && timeoutMs != null && timeoutMs < ANSWERS_MIN_MS) {
+    // Nothing is saved yet: the next tick evaluates the stop again and has the time for the call.
+    return { action: "pass", halted: false, deferred: true, model: "", costEur: 0 };
+  }
+  if (targets.size > 0) {
+    const targetBlocks = dropped.blocks.filter((b) => targets.has(b.id));
+    const prompt = answersPassPrompt(context, targetBlocks, forModel);
+    const models = options.models ?? (await loadContentModelConfig(service)).write;
+    const call = await (options.callTool ?? callContentTool)({
+      models,
+      system: prompt.system,
+      user: prompt.user,
+      tool: ANSWERS_TOOL,
+      maxTokens: ANSWERS_MAX_TOKENS,
+      timeoutMs: timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS,
+    });
+    model = call.model;
+    usage = call.usage;
+    costEur = estimateCostEur(call.model, call.usage);
+    await recordLlmUsageEvent(service, {
+      organisationId: page.organisation_id,
+      userId: page.started_by,
+      agentId: avatarId,
+      mode: ANSWERS_USAGE_MODE,
+      via: "direct",
+      model: call.model,
+      inputTokens: call.usage.inputTokens,
+      outputTokens: call.usage.outputTokens,
+    });
+    const normalized = normalizeAnswersOutput(call.json, { blocks: dropped.blocks, targets });
+    result = { ...normalized, changed: [...new Set([...dropped.changed, ...normalized.changed])] };
+  }
+  if (!(await pageStillOurs(service, page))) return { action: "pass", halted: true, discarded: true, model, costEur };
+
+  const html = renderBlocksHtml(result.blocks);
+  const answerNotes = handled
+    .filter((h) => h.source === "kunde")
+    .map((h) => customerAnswerNote(h.question, h.action === "answer" ? h.answer : null));
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({
+      html,
+      markdown: htmlToMarkdown(html),
+      questions: [],
+      notes: answerNotes.length > 0 ? [...page.notes, answerNotes.join("\n")].slice(-20) : page.notes,
+      cost_eur: roundEur(num(page.cost_eur) + costEur),
+      question_stop: {
+        status: "done",
+        at,
+        asked: stop.asked ?? 0,
+        handled,
+        pass: {
+          at,
+          cost_eur: roundEur(costEur),
+          model: model || null,
+          input_tokens: usage.inputTokens,
+          output_tokens: usage.outputTokens,
+          changed: result.changed,
+          fallback: result.fallback,
+          rejected: result.rejected,
+        },
+      },
+    })
+    .eq("id", page.id);
+  if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
+  return { action: "pass", halted: false, model, costEur };
 }

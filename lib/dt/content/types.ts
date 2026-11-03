@@ -136,6 +136,22 @@ export type ContentQuestion = {
   section?: string | null;
   excerpt?: string | null;
   blocking: boolean;
+  /** Stable id on the page (`contentQuestionId`); the answer fields address it. */
+  id?: string;
+  /**
+   * „firma“: the same on every page (Telefon, Öffnungszeiten, Google-Profil …), asked once per
+   * organisation under „Fragen zum Unternehmen“; „seite“: about this page. Set by the model,
+   * checked in code with the topic map (a topic in the map is always „firma“).
+   */
+  scope?: "firma" | "seite";
+  /** Topic of the code's topic map (telefon, adresse …), null for anything else. */
+  topic?: string | null;
+  /** How much the page needs the answer; the three most important ones are asked. */
+  severity?: string;
+  /** Faktencheck only, at most one: the page's main topic itself is in doubt; stops right after the Faktencheck. */
+  grundlegend?: boolean;
+  /** The step that raised it. */
+  origin_step?: number | null;
 };
 
 /** A web source the Aktualitätsprüfung used. Internal: never part of the page text or an export. */
@@ -274,6 +290,19 @@ export type ContentReview = {
   final_findings: ContentFinding[];
   unresolved: ContentFinding[];
   questions: ContentQuestion[];
+  /** Questions collected while the page runs; asked once, before the Watermark Entfernung. */
+  collected_questions: ContentQuestion[];
+  /** The page's one stop for questions (`dt_content_pages.question_stop`). */
+  question_stop: {
+    status: "none" | "waiting" | "answered" | "done";
+    asked: number;
+    /** Decisions so far: the customer's and the known answers. */
+    handled: Array<{ id: string; action: "answer" | "drop"; answer: string | null; source: string; question: string }>;
+    /** Cost of „Antworten einarbeiten“, once it ran. */
+    pass_cost: string | null;
+  };
+  /** Company questions this page raised („Fragen zum Unternehmen“; one answer for all pages). */
+  org_questions: ContentOrgQuestionView[];
   /** Updates with their sources and the send-back to GEO; the sources stay in the app, never in an export. */
   freshness: ContentReviewFreshness;
   /** Steps the editor switched off for this page, in step order. */
@@ -494,3 +523,27 @@ export type ContentContactActionResult = ContentContactResult & {
 
 /** `PUT /api/dt/content/wishes`: „Kundenwünsche“ of the organisation, one per line. */
 export type ContentWishesResult = { client_wishes: string; count: number };
+
+/** One question of „Fragen zum Unternehmen“ as the browser sees it. */
+export type ContentOrgQuestionView = {
+  id: string;
+  question: string;
+  placeholder: string | null;
+  status: "open" | "answered" | "no_answer";
+  answer: string | null;
+  /** How many pages raised it. */
+  pages: number;
+};
+
+/** `GET` / `PUT /api/dt/content/org-questions`. */
+export type ContentOrgQuestionsResult = {
+  questions: Array<ContentOrgQuestionView & { page_slugs: string[]; topic_key: string | null; answered_at: string | null }>;
+};
+
+/** `POST /api/dt/content/pages/[slug]/answers`: answers at the page's stop (or for the one „grundlegend“ question). */
+export type ContentAnswersBody = {
+  organisationId: string;
+  answers: Array<{ id: string; action: "answer" | "drop"; answer?: string | null }>;
+  /** „Antworten einarbeiten & weiter“: every question decided, the run goes on. */
+  submit?: boolean;
+};

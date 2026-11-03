@@ -59,6 +59,34 @@ export class XaiTimeoutError extends ContentLlmError {
   }
 }
 
+/**
+ * Grok answered 200 but without any text (31.10.: nine times in a row on the first group of a
+ * health page). Carries the model and what the response held, so the runner can try smaller
+ * groups and other models instead of repeating the same call, and the reason is visible.
+ */
+export class XaiEmptyAnswerError extends ContentLlmError {
+  readonly model: string;
+  readonly diagnostics: string;
+
+  constructor(model: string, detail: string, diagnostics: string) {
+    super(`Die Antwort von Grok (${model}) enthielt keinen Text.${detail}${diagnostics ? ` [${diagnostics}]` : ""}`, true);
+    this.name = "XaiEmptyAnswerError";
+    this.model = model;
+    this.diagnostics = diagnostics;
+  }
+}
+
+/** What an empty response held: finish_reason, number of choices, usage, a snippet of the body. */
+function emptyDiagnostics(completion: ChatCompletion, body: string): string {
+  const parts = [
+    `choices=${completion.choices?.length ?? 0}`,
+    completion.choices?.[0]?.finish_reason ? `finish_reason=${completion.choices[0].finish_reason}` : "",
+    completion.usage ? `tokens=${completion.usage.prompt_tokens ?? 0}/${completion.usage.completion_tokens ?? 0}` : "",
+    `body=${snippet(body).slice(0, 120)}`,
+  ];
+  return parts.filter(Boolean).join(", ");
+}
+
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 export type XaiTextCall = {
@@ -193,7 +221,7 @@ async function completeOnce(
   if (!text) {
     const refusal = typeof choice?.message?.refusal === "string" ? choice.message.refusal : "";
     const detail = refusal ? ` Grok: „${snippet(refusal)}“` : finishReason ? ` (finish_reason: ${finishReason})` : "";
-    return { ok: false, modelNotFound: false, error: new ContentLlmError(`Die Antwort von Grok enthielt keinen Text.${detail}`, true) };
+    return { ok: false, modelNotFound: false, error: new XaiEmptyAnswerError(model, detail, emptyDiagnostics(completion, body)) };
   }
   if (finishReason === "length") {
     return { ok: false, modelNotFound: false, error: new ContentLlmError("Die Antwort von Grok wurde abgeschnitten. Bitte den Schritt wiederholen.", false) };

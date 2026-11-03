@@ -1,3 +1,4 @@
+import { loadOrgQuestions } from "@/lib/dt/content/org-questions";
 import { reconcileContentPages } from "@/lib/dt/content/pipeline/health";
 import { contentError, contentOk, gateContentRoute, isValidContentSlug } from "@/lib/dt/content/route-helpers";
 import { buildReview, loadContentPage, loadContentSteps } from "@/lib/dt/content/store";
@@ -16,8 +17,8 @@ export async function GET(req: Request, context: { params: Promise<{ slug: strin
     const page = await loadContentPage(gate.service, gate.organisationId, slug);
     if (!page) return contentError("Seite nicht gefunden.", 404);
     const { pages, verdicts } = await reconcileContentPages(gate.service, [page]);
-    const steps = await loadContentSteps(gate.service, page.id);
-    return contentOk(buildReview(pages[0] ?? page, steps, verdicts.get(page.id) ?? null));
+    const [steps, orgQuestions] = await Promise.all([loadContentSteps(gate.service, page.id), loadOrgQuestions(gate.service, gate.organisationId)]);
+    return contentOk(buildReview(pages[0] ?? page, steps, verdicts.get(page.id) ?? null, { orgQuestions }));
   } catch (error) {
     return contentError(error instanceof Error ? error.message : "Seite konnte nicht geladen werden.", 500);
   }

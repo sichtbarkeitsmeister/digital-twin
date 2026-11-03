@@ -45,6 +45,11 @@ export type RephraseProgress = {
   models: string[];
   /** Models that ran into the chunk time limit; later chunks and attempts leave them out. */
   slow_models: string[];
+  /**
+   * Texte only: sections Grok gave no text for, with every model and alone. They keep the
+   * Lektorat's wording (`rewritten` holds it unchanged) and become an open point on the page.
+   */
+  kept?: Array<{ block_id: string; reason: string }>;
 };
 
 /** A model that took at least this long before the time limit hit counts as too slow for this page. */
@@ -85,6 +90,13 @@ export function readRephraseProgress(output: unknown, total: number): RephrasePr
     cost_eur: num(r.cost_eur),
     models: Array.isArray(r.models) ? r.models.filter((m): m is string => typeof m === "string") : [],
     slow_models: Array.isArray(r.slow_models) ? r.slow_models.filter((m): m is string => typeof m === "string") : [],
+    ...(Array.isArray(r.kept) && r.kept.length > 0
+      ? {
+          kept: r.kept
+            .filter((k): k is { block_id: string; reason: string } => Boolean(k) && typeof (k as { block_id?: unknown }).block_id === "string")
+            .map((k) => ({ block_id: k.block_id, reason: String(k.reason ?? "") })),
+        }
+      : {}),
   };
 }
 

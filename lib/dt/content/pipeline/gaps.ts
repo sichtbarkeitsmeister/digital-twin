@@ -30,6 +30,14 @@ export type ContentGap = {
   excerpt: string;
 };
 
+/** The first placeholder in the text as written, null when there is none. */
+export function firstContentGap(text: string): string | null {
+  GAP_RE.lastIndex = 0;
+  const m = GAP_RE.exec(text);
+  GAP_RE.lastIndex = 0;
+  return m ? m[0] : null;
+}
+
 /** True when the text still holds a placeholder for a fact only the customer knows. */
 export function hasContentGap(text: string): boolean {
   GAP_RE.lastIndex = 0;

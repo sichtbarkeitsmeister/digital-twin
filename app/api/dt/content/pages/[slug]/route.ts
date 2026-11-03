@@ -1,3 +1,4 @@
+import { loadOrgQuestions } from "@/lib/dt/content/org-questions";
 import { loadContentOverview } from "@/lib/dt/content/overview";
 import { parseContentPagePatch } from "@/lib/dt/content/page-patch";
 import { deleteContentPage } from "@/lib/dt/content/pipeline/actions";
@@ -65,12 +66,13 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
       if (!saved.ok) return contentError(saved.error, saved.status);
     }
 
-    const [fresh, steps, overview] = await Promise.all([
+    const [fresh, steps, overview, orgQuestions] = await Promise.all([
       loadContentPage(gate.service, gate.organisationId, slug),
       loadContentSteps(gate.service, page.id),
       loadContentOverview(gate.service, gate.organisationId),
+      loadOrgQuestions(gate.service, gate.organisationId),
     ]);
-    const data: ContentPagePatchResult = { review: buildReview(fresh ?? page, steps), overview };
+    const data: ContentPagePatchResult = { review: buildReview(fresh ?? page, steps, null, { orgQuestions }), overview };
     return contentOk(data);
   } catch (error) {
     return contentError(error instanceof Error ? error.message : "Änderung konnte nicht gespeichert werden.", 500);

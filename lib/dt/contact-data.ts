@@ -326,6 +326,16 @@ export function contactFieldText(data: Pick<OrgContactData, "fields">, key: Cont
   return withoutInvisibleChars(data.fields[key]?.value ?? "").trim();
 }
 
+/** The digits of a German phone number, „+49“, „0049“ and „(0)“ written as the leading 0. */
+export function phoneDigits(phone: string): string {
+  return phone
+    .replace(/\(\s*0\s*\)/g, "")
+    .replace(/[^\d+]/g, "")
+    .replace(/^\+49/, "0")
+    .replace(/^0049/, "0")
+    .replace(/\D/g, "");
+}
+
 /** One change for the Firmenprofil's change log (`dt_company_profile_edits.changes`). */
 export type ContactDataChange = { key: string; label: string; before: string; after: string };
 

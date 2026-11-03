@@ -18,6 +18,8 @@ import {
 } from "@/lib/dt/content/excel-structure";
 import { CONTACT_DATA_MIGRATION_FILE } from "@/lib/dt/contact-data";
 import { readContentFreshness, reviewFreshness } from "@/lib/dt/content/freshness";
+import { CONTENT_ORG_QUESTIONS_MIGRATION_FILE, isMissingOrgQuestionsError } from "@/lib/dt/content/org-questions";
+import { readQuestionStop, type ContentQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
 import type { ContentAnrede, ContentTextSettings } from "@/lib/dt/content/mapping";
 import { cleanTextSettings } from "@/lib/dt/content/mapping";
@@ -46,6 +48,7 @@ import {
 } from "@/lib/dt/content/pipeline/steps";
 import { CONTENT_ACTION_LABELS, formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
+import type { ContentOrgQuestionRow } from "@/lib/dt/content/org-questions";
 import {
   briefingPatchFor,
   planImprovementStructure,
@@ -115,6 +118,8 @@ export type ContentPageRow = {
   skip_steps: ContentSkippableStepKey[];
   /** „Zusätzliche Wünsche für diese Seite“, one per line (migration 20261103); „Zurücksetzen“ keeps them. */
   client_wishes: string;
+  /** The page's one stop for questions before the Watermark Entfernung (migration 20261104); `{}` until reached. */
+  question_stop: ContentQuestionStop;
   error: string | null;
   job_id: string | null;
   cost_eur: number | string;
@@ -166,10 +171,10 @@ const BRIEFING_COLUMNS =
  * `skip_steps` likewise (20261028): a runner that cannot read it would run steps the editor
  * switched off, and pay for them.
  */
-export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, client_wishes, error, job_id, cost_eur, started_by, created_at, updated_at`;
+export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, client_wishes, question_stop, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** Light projection for the overview table (no HTML). */
-const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, client_wishes, error, job_id, cost_eur, started_by, created_at, updated_at`;
+const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, client_wishes, question_stop, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** What the prompts see of the other pages (cannibalisation, deferred questions). */
 const OUTLINE_COLUMNS = "slug, name, path, level, source, page_role, page_type, pillar_name, main_keyword, keywords";
@@ -197,6 +202,8 @@ export const CONTENT_SKIP_STEPS_MIGRATION_FILE = "database/migrations/20261028_d
  * Must run before the code is deployed: every Texte step reads them.
  */
 export const CONTENT_CLIENT_DATA_MIGRATION_FILE = CONTACT_DATA_MIGRATION_FILE;
+/** `question_stop` and the pool `dt_content_org_questions`: far fewer questions. Must run before the code is deployed. */
+export const CONTENT_FEWER_QUESTIONS_MIGRATION_FILE = CONTENT_ORG_QUESTIONS_MIGRATION_FILE;
 export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
 /** The latest migration that lists every page type in the CHECK of `dt_content_pages.page_type`. */
 export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
@@ -263,6 +270,9 @@ export function isMissingContentColumnError(error: { code?: string; message?: st
 }
 
 export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
+  if ((isMissingContentColumnError(error) && /question_stop/i.test(error.message ?? "")) || isMissingOrgQuestionsError(error)) {
+    return `Die Datenbank kennt den einen Halt für Fragen und die Fragen zum Unternehmen noch nicht: Bitte ${CONTENT_FEWER_QUESTIONS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin läuft in Texte kein Schritt.`;
+  }
   if (isMissingClientDataError(error)) {
     return `Die Datenbank kennt Kontaktdaten und Kundenwünsche noch nicht: Bitte ${CONTENT_CLIENT_DATA_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin läuft in Texte kein Schritt.`;
   }
@@ -352,6 +362,7 @@ function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
     freshness: readContentFreshness(raw.freshness),
     skip_steps: normalizeSkipSteps(raw.skip_steps),
     client_wishes: typeof raw.client_wishes === "string" ? raw.client_wishes : "",
+    question_stop: readQuestionStop(raw.question_stop),
   };
 }
 
@@ -1182,6 +1193,10 @@ export function pageDetail(page: ContentPageRow, extra: ContentPageExtra = {}): 
     case "laeuft":
       return describeRunningPage(page, extra.steps ?? null, extra.verdict ?? null);
     case "braucht_sie":
+      if (page.question_stop.status === "waiting") {
+        const n = page.question_stop.asked ?? page.questions.length;
+        return `${n} ${n === 1 ? "Frage" : "Fragen"} vor der Watermark Entfernung – einmal beantworten, dann geht es weiter`;
+      }
       return questionsDetail(page.questions);
     case "in_arbeit":
       if (page.error) return `Fehler in Schritt ${page.step ?? "?"}: ${page.error}`;
@@ -1379,6 +1394,7 @@ export function buildReview(
   page: ContentPageRow,
   steps: ContentStepRow[],
   verdict: ContentJobVerdict | null = null,
+  extra: { orgQuestions?: readonly ContentOrgQuestionRow[] } = {},
 ): ContentReview {
   const textSteps = steps
     .filter((s) => (s.status === "done" || s.status === "waiting") && CONTENT_STEPS.find((d) => d.step === s.step)?.writesText)
@@ -1403,6 +1419,16 @@ export function buildReview(
     final_findings: page.final_findings,
     unresolved: page.unresolved,
     questions: page.state === "braucht_sie" ? page.questions : [],
+    collected_questions: page.state === "braucht_sie" ? [] : page.questions,
+    question_stop: {
+      status: page.question_stop.status ?? "none",
+      asked: page.question_stop.asked ?? 0,
+      handled: page.question_stop.handled,
+      pass_cost: page.question_stop.pass ? formatEur(page.question_stop.pass.cost_eur) : null,
+    },
+    org_questions: (extra.orgQuestions ?? [])
+      .filter((q) => q.page_slugs.includes(page.slug))
+      .map((q) => ({ id: q.id, question: q.question, placeholder: q.placeholder, status: q.status, answer: q.answer, pages: q.page_slugs.length })),
     freshness: reviewFreshness(page.freshness),
     skip_steps: page.skip_steps,
     steps: stepList(steps, page),

@@ -25,7 +25,7 @@ import {
   type RephraseProgress,
 } from "../lib/dt/content/pipeline/rephrase";
 import { runRephraseOnBlocks, type RephraseRunOptions } from "../lib/dt/content/pipeline/rephrase-runner";
-import { XAI_MISSING_KEY_MESSAGE, XaiTimeoutError, callXaiText, type XaiTextCall } from "../lib/dt/content/pipeline/xai";
+import { XAI_MISSING_KEY_MESSAGE, XaiEmptyAnswerError, XaiTimeoutError, callXaiText, type XaiTextCall } from "../lib/dt/content/pipeline/xai";
 import { renderBlocksHtml, type ContentTextBlock } from "../lib/dt/content/render";
 import { blocksFromDocument } from "../lib/dt/text-tools/ingest";
 import {
@@ -526,6 +526,63 @@ async function testBrowserRunAndExport() {
   console.log("browser run and export: ok");
 }
 
+/**
+ * 31.10.: Grok answered 200 without any text, nine times in a row on the first group of a page,
+ * and the step failed. Now the group is retried section by section and with the other models; in
+ * Texte a section that still gets no text keeps its wording and is listed (`progress.kept`).
+ */
+async function testRunnerEmptyAnswers() {
+  const blocks = bigBlocks(4, 120);
+  const empty = () =>
+    new Response(JSON.stringify({ choices: [{ finish_reason: null, message: { content: "" } }], usage: { prompt_tokens: 90, completion_tokens: 0 } }), { status: 200 });
+  const seen: Array<{ model: string; ids: string[] }> = [];
+  // The first model returns nothing for the group and for section 2 alone; the second model can do section 2.
+  const fetchImpl = async (_url: string, init: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init.body)) as { model: string; messages: Array<{ role: string; content: string }> };
+    const user = body.messages.find((m) => m.role === "user")!.content;
+    const ids = Array.from(user.matchAll(/data-block-id="([^"]+)"/g), (m) => m[1]!);
+    seen.push({ model: body.model, ids });
+    const hard = ids.includes(blocks[1]!.id);
+    const alwaysEmpty = ids.includes(blocks[2]!.id);
+    if (alwaysEmpty || (hard && body.model === MODELS[0])) return empty();
+    return new Response(
+      JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: ids.map((id) => `<section data-block-id="${id}"><h2>x</h2><p>Neu ${id}.</p></section>`).join("") } }], usage: { prompt_tokens: 100, completion_tokens: 40 } }),
+      { status: 200 },
+    );
+  };
+  const progress = emptyRephraseProgress(rephraseBlockCount(blocks));
+  const run = await runRephraseOnBlocks({ settings, notes: [] }, blocks, {
+    progress,
+    deadline: Date.now() + 600_000,
+    models: MODELS,
+    call: viaFetch(fetchImpl),
+    onUsage: async () => undefined,
+    save: async () => undefined,
+    keepOnEmpty: true,
+  });
+  assert.equal(run.state, "done", "the step finishes");
+  if (run.state !== "done") return;
+  assert.equal(run.blocks[1]!.html, `<p>Neu ${blocks[1]!.id}.</p>`, "alone and with the next model it worked");
+  assert.equal(run.blocks[2]!.html, blocks[2]!.html, "no model gave text: the section keeps its wording");
+  assert.deepEqual(progress.kept?.map((k) => k.block_id), [blocks[2]!.id]);
+  assert.match(progress.kept![0]!.reason, /keinen Text.*choices=1/, "the reason with what the response held");
+  assert.ok(seen.some((c) => c.ids.length === 1 && c.model === MODELS[1]), "the other model was asked");
+
+  // The standalone tool (no keepOnEmpty) still reports the error, after trying the same way.
+  await assert.rejects(
+    runRephraseOnBlocks({ notes: [] }, blocks, {
+      progress: emptyRephraseProgress(rephraseBlockCount(blocks)),
+      deadline: Date.now() + 600_000,
+      models: MODELS,
+      call: viaFetch(fetchImpl),
+      onUsage: async () => undefined,
+      save: async () => undefined,
+    }),
+    (error: unknown) => error instanceof XaiEmptyAnswerError,
+  );
+  console.log("runner: empty Grok answers (split, other models, keep in Texte): ok");
+}
+
 async function main() {
   testChunkPlanning();
   testMergeById();
@@ -533,6 +590,7 @@ async function main() {
   await testRunnerFullRun();
   await testRunnerPausesAndResumes();
   await testRunnerSlowModelAndErrors();
+  await testRunnerEmptyAnswers();
   testPrepareDocument();
   testChunkRequestValidation();
   await testChunkCall();
