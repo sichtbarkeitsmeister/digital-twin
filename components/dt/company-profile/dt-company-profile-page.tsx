@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Building2, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { DtContactDataFields } from "@/components/dt/contact/dt-contact-data-fields";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +14,7 @@ import {
   DT_ONBOARDING_MAX_CUSTOMER_CONTACTS,
 } from "@/lib/dt/onboarding/copy";
 import type { CompanyProfile, CompanyProfileContact, CompanyProfileEditRow } from "@/lib/dt/company-profile";
+import { contactFormState, type ContactFieldKey, type ContactFormState } from "@/lib/dt/contact-data";
 import { ANBIETER_POINTS } from "@/lib/dt/transcripts/workshop-model";
 import { organisationOptionLabel, type OrganisationOption } from "@/lib/shared/organisation-option";
 import { readSelectedOrganisationId } from "@/lib/shared/selected-organisation-storage";
@@ -51,6 +53,9 @@ export function DtCompanyProfilePage(props: {
     Object.fromEntries((props.initialProfile?.points ?? []).map((p) => [p.key, p.current])),
   );
   const [note, setNote] = useState("");
+  const [contactForm, setContactForm] = useState<ContactFormState | null>(
+    props.initialProfile?.contactData ? contactFormState(props.initialProfile.contactData) : null,
+  );
   const [edits, setEdits] = useState<CompanyProfileEditRow[]>([]);
   const [loading, setLoading] = useState(!props.initialProfile);
   const [busy, setBusy] = useState(false);
@@ -63,6 +68,7 @@ export function DtCompanyProfilePage(props: {
     setWebsiteUrl(next.websiteUrl);
     setContacts(next.contacts.length > 0 ? next.contacts : [{ ...EMPTY_CUSTOMER_CONTACT }]);
     setPoints(Object.fromEntries(next.points.map((p) => [p.key, p.current])));
+    setContactForm(next.contactData ? contactFormState(next.contactData) : null);
   }, []);
 
   const refresh = useCallback(
@@ -125,6 +131,18 @@ export function DtCompanyProfilePage(props: {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }
 
+  /**
+   * Without any Ansprechpartner the Kontaktdaten show the crawl's one; typed over there, it
+   * becomes the first Ansprechpartner (the same data in Texte).
+   */
+  function contactsForSave(): CompanyProfileContact[] {
+    if (!contactForm || contactHidden.includes("ansprechpartner")) return contacts;
+    const typed = contactForm.fields.ansprechpartner.trim();
+    const stored = profile?.contactData?.fields.ansprechpartner?.value.trim() ?? "";
+    if (!typed || typed === stored) return contacts;
+    return [{ ...EMPTY_CUSTOMER_CONTACT, name: typed }, ...contacts.filter((c) => c.name.trim() || c.role.trim() || c.email.trim() || c.phone.trim())];
+  }
+
   async function save() {
     if (!profile?.canEdit) return;
     setBusy(true);
@@ -136,12 +154,23 @@ export function DtCompanyProfilePage(props: {
           organisationId: orgId,
           displayName,
           websiteUrl,
-          contacts,
+          contacts: contactsForSave(),
           points: ANBIETER_POINTS.map((point) => ({
             key: point.key,
             current: points[point.key] ?? "",
           })),
           note: note.trim() || undefined,
+          ...(contactForm
+            ? {
+                contactData: {
+                  fields: Object.fromEntries(
+                    Object.entries(contactForm.fields).filter(([key]) => !contactHidden.includes(key as ContactFieldKey)),
+                  ),
+                  custom: contactForm.custom,
+                  no_google_profile: contactForm.no_google_profile,
+                },
+              }
+            : {}),
         }),
       });
       const json = (await res.json()) as {
@@ -166,6 +195,17 @@ export function DtCompanyProfilePage(props: {
       setBusy(false);
     }
   }
+
+  // Firmenname and Website are the Anzeigename and Website of the Stammdaten; Ansprechpartner is
+  // the first contact below, unless there is none yet (then the crawl's value shows here).
+  const contactHidden: ContactFieldKey[] = useMemo(
+    () => [
+      "firmenname",
+      "website",
+      ...(contacts.some((c) => c.name.trim() || c.role.trim()) ? (["ansprechpartner"] as ContactFieldKey[]) : []),
+    ],
+    [contacts],
+  );
 
   const filledPointCount = useMemo(
     () => ANBIETER_POINTS.filter((point) => (points[point.key] ?? "").trim()).length,
@@ -229,7 +269,7 @@ export function DtCompanyProfilePage(props: {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1 text-sm sm:col-span-2">
-                <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">Anzeigename</span>
+                <span className="font-semibold text-sbkm-ink-600 dark:text-white/55">Anzeigename (Firmenname)</span>
                 <input
                   className={inputClass}
                   value={displayName}
@@ -342,6 +382,31 @@ export function DtCompanyProfilePage(props: {
                 </DtPillButton>
               ) : null}
             </div>
+          </DtGlassCard>
+
+          <DtGlassCard variant="subtle" className="grid gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-sbkm-navy dark:text-white">Kontaktdaten</h2>
+              <p className="mt-1 text-sm text-sbkm-ink-600 dark:text-white/55">
+                Adresse, Telefon, Öffnungszeiten, Google-Profil und Social Media – so, wie sie in den Website-Texten
+                stehen sollen. Alles ist freiwillig. Felder aus dem Website-Crawl sind gekennzeichnet; was Sie ändern,
+                bleibt so.
+              </p>
+            </div>
+            {profile.contactData && contactForm ? (
+              <DtContactDataFields
+                stored={profile.contactData}
+                value={contactForm}
+                onChange={setContactForm}
+                disabled={!profile.canEdit || busy}
+                hidden={contactHidden}
+                googleNotFound={Boolean(profile.contactData.google_search && profile.contactData.google_search.status !== "found")}
+              />
+            ) : (
+              <p className="text-sm text-sbkm-ink-600 dark:text-white/55">
+                {profile.contactDataError ?? "Kontaktdaten sind noch nicht verfügbar."}
+              </p>
+            )}
           </DtGlassCard>
 
           <DtGlassCard variant="subtle" className="grid gap-4">

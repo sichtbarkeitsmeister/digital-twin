@@ -24,6 +24,7 @@ import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { downloadContentExport } from "@/components/dt/content/download";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
+import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
 import {
   CONTENT_PAGE_TYPE_LABELS,
@@ -126,6 +127,8 @@ export function DtContentPageDrawer(props: {
   const [blockText, setBlockText] = useState("");
   const [note, setNote] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
+  /** „Zusätzliche Wünsche für diese Seite“ as typed; null while it equals the stored text. */
+  const [pageWishes, setPageWishes] = useState<string | null>(null);
 
   const base = page
     ? `/api/dt/content/pages/${encodeURIComponent(page.slug)}`
@@ -150,6 +153,7 @@ export function DtContentPageDrawer(props: {
     setMode(null);
     setNote("");
     setJobId(null);
+    setPageWishes(null);
     void loadReview();
   }, [open, page, loadReview]);
 
@@ -341,6 +345,24 @@ export function DtContentPageDrawer(props: {
     setReview(res.data.review);
     toast.success(run ? `${step.name} läuft wieder` : `${step.name} wird übersprungen`);
     onChangedRef.current();
+  }
+
+  /** „Zusätzliche Wünsche für diese Seite“: saved at once; the next step that runs reads them. */
+  async function savePageWishes() {
+    if (!base || pageWishes == null) return;
+    setBusy("client_wishes");
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, {
+      method: "PATCH",
+      body: { organisationId, client_wishes: pageWishes },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    setPageWishes(null);
+    toast.success("Wünsche für diese Seite gespeichert – gilt ab dem nächsten Schritt.");
   }
 
   async function runThrough() {
@@ -656,6 +678,36 @@ export function DtContentPageDrawer(props: {
                           </p>
                         ))}
                         <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">{CONTENT_SKIP_NOTE}</p>
+                      </div>
+                      <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
+                        <label htmlFor="content-page-wishes" className="text-xs font-semibold text-sbkm-navy dark:text-white">
+                          Zusätzliche Wünsche für diese Seite
+                        </label>
+                        <textarea
+                          id="content-page-wishes"
+                          className={cn(textareaClass, "min-h-[64px] text-xs")}
+                          value={pageWishes ?? review.briefing.client_wishes}
+                          onChange={(e) => setPageWishes(e.target.value)}
+                          maxLength={CLIENT_WISHES_TEXT_MAX}
+                          disabled={Boolean(busy)}
+                          placeholder="Ein Wunsch pro Zeile, z. B. „Notdienst nicht erwähnen“"
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <DtPillButton
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-3 text-xs"
+                            disabled={Boolean(busy) || pageWishes == null || pageWishes.trim() === review.briefing.client_wishes.trim()}
+                            onClick={() => void savePageWishes()}
+                          >
+                            {busy === "client_wishes" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+                            Speichern
+                          </DtPillButton>
+                          <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
+                            Zusätzlich zu den Kundenwünschen; gilt ab dem nächsten Schritt.
+                          </span>
+                        </div>
                       </div>
                       <dl className="grid gap-1 text-xs text-sbkm-ink-600 dark:text-white/65">
                         <div className="flex gap-2">

@@ -16,6 +16,7 @@ import {
   type ContentBriefingPage,
   type ContentPageKeywords,
 } from "@/lib/dt/content/excel-structure";
+import { CONTACT_DATA_MIGRATION_FILE } from "@/lib/dt/contact-data";
 import { readContentFreshness, reviewFreshness } from "@/lib/dt/content/freshness";
 import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
 import type { ContentAnrede, ContentTextSettings } from "@/lib/dt/content/mapping";
@@ -112,6 +113,8 @@ export type ContentPageRow = {
    * Belongs to the page like `page_type`: „Zurücksetzen“ keeps it, no upload or sync writes it.
    */
   skip_steps: ContentSkippableStepKey[];
+  /** „Zusätzliche Wünsche für diese Seite“, one per line (migration 20261103); „Zurücksetzen“ keeps them. */
+  client_wishes: string;
   error: string | null;
   job_id: string | null;
   cost_eur: number | string;
@@ -149,6 +152,8 @@ export type ContentSettingsRow = {
   avatar_agent_id: string | null;
   confirmed_by: string | null;
   confirmed_at: string;
+  /** „Kundenwünsche“ of the organisation, one per line (migration 20261103). */
+  client_wishes: string;
 };
 
 const BRIEFING_COLUMNS =
@@ -161,10 +166,10 @@ const BRIEFING_COLUMNS =
  * `skip_steps` likewise (20261028): a runner that cannot read it would run steps the editor
  * switched off, and pay for them.
  */
-export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, error, job_id, cost_eur, started_by, created_at, updated_at`;
+export const PAGE_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, html, markdown, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, client_wishes, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** Light projection for the overview table (no HTML). */
-const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, error, job_id, cost_eur, started_by, created_at, updated_at`;
+const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position, source, source_url, crawled_at, main_keyword, ${BRIEFING_COLUMNS}, state, step, released, released_at, title, meta_description, findings, final_findings, unresolved, questions, notes, freshness, skip_steps, client_wishes, error, job_id, cost_eur, started_by, created_at, updated_at`;
 
 /** What the prompts see of the other pages (cannibalisation, deferred questions). */
 const OUTLINE_COLUMNS = "slug, name, path, level, source, page_role, page_type, pillar_name, main_keyword, keywords";
@@ -187,6 +192,11 @@ export const CONTENT_NINE_STEPS_MIGRATION_FILE = "database/migrations/20261011_d
 export const CONTENT_AKTUALITAET_MIGRATION_FILE = "database/migrations/20261027_dt_content_aktualitaet.sql";
 /** `dt_content_pages.skip_steps` with its CHECK: the steps switched off per page. Must run before the code is deployed. */
 export const CONTENT_SKIP_STEPS_MIGRATION_FILE = "database/migrations/20261028_dt_content_skip_steps.sql";
+/**
+ * Kontaktdaten (`dt_org_contact_data`) and Kundenwünsche (`client_wishes` on settings and pages).
+ * Must run before the code is deployed: every Texte step reads them.
+ */
+export const CONTENT_CLIENT_DATA_MIGRATION_FILE = CONTACT_DATA_MIGRATION_FILE;
 export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
 /** The latest migration that lists every page type in the CHECK of `dt_content_pages.page_type`. */
 export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
@@ -233,6 +243,14 @@ export function isMissingSkipStepsColumnError(error: { code?: string; message?: 
   return Boolean(error) && isMissingContentColumnError(error) && /skip_steps/i.test(error?.message ?? "");
 }
 
+/** `client_wishes` or `dt_org_contact_data` unknown: migration 20261103 never ran. */
+export function isMissingClientDataError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  if (/client_wishes/i.test(message)) return isMissingContentColumnError(error);
+  return /dt_org_contact_data/i.test(message) && (error.code === "PGRST205" || error.code === "42P01" || /does not exist|schema cache/i.test(message));
+}
+
 /** `column dt_content_pages.source does not exist` (select) or PGRST204 (write): the source migration never ran. */
 export function isMissingContentColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
@@ -245,6 +263,9 @@ export function isMissingContentColumnError(error: { code?: string; message?: st
 }
 
 export function contentDbErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
+  if (isMissingClientDataError(error)) {
+    return `Die Datenbank kennt Kontaktdaten und Kundenwünsche noch nicht: Bitte ${CONTENT_CLIENT_DATA_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin läuft in Texte kein Schritt.`;
+  }
   if (isMissingSkipStepsColumnError(error)) {
     return `Die Datenbank kennt noch keine abgeschalteten Schritte je Seite: Bitte ${CONTENT_SKIP_STEPS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin läuft in Texte kein Schritt.`;
   }
@@ -330,6 +351,7 @@ function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
     notes: asArray<string>(raw.notes).filter((n) => typeof n === "string"),
     freshness: readContentFreshness(raw.freshness),
     skip_steps: normalizeSkipSteps(raw.skip_steps),
+    client_wishes: typeof raw.client_wishes === "string" ? raw.client_wishes : "",
   };
 }
 
@@ -341,13 +363,37 @@ export async function loadContentSettings(
 ): Promise<ContentSettingsRow | null> {
   const { data, error } = await service
     .from("dt_content_settings")
-    .select("organisation_id, anrede, branche, tonalitaet, verbotene_woerter, avatar_agent_id, confirmed_by, confirmed_at")
+    .select("organisation_id, anrede, branche, tonalitaet, verbotene_woerter, avatar_agent_id, confirmed_by, confirmed_at, client_wishes")
     .eq("organisation_id", organisationId)
     .maybeSingle();
-  if (error && isMissingContentTableError(error)) {
+  // A missing column must not read as „no settings yet“: the message names the migration.
+  if (error && (isMissingContentTableError(error) || isMissingContentColumnError(error))) {
     throw new Error(contentDbErrorMessage(error, "Einstellungen konnten nicht geladen werden"));
   }
-  return (data as ContentSettingsRow | null) ?? null;
+  if (!data) return null;
+  const row = data as ContentSettingsRow;
+  return { ...row, client_wishes: typeof row.client_wishes === "string" ? row.client_wishes : "" };
+}
+
+/**
+ * „Kundenwünsche“ of the organisation. Only on confirmed settings: the row has no defaults
+ * for Anrede and Branche, and the pipeline does not run without them anyway.
+ */
+export async function saveContentClientWishes(
+  service: SupabaseClient,
+  organisationId: string,
+  wishes: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { data, error } = await service
+    .from("dt_content_settings")
+    .update({ client_wishes: wishes })
+    .eq("organisation_id", organisationId)
+    .select("organisation_id");
+  if (error) return { ok: false, status: 500, error: contentDbErrorMessage(error, "Kundenwünsche konnten nicht gespeichert werden") };
+  if (!data || data.length === 0) {
+    return { ok: false, status: 409, error: "Bitte zuerst die Einstellungen für Texte bestätigen; dann lassen sich Kundenwünsche speichern." };
+  }
+  return { ok: true };
 }
 
 export function settingsFromRow(row: ContentSettingsRow): ContentTextSettings {
@@ -716,6 +762,21 @@ export async function updateContentSkipSteps(
   const { error } = await service.from("dt_content_pages").update({ skip_steps: plan.skipSteps }).eq("id", page.id).neq("state", "laeuft");
   return error
     ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Schritte konnten nicht gespeichert werden") }
+    : { ok: true };
+}
+
+/**
+ * „Zusätzliche Wünsche für diese Seite“. Allowed in every state, also while the page runs: the
+ * next step that starts reads them (no automatic rerun).
+ */
+export async function updateContentClientWishes(
+  service: SupabaseClient,
+  page: Pick<ContentPageRow, "id">,
+  wishes: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { error } = await service.from("dt_content_pages").update({ client_wishes: wishes.trim() }).eq("id", page.id);
+  return error
+    ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Wünsche für diese Seite konnten nicht gespeichert werden") }
     : { ok: true };
 }
 
@@ -1310,6 +1371,7 @@ export function pageBriefing(page: ContentPageRow): ContentPageBriefing {
     ki_prompt: page.ki_prompt,
     internal_link_targets: page.internal_link_targets,
     estimated_traffic: page.estimated_traffic,
+    client_wishes: page.client_wishes,
   };
 }
 

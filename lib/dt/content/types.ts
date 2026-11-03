@@ -3,6 +3,7 @@
  * The pipeline behind the routes runs inside DigitalTwin (`lib/dt/content/pipeline`).
  */
 
+import type { ContactFieldKey, ContactSource, OrgContactData } from "@/lib/dt/contact-data";
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
 import type { ContentPageRole, ContentPageType } from "@/lib/dt/content/page-types";
@@ -246,6 +247,8 @@ export type ContentPageBriefing = {
   ki_prompt: string | null;
   internal_link_targets: string[];
   estimated_traffic: number | null;
+  /** „Zusätzliche Wünsche für diese Seite“, one per line (empty when none). */
+  client_wishes: string;
 };
 
 export type ContentReview = {
@@ -464,3 +467,30 @@ export type ContentReadinessResult = {
 
 /** What `/api/dt/content/*` returns to the browser. */
 export type ContentApiResponse<T> = { ok: true; data: T } | { ok: false; message: string };
+
+/** `GET` / `PUT /api/dt/content/contact`: the organisation's Kontaktdaten (shared with the Firmenprofil). */
+export type ContentContactResult = {
+  contact: OrgContactData;
+  /** A crawl of the website exists: „Aus Website neu füllen“ is offered (not for a new website). */
+  crawl_available: boolean;
+  /** Why „Google-Profil suchen“ cannot run now (no name or place, link filled, „Kein Google-Profil“); null when it can. */
+  google_blocked: string | null;
+};
+
+/** `PUT /api/dt/content/contact`: the whole card; only fields whose text changed become „manuell“. */
+export type ContentContactPutBody = {
+  organisationId: string;
+  fields: Partial<Record<ContactFieldKey, string>>;
+  custom: Array<{ label: string; value: string }>;
+  no_google_profile: boolean;
+};
+
+/** `POST /api/dt/content/contact/refill` and `/google`: what the fill or the search did. */
+export type ContentContactActionResult = ContentContactResult & {
+  /** Fields that changed, with their new source. */
+  changed: Array<{ key: ContactFieldKey; source: ContactSource }>;
+  message: string;
+};
+
+/** `PUT /api/dt/content/wishes`: „Kundenwünsche“ of the organisation, one per line. */
+export type ContentWishesResult = { client_wishes: string; count: number };

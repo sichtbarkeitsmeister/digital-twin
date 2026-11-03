@@ -8,6 +8,7 @@ import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
+import { DtContentContactCard } from "@/components/dt/content/dt-content-contact-card";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
 import { DtContentPagesSourceCard } from "@/components/dt/content/dt-content-pages-source-card";
 import { DtContentPagesToolbar } from "@/components/dt/content/dt-content-pages-toolbar";
@@ -18,6 +19,7 @@ import {
 import { DtContentReadinessCard } from "@/components/dt/content/dt-content-readiness-card";
 import { DtContentSettingsCard } from "@/components/dt/content/dt-content-settings-card";
 import { DtContentTypePromptsCard } from "@/components/dt/content/dt-content-type-prompts-card";
+import { DtContentWishesCard } from "@/components/dt/content/dt-content-wishes-card";
 import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-card";
 import { CenteredModal } from "@/components/ui/centered-modal";
 import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
@@ -78,8 +80,12 @@ export function DtContentWorkspace(props: {
   /** Confirmed settings from `dt_content_settings`; null shows the settings card open. */
   initialSettings: ContentTextSettings | null;
   initialAvatarId: string | null;
+  /** „Kundenwünsche“ of the organisation (`dt_content_settings.client_wishes`). */
+  initialWishes: string;
 }) {
   const { organisationId } = props;
+  /** Bumped when the page source changed (crawl finished, pages taken over): the Kontaktdaten reload. */
+  const [contactRefresh, setContactRefresh] = useState(0);
 
   const [readiness, setReadiness] = useState<ContentReadiness | null>(null);
   const [local, setLocal] = useState<ContentLocalSources | null>(null);
@@ -379,6 +385,7 @@ export function DtContentWorkspace(props: {
         onConfirm={(next) => void confirmSettings(next)}
         onEdit={() => setEditingSettings(true)}
       />
+      <DtContentWishesCard organisationId={organisationId} initial={props.initialWishes} settingsConfirmed={Boolean(settings)} />
 
       <DtContentReadinessCard
         organisationId={organisationId}
@@ -394,10 +401,12 @@ export function DtContentWorkspace(props: {
         onChanged={(next) => {
           if (next) applyOverview(next);
           setFilter(EMPTY_CONTENT_PAGE_FILTER);
+          setContactRefresh((n) => n + 1);
           void loadReadiness();
           void loadOverview();
         }}
       />
+      <DtContentContactCard organisationId={organisationId} refreshKey={contactRefresh} />
 
       <section className={cn(cardClass, "grid gap-4 p-4 sm:p-5")} aria-label="Texte erstellen">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -573,7 +582,7 @@ export function DtContentWorkspace(props: {
         }
         description={
           confirmBulk === "all"
-            ? "Alle Seiten dieser Organisation mit Texten, Schritten, Fragen und Kosten, die bestätigten Einstellungen und die hochgeladene Seitenstruktur werden gelöscht. Laufende Schritte werden gestoppt. Der Crawl der Website, Avatare und Anbieterfakten bleiben."
+            ? "Alle Seiten dieser Organisation mit Texten, Schritten, Fragen und Kosten, die bestätigten Einstellungen und die hochgeladene Seitenstruktur werden gelöscht. Laufende Schritte werden gestoppt. Der Crawl der Website, die Kontaktdaten, Avatare und Anbieterfakten bleiben."
             : confirmBulk === "delete"
               ? "Die Seiten verschwinden aus der Tabelle – mit Text, Schritten und Fragen. Laufende Schritte werden gestoppt."
               : "Text, Schritte, Fragen und Anmerkungen gehen verloren; die Seiten bleiben in der Tabelle. Laufende Schritte werden gestoppt."
@@ -612,7 +621,7 @@ export function DtContentWorkspace(props: {
           {confirmBulk === "all" ? (
             <>
               <li>{pages.length} {pages.length === 1 ? "Seite" : "Seiten"} in der Tabelle</li>
-              {settings ? <li>Bestätigte Einstellungen für Texte</li> : null}
+              {settings ? <li>Bestätigte Einstellungen für Texte (mit den Kundenwünschen)</li> : null}
               {local?.structure ? <li>Seitenstruktur „{local.structure.filename?.trim() || "ohne Dateiname"}“</li> : null}
             </>
           ) : null}

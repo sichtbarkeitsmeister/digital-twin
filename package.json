@@ -90,6 +90,7 @@
     "test:content-excel-structure": "tsx scripts/test-content-excel-structure.ts",
     "test:content-aktualitaet": "tsx scripts/test-content-aktualitaet.ts",
     "test:content-skip-steps": "tsx scripts/test-content-skip-steps.ts",
+    "test:content-client-data": "tsx scripts/test-content-client-data.ts",
     "test:content-job-ownership": "tsx scripts/test-content-job-ownership.ts",
     "test:content-step-budgets": "tsx scripts/test-content-step-budgets.ts",
     "test:content-model-params": "tsx scripts/test-content-model-params.ts",

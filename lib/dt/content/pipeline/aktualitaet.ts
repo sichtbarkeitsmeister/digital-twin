@@ -26,6 +26,8 @@ import {
   CONTENT_HERO_BLOCK_ID,
   TEXT_PROPERTIES,
   anbieterBlock,
+  clientWishesBlock,
+  clientWishesRules,
   currentTextBlock,
   joinPromptParts,
   normalizeQuestions,
@@ -121,7 +123,11 @@ function todayText(now: Date): string {
 
 /** Same system prompt for both calls, so the instruction and the rules never differ between them. */
 export function aktualitaetSystemPrompt(context: ContentPipelineContext): string {
-  return stepSystem(stepInstruction(context, "aktualitaet"), context.settings, [AKTUALITAET_RULES, DT_WEB_RESEARCH_INSTRUCTIONS]);
+  return stepSystem(stepInstruction(context, "aktualitaet"), context.settings, [
+    AKTUALITAET_RULES,
+    DT_WEB_RESEARCH_INSTRUCTIONS,
+    ...clientWishesRules(context),
+  ]);
 }
 
 /** Fingerprint of the text the research looks at; another text means the research is stale. */
@@ -276,6 +282,7 @@ export function aktualitaetWriteSpec(
       sourcesBlock(research.sources),
       anbieterBlock(context),
       settingsBlock(context.settings),
+      clientWishesBlock(context),
       notesBlock(context),
       [
         "## Auftrag in diesem Aufruf: Ergebnis",

@@ -379,7 +379,7 @@ function extractAddress(blob: string): string | null {
   return sentence;
 }
 
-function extractOpeningHours(blob: string): string | null {
+export function extractOpeningHours(blob: string): string | null {
   const sentence = firstSentenceAround(
     blob,
     [
@@ -390,11 +390,28 @@ function extractOpeningHours(blob: string): string | null {
   return sentence;
 }
 
+/**
+ * A link to a Google business profile or its map, as websites carry it: google.*\/maps (also
+ * the \/maps\/embed of an iframe), maps.google.*, maps.app.goo.gl, goo.gl\/maps, g.page,
+ * share.google and the review link search.google.com\/local\/writereview?placeid=…. Global:
+ * `extractGoogleProfileUrls` collects every match.
+ */
+export const GOOGLE_PROFILE_URL_RE =
+  /(?:https?:)?\/\/(?:www\.)?(?:google\.[a-z.]{2,8}\/maps[^\s<>"'`)\]]*|maps\.google\.[a-z.]{2,8}[^\s<>"'`)\]]*|maps\.app\.goo\.gl\/[^\s<>"'`)\]]+|goo\.gl\/maps\/[^\s<>"'`)\]]+|g\.page\/[^\s<>"'`)\]]+|share\.google\/[^\s<>"'`)\]]+|search\.google\.[a-z.]{2,8}\/local\/(?:writereview|reviews)\?[^\s<>"'`)\]]*)/gi;
+
+/** Every Google profile or map link in a text or an HTML attribute, in order, each once, `https:` added where missing. */
+export function extractGoogleProfileUrls(text: string): string[] {
+  const out: string[] = [];
+  for (const match of text.matchAll(GOOGLE_PROFILE_URL_RE)) {
+    let url = match[0].replace(/&amp;/g, "&").replace(/[.,;:!?)]+$/g, "");
+    if (url.startsWith("//")) url = `https:${url}`;
+    if (!out.includes(url)) out.push(url);
+  }
+  return out;
+}
+
 function extractGbpUrl(blob: string): string | null {
-  const m = blob.match(
-    /https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/maps[^\s<>"')\]]*|maps\.google\.[^\s<>"')\]]*|g\.page\/[^\s<>"')\]]+)/i,
-  );
-  return m?.[0]?.replace(/[.,;:!?)]+$/g, "") ?? null;
+  return extractGoogleProfileUrls(blob)[0] ?? null;
 }
 
 function extractReviews(blob: string): string | null {

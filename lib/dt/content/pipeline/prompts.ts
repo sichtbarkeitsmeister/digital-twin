@@ -12,6 +12,15 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 
+import type { ContactPromptData } from "@/lib/dt/contact-data";
+import {
+  CLIENT_WISHES_MAX,
+  CLIENT_WISHES_TEXT_MAX,
+  CLIENT_WISH_MAX_CHARS,
+  hasClientWishes,
+  parseClientWishes,
+  type ContentClientWishes,
+} from "@/lib/dt/content/client-wishes";
 import type { ContentPageKeywords } from "@/lib/dt/content/excel-structure";
 import {
   brancheRuleGroup,
@@ -106,6 +115,18 @@ export type ContentPipelineContext = {
   stepPrompts?: Partial<ContentStepPrompts>;
   /** Human notes from "Mit Anmerkung wiederholen", oldest first. */
   notes: string[];
+  /**
+   * The organisation's Kontaktdaten, filled fields only (`contactPromptData`), read fresh for
+   * every step. Confirmed facts; SEO, Faktencheck, GEO, Hormozi and the Endabnahme see them.
+   * The standalone tools have none.
+   */
+  contact?: ContactPromptData | null;
+  /**
+   * „Kundenwünsche“: the organisation's (`dt_content_settings.client_wishes`) and this page's
+   * (`dt_content_pages.client_wishes`), one wish per entry, read fresh for every step. Every
+   * step that writes text gets them, and the Watermark step of Texte; the standalone tools never.
+   */
+  wishes?: ContentClientWishes;
   /**
    * The Aktualitätsprüfung's state on this page (`dt_content_pages.freshness`). GEO reads its
    * `pending_sections` after a send-back; the standalone tools have none.
@@ -529,6 +550,8 @@ export type RephrasePromptContext = {
   settings?: ContentTextSettings | null;
   notes: readonly string[];
   page?: { ki_prompt: string | null } | null;
+  /** Texte only: the client's wishes. The standalone Watermark tool passes none. */
+  wishes?: ContentClientWishes | null;
 };
 
 /** The Vorgaben of a text without Texte settings: whatever the text already does stays. */
@@ -542,6 +565,92 @@ export function notesBlock(context: RephrasePromptContext): string {
     ...(context.page?.ki_prompt ? [`KI-Prompt aus der Seitenstruktur: ${clip(context.page.ki_prompt, 2_000)}`] : []),
     ...context.notes.map((n) => clip(n, 2_000)),
   ]);
+}
+
+// --- client data: Kontaktdaten and Kundenwünsche --------------------------------------------------
+
+export { CLIENT_WISHES_MAX, CLIENT_WISHES_TEXT_MAX, CLIENT_WISH_MAX_CHARS, hasClientWishes, parseClientWishes, type ContentClientWishes };
+
+/** The wishes as one numbered list, the organisation's first; the steps cite them by wording. */
+export function clientWishesBlock(context: { wishes?: ContentClientWishes | null }): string {
+  const wishes = context.wishes;
+  if (!wishes || !hasClientWishes(wishes)) return "";
+  let n = 0;
+  const numbered = (list: readonly string[]) => list.map((w) => `${++n}. ${w}`).join("\n");
+  return [
+    "## Wünsche des Kunden (verbindlich)",
+    wishes.organisation.length > 0 ? `Für alle Seiten:\n${numbered(wishes.organisation)}` : "",
+    wishes.page.length > 0 ? `Nur für diese Seite:\n${numbered(wishes.page)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Fixed rule of every step that sees the wishes (the editable instructions cannot remove it):
+ * the wishes go before the Texter-Prompt, the Textvorlage and the step's own instruction, never
+ * before the facts rules, the Anrede, the verbotene Wörter and the Branchenregel.
+ */
+export const CLIENT_WISHES_RULES = `Wünsche des Kunden (feste Regel): Die Wünsche im Abschnitt „Wünsche des Kunden (verbindlich)“ gelten für den ganzen Text. Sie gehen dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor. Sie gehen nie vor: den Regeln zu Tatsachen (nichts erfinden, nur belegte Fakten), der Anrede, den verbotenen Wörtern und der Branchenregel. Widerspricht ein Wunsch einer dieser Regeln, folgst du der Regel und meldest einen offenen Punkt, der den Wunsch wörtlich nennt – als Befund, wo dieser Schritt Befunde hat; sonst meldet ihn die Endabnahme. Ein solcher Konflikt ist nie eine Frage an den Kunden. Wie das Unternehmen im Fließtext genannt wird (Kurzform, Schreibweise) oder welche Wörter es benutzt, ist eine Sprachvorgabe und kein Widerspruch zu den Fakten oder Kontaktdaten.`;
+
+/** The wishes rule when the page has wishes; nothing otherwise (the prompt stays as before). */
+export function clientWishesRules(context: { wishes?: ContentClientWishes | null }): string[] {
+  return hasClientWishes(context.wishes) ? [CLIENT_WISHES_RULES] : [];
+}
+
+/**
+ * „Kontaktdaten (bestätigt)“: only the filled fields. Confirmed facts like the Anbieterfakten;
+ * the Google-Profil link is a contact option for a call to action, a rating only when the facts
+ * name one.
+ */
+export function kontaktBlock(context: { contact?: ContactPromptData | null }): string {
+  const contact = context.contact;
+  if (!contact) return "";
+  const lines = contact.lines.map((l) => `- ${l.label}: ${l.value}`);
+  return [
+    "## Kontaktdaten (bestätigt)",
+    "Bestätigte Fakten über das Unternehmen. Kontaktwege, Adresse und Öffnungszeiten nur in dieser Schreibweise verwenden.",
+    ...lines,
+    contact.google_profile_url
+      ? "Das Google-Profil ist ein bestätigter Kontaktweg, z. B. für eine Handlungsaufforderung „Bewertungen auf Google ansehen“ (als Text, ohne <a>-Tag). Eine Bewertung oder Anzahl von Bewertungen nur nennen, wenn sie in den Anbieterfakten steht – nie erfinden."
+      : contact.no_google_profile
+        ? "Das Unternehmen hat kein Google-Profil: keinen Verweis auf Google-Bewertungen."
+        : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Fixed checks of the Faktencheck against the client data (only the parts the page has). */
+export function faktencheckClientRules(context: Pick<ContentPipelineContext, "contact" | "wishes">): string[] {
+  const rules: string[] = [];
+  if (context.contact) {
+    rules.push(
+      "Kontaktdaten (feste Regel): Prüfe den Text auch gegen die Kontaktdaten (bestätigt). Firmenname, Adresse, Telefon, E-Mail, Öffnungszeiten und Links müssen so im Text stehen, wie sie dort stehen; eine Abweichung ist ein finding mit severity high. Was in den Kontaktdaten steht, ist belegt – dazu stellst du keine Frage.",
+    );
+  }
+  if (hasClientWishes(context.wishes)) {
+    rules.push(
+      "Wünsche des Kunden (feste Regel): Prüfe jeden Wunsch einzeln. Jeder Verstoß ist ein finding mit severity high, dessen title mit „Kundenwunsch:“ beginnt und dessen problem den Wunsch wörtlich nennt.",
+    );
+  }
+  return rules;
+}
+
+/** Fixed checks of the Endabnahme: every wish one by one, the contact data for consistency. */
+export function endabnahmeClientRules(context: Pick<ContentPipelineContext, "contact" | "wishes">): string {
+  const rules: string[] = [];
+  if (hasClientWishes(context.wishes)) {
+    rules.push(
+      "Prüfe jeden Wunsch des Kunden einzeln. Jeder Verstoß – auch ein Wunsch, der einer festen Regel weichen musste – kommt in unresolved: title beginnt mit „Kundenwunsch:“, problem nennt den Wunsch wörtlich. Ein eingehaltener Wunsch ist kein offener Punkt, auch wenn er der Tonalität, dem Text-Prompt oder der Seitentyp-Vorlage widerspricht: Der Wunsch geht diesen vor.",
+    );
+  }
+  if (context.contact) {
+    rules.push(
+      "Prüfe Firmenname, Adresse und Telefon im Text gegen die Kontaktdaten (bestätigt): Jede Abweichung und jede Schreibweise, die im Text nicht einheitlich ist, kommt in unresolved.",
+    );
+  }
+  return rules.join("\n");
 }
 
 function outputBlock(context: ContentPipelineContext, step: number, title: string, max = MAX_OUTPUT_CHARS): string {
@@ -570,7 +679,7 @@ export function joinPromptParts(parts: readonly string[]): string {
 const join = joinPromptParts;
 
 export const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte für kleine Unternehmen schreibt. Sprache: Deutsch.
-Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
+Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten, den Kontaktdaten (bestätigt) und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`;
 
 export const BLOCKS_SCHEMA = {
@@ -876,13 +985,16 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
     system: stepSystem(stepInstruction(context, "seo"), context.settings, [
       `Allgemeine Regeln (jeder Seitentyp):\n${general}`,
       `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
+      ...clientWishesRules(context),
     ]),
     user: join([
       pageBlock(context),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE})`),
       anbieterBlock(context),
+      kontaktBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
+      clientWishesBlock(context),
       notesBlock(context),
     ]),
     tool: {
@@ -909,13 +1021,18 @@ export const FAKTENCHECK_MAX_TOKENS = 12_000;
 function faktencheck(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: FAKTENCHECK_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "faktencheck"), context.settings),
+    system: stepSystem(stepInstruction(context, "faktencheck"), context.settings, [
+      ...faktencheckClientRules(context),
+      ...clientWishesRules(context),
+    ]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
       anbieterBlock(context),
+      kontaktBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
+      clientWishesBlock(context),
       notesBlock(context),
     ]),
     tool: {
@@ -964,8 +1081,12 @@ const DEFAULT_GEO_INSTRUCTION = resolveContentStepPrompt("geo", null);
  * prompt, so an uploaded text is reworked by the same rules as a page of the pipeline. The
  * instruction is the saved GEO text from Globale Prompts (or the default), already filled.
  */
-export function geoSystemPrompt(settings: ContentTextSettings, instruction: string = DEFAULT_GEO_INSTRUCTION): string {
-  return stepSystem(instruction, settings);
+export function geoSystemPrompt(
+  settings: ContentTextSettings,
+  instruction: string = DEFAULT_GEO_INSTRUCTION,
+  extra: readonly string[] = [],
+): string {
+  return stepSystem(instruction, settings, extra);
 }
 
 export const GEO_TOOL: Anthropic.Tool = {
@@ -1009,7 +1130,7 @@ export function freshnessSendBackBlock(context: Pick<ContentPipelineContext, "fr
 function geo(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: GEO_MAX_TOKENS,
-    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo")),
+    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), clientWishesRules(context)),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1017,8 +1138,10 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
       outputBlock(context, CONTENT_STEP_FAKTENCHECK, `Faktencheck (Schritt ${CONTENT_STEP_FAKTENCHECK}) – umsetzen`),
       freshnessSendBackBlock(context),
       anbieterBlock(context),
+      kontaktBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
+      clientWishesBlock(context),
       notesBlock(context),
     ]),
     tool: GEO_TOOL,
@@ -1032,14 +1155,16 @@ export const HORMOZI_MAX_TOKENS = 12_000;
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: HORMOZI_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "hormozi"), context.settings),
+    system: stepSystem(stepInstruction(context, "hormozi"), context.settings, clientWishesRules(context)),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – hormozi, conversion_goal und usable_facts`),
       anbieterBlock(context),
+      kontaktBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
+      clientWishesBlock(context),
       notesBlock(context),
     ]),
     tool: {
@@ -1075,13 +1200,14 @@ function normalizeSelfScore(raw: unknown): SelfScore | null {
 function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 12_000,
-    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings),
+    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, clientWishesRules(context)),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
+      clientWishesBlock(context),
       notesBlock(context),
     ]),
     tool: {
@@ -1126,13 +1252,14 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
 function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 12_000,
-    system: stepSystem(stepInstruction(context, "lektorat"), context.settings),
+    system: stepSystem(stepInstruction(context, "lektorat"), context.settings, clientWishesRules(context)),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
+      clientWishesBlock(context),
       notesBlock(context),
     ]),
     tool: {
@@ -1177,15 +1304,17 @@ function endabnahme(context: ContentPipelineContext): ContentStepSpec {
 
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
 unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein nicht gefüllter Hero („${CONTENT_HERO_PLACEHOLDER}“ oder „${CONTENT_HERO_PLACEHOLDER_LEGACY}“), eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite, ein offener Punkt der Aktualitätsprüfung. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und „Zuletzt aktualisiert: [DATUM]“.
-summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.`,
+summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.${endabnahmeClientRules(context) ? `\n${endabnahmeClientRules(context)}` : ""}`,
     user: join([
       pageBlock(context),
       currentTextBlock(context),
       outputBlock(context, CONTENT_STEP_LEKTORAT, `Lektorat (Schritt ${CONTENT_STEP_LEKTORAT}) – gemeldete Befunde`),
       openFindingsBlock(context),
       anbieterBlock(context),
+      kontaktBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
+      clientWishesBlock(context),
       notesBlock(context),
     ]),
     tool: {
@@ -1222,9 +1351,20 @@ export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: reado
     user: join([
       `## Abschnitte (bitte in derselben Form zurückgeben, nur der Text darin neu formuliert)\n${rephraseChunkHtml(chunk)}`,
       context.settings ? settingsBlock(context.settings) : REPHRASE_OWN_VORGABEN,
+      rephraseWishesBlock(context),
       notesBlock(context),
     ]),
   };
+}
+
+/**
+ * The wishes for the Grok pass, with the priority in a sentence: the system prompt is shared
+ * with the standalone Watermark tool and stays as it is.
+ */
+export function rephraseWishesBlock(context: Pick<RephrasePromptContext, "wishes">): string {
+  const block = clientWishesBlock(context);
+  if (!block) return "";
+  return `${block}\nDiese Wünsche gelten auch beim Neuformulieren, außer sie widersprechen den Fakten, der Anrede oder den verbotenen Wörtern; dann gilt die Regel.`;
 }
 
 const SPECS: Record<number, (context: ContentPipelineContext) => ContentStepSpec> = {

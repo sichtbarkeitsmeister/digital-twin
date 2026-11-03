@@ -73,6 +73,7 @@ async function TextePageContent({ searchParams }: { searchParams: { org?: string
           )}
           initialSettings={settingsRow ? settingsFromRow(settingsRow) : null}
           initialAvatarId={settingsRow?.avatar_agent_id ?? null}
+          initialWishes={settingsRow?.client_wishes ?? ""}
         />
       </div>
     </OrganisationPageShell>

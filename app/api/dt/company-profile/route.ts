@@ -5,6 +5,7 @@ import {
   loadCompanyProfile,
   saveCompanyProfile,
 } from "@/lib/dt/company-profile";
+import { CONTACT_CUSTOM_FIELDS_MAX, isContactFieldKey } from "@/lib/dt/contact-data";
 import { requireAuthUser } from "@/lib/dt/db";
 import { canManageDtAgents, isPlatformAdmin } from "@/lib/dt/org-access";
 
@@ -29,6 +30,14 @@ const patchSchema = z.object({
     )
     .max(20),
   note: z.string().trim().max(2_000).optional(),
+  /** The Kontaktdaten card (same data as in Texte); absent while the migration is missing. */
+  contactData: z
+    .object({
+      fields: z.record(z.string(), z.string().max(1_600)),
+      custom: z.array(z.object({ label: z.string().max(120), value: z.string().max(800) })).max(CONTACT_CUSTOM_FIELDS_MAX),
+      no_google_profile: z.boolean(),
+    })
+    .optional(),
 });
 
 async function isOrgMember(
@@ -98,6 +107,13 @@ export async function PATCH(req: Request) {
     websiteUrl: parsed.data.websiteUrl,
     contacts: parsed.data.contacts,
     points: parsed.data.points,
+    contactData: parsed.data.contactData
+      ? {
+          fields: Object.fromEntries(Object.entries(parsed.data.contactData.fields).filter(([key]) => isContactFieldKey(key))),
+          custom: parsed.data.contactData.custom,
+          no_google_profile: parsed.data.contactData.no_google_profile,
+        }
+      : null,
     note: parsed.data.note,
   });
 

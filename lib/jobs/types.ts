@@ -4,6 +4,7 @@ export type JobKind =
   | "leadinfo.normalize"
   | "seo.crawl"
   | "content.page"
+  | "content.contact"
   | "grounding.page"
   | "seo.grounding_check"
   | "seo.grounding_schedule"

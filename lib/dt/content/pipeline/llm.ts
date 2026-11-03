@@ -197,9 +197,14 @@ export async function callContentResearch(input: {
   /** Defaults to the Texte key. */
   apiKey?: string | null;
   onCall?: (call: ContentResearchCall) => Promise<void> | void;
+  /** The web tools with their limits; defaults to the Aktualitätsprüfung's (`DT_WEB_RESEARCH_TOOLS`). */
+  tools?: Anthropic.ToolUnion[];
+  /** Whose search it is in error messages; defaults to „der Aktualitätsprüfung“. */
+  purpose?: string;
   /** Tests hand in a stub client; no network. */
   anthropic?: Anthropic;
 }): Promise<ContentResearchResult> {
+  const purpose = input.purpose ?? "der Aktualitätsprüfung";
   let anthropic = input.anthropic;
   if (!anthropic) {
     const apiKey = input.apiKey ?? resolveContentApiKey();
@@ -219,7 +224,7 @@ export async function callContentResearch(input: {
   for (let round = 0; round < MAX_RESEARCH_ROUNDS; round++) {
     const remaining = deadline - Date.now();
     if (remaining < MIN_RESEARCH_ROUND_MS) {
-      throw new ContentLlmError("Die Websuche der Aktualitätsprüfung hat das Zeitlimit erreicht. Der Schritt wird später erneut versucht.", true);
+      throw new ContentLlmError(`Die Websuche ${purpose} hat das Zeitlimit erreicht. Der Schritt wird später erneut versucht.`, true);
     }
     let result: Awaited<ReturnType<typeof callAnthropicFirstAvailable>>;
     try {
@@ -231,7 +236,7 @@ export async function callContentResearch(input: {
         timeoutMs: remaining,
         stream: true,
         system: input.system,
-        tools: DT_WEB_RESEARCH_TOOLS,
+        tools: input.tools ?? DT_WEB_RESEARCH_TOOLS,
         toolChoice: { type: "auto" },
         messages,
       });
@@ -259,9 +264,9 @@ export async function callContentResearch(input: {
       continue;
     }
     if (response.stop_reason === "max_tokens") {
-      throw new ContentLlmError("Die Recherche der Aktualitätsprüfung wurde abgeschnitten. Bitte den Schritt wiederholen.", false);
+      throw new ContentLlmError(`Die Recherche ${purpose} wurde abgeschnitten. Bitte den Schritt wiederholen.`, false);
     }
     return { text: texts.join("\n\n"), blocks, calls, model: result.model };
   }
-  throw new ContentLlmError("Die Websuche der Aktualitätsprüfung wurde nicht fertig. Der Schritt wird später erneut versucht.", true);
+  throw new ContentLlmError(`Die Websuche ${purpose} wurde nicht fertig. Der Schritt wird später erneut versucht.`, true);
 }
