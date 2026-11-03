@@ -665,6 +665,7 @@ function testEndToEndFindings() {
   const dated = withDateMarker([{ id: "stand", heading: null, level: 2, html: "<p>Zuletzt aktualisiert: [BITTE PRÜFEN: Datum der Veröffentlichung]</p>" }]);
   assert.equal(dated[0]!.html, "<p>Zuletzt aktualisiert: [DATUM]</p>");
   assert.match(QUESTION_RULES, /geht dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor/, "the rule wins over saved prompts asking for placeholders");
+  assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, /der Marker \[DATUM\] \(das Datum setzt das Web-Team/, "[DATUM] is no open point anywhere in the text");
 
   // The Kontaktdaten's phone spelling: same digits in another grouping get the confirmed spelling.
   assert.equal(phoneDigits("+49 (0) 511 55 47 85 85"), "051155478585");
