@@ -575,6 +575,8 @@ async function runRephraseStep(input: {
   const run = await runRephraseOnBlocks(context, context.blocks, {
     progress,
     deadline,
+    // A section Grok gives no text for keeps its wording and becomes an open point (31.10.).
+    keepOnEmpty: true,
     onUsage: (usage) =>
       recordLlmUsageEvent(service, {
         organisationId: page.organisation_id,
@@ -604,6 +606,20 @@ async function runRephraseStep(input: {
   };
   // Watermark Entfernung writes text but is no gap-checked step: no question plan here.
   const { pagePatch, stepStatus, halted } = stepPatchFor(def, output, { ...page, knowledge: context.knowledge });
+  if (progress.kept?.length) {
+    const names = new Map(context.blocks.map((b) => [b.id, b.heading?.trim() || b.id]));
+    pagePatch.findings = [
+      ...page.findings,
+      ...progress.kept.map((k) => ({
+        title: "Abschnitt nicht umformuliert",
+        problem: `Grok hat für den Abschnitt „${names.get(k.block_id) ?? k.block_id}“ keinen Text geliefert (auch einzeln und mit den anderen Grok-Modellen). Er steht so da, wie das Lektorat ihn gelassen hat. ${k.reason}`.trim(),
+        proposal: "Abschnitt so lassen oder von Hand umformulieren (Abschnitt ändern).",
+        severity: "low",
+        severity_label: "Hinweis",
+        block_id: k.block_id,
+      })),
+    ];
+  }
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
   await saveProgress(run.model, { status: stepStatus, finished_at: new Date().toISOString() });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);

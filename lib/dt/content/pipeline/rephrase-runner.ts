@@ -21,7 +21,14 @@ import {
   rephrasedBlocks,
   type RephraseProgress,
 } from "@/lib/dt/content/pipeline/rephrase";
-import { XaiTimeoutError, callXaiText, resolveXaiModels, type XaiTextCall, type XaiTextResult } from "@/lib/dt/content/pipeline/xai";
+import {
+  XaiEmptyAnswerError,
+  XaiTimeoutError,
+  callXaiText,
+  resolveXaiModels,
+  type XaiTextCall,
+  type XaiTextResult,
+} from "@/lib/dt/content/pipeline/xai";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import type { ContentTextBlock } from "@/lib/dt/content/render";
 
@@ -55,6 +62,12 @@ export type RephraseRunOptions = {
   /** Tests pass a stub; production calls Grok. */
   call?: (input: XaiTextCall) => Promise<XaiTextResult>;
   now?: () => number;
+  /**
+   * Texte: a section Grok returns no text for (alone, with every model) keeps its wording and is
+   * listed in `progress.kept` instead of failing the step. The standalone tool leaves it off and
+   * reports the error.
+   */
+  keepOnEmpty?: boolean;
 };
 
 export type RephraseRunResult =
@@ -87,16 +100,29 @@ export async function runRephraseOnBlocks(
       return { state: "partial", model };
     }
 
-    const prompt = rephraseChunkPrompt(context, chunk);
-    let answer: XaiTextResult;
-    try {
-      answer = await call({
+    const ask = (part: readonly ContentTextBlock[], models: readonly string[]) => {
+      const prompt = rephraseChunkPrompt(context, part);
+      return call({
         system: prompt.system,
         user: prompt.user,
-        maxTokens: rephraseChunkMaxTokens(chunk),
-        timeoutMs: Math.min(remaining, REPHRASE_CHUNK_TIMEOUT_MS),
-        models: rephraseModelOrder(candidates, progress.slow_models),
+        maxTokens: rephraseChunkMaxTokens(part),
+        timeoutMs: Math.min(options.deadline - now(), REPHRASE_CHUNK_TIMEOUT_MS),
+        models,
       });
+    };
+    const book = async (answer: XaiTextResult, part: readonly ContentTextBlock[]) => {
+      model = answer.model;
+      const costEur = estimateCostEur(answer.model, answer.usage);
+      await options.onUsage({ model: answer.model, inputTokens: answer.usage.inputTokens, outputTokens: answer.usage.outputTokens, costEur });
+      for (const block of parseRephrasedChunk(answer.text, part)) progress.rewritten[block.id] = block.html;
+      progress.calls += 1;
+      progress.input_tokens += answer.usage.inputTokens;
+      progress.output_tokens += answer.usage.outputTokens;
+      progress.cost_eur = roundEur(progress.cost_eur + costEur);
+      if (!progress.models.includes(model)) progress.models.push(model);
+    };
+    try {
+      await book(await ask(chunk, rephraseModelOrder(candidates, progress.slow_models)), chunk);
     } catch (error) {
       // A model that needs more than a minute for one small chunk is the wrong model for this
       // text: remember it, so the retry starts with the next candidate instead of failing again.
@@ -104,18 +130,36 @@ export async function runRephraseOnBlocks(
         progress.slow_models.push(error.model);
         await options.save(progress, { reason: "paused", model }).catch(() => undefined);
       }
-      throw error;
+      if (!(error instanceof XaiEmptyAnswerError)) throw error;
+      // No text at all is no passing hiccup: the same call answers the same way (31.10.: nine
+      // times). Each section alone, first with the order as before, then with every other model.
+      for (const block of chunk) {
+        let lastEmpty: XaiEmptyAnswerError = error;
+        const tried = new Set<string>();
+        let answered = false;
+        for (const order of [rephraseModelOrder(candidates, progress.slow_models), ...candidates.map((m) => [m])]) {
+          if (order.length === 1 && tried.has(order[0]!)) continue;
+          if (options.deadline - now() < REPHRASE_MIN_REMAINING_MS) {
+            await options.save(progress, { reason: "paused", model });
+            return { state: "partial", model };
+          }
+          try {
+            await book(await ask([block], order), [block]);
+            answered = true;
+            break;
+          } catch (inner) {
+            if (!(inner instanceof XaiEmptyAnswerError)) throw inner;
+            lastEmpty = inner;
+            tried.add(inner.model);
+          }
+        }
+        if (answered) continue;
+        if (!options.keepOnEmpty) throw lastEmpty;
+        // Texte: the section keeps the Lektorat's wording; the page lists it as an open point.
+        progress.rewritten[block.id] = block.html;
+        progress.kept = [...(progress.kept ?? []).filter((k) => k.block_id !== block.id), { block_id: block.id, reason: lastEmpty.message.slice(0, 300) }];
+      }
     }
-
-    model = answer.model;
-    const costEur = estimateCostEur(answer.model, answer.usage);
-    await options.onUsage({ model: answer.model, inputTokens: answer.usage.inputTokens, outputTokens: answer.usage.outputTokens, costEur });
-    for (const block of parseRephrasedChunk(answer.text, chunk)) progress.rewritten[block.id] = block.html;
-    progress.calls += 1;
-    progress.input_tokens += answer.usage.inputTokens;
-    progress.output_tokens += answer.usage.outputTokens;
-    progress.cost_eur = roundEur(progress.cost_eur + costEur);
-    if (!progress.models.includes(model)) progress.models.push(model);
 
     if (options.stillWanted && !(await options.stillWanted())) {
       return { state: "discarded", model };

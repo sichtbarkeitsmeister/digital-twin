@@ -51,7 +51,7 @@ export function skipReason(page: ContentPageRow): string | null {
   }
 }
 
-async function enqueuePageJob(
+export async function enqueuePageJob(
   service: SupabaseClient,
   page: ContentPageRow,
   userId: string | null,
@@ -449,7 +449,10 @@ export async function submitContentAnswers(
   page: ContentPageRow,
   input: { answers: readonly ContentAnswerInput[]; submit: boolean },
   userId: string,
+  /** The dry run and the tests continue the page without the job queue. */
+  deps: { enqueue?: typeof enqueuePageJob } = {},
 ): Promise<ActionResult & { saved?: number }> {
+  const enqueue = deps.enqueue ?? enqueuePageJob;
   if (page.state !== "braucht_sie") return { ok: false, status: 409, message: "Die Seite wartet gerade nicht auf Antworten." };
   const byId = new Map(page.questions.filter((q) => q.id).map((q) => [q.id!, q]));
   for (const a of input.answers) {
@@ -473,7 +476,7 @@ export async function submitContentAnswers(
       .eq("page_id", page.id)
       .eq("step", CONTENT_STEP_FAKTENCHECK)
       .neq("status", "skipped");
-    return enqueuePageJob(service, page, userId, {
+    return enqueue(service, page, userId, {
       questions: page.questions.filter((q) => !q.grundlegend),
       notes: [...page.notes, customerAnswerNote(grundlegend.question, decision.action === "answer" ? decision.answer ?? null : null)].slice(-20),
     });
@@ -510,5 +513,5 @@ export async function submitContentAnswers(
   if (open.length > 0) {
     return { ok: false, status: 409, message: `Noch ${open.length} ${open.length === 1 ? "Frage" : "Fragen"} zum Unternehmen offen: beantworten oder „Keine Angabe“ wählen.` };
   }
-  return enqueuePageJob(service, page, userId, { question_stop: { ...nextStop, status: "answered", at: now } });
+  return enqueue(service, page, userId, { question_stop: { ...nextStop, status: "answered", at: now } });
 }
