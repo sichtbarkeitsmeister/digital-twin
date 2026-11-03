@@ -18,6 +18,7 @@ import {
   applyAutomaticContactValues,
   applyManualContactValues,
   contactFieldBadge,
+  contactFieldText,
   contactPromptData,
   diffContactData,
   readOrgContactData,
@@ -164,6 +165,10 @@ function testPromptBlockOnlyFilled() {
     assert.doesNotMatch(block, new RegExp(`- ${absent}:`), `${absent} is empty and not in the block`);
   }
   assert.equal(contactPromptData(data({})), null, "nothing filled: no block at all");
+  // Seen in a real run: a company name copied with soft hyphens from the website.
+  const shy = data({ firmenname: { value: "Rechts\u00adanwalts\u00adkanzlei DIEL", source: "manuell", updated_at: null } });
+  assert.equal(contactFieldText(shy, "firmenname"), "Rechtsanwaltskanzlei DIEL");
+  assert.equal(contactPromptData(shy)!.lines[0]!.value, "Rechtsanwaltskanzlei DIEL", "no soft hyphen in the prompt");
   assert.equal(kontaktBlock({ contact: null }), "");
   assert.match(kontaktBlock({ contact: contactPromptData(data({}, { no_google_profile: true })) }), /kein Google-Profil/);
   assert.match(BASE_RULES, /Anbieterfakten, den Kontaktdaten \(bestätigt\) und den Anmerkungen der Redaktion/, "BASE_RULES accepts facts from the Kontaktdaten");
@@ -626,6 +631,7 @@ function testWishesInEveryWritingStep() {
   for (const step of writing) {
     const spec = contentStepSpec(step, context);
     assert.ok(spec.system.includes(CLIENT_WISHES_RULES), `step ${step}: the priority rule is in the fixed system part`);
+    assert.match(CLIENT_WISHES_RULES, /nie eine Frage an den Kunden/, "a wish conflict is an open point, not a question");
   }
   // The rule comes after the Texter-Prompt and the Textvorlage, before the Branchenregel.
   const seo = contentStepSpec(CONTENT_STEP_SEO, context).system;
@@ -689,6 +695,7 @@ function testChecksOfFaktencheckAndEndabnahme() {
   assert.match(fakten, /Prüfe den Text auch gegen die Kontaktdaten/);
   const endabnahme = contentStepSpec(CONTENT_STEP_ENDABNAHME, context).system;
   assert.match(endabnahme, /Prüfe jeden Wunsch des Kunden einzeln\. Jeder Verstoß .* kommt in unresolved/);
+  assert.match(endabnahme, /Ein eingehaltener Wunsch ist kein offener Punkt/, "a kept wish is no open point (seen in a real run)");
   assert.match(endabnahme, /Prüfe Firmenname, Adresse und Telefon im Text gegen die Kontaktdaten/);
 
   // The Endabnahme's violations become the page's open points.

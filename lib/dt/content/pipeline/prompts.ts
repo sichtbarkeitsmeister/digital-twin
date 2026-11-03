@@ -674,7 +674,7 @@ export function endabnahmeClientRules(context: Pick<ContentPipelineContext, "con
   const rules: string[] = [];
   if (hasClientWishes(context.wishes)) {
     rules.push(
-      "Prüfe jeden Wunsch des Kunden einzeln. Jeder Verstoß – auch ein Wunsch, der einer festen Regel weichen musste – kommt in unresolved: title beginnt mit „Kundenwunsch:“, problem nennt den Wunsch wörtlich.",
+      "Prüfe jeden Wunsch des Kunden einzeln. Jeder Verstoß – auch ein Wunsch, der einer festen Regel weichen musste – kommt in unresolved: title beginnt mit „Kundenwunsch:“, problem nennt den Wunsch wörtlich. Ein eingehaltener Wunsch ist kein offener Punkt, auch wenn er der Tonalität, dem Text-Prompt oder der Seitentyp-Vorlage widerspricht: Der Wunsch geht diesen vor.",
     );
   }
   if (context.contact) {
