@@ -23,6 +23,7 @@ import {
   type ContentClientWishes,
 } from "@/lib/dt/content/client-wishes";
 import type { ContentPageKeywords } from "@/lib/dt/content/excel-structure";
+import { firstContentGap, hasContentGap } from "@/lib/dt/content/pipeline/gaps";
 import {
   brancheRuleGroup,
   contentTonalitaetText,
@@ -330,13 +331,17 @@ export function normalizeQuestions(raw: unknown, knownBlockIds: ReadonlySet<stri
     const question = str(r.question, 600);
     if (!question) continue;
     const blockId = str(r.block_id, 80);
+    const excerpt = str(r.excerpt, 500) || null;
+    const given = str(r.placeholder, 200) || null;
+    // Seen in a real run: the expected answer in `placeholder`, the text's placeholder in `excerpt`.
+    const placeholder = given && hasContentGap(given) ? given : (excerpt ? firstContentGap(excerpt) : null) ?? given;
     out.push({
       kind: ["fact", "decision", "missing", "outdated"].includes(String(r.kind)) ? String(r.kind) : "fact",
       question,
       field: str(r.field, 80) || null,
-      placeholder: str(r.placeholder, 200) || null,
+      placeholder,
       block_id: knownBlockIds.has(blockId) ? blockId : null,
-      excerpt: str(r.excerpt, 500) || null,
+      excerpt,
       blocking: r.blocking !== false,
       ...(r.scope === "firma" || r.scope === "seite" ? { scope: r.scope } : {}),
       ...(["high", "medium", "low"].includes(String(r.severity)) ? { severity: String(r.severity) } : {}),

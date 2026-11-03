@@ -439,6 +439,20 @@ console.log("normalize: ok");
   assert.ok(nothingFound && nothingFound.retryable, "claims but no source: never „aktuell“, try again");
   assert.match(nothingFound!.message, /als „aktuell“ durchgelassen/);
   assert.ok(researchProblem(researchFromCall("ohne Zählzeile", none, { searches: 0, fetches: 0 }), none), "no claim line and no source: not usable either");
+  // Found in the end-to-end run: every line a Kundenangabe or „nicht prüfbar“, yet counted.
+  const onlyCustomer = [
+    "**Prüfprotokoll**",
+    "- [zusammenfassung] „Gegründet im März 2017.“ → Kundenangabe – aus den Anbieterfakten – Quelle: keine",
+    "- [beweis] „5,0 Sterne bei Google“ → Kundenangabe – Bewertungsstand – Quelle: keine",
+    "- [stand] „Zuletzt aktualisiert: [DATUM]“ → nicht prüfbar – Platzhalter – Quelle: keine",
+    "Zeitkritische Aussagen: 3",
+  ].join("\n");
+  const customerOnly = researchFromCall(onlyCustomer, none, { searches: 0, fetches: 0 });
+  assert.equal(customerOnly.claims, 0, "nothing to check on the web");
+  assert.equal(researchProblem(customerOnly, none), null, "no source needed: the step goes on");
+  assert.ok(aktualitaetNeedsNoResult(customerOnly), "and needs no result call");
+  const mixed = researchFromCall(`${onlyCustomer}\n- [recht] „Seit 2024 gilt …“ → aktuell – heute so – Quelle: https://x.de`, none, { searches: 0, fetches: 0 });
+  assert.ok(researchProblem(mixed, none), "one line that needs the web and no source: still not usable");
   const failing = inspected({ searchErrors: ["unavailable", "unavailable"] });
   const failed = researchProblem(researchFromCall("Zeitkritische Aussagen: 0", failing, { searches: 2, fetches: 0 }), failing);
   assert.ok(failed?.retryable);

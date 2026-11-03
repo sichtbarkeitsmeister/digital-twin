@@ -691,6 +691,13 @@ function testEndToEndFindings() {
   assert.deepEqual(items.filter((i) => i.source === "offen").map((i) => [i.action, i.placeholder]), five.overflow.map((o) => ["drop", o.placeholder]), "the two unasked ones are dropped");
   assert.doesNotMatch(renderBlocksHtml(applyDrops(blocks, items).blocks), /BITTE PRÜFEN/, "no placeholder of an unasked question stays");
   assert.equal(readQuestionStop({ handled: [{ ...items[4], source: "offen" }] }).handled[0]!.source, "offen");
+  // The model put the expected answer into `placeholder` and the text's placeholder into `excerpt`.
+  const mixed = normalizeQuestions(
+    [{ question: "Welche Infusionsinhalte werden eingesetzt?", placeholder: "Hochdosis-Vitamin-C, Aufbauinfusionen", excerpt: "[BITTE PRÜFEN: genaue Infusionsinhalte]", block_id: "x" }],
+    new Set(["x"]),
+  );
+  assert.equal(mixed[0]!.placeholder, "[BITTE PRÜFEN: genaue Infusionsinhalte]", "the text's placeholder, so the answer can be worked in");
+  assert.equal(normalizeQuestions([{ question: "Q?", placeholder: "frei", excerpt: "kein Platzhalter" }], new Set())[0]!.placeholder, "frei");
   console.log("end-to-end findings: sources, date, phone spelling, soft hyphens, unasked placeholders: ok");
 }
 

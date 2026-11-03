@@ -399,18 +399,39 @@ export function parseClaimCount(protocol: string): number | null {
   return last ? Number(last[1]) : null;
 }
 
+/**
+ * The protocol's lines („- [id] „Aussage“ → Einstufung – …“): how many there are and how many
+ * need a source on the web. „Kundenangabe“ and „nicht prüfbar“ are only marked, never searched.
+ */
+export function protocolLineCounts(protocol: string): { lines: number; web: number } {
+  let lines = 0;
+  let web = 0;
+  for (const line of protocol.split("\n")) {
+    const m = line.match(/^\s*[-*•]\s*\[[^\]]*\].*?→\s*\**\s*([^–—\-|]+)/u);
+    if (!m) continue;
+    lines += 1;
+    if (!/^\s*(?:kundenangabe|nicht\s+prüfbar)/iu.test(m[1]!)) web += 1;
+  }
+  return { lines, web };
+}
+
 export function researchFromCall(
   protocol: string,
   inspection: ResearchInspection,
   usage: { searches: number; fetches: number },
 ): AktualitaetResearch {
+  // A protocol whose every line is a Kundenangabe or „nicht prüfbar“ found nothing to check on the
+  // web, even when its count line counts those lines: no source is needed then (as with 0).
+  const counted = parseClaimCount(protocol);
+  const lines = protocolLineCounts(protocol);
+  const claims = counted != null && counted > 0 && lines.lines > 0 && lines.web === 0 ? 0 : counted;
   return {
     text: protocol.trim(),
     sources: inspection.sources,
     searches: usage.searches,
     fetches: usage.fetches,
     search_limit_hit: inspection.searchLimitHit,
-    claims: parseClaimCount(protocol),
+    claims,
   };
 }
 

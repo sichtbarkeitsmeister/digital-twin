@@ -463,6 +463,7 @@ async function runAktualitaetStep(input: {
       fetches: result.calls.reduce((sum, call) => sum + call.web.webFetchRequests, 0),
     });
     const problem = researchProblem(research, inspection);
+    if (problem) console.warn("[content] research not usable, protocol:", research.text.slice(0, 1500));
     if (problem) {
       // Never „alles aktuell“ without a source: the step fails visibly, the cost stays recorded.
       await saveProgress();
