@@ -310,6 +310,7 @@ async function testFillFromWebsite() {
   let extractionCalls = 0;
   const result = await fillContactDataFromWebsite(db.service, ORG, {
     userId: USER,
+    retryDelayMs: 0,
     fetchImpl,
     now: NOW,
     callTool: async () => {
@@ -318,7 +319,8 @@ async function testFillFromWebsite() {
     },
   });
   assert.ok(result.ok);
-  assert.deepEqual(fetched.sort(), ["https://muster-dach.de/", "https://muster-dach.de/impressum", "https://muster-dach.de/kontakt"]);
+  assert.deepEqual([...new Set(fetched)].sort(), ["https://muster-dach.de/", "https://muster-dach.de/impressum", "https://muster-dach.de/kontakt"]);
+  assert.equal(fetched.filter((u) => u.endsWith("/kontakt")).length, 2, "a page that reads like a bot check (too short) is fetched once more");
   assert.equal(extractionCalls, 0, "the heuristics filled the core fields: no model call");
   const loaded = await loadOrgContactData(db.service, ORG);
   assert.equal(loaded.data.fields.telefon?.value, "0221 55555", "the manual phone stays");
@@ -344,6 +346,7 @@ async function testFillFromWebsite() {
   const models: string[][] = [];
   const sparseResult = await fillContactDataFromWebsite(sparse.service, ORG, {
     userId: null,
+    retryDelayMs: 0,
     fetchImpl: async () => new Response("", { status: 500 }),
     callTool: async (input) => {
       models.push(input.models);
@@ -653,7 +656,7 @@ function testWishesInEveryWritingStep() {
   const plain = pipelineContext();
   for (const step of [...writing, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_ENDABNAHME]) {
     const spec = contentStepSpec(step, plain);
-    assert.doesNotMatch(`${spec.system}\n${spec.user}`, /Wünsche des Kunden|Kontaktdaten \(bestätigt\)\n/, `step ${step}: nothing without client data`);
+    assert.doesNotMatch(`${spec.system}\n${spec.user}`, /## Wünsche des Kunden|Wünsche des Kunden \(feste Regel\)|## Kontaktdaten \(bestätigt\)/, `step ${step}: nothing without client data`);
   }
   console.log("Kundenwünsche: in every writing step: ok");
 }

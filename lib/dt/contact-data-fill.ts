@@ -95,7 +95,7 @@ type ToolCaller = typeof callContentTool;
 export async function fillContactDataFromWebsite(
   service: SupabaseClient,
   organisationId: string,
-  options: { userId: string | null; note?: string; fetchImpl?: FetchLike; callTool?: ToolCaller; now?: Date } = { userId: null },
+  options: { userId: string | null; note?: string; fetchImpl?: FetchLike; callTool?: ToolCaller; now?: Date; retryDelayMs?: number } = { userId: null },
 ): Promise<ContactFillResult> {
   const { data: rows, error } = await service
     .from("dt_site_pages")
@@ -119,7 +119,12 @@ export async function fillContactDataFromWebsite(
   const pageTexts: Array<{ label: string; text: string; kind: string }> = [];
   const pages: string[] = [];
   for (const choice of choices) {
-    const fetched = await fetchLivePageHtml(choice.page.url, options.fetchImpl ?? fetch);
+    // One more try after a short pause: a slow or busy site (15 s limit) lost the Google link in a test run.
+    let fetched = await fetchLivePageHtml(choice.page.url, options.fetchImpl ?? fetch);
+    if (!fetched || looksLikeBlockedPage(liveHtmlText(fetched))) {
+      await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs ?? 2_000));
+      fetched = (await fetchLivePageHtml(choice.page.url, options.fetchImpl ?? fetch)) ?? fetched;
+    }
     const liveText = fetched ? liveHtmlText(fetched) : "";
     // A bot check instead of the page: the stored crawl text stands in (without links).
     const html = fetched && !looksLikeBlockedPage(liveText) ? fetched : null;
