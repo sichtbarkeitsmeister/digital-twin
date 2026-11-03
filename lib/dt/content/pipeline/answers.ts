@@ -109,6 +109,18 @@ export function fillPlaceholder(block: ContentTextBlock, placeholder: string, an
   };
 }
 
+/**
+ * Whether an answer can stand in the text in place of its placeholder as it is: a value („120 €“,
+ * „Mo–Fr 9–17 Uhr“), not a confirmation („Ja, das stimmt so.“) or several sentences. Only such an
+ * answer is swapped in by code; any other needs the model's sentence, or the placeholder stays.
+ */
+export function isLiteralAnswer(answer: string): boolean {
+  const a = answer.trim();
+  if (!a || a.length > 160) return false;
+  if (/^(?:ja|nein|jein|stimmt|korrekt|richtig|genau|passt|so ist es|trifft zu|trifft nicht zu)\b/iu.test(a)) return false;
+  return !/[.!?]\s+\p{Lu}/u.test(a);
+}
+
 /** Every number in `after` is in `before` or in an answer: the pass adds no facts of its own. */
 export function noNewNumbers(before: string, after: string, answers: readonly string[]): boolean {
   const allowed = new Set([before, ...answers].flatMap((t) => t.match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(/[.,]/g, "")));
@@ -177,6 +189,11 @@ export function normalizeAnswersOutput(
       return items.reduce((b, h) => {
         if (!isTextPlaceholder(h.placeholder)) return b;
         if (h.action === "drop") return removeSentenceWith(b, h.placeholder!) ?? b;
+        if (!isLiteralAnswer(h.answer!)) {
+          // „Ja, das stimmt so.“ in place of the placeholder would be nonsense: it stays an open placeholder.
+          rejected.push({ block_id: block.id, reason: `Antwort nicht als Wert einsetzbar, Platzhalter bleibt: ${h.placeholder}` });
+          return b;
+        }
         return fillPlaceholder(b, h.placeholder!, h.answer!);
       }, block);
     };
@@ -184,7 +201,10 @@ export function normalizeAnswersOutput(
       rejected.push({ block_id: block.id, reason: "fehlt in der Antwort" });
       return filledInCode();
     }
-    const candidate = { ...proposed, id: block.id, level: proposed.level ?? block.level };
+    // Heading and level are no part of an answer: a model that changed them anyway is repaired,
+    // not thrown away (seen in a real run: the level changed, and the answer went in by code).
+    const headingMayChange = index > 0 && block.id !== CONTENT_HERO_BLOCK_ID && items.some((h) => (block.heading ?? "").includes(h.placeholder ?? "\u0000"));
+    const candidate = { ...proposed, id: block.id, level: block.level, heading: headingMayChange ? proposed.heading : block.heading };
     const problem = why(block, candidate, items, index === 0);
     if (problem) {
       rejected.push({ block_id: block.id, reason: problem });

@@ -15,7 +15,15 @@ import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { contentGapQuestions } from "../lib/dt/content/pipeline/gaps";
 import { addOrgQuestions, contactFieldsForAnswer, customerAnswersFromPool, loadOrgQuestions } from "../lib/dt/content/org-questions";
 import { approvalPatch, rerunPagePatch, resetContentPage, stopContentRun, submitContentAnswers } from "../lib/dt/content/pipeline/actions";
-import { answerTargets, applyDrops, fillPlaceholder, noNewNumbers, normalizeAnswersOutput, removeSentenceWith } from "../lib/dt/content/pipeline/answers";
+import {
+  answerTargets,
+  applyDrops,
+  fillPlaceholder,
+  isLiteralAnswer,
+  noNewNumbers,
+  normalizeAnswersOutput,
+  removeSentenceWith,
+} from "../lib/dt/content/pipeline/answers";
 import {
   FAKTENCHECK_QUESTION_RULES,
   QUESTION_RULES,
@@ -566,8 +574,15 @@ function testPassChecks() {
   const invented = normalizeAnswersOutput({ blocks: [{ id: "kosten", heading: "Was kostet die Beratung?", level: 2, html: "<p>Die Stunde kostet 120 €, Firmen zahlen 150 €.</p>" }] }, { blocks, targets });
   assert.deepEqual([invented.changed, invented.fallback, invented.rejected[0]?.reason], [[], ["kosten"], "Zahl, die weder im Abschnitt noch in einer Antwort steht"]);
   assert.match(invented.blocks.find((b) => b.id === "kosten")!.html, /Danach kostet die Stunde 120 €\./, "fallback: the placeholder swapped for the answer");
-  const heading = normalizeAnswersOutput({ blocks: [{ id: "kosten", heading: "Preise", level: 2, html: "<p>120 €</p>" }] }, { blocks, targets });
-  assert.equal(heading.rejected[0]?.reason, "Überschrift geändert");
+  const heading = normalizeAnswersOutput({ blocks: [{ id: "kosten", heading: "Preise", level: 3, html: "<p>Die Erstberatung ist kostenlos. Danach kostet die Stunde 120 €. Sie zahlen erst nach dem Termin.</p>" }] }, { blocks, targets });
+  const repaired = heading.blocks.find((b) => b.id === "kosten")!;
+  assert.deepEqual([repaired.heading, repaired.level, heading.changed], ["Was kostet die Beratung?", 2, ["kosten"]], "heading and level are repaired, the answer kept");
+  // A confirmation is no value: the code does not paste „Ja, das stimmt so.“ into the sentence.
+  const yes: ContentHandledQuestion = { ...answer, answer: "Ja, das stimmt so." };
+  const confirmed = normalizeAnswersOutput({ blocks: [] }, { blocks, targets: answerTargets(blocks, [yes]) });
+  assert.match(confirmed.blocks.find((b) => b.id === "kosten")!.html, /\[BITTE PRÜFEN: Preis pro Stunde\]/, "the placeholder stays open");
+  assert.ok(confirmed.rejected.some((r) => /nicht als Wert einsetzbar/.test(r.reason)));
+  assert.ok(isLiteralAnswer("120 €") && isLiteralAnswer("Mo–Fr 9–17 Uhr") && !isLiteralAnswer("Ja.") && !isLiteralAnswer("Nein, das machen wir nicht. Aber anders."));
   const marker = normalizeAnswersOutput({ blocks: [{ id: "kosten", heading: "Was kostet die Beratung?", level: 2, html: "<p>Die Stunde kostet [BITTE PRÜFEN: Preis pro Stunde] bzw. 120 €.</p>" }] }, { blocks, targets });
   assert.equal(marker.rejected[0]?.reason, "Platzhalter oder Marker verändert", "the answered placeholder must be gone");
   assert.equal(noNewNumbers("Wir prüfen in 5 Tagen.", "Wir prüfen in 5 Tagen, ab 120 €.", ["120 €"]), true);
