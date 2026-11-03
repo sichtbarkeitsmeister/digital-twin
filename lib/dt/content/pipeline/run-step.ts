@@ -19,7 +19,7 @@ import {
   applyDrops,
   normalizeAnswersOutput,
 } from "@/lib/dt/content/pipeline/answers";
-import { planQuestionStop, questionStopOutcome, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
+import { planQuestionStop, questionStopOutcome, questionStopPassItems, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { buildContentKnowledge, customerAnswerNote } from "@/lib/dt/content/pipeline/questions";
 import { parseClientWishes } from "@/lib/dt/content/client-wishes";
 import {
@@ -799,7 +799,8 @@ export async function runQuestionStop(
   }
 
   // „Antworten einarbeiten“: drops in code, answers through one short call on the affected Abschnitte.
-  const handled = plan.handled;
+  // Page questions never asked (over the limit) go like „Ohne Angabe weiter“.
+  const handled = questionStopPassItems(plan);
   const dropped = applyDrops(blocks, handled);
   const forModel = [...handled.filter((h) => h.action === "answer" && h.answer), ...dropped.unresolved];
   const targets = answerTargets(dropped.blocks, forModel);

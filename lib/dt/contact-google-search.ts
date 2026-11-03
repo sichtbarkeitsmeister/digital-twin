@@ -16,8 +16,7 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 
-import { contactFieldText, type OrgContactData } from "@/lib/dt/contact-data";
-import { phoneDigits } from "@/lib/dt/contact-data-crawl";
+import { contactFieldText, phoneDigits, type OrgContactData } from "@/lib/dt/contact-data";
 import { DT_WEB_RESEARCH_TOOLS } from "@/lib/dt/seo/web-research";
 import { extractGoogleProfileUrls } from "@/lib/surveys/org-crawl-prefill";
 

@@ -47,6 +47,8 @@ import {
   overflowFindings,
   planContentQuestions,
   questionPlanRecord,
+  sourceFindings,
+  wishConflictFindings,
   type ContentKnowledge,
   type ContentQuestionPlan,
 } from "@/lib/dt/content/pipeline/questions";
@@ -63,6 +65,7 @@ import {
   CONTENT_STEP_VERMENSCHLICHUNG,
   type ContentStepDefinition,
 } from "@/lib/dt/content/pipeline/steps";
+import { phoneDigits } from "@/lib/dt/contact-data";
 import { htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import type { ContentPageRow, ContentStepRow } from "@/lib/dt/content/store";
 import type { IngestedText } from "@/lib/dt/text-tools/ingest";
@@ -95,8 +98,55 @@ export const GAP_CHECKED_TEXT_STEPS: ReadonlySet<number> = new Set([
   CONTENT_STEP_LEKTORAT,
 ]);
 
-export function textPatch(out: TextOutput): Record<string, unknown> {
-  const html = renderBlocksHtml(out.blocks);
+/**
+ * „[BITTE PRÜFEN: Datum der Veröffentlichung]“ (some saved prompts ask for it) is the date the web
+ * team sets on publishing: the wanted marker [DATUM], not a question for the customer.
+ */
+const PUBLICATION_DATE_PLACEHOLDER_RE =
+  /\[\s*BITTE\s+PR(?:Ü|UE)FEN\s*:\s*(?:(?:Datum|Stand)\s+der\s+Ver(?:ö|oe)ffentlichung|Ver(?:ö|oe)ffentlichungsdatum|Datum|Stand|Datum\s+der\s+letzten\s+Aktualisierung)\s*\]/giu;
+
+export function withDateMarker(blocks: readonly ContentTextBlock[]): ContentTextBlock[] {
+  return blocks.map((b) => {
+    const html = b.html.replace(PUBLICATION_DATE_PLACEHOLDER_RE, "[DATUM]");
+    const heading = b.heading?.replace(PUBLICATION_DATE_PLACEHOLDER_RE, "[DATUM]") ?? null;
+    return html === b.html && heading === (b.heading ?? null) ? b : { ...b, html, heading };
+  });
+}
+
+const PHONE_IN_TEXT_RE = /(?:\+\s?49|\b0)[\d\s/().\u2011-]{5,}\d/g;
+
+/**
+ * Phone numbers of the Kontaktdaten (bestätigt) in exactly their spelling: a number in the text
+ * with the same digits but another grouping („0511 / 554 785 85“) gets the confirmed spelling.
+ * Only text, never an attribute (a tel: link keeps its form).
+ */
+export function withContactSpelling(blocks: readonly ContentTextBlock[], knowledge?: ContentKnowledge): ContentTextBlock[] {
+  const confirmed = (["telefon", "mobil"] as const)
+    .map((key) => knowledge?.values[key])
+    .filter((v): v is { value: string; source: "kontaktdaten" } => v?.source === "kontaktdaten" && Boolean(v.value.trim()))
+    .map((v) => ({ spelling: v.value.trim(), digits: phoneDigits(v.value) }))
+    .filter((v) => v.digits.length >= 6);
+  if (confirmed.length === 0) return [...blocks];
+  const fix = (text: string) =>
+    text.replace(PHONE_IN_TEXT_RE, (match) => {
+      const trimmed = match.replace(/[\s/(.-]+$/, "");
+      const hit = confirmed.find((c) => c.digits === phoneDigits(trimmed));
+      return hit && trimmed !== hit.spelling ? hit.spelling + match.slice(trimmed.length) : match;
+    });
+  const fixHtml = (html: string) =>
+    html
+      .split(/(<[^>]*>)/)
+      .map((part) => (part.startsWith("<") ? part : fix(part)))
+      .join("");
+  return blocks.map((b) => {
+    const html = fixHtml(b.html);
+    const heading = b.heading == null ? b.heading : fix(b.heading);
+    return html === b.html && heading === b.heading ? b : { ...b, html, heading };
+  });
+}
+
+export function textPatch(out: TextOutput, knowledge?: ContentKnowledge): Record<string, unknown> {
+  const html = renderBlocksHtml(withContactSpelling(withDateMarker(out.blocks), knowledge));
   return { html, markdown: htmlToMarkdown(html), title: out.title, meta_description: out.meta_description };
 }
 
@@ -126,10 +176,13 @@ export function collectQuestions(
   return plan;
 }
 
-/** Open points for the questions over the limit, added once to the page's open points. */
+/** Open points for the questions over the limit and for wish conflicts, added once to the page's open points. */
 function withOverflow(findings: readonly ContentFinding[], plan: ContentQuestionPlan): ContentFinding[] {
   const seen = new Set(findings.map(findingKey));
-  return [...findings, ...overflowFindings(plan.overflow).filter((f) => !seen.has(findingKey(f)))];
+  return [
+    ...findings,
+    ...[...overflowFindings(plan.overflow), ...wishConflictFindings(plan.wishConflicts), ...sourceFindings(plan.sources)].filter((f) => !seen.has(findingKey(f))),
+  ];
 }
 
 /** Every placeholder still in the text at the Endabnahme, as an open point (unless the model named it). */
@@ -274,7 +327,7 @@ export function stepPatchFor(
     case CONTENT_STEP_AKTUALITAET: {
       const out = output as AktualitaetOutput;
       if (out.blocks.length === 0) throw new ContentLlmError("Die Aktualitätsprüfung lieferte keinen Text.", true);
-      Object.assign(pagePatch, textPatch(out));
+      Object.assign(pagePatch, textPatch(out, current.knowledge));
       const geoSkipped = current.skip_steps?.includes("geo") ?? false;
       const freshness = planFreshness(readContentFreshness(current.freshness), out, now.toISOString(), { geoSkipped });
       pagePatch.freshness = freshness.freshness;
@@ -296,10 +349,10 @@ export function stepPatchFor(
     case CONTENT_STEP_LEKTORAT: {
       const out = output as LektoratOutput;
       if (out.blocks.length === 0) throw new ContentLlmError("Das Lektorat lieferte keinen Text.", true);
-      Object.assign(pagePatch, textPatch(out));
+      Object.assign(pagePatch, textPatch(out, current.knowledge));
       pagePatch.final_findings = out.final_findings;
       plan = collectQuestions(pagePatch, savedBlocks(pagePatch), { step: def.step, current });
-      if (plan.overflow.length > 0) pagePatch.findings = withOverflow(current.findings ?? [], plan);
+      if (plan.overflow.length > 0 || plan.wishConflicts.length > 0 || plan.sources.length > 0) pagePatch.findings = withOverflow(current.findings ?? [], plan);
       break;
     }
     case CONTENT_STEP_ENDABNAHME: {
@@ -320,7 +373,7 @@ export function stepPatchFor(
       if (def.writesText) {
         const out = output as TextOutput;
         if (out.blocks.length === 0) throw new ContentLlmError("Die KI hat keinen Text geliefert.", true);
-        Object.assign(pagePatch, textPatch(out));
+        Object.assign(pagePatch, textPatch(out, current.knowledge));
         if (def.step === CONTENT_STEP_GEO) {
           // GEO works the Faktencheck's findings in; they are settled then. The open points the
           // Aktualitätsprüfung leaves after it stay on the page until the Endabnahme.
@@ -331,7 +384,7 @@ export function stepPatchFor(
         }
         if (GAP_CHECKED_TEXT_STEPS.has(def.step)) {
           plan = collectQuestions(pagePatch, savedBlocks(pagePatch), { step: def.step, current });
-          if (plan.overflow.length > 0) {
+          if (plan.overflow.length > 0 || plan.wishConflicts.length > 0 || plan.sources.length > 0) {
             const base = def.step === CONTENT_STEP_GEO ? [] : (current.findings ?? []);
             pagePatch.findings = withOverflow(base, plan);
           }

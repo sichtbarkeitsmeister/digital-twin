@@ -332,6 +332,10 @@ export type ContentQuestionPlan = {
   suppressed: Array<{ question: string; reason: string }>;
   /** The one question that stops the page right after the Faktencheck. */
   grundlegend: ContentQuestion | null;
+  /** Wish conflicts the model asked as questions: open points instead. */
+  wishConflicts: ContentQuestion[];
+  /** Missing sources: the editor's open points, not customer questions. */
+  sources: ContentQuestion[];
 };
 
 function sameQuestion(a: ContentQuestion, b: ContentQuestion): boolean {
@@ -340,7 +344,54 @@ function sameQuestion(a: ContentQuestion, b: ContentQuestion): boolean {
   if (isTextPlaceholder(a.placeholder) && isTextPlaceholder(b.placeholder)) {
     return (a.block_id ?? "") === (b.block_id ?? "") && loose(a.placeholder) === loose(b.placeholder);
   }
+  // A company question is the same wherever on the page it was raised.
+  if (a.scope === "firma" || b.scope === "firma") return similarQuestionText(a.question, b.question);
   return (a.block_id ?? "") === (b.block_id ?? "") && similarQuestionText(a.question, b.question);
+}
+
+/** The organisation's pool already has this question (open or decided): it is a company question then. */
+export function poolMatch(q: ContentQuestion, pool: readonly ContentPoolQuestion[]): ContentPoolQuestion | null {
+  const key = poolDedupeKey(q);
+  return pool.find((p) => p.dedupe_key === key) ?? pool.find((p) => similarQuestionText(p.question, q.question)) ?? null;
+}
+
+/**
+ * A conflict between a customer wish and a fixed rule is an open point, never a question to the
+ * customer (the rule wins, see `CLIENT_WISHES_RULES`); the model sometimes asks anyway.
+ */
+export function isWishConflictQuestion(q: Pick<ContentQuestion, "question">): boolean {
+  return /\b(?:kunden)?wunsch\b|\bwünsche des kunden\b/i.test(q.question) && /kollidier|widersprich|widerspruch|konflikt|vereinbar/i.test(q.question);
+}
+
+/**
+ * A missing source for a claim ([QUELLE BITTE ERGÄNZEN], „Welche Quelle belegt …?“) is the
+ * editor's research, not a fact only the customer knows: an open point, never a customer question.
+ */
+export function isSourceQuestion(q: Pick<ContentQuestion, "question" | "placeholder" | "excerpt">): boolean {
+  if (/\[\s*QUELLE\s+BITTE/i.test(q.placeholder ?? "")) return true;
+  return /^\s*welche\s+(?:quelle|studie|leitlinie)/i.test(q.question) || (/quelle/i.test(q.question) && /\[\s*QUELLE\s+BITTE/i.test(q.excerpt ?? ""));
+}
+
+export function sourceFindings(questions: readonly ContentQuestion[]): ContentFinding[] {
+  return questions.map((q) => ({
+    title: "Quelle fehlt",
+    problem: [q.question, q.excerpt ? `Stelle: „${q.excerpt}“` : ""].filter(Boolean).join(" "),
+    proposal: "Quelle recherchieren und ergänzen oder die Aussage streichen.",
+    severity: "medium",
+    severity_label: "Mittel",
+    block_id: q.block_id ?? null,
+  }));
+}
+
+export function wishConflictFindings(questions: readonly ContentQuestion[]): ContentFinding[] {
+  return questions.map((q) => ({
+    title: "Kundenwunsch im Konflikt",
+    problem: q.question,
+    proposal: "Der Wunsch weicht einer festen Regel (Fakten, Anrede, verbotene Wörter, Branchenregel). Bitte prüfen, ob der Wunsch angepasst werden soll.",
+    severity: "medium",
+    severity_label: "Mittel",
+    block_id: q.block_id ?? null,
+  }));
 }
 
 const KNOWN_REASON: Record<string, string> = {
@@ -376,8 +427,27 @@ export function planContentQuestions(input: {
 
   const kept: ContentQuestion[] = [];
   const suppressed: ContentQuestionPlan["suppressed"] = [];
-  for (const q of all) {
-    if (kept.some((k) => sameQuestion(k, q))) continue;
+  const wishConflicts: ContentQuestion[] = [];
+  const sources: ContentQuestion[] = [];
+  for (const raw of all) {
+    if (isWishConflictQuestion(raw)) {
+      wishConflicts.push(raw);
+      continue;
+    }
+    if (isSourceQuestion(raw)) {
+      if (!sources.some((s) => sameQuestion(s, raw))) sources.push(raw);
+      continue;
+    }
+    // Asked once for the organisation already: a company question, not one of this page.
+    const q = raw.scope === "seite" && poolMatch(raw, knowledge.pool) ? { ...raw, scope: "firma" as const } : raw;
+    if (kept.some((k) => sameQuestion(k, q))) {
+      // The same question as company and page question: the company one stands.
+      if (q.scope === "firma") {
+        const i = kept.findIndex((k) => sameQuestion(k, q));
+        if (kept[i]!.scope === "seite") kept[i] = { ...kept[i]!, scope: "firma" };
+      }
+      continue;
+    }
     const known = knownAnswerFor(q, knowledge);
     if (known) {
       suppressed.push({ question: q.question, reason: KNOWN_REASON[known.source] ?? "bekannt" });
@@ -413,6 +483,8 @@ export function planContentQuestions(input: {
     overflow: ranked.slice(CONTENT_MAX_PAGE_QUESTIONS),
     suppressed,
     grundlegend: grundlegend ? ranked.find((q) => q.grundlegend) ?? null : null,
+    wishConflicts,
+    sources,
   };
 }
 
@@ -436,6 +508,8 @@ export function questionPlanRecord(plan: ContentQuestionPlan): Record<string, un
     asked_on_page: plan.page.map((q) => q.question),
     company_questions: plan.firma.map((q) => q.question),
     unasked_questions: plan.overflow.map((q) => q.question),
+    wish_conflicts: plan.wishConflicts.map((q) => q.question),
+    missing_sources: plan.sources.length,
     suppressed_questions: plan.suppressed,
     grundlegend: plan.grundlegend?.question ?? null,
   };

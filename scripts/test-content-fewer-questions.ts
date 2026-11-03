@@ -10,7 +10,7 @@
  */
 import assert from "node:assert/strict";
 
-import { EMPTY_ORG_CONTACT_DATA, type OrgContactData } from "../lib/dt/contact-data";
+import { EMPTY_ORG_CONTACT_DATA, contactFieldText, contactPromptData, phoneDigits, type OrgContactData } from "../lib/dt/contact-data";
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { contentGapQuestions } from "../lib/dt/content/pipeline/gaps";
 import { addOrgQuestions, contactFieldsForAnswer, customerAnswersFromPool, loadOrgQuestions } from "../lib/dt/content/org-questions";
@@ -24,11 +24,19 @@ import {
   normalizeQuestions,
   type ContentPipelineContext,
 } from "../lib/dt/content/pipeline/prompts";
-import { planQuestionStop, questionStopDue, questionStopOutcome, readQuestionStop, type ContentHandledQuestion } from "../lib/dt/content/pipeline/question-stop";
+import {
+  planQuestionStop,
+  questionStopDue,
+  questionStopOutcome,
+  questionStopPassItems,
+  readQuestionStop,
+  type ContentHandledQuestion,
+} from "../lib/dt/content/pipeline/question-stop";
 import {
   CONTENT_MAX_PAGE_QUESTIONS,
   buildContentKnowledge,
   customerAnswerNote,
+  isSourceQuestion,
   knownAnswerFor,
   normalizeQuestionScope,
   planContentQuestions,
@@ -37,7 +45,7 @@ import {
   type ContentPoolQuestion,
 } from "../lib/dt/content/pipeline/questions";
 import { runQuestionStop, type QuestionStopOutcome } from "../lib/dt/content/pipeline/run-step";
-import { planFreshness, stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
+import { planFreshness, stepPatchFor, withContactSpelling, withDateMarker } from "../lib/dt/content/pipeline/step-patch";
 import {
   CONTENT_STEP_AKTUALITAET,
   CONTENT_STEP_ENDABNAHME,
@@ -179,6 +187,28 @@ function testLimitAndOverflow() {
   const findings = patch.pagePatch.findings as Array<{ title: string; severity: string }>;
   assert.equal(findings.filter((f) => f.title === "Offene Frage (nicht gestellt)").length, 3, "the rest (two low ones and the price placeholder) are open points");
   assert.equal((patch.questionPlan!.unasked_questions as string[]).length, 3, "recorded as unasked in the step output");
+
+  // Found in the end-to-end run: the same question as page and company question, and a wish conflict asked as a question.
+  const twice = planContentQuestions({
+    candidates: [q("Werden Entsorgungsnachweise ausgestellt?", { scope: "firma", block_id: "ablauf" }), q("Werden Entsorgungsnachweise ausgestellt?", { scope: "seite", block_id: "kosten" })],
+    blocks,
+    step: CONTENT_STEP_FAKTENCHECK,
+  });
+  assert.deepEqual([twice.firma.length, twice.page.length], [1, 0], "asked once, as the company question");
+  const pooled = planContentQuestions({
+    candidates: [q("Werden Entsorgungsnachweise ausgestellt?", { scope: "seite" })],
+    blocks,
+    step: CONTENT_STEP_LEKTORAT,
+    knowledge: buildContentKnowledge({ pool: [{ id: "p", dedupe_key: "text:werden entsorgungsnachweise ausgestellt", topic_key: null, question: "Werden Entsorgungsnachweise ausgestellt?", status: "open", answer: null, page_slugs: ["x"] }] }),
+  });
+  assert.deepEqual([pooled.firma.length, pooled.page.length], [1, 0], "a page question the pool holds goes to the pool");
+  const conflict = stepPatchFor(
+    contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!,
+    { findings: [], questions: [q("Der Wunsch „Firmenname immer ‚Einfach Entrümpelung‘“ kollidiert mit den Kontaktdaten. Soll die Langform bleiben?")] },
+    { html: renderBlocksHtml(BLOCKS.filter((b) => b.id !== "kosten" && b.id !== "kontakt")) },
+  );
+  assert.deepEqual([(conflict.pagePatch.questions as unknown[]).length, conflict.firmaQuestions?.length ?? 0], [0, 0], "a wish conflict is no question");
+  assert.ok((conflict.pagePatch.findings as Array<{ title: string }>).some((f) => f.title === "Kundenwunsch im Konflikt"), "but an open point");
   console.log("B: three per page, the rest as open points: ok");
 }
 
@@ -601,6 +631,69 @@ function testPromptRules() {
   console.log("prompts: the rule in the fixed part of the six steps: ok");
 }
 
+// --- found in the end-to-end runs on three pages ---------------------------------------------------
+
+function testEndToEndFindings() {
+  // A missing source is the editor's open point, never a customer question (also not at the stop).
+  const src = q("Welche Quelle belegt diese Aussage?", { block_id: "ablauf", placeholder: "[QUELLE BITTE ERGÄNZEN]" });
+  assert.ok(isSourceQuestion(src));
+  assert.ok(isSourceQuestion(q("Welche Quelle (Studie, Leitlinie) kann für Aussagen zu Infusionen angegeben werden?")));
+  assert.ok(!isSourceQuestion(q("Werden Entsorgungsnachweise ausgestellt?")));
+  const withSource = renderBlocksHtml([...BLOCKS.filter((b) => b.id !== "kosten" && b.id !== "kontakt"), { id: "beleg", heading: "Quellen", level: 2, html: "<p>Laut Studie wirkt es [QUELLE BITTE ERGÄNZEN].</p>" }]);
+  const patch = stepPatchFor(contentStepDefinition(CONTENT_STEP_FAKTENCHECK)!, { findings: [], questions: [src] }, { html: withSource });
+  assert.deepEqual(patch.pagePatch.questions, [], "no page question for a source");
+  assert.ok((patch.pagePatch.findings as Array<{ title: string }>).some((f) => f.title === "Quelle fehlt"), "an open point instead");
+  const stopPlan = planQuestionStop({ blocks: parseBlocksFromHtml(withSource), questions: [src], knowledge: buildContentKnowledge({}), slug: "x" });
+  assert.equal(questionStopOutcome(stopPlan), "go_on", "the stop does not ask for a source either");
+
+  // The publication date some saved prompts write as a placeholder is the wanted marker [DATUM].
+  const dated = withDateMarker([{ id: "stand", heading: null, level: 2, html: "<p>Zuletzt aktualisiert: [BITTE PRÜFEN: Datum der Veröffentlichung]</p>" }]);
+  assert.equal(dated[0]!.html, "<p>Zuletzt aktualisiert: [DATUM]</p>");
+  assert.match(QUESTION_RULES, /geht dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor/, "the rule wins over saved prompts asking for placeholders");
+
+  // The Kontaktdaten's phone spelling: same digits in another grouping get the confirmed spelling.
+  assert.equal(phoneDigits("+49 (0) 511 55 47 85 85"), "051155478585");
+  assert.equal(phoneDigits("0511 / 554 785 85"), phoneDigits("0511 / 55 47 85 85"));
+  const knowledge = buildContentKnowledge({ contact: contact({ telefon: "0511 / 55 47 85 85" }) });
+  const spelled = withContactSpelling(
+    [{ id: "kontakt", heading: "Rufen Sie an: 0511 / 554 785 85", level: 2, html: '<p>Telefon: <a href="tel:+4951155478585">0511 / 554 785 85</a>, Fax 0511 / 55 47 85 86. Oder +49 511 55478585.</p>' }],
+    knowledge,
+  );
+  assert.equal(spelled[0]!.heading, "Rufen Sie an: 0511 / 55 47 85 85");
+  assert.equal(
+    spelled[0]!.html,
+    '<p>Telefon: <a href="tel:+4951155478585">0511 / 55 47 85 85</a>, Fax 0511 / 55 47 85 86. Oder 0511 / 55 47 85 85.</p>',
+    "text only (the tel: link keeps its form), another number stays",
+  );
+  const viaStep = stepPatchFor(
+    contentStepDefinition(CONTENT_STEP_LEKTORAT)!,
+    { blocks: [...BLOCKS.filter((b) => b.id !== "kosten" && b.id !== "kontakt"), { id: "kontakt", heading: null, level: 2, html: "<p>Rufen Sie an: 0511 / 554 785 85.</p>" }], title: "T", meta_description: "M", questions: [] },
+    { html: HTML, knowledge },
+  );
+  assert.match(String(viaStep.pagePatch.html), /0511 \/ 55 47 85 85/, "applied to every text step's output");
+
+  // Soft hyphens of a copied company name are no part of the value.
+  const shy = contact({ firmenname: "Rechts\u00adanwalts\u00adkanzlei DIEL" });
+  assert.equal(contactFieldText(shy, "firmenname"), "Rechtsanwaltskanzlei DIEL");
+  assert.equal(contactPromptData(shy)!.lines[0]!.value, "Rechtsanwaltskanzlei DIEL");
+
+  // Page questions over the limit are never asked: once the stop is passed their sentences go.
+  const blocks: ContentTextBlock[] = [
+    { id: "h1", heading: "Seite", level: 1, html: "" },
+    ...[1, 2, 3, 4, 5].map((n) => ({ id: `b${n}`, heading: `Abschnitt ${n}`, level: 2 as const, html: `<p>Satz eins. Wert ${n}: [BITTE PRÜFEN: Angabe ${n}]. Satz drei.</p>` })),
+  ];
+  const five = planQuestionStop({ blocks, questions: [], knowledge: buildContentKnowledge({}), slug: "x" });
+  assert.deepEqual([five.ask.length, five.overflow.length], [3, 2]);
+  const decided = five.ask.map((a): ContentHandledQuestion => ({ id: a.id!, question: a.question, placeholder: a.placeholder ?? null, block_id: a.block_id ?? null, excerpt: null, scope: "seite", action: "drop", answer: null, source: "kunde" }));
+  const answered = planQuestionStop({ blocks, questions: five.ask, knowledge: buildContentKnowledge({}), decisions: decided, slug: "x" });
+  const items = questionStopPassItems(answered);
+  assert.equal(items.length, 5);
+  assert.deepEqual(items.filter((i) => i.source === "offen").map((i) => [i.action, i.placeholder]), five.overflow.map((o) => ["drop", o.placeholder]), "the two unasked ones are dropped");
+  assert.doesNotMatch(renderBlocksHtml(applyDrops(blocks, items).blocks), /BITTE PRÜFEN/, "no placeholder of an unasked question stays");
+  assert.equal(readQuestionStop({ handled: [{ ...items[4], source: "offen" }] }).handled[0]!.source, "offen");
+  console.log("end-to-end findings: sources, date, phone spelling, soft hyphens, unasked placeholders: ok");
+}
+
 async function main() {
   testTopicsAndSuppression();
   testLimitAndOverflow();
@@ -614,6 +707,7 @@ async function main() {
   testPassChecks();
   await testLifecycle();
   testPromptRules();
+  testEndToEndFindings();
   console.log("OK: fewer questions tests passed");
 }
 

@@ -22,10 +22,13 @@ import { contentGapQuestions } from "@/lib/dt/content/pipeline/gaps";
 import {
   CONTENT_MAX_PAGE_QUESTIONS,
   isTextPlaceholder,
+  isSourceQuestion,
+  isWishConflictQuestion,
   knownAnswerFor,
   narrowQuestionTopic,
   normalizeQuestionScope,
   poolDedupeKey,
+  poolMatch,
   type ContentKnowledge,
   type ContentPoolQuestion,
 } from "@/lib/dt/content/pipeline/questions";
@@ -47,7 +50,8 @@ export type ContentHandledQuestion = {
   /** answer: work the answer in; drop: „Ohne Angabe weiter“, the sentence goes. */
   action: "answer" | "drop";
   answer: string | null;
-  source: "kunde" | "kontaktdaten" | "pool" | "notiz" | "fakten" | "antwort";
+  /** offen: a page question over the limit of three, never asked: its sentence goes, an open point stays. */
+  source: "kunde" | "kontaktdaten" | "pool" | "notiz" | "fakten" | "antwort" | "offen";
 };
 
 export type ContentAnswersPassRecord = {
@@ -100,7 +104,7 @@ export function readQuestionStop(raw: unknown): ContentQuestionStop {
       scope: h.scope === "firma" ? "firma" : "seite",
       action: h.action === "drop" ? "drop" : "answer",
       answer: text(h.answer, 2_000),
-      source: (["kunde", "kontaktdaten", "pool", "notiz", "fakten", "antwort"] as const).find((s) => s === h.source) ?? "kunde",
+      source: (["kunde", "kontaktdaten", "pool", "notiz", "fakten", "antwort", "offen"] as const).find((s) => s === h.source) ?? "kunde",
     });
   }
   const p = rec(r.pass);
@@ -147,6 +151,8 @@ export function questionStopDue(
 export type ContentQuestionStopPlan = {
   /** The page's own questions only the customer can answer (at most three). */
   ask: ContentQuestion[];
+  /** The page's own questions over the limit: never asked, their sentences go when the stop is passed. */
+  overflow: ContentQuestion[];
   /** Open company questions this page raised (answered under „Fragen zum Unternehmen“ or in the page window). */
   askPool: ContentPoolQuestion[];
   /** Company questions of the text the pool does not have yet. */
@@ -192,9 +198,13 @@ export function planQuestionStop(input: {
   const newFirma: ContentQuestion[] = [];
   const handled: ContentHandledQuestion[] = [];
   const seen = new Set<string>();
-  for (const q of all) {
-    if (seen.has(q.id!)) continue;
-    seen.add(q.id!);
+  for (const raw of all) {
+    if (seen.has(raw.id!)) continue;
+    seen.add(raw.id!);
+    // Wish conflicts and missing sources are open points for the editor, never customer questions.
+    if (isWishConflictQuestion(raw) || isSourceQuestion(raw)) continue;
+    // A page question the organisation's pool already holds is asked (once) there, not twice.
+    const q = raw.scope === "seite" && poolMatch(raw, input.knowledge.pool) ? { ...raw, scope: "firma" as const } : raw;
     const decided = decisions.get(q.id!);
     if (decided) {
       handled.push({ ...handledFrom(q, decided.action, decided.answer, decided.source), source: decided.source });
@@ -207,7 +217,7 @@ export function planQuestionStop(input: {
     }
     if (q.scope === "firma") {
       const key = poolDedupeKey(q);
-      const row = input.knowledge.pool.find((p) => p.dedupe_key === key);
+      const row = input.knowledge.pool.find((p) => p.dedupe_key === key) ?? poolMatch(q, input.knowledge.pool);
       if (!row) {
         if (!newFirma.some((f) => poolDedupeKey(f) === key)) newFirma.push(q);
       } else if (row.status === "open" && !askPool.some((p) => p.id === row.id)) {
@@ -226,7 +236,18 @@ export function planQuestionStop(input: {
     .map((q, i) => ({ q, i }))
     .sort((a, b) => (rank[a.q.severity ?? "medium"] ?? 1) - (rank[b.q.severity ?? "medium"] ?? 1) || a.i - b.i)
     .map((x) => x.q);
-  return { ask: ordered.slice(0, CONTENT_MAX_PAGE_QUESTIONS), askPool, newFirma, handled };
+  return { ask: ordered.slice(0, CONTENT_MAX_PAGE_QUESTIONS), overflow: ordered.slice(CONTENT_MAX_PAGE_QUESTIONS), askPool, newFirma, handled };
+}
+
+/**
+ * What the answers pass works in once the stop is passed: the decided questions plus every page
+ * question still undecided (over the limit, or new since the stop asked) as a drop, so no
+ * placeholder of an unasked question stays in the text. The steps already left an open point
+ * („Offene Frage (nicht gestellt)“) for each.
+ */
+export function questionStopPassItems(plan: Pick<ContentQuestionStopPlan, "ask" | "overflow" | "handled">): ContentHandledQuestion[] {
+  const open = [...plan.ask, ...plan.overflow].filter((q) => !plan.handled.some((h) => h.id === q.id));
+  return [...plan.handled, ...open.map((q) => handledFrom(q, "drop", null, "offen"))];
 }
 
 /** What the stop does now: ask (stop as „Braucht Sie“), work known answers in, or go on. */

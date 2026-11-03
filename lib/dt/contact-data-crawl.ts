@@ -13,7 +13,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import * as cheerio from "cheerio";
 
-import type { ContactFieldKey } from "@/lib/dt/contact-data";
+import { phoneDigits, type ContactFieldKey } from "@/lib/dt/contact-data";
 import {
   extractGoogleProfileUrls,
   extractImpressumFacts,
@@ -207,9 +207,6 @@ export function isMobileNumber(phone: string): boolean {
   return /^01[567]\d/.test(digits);
 }
 
-export function phoneDigits(phone: string): string {
-  return phone.replace(/[^\d+]/g, "").replace(/^\+49/, "0").replace(/^0049/, "0").replace(/\D/g, "");
-}
 
 const PHONE_VALUE = String.raw`(\+?\d[\d ()/.\-]{5,22}\d)`;
 
