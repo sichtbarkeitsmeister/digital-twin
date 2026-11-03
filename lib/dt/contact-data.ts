@@ -317,8 +317,13 @@ export function withProfileColumns(data: OrgContactData, columns: ContactProfile
 
 // --- values and changes -------------------------------------------------------------------------------
 
+/** Soft hyphens and zero-width characters (copied from a website) are no part of a value. */
+export function withoutInvisibleChars(value: string): string {
+  return value.replace(/[\u00AD\u200B-\u200D\u2060\uFEFF]/g, "");
+}
+
 export function contactFieldText(data: Pick<OrgContactData, "fields">, key: ContactFieldKey): string {
-  return data.fields[key]?.value.trim() ?? "";
+  return withoutInvisibleChars(data.fields[key]?.value ?? "").trim();
 }
 
 /** One change for the Firmenprofil's change log (`dt_company_profile_edits.changes`). */
@@ -471,7 +476,7 @@ export function contactPromptData(
 ): ContactPromptData | null {
   const lines: ContactPromptData["lines"] = [];
   const push = (label: string, value: string) => {
-    const v = value.replace(/\s*\n\s*/g, " · ").trim();
+    const v = withoutInvisibleChars(value).replace(/\s*\n\s*/g, " · ").trim();
     if (v) lines.push({ label, value: v });
   };
   const get = (key: ContactFieldKey) => contactFieldText(data, key);
