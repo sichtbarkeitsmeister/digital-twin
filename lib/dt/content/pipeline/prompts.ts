@@ -13,6 +13,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 
 import type { ContactPromptData } from "@/lib/dt/contact-data";
+import type { ContentKnowledge } from "@/lib/dt/content/pipeline/questions";
 import {
   CLIENT_WISHES_MAX,
   CLIENT_WISHES_TEXT_MAX,
@@ -127,6 +128,13 @@ export type ContentPipelineContext = {
    * step that writes text gets them, and the Watermark step of Texte; the standalone tools never.
    */
   wishes?: ContentClientWishes;
+  /**
+   * Answers to „Fragen zum Unternehmen“ that are no Kontaktdaten field: confirmed facts for
+   * every later step, shown in the Anbieterfakten block as „Antworten des Kunden“.
+   */
+  customerAnswers?: Array<{ question: string; answer: string }>;
+  /** What is known for the question rules (Kontaktdaten, pool, notes, Anbieterfakten); the pipeline only. */
+  knowledge?: ContentKnowledge;
   /**
    * The Aktualitätsprüfung's state on this page (`dt_content_pages.freshness`). GEO reads its
    * `pending_sections` after a send-back; the standalone tools have none.
@@ -330,6 +338,9 @@ export function normalizeQuestions(raw: unknown, knownBlockIds: ReadonlySet<stri
       block_id: knownBlockIds.has(blockId) ? blockId : null,
       excerpt: str(r.excerpt, 500) || null,
       blocking: r.blocking !== false,
+      ...(r.scope === "firma" || r.scope === "seite" ? { scope: r.scope } : {}),
+      ...(["high", "medium", "low"].includes(String(r.severity)) ? { severity: String(r.severity) } : {}),
+      ...(r.grundlegend === true ? { grundlegend: true } : {}),
     });
   }
   return out;
@@ -415,12 +426,17 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 // Exported for the standalone GEO and Hormozi tools (lib/dt/text-tools/geo.ts, hormozi.ts),
 // which build the same blocks around an uploaded text instead of a page of the pipeline.
 
-export function anbieterBlock(context: Pick<ContentPipelineContext, "sections">): string {
+export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers">>): string {
   const filled = context.sections.filter((s) => s.current.trim());
-  if (filled.length === 0) return "## Anbieterfakten\n(keine)";
+  const answers = (context.customerAnswers ?? []).filter((a) => a.question.trim() && a.answer.trim());
+  const answersPart = answers.length
+    ? [`### Antworten des Kunden (bestätigt)\n${answers.map((a) => `- ${clip(a.question, 400)} → ${clip(a.answer, 1_000)}`).join("\n")}`]
+    : [];
+  if (filled.length === 0 && answersPart.length === 0) return "## Anbieterfakten\n(keine)";
   return [
     "## Anbieterfakten aus Fragebogen und Kundengesprächen (einzige Quelle für Tatsachen)",
     ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`),
+    ...answersPart,
   ].join("\n\n");
 }
 
@@ -597,6 +613,17 @@ export const CLIENT_WISHES_RULES = `Wünsche des Kunden (feste Regel): Die Wüns
 export function clientWishesRules(context: { wishes?: ContentClientWishes | null }): string[] {
   return hasClientWishes(context.wishes) ? [CLIENT_WISHES_RULES] : [];
 }
+
+/**
+ * Fixed rule of every step that writes text or asks (SEO, Faktencheck, GEO, Hormozi,
+ * Vermenschlichung, Lektorat): ask or leave a placeholder only for what the page cannot be
+ * published without and what is central to this page; otherwise leave the statement out. The
+ * code enforces the rest (topic map, pool, limit of three; `questions.ts`).
+ */
+export const QUESTION_RULES = `Fragen und Platzhalter (feste Regel): Eine fehlende Angabe wird nur dann zu einer Frage an den Kunden oder zu einem Platzhalter [BITTE PRÜFEN: …], wenn die Seite ohne sie nicht korrekt veröffentlicht werden kann UND die Angabe zentral für genau diese Seite ist (z. B. der Preis auf einer Preisseite, die Hauptleistung einer Leistungsseite). Sonst lässt du die Aussage weg und schreibst keinen Platzhalter. Nie fragen und nie einen Platzhalter setzen für etwas, das bekannt ist: Anbieterfakten, Antworten des Kunden, Kontaktdaten, Wünsche des Kunden, Anmerkungen der Redaktion. Angaben über das Unternehmen, die auf jeder Seite gleich sind (Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner), fehlen nie so sehr, dass die Seite sie braucht: dann weglassen.`;
+
+/** The Faktencheck's own part of the rule: scope, severity and the one „grundlegend“ question. */
+export const FAKTENCHECK_QUESTION_RULES = `Fragen im Faktencheck (feste Regel): Stelle höchstens wenige Fragen, die wichtigsten zuerst; alles andere ist ein finding mit dem Vorschlag, die Aussage wegzulassen. Jede Frage bekommt scope „firma“ (Angabe über das Unternehmen, auf jeder Seite gleich: Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner …) oder „seite“ (nur diese Seite), und severity high (ohne Antwort nicht veröffentlichbar), medium oder low. grundlegend = true nur, wenn das Hauptthema der Seite selbst zweifelhaft ist (z. B. „Wird diese Leistung überhaupt angeboten?“) – höchstens eine Frage, sonst false. Platzhalter im Text erfasst der Code selbst; als question nur, wenn die Regel oben sie erlaubt.`;
 
 /**
  * „Kontaktdaten (bestätigt)“: only the filled fields. Confirmed facts like the Anbieterfakten;
@@ -985,6 +1012,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
     system: stepSystem(stepInstruction(context, "seo"), context.settings, [
       `Allgemeine Regeln (jeder Seitentyp):\n${general}`,
       `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
+      QUESTION_RULES,
       ...clientWishesRules(context),
     ]),
     user: join([
@@ -1022,6 +1050,8 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: FAKTENCHECK_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "faktencheck"), context.settings, [
+      QUESTION_RULES,
+      FAKTENCHECK_QUESTION_RULES,
       ...faktencheckClientRules(context),
       ...clientWishesRules(context),
     ]),
@@ -1055,8 +1085,11 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
                 block_id: { type: "string" },
                 excerpt: { type: "string", description: "Der Satz aus dem Text, um den es geht." },
                 blocking: { type: "boolean" },
+                scope: { type: "string", enum: ["firma", "seite"], description: "firma: Angabe über das Unternehmen, auf jeder Seite gleich; seite: nur diese Seite." },
+                severity: { type: "string", enum: ["high", "medium", "low"] },
+                grundlegend: { type: "boolean", description: "Nur wenn das Hauptthema der Seite selbst zweifelhaft ist; höchstens eine Frage." },
               },
-              required: ["kind", "question", "field", "placeholder", "block_id", "excerpt", "blocking"],
+              required: ["kind", "question", "field", "placeholder", "block_id", "excerpt", "blocking", "scope", "severity", "grundlegend"],
             },
           },
         },
@@ -1130,7 +1163,7 @@ export function freshnessSendBackBlock(context: Pick<ContentPipelineContext, "fr
 function geo(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: GEO_MAX_TOKENS,
-    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), clientWishesRules(context)),
+    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1155,7 +1188,7 @@ export const HORMOZI_MAX_TOKENS = 12_000;
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: HORMOZI_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "hormozi"), context.settings, clientWishesRules(context)),
+    system: stepSystem(stepInstruction(context, "hormozi"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1200,7 +1233,7 @@ function normalizeSelfScore(raw: unknown): SelfScore | null {
 function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 12_000,
-    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, clientWishesRules(context)),
+    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1252,7 +1285,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
 function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 12_000,
-    system: stepSystem(stepInstruction(context, "lektorat"), context.settings, clientWishesRules(context)),
+    system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),

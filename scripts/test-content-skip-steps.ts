@@ -85,6 +85,14 @@ const LIVE_URL = "https://praxis.de/implantate";
 
 type Row = FakeRow;
 
+/** The stop before the Watermark Entfernung, stubbed: nothing to ask, the run goes on (its own tests: test-content-fewer-questions). */
+function stopGoesOn(db: FakeContentDb) {
+  return async () => {
+    Object.assign(db.page(), { question_stop: { status: "done", handled: [] } });
+    return { action: "go_on" as const, halted: false, model: "", costEur: 0 };
+  };
+}
+
 class FakeContentDb extends FakeDb {
   page(): Row {
     return this.rows("dt_content_pages").find((p) => p.id === PAGE_ID)!;
@@ -133,6 +141,7 @@ const pageRow = (patch: Partial<ContentPageRow> = {}): ContentPageRow => ({
   freshness: EMPTY_CONTENT_FRESHNESS,
   skip_steps: [],
   client_wishes: "",
+  question_stop: { handled: [] },
   error: null,
   job_id: JOB_ID,
   cost_eur: 0,
@@ -290,7 +299,7 @@ async function runnerTests() {
       job,
       pageId: PAGE_ID,
       deadline: Date.now() + 240_000,
-      runners: { runStep: stubRunner(db, calls), skipStep: skipWith(liveFetch) },
+      runners: { questionStop: stopGoesOn(db), runStep: stubRunner(db, calls), skipStep: skipWith(liveFetch) },
     });
     assert.deepEqual(calls, [1, 3, 5, 7, 8, 10], "the model runs only for steps that are on");
     assert.equal(result.ok && result.result?.halted, true, "the Endabnahme halts as always");
@@ -322,7 +331,7 @@ async function runnerTests() {
       job,
       pageId: PAGE_ID,
       deadline: Date.now() + 5_000,
-      runners: { runStep: stubRunner(db, calls) },
+      runners: { questionStop: stopGoesOn(db), runStep: stubRunner(db, calls) },
     });
     assert.deepEqual(calls, [], "no budget for a model step");
     assert.equal(db.step(CONTENT_STEP_FAKTENCHECK)!.status, "skipped");
@@ -343,7 +352,7 @@ async function runnerTests() {
       dt_content_steps: [stepRow(1), stepRow(2), doneCheck, stepRow(4), migrated],
     });
     const calls: number[] = [];
-    await runContentPageSteps({ service: db.service, job, pageId: PAGE_ID, deadline: Date.now() + 5_000, runners: { runStep: stubRunner(db, calls) } });
+    await runContentPageSteps({ service: db.service, job, pageId: PAGE_ID, deadline: Date.now() + 5_000, runners: { questionStop: stopGoesOn(db), runStep: stubRunner(db, calls) } });
     assert.deepEqual(db.step(CONTENT_STEP_FAKTENCHECK), doneCheck, "a done row is never touched by the list");
     assert.deepEqual(db.step(CONTENT_STEP_AKTUALITAET), migrated, "the migration's skipped row stays (no skipped_by)");
     assert.equal(db.step(CONTENT_STEP_HORMOZI)!.status, "skipped", "the first step still to run is skipped");
@@ -355,7 +364,7 @@ async function runnerTests() {
       dt_content_pages: [pageRow({ step: 3, skip_steps: ["faktencheck"] })],
       dt_content_steps: [stepRow(1), stepRow(2), stepRow(3, { status: "pending", error: "Überlastet", output: null, cost_eur: 0 })],
     });
-    await runContentPageSteps({ service: db.service, job, pageId: PAGE_ID, deadline: Date.now() + 5_000, runners: { runStep: stubRunner(db, []) } });
+    await runContentPageSteps({ service: db.service, job, pageId: PAGE_ID, deadline: Date.now() + 5_000, runners: { questionStop: stopGoesOn(db), runStep: stubRunner(db, []) } });
     assert.deepEqual([db.step(3)!.status, db.step(3)!.error], ["skipped", null]);
     assert.equal(db.page().error, null, "the old error leaves the page");
   }
@@ -368,7 +377,7 @@ async function runnerTests() {
       dt_content_pages: [pageRow({ step: 9, html, cost_eur: 1, skip_steps: ["watermark"] })],
       dt_content_steps: [...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => stepRow(n)), stepRow(9, { status: "pending", output: progress, cost_eur: 0.12, model: "grok-4" })],
     });
-    await runContentPageSteps({ service: db.service, job, pageId: PAGE_ID, deadline: Date.now() + 5_000, runners: { runStep: stubRunner(db, []) } });
+    await runContentPageSteps({ service: db.service, job, pageId: PAGE_ID, deadline: Date.now() + 5_000, runners: { questionStop: stopGoesOn(db), runStep: stubRunner(db, []) } });
     assert.deepEqual(db.step(9)!.output, { skipped_by: "user" }, "the saved chunks are gone");
     assert.deepEqual([db.step(9)!.cost_eur, db.step(9)!.model], [0, null]);
     assert.equal(db.page().html, html, "the text is the one from before the Watermark step");
@@ -427,12 +436,13 @@ async function seoTests() {
     assert.equal(db.page().title, null, "the crawl text has no <title>: the page keeps its own");
   }
   {
-    // A placeholder in the live text stops the page like after any text step; the row stays „skipped“.
+    // A placeholder in the live text is collected like after any text step (asked at the stop before
+    // the Watermark Entfernung); the row stays „skipped“ and the run goes on.
     const withGap = SITE_ROW.text_content + "\nPreis: [BITTE PRÜFEN: Preis pro Implantat]";
     const db = new FakeContentDb({ dt_content_pages: [pageRow({ step: 1, skip_steps: ["seo"] })], dt_site_pages: [{ ...SITE_ROW, text_content: withGap }] });
     const outcome = await skipContentStep(db.service, pageRow({ step: 1, skip_steps: ["seo"] }), steps, CONTENT_STEP_SEO, { fetchImpl: deadFetch as never });
-    assert.equal(outcome.halted, true);
-    assert.equal(db.page().state, "braucht_sie");
+    assert.equal(outcome.halted, false);
+    assert.equal(db.page().state, "laeuft");
     assert.equal((db.page().questions as unknown[]).length, 1);
     assert.equal(db.step(CONTENT_STEP_SEO)!.status, "skipped");
   }
@@ -449,7 +459,7 @@ async function seoTests() {
       job,
       pageId: PAGE_ID,
       deadline: Date.now() + 240_000,
-      runners: { runStep: stubRunner(db, calls), skipStep: skipWith(deadFetch) },
+      runners: { questionStop: stopGoesOn(db), runStep: stubRunner(db, calls), skipStep: skipWith(deadFetch) },
     });
     assert.deepEqual(calls, [], "nothing after the failed import runs");
     assert.ok(!result.ok && result.retryable === false);

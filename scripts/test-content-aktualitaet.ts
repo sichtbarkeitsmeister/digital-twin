@@ -541,16 +541,18 @@ const customerQuestion = { kind: "outdated", question: "Stimmt die Pauschale noc
   assert.match(findings[0]!.proposal, /Abschnitt auf die neue Heizungsförderung umstellen\. Quelle: KfW Heizungsförderung \(kfw\.de\): https:\/\/www\.kfw\.de/);
   const fresh2 = second.pagePatch.freshness as ContentFreshness;
   assert.deepEqual([fresh2.sendbacks, fresh2.converted_sections, fresh2.carried_questions], [1, [section], []]);
-  assert.deepEqual([second.halted, second.stepStatus, second.pagePatch.state], [true, "waiting", "braucht_sie"], "the carried question stops the page as „Braucht Sie“");
+  // Since the one stop before the Watermark Entfernung: the carried question is collected, not asked now.
+  assert.deepEqual([second.halted, second.stepStatus, second.pagePatch.state], [false, "done", undefined], "the carried question joins the page's one stop");
   assert.deepEqual((second.pagePatch.questions as Array<{ block_id: string; section: string }>).map((q) => [q.block_id, q.section]), [["preise", "Was kostet der Heizungstausch bei uns?"]]);
 
   // Second check, all fine: the page simply goes on.
   const clean = stepPatchFor(def, outputWith({}), { html: "", freshness: { ...afterGeo, carried_questions: [] } }, at);
   assert.deepEqual([clean.halted, clean.resetFrom, clean.pagePatch.findings, clean.pagePatch.questions], [false, undefined, [], []]);
 
-  // Questions on the first check without an outdated Abschnitt stop the page at once.
+  // Questions on the first check without an outdated Abschnitt are collected for the stop before the Watermark Entfernung.
   const asks = stepPatchFor(def, outputWith({ questions: [customerQuestion] }), { html: "", freshness: {} }, at);
-  assert.deepEqual([asks.halted, asks.pagePatch.state, asks.resetFrom], [true, "braucht_sie", undefined]);
+  assert.deepEqual([asks.halted, asks.pagePatch.state, asks.resetFrom], [false, undefined, undefined]);
+  assert.equal((asks.pagePatch.questions as unknown[]).length, 1, "collected on the page");
 
   // planFreshness on its own: a carried question whose Abschnitt GEO removed keeps its name, loses its id.
   const plan = planFreshness({ ...afterGeo, carried_questions: [{ ...customerQuestion, section: "Preise" }] }, { ...outputWith({}), blocks: blocks.filter((b) => b.id !== "preise") }, at.toISOString());

@@ -32,7 +32,7 @@ export type ContentStepDefinition = {
 
 /**
  * The ten steps of the Step-by-Step-Content-Agent, one background job per step:
- * Analyse plans, SEO writes the page, the Faktencheck stops for the customer's answers,
+ * Analyse plans, SEO writes the page, the Faktencheck collects the few questions only the customer can answer (asked once, before the Watermark Entfernung),
  * GEO rewrites for citation, the Aktualitätsprüfung checks every time-sensitive statement
  * with the web search (and may send the text back to GEO once), Hormozi / Vermenschlichung
  * are two rewrites (conversion, wording), Lektorat corrects, Watermark Entfernung rephrases

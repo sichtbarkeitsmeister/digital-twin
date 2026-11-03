@@ -7,6 +7,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { EMPTY_CONTENT_FRESHNESS } from "@/lib/dt/content/freshness";
+import { loadOrgQuestions } from "@/lib/dt/content/org-questions";
+import { readQuestionStop, type ContentHandledQuestion } from "@/lib/dt/content/pipeline/question-stop";
+import { customerAnswerNote } from "@/lib/dt/content/pipeline/questions";
 import {
   CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
@@ -112,11 +115,15 @@ export async function startContentRun(
 }
 
 /**
- * „Freigeben“. On a page that stopped as „Braucht Sie“ (open questions after the Faktencheck,
- * a placeholder after a text step): accept the text as it is and continue with the next
- * step; nothing is filled in or removed, so a placeholder still in the text stops the page
- * again. After the Endabnahme that stopped for a placeholder, and on a finished page: release.
- * A skipped SEO whose live text held a placeholder stops the same way; its row stays „skipped“.
+ * „Freigeben“. On a page that stopped as „Braucht Sie“: accept the text as it is and continue;
+ * nothing is filled in or removed.
+ *   - At the one stop before the Watermark Entfernung: the stop is done, no question is asked
+ *     again; what is left in the text the Endabnahme lists as open points.
+ *   - After the Faktencheck for a „grundlegend“ question: that one is accepted, the other
+ *     collected questions wait for the stop.
+ *   - Pages that stopped under the old rules (questions after the Faktencheck, a placeholder
+ *     after a text step, the Endabnahme for a placeholder) work as before: their questions are
+ *     cleared and the run goes on; after the Endabnahme, and on a finished page: release.
  */
 export async function approveContentStep(
   service: SupabaseClient,
@@ -140,7 +147,7 @@ export async function approveContentStep(
       if (error) return { ok: false, status: 500, message: error.message };
       return { ok: true, jobId: null };
     }
-    return enqueuePageJob(service, page, userId, { questions: [] });
+    return enqueuePageJob(service, page, userId, approvalPatch(page, now));
   }
   if (step === CONTENT_STEP_ENDABNAHME && page.state === "fertig" && !page.released) {
     await service
@@ -156,6 +163,18 @@ export async function approveContentStep(
     return { ok: true, jobId: null };
   }
   return { ok: false, status: 409, message: "Dieser Schritt wartet gerade nicht auf eine Freigabe." };
+}
+
+/** What „Freigeben“ leaves of the questions (see `approveContentStep`). */
+export function approvalPatch(page: Pick<ContentPageRow, "questions" | "question_stop">, now: string): Record<string, unknown> {
+  const stop = readQuestionStop(page.question_stop);
+  if (stop.status === "waiting" || stop.status === "answered") {
+    return { questions: [], question_stop: { ...stop, status: "done", at: now } };
+  }
+  if (page.questions.some((q) => q.grundlegend)) {
+    return { questions: page.questions.filter((q) => !q.grundlegend) };
+  }
+  return { questions: [] };
 }
 
 function canEdit(page: ContentPageRow): boolean {
@@ -261,6 +280,7 @@ const RESET_PATCH = {
   questions: [],
   notes: [],
   freshness: EMPTY_CONTENT_FRESHNESS,
+  question_stop: {},
   error: null,
   job_id: null,
   cost_eur: 0,
@@ -395,13 +415,100 @@ export async function rerunContentStep(
   } catch (error) {
     return { ok: false, status: 500, message: error instanceof Error ? error.message : "Schritte konnten nicht zurückgesetzt werden." };
   }
-  return enqueuePageJob(service, page, userId, {
+  return enqueuePageJob(service, page, userId, rerunPagePatch(page, step, note));
+}
+
+/** What „Mit Anmerkung wiederholen“ from `step` writes on the page. */
+export function rerunPagePatch(page: Pick<ContentPageRow, "notes" | "freshness">, step: number, note: string): Record<string, unknown> {
+  return {
     notes: [...page.notes, note.trim()].slice(-20),
     step,
     released: false,
     freshness: freshnessForRerun(page, step),
+    // From the Lektorat or earlier the page reaches its stop again; from Watermark on it stays passed.
+    ...(step <= CONTENT_STEP_LEKTORAT ? { question_stop: {} } : {}),
     ...(step <= CONTENT_STEP_FAKTENCHECK ? { questions: [], findings: [] } : {}),
     ...(step <= CONTENT_STEP_LEKTORAT ? { final_findings: [] } : {}),
     ...(step < CONTENT_STEP_ENDABNAHME ? { unresolved: [] } : {}),
-  });
+  };
+}
+
+export type ContentAnswerInput = { id: string; action: "answer" | "drop"; answer?: string | null };
+
+/**
+ * Answers in the page window of a „Braucht Sie“ page under the new rules.
+ *   - At the stop before the Watermark Entfernung: the decisions are saved per question
+ *     (answer, or „Ohne Angabe weiter“); `submit` („Antworten einarbeiten & weiter“) needs
+ *     every page question decided and every company question of this page answered under
+ *     „Fragen zum Unternehmen“, then the short pass runs and the run goes on.
+ *   - After the Faktencheck for the „grundlegend“ question: the answer becomes a note (a
+ *     confirmed fact for every later step) and the run goes on; the other questions wait.
+ */
+export async function submitContentAnswers(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  input: { answers: readonly ContentAnswerInput[]; submit: boolean },
+  userId: string,
+): Promise<ActionResult & { saved?: number }> {
+  if (page.state !== "braucht_sie") return { ok: false, status: 409, message: "Die Seite wartet gerade nicht auf Antworten." };
+  const byId = new Map(page.questions.filter((q) => q.id).map((q) => [q.id!, q]));
+  for (const a of input.answers) {
+    if (!byId.has(a.id)) return { ok: false, status: 404, message: "Diese Frage gehört nicht (mehr) zur Seite. Bitte neu laden." };
+    if (a.action === "answer" && !a.answer?.trim()) return { ok: false, status: 400, message: "Bitte eine Antwort eingeben oder „Ohne Angabe weiter“ wählen." };
+  }
+  const now = new Date().toISOString();
+  const stop = readQuestionStop(page.question_stop);
+
+  if (stop.status !== "waiting") {
+    // The one early stop: the „grundlegend“ question of the Faktencheck.
+    const grundlegend = page.questions.find((q) => q.grundlegend);
+    if (!grundlegend || page.step !== CONTENT_STEP_FAKTENCHECK) {
+      return { ok: false, status: 409, message: "Diese Seite wartet nach den alten Regeln: bitte „Freigeben“ oder „Abschnitt ändern“." };
+    }
+    const decision = input.answers.find((a) => a.id === grundlegend.id);
+    if (!input.submit || !decision) return { ok: true, jobId: null, saved: 0 };
+    await service
+      .from("dt_content_steps")
+      .update({ status: "done", approved_by: userId, approved_at: now })
+      .eq("page_id", page.id)
+      .eq("step", CONTENT_STEP_FAKTENCHECK)
+      .neq("status", "skipped");
+    return enqueuePageJob(service, page, userId, {
+      questions: page.questions.filter((q) => !q.grundlegend),
+      notes: [...page.notes, customerAnswerNote(grundlegend.question, decision.action === "answer" ? decision.answer ?? null : null)].slice(-20),
+    });
+  }
+
+  const handled = new Map(stop.handled.map((h) => [h.id, h]));
+  for (const a of input.answers) {
+    const q = byId.get(a.id)!;
+    const entry: ContentHandledQuestion = {
+      id: a.id,
+      question: q.question,
+      placeholder: q.placeholder ?? null,
+      block_id: q.block_id ?? null,
+      excerpt: q.excerpt ?? null,
+      scope: q.scope === "firma" ? "firma" : "seite",
+      action: a.action,
+      answer: a.action === "answer" ? a.answer!.trim().slice(0, 2_000) : null,
+      source: "kunde",
+    };
+    handled.set(a.id, entry);
+  }
+  const nextStop = { ...stop, handled: [...handled.values()] };
+  if (!input.submit) {
+    const { error } = await service.from("dt_content_pages").update({ question_stop: nextStop }).eq("id", page.id).eq("state", "braucht_sie");
+    if (error) return { ok: false, status: 500, message: error.message };
+    return { ok: true, jobId: null, saved: input.answers.length };
+  }
+  const missing = page.questions.filter((q) => q.id && !handled.has(q.id));
+  if (missing.length > 0) {
+    return { ok: false, status: 409, message: `Noch ${missing.length} ${missing.length === 1 ? "Frage" : "Fragen"} ohne Antwort: antworten oder „Ohne Angabe weiter“ wählen.` };
+  }
+  const pool = await loadOrgQuestions(service, page.organisation_id);
+  const open = pool.filter((p) => p.status === "open" && p.page_slugs.includes(page.slug));
+  if (open.length > 0) {
+    return { ok: false, status: 409, message: `Noch ${open.length} ${open.length === 1 ? "Frage" : "Fragen"} zum Unternehmen offen: beantworten oder „Keine Angabe“ wählen.` };
+  }
+  return enqueuePageJob(service, page, userId, { question_stop: { ...nextStop, status: "answered", at: now } });
 }

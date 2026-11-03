@@ -9,6 +9,7 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentContactCard } from "@/components/dt/content/dt-content-contact-card";
+import { DtContentOrgQuestionsCard } from "@/components/dt/content/dt-content-org-questions-card";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
 import { DtContentPagesSourceCard } from "@/components/dt/content/dt-content-pages-source-card";
 import { DtContentPagesToolbar } from "@/components/dt/content/dt-content-pages-toolbar";
@@ -86,6 +87,8 @@ export function DtContentWorkspace(props: {
   const { organisationId } = props;
   /** Bumped when the page source changed (crawl finished, pages taken over): the Kontaktdaten reload. */
   const [contactRefresh, setContactRefresh] = useState(0);
+  /** Bumped after each overview load: pages that ran may have raised company questions. */
+  const [orgQuestionsRefresh, setOrgQuestionsRefresh] = useState(0);
 
   const [readiness, setReadiness] = useState<ContentReadiness | null>(null);
   const [local, setLocal] = useState<ContentLocalSources | null>(null);
@@ -133,6 +136,7 @@ export function DtContentWorkspace(props: {
 
   const applyOverview = useCallback((next: ContentOverview) => {
     setOverview(next);
+    setOrgQuestionsRefresh((n) => n + 1);
     setOverviewError(null);
     setRefreshedAt(new Date().toISOString());
     setSelected((prev) => {
@@ -407,6 +411,7 @@ export function DtContentWorkspace(props: {
         }}
       />
       <DtContentContactCard organisationId={organisationId} refreshKey={contactRefresh} />
+      <DtContentOrgQuestionsCard organisationId={organisationId} refreshKey={orgQuestionsRefresh} />
 
       <section className={cn(cardClass, "grid gap-4 p-4 sm:p-5")} aria-label="Texte erstellen">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
