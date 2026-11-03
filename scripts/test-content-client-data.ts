@@ -695,6 +695,7 @@ function testChecksOfFaktencheckAndEndabnahme() {
   assert.match(fakten, /Prüfe den Text auch gegen die Kontaktdaten/);
   const endabnahme = contentStepSpec(CONTENT_STEP_ENDABNAHME, context).system;
   assert.match(endabnahme, /Prüfe jeden Wunsch des Kunden einzeln\. Jeder Verstoß .* kommt in unresolved/);
+  assert.match(endabnahme, /Ein eingehaltener Wunsch ist kein offener Punkt/, "a kept wish is no open point (seen in a real run)");
   assert.match(endabnahme, /Prüfe Firmenname, Adresse und Telefon im Text gegen die Kontaktdaten/);
 
   // The Endabnahme's violations become the page's open points.
