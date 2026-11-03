@@ -132,6 +132,7 @@ const pageRow = (patch: Partial<ContentPageRow> = {}): ContentPageRow => ({
   notes: [],
   freshness: EMPTY_CONTENT_FRESHNESS,
   skip_steps: [],
+  client_wishes: "",
   error: null,
   job_id: JOB_ID,
   cost_eur: 0,

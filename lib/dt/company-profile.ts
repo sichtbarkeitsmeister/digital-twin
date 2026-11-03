@@ -5,6 +5,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { ContactDataInput, OrgContactData } from "@/lib/dt/contact-data";
+import { ContactDataMigrationError, loadOrgContactData, saveOrgContactData } from "@/lib/dt/contact-data-store";
+
 import {
   DT_ONBOARDING_MAX_CUSTOMER_CONTACTS,
   EMPTY_CUSTOMER_CONTACT,
@@ -53,6 +56,13 @@ export type CompanyProfile = {
   points: AnbieterItem[];
   anbieterStatus: AnbieterState["status"];
   canEdit: boolean;
+  /**
+   * The public Kontaktdaten (`dt_org_contact_data`), the same data Texte shows under
+   * „Kontaktdaten“. Firmenname and Website are the Anzeigename and Website above, Ansprechpartner
+   * the first contact. Null with `contactDataError` when it cannot be read (migration missing).
+   */
+  contactData: OrgContactData | null;
+  contactDataError: string | null;
 };
 
 const EDIT_SELECT =
@@ -202,6 +212,14 @@ export async function loadCompanyProfile(
 
   if (!org) return null;
 
+  let contactData: OrgContactData | null = null;
+  let contactDataError: string | null = null;
+  try {
+    contactData = (await loadOrgContactData(supabase, organisationId)).data;
+  } catch (error) {
+    contactDataError = error instanceof Error ? error.message : "Kontaktdaten konnten nicht geladen werden.";
+  }
+
   const organisationName = org.name?.trim() || "Organisation";
   const displayName = config?.display_name?.trim() || organisationName;
   const websiteUrl = config?.website_url?.trim() || "";
@@ -219,6 +237,8 @@ export async function loadCompanyProfile(
     points,
     anbieterStatus: workshop.anbieter.status,
     canEdit,
+    contactData,
+    contactDataError,
   };
 }
 
@@ -230,17 +250,39 @@ export async function saveCompanyProfile(input: {
   websiteUrl: string;
   contacts: CompanyProfileContact[];
   points: unknown;
+  /** The Kontaktdaten card; Firmenname, Website and Ansprechpartner come from the fields above. */
+  contactData?: ContactDataInput | null;
   note?: string | null;
 }): Promise<{ ok: true; profile: CompanyProfile; editId: string | null } | { ok: false; message: string }> {
   const current = await loadCompanyProfile(input.supabase, input.organisationId, true);
   if (!current) return { ok: false, message: "Organisation nicht gefunden." };
+
+  // Kontaktdaten first: the same row Texte writes; their changes join this save's log entry.
+  let contactChanges: CompanyProfileChange[] = [];
+  if (input.contactData) {
+    try {
+      const saved = await saveOrgContactData(input.supabase, {
+        organisationId: input.organisationId,
+        userId: input.userId,
+        values: input.contactData,
+        skipReused: true,
+        log: false,
+      });
+      contactChanges = saved.changes;
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof ContactDataMigrationError || error instanceof Error ? error.message : "Kontaktdaten konnten nicht gespeichert werden.",
+      };
+    }
+  }
 
   const nextDisplayName = clip(input.displayName, 160) || current.organisationName;
   const nextWebsiteUrl = clip(input.websiteUrl, 500);
   const nextContacts = normalizeProfileContacts(input.contacts);
   const nextPoints = normalizeIncomingPoints(input.points, current.points);
 
-  const changes = buildCompanyProfileChanges({
+  const profileChanges = buildCompanyProfileChanges({
     before: {
       displayName: current.displayName,
       websiteUrl: current.websiteUrl,
@@ -255,8 +297,13 @@ export async function saveCompanyProfile(input: {
     },
   });
 
+  const changes = [...profileChanges, ...contactChanges];
   if (changes.length === 0) {
     return { ok: true, profile: current, editId: null };
+  }
+  if (profileChanges.length === 0) {
+    // Only the Kontaktdaten changed: nothing else to write, the change log as for any edit.
+    return logAndReload(input, changes);
   }
 
   const workshop = await loadWorkshopState(input.supabase, input.organisationId);
@@ -328,6 +375,13 @@ export async function saveCompanyProfile(input: {
     // Contacts stay empty until onboarding exists — still log other field changes.
   }
 
+  return logAndReload(input, changes);
+}
+
+async function logAndReload(
+  input: { supabase: SupabaseClient; organisationId: string; userId: string; note?: string | null },
+  changes: CompanyProfileChange[],
+): Promise<{ ok: true; profile: CompanyProfile; editId: string | null } | { ok: false; message: string }> {
   const { data: editRow, error: editError } = await input.supabase
     .from("dt_company_profile_edits")
     .insert({

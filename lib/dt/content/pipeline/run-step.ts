@@ -7,6 +7,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
+import { loadContactPromptData } from "@/lib/dt/contact-data-store";
+import { parseClientWishes } from "@/lib/dt/content/client-wishes";
 import {
   loadContentAnbieterSources,
   loadContentAvatarOptions,
@@ -123,8 +125,9 @@ async function loadContext(
   steps: ContentStepRow[],
 ): Promise<{ context: ContentPipelineContext; avatarId: string | null }> {
   // The editable texts (Texter prompt, Textvorlagen, step instructions) are read for every
-  // step, so a save under Globale Prompts reaches the next step without a deploy.
-  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts] = await Promise.all([
+  // step, so a save under Globale Prompts reaches the next step without a deploy. So are the
+  // client data: the Kontaktdaten and the Kundenwünsche (settings row and page row).
+  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts, contact] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
     loadContentAnbieterSources(service, page.organisation_id),
@@ -133,6 +136,7 @@ async function loadContext(
     loadContentTypePromptsForRun(service),
     loadTexterPrompt(service),
     loadContentStepPrompts(service),
+    loadContactPromptData(service, page.organisation_id),
   ]);
   if (!settingsRow) {
     throw new ContentLlmError("Die Einstellungen für Texte sind noch nicht bestätigt.", false);
@@ -186,6 +190,11 @@ async function loadContext(
       texterPrompt,
       stepPrompts,
       notes: page.notes,
+      contact,
+      wishes: {
+        organisation: parseClientWishes(settingsRow.client_wishes),
+        page: parseClientWishes(page.client_wishes),
+      },
       freshness: page.freshness,
       openFindings: page.findings,
       outputs,

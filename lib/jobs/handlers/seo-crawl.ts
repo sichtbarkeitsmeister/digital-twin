@@ -9,6 +9,7 @@ import {
   type DtCrawledPage,
 } from "@/lib/dt/seo/crawl-sitemap";
 import { reclaimStuckCrawlUrls } from "@/lib/dt/seo/reclaim-stuck-crawl-urls";
+import { enqueueJob } from "@/lib/jobs/queue";
 import { createServiceClient } from "@/lib/supabase/service";
 
 import type { JobHandler } from "../types";
@@ -43,7 +44,24 @@ type CrawlRow = {
   message: string | null;
   gsc_sync_status: string | null;
   started_at: string | null;
+  created_by_user_id: string | null;
 };
+
+/**
+ * A finished crawl fills the organisation's Kontaktdaten (empty and crawl-filled fields only)
+ * and looks for the Google-Profil once (job `content.contact`). A failure to enqueue never
+ * fails the crawl.
+ */
+async function enqueueContactFill(organisationId: string, userId: string | null): Promise<void> {
+  const queued = await enqueueJob({
+    kind: "content.contact",
+    organisationId,
+    payload: { organisationId, userId },
+    dedupeKey: `content.contact:${organisationId}`,
+    maxAttempts: 2,
+  }).catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
+  if (!queued.ok) console.warn("[seo.crawl] Kontaktdaten-Job nicht angelegt:", queued.error);
+}
 
 type ClaimedUrl = { id: string; url: string; depth: number };
 
@@ -94,7 +112,7 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
   const { data: crawl, error: crawlError } = await supabase
     .from("dt_site_crawls")
     .select(
-      "id,organisation_id,status,max_pages,pages_crawled,pages_discovered,message,gsc_sync_status,started_at",
+      "id,organisation_id,status,max_pages,pages_crawled,pages_discovered,message,gsc_sync_status,started_at,created_by_user_id",
     )
     .eq("id", crawlId)
     .maybeSingle();
@@ -148,6 +166,7 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
 
   if (urls.length === 0) {
     const done = await finishIfEmpty(supabase, crawlId);
+    if (done.done) await enqueueContactFill(organisationId, row.created_by_user_id ?? null);
     return { ok: true, result: done, reschedule: Boolean(done.reschedule) };
   }
 
@@ -299,6 +318,7 @@ export const seoCrawlHandler: JobHandler = async ({ job }) => {
         message: `Abgeschlossen: ${pagesCrawled} Seiten gecrawlt.`,
       })
       .eq("id", crawlId);
+    await enqueueContactFill(organisationId, row.created_by_user_id ?? null);
     return { ok: true, result: { done: true, pagesCrawled } };
   }
 

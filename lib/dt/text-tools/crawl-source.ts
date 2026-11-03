@@ -103,9 +103,14 @@ export type CrawledPageInput = {
   ingested: IngestedText;
 };
 
-type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
-async function fetchLiveHtml(url: string, fetchImpl: FetchLike): Promise<string | null> {
+/**
+ * The live HTML of a crawled page, with the crawl's user agent and time limit; only a safe
+ * public URL (`checkSafePublicUrl`), only text/html, at most the upload size. Null on any
+ * failure. Also read by the Kontaktdaten fill (`contact-data-fill.ts`) for the page's links.
+ */
+export async function fetchLivePageHtml(url: string, fetchImpl: FetchLike = fetch): Promise<string | null> {
   if (!checkSafePublicUrl(url).ok) return null;
   try {
     const res = await fetchImpl(url, {
@@ -158,7 +163,7 @@ export async function loadCrawledPageInput(
   const pageName = (page.h1 || page.title || "").replace(/\s+/g, " ").trim().slice(0, 200) || (pathname === "/" ? "Startseite" : pathname);
   const fileName = `${crawlPageSlug(pathname, pageName)}.html`.slice(0, 260);
 
-  const live = await fetchLiveHtml(page.url, options.fetchImpl ?? fetch);
+  const live = await fetchLivePageHtml(page.url, options.fetchImpl ?? fetch);
   let liveError: string | null = null;
   if (live) {
     const document: UploadedDocument = { kind: "html", content: mainContentHtml(live), format: "web" };

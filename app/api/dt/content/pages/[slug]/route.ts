@@ -14,15 +14,18 @@ import {
   loadContentPage,
   loadContentSteps,
   planContentSkipSteps,
+  updateContentClientWishes,
   updateContentPageType,
   updateContentSkipSteps,
 } from "@/lib/dt/content/store";
 import type { ContentPagePatchResult } from "@/lib/dt/content/types";
 
 /**
- * „Seitentyp“ in the table and in the drawer, and „Schritte“ in the drawer (`skip_steps`, the
- * whole list of steps switched off). Every page: the Excel type and the crawl guess are
- * suggestions the editor overrides by hand. Neither changes while the page runs (409).
+ * „Seitentyp“ in the table and in the drawer, „Schritte“ in the drawer (`skip_steps`, the
+ * whole list of steps switched off) and „Zusätzliche Wünsche für diese Seite“
+ * (`client_wishes`). Every page: the Excel type and the crawl guess are suggestions the editor
+ * overrides by hand. Type and steps do not change while the page runs (409); the wishes do,
+ * they apply from the next step that runs.
  */
 export async function PATCH(req: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
@@ -38,7 +41,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
   try {
     const page = await loadContentPage(gate.service, gate.organisationId, slug);
     if (!page) return contentError("Seite nicht gefunden.", 404);
-    const { page_type: pageType, skip_steps: skipSteps } = parsed.data;
+    const { page_type: pageType, skip_steps: skipSteps, client_wishes: clientWishes } = parsed.data;
     // Everything is checked before anything is written.
     if (pageType !== undefined) {
       const blocker = contentPageTypeChangeBlocker(page);
@@ -55,6 +58,10 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
     }
     if (skipSteps !== undefined) {
       const saved = await updateContentSkipSteps(gate.service, page, skipSteps);
+      if (!saved.ok) return contentError(saved.error, saved.status);
+    }
+    if (clientWishes !== undefined) {
+      const saved = await updateContentClientWishes(gate.service, page, clientWishes);
       if (!saved.ok) return contentError(saved.error, saved.status);
     }
 

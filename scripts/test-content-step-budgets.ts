@@ -115,7 +115,7 @@ const pageRow = (patch: Partial<ContentPageRow> = {}): ContentPageRow => ({
   source_url: null, crawled_at: null, main_keyword: null, page_role: "pillar", page_type: "startseite", pillar_name: null,
   estimated_traffic: null, keywords: null, h1_options: [], user_questions: [], ki_prompt: null, internal_link_targets: [],
   state: "laeuft", step: null, released: false, released_at: null, title: null, meta_description: null, html: "", markdown: "",
-  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], freshness: EMPTY_CONTENT_FRESHNESS, skip_steps: [],
+  findings: [], final_findings: [], unresolved: [], questions: [], notes: [], freshness: EMPTY_CONTENT_FRESHNESS, skip_steps: [], client_wishes: "",
   error: null, job_id: JOB_ID, cost_eur: 0, started_by: null, created_at: "2026-10-27T16:55:40Z", updated_at: "2026-10-27T16:55:40Z",
   ...patch,
 });

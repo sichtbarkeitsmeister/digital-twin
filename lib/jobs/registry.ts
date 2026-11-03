@@ -1,3 +1,4 @@
+import { contentContactHandler } from "./handlers/content-contact";
 import { contentPageHandler } from "./handlers/content-page";
 import { groundingPageHandler } from "./handlers/grounding-page";
 import { leadinfoNormalizeHandler } from "./handlers/leadinfo-normalize";
@@ -13,6 +14,7 @@ export const JOB_HANDLERS: Record<string, JobHandler> = {
   "leadinfo.normalize": leadinfoNormalizeHandler,
   "seo.crawl": seoCrawlHandler,
   "content.page": contentPageHandler,
+  "content.contact": contentContactHandler,
   "grounding.page": groundingPageHandler,
   "seo.grounding_check": seoGroundingCheckHandler,
   "seo.grounding_schedule": seoGroundingScheduleHandler,

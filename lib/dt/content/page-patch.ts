@@ -7,6 +7,7 @@
 import { z } from "zod";
 
 import { CONTENT_PAGE_TYPES } from "@/lib/dt/content/page-types";
+import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
 import {
   CONTENT_SKIPPABLE_STEP_KEYS,
   contentStepByKey,
@@ -20,8 +21,10 @@ const patchSchema = z
     page_type: z.enum(CONTENT_PAGE_TYPES).optional(),
     /** The whole new list; each switch sends it. Duplicates are dropped when it is stored. */
     skip_steps: z.array(z.enum(CONTENT_SKIPPABLE_STEP_KEYS)).max(CONTENT_SKIPPABLE_STEP_KEYS.length * 2).optional(),
+    /** „Zusätzliche Wünsche für diese Seite“, one per line; also while the page runs (the next step reads them). */
+    client_wishes: z.string().max(CLIENT_WISHES_TEXT_MAX).optional(),
   })
-  .refine((body) => body.page_type !== undefined || body.skip_steps !== undefined);
+  .refine((body) => body.page_type !== undefined || body.skip_steps !== undefined || body.client_wishes !== undefined);
 
 export type ContentPagePatchBody = z.infer<typeof patchSchema>;
 
@@ -48,5 +51,6 @@ export function parseContentPagePatch(
     return { ok: false, message: skipStepsMessage(raw.skip_steps) };
   }
   if ("page_type" in raw) return { ok: false, message: "Ungültiger Seitentyp." };
+  if ("client_wishes" in raw) return { ok: false, message: `Die Wünsche für diese Seite dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.` };
   return { ok: false, message: "Ungültige Anfrage." };
 }
