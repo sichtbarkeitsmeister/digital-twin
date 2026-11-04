@@ -124,6 +124,6 @@ export async function PATCH(req: Request) {
     ok: true,
     profile: result.profile,
     editId: result.editId,
-    changed: Boolean(result.editId),
+    changed: result.changed,
   });
 }

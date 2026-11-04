@@ -301,10 +301,10 @@ function dedupeText(values: readonly string[], max: number): string[] {
 export const CONTENT_MAX_FINDINGS = 30;
 export const CONTENT_MAX_QUESTIONS = 20;
 
-export function normalizeFindings(raw: unknown, knownBlockIds: ReadonlySet<string>): ContentFinding[] {
+export function normalizeFindings(raw: unknown, knownBlockIds: ReadonlySet<string>, max: number = CONTENT_MAX_FINDINGS): ContentFinding[] {
   if (!Array.isArray(raw)) return [];
   const out: ContentFinding[] = [];
-  for (const item of raw.slice(0, CONTENT_MAX_FINDINGS)) {
+  for (const item of raw.slice(0, max)) {
     const r = rec(item);
     const title = str(r.title, 200);
     const problem = str(r.problem, 1_000);
@@ -323,10 +323,10 @@ export function normalizeFindings(raw: unknown, knownBlockIds: ReadonlySet<strin
   return out;
 }
 
-export function normalizeQuestions(raw: unknown, knownBlockIds: ReadonlySet<string>): ContentQuestion[] {
+export function normalizeQuestions(raw: unknown, knownBlockIds: ReadonlySet<string>, max: number = CONTENT_MAX_QUESTIONS): ContentQuestion[] {
   if (!Array.isArray(raw)) return [];
   const out: ContentQuestion[] = [];
-  for (const item of raw.slice(0, CONTENT_MAX_QUESTIONS)) {
+  for (const item of raw.slice(0, max)) {
     const r = rec(item);
     const question = str(r.question, 600);
     if (!question) continue;
@@ -1043,13 +1043,22 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
 }
 
 /**
- * Output budget of the Faktencheck. Its answer grows with the page: up to 30 findings and 20
- * questions, each quoting its sentence, about 10,000 tokens. 6,000 cut off a long Startseite
- * (24 Abschnitte) on 27.10. after 112 s, about 54 tokens per second; at that speed 12,000 is
- * about what one call can write within its 225 s, so the job loop gives the step a long slot.
+ * Output budget of the Faktencheck. Its answer grows with the page, each finding and question
+ * quoting its sentence. 6,000 cut off a long Startseite (24 Abschnitte) on 27.10. after 112 s,
+ * about 54 tokens per second; at that speed 12,000 is about what one call can write within its
+ * 225 s, so the job loop gives the step a long slot and the budget cannot simply grow.
  * Only what is written is billed.
  */
 export const FAKTENCHECK_MAX_TOKENS = 12_000;
+
+/**
+ * What the Faktencheck may write: the most important findings and questions. With 30 findings
+ * and 20 questions (and since 03.11. scope, severity and grundlegend on each question) its answer
+ * doubled to about 9,000–10,000 tokens and cut off at 12,000 on a real Startseite (03.11.).
+ * The page asks at most three questions anyway; the rest of a long list was never used.
+ */
+export const FAKTENCHECK_MAX_FINDINGS = 20;
+export const FAKTENCHECK_MAX_QUESTIONS = 10;
 
 function faktencheck(context: ContentPipelineContext): ContentStepSpec {
   return {
@@ -1072,14 +1081,14 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
     ]),
     tool: {
       name: "submit_faktencheck",
-      description: `Befunde und Fragen an den Kunden: höchstens ${CONTENT_MAX_FINDINGS} Befunde und ${CONTENT_MAX_QUESTIONS} Fragen, die wichtigsten zuerst.`,
+      description: `Befunde und Fragen an den Kunden: höchstens ${FAKTENCHECK_MAX_FINDINGS} Befunde und ${FAKTENCHECK_MAX_QUESTIONS} Fragen, die wichtigsten zuerst. Gleichartige Befunde (dieselbe Ursache in mehreren Abschnitten) sind ein Befund.`,
       input_schema: {
         type: "object",
         properties: {
-          findings: { ...FINDINGS_SCHEMA, maxItems: CONTENT_MAX_FINDINGS },
+          findings: { ...FINDINGS_SCHEMA, maxItems: FAKTENCHECK_MAX_FINDINGS },
           questions: {
             type: "array",
-            maxItems: CONTENT_MAX_QUESTIONS,
+            maxItems: FAKTENCHECK_MAX_QUESTIONS,
             items: {
               type: "object",
               properties: {
@@ -1104,7 +1113,10 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
     normalize: (json, ctx): FaktencheckOutput => {
       const r = rec(json);
       const ids = blockIds(ctx.blocks);
-      return { findings: normalizeFindings(r.findings, ids), questions: normalizeQuestions(r.questions, ids) };
+      return {
+        findings: normalizeFindings(r.findings, ids, FAKTENCHECK_MAX_FINDINGS),
+        questions: normalizeQuestions(r.questions, ids, FAKTENCHECK_MAX_QUESTIONS),
+      };
     },
   };
 }

@@ -192,7 +192,13 @@ export async function logContactChanges(
     })
     .select("id")
     .maybeSingle();
-  if (error) throw new Error(`Änderung konnte nicht protokolliert werden: ${error.message}`);
+  // The values are saved already; a change log that cannot be written (in production the table
+  // was missing: migration 20261022 not run) must not turn the save into an error, nor fail the
+  // crawl's fill job (it retried and then reported nothing as filled).
+  if (error) {
+    console.error(`[contact-data] Änderung nicht protokolliert (${input.organisationId}): ${error.message}`);
+    return null;
+  }
   return (data as { id?: string } | null)?.id ?? null;
 }
 

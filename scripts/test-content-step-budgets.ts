@@ -13,6 +13,8 @@ import {
   CONTENT_MAX_FINDINGS,
   CONTENT_MAX_QUESTIONS,
   ENDABNAHME_MAX_TOKENS,
+  FAKTENCHECK_MAX_FINDINGS,
+  FAKTENCHECK_MAX_QUESTIONS,
   FAKTENCHECK_MAX_TOKENS,
   contentStepSpec,
   normalizeFindings,
@@ -53,16 +55,16 @@ const context = (): ContentPipelineContext => ({
   metaDescription: null,
 });
 
-/** A Faktencheck answer at the normaliser's caps, with findings and questions as long as real ones. */
+/** A Faktencheck answer at its caps, with findings and questions as long as real ones (all fields set). */
 function maximalAnswer() {
-  const findings = Array.from({ length: CONTENT_MAX_FINDINGS }, (_, i) => ({
+  const findings = Array.from({ length: FAKTENCHECK_MAX_FINDINGS }, (_, i) => ({
     title: `Ankaufspreis für Silberbesteck ohne Beleg (${i + 1})`,
     problem: `Der Satz „Für 800er Silberbesteck zahlen wir bis zu 1,20 € pro Gramm, auch für Einzelteile und beschädigte Stücke“ nennt einen Preis, der in den Anbieterfakten nicht vorkommt. Auch die Zusage für beschädigte Stücke ist nicht belegt.`,
     proposal: "Den Preis streichen oder durch die Angabe aus den Anbieterfakten ersetzen; die Zusage für beschädigte Stücke nur übernehmen, wenn der Kunde sie bestätigt.",
     severity: "high",
     block_id: `abschnitt-${i + 1}`,
   }));
-  const questions = Array.from({ length: CONTENT_MAX_QUESTIONS }, (_, i) => ({
+  const questions = Array.from({ length: FAKTENCHECK_MAX_QUESTIONS }, (_, i) => ({
     kind: "fact",
     question: `Kaufen Sie Nachlässe und Haushaltsauflösungen auch außerhalb von Hamburg an, und wenn ja, bis zu welcher Entfernung fahren Sie kostenlos zur Besichtigung? (${i + 1})`,
     field: "leistungen",
@@ -70,6 +72,9 @@ function maximalAnswer() {
     block_id: `abschnitt-${i + 1}`,
     excerpt: "Wir kommen zu Ihnen nach Hause, schätzen kostenlos und zahlen sofort in bar – in ganz Norddeutschland, ohne Anfahrtskosten und ohne Mindestwert.",
     blocking: true,
+    scope: "seite",
+    severity: "medium",
+    grundlegend: false,
   }));
   return { findings, questions };
 }
@@ -82,7 +87,11 @@ function maximalAnswer() {
   const answer = maximalAnswer();
   const tokens = JSON.stringify(answer).length / CHARS_PER_TOKEN;
   assert.ok(tokens * 1.1 <= FAKTENCHECK_MAX_TOKENS, `a maximal answer (~${Math.round(tokens)} tokens) fits ${FAKTENCHECK_MAX_TOKENS}`);
-  assert.ok(tokens > 6_000, "and would have been cut off at the old 6,000");
+  // 03.11.: real answers ran 30–40 % longer than this estimate (9,700–9,950 tokens at 30 findings
+  // and 20 questions) and one was cut off at 12,000; at the caps there is room for that now.
+  assert.ok(tokens * 1.4 <= FAKTENCHECK_MAX_TOKENS, `a maximal answer (~${Math.round(tokens)} tokens) leaves room for longer real ones`);
+  // (At the old caps of 30 findings and 20 questions this estimate was over 6,000, the budget before 27.10.)
+  assert.ok(tokens > 3_000, `the estimate (~${Math.round(tokens)} tokens) is a real answer's size, not a toy`);
 
   // One call can write the whole budget: at the measured speed within a long slot's time limit.
   const longSlotMs = stepBudgetMs(0, 240_000, 150_000)!;
@@ -91,12 +100,18 @@ function maximalAnswer() {
 
   // The schema tells the model the caps the normaliser applies, most important first.
   const schema = spec.tool.input_schema as { properties: Record<string, { maxItems?: number }> };
-  assert.equal(schema.properties.findings!.maxItems, CONTENT_MAX_FINDINGS);
-  assert.equal(schema.properties.questions!.maxItems, CONTENT_MAX_QUESTIONS);
-  assert.match(spec.tool.description ?? "", new RegExp(`höchstens ${CONTENT_MAX_FINDINGS} Befunde und ${CONTENT_MAX_QUESTIONS} Fragen, die wichtigsten zuerst`));
+  assert.equal(schema.properties.findings!.maxItems, FAKTENCHECK_MAX_FINDINGS);
+  assert.equal(schema.properties.questions!.maxItems, FAKTENCHECK_MAX_QUESTIONS);
+  assert.match(spec.tool.description ?? "", new RegExp(`höchstens ${FAKTENCHECK_MAX_FINDINGS} Befunde und ${FAKTENCHECK_MAX_QUESTIONS} Fragen, die wichtigsten zuerst`));
   const ids = new Set(answer.findings.map((f) => f.block_id));
-  assert.equal(normalizeFindings([...answer.findings, ...answer.findings], ids).length, CONTENT_MAX_FINDINGS, "more than the cap is not kept");
-  assert.equal(normalizeQuestions([...answer.questions, ...answer.questions], ids).length, CONTENT_MAX_QUESTIONS);
+  const doubled = spec.normalize({ findings: [...answer.findings, ...answer.findings], questions: [...answer.questions, ...answer.questions] }, context()) as {
+    findings: unknown[];
+    questions: unknown[];
+  };
+  assert.deepEqual([doubled.findings.length, doubled.questions.length], [FAKTENCHECK_MAX_FINDINGS, FAKTENCHECK_MAX_QUESTIONS], "more than the Faktencheck's caps is not kept");
+  // The other steps keep the general caps.
+  assert.equal(normalizeFindings([...answer.findings, ...answer.findings, ...answer.findings], ids).length, CONTENT_MAX_FINDINGS);
+  assert.equal(normalizeQuestions([...answer.questions, ...answer.questions, ...answer.questions], ids).length, CONTENT_MAX_QUESTIONS);
 
   // The other steps keep their schema: the Lektorat's findings carry no cap.
   const lektorat = contentStepSpec(8, context()).tool.input_schema as { properties: Record<string, { maxItems?: number }> };

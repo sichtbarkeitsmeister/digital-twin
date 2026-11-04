@@ -253,7 +253,7 @@ export async function saveCompanyProfile(input: {
   /** The Kontaktdaten card; Firmenname, Website and Ansprechpartner come from the fields above. */
   contactData?: ContactDataInput | null;
   note?: string | null;
-}): Promise<{ ok: true; profile: CompanyProfile; editId: string | null } | { ok: false; message: string }> {
+}): Promise<{ ok: true; profile: CompanyProfile; editId: string | null; changed: boolean } | { ok: false; message: string }> {
   const current = await loadCompanyProfile(input.supabase, input.organisationId, true);
   if (!current) return { ok: false, message: "Organisation nicht gefunden." };
 
@@ -299,7 +299,7 @@ export async function saveCompanyProfile(input: {
 
   const changes = [...profileChanges, ...contactChanges];
   if (changes.length === 0) {
-    return { ok: true, profile: current, editId: null };
+    return { ok: true, profile: current, editId: null, changed: false };
   }
   if (profileChanges.length === 0) {
     // Only the Kontaktdaten changed: nothing else to write, the change log as for any edit.
@@ -381,7 +381,7 @@ export async function saveCompanyProfile(input: {
 async function logAndReload(
   input: { supabase: SupabaseClient; organisationId: string; userId: string; note?: string | null },
   changes: CompanyProfileChange[],
-): Promise<{ ok: true; profile: CompanyProfile; editId: string | null } | { ok: false; message: string }> {
+): Promise<{ ok: true; profile: CompanyProfile; editId: string | null; changed: boolean } | { ok: false; message: string }> {
   const { data: editRow, error: editError } = await input.supabase
     .from("dt_company_profile_edits")
     .insert({
@@ -393,13 +393,15 @@ async function logAndReload(
     .select("id")
     .maybeSingle();
 
+  // The changes are saved already; a change log that cannot be written (in production the table
+  // was missing: migration 20261022 not run) must not report the save as failed.
   if (editError) {
-    return { ok: false, message: editError.message || "Änderung konnte nicht protokolliert werden." };
+    console.error(`[company-profile] Änderung nicht protokolliert (${input.organisationId}): ${editError.message}`);
   }
 
   const profile = await loadCompanyProfile(input.supabase, input.organisationId, true);
   if (!profile) return { ok: false, message: "Profil nach dem Speichern nicht gefunden." };
-  return { ok: true, profile, editId: editRow?.id ?? null };
+  return { ok: true, profile, editId: editRow?.id ?? null, changed: changes.length > 0 };
 }
 
 function parseChanges(raw: unknown): CompanyProfileChange[] {

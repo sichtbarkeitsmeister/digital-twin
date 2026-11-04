@@ -35,7 +35,8 @@ import {
   splitAddress,
 } from "../lib/dt/contact-data-crawl";
 import { fillContactDataFromWebsite, looksLikeBlockedPage, searchGoogleProfile } from "../lib/dt/contact-data-fill";
-import { loadOrgContactData, saveOrgContactData } from "../lib/dt/contact-data-store";
+import { loadOrgContactData, saveAutomaticContactValues, saveOrgContactData } from "../lib/dt/contact-data-store";
+import { loadCompanyProfile, saveCompanyProfile } from "../lib/dt/company-profile";
 import {
   GOOGLE_SEARCH_MAX_FETCHES,
   GOOGLE_SEARCH_MAX_SEARCHES,
@@ -405,6 +406,57 @@ async function testChangeLog() {
   console.log("Kontaktdaten: change log: ok");
 }
 
+/**
+ * 03.11. in production: the table of the change log did not exist (migration 20261022 not run).
+ * The values were saved, then the log failed: the card and the Firmenprofil showed an error and
+ * the crawl's fill job failed once and retried. A change log that cannot be written is a warning.
+ */
+async function testMissingChangeLog() {
+  const db = new FakeDb({
+    organisations: [{ id: ORG, name: "Muster Dach GmbH" }],
+    dt_org_config: [{ organisation_id: ORG, display_name: "Muster Dach", website_url: "https://muster-dach.de" }],
+    dt_org_onboarding: [{ organisation_id: ORG, customer_contacts: [] }],
+  });
+  const missing = { data: null, error: { message: 'relation "public.dt_company_profile_edits" does not exist' } };
+  const failingLog = {
+    insert: () => ({ select: () => ({ maybeSingle: async () => missing }) }),
+  };
+  const service = new Proxy(db.service as object, {
+    get(target, prop, receiver) {
+      if (prop === "from") return (table: string) => (table === "dt_company_profile_edits" ? failingLog : (target as { from: (t: string) => unknown }).from(table));
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as typeof db.service;
+  const errors: unknown[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => void errors.push(args);
+  try {
+    const manual = await saveOrgContactData(service, { organisationId: ORG, userId: USER, values: { fields: { telefon: "0221 1" } }, now: NOW });
+    assert.equal(manual.editId, null);
+    assert.equal((await loadOrgContactData(db.service, ORG)).data.fields.telefon?.value, "0221 1", "a manual save goes through");
+    const automatic = await saveAutomaticContactValues(service, { organisationId: ORG, userId: USER, found: { email: "info@muster-dach.de" }, source: "crawl", note: "Crawl" });
+    assert.deepEqual(automatic.changed, ["email"], "the fill reports what it filled (no failed attempt, no empty retry)");
+    const before = await loadCompanyProfile(db.service, ORG, true);
+    assert.ok(before);
+    const profile = await saveCompanyProfile({
+      supabase: service,
+      organisationId: ORG,
+      userId: USER,
+      displayName: before.displayName,
+      websiteUrl: before.websiteUrl,
+      contacts: before.contacts,
+      points: before.points,
+      contactData: { fields: { telefon: "0221 2" }, custom: [], no_google_profile: false },
+    });
+    assert.ok(profile.ok, "the Firmenprofil save is no error either");
+    assert.ok(profile.ok && profile.changed && profile.editId === null, "and reports the change although nothing was logged");
+  } finally {
+    console.error = original;
+  }
+  assert.equal(errors.length, 3, "each missing log entry is logged for the team");
+  console.log("Kontaktdaten: a missing change log is a warning, not an error: ok");
+}
+
 function testMigrationMessage() {
   const message = contentDbErrorMessage({ code: "42703", message: "column dt_content_pages.client_wishes does not exist" }, "x");
   assert.match(message, /20261103_dt_content_client_data\.sql/);
@@ -730,6 +782,7 @@ async function main() {
   testBlockedPage();
   await testFillFromWebsite();
   await testChangeLog();
+  await testMissingChangeLog();
   testMigrationMessage();
   testGoogleLinkPatterns();
   testGoogleCandidateMatch();
