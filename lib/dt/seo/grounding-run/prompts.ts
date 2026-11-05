@@ -638,7 +638,7 @@ Schritt 3 Seite bauen: Du schreibst die vollständige HTML-Datei der Grounding P
 ${rules.standard}
 
 Technik:
-- Vollständiges Dokument: <!doctype html>, <html lang="de">, <head> mit <meta charset>, <meta name="viewport">, <title> (Name der Entität, optional „: Fakten“), <meta name="description"> (ein Satz, 120–155 Zeichen, nur Fakten), <link rel="canonical" href="${page.url}">, die JSON-LD-Skripte; <body> mit <main> und dem Inhalt. Nur wenige Zeilen CSS im <head> (lead-definition, data-grid als zweispaltige Liste, review-notice, max-width) – die Seite übernimmt Header, Footer und Typografie der Website.
+- Vollständiges Dokument: <!doctype html>, <html lang="de">, <head> mit <meta charset>, <meta name="viewport">, <title> (Name der Entität, optional „: Fakten“), <meta name="description"> (ein Satz, 120–155 Zeichen, nur Fakten), <link rel="canonical" href="${page.url}">, die JSON-LD-Skripte; <body> mit <main> und dem Inhalt. Kein eigenes CSS: kein <style>-Element, keine style-Attribute, keine Stylesheets oder Schrift-Links, kein JavaScript außer JSON-LD. Farben und Schriften der Website setzt das Tool nach dem Bauen als fertigen <style>-Block ein. Nutze dafür diese Klassen: <ol class="breadcrumb"> in <nav>, <p class="lead-definition"> für den Definitionssatz, <dl class="data-grid"> für Kerndaten, <p class="source"> für Quellenzeilen, <footer class="page-meta"> am Seitenende.
 - Ausschließlich belegte Fakten aus der Faktenbasis. Fakten mit Befund „streichen“ fehlen. Unbeantwortete Fragen: den betroffenen Fakt weglassen – keine Platzhalter wie [prüfen] im sichtbaren Text.
 - JSON-LD: ein Skript mit dem Entitätstyp (Name, Beschreibung = Definition, url, address/areaServed/contactPoint nur wenn sichtbar), ein Skript mit WebPage (@id ${page.url}, name, inLanguage "de", datePublished und dateModified ${context.today}, mainEntity → die Entität${context.hub ? `, isPartOf ${context.hub.url}` : ""}), FAQPage nur bei sichtbarer FAQ.
 - Verlinkung: ${context.hub ? `zurück zum Hub ${context.hub.url}` : "zu den Entitätsseiten, sobald es welche gibt"}; verwandte Entitäten aus der Faktenbasis im Fließtext verlinken, wenn eine URL bekannt ist.
@@ -693,7 +693,7 @@ Checkliste:
 4. Spiegelt das JSON-LD nur Sichtbares, stimmen Typ, @id, Daten, mainEntity? Keine lastReviewed/reviewedBy, kein Prüfhinweis, kein Badge.
 5. Haben zeitabhängige Werte einen Stand, sind Quellen sichtbar?
 6. Keine Sätze über KI/LLM/Grounding im sichtbaren Text, keine Floskeln, keine Superlative, kein „wir“.
-7. Technik: gültiges Dokument, lang="de", canonical, title, description, Standard-Zeile v1.6, Größe unter ${GROUNDING_HTML_TARGET_CHARS.toLocaleString("de-DE")} Zeichen.
+7. Technik: gültiges Dokument, lang="de", canonical, title, description, Standard-Zeile v1.6, Größe unter ${GROUNDING_HTML_TARGET_CHARS.toLocaleString("de-DE")} Zeichen. Das <style>-Element mit dem Design setzt das Tool: unverändert lassen, kein eigenes CSS ergänzen.
 
 Ergebnis:
 - issues: jede Abweichung mit Vorschlag (severity high = Fakt falsch/unbelegt oder Pflichtblock fehlt, medium = Struktur/JSON-LD, low = Stil).

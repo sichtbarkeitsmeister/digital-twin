@@ -38,6 +38,8 @@ export type GroundingHints = {
   refreshChanges: string[];
   /** Dates and llms.txt URL the draft was rendered with (re-render after fact switches). */
   render: { createdDay: string; modifiedDay: string; llmsUrl: string } | null;
+  /** The automatic design detection of this check (colours and fonts of the website). */
+  design: { status: "detected" | "skipped" | "failed"; message: string } | null;
 };
 
 export const EMPTY_HINTS: GroundingHints = {
@@ -48,6 +50,7 @@ export const EMPTY_HINTS: GroundingHints = {
   decisionReasons: [],
   refreshChanges: [],
   render: null,
+  design: null,
 };
 
 /** The reviewer's six ticks (review_checklist). */

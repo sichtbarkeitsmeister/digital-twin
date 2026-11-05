@@ -5,6 +5,7 @@ import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { markRunUploaded } from "@/lib/dt/seo/grounding-check/actions";
 import { loadRunRow, serializeRunDetail } from "@/lib/dt/seo/grounding-check/store";
+import { loadResolvedGroundingDesign } from "@/lib/dt/seo/grounding-design/store";
 import { createServiceClient } from "@/lib/supabase/service";
 
 const bodySchema = z.object({
@@ -37,7 +38,8 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
   try {
     const result = await markRunUploaded(service, run, { userId: auth.userId, url: parsed.data.url || null });
     if (!result.ok) return NextResponse.json({ ok: false, message: result.message }, { status: result.status });
-    return NextResponse.json({ ok: true, run: serializeRunDetail(result.value) });
+    const design = await loadResolvedGroundingDesign(service, result.value.organisation_id);
+    return NextResponse.json({ ok: true, run: serializeRunDetail(result.value, { design }) });
   } catch (error) {
     return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "Speichern fehlgeschlagen." }, { status: 500 });
   }

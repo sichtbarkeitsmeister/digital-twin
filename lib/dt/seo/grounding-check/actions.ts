@@ -24,6 +24,7 @@ import { applyReviewToHtml, applyReviewToLlmsTxt } from "@/lib/dt/seo/grounding-
 import { RUN_DETAIL_COLUMNS, groundingRunsDbErrorMessage } from "@/lib/dt/seo/grounding-check/store";
 import { EMPTY_HINTS, type CrawledUrlEntry, type GroundingHints, type ReviewChecklist } from "@/lib/dt/seo/grounding-check/types";
 import { type GroundingValidation, validateGroundingDraft } from "@/lib/dt/seo/grounding-check/validate";
+import { loadResolvedGroundingDesign } from "@/lib/dt/seo/grounding-design/store";
 import { enqueueJob } from "@/lib/jobs/queue";
 import type { DtGroundingPageRow, DtGroundingRunRow, DtGroundingRunTrigger } from "@/lib/dt/types";
 
@@ -112,7 +113,8 @@ export async function saveDraft(
     }
     model = applyFactToggles(model, { facts: input.facts, faq: input.faq });
     const crawled = Array.isArray(run.crawled_urls) ? (run.crawled_urls as CrawledUrlEntry[]) : [];
-    html = renderGroundingHtml({ model, createdDay: render.createdDay, modifiedDay: render.modifiedDay, sourceTitles: sourceTitlesFor(model, crawled) });
+    const design = await loadResolvedGroundingDesign(service, run.organisation_id);
+    html = renderGroundingHtml({ model, createdDay: render.createdDay, modifiedDay: render.modifiedDay, sourceTitles: sourceTitlesFor(model, crawled), design });
     llmsTxt = renderGroundingLlmsTxt({ model, llmsUrl: render.llmsUrl, createdDay: render.createdDay, modifiedDay: render.modifiedDay, month: render.modifiedDay.slice(0, 7) });
     patch.fact_model = model;
   }

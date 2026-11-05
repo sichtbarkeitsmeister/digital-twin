@@ -8,6 +8,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
+import { injectDesign } from "@/lib/dt/seo/grounding-design/css";
+import { loadResolvedGroundingDesign } from "@/lib/dt/seo/grounding-design/store";
 import { loadGroundingRunContext } from "@/lib/dt/seo/grounding-run/context";
 import { loadGroundingPagesRules } from "@/lib/dt/prompts/grounding-pages-rules";
 import { groundingStepSpec } from "@/lib/dt/seo/grounding-run/prompts";
@@ -116,6 +118,10 @@ export async function runGroundingStep(
 
   const { pagePatch, stepStatus, halted } = groundingStepPatchFor(step, output, { html: (live?.html as string | null) ?? page.html });
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + costEur);
+  // The model writes no CSS of its own: the organisation's design goes in here, in code.
+  if (typeof pagePatch.html === "string" && pagePatch.html) {
+    pagePatch.html = injectDesign(pagePatch.html, await loadResolvedGroundingDesign(service, page.organisation_id));
+  }
 
   await upsertStep(service, page, step, {
     status: stepStatus,

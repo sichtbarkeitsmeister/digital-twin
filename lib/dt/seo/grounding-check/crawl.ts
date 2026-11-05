@@ -281,6 +281,8 @@ export type CrawlFailure = { url: string; category: KeyPageCategory; reason: str
 export type WebsiteCollection = {
   origin: string;
   homeUrl: string;
+  /** Where the homepage request ended (base for its relative links). */
+  homeFinalUrl: string;
   homeHtml: string;
   pages: CrawledKeyPage[];
   failed: CrawlFailure[];
@@ -480,6 +482,7 @@ export async function collectWebsite(
   return {
     origin,
     homeUrl,
+    homeFinalUrl: home.finalUrl,
     homeHtml: home.body,
     pages,
     failed,

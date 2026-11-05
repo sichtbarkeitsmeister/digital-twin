@@ -23,6 +23,7 @@ import {
   type GroundingFinding,
   type GroundingQuestion,
 } from "@/lib/dt/seo/grounding-run/prompts";
+import { type CmsFields, cmsFieldsFromHtml } from "@/lib/dt/seo/grounding-design/snippet";
 import type { DtGroundingPageRow, DtGroundingRunState, DtGroundingStepRow } from "@/lib/dt/types";
 
 export const GROUNDING_DRAFTS_MIGRATION_FILE = "database/migrations/20261013_dt_grounding_drafts.sql";
@@ -132,6 +133,8 @@ export type DtGroundingRunView = {
   detail: string | null;
   error: string | null;
   hasHtml: boolean;
+  /** Title, meta description, canonical URL and slug of the HTML, for the CMS fields. */
+  cmsFields: CmsFields | null;
   title: string | null;
   metaDescription: string | null;
   schemaType: string | null;
@@ -195,6 +198,7 @@ export function buildGroundingRunView(
     detail,
     error: row.run_error,
     hasHtml: Boolean(row.html?.trim()),
+    cmsFields: row.html?.trim() ? cmsFieldsFromHtml(row.html) : null,
     title: row.title,
     metaDescription: row.meta_description,
     schemaType: row.entity_type,
