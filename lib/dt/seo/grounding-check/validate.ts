@@ -4,7 +4,10 @@
  * - mirror: every visible fact of an entity is in that entity's JSON-LD node, and every
  *   JSON-LD value is visible on the page (text, links, <time datetime>, title, meta);
  * - no fact without a source, review notice and reviewedBy/lastReviewed agree;
- * - warnings for marketing words and numbers in the prose that no fact supports.
+ * - warnings for marketing words and numbers in the prose that no fact supports;
+ * - design limits of a generated page: no JavaScript (not even inline handlers), no
+ *   stylesheet links or @import, no external resources except self-hosted font files on the
+ *   client's own origin, inline CSS within the budget (about 2 KB).
  * Pure.
  */
 
@@ -23,6 +26,9 @@ import {
 import { type GroundingFactModel, looseText, visibleEntities } from "@/lib/dt/seo/grounding-check/fact-model";
 import { contentLeaves, hasType, parseJsonLdFromHtml, type JsonLdNode } from "@/lib/dt/seo/grounding-check/jsonld";
 import { normalizeUrlValue } from "@/lib/dt/seo/grounding-check/normalize";
+import { GROUNDING_CSS_BUDGET, SNIPPET_WRAPPER_CLASS, byteLength } from "@/lib/dt/seo/grounding-design/css";
+import { parseCss, parseFontSrc } from "@/lib/dt/seo/grounding-design/css-parse";
+import { absoluteUrl, isOwnOrigin } from "@/lib/dt/seo/grounding-design/origin";
 
 export type ValidationIssue = { code: string; severity: "error" | "warning"; message: string };
 export type GroundingValidation = { ok: boolean; checkedAt: string; issues: ValidationIssue[] };
@@ -157,6 +163,101 @@ export function visibleFactsNotInJsonLd(html: string): ValidationIssue[] {
   return issues;
 }
 
+/** Elements that make a browser load something. */
+const RESOURCE_ELEMENTS = "img, picture, iframe, frame, embed, object, video, audio, source, track, input[type='image'], image";
+/** <link> types that only describe the page; everything else loads or announces a resource. */
+const DESCRIPTIVE_LINK_RELS = /^(canonical|alternate)$/;
+
+/**
+ * Design limits of a Grounding Page (or CMS snippet): no inline JavaScript, no stylesheet
+ * links or @import, no external resources except self-hosted font files on the client's own
+ * origin (`siteUrl`), inline CSS within GROUNDING_CSS_BUDGET bytes. All issues are errors.
+ */
+export function validateDesignLimits(html: string, opts: { siteUrl: string | null }): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const error = (code: string, message: string) => issues.push({ code, severity: "error", message });
+  const $ = cheerio.load(html);
+  const site = opts.siteUrl;
+
+  const handlers = new Set<string>();
+  $("*").each((_, el) => {
+    for (const name of Object.keys((el as { attribs?: Record<string, string> }).attribs ?? {})) {
+      if (/^on[a-z]+$/i.test(name)) handlers.add(name.toLowerCase());
+    }
+  });
+  if (handlers.size > 0) error("javascript_inline", `Die Seite enthält JavaScript in Attributen (${[...handlers].slice(0, 4).join(", ")}).`);
+  if ($("[href^='javascript:' i], [src^='javascript:' i]").length > 0) error("javascript_inline", "Die Seite enthält javascript:-Links.");
+
+  const links = $("link").toArray().filter((el) => {
+    const rels = ($(el).attr("rel") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+    return rels.length === 0 || rels.some((r) => !DESCRIPTIVE_LINK_RELS.test(r));
+  });
+  const stylesheetLinks = links.filter((el) => /\bstylesheet\b/i.test($(el).attr("rel") ?? ""));
+  if (stylesheetLinks.length > 0) error("stylesheet_link", "Die Seite bindet ein externes Stylesheet ein (<link rel=\"stylesheet\">); erlaubt ist nur Inline-CSS.");
+  const otherLinks = links.filter((el) => !/\bstylesheet\b/i.test($(el).attr("rel") ?? ""));
+  if (otherLinks.length > 0) {
+    error("external_resource", `Die Seite lädt weitere Ressourcen über <link> (${otherLinks.map((el) => $(el).attr("rel") ?? "?").slice(0, 3).join(", ")}).`);
+  }
+  const loaders = $(RESOURCE_ELEMENTS).toArray();
+  if (loaders.length > 0) {
+    error("external_resource", `Die Seite lädt Bilder, Frames oder Medien (${[...new Set(loaders.map((el) => el.tagName.toLowerCase()))].join(", ")}); erlaubt sind nur selbst gehostete Schriftdateien.`);
+  }
+
+  let cssBytes = 0;
+  const fontHosts = new Set<string>();
+  let otherUrls = 0;
+  let imports = 0;
+  $("style").each((_, el) => {
+    const css = $(el).text();
+    cssBytes += byteLength(css.trim());
+    const parsed = parseCss(css);
+    imports += parsed.imports.length + (/@import\b/i.test(css) && parsed.imports.length === 0 ? 1 : 0);
+    for (const face of parsed.fontFaces) {
+      for (const d of face.declarations.filter((x) => x.property === "src")) {
+        for (const src of parseFontSrc(d.value)) {
+          const abs = site ? absoluteUrl(src.url, site) : null;
+          if (!abs || !site || !isOwnOrigin(abs, site)) fontHosts.add(abs ? new URL(abs).hostname : src.url.slice(0, 60));
+          else if (!/\.woff2?$/i.test(new URL(abs).pathname)) fontHosts.add(`${new URL(abs).hostname} (kein woff/woff2)`);
+        }
+      }
+    }
+    for (const rule of parsed.rules) {
+      for (const d of rule.declarations) if (/url\(/i.test(d.value)) otherUrls += 1;
+    }
+  });
+  if ($("[style*='url(' i]").length > 0) otherUrls += $("[style*='url(' i]").length;
+  if (imports > 0) error("stylesheet_link", "Das CSS lädt weitere Stylesheets über @import.");
+  if (fontHosts.size > 0) {
+    error("font_external", `Schriftdateien dürfen nur von der eigenen Domain kommen (gefunden: ${[...fontHosts].slice(0, 3).join(", ")}).`);
+  }
+  if (otherUrls > 0) error("external_resource", "Das CSS lädt Bilder oder andere Dateien über url(); erlaubt sind nur selbst gehostete Schriftdateien.");
+  if (cssBytes > GROUNDING_CSS_BUDGET) {
+    error("css_budget", `Das Inline-CSS ist ${cssBytes} Byte groß; erlaubt sind höchstens ${GROUNDING_CSS_BUDGET} Byte.`);
+  }
+  return issues;
+}
+
+/** The CMS snippet: wrapper, JSON-LD, no document shell, scoped CSS and the same design limits. */
+export function validateCmsSnippet(snippet: string, opts: { siteUrl: string | null }): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const error = (code: string, message: string) => issues.push({ code, severity: "error", message });
+  if (/<!doctype|<html[\s>]|<head[\s>]|<body[\s>]/i.test(snippet)) error("snippet_document", "Das Snippet darf kein <html>, <head> oder <body> enthalten.");
+  const $ = cheerio.load(snippet, null, false);
+  if ($(`div.${SNIPPET_WRAPPER_CLASS}`).length !== 1) error("snippet_wrapper", `Das Snippet braucht genau einen Wrapper <div class="${SNIPPET_WRAPPER_CLASS}">.`);
+  if ($("script").toArray().some((s) => ($(s).attr("type") ?? "").toLowerCase() !== "application/ld+json")) {
+    error("javascript", "Das Snippet enthält JavaScript; erlaubt ist nur JSON-LD.");
+  }
+  if ($('script[type="application/ld+json"]').length === 0) error("jsonld_missing", "Das Snippet enthält kein JSON-LD.");
+  if ($("h1").length !== 1) error("h1", `Das Snippet braucht genau eine H1 (gefunden: ${$("h1").length}).`);
+  for (const style of $("style").toArray()) {
+    const parsed = parseCss($(style).text());
+    const unscoped = parsed.rules.flatMap((r) => r.selectors).filter((sel) => !sel.startsWith(`.${SNIPPET_WRAPPER_CLASS}`));
+    if (unscoped.length > 0) error("snippet_css_scope", `CSS im Snippet muss auf .${SNIPPET_WRAPPER_CLASS} begrenzt sein (z. B. ${unscoped[0]}).`);
+  }
+  issues.push(...validateDesignLimits(snippet, opts));
+  return issues;
+}
+
 /**
  * Technical and v1.7 checks of the HTML file. `reviewed` = after approval. `strict` for files
  * built from the template; an existing (CMS) page refreshed in place keeps its scripts.
@@ -179,6 +280,8 @@ export function validateGroundingHtml(html: string, opts: { reviewed: boolean; s
     (strict ? error : warning)("javascript", "Die Seite enthält JavaScript; erlaubt ist nur JSON-LD.");
   }
   if (/noindex/i.test($('meta[name="robots"]').attr("content") ?? "")) error("noindex", "Die Seite ist auf noindex gesetzt.");
+  // A page refreshed in place (CMS) keeps its theme's assets; a generated page must not load any.
+  if (strict) issues.push(...validateDesignLimits(html, { siteUrl: $('link[rel="canonical"]').attr("href") ?? null }));
   if (html.length > 150_000) warning("size", `Die Datei ist ${Math.round(html.length / 1024)} KB groß; leichter ist besser.`);
 
   const parsed = parseJsonLdFromHtml(html);

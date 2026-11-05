@@ -59,6 +59,7 @@ import {
   type GroundingHints,
 } from "@/lib/dt/seo/grounding-check/types";
 import { validateGroundingDraft } from "@/lib/dt/seo/grounding-check/validate";
+import { detectAndStoreGroundingDesign, loadResolvedGroundingDesign } from "@/lib/dt/seo/grounding-design/store";
 import { loadWunschkundenKnowledgeForSeo } from "@/lib/dt/seo/wunschkunden-knowledge";
 import type { DtGroundingRunRow } from "@/lib/dt/types";
 
@@ -93,6 +94,9 @@ export const GROUNDING_CHECK_STEP_MS: Record<"crawl" | "extract" | "compare" | "
 };
 
 const MAX_EXISTING_HTML = 1_500_000;
+/** The design detection needs at least this much of the crawl step; else the last one stays. */
+const DESIGN_MIN_MS = 8_000;
+const DESIGN_MAX_MS = 15_000;
 const MAX_LLMS_TXT = 200_000;
 const INTERNAL_CHARS = 12_000;
 
@@ -142,6 +146,38 @@ async function loadInternalContext(service: SupabaseClient, organisationId: stri
 }
 
 // --- 1 crawl -----------------------------------------------------------------------------------
+
+/**
+ * Colours and fonts of the website from the homepage the crawl already fetched (plus its
+ * same-origin CSS). Never fails the check; manual values in the profile are not touched.
+ */
+async function detectDesignDuringCheck(
+  ctx: StepContext,
+  input: { websiteUrl: string; home: { url: string; html: string } },
+): Promise<GroundingHints["design"]> {
+  const room = ctx.deadline - Date.now();
+  if (room < DESIGN_MIN_MS) {
+    return { status: "skipped", message: "Design nicht neu erkannt (Zeitlimit des Schritts); es gilt das zuletzt erkannte Design." };
+  }
+  try {
+    const result = await detectAndStoreGroundingDesign(ctx.service, {
+      organisationId: ctx.run.organisation_id,
+      websiteUrl: input.websiteUrl,
+      home: input.home,
+      deadline: Date.now() + Math.min(DESIGN_MAX_MS, room - 3_000),
+      now: ctx.now,
+    });
+    if (!result.ok) {
+      if (!result.migrationMissing) console.warn("[grounding-check] design:", result.message);
+      return { status: result.migrationMissing ? "skipped" : "failed", message: result.message };
+    }
+    const read = result.report.stylesheets.filter((s) => s.status === "read").length;
+    return { status: "detected", message: `Design der Website erkannt (${read} CSS-${read === 1 ? "Datei" : "Dateien"} gelesen).` };
+  } catch (error) {
+    console.warn("[grounding-check] design:", error instanceof Error ? error.message : error);
+    return { status: "failed", message: "Design konnte nicht erkannt werden; es gilt das zuletzt gespeicherte Design." };
+  }
+}
 
 export async function runCrawlStep(ctx: StepContext): Promise<StepPatch> {
   const { service, run } = ctx;
@@ -197,6 +233,8 @@ export async function runCrawlStep(ctx: StepContext): Promise<StepPatch> {
   const pageUrl = existing?.url ?? hubUrl ?? `${collection.origin}/grounding/`;
   const live = existing ? deriveGroundingPageLiveFacts(extractGroundingPageHtml(existing.html)) : null;
 
+  const design = await detectDesignDuringCheck(ctx, { websiteUrl, home: { url: collection.homeFinalUrl, html: collection.homeHtml } });
+
   const crawledUrls: CrawledUrlEntry[] = [
     ...collection.pages.map((p) => ({ url: p.url, category: p.category, ok: true as const, source: p.source, title: p.title })),
     ...collection.failed.map((f) => ({ url: f.url, category: f.category, ok: false as const, reason: f.reason })),
@@ -213,6 +251,7 @@ export async function runCrawlStep(ctx: StepContext): Promise<StepPatch> {
     footerLink: existing ? inspectFooterGroundingLink(collection.homeHtml, collection.homeUrl, existing.url) : null,
     robots: { found: collection.robotsTxt !== null, crawlers: evaluateAiCrawlerAccess(collection.robotsTxt, groundingPath) },
     llmsTxt: { found: Boolean(existingLlms), url: existingLlms?.url ?? null },
+    design,
     crawl: {
       pages: collection.pages.length,
       cached: collection.pages.filter((p) => p.source === "cache").length,
@@ -392,7 +431,8 @@ export async function runGenerateStep(ctx: StepContext): Promise<StepPatch> {
   model = { ...model, prose: normalizeProse(result.json, model) };
   const createdDay = (snapshot.existing && existingDatePublished(snapshot.existing.html)) || day;
   const render = { createdDay, modifiedDay: day, llmsUrl };
-  const html = renderGroundingHtml({ model, createdDay, modifiedDay: day, sourceTitles: sourceTitlesFor(model, crawled) });
+  const design = await loadResolvedGroundingDesign(service, run.organisation_id);
+  const html = renderGroundingHtml({ model, createdDay, modifiedDay: day, sourceTitles: sourceTitlesFor(model, crawled), design });
   const llmsTxt = renderGroundingLlmsTxt({ model, llmsUrl, createdDay, modifiedDay: day, month });
   return {
     ...usagePatch(run, result),

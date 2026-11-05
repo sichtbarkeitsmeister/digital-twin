@@ -15,6 +15,9 @@ import {
 } from "@/lib/dt/seo/grounding-check/fact-model";
 import { EMPTY_HINTS, type CrawledUrlEntry, type GroundingHints, type ReviewChecklist } from "@/lib/dt/seo/grounding-check/types";
 import type { GroundingValidation } from "@/lib/dt/seo/grounding-check/validate";
+import { replaceDesignStyle } from "@/lib/dt/seo/grounding-design/css";
+import type { ResolvedDesign } from "@/lib/dt/seo/grounding-design/profile";
+import { type CmsFields, cmsFieldsFromHtml } from "@/lib/dt/seo/grounding-design/snippet";
 import type {
   DtGroundingRunDecision,
   DtGroundingRunRow,
@@ -110,7 +113,20 @@ export type GroundingRunDetail = GroundingRunSummary & {
   draftHtml: string | null;
   draftLlmsTxt: string | null;
   reviewChecklist: ReviewChecklist | null;
+  /** What goes into the CMS fields next to the snippet (from the draft's head). */
+  cmsFields: CmsFields;
 };
+
+/**
+ * The draft with the organisation's current design: design is presentation only, so a page
+ * our template built always shows (and downloads with) the latest profile. Pages refreshed in
+ * place from a CMS and hand-edited style blocks stay as they are.
+ */
+export function draftHtmlWithDesign(row: Pick<DtGroundingRunRow, "draft_html" | "decision">, design: ResolvedDesign | null | undefined): string | null {
+  if (!row.draft_html || design === undefined) return row.draft_html;
+  if (row.decision !== "create" && row.decision !== "update_required") return row.draft_html;
+  return replaceDesignStyle(row.draft_html, design).html;
+}
 
 export function serializeRunSummary(row: DtGroundingRunRow): GroundingRunSummary {
   return {
@@ -144,7 +160,8 @@ function isDiff(value: unknown): value is GroundingDiff {
   return Boolean(value) && typeof value === "object" && Array.isArray((value as GroundingDiff).items);
 }
 
-export function serializeRunDetail(row: DtGroundingRunRow): GroundingRunDetail {
+/** `design`: the organisation's current design (omit to show the stored file as it is). */
+export function serializeRunDetail(row: DtGroundingRunRow, opts: { design?: ResolvedDesign | null } = {}): GroundingRunDetail {
   const openPoints = Array.isArray(row.open_points)
     ? row.open_points.flatMap((p) => {
         const parsed = groundingOpenPointSchema.safeParse(p);
@@ -152,6 +169,7 @@ export function serializeRunDetail(row: DtGroundingRunRow): GroundingRunDetail {
       })
     : [];
   const validation = row.validation && typeof row.validation === "object" ? (row.validation as GroundingValidation) : null;
+  const draftHtml = draftHtmlWithDesign(row, opts.design);
   return {
     ...serializeRunSummary(row),
     crawledUrls: Array.isArray(row.crawled_urls) ? (row.crawled_urls as CrawledUrlEntry[]) : [],
@@ -161,9 +179,10 @@ export function serializeRunDetail(row: DtGroundingRunRow): GroundingRunDetail {
     openPoints,
     hints: { ...EMPTY_HINTS, ...((row.hints as Partial<GroundingHints> | null) ?? {}) },
     validation,
-    draftHtml: row.draft_html,
+    draftHtml,
     draftLlmsTxt: row.draft_llms_txt,
     reviewChecklist: row.review_checklist && typeof row.review_checklist === "object" ? (row.review_checklist as ReviewChecklist) : null,
+    cmsFields: cmsFieldsFromHtml(draftHtml),
   };
 }
 

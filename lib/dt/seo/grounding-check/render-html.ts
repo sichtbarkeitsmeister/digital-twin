@@ -1,6 +1,8 @@
 /**
  * grounding.html from the fact model: static, light HTML (no JavaScript, a few lines of
- * CSS) and one JSON-LD graph built from the same facts, so both mirror each other.
+ * CSS) and one JSON-LD graph built from the same facts, so both mirror each other. The CSS
+ * comes from the organisation's design profile (grounding-design/css.ts); without one it is
+ * the neutral template.
  * The review notice is NOT in the draft (standard: no placeholder before a documented
  * review); review-stamp.ts adds it, reviewedBy and lastReviewed when a person approves.
  */
@@ -26,6 +28,8 @@ import {
   visibleEntities,
 } from "@/lib/dt/seo/grounding-check/fact-model";
 import type { CrawledUrlEntry } from "@/lib/dt/seo/grounding-check/types";
+import { designStyleBlock } from "@/lib/dt/seo/grounding-design/css";
+import type { ResolvedDesign } from "@/lib/dt/seo/grounding-design/profile";
 import { looseName, normalizeDateValue, normalizeNumber, normalizePhone, parseGermanAddress } from "@/lib/dt/seo/grounding-check/normalize";
 
 /** Where review-stamp.ts puts the review notice. */
@@ -39,6 +43,8 @@ export type RenderInput = {
   modifiedDay: string;
   /** Titles of the crawled pages by URL, for the source links. */
   sourceTitles?: Record<string, string>;
+  /** Colours and fonts of the client's website; null/absent = neutral template. */
+  design?: ResolvedDesign | null;
 };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -234,16 +240,6 @@ export function pageSources(model: GroundingFactModel): string[] {
   return [...urls];
 }
 
-const CSS = `body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.6;color:#1b1f24;background:#fff}
-main{max-width:46rem;margin:0 auto;padding:2rem 1rem 3rem}
-.breadcrumb{display:flex;flex-wrap:wrap;gap:.5rem;list-style:none;margin:0 0 1.5rem;padding:0;font-size:.875rem}
-.breadcrumb li+li::before{content:"›";margin-right:.5rem;color:#6b7280}
-.lead-definition{font-size:1.125rem}
-.data-grid{display:grid;grid-template-columns:minmax(8rem,max-content) 1fr;gap:.35rem 1.25rem;margin:1rem 0}
-.data-grid dt{font-weight:600}.data-grid dd{margin:0;grid-column:2}
-.source,.page-meta{font-size:.875rem;color:#4b5563}
-section{margin-top:2rem}`;
-
 export function renderGroundingHtml(input: RenderInput): string {
   const { model } = input;
   const titles = input.sourceTitles ?? {};
@@ -332,9 +328,7 @@ export function renderGroundingHtml(input: RenderInput): string {
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="${escapeHtml(model.pageUrl)}">
 <!-- Grounding Page Standard v${GROUNDING_STANDARD_VERSION_UNREVIEWED} – ${GROUNDING_STANDARD_URL.replace(/^https:\/\//, "")} -->
-<style>
-${CSS}
-</style>
+${designStyleBlock(input.design ?? null, model.pageUrl)}
 </head>
 <body>
 <main>

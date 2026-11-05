@@ -6,6 +6,7 @@ import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { approveDraft, rejectDraft, saveDraft, type ActionResult } from "@/lib/dt/seo/grounding-check/actions";
 import { normalizeChecklist } from "@/lib/dt/seo/grounding-check/review";
 import { loadRunRow, serializeRunDetail } from "@/lib/dt/seo/grounding-check/store";
+import { loadResolvedGroundingDesign } from "@/lib/dt/seo/grounding-design/store";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { DtGroundingRunRow } from "@/lib/dt/types";
 
@@ -76,5 +77,6 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
   if (!result.ok) {
     return NextResponse.json({ ok: false, message: result.message, validation: result.validation ?? null }, { status: result.status });
   }
-  return NextResponse.json({ ok: true, run: serializeRunDetail(result.value) });
+  const design = await loadResolvedGroundingDesign(service, run.organisation_id);
+  return NextResponse.json({ ok: true, run: serializeRunDetail(result.value, { design }) });
 }

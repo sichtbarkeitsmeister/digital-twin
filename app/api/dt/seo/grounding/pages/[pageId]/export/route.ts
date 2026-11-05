@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireDtSeoAccess } from "@/lib/dt/seo/access";
 import { DT_GROUNDING_PAGE_SELECT, sortGroundingPages } from "@/lib/dt/seo/grounding-pages";
+import { injectDesign, snippetCss } from "@/lib/dt/seo/grounding-design/css";
+import { buildCmsSnippet, cmsFieldsFromHtml } from "@/lib/dt/seo/grounding-design/snippet";
+import { loadResolvedGroundingDesign } from "@/lib/dt/seo/grounding-design/store";
 import { buildGroundingLlmsTxt } from "@/lib/dt/seo/grounding-run/prompts";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { DtGroundingPageRow } from "@/lib/dt/types";
@@ -16,7 +19,14 @@ function fileSlug(page: DtGroundingPageRow, organisationName: string): string {
   return base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-/** `?format=html` downloads the draft page; `?format=llms` the llms.txt of the domain. */
+/** Shown inline (preview iframe): sandboxed even when opened directly, nothing but inline CSS and fonts. */
+const PREVIEW_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; font-src https:";
+
+/**
+ * `?format=html` downloads the draft page with the current design (`&preview=1` shows it
+ * inline for the preview), `?format=snippet` the page content for a CMS (`&css=1` adds the
+ * design scoped to .grounding-page), `?format=llms` the llms.txt of the domain.
+ */
 export async function GET(req: Request, context: { params: Promise<{ pageId: string }> }) {
   const auth = await requireAuthUser();
   if (!auth.ok || !auth.userId) {
@@ -25,7 +35,7 @@ export async function GET(req: Request, context: { params: Promise<{ pageId: str
   const url = new URL(req.url);
   const organisationId = url.searchParams.get("org") ?? "";
   const format = url.searchParams.get("format") ?? "html";
-  if (!/^[0-9a-f-]{36}$/i.test(organisationId) || (format !== "html" && format !== "llms")) {
+  if (!/^[0-9a-f-]{36}$/i.test(organisationId) || (format !== "html" && format !== "llms" && format !== "snippet")) {
     return NextResponse.json({ ok: false, message: "Ungültige Anfrage." }, { status: 400 });
   }
   const { pageId } = await context.params;
@@ -45,15 +55,32 @@ export async function GET(req: Request, context: { params: Promise<{ pageId: str
   if (!page) return NextResponse.json({ ok: false, message: "Grounding Page nicht gefunden." }, { status: 404 });
   const organisationName = ((config?.display_name as string | null | undefined) ?? "").trim();
 
-  if (format === "html") {
+  if (format === "html" || format === "snippet") {
     if (!page.html?.trim()) {
       return NextResponse.json({ ok: false, message: "Für diese Seite gibt es noch keine HTML-Datei." }, { status: 404 });
     }
-    return new Response(page.html, {
+    // The agent's HTML never brings its own styles: the current design goes in here.
+    const design = await loadResolvedGroundingDesign(service, organisationId);
+    const html = injectDesign(page.html, design);
+    if (format === "snippet") {
+      const body = buildCmsSnippet(html, { css: url.searchParams.get("css") === "1" ? snippetCss(design, cmsFieldsFromHtml(html).canonicalUrl ?? page.url) : null });
+      return new Response(body, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Disposition": attachment(`${fileSlug(page, organisationName)}-cms-snippet.html`),
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+    const preview = url.searchParams.get("preview") === "1";
+    return new Response(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": attachment(`${fileSlug(page, organisationName)}.html`),
+        "Content-Disposition": preview ? "inline" : attachment(`${fileSlug(page, organisationName)}.html`),
         "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        ...(preview ? { "Content-Security-Policy": PREVIEW_CSP } : {}),
       },
     });
   }

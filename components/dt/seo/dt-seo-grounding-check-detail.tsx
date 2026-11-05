@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 
 import { DtPillButton } from "@/components/dt/dt-pill-button";
+import { DtSeoGroundingDownloads } from "@/components/dt/seo/dt-seo-grounding-downloads";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/dt/cn";
 import { GROUNDING_REVIEW_CHECKLIST, GROUNDING_REVIEWER } from "@/lib/dt/prompts/grounding-page-standard";
@@ -197,6 +198,16 @@ function Hints({ run }: { run: GroundingRunDetail }) {
             ))}
           </span>
         </li>
+        {hints.design ? (
+          <li className="flex gap-1.5">
+            {hints.design.status === "detected" ? (
+              <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-sbkm-mint" aria-hidden />
+            ) : (
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" aria-hidden />
+            )}
+            Design: {hints.design.message}
+          </li>
+        ) : null}
         <li className="flex gap-1.5">
           {hints.llmsTxt.found ? (
             <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-sbkm-mint" aria-hidden />
@@ -434,7 +445,13 @@ function DraftEditor(props: { run: GroundingRunDetail; editable: boolean; busy: 
       </div>
       {tab === "preview" ? (
         // No allow-* tokens: the draft runs without scripts, forms, popups or same-origin access.
-        <iframe title="Vorschau grounding.html" sandbox="" srcDoc={html} referrerPolicy="no-referrer" className="h-[640px] w-full rounded-xl border border-sbkm-navy/15 bg-white dark:border-white/15" />
+        <div className="grid gap-1">
+          <iframe title="Vorschau grounding.html" sandbox="" srcDoc={html} referrerPolicy="no-referrer" className="h-[640px] w-full rounded-xl border border-sbkm-navy/15 bg-white dark:border-white/15" />
+          <p className="text-[11px] text-sbkm-ink-600 dark:text-white/50">
+            Vorschau mit dem aktuellen „Design der Grounding Page“. Schriftdateien der Kunden-Website lädt der Browser hier im Tool oft nicht
+            (fremde Domain, CORS); dann erscheint die Ersatzschrift. Auf der Website des Kunden erscheint die richtige Schrift.
+          </p>
+        </div>
       ) : tab === "html" ? (
         <textarea value={html} onChange={(e) => setHtml(e.target.value)} readOnly={!props.editable} spellCheck={false} className={CODE_CLASS} aria-label="grounding.html" />
       ) : (
@@ -529,23 +546,22 @@ function UploadBox(props: { run: GroundingRunDetail; busy: boolean; onMarkUpload
   return (
     <div className="grid gap-3 rounded-xl border border-sbkm-mint/60 bg-sbkm-mint/10 p-3">
       <p className="text-xs text-sbkm-navy dark:text-white">
-        Freigegeben am {formatDay(run.reviewedAt)} von {run.reviewerName ?? "—"}. Beide Dateien herunterladen und von Hand auf der Website
-        hochladen: grounding.html unter der Grounding-URL, llms.txt im Stammverzeichnis.
+        Freigegeben am {formatDay(run.reviewedAt)} von {run.reviewerName ?? "—"}. Die Seite herunterladen und von Hand auf der Website
+        einsetzen – als eigene HTML-Datei unter der Grounding-URL oder als Snippet im CMS – und die llms.txt im Stammverzeichnis hochladen.
       </p>
-      <div className="flex flex-wrap gap-2">
-        <DtPillButton asChild size="sm" variant="outline" className="gap-1.5">
-          <a href={`${base}?file=html`}>
-            <Download className="size-4" aria-hidden />
-            grounding.html
-          </a>
-        </DtPillButton>
-        <DtPillButton asChild size="sm" variant="outline" className="gap-1.5">
-          <a href={`${base}?file=llms`}>
-            <Download className="size-4" aria-hidden />
-            llms.txt
-          </a>
-        </DtPillButton>
-      </div>
+      <DtSeoGroundingDownloads
+        htmlHref={`${base}?file=html`}
+        snippetHref={(css) => `${base}?file=snippet${css ? "&css=1" : ""}`}
+        cmsFields={run.cmsFields}
+        extra={
+          <DtPillButton asChild size="sm" variant="outline" className="gap-1.5">
+            <a href={`${base}?file=llms`}>
+              <Download className="size-4" aria-hidden />
+              llms.txt
+            </a>
+          </DtPillButton>
+        }
+      />
       {run.status === "approved" ? (
         <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
           <label className="grid gap-1.5">

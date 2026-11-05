@@ -33,6 +33,8 @@ import type {
 } from "@/lib/dt/seo/grounding-pages";
 import type { DtGroundingRunState } from "@/lib/dt/types";
 import { DtSeoGroundingCheckCard } from "@/components/dt/seo/dt-seo-grounding-check-card";
+import { DtSeoGroundingDesignCard } from "@/components/dt/seo/dt-seo-grounding-design-card";
+import { DtSeoGroundingDownloads } from "@/components/dt/seo/dt-seo-grounding-downloads";
 import { DtSeoGroundingRulesCard } from "@/components/dt/seo/dt-seo-grounding-rules-card";
 
 /**
@@ -215,6 +217,7 @@ function GroundingDraft(props: {
   const [rebuildNote, setRebuildNote] = useState("");
   const [showRebuild, setShowRebuild] = useState(false);
   const [showFacts, setShowFacts] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
 
   if (!run) return null;
@@ -356,18 +359,51 @@ function GroundingDraft(props: {
               </ul>
             </div>
           ) : null}
-          <div className="flex flex-wrap gap-2">
-            {run.hasHtml ? (
-              <a href={`${exportBase}&format=html`} className={LINK_CLASS}>
+          {run.hasHtml ? (
+            <>
+              <DtSeoGroundingDownloads
+                htmlHref={`${exportBase}&format=html`}
+                snippetHref={(css) => `${exportBase}&format=snippet${css ? "&css=1" : ""}`}
+                cmsFields={run.cmsFields}
+                extra={
+                  <a href={`${exportBase}&format=llms`} className={LINK_CLASS}>
+                    <Download className="size-3.5" aria-hidden />
+                    llms.txt
+                  </a>
+                }
+              />
+              <button
+                type="button"
+                onClick={() => setShowPreview((v) => !v)}
+                className="w-fit text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline dark:text-sbkm-mint"
+              >
+                {showPreview ? "Vorschau ausblenden" : "Vorschau mit dem Design anzeigen"}
+              </button>
+              {showPreview ? (
+                <div className="grid gap-1">
+                  {/* No allow-* tokens; the route also answers with CSP sandbox. */}
+                  <iframe
+                    title="Vorschau der Grounding Page"
+                    sandbox=""
+                    src={`${exportBase}&format=html&preview=1`}
+                    referrerPolicy="no-referrer"
+                    className="h-[560px] w-full rounded-xl border border-sbkm-navy/15 bg-white dark:border-white/15"
+                  />
+                  <p className="text-[11px] text-sbkm-ink-600 dark:text-white/50">
+                    Schriftdateien der Kunden-Website lädt der Browser hier im Tool oft nicht (fremde Domain, CORS); dann erscheint die
+                    Ersatzschrift. Auf der Website des Kunden erscheint die richtige Schrift.
+                  </p>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <a href={`${exportBase}&format=llms`} className={LINK_CLASS}>
                 <Download className="size-3.5" aria-hidden />
-                HTML-Datei herunterladen
+                llms.txt
               </a>
-            ) : null}
-            <a href={`${exportBase}&format=llms`} className={LINK_CLASS}>
-              <Download className="size-3.5" aria-hidden />
-              llms.txt
-            </a>
-          </div>
+            </div>
+          )}
           <p className="text-xs text-sbkm-ink-600 dark:text-white/55">
             Datei auf der Website unter {page.url} einfügen, Footer-Link „Fakten“ setzen, die Fakten als Mensch prüfen
             und dann oben „Freigabe dokumentieren“ (Prüfer + Datum). Erst danach Prüfhinweis und reviewedBy/lastReviewed auf
@@ -1069,6 +1105,8 @@ export function DtSeoGroundingPanel(props: {
         canEdit={props.canEdit}
         onPagesChanged={() => void refresh()}
       />
+
+      <DtSeoGroundingDesignCard organisationId={props.organisationId} canEdit={props.canEdit} />
 
       <DtSeoGroundingRulesCard canEdit={props.canEdit} />
 

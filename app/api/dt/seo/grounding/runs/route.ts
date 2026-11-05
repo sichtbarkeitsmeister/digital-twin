@@ -13,6 +13,7 @@ import {
   serializeRunDetail,
   serializeRunSummary,
 } from "@/lib/dt/seo/grounding-check/store";
+import { loadResolvedGroundingDesign } from "@/lib/dt/seo/grounding-design/store";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { DtGroundingRunRow } from "@/lib/dt/types";
 
@@ -66,7 +67,7 @@ export async function GET(req: Request) {
     if (row) {
       const reconciled = rows.find((r) => r.id === detailId);
       const merged = reconciled ? { ...(row as unknown as DtGroundingRunRow), status: reconciled.status, error: reconciled.error } : (row as unknown as DtGroundingRunRow);
-      detail = serializeRunDetail(merged);
+      detail = serializeRunDetail(merged, { design: await loadResolvedGroundingDesign(service, organisationId) });
     }
   }
 
