@@ -10,6 +10,14 @@ import {
   sendSupabaseAuthInviteEmail,
 } from "@/lib/email/member-invite";
 import { ensureConfirmedAuthUser } from "@/lib/auth/ensure-auth-user";
+import {
+  clearOrganisationOwnerWithService,
+  describeOwnerChange,
+  describeOwnerRemoval,
+  isMissingOwnerRpc,
+  listOrganisationOwnerEmails,
+  transferOrganisationOwnerWithService,
+} from "@/lib/dashboard/change-organisation-owner";
 import { mapTransferOwnershipError } from "@/lib/dashboard/transfer-ownership-error";
 import { isOrgOwner, isPlatformAdmin } from "@/lib/dt/org-access";
 import {
@@ -617,6 +625,7 @@ const transferSchema = z.object({
     .toLowerCase()
     .email("Bitte eine gültige E-Mail-Adresse eingeben."),
   send_welcome: checkboxOnSchema.default(true),
+  remove_previous_owner: checkboxOnSchema,
 });
 
 export async function transferOwnershipAction(
@@ -627,6 +636,7 @@ export async function transferOwnershipAction(
     organisation_id: formData.get("organisation_id"),
     new_owner_email: formData.get("new_owner_email"),
     send_welcome: formData.get("send_welcome"),
+    remove_previous_owner: formData.get("remove_previous_owner"),
   });
 
   if (!parsed.success) {
@@ -686,14 +696,40 @@ export async function transferOwnershipAction(
     };
   }
 
+  const removePrevious = parsed.data.remove_previous_owner;
   const { error } = await supabase.rpc("transfer_organisation_ownership", {
     org_id: parsed.data.organisation_id,
     new_owner_user_id: owner.userId,
+    remove_previous_owner: removePrevious,
   });
 
   if (error) {
-    console.warn("[org] transfer_organisation_ownership failed:", error.message);
-    return { ok: false, message: mapTransferOwnershipError(error) };
+    if (!isMissingOwnerRpc(error.message)) {
+      console.warn("[org] transfer_organisation_ownership failed:", error.message);
+      return { ok: false, message: mapTransferOwnershipError(error) };
+    }
+    const platformAdmin = await isPlatformAdmin(supabase, user.id);
+    const orgOwner = await isOrgOwner(supabase, user.id, parsed.data.organisation_id);
+    if (!platformAdmin && !orgOwner) {
+      return { ok: false, message: mapTransferOwnershipError({ message: "forbidden" }) };
+    }
+    try {
+      await transferOrganisationOwnerWithService(service, {
+        organisationId: parsed.data.organisation_id,
+        newOwnerUserId: owner.userId,
+        actorUserId: user.id,
+        removePrevious,
+      });
+    } catch (err) {
+      console.warn(
+        "[org] transfer ownership service fallback failed:",
+        err instanceof Error ? err.message : err,
+      );
+      return {
+        ok: false,
+        message: err instanceof Error ? err.message : mapTransferOwnershipError(error),
+      };
+    }
   }
 
   const organisationName = orgRow?.name?.trim() || "deine Organisation";
@@ -719,15 +755,104 @@ export async function transferOwnershipAction(
 
   revalidatePath("/dashboard/organisations");
   revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/admin/organisations");
   revalidatePath("/dashboard/admin/mails");
-  const createdNote = owner.created ? " Es gab noch kein Konto — wir haben eines angelegt." : "";
-  const baseMessage = `Ownership wurde an ${ownerEmail} übertragen.${createdNote}`;
+  const baseMessage = describeOwnerChange({
+    email: ownerEmail,
+    createdAccount: owner.created,
+    removedPrevious: removePrevious,
+  });
   return {
     ok: true,
     emailSent,
     inviteLink,
     message: emailStatus ? `${baseMessage} ${emailStatus}` : baseMessage,
   };
+}
+
+const clearOwnerSchema = z.object({
+  organisation_id: z.string().uuid(),
+});
+
+export async function clearOrganisationOwnerAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = clearOwnerSchema.safeParse({
+    organisation_id: formData.get("organisation_id"),
+  });
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Ungültige Eingabe" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) {
+    return { ok: false, message: "Nicht angemeldet." };
+  }
+  if (!(await isPlatformAdmin(supabase, user.id))) {
+    return {
+      ok: false,
+      message: "Keine Berechtigung: nur ein Plattform-Admin kann den Inhaber entfernen.",
+    };
+  }
+
+  let service: ReturnType<typeof createServiceClient>;
+  try {
+    service = createServiceClient();
+  } catch (err) {
+    return {
+      ok: false,
+      message:
+        err instanceof Error
+          ? err.message
+          : "Server-Konfiguration unvollständig (Supabase Service Role).",
+    };
+  }
+
+  let removedEmails: string[] = [];
+  try {
+    removedEmails = await listOrganisationOwnerEmails(service, parsed.data.organisation_id);
+  } catch (err) {
+    console.warn(
+      "[org] could not list owner emails before clear:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  const { error } = await supabase.rpc("clear_organisation_owner", {
+    org_id: parsed.data.organisation_id,
+  });
+
+  if (error) {
+    if (!isMissingOwnerRpc(error.message)) {
+      console.warn("[org] clear_organisation_owner failed:", error.message);
+      return { ok: false, message: mapTransferOwnershipError(error) };
+    }
+    try {
+      removedEmails = await clearOrganisationOwnerWithService(
+        service,
+        parsed.data.organisation_id,
+      );
+    } catch (err) {
+      console.warn(
+        "[org] clear owner service fallback failed:",
+        err instanceof Error ? err.message : err,
+      );
+      return {
+        ok: false,
+        message:
+          err instanceof Error ? err.message : "Der Inhaber konnte nicht entfernt werden.",
+      };
+    }
+  }
+
+  revalidatePath("/dashboard/organisations");
+  revalidatePath(`/dashboard/organisations/${parsed.data.organisation_id}`);
+  revalidatePath("/dashboard/admin/organisations");
+  return { ok: true, message: describeOwnerRemoval(removedEmails) };
 }
 
 const acceptInviteSchema = z.object({

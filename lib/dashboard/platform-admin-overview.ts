@@ -9,6 +9,9 @@ export type PlatformAdminOrgRow = {
   memberCount: number;
   pendingInviteCount: number;
   ownerEmail: string | null;
+  /** True when the shown address is only a pending owner invite. */
+  ownerPending: boolean;
+  pendingEmails: string[];
   twinProvisioned: boolean;
   seoEnabled: boolean;
   agentCount: number;
@@ -50,7 +53,7 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
     supabase.from("organisation_members").select("organisation_id"),
     supabase
       .from("organisation_invites")
-      .select("organisation_id")
+      .select("organisation_id,email,org_role")
       .eq("status", "pending"),
     supabase
       .from("dt_org_config")
@@ -75,12 +78,23 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
   }
 
   const pendingInviteByOrg = new Map<string, number>();
+  const pendingEmailsByOrg = new Map<string, string[]>();
+  const pendingOwnerEmailByOrg = new Map<string, string>();
   for (const row of invites ?? []) {
     if (!orgIds.has(row.organisation_id)) continue;
     pendingInviteByOrg.set(
       row.organisation_id,
       (pendingInviteByOrg.get(row.organisation_id) ?? 0) + 1,
     );
+    const email = row.email?.trim().toLowerCase() ?? "";
+    if (email) {
+      const list = pendingEmailsByOrg.get(row.organisation_id) ?? [];
+      list.push(email);
+      pendingEmailsByOrg.set(row.organisation_id, list);
+    }
+    if (row.org_role === "owner" && email && !pendingOwnerEmailByOrg.has(row.organisation_id)) {
+      pendingOwnerEmailByOrg.set(row.organisation_id, email);
+    }
   }
 
   const configByOrg = new Map(
@@ -128,9 +142,11 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
 
   const organisations: PlatformAdminOrgRow[] = allOrgs.map((org) => {
     const cfg = configByOrg.get(org.id);
-    const ownerEmail = org.owner_user_id
+    const memberOwnerEmail = org.owner_user_id
       ? (ownerEmailById.get(org.owner_user_id) ?? null)
       : null;
+    const pendingOwnerEmail = pendingOwnerEmailByOrg.get(org.id) ?? null;
+    const ownerEmail = memberOwnerEmail ?? pendingOwnerEmail;
 
     return {
       id: org.id,
@@ -141,6 +157,8 @@ export async function loadPlatformAdminOverview(): Promise<PlatformAdminOverview
       memberCount: memberCountByOrg.get(org.id) ?? 0,
       pendingInviteCount: pendingInviteByOrg.get(org.id) ?? 0,
       ownerEmail,
+      ownerPending: !memberOwnerEmail && Boolean(pendingOwnerEmail),
+      pendingEmails: pendingEmailsByOrg.get(org.id) ?? [],
       twinProvisioned: cfg?.twin_provisioned ?? false,
       seoEnabled: cfg?.seo_enabled ?? false,
       agentCount: agentCountByOrg.get(org.id) ?? 0,
