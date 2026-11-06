@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createDtPersonaAgent, loadAgentsForOrg, requireAuthUser } from "@/lib/dt/db";
-import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { filterAgentsHiddenFromOrgMembers, withoutSeededStandardAvatars } from "@/lib/dt/agents/seo-advisor";
+import { removeSeededStandardAvatars } from "@/lib/dt/agents/remove-standard-avatar";
 import { canDirectlyEditDtAgents, canManageDtAgents, isPlatformAdmin } from "@/lib/dt/org-access";
 import { mapPersonaAgentRpcError } from "@/lib/dt/survey-to-agent-service";
 
@@ -36,9 +37,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: "Ungültige Organisation." }, { status: 400 });
   }
 
+  await removeSeededStandardAvatars(parsed.data.org);
+
   const agents = await loadAgentsForOrg(parsed.data.org);
   const platformAdmin = await isPlatformAdmin(auth.supabase, auth.userId!);
-  const visibleAgents = platformAdmin ? agents : filterAgentsHiddenFromOrgMembers(agents);
+  const visibleAgents = withoutSeededStandardAvatars(
+    platformAdmin ? agents : filterAgentsHiddenFromOrgMembers(agents),
+  );
   return NextResponse.json({ ok: true, agents: visibleAgents });
 }
 

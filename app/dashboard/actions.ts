@@ -16,6 +16,7 @@ import {
   deliverOwnerWelcomeWithFallback,
   ensureOwnerLoginLink,
 } from "@/lib/email/owner-welcome";
+import { removeSeededStandardAvatars } from "@/lib/dt/agents/remove-standard-avatar";
 import { resolveOrganisationSlug } from "@/lib/dt/org-slug";
 import { ensureOrganisationSurveyFolder } from "@/lib/dt/ensure-organisation-survey-folder";
 import { pickSurveyFolderToRename } from "@/lib/dt/organisation-rename";
@@ -161,6 +162,10 @@ export async function adminCreateOrganisationAction(
 
     let organisationId: string | null =
       typeof createdOrgId === "string" && createdOrgId.trim() ? createdOrgId : null;
+
+    if (organisationId) {
+      await removeSeededStandardAvatars(organisationId);
+    }
 
     let folderStatus: string | null = null;
     if (create_survey_folder && user?.id) {

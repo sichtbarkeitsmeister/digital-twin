@@ -5,13 +5,25 @@ import {
   resolveDefaultAgentId,
   shouldStartNewChatOnAgentSwitch,
 } from "../lib/dt/chat/agent-selection";
-import { filterAgentsHiddenFromOrgMembers } from "../lib/dt/agents/seo-advisor";
+import {
+  filterAgentsHiddenFromOrgMembers,
+  isSeededStandardAvatar,
+  withoutSeededStandardAvatars,
+} from "../lib/dt/agents/seo-advisor";
 
 const advisor = { id: "advisor", slug: "seo_advisor", kind: "seo_advisor" };
 const geo = { id: "geo", slug: "geo_advisor", kind: "geo_advisor" };
 const peter = { id: "peter", slug: "peter_lustig", kind: "persona" };
 const benno = { id: "benno", slug: "benno", kind: "wunschkunde" };
-const starterTwin = { id: "twin", slug: "default", kind: "persona" };
+const starterTwin = { id: "twin", slug: "default", kind: "persona", is_default: true };
+
+assert.equal(isSeededStandardAvatar(starterTwin), true);
+assert.equal(isSeededStandardAvatar({ slug: "default", kind: "seo_advisor", is_default: true }), false);
+assert.equal(isSeededStandardAvatar({ slug: "peter_lustig", kind: "persona", is_default: false }), false);
+assert.deepEqual(
+  withoutSeededStandardAvatars([starterTwin, peter]).map((agent) => agent.id),
+  ["peter"],
+);
 
 function testSeoWorkspaceKeepsTwins() {
   const agents = [advisor, peter, benno];
