@@ -1025,11 +1025,12 @@ export function FragebogenFromOrgWizard(props: {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Sparkles className="size-4" aria-hidden />
-            6. Individuelle Fragen (letzter Block)
+            6. Individuelle Fragen (vor dem Abschluss)
           </CardTitle>
           <CardDescription>
-            Die KI schlägt danach Sonderfragen für das jeweilige Unternehmen vor. In der Prüfung
-            kannst du sie bearbeiten, kopieren oder löschen.
+            Die KI schlägt Sonderfragen für das jeweilige Unternehmen vor. Sie stehen als
+            vorletzter Schritt, der Abschluss bleibt am Ende. In der Prüfung kannst du sie
+            bearbeiten, kopieren oder löschen.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -1053,7 +1054,7 @@ export function FragebogenFromOrgWizard(props: {
                   : "border-sbkm-navy/10",
               )}
             >
-              Zusatzfragen am Ende
+              Vor dem Abschluss
             </button>
             <button
               type="button"
