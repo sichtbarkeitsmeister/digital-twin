@@ -11,9 +11,11 @@ const initialState: ActionState = { ok: true, message: "" };
 
 export function TransferOwnershipForm({
   organisationId,
+  currentOwnerEmail,
   onSuccess,
 }: {
   organisationId: string;
+  currentOwnerEmail?: string | null;
   onSuccess?: () => void;
 }) {
   const [state, formAction, pending] = useActionState(
@@ -35,6 +37,15 @@ export function TransferOwnershipForm({
     <form action={formAction} className="grid gap-4">
       <input type="hidden" name="organisation_id" value={organisationId} />
 
+      {currentOwnerEmail ? (
+        <p className="text-sm text-secondary">
+          Aktueller Inhaber:{" "}
+          <span className="font-medium text-primary">{currentOwnerEmail}</span>
+        </p>
+      ) : (
+        <p className="text-sm text-secondary">Diese Organisation hat noch keinen Inhaber.</p>
+      )}
+
       <div className="grid gap-2">
         <Label htmlFor="new_owner_email">E-Mail des neuen Inhabers</Label>
         <Input
@@ -47,9 +58,30 @@ export function TransferOwnershipForm({
         />
         <p className="text-xs text-secondary">
           Bestehendes Konto oder neue Adresse. Die Person wird Inhaber und erhält
-          volle Rechte. Fehlt noch ein Konto, legen wir eines an.
+          volle Rechte. Fehlt noch ein Konto, legen wir eines an. Offene
+          Inhaber-Einladungen werden dabei gelöscht.
         </p>
       </div>
+
+      {currentOwnerEmail ? (
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+          <input
+            type="checkbox"
+            name="remove_previous_owner"
+            value="on"
+            defaultChecked
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border border-primary accent-primary"
+          />
+          <span className="grid gap-1">
+            <span className="text-sm font-medium">Bisherige Adresse entfernen</span>
+            <span className="text-xs text-secondary">
+              {currentOwnerEmail} verliert den Zugang zu dieser Organisation. Ohne
+              Haken bleibt ein bestehendes Konto als Admin. Offene Inhaber-Einladungen
+              werden in beiden Fällen gelöscht.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
         <input
@@ -111,7 +143,7 @@ export function TransferOwnershipForm({
         variant="destructive"
         className="transition-transform duration-150 active:scale-[0.98]"
       >
-        {pending ? "Wird übertragen…" : "Ownership übertragen"}
+        {pending ? "Wird gespeichert…" : "Inhaber speichern"}
       </Button>
     </form>
   );
