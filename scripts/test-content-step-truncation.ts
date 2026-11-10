@@ -14,6 +14,8 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import {
   CONTENT_STOP_REASON_TIMEOUT,
+  CONTENT_TIMEOUT_FINAL_MESSAGE,
+  CONTENT_TIMEOUT_MAX_RETRIES,
   CONTENT_TIMEOUT_MESSAGE,
   CONTENT_TRUNCATED_MESSAGE,
   ContentLlmError,
@@ -23,13 +25,15 @@ import {
 } from "../lib/dt/content/pipeline/llm";
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { TEXT_STEP_MAX_TOKENS, TEXT_TOOL_SCHEMA, contentStepSpec, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
-import { stepFailureDetail } from "../lib/dt/content/pipeline/run-step";
+import { stepFailureDetail, type StepOutcome } from "../lib/dt/content/pipeline/run-step";
 import { CONTENT_STEPS } from "../lib/dt/content/pipeline/steps";
 import { contentStepLogLine, contentStopReasonLabel } from "../lib/dt/content/presentation";
+import type { ContentStepRow } from "../lib/dt/content/store";
 import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
-import { FULL_TEXT_STEP_MS } from "../lib/jobs/handlers/content-page";
+import { FULL_TEXT_STEP_MS, runContentPageSteps, stepTimedOutBefore } from "../lib/jobs/handlers/content-page";
 import { stepBudgetMs } from "../lib/jobs/schedule";
 
+import { FakeDb } from "./fake-supabase";
 import { messageStart, startFakeAnthropicApi, textReply, type FakeReply } from "./support/fake-anthropic-api";
 
 const TOOL: Anthropic.Tool = { name: "submit_seo_text", description: "Seitentext", input_schema: TEXT_TOOL_SCHEMA };
@@ -169,6 +173,44 @@ async function main() {
   // A text step starts only with a nearly full tick: at least 185 s for the call.
   assert.equal(stepBudgetMs(0, 190_000, FULL_TEXT_STEP_MS), null, "190 s left: the text step waits for the next tick");
   assert.ok(stepBudgetMs(0, 240_000, FULL_TEXT_STEP_MS)! >= 185_000);
+
+  // The time limit: one repetition, then the step fails and the page stops.
+  {
+    const ORG = "11111111-1111-4111-8111-111111111111";
+    const PAGE_ID = "22222222-2222-4222-8222-222222222222";
+    const JOB_ID = "33333333-3333-4333-8333-333333333333";
+    const page = {
+      id: PAGE_ID, organisation_id: ORG, slug: "unterseite", name: "Unterseite", source: "structure", source_url: null, state: "laeuft", step: 1,
+      job_id: JOB_ID, skip_steps: [], question_stop: { handled: [] }, notes: [], findings: [], cost_eur: 0, freshness: EMPTY_CONTENT_FRESHNESS,
+    };
+    const db = new FakeDb({
+      dt_content_pages: [page],
+      dt_content_steps: [{ page_id: PAGE_ID, organisation_id: ORG, step: 1, name: "Analyse", status: "done", output: { page_facts: { facts: [], conversations: 0 } } }],
+    });
+    let calls = 0;
+    const runStep = async (): Promise<StepOutcome> => {
+      calls += 1;
+      throw new ContentLlmError(CONTENT_TIMEOUT_MESSAGE, true, { stopReason: CONTENT_STOP_REASON_TIMEOUT, outputTokens: 7_300 });
+    };
+    const tick = () =>
+      runContentPageSteps({ service: db.service, job: { id: JOB_ID, attempts: 0, max_attempts: 3 }, pageId: PAGE_ID, deadline: Date.now() + 240_000, runners: { runStep } });
+    const seoRow = () => db.rows("dt_content_steps").find((r) => r.step === 2) as unknown as Pick<ContentStepRow, "status" | "error" | "stop_reason" | "output_tokens">;
+
+    const first = await tick();
+    assert.deepEqual(first, { ok: false, error: CONTENT_TIMEOUT_MESSAGE, retryable: true }, "first time-out: the job tries SEO again");
+    assert.deepEqual([seoRow().status, seoRow().stop_reason, seoRow().output_tokens], ["pending", "timeout", 7_300]);
+    assert.equal(stepTimedOutBefore(seoRow()), true);
+
+    const second = await tick();
+    assert.deepEqual(second, { ok: false, error: CONTENT_TIMEOUT_FINAL_MESSAGE, retryable: false }, "second time-out: no third attempt, although the job had one left");
+    assert.deepEqual([seoRow().status, seoRow().error], ["error", CONTENT_TIMEOUT_FINAL_MESSAGE]);
+    assert.equal((db.rows("dt_content_pages")[0] as { state: string }).state, "in_arbeit", "the page stops with the error");
+    assert.equal(calls, 2);
+    assert.equal(CONTENT_TIMEOUT_MAX_RETRIES, 1);
+    assert.equal(stepTimedOutBefore(seoRow()), false, "started again by hand, the step gets its one repetition anew");
+    assert.equal(stepTimedOutBefore({ status: "pending", error: "Die KI ist gerade ausgelastet.", stop_reason: null }), false, "overload is not a time-out");
+  }
+  console.log("one repetition after the time limit: ok");
 
   // The step log line of the page window.
   assert.equal(contentStepLogLine({ output_tokens: 6_412, stop_reason: "tool_use" }), "6.412 Ausgabe-Tokens · vollständig (tool_use)");

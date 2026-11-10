@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { interruptedStepMessage } from "@/lib/dt/content/job-state";
-import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
+import { CONTENT_STOP_REASON_TIMEOUT, CONTENT_TIMEOUT_FINAL_MESSAGE, ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 import { readPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import { questionStopDue } from "@/lib/dt/content/pipeline/question-stop";
 import {
@@ -22,7 +22,7 @@ import {
   nextContentStep,
   skipsContentStep,
 } from "@/lib/dt/content/pipeline/steps";
-import { loadContentPageById, loadContentSteps, type ContentPageRow } from "@/lib/dt/content/store";
+import { loadContentPageById, loadContentSteps, type ContentPageRow, type ContentStepRow } from "@/lib/dt/content/store";
 import { JOB_WORKER_BUDGET_MS, stepBudgetMs } from "@/lib/jobs/schedule";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -49,6 +49,17 @@ const LONG_CHECK_STEPS: ReadonlySet<number> = new Set([CONTENT_STEP_FAKTENCHECK,
 const LIVE_TEXT_MS = 20_000;
 /** The stop before the Watermark Entfernung: at most one short call on a few Abschnitte. */
 const QUESTION_STOP_MS = 90_000;
+
+/**
+ * Did this step's previous attempt end at the time limit? Then its row waits to run again
+ * (`pending`) with that reason on it (`markContentStepRetry`); a second time-out is final
+ * (`CONTENT_TIMEOUT_MAX_RETRIES`). A step started again by hand („Weiterlaufen lassen“ after
+ * the error) has an `error` row and gets its one repetition anew.
+ */
+export function stepTimedOutBefore(row: Pick<ContentStepRow, "status" | "error" | "stop_reason"> | null | undefined): boolean {
+  if (!row || row.status !== "pending") return false;
+  return row.stop_reason === CONTENT_STOP_REASON_TIMEOUT || /Zeitlimit erreicht/i.test(row.error ?? "");
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -279,11 +290,16 @@ export async function runContentPageSteps(input: {
         // Database hiccups while saving are worth another try; a rejected key or a cut-off
         // answer (ContentLlmError, retryable=false) is not.
         const retryable = error instanceof ContentLlmError ? error.retryable : true;
-        if (!retryable || lastAttempt) {
-          await markContentStepError(service, page, next, message, stepFailureDetail(error));
-          return { ok: false, error: message, retryable: false };
+        const detail = stepFailureDetail(error);
+        // The time limit: one repetition, then the step fails for everyone to see.
+        const timedOut = detail.stopReason === CONTENT_STOP_REASON_TIMEOUT;
+        const timedOutBefore = timedOut && stepTimedOutBefore(steps.find((s) => s.step === next));
+        if (!retryable || lastAttempt || timedOutBefore) {
+          const final = timedOut ? CONTENT_TIMEOUT_FINAL_MESSAGE : message;
+          await markContentStepError(service, page, next, final, detail);
+          return { ok: false, error: final, retryable: false };
         }
-        await markContentStepRetry(service, page, next, message, stepFailureDetail(error));
+        await markContentStepRetry(service, page, next, message, detail);
         return { ok: false, error: message, retryable: true };
       }
     }

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import {
+  AnthropicTimeoutError,
   callAnthropicFirstAvailable,
   extractAnthropicText,
   extractToolUseInput,
@@ -31,8 +32,18 @@ export class ContentLlmError extends Error {
 
 /** Shown at the step when the answer hit max_tokens; the text never reaches the next step. */
 export const CONTENT_TRUNCATED_MESSAGE = "Ausgabe abgeschnitten (Token-Limit)";
-/** Shown at the step when the time limit cut the stream; the job tries the step again. */
-export const CONTENT_TIMEOUT_MESSAGE = "Ausgabe unvollständig (Zeitlimit erreicht). Der Schritt wird erneut versucht.";
+/** Shown at the step when the time limit cut the stream; the job tries the step again, once. */
+export const CONTENT_TIMEOUT_MESSAGE = "Ausgabe unvollständig (Zeitlimit erreicht). Der Schritt wird einmal erneut versucht.";
+/** Shown when the one repetition ran into the time limit too: the page stops with the error. */
+export const CONTENT_TIMEOUT_FINAL_MESSAGE =
+  "Ausgabe unvollständig (Zeitlimit erreicht). Auch die Wiederholung wurde nicht fertig; der Schritt ist fehlgeschlagen.";
+/** How often a step is repeated after the time limit cut its answer. */
+export const CONTENT_TIMEOUT_MAX_RETRIES = 1;
+
+/** The request ran into the time limit before or while the model answered. */
+function timeoutError(message: string): ContentLlmError {
+  return new ContentLlmError(message, true, { stopReason: CONTENT_STOP_REASON_TIMEOUT });
+}
 /** `stop_reason` we record for an answer the time limit cut (the API sent none). */
 export const CONTENT_STOP_REASON_TIMEOUT = "timeout";
 
@@ -167,6 +178,8 @@ export async function callContentTool(input: {
       result = await call(false);
     }
   } catch (error) {
+    // No answer at all within the time limit counts like an answer the limit cut.
+    if (error instanceof AnthropicTimeoutError) throw timeoutError(CONTENT_TIMEOUT_MESSAGE);
     throw new ContentLlmError(llmErrorMessage(error), isRetryableLlmError(error));
   }
   if (!result) {
@@ -280,7 +293,7 @@ export async function callContentResearch(input: {
   for (let round = 0; round < MAX_RESEARCH_ROUNDS; round++) {
     const remaining = deadline - Date.now();
     if (remaining < MIN_RESEARCH_ROUND_MS) {
-      throw new ContentLlmError(`Die Websuche ${purpose} hat das Zeitlimit erreicht. Der Schritt wird später erneut versucht.`, true);
+      throw timeoutError(`Die Websuche ${purpose} hat das Zeitlimit erreicht. Der Schritt wird einmal erneut versucht.`);
     }
     let result: Awaited<ReturnType<typeof callAnthropicFirstAvailable>>;
     try {
@@ -297,6 +310,9 @@ export async function callContentResearch(input: {
         messages,
       });
     } catch (error) {
+      if (error instanceof AnthropicTimeoutError) {
+        throw timeoutError(`Die Websuche ${purpose} hat das Zeitlimit erreicht. Der Schritt wird einmal erneut versucht.`);
+      }
       throw new ContentLlmError(researchErrorMessage(error), isRetryableLlmError(error));
     }
     if (!result) throw new ContentLlmError("Das KI-Modell ist nicht verfügbar. Bitte die Technik informieren.", false);
@@ -321,7 +337,7 @@ export async function callContentResearch(input: {
     }
     const incomplete = incompleteResponseError(result, {
       truncated: `Die Recherche ${purpose} wurde abgeschnitten (Token-Limit). Bitte den Schritt wiederholen.`,
-      timeout: `Die Websuche ${purpose} hat das Zeitlimit erreicht. Der Schritt wird später erneut versucht.`,
+      timeout: `Die Websuche ${purpose} hat das Zeitlimit erreicht. Der Schritt wird einmal erneut versucht.`,
     });
     if (incomplete) throw incomplete;
     return { text: texts.join("\n\n"), blocks, calls, model: result.model };
