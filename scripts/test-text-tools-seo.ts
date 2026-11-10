@@ -92,7 +92,7 @@ function testSystemPromptUsesGlobalSeoPromptAndOwnTemplate() {
   assert.doesNotMatch(system, /Branchenregel|Allgemeine Regeln \(jeder Seitentyp\)|aus den Vorgaben gelten/);
   assert.equal(tool.name, "submit_seo_text");
   assert.deepEqual(tool.input_schema, TEXT_TOOL_SCHEMA);
-  assert.equal(maxTokens, 12_000);
+  assert.equal(maxTokens, 16_000);
 
   // Ratgeber: the type changes the filled variables and the recipe.
   const ratgeber = seoToolSpec(context({ pageType: "ratgeber" })).system;

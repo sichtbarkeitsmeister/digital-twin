@@ -24,6 +24,7 @@ import { CONTENT_PAGE_TYPE_LABELS, type ContentPageType } from "@/lib/dt/content
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import {
   MAX_STANDALONE_MATERIAL_CHARS,
+  TEXT_STEP_MAX_TOKENS,
   TEXT_TOOL_SCHEMA,
   anbieterBlock,
   avatarBlock,
@@ -42,7 +43,7 @@ import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
 /** The `mode` of the usage event of a run. */
 export const SEO_TOOL_USAGE_MODE = "text-tool.seo";
-export const SEO_TOOL_MAX_TOKENS = 12_000;
+export const SEO_TOOL_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 /** The run route may take 300 s; the model gets most of it, the rest is loading and answering. */
 export const SEO_TOOL_TIMEOUT_MS = 270_000;
 

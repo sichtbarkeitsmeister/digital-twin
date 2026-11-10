@@ -9,6 +9,7 @@ import {
   runContentStep,
   runQuestionStop,
   skipContentStep,
+  stepFailureDetail,
 } from "@/lib/dt/content/pipeline/run-step";
 import {
   CONTENT_STEP_AKTUALITAET,
@@ -20,13 +21,21 @@ import {
   skipsContentStep,
 } from "@/lib/dt/content/pipeline/steps";
 import { loadContentPageById, loadContentSteps, type ContentPageRow } from "@/lib/dt/content/store";
-import { stepBudgetMs } from "@/lib/jobs/schedule";
+import { JOB_WORKER_BUDGET_MS, stepBudgetMs } from "@/lib/jobs/schedule";
 import { createServiceClient } from "@/lib/supabase/service";
 
 import type { JobHandler, JobHandlerResult, JobRow } from "../types";
 
 /** A full page needs most of the worker budget. Shorter steps can start later in the tick. */
 const LONG_STEP_MS = 150_000;
+/**
+ * A Claude step that returns the whole page text (SEO, GEO, Hormozi, Vermenschlichung,
+ * Lektorat) starts only with a nearly full tick. Started with 150 s left it got about 135 s,
+ * some 7,300 tokens at the measured 54 per second: an Unterseite of 2,600 words did not fit,
+ * the time limit cut the stream and the stub went on as the text (10.11.). With 200 s left the
+ * call has at least 185 s, about 10,000 tokens; a first step of a tick gets up to 225 s.
+ */
+export const FULL_TEXT_STEP_MS = 200_000;
 const SHORT_STEP_MS = 45_000;
 /**
  * Steps that write no text but whose answer grows with the page: the Faktencheck's findings and
@@ -127,7 +136,8 @@ export async function runContentPageSteps(input: {
   const skipStep = input.runners?.skipStep ?? skipContentStep;
   const questionStop = input.runners?.questionStop ?? runQuestionStop;
   const lastAttempt = job.attempts + 1 >= job.max_attempts;
-  const limit = input.deadline ?? Date.now() + LONG_STEP_MS;
+  // Without a deadline (tests, a direct call) the loop has one full worker tick.
+  const limit = input.deadline ?? Date.now() + JOB_WORKER_BUDGET_MS;
   let continued: JobHandlerResult | null = null;
   let page: ContentPageRow | null = null;
   let next: number | null = null;
@@ -222,9 +232,11 @@ export async function runContentPageSteps(input: {
         const needed =
           def?.provider === "xai"
             ? SHORT_STEP_MS
-            : def?.step === CONTENT_STEP_AKTUALITAET || def?.writesText || (def != null && LONG_CHECK_STEPS.has(def.step))
-              ? LONG_STEP_MS
-              : SHORT_STEP_MS;
+            : def?.writesText && def.step !== CONTENT_STEP_AKTUALITAET
+              ? FULL_TEXT_STEP_MS
+              : def?.step === CONTENT_STEP_AKTUALITAET || (def != null && LONG_CHECK_STEPS.has(def.step))
+                ? LONG_STEP_MS
+                : SHORT_STEP_MS;
         const stepBudget = stepBudgetMs(Date.now(), limit, needed);
         if (stepBudget == null) {
           return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true } };
@@ -263,10 +275,10 @@ export async function runContentPageSteps(input: {
         // answer (ContentLlmError, retryable=false) is not.
         const retryable = error instanceof ContentLlmError ? error.retryable : true;
         if (!retryable || lastAttempt) {
-          await markContentStepError(service, page, next, message);
+          await markContentStepError(service, page, next, message, stepFailureDetail(error));
           return { ok: false, error: message, retryable: false };
         }
-        await markContentStepRetry(service, page, next, message);
+        await markContentStepRetry(service, page, next, message, stepFailureDetail(error));
         return { ok: false, error: message, retryable: true };
       }
     }

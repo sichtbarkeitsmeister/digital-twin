@@ -127,8 +127,13 @@ export function describeAnbieterSources(anbieter: ContentLocalSources["anbieter"
     const n = anbieter.fragebogen.facts;
     parts.push(`${n} ${n === 1 ? "Antwort" : "Antworten"} aus dem Anbieter-Fragebogen „${anbieter.fragebogen.title}“`);
   }
-  return parts.join(" · ");
+  const line = parts.join(" · ");
+  return anbieter.workshop?.stale ? `${line}. ${CONTENT_STALE_WORKSHOP_HINT}` : line;
 }
+
+/** Shown with the Anbieterfakten when a conversation is newer than the evaluation the texts read. */
+export const CONTENT_STALE_WORKSHOP_HINT =
+  "Achtung: Seit der letzten Auswertung wurde ein Gespräch hochgeladen oder geändert. Die Texte kennen es erst, wenn unter Transkripte „Anbieter auswerten“ neu gelaufen ist.";
 
 function pagesWord(n: number): string {
   return `${n} ${n === 1 ? "Seite" : "Seiten"}`;

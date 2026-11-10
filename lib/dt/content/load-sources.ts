@@ -15,6 +15,7 @@ import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
 import { extractSurveyFacts } from "@/lib/dt/survey-facts";
 import type { SurveyFieldQuestionRow } from "@/lib/dt/survey-to-agent-context";
 import { normalizeAnbieterItems } from "@/lib/dt/transcripts/workshop-model";
+import { loadWorkshopState } from "@/lib/dt/transcripts/workshop-store";
 
 export type ContentAvatarOption = {
   id: string;
@@ -143,9 +144,9 @@ export async function loadContentAnbieterSources(
   };
 }
 
-export function anbieterSummary(sources: ContentAnbieterSources): ContentLocalSources["anbieter"] {
+export function anbieterSummary(sources: ContentAnbieterSources, options: { stale?: boolean } = {}): ContentLocalSources["anbieter"] {
   const filled = filledWorkshopSections(sources.workshop);
-  const workshop = filled > 0 ? { filled, total: sources.workshop.length } : null;
+  const workshop = filled > 0 ? { filled, total: sources.workshop.length, ...(options.stale ? { stale: true } : {}) } : null;
   const fragebogen = sources.fragebogen
     ? { title: sources.fragebogen.title, facts: sources.fragebogen.facts.length }
     : null;
@@ -228,12 +229,27 @@ export async function loadContentCrawlSummary(
   };
 }
 
+/**
+ * Was a conversation uploaded or changed after the Anbieter evaluation was made? The texts read
+ * the evaluation (`dt_workshop_corpus.anbieter`), not the transcripts: until „Anbieter auswerten“
+ * runs again, the new conversation is in no text. A read error counts as „not stale“.
+ */
+export async function isWorkshopEvaluationStale(supabase: SupabaseClient, organisationId: string): Promise<boolean> {
+  try {
+    const state = await loadWorkshopState(supabase, organisationId);
+    return state.anbieter.status === "stale";
+  } catch {
+    return false;
+  }
+}
+
 export async function loadContentLocalSources(
   supabase: SupabaseClient,
   organisationId: string,
 ): Promise<ContentLocalSources> {
-  const [anbieter, avatars, { data: structure }, pages, crawl, textUploads] = await Promise.all([
+  const [anbieter, stale, avatars, { data: structure }, pages, crawl, textUploads] = await Promise.all([
     loadContentAnbieterSources(supabase, organisationId),
+    isWorkshopEvaluationStale(supabase, organisationId),
     loadContentAvatarOptions(supabase, organisationId),
     supabase
       .from("dt_website_structures")
@@ -245,7 +261,7 @@ export async function loadContentLocalSources(
     countTextUploads(supabase, organisationId),
   ]);
   return {
-    anbieter: anbieterSummary(anbieter),
+    anbieter: anbieterSummary(anbieter, { stale }),
     avatarCount: avatars.length,
     structure: structure
       ? {

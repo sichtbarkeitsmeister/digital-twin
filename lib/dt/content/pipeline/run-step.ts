@@ -73,6 +73,7 @@ import { htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/
 import {
   contentDbErrorMessage,
   contentStructureOutline,
+  isMissingStopReasonColumnError,
   loadContentPageOutline,
   loadContentSettings,
   num,
@@ -259,14 +260,23 @@ async function upsertStep(
   patch: Partial<ContentStepRow>,
 ): Promise<void> {
   const def = contentStepDefinition(step);
-  const { error } = await service.from("dt_content_steps").upsert(
-    { page_id: page.id, organisation_id: page.organisation_id, step, name: def?.name ?? `Schritt ${step}`, ...patch },
-    { onConflict: "page_id,step" },
-  );
+  const row = { page_id: page.id, organisation_id: page.organisation_id, step, name: def?.name ?? `Schritt ${step}`, ...patch };
+  let { error } = await service.from("dt_content_steps").upsert(row, { onConflict: "page_id,step" });
+  if (error && "stop_reason" in row && isMissingStopReasonColumnError(error)) {
+    // Migration 20261111 not run yet: the step is saved without its stop_reason.
+    const rest: Record<string, unknown> = { ...row };
+    delete rest.stop_reason;
+    ({ error } = await service.from("dt_content_steps").upsert(rest, { onConflict: "page_id,step" }));
+  }
   if (error) throw new Error(contentDbErrorMessage(error, "Schritt konnte nicht gespeichert werden"));
 }
 
-type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string };
+type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string; stopReason?: string | null };
+
+/** `stop_reason` of the step's last call, for the step row. */
+function lastStopReason(calls: readonly ModelCall[]): string | null {
+  return calls[calls.length - 1]?.stopReason ?? null;
+}
 
 /**
  * After a step's patch: its company questions go into the organisation's pool, and the step row
@@ -387,6 +397,7 @@ export async function runContentStep(
     output_tokens: usage.outputTokens,
     cost_eur: roundEur(costEur),
     error: null,
+    stop_reason: lastStopReason(calls),
     finished_at: new Date().toISOString(),
   });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
@@ -502,6 +513,7 @@ async function runAktualitaetStep(input: {
   const research = progress.research;
   if (!research) throw new ContentLlmError("Die Recherche der Aktualitätsprüfung fehlt. Der Schritt wird erneut versucht.", true);
   let output: AktualitaetOutput;
+  let stopReason: string | null = null;
   if (aktualitaetNeedsNoResult(research)) {
     output = unchangedAktualitaetOutput(context, research);
   } else {
@@ -509,6 +521,7 @@ async function runAktualitaetStep(input: {
     const { output: written, calls } = await callStep(spec, context, models, Math.max(30_000, deadline - Date.now()));
     for (const call of calls) await bill(call);
     output = written as AktualitaetOutput;
+    stopReason = lastStopReason(calls);
   }
 
   if (!(await pageStillOurs(service, page))) {
@@ -533,6 +546,7 @@ async function runAktualitaetStep(input: {
     output_tokens: progress.output_tokens,
     cost_eur: progress.cost_eur,
     error: null,
+    stop_reason: stopReason,
     finished_at: new Date().toISOString(),
   });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
@@ -712,6 +726,22 @@ export async function skipContentStep(
   return { step, halted, skipped: true, model: "", costEur: 0 };
 }
 
+/** What a failed model call left for the step's log: why it stopped and how much it had written. */
+export type StepFailureDetail = { stopReason?: string | null; outputTokens?: number | null };
+
+/** The log fields of a failed call as the error carries them (`ContentLlmError`); empty for other errors. */
+export function stepFailureDetail(error: unknown): StepFailureDetail {
+  if (!(error instanceof ContentLlmError)) return {};
+  return { stopReason: error.stopReason, outputTokens: error.outputTokens };
+}
+
+function failurePatch(detail: StepFailureDetail): Partial<ContentStepRow> {
+  return {
+    ...(detail.stopReason ? { stop_reason: detail.stopReason } : {}),
+    ...(detail.outputTokens != null ? { output_tokens: detail.outputTokens } : {}),
+  };
+}
+
 /**
  * Pause the page with the error visible in the table and drawer. Not when the page is no
  * longer this job's (stopped, or started again under a new job): the failure of a stopped
@@ -722,6 +752,7 @@ export async function markContentStepError(
   page: ContentPageRow,
   step: number,
   message: string,
+  detail: StepFailureDetail = {},
 ): Promise<void> {
   if (!(await pageStillOurs(service, page))) return;
   const text = message.slice(0, 500);
@@ -729,6 +760,7 @@ export async function markContentStepError(
     status: "error",
     error: text,
     finished_at: new Date().toISOString(),
+    ...failurePatch(detail),
   }).catch((err) => console.error("[content] step error not stored", err));
   const { error } = await service
     .from("dt_content_pages")
@@ -754,6 +786,7 @@ export async function markContentStepRetry(
   page: ContentPageRow,
   step: number,
   message: string,
+  detail: StepFailureDetail = {},
 ): Promise<void> {
   if (!(await pageStillOurs(service, page))) return;
   const text = message.slice(0, 500);
@@ -761,6 +794,7 @@ export async function markContentStepRetry(
     status: "pending",
     error: text,
     finished_at: new Date().toISOString(),
+    ...failurePatch(detail),
   }).catch((err) => console.error("[content] step retry not stored", err));
   await service
     .from("dt_content_pages")

@@ -241,7 +241,12 @@ export const CONTENT_HERO_BLOCK_ID = "hero";
 /** Sum of the five self-scores (1–10 each) under which the Vermenschlichung tries once more. */
 export const CONTENT_SELF_SCORE_MIN = 35;
 
-const MAX_SECTION_CHARS = 6_000;
+/**
+ * How much of one Anbieter section the prompts read: all of it. The workshop evaluation stores
+ * up to 24,000 characters per point (`POINT_TEXT_MAX` in workshop-model.ts); the former 6,000
+ * dropped the rest of a long point (several workshops, many Leistungen) without a word.
+ */
+const MAX_SECTION_CHARS = 24_000;
 /** The avatar's description (`avatarTextForContent`); fits nine in ten avatar texts whole. */
 const MAX_AVATAR_CHARS = 20_000;
 const MAX_OUTLINE_CHARS = 5_000;
@@ -1025,10 +1030,17 @@ export function normalizeAnalyse(json: unknown, context: ContentPipelineContext)
   };
 }
 
+/**
+ * Output budget of every Claude step that returns the whole page text (SEO, GEO, Hormozi,
+ * Vermenschlichung, Lektorat). An Unterseite of 2,600 words is about 7,000–10,000 tokens with
+ * its JSON frame; 16,000 leaves room. A cut-off answer fails the step (`callContentTool`).
+ */
+export const TEXT_STEP_MAX_TOKENS = 16_000;
+
 function seo(context: ContentPipelineContext): ContentStepSpec {
   const general = context.texterPrompt?.trim() || DEFAULT_TEXTER_PROMPT;
   return {
-    maxTokens: 12_000,
+    maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "seo"), context.settings, [
       `Allgemeine Regeln (jeder Seitentyp):\n${general}`,
       `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
@@ -1125,7 +1137,7 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
 }
 
 /** Output size of the GEO rewrite; the standalone GEO tool uses the same budget. */
-export const GEO_MAX_TOKENS = 12_000;
+export const GEO_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 
 const DEFAULT_GEO_INSTRUCTION = resolveContentStepPrompt("geo", null);
 
@@ -1203,7 +1215,7 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
 }
 
 /** Output size of the Hormozi rewrite; the standalone Hormozi tool uses the same budget. */
-export const HORMOZI_MAX_TOKENS = 12_000;
+export const HORMOZI_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
@@ -1252,7 +1264,7 @@ function normalizeSelfScore(raw: unknown): SelfScore | null {
 
 function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
-    maxTokens: 12_000,
+    maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
@@ -1304,7 +1316,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
 
 function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
-    maxTokens: 12_000,
+    maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),

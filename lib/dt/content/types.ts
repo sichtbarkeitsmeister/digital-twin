@@ -226,6 +226,13 @@ export type ContentStep = {
   live_text: boolean;
   /** Skipped SEO on an upload page: the text of the Word file became the starting text. */
   upload_text: boolean;
+  /** Output tokens of the step's last run (all its calls); 0 when it has not run. */
+  output_tokens: number;
+  /** Why the model stopped in the step's last call: `tool_use`, `end_turn`, `max_tokens`, `timeout` …; null when unknown. */
+  stop_reason: string | null;
+  model: string | null;
+  /** The step's error, or why it is tried again; null otherwise. */
+  error: string | null;
 };
 
 export type ContentActionKind =
@@ -341,7 +348,8 @@ export type ContentLocalSources = {
    * completed Anbieter-Fragebogen. Null when neither has content.
    */
   anbieter: {
-    workshop: { filled: number; total: number } | null;
+    /** `stale`: a conversation was uploaded or changed after the last evaluation; the texts do not know it yet. */
+    workshop: { filled: number; total: number; stale?: boolean } | null;
     fragebogen: { title: string; facts: number } | null;
   } | null;
   avatarCount: number;

@@ -111,7 +111,7 @@ function testSystemPromptUsesGlobalHormoziPrompt() {
   assert.ok(bausteine.required.every((k) => bausteine.properties[k]?.type === "string"));
   assert.deepEqual(schema.required, ["title", "meta_description", "blocks", "hormozi"]);
   assert.equal(spec.maxTokens, HORMOZI_MAX_TOKENS);
-  assert.equal(HORMOZI_MAX_TOKENS, 12_000, "same budget as Texte's Hormozi step");
+  assert.equal(HORMOZI_MAX_TOKENS, 16_000, "same budget as Texte's Hormozi step");
   assert.match(CONTENT_STEP_PROMPT_META.hormozi.description, /Gilt auch für das Werkzeug Verwaltung → Hormozi\.$/);
   console.log("system prompt from Globale Prompts, cta_regel per page type: ok");
 }
@@ -347,7 +347,7 @@ async function testRunOneCall() {
   assert.equal(calls[0]!.system, spec.system);
   assert.equal(calls[0]!.user, spec.user);
   assert.equal(calls[0]!.tool.name, "submit_hormozi_tool_text");
-  assert.equal(calls[0]!.maxTokens, 12_000);
+  assert.equal(calls[0]!.maxTokens, 16_000);
   assert.equal(calls[0]!.timeoutMs, HORMOZI_TOOL_TIMEOUT_MS);
   assert.equal(HORMOZI_TOOL_TIMEOUT_MS, 270_000);
   assert.deepEqual(calls[0]!.models, ["claude-sonnet-4-6"]);

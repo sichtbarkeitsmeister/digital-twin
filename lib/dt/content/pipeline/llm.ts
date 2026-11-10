@@ -15,12 +15,55 @@ import { DT_WEB_RESEARCH_TOOLS, sumServerToolUsage, type DtWebResearchUsage } fr
 /** Pipeline error with a hint whether the job runner should try again later. */
 export class ContentLlmError extends Error {
   readonly retryable: boolean;
+  /** Why the model stopped, when the call got that far (`max_tokens`, `timeout` …); for the step row. */
+  readonly stopReason: string | null;
+  /** Output tokens of the call that failed, when known. */
+  readonly outputTokens: number | null;
 
-  constructor(message: string, retryable: boolean) {
+  constructor(message: string, retryable: boolean, detail: { stopReason?: string | null; outputTokens?: number | null } = {}) {
     super(message);
     this.name = "ContentLlmError";
     this.retryable = retryable;
+    this.stopReason = detail.stopReason ?? null;
+    this.outputTokens = detail.outputTokens ?? null;
   }
+}
+
+/** Shown at the step when the answer hit max_tokens; the text never reaches the next step. */
+export const CONTENT_TRUNCATED_MESSAGE = "Ausgabe abgeschnitten (Token-Limit)";
+/** Shown at the step when the time limit cut the stream; the job tries the step again. */
+export const CONTENT_TIMEOUT_MESSAGE = "Ausgabe unvollständig (Zeitlimit erreicht). Der Schritt wird erneut versucht.";
+/** `stop_reason` we record for an answer the time limit cut (the API sent none). */
+export const CONTENT_STOP_REASON_TIMEOUT = "timeout";
+
+/**
+ * The most a model may be asked to write. Only the old fallbacks are below what the steps ask
+ * for; every current model writes far more than 64,000, which no step reaches.
+ */
+export function contentModelOutputLimit(model: string): number {
+  if (/claude-3-5-sonnet/i.test(model)) return 8_192;
+  if (/claude-3-/i.test(model)) return 4_096;
+  return 64_000;
+}
+
+/**
+ * A response that is not a finished answer: cut by the time limit (the stream ends without a
+ * stop_reason) or by max_tokens. The stream reader closes a cut-off tool call's JSON, so such
+ * a response parses like a complete one; it must never be read as the step's result.
+ */
+function incompleteResponseError(
+  result: { response: Anthropic.Messages.Message; timedOut?: boolean },
+  messages: { truncated: string; timeout: string },
+): ContentLlmError | null {
+  const stopReason = result.response.stop_reason;
+  const outputTokens = result.response.usage?.output_tokens ?? null;
+  if (stopReason === "max_tokens") {
+    return new ContentLlmError(messages.truncated, false, { stopReason, outputTokens });
+  }
+  if (result.timedOut || stopReason == null) {
+    return new ContentLlmError(messages.timeout, true, { stopReason: CONTENT_STOP_REASON_TIMEOUT, outputTokens });
+  }
+  return null;
 }
 
 const STEP_TIMEOUT_MS = 240_000;
@@ -28,6 +71,12 @@ const STEP_TIMEOUT_MS = 240_000;
 /** Shared with the DT chat (`lib/ai/anthropic-model-params.ts`): Sonnet 5.5 without extended thinking, 1.35× budget. */
 export { SONNET_5_5_BUDGET_FACTOR };
 export const contentModelParams = anthropicModelParams;
+
+/** The model's request settings with max_tokens kept within what that model can write. */
+function cappedModelParams(model: string, maxTokens: number): ReturnType<typeof anthropicModelParams> {
+  const params = contentModelParams(model, maxTokens);
+  return { ...params, maxTokens: Math.min(params.maxTokens, contentModelOutputLimit(model)) };
+}
 
 function anthropicStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
@@ -73,7 +122,13 @@ export async function callContentTool(input: {
   toolLabel?: string;
   /** Tests hand in a stub client; no network. */
   anthropic?: Anthropic;
-}): Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string }> {
+}): Promise<{
+  json: unknown;
+  usage: { inputTokens: number; outputTokens: number };
+  model: string;
+  /** Why the model stopped (`tool_use`, `end_turn` …); optional so test stubs need not set it. */
+  stopReason?: string | null;
+}> {
   let anthropic = input.anthropic;
   if (!anthropic) {
     const apiKey = input.apiKey ?? resolveContentApiKey();
@@ -92,7 +147,7 @@ export async function callContentTool(input: {
       anthropic: client,
       models: input.models,
       maxTokens: input.maxTokens,
-      modelParams: (model) => contentModelParams(model, input.maxTokens),
+      modelParams: (model) => cappedModelParams(model, input.maxTokens),
       timeoutMs: input.timeoutMs ?? STEP_TIMEOUT_MS,
       stream: true,
       system: forced
@@ -121,17 +176,18 @@ export async function callContentTool(input: {
     );
   }
 
+  // First of all: is this a finished answer? A cut-off one parses like a complete one.
+  const incomplete = incompleteResponseError(result, { truncated: CONTENT_TRUNCATED_MESSAGE, timeout: CONTENT_TIMEOUT_MESSAGE });
+  if (incomplete) throw incomplete;
+
   // Claude sometimes sends a nested parameter (the text sections, the findings) as a JSON
   // string, often with an unescaped quote in it; read it back as the declared array/object.
   const json = reviveStringifiedToolInput(
     extractToolUseInput(result.response, input.tool.name),
     input.tool.input_schema as Parameters<typeof reviveStringifiedToolInput>[1],
   );
-  if (!json) throw new ContentLlmError("Die KI-Antwort enthielt kein Ergebnis.", true);
-  if (result.response.stop_reason === "max_tokens") {
-    throw new ContentLlmError("Die KI-Antwort wurde abgeschnitten. Bitte den Schritt wiederholen.", false);
-  }
-  return { json, usage: sumAnthropicUsage(result.response.usage), model: result.model };
+  if (!json) throw new ContentLlmError("Die KI-Antwort enthielt kein Ergebnis.", true, { stopReason: result.response.stop_reason });
+  return { json, usage: sumAnthropicUsage(result.response.usage), model: result.model, stopReason: result.response.stop_reason };
 }
 
 // --- web research (Aktualitätsprüfung) ------------------------------------------------------------
@@ -232,7 +288,7 @@ export async function callContentResearch(input: {
         anthropic,
         models,
         maxTokens: input.maxTokens,
-        modelParams: (model) => contentModelParams(model, input.maxTokens),
+        modelParams: (model) => cappedModelParams(model, input.maxTokens),
         timeoutMs: remaining,
         stream: true,
         system: input.system,
@@ -263,9 +319,11 @@ export async function callContentResearch(input: {
       messages.push({ role: "assistant", content: response.content });
       continue;
     }
-    if (response.stop_reason === "max_tokens") {
-      throw new ContentLlmError(`Die Recherche ${purpose} wurde abgeschnitten. Bitte den Schritt wiederholen.`, false);
-    }
+    const incomplete = incompleteResponseError(result, {
+      truncated: `Die Recherche ${purpose} wurde abgeschnitten (Token-Limit). Bitte den Schritt wiederholen.`,
+      timeout: `Die Websuche ${purpose} hat das Zeitlimit erreicht. Der Schritt wird später erneut versucht.`,
+    });
+    if (incomplete) throw incomplete;
     return { text: texts.join("\n\n"), blocks, calls, model: result.model };
   }
   throw new ContentLlmError(`Die Websuche ${purpose} wurde nicht fertig. Der Schritt wird später erneut versucht.`, true);

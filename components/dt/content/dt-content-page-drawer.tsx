@@ -38,6 +38,7 @@ import {
   approveNeedsConfirm,
   contentActionLabel,
   contentSkipWarnings,
+  contentStepLogLine,
   contentStepStatusLabel,
   extractContentBlocks,
   formatEur,
@@ -557,12 +558,27 @@ export function DtContentPageDrawer(props: {
                       </summary>
                       <ol className="divide-y divide-sbkm-navy/8 border-t border-sbkm-navy/8 dark:divide-white/8 dark:border-white/8">
                         {review.steps.map((s) => (
-                          <li key={s.step} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
-                            <span className="flex min-w-0 items-center gap-3">
-                              <span className="w-5 shrink-0 text-right text-xs tabular-nums text-sbkm-ink-500 dark:text-white/40">
+                          <li key={s.step} className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm">
+                            <span className="flex min-w-0 items-start gap-3">
+                              <span className="w-5 shrink-0 text-right text-xs leading-5 tabular-nums text-sbkm-ink-500 dark:text-white/40">
                                 {s.step}
                               </span>
-                              <span className="truncate text-sbkm-navy dark:text-white">{s.name}</span>
+                              <span className="grid min-w-0 gap-0.5">
+                                <span className="truncate text-sbkm-navy dark:text-white">{s.name}</span>
+                                {contentStepLogLine(s) ? (
+                                  <span className="text-xs tabular-nums text-sbkm-ink-600 dark:text-white/60">{contentStepLogLine(s)}</span>
+                                ) : null}
+                                {s.error ? (
+                                  <span
+                                    className={cn(
+                                      "text-xs",
+                                      s.status === "error" ? "text-red-700 dark:text-red-300" : "text-sbkm-ink-600 dark:text-white/60",
+                                    )}
+                                  >
+                                    {s.error}
+                                  </span>
+                                ) : null}
+                              </span>
                             </span>
                             <span className="flex shrink-0 items-center gap-3 text-xs">
                               <span
