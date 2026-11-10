@@ -32,7 +32,7 @@ import {
   type TextOutput,
 } from "@/lib/dt/content/pipeline/prompts";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { normalizeBlocks, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
+import { CONTENT_MAX_BLOCKS, normalizeBlocks, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import { fillContentStepPrompt, loadContentStepPrompts, resolveContentStepPrompt } from "@/lib/dt/content/step-prompts";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
@@ -57,7 +57,7 @@ export const geoToolRequestSchema = z.object({
   pageName: z.string().trim().max(200).nullable(),
   /** The avatar picked in the form; null reworks the text without one. */
   avatarId: z.string().uuid().nullable(),
-  blocks: z.array(blockSchema).min(1).max(40),
+  blocks: z.array(blockSchema).min(1).max(CONTENT_MAX_BLOCKS),
   /** `<title>` / meta description of an HTML upload, null otherwise. */
   title: z.string().max(200).nullable(),
   metaDescription: z.string().max(400).nullable(),

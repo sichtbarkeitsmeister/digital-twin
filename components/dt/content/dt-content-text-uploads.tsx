@@ -1,5 +1,6 @@
 "use client";
 
+import { CONTENT_MAX_BLOCKS } from "@/lib/dt/content/render";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -417,7 +418,7 @@ export function DtContentTextUploads(props: {
         </DtPillButton>
         <span className="text-xs text-sbkm-ink-600 dark:text-white/65">
           oder Dateien hierher ziehen · eine oder viele · nur .docx · je Datei höchstens{" "}
-          {Math.round(TEXT_UPLOAD_MAX_FILE_BYTES / (1024 * 1024))} MB, 60.000 Zeichen und 40 Abschnitte
+          {Math.round(TEXT_UPLOAD_MAX_FILE_BYTES / (1024 * 1024))} MB, 60.000 Zeichen und {CONTENT_MAX_BLOCKS} Abschnitte
         </span>
       </div>
 

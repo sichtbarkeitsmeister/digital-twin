@@ -307,7 +307,7 @@ function cleanFileName(name: string): string {
 
 /**
  * One uploaded Word file: read with the ingest of the text tools (.docx via mammoth, the same
- * limits: 60.000 characters, 40 sections), then stored by its name key.
+ * limits: 60.000 characters, `TEXT_TOOL_MAX_BLOCKS` sections), then stored by its name key.
  *
  *   - A file that cannot be read (old .doc, no Word file, too long …) is stored as a row with
  *     its `error`, so it shows in the table and the rest of the batch goes on. It never
