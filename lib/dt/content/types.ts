@@ -3,6 +3,7 @@
  * The pipeline behind the routes runs inside DigitalTwin (`lib/dt/content/pipeline`).
  */
 
+import type { ContentPageFact } from "@/lib/dt/content/pipeline/page-facts-model";
 import type { ContactFieldKey, ContactSource, OrgContactData } from "@/lib/dt/contact-data";
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
@@ -226,6 +227,13 @@ export type ContentStep = {
   live_text: boolean;
   /** Skipped SEO on an upload page: the text of the Word file became the starting text. */
   upload_text: boolean;
+  /** Output tokens of the step's last run (all its calls); 0 when it has not run. */
+  output_tokens: number;
+  /** Why the model stopped in the step's last call: `tool_use`, `end_turn`, `max_tokens`, `timeout` …; null when unknown. */
+  stop_reason: string | null;
+  model: string | null;
+  /** The step's error, or why it is tried again; null otherwise. */
+  error: string | null;
 };
 
 export type ContentActionKind =
@@ -281,6 +289,25 @@ export type ContentReview = {
    * Its outputs do not fit today's steps: the editor resets it.
    */
   legacy_steps: boolean;
+  /**
+   * The page's Faktenauszug from the customer's conversations (made before the Analyse); null
+   * until it exists (page not started, or started before the excerpt was introduced).
+   */
+  page_facts: {
+    /** „18 Fakten aus 3 Gesprächen“ */
+    summary: string;
+    facts: ContentPageFact[];
+    /** What the page would need but no conversation says. */
+    gaps: string[];
+    conversations: number;
+    /** The conversations were too long for one call; their wording was shortened. */
+    shortened: boolean;
+    error: string | null;
+    /** Why no excerpt was made on purpose (evaluation not approved or outdated); null otherwise. */
+    skipped: string | null;
+    /** Statements the evaluation blocks („Gesperrt“), as every step gets them. */
+    blocked: string[];
+  } | null;
   public: {
     state: ContentPageState;
     label: string;
@@ -341,7 +368,8 @@ export type ContentLocalSources = {
    * completed Anbieter-Fragebogen. Null when neither has content.
    */
   anbieter: {
-    workshop: { filled: number; total: number } | null;
+    /** `stale`: a conversation was uploaded or changed after the last evaluation; the texts do not know it yet. */
+    workshop: { filled: number; total: number; stale?: boolean } | null;
     fragebogen: { title: string; facts: number } | null;
   } | null;
   avatarCount: number;

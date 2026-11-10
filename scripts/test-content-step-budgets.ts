@@ -123,8 +123,11 @@ const pageRow = (patch: Partial<ContentPageRow> = {}): ContentPageRow => ({
 const doneUpTo = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ page_id: PAGE_ID, organisation_id: ORG, step: i + 1, name: contentStepDefinition(i + 1)!.name, status: "done" }));
 
-async function loopSlot(stepsDone: number, secondsLeft: number): Promise<number[]> {
-  const db = new FakeDb({ dt_content_pages: [pageRow({ step: stepsDone || null })], dt_content_steps: doneUpTo(stepsDone) });
+async function loopSlot(stepsDone: number, secondsLeft: number, factsStored = false): Promise<number[]> {
+  const waitingAnalyse = factsStored
+    ? [{ page_id: PAGE_ID, organisation_id: ORG, step: 1, name: "Analyse", status: "pending", output: { page_facts: { facts: [], gaps: [], conversations: 0 } } }]
+    : [];
+  const db = new FakeDb({ dt_content_pages: [pageRow({ step: stepsDone || null })], dt_content_steps: [...doneUpTo(stepsDone), ...waitingAnalyse] });
   const calls: number[] = [];
   const runStep = async (_service: unknown, _page: ContentPageRow, _steps: readonly ContentStepRow[], step: number): Promise<StepOutcome> => {
     calls.push(step);
@@ -139,7 +142,9 @@ async function slots() {
   assert.deepEqual(await loopSlot(2, 230), [CONTENT_STEP_FAKTENCHECK], "with a long slot it runs");
   assert.deepEqual(await loopSlot(9, 100), [], "the Endabnahme likewise");
   assert.deepEqual(await loopSlot(9, 230), [CONTENT_STEP_ENDABNAHME]);
-  assert.deepEqual(await loopSlot(0, 100), [1], "the Analyse still starts with a short remainder");
+  assert.deepEqual(await loopSlot(0, 100), [], "a new page first makes its Faktenauszug (all conversations): it waits for a full tick");
+  assert.deepEqual(await loopSlot(0, 230), [1]);
+  assert.deepEqual(await loopSlot(0, 100, true), [1], "with the Faktenauszug stored, the Analyse itself starts with a short remainder");
   console.log("job loop slots: ok");
 }
 

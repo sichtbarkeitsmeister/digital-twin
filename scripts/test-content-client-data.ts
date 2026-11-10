@@ -171,7 +171,7 @@ function testPromptBlockOnlyFilled() {
   assert.equal(contactPromptData(shy)!.lines[0]!.value, "Rechtsanwaltskanzlei DIEL", "no soft hyphen in the prompt");
   assert.equal(kontaktBlock({ contact: null }), "");
   assert.match(kontaktBlock({ contact: contactPromptData(data({}, { no_google_profile: true })) }), /kein Google-Profil/);
-  assert.match(BASE_RULES, /Anbieterfakten, den Kontaktdaten \(bestätigt\) und den Anmerkungen der Redaktion/, "BASE_RULES accepts facts from the Kontaktdaten");
+  assert.match(BASE_RULES, /aus den Anbieterfakten, dem Faktenauszug, den Antworten des Kunden, den Kontaktdaten und den Anmerkungen der Redaktion/, "BASE_RULES accepts facts from the Kontaktdaten");
   console.log("Kontaktdaten: prompt block with filled fields only: ok");
 }
 

@@ -651,7 +651,7 @@ async function actionTests() {
   assert.deepEqual([by("seo").skippable, by("seo").reason_locked], [false, "Nur bei Seiten mit vorhandenem Text (von der Website oder aus einer Word-Datei): dann wird dieser Text übernommen"]);
   assert.deepEqual([by("geo").skippable, by("geo").skipped_by_user], [true, true]);
   assert.deepEqual([by("aktualitaet").status, by("aktualitaet").skipped_by_user, by("aktualitaet").live_text], ["skipped", false, false], "a migration-skipped row is no user choice");
-  assert.deepEqual(Object.keys(by("geo")).sort(), ["cost_eur", "exists", "key", "live_text", "name", "reason_locked", "skippable", "skipped_by_user", "status", "step", "upload_text"]);
+  assert.deepEqual(Object.keys(by("geo")).sort(), ["cost_eur", "error", "exists", "key", "live_text", "model", "name", "output_tokens", "reason_locked", "skippable", "skipped_by_user", "status", "step", "stop_reason", "upload_text"]);
 
   assert.equal(pageSummary(pageRow({ skip_steps: ["geo", "watermark"] })).skipped_count, 2);
   assert.equal(pageSummary(pageRow()).skipped_count, 0);

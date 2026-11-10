@@ -43,6 +43,9 @@ import {
   type AktualitaetOutput,
 } from "@/lib/dt/content/pipeline/aktualitaet";
 import { ContentLlmError, callContentResearch, callContentTool } from "@/lib/dt/content/pipeline/llm";
+import { extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { PAGE_FACTS_USAGE_MODE, emptyPageFacts, evaluationSkipReason, pageFactsFromCall, pageFactsPrompt } from "@/lib/dt/content/pipeline/page-facts";
+import { readPageFacts, withoutPageFacts, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import {
   contentStepSpec,
   type ContentPipelineContext,
@@ -63,6 +66,7 @@ import {
 } from "@/lib/dt/content/pipeline/step-patch";
 import {
   CONTENT_STEP_AKTUALITAET,
+  CONTENT_STEP_ANALYSE,
   CONTENT_STEP_FAKTENCHECK,
   contentStepDefinition,
   contentStepSkippable,
@@ -73,6 +77,7 @@ import { htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/
 import {
   contentDbErrorMessage,
   contentStructureOutline,
+  isMissingStopReasonColumnError,
   loadContentPageOutline,
   loadContentSettings,
   num,
@@ -88,6 +93,8 @@ import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { loadPageTextUpload } from "@/lib/dt/content/text-uploads";
 import { uploadBlocksToMarkdown } from "@/lib/dt/content/upload-match";
 import { loadCrawledPageInput } from "@/lib/dt/text-tools/crawl-source";
+import type { WorkshopSectionStatus, WorkshopSource } from "@/lib/dt/transcripts/workshop-model";
+import { loadWorkshopState } from "@/lib/dt/transcripts/workshop-store";
 
 export type StepOutcome = {
   step: number;
@@ -108,7 +115,7 @@ export type StepOutcome = {
 };
 
 /** How much of the live page's text the prompts see (pages taken over from the crawl). */
-const EXISTING_TEXT_MAX_CHARS = 6_000;
+const EXISTING_TEXT_MAX_CHARS = 20_000;
 /**
  * How much of an uploaded Word text the prompts see. 6.000 characters (about 900 words) cut a
  * normal service page in half; unlike the crawl text, which is page chrome plus body and only a
@@ -198,8 +205,11 @@ async function loadContext(
 
   const outputs: ContentPipelineContext["outputs"] = {};
   for (const row of steps) {
-    if (row.status === "done" || row.status === "waiting") outputs[row.step] = row.output;
+    // The Analyse's row also holds the Faktenauszug; the prompts quote the Analyse without it.
+    if (row.status === "done" || row.status === "waiting") outputs[row.step] = withoutPageFacts(row.output);
   }
+  // Made before the Analyse and kept in its row whatever the row's status is.
+  const pageFacts = readPageFacts(steps.find((row) => row.step === CONTENT_STEP_ANALYSE)?.output);
 
   return {
     avatarId: avatarRow?.id ?? null,
@@ -236,8 +246,9 @@ async function loadContext(
         contact: contactData.data,
         pool,
         notes: page.notes,
-        anbieterText: anbieter.sections.map((s) => s.current).join("\n"),
+        anbieterText: [...anbieter.sections.map((s) => s.current), ...(pageFacts?.facts ?? []).map((f) => f.fact)].join("\n"),
       }),
+      pageFacts,
       wishes: {
         organisation: parseClientWishes(settingsRow.client_wishes),
         page: parseClientWishes(page.client_wishes),
@@ -259,14 +270,23 @@ async function upsertStep(
   patch: Partial<ContentStepRow>,
 ): Promise<void> {
   const def = contentStepDefinition(step);
-  const { error } = await service.from("dt_content_steps").upsert(
-    { page_id: page.id, organisation_id: page.organisation_id, step, name: def?.name ?? `Schritt ${step}`, ...patch },
-    { onConflict: "page_id,step" },
-  );
+  const row = { page_id: page.id, organisation_id: page.organisation_id, step, name: def?.name ?? `Schritt ${step}`, ...patch };
+  let { error } = await service.from("dt_content_steps").upsert(row, { onConflict: "page_id,step" });
+  if (error && "stop_reason" in row && isMissingStopReasonColumnError(error)) {
+    // Migration 20261111 not run yet: the step is saved without its stop_reason.
+    const rest: Record<string, unknown> = { ...row };
+    delete rest.stop_reason;
+    ({ error } = await service.from("dt_content_steps").upsert(rest, { onConflict: "page_id,step" }));
+  }
   if (error) throw new Error(contentDbErrorMessage(error, "Schritt konnte nicht gespeichert werden"));
 }
 
-type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string };
+type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string; stopReason?: string | null };
+
+/** `stop_reason` of the step's last call, for the step row. */
+function lastStopReason(calls: readonly ModelCall[]): string | null {
+  return calls[calls.length - 1]?.stopReason ?? null;
+}
 
 /**
  * After a step's patch: its company questions go into the organisation's pool, and the step row
@@ -346,6 +366,10 @@ export async function runContentStep(
     return runAktualitaetStep({ service, page, def, steps, context, avatarId, timeoutMs });
   }
   const models = await loadContentModelConfig(service);
+  if (def.step === CONTENT_STEP_ANALYSE && !context.pageFacts) {
+    // First the Faktenauszug from the conversations; the Analyse itself follows in the next turn.
+    return runPageFactsPart({ service, page, def, context, avatarId, models: models[def.tier], timeoutMs });
+  }
   const spec = contentStepSpec(step, context);
   const { output, calls } = await callStep(spec, context, models[def.tier], timeoutMs);
   const model = calls[calls.length - 1]!.model;
@@ -377,22 +401,125 @@ export async function runContentStep(
   const patch = stepPatchFor(def, output, { ...page, knowledge: context.knowledge });
   const { pagePatch, stepStatus, halted } = patch;
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + costEur);
-  const storedOutput = await settleQuestionPlan(service, page, patch, output);
+  const settled = await settleQuestionPlan(service, page, patch, output);
+  // The Analyse's row keeps the Faktenauszug made before it, and its tokens and cost.
+  const facts = def.step === CONTENT_STEP_ANALYSE ? context.pageFacts ?? null : null;
+  const storedOutput = facts ? { ...settled, page_facts: facts } : settled;
 
   await upsertStep(service, page, step, {
     status: stepStatus,
     output: storedOutput,
     model,
-    input_tokens: usage.inputTokens,
-    output_tokens: usage.outputTokens,
-    cost_eur: roundEur(costEur),
+    input_tokens: usage.inputTokens + (facts?.input_tokens ?? 0),
+    output_tokens: usage.outputTokens + (facts?.output_tokens ?? 0),
+    cost_eur: roundEur(costEur + (facts?.cost_eur ?? 0)),
     error: null,
+    stop_reason: lastStopReason(calls),
     finished_at: new Date().toISOString(),
   });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
   if (error) throw new Error(`Seite konnte nicht gespeichert werden: ${error.message}`);
 
   return { step, halted, model, costEur };
+}
+
+/**
+ * The first part of the Analyse step: the page's Faktenauszug (`page-facts.ts`). One call reads
+ * all conversations of the organisation and keeps what they say about this page's topic; the
+ * result is saved in the step row and the step hands back `partial`, so the Analyse runs in the
+ * next loop turn with its own time. Without conversations no call is made, and none while the
+ * Anbieter evaluation is not approved or older than a conversation (the page window says why). A call the job can
+ * try again (overload, time limit) fails the step like any other; one it cannot (a refused
+ * request, a cut-off answer) does not stop the page: it runs with the Anbieter sections alone,
+ * as before, and the page window says that the excerpt is missing and why.
+ */
+export async function runPageFactsPart(input: {
+  service: SupabaseClient;
+  page: ContentPageRow;
+  def: ContentStepDefinition;
+  context: ContentPipelineContext;
+  avatarId: string | null;
+  models: string[];
+  timeoutMs: number | undefined;
+  /** Tests hand in a stub; no network. */
+  callTool?: typeof callContentTool;
+}): Promise<StepOutcome> {
+  const { service, page, def, context } = input;
+  let sources: WorkshopSource[] = [];
+  let evaluation: Array<{ label: string; current: string }> = [];
+  let status: WorkshopSectionStatus = "empty";
+  let loadError: string | null = null;
+  try {
+    const state = await loadWorkshopState(service, page.organisation_id);
+    sources = state.sources;
+    evaluation = state.anbieter.items.map((item) => ({ label: item.label, current: item.current }));
+    status = state.anbieter.status;
+  } catch (error) {
+    loadError = `Die Gespräche konnten nicht gelesen werden: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  const blocked = extractBlockedStatements(evaluation);
+  const skipReason = sources.length > 0 ? evaluationSkipReason(status) : null;
+
+  let facts: ContentPageFacts;
+  let model = "";
+  if (sources.length === 0) {
+    facts = emptyPageFacts({ conversations: 0, error: loadError, blocked });
+  } else if (skipReason) {
+    // Not approved or older than a conversation: nothing is pulled from unchecked conversations.
+    facts = emptyPageFacts({ conversations: sources.length, skipped: skipReason, blocked });
+  } else {
+    const prompt = pageFactsPrompt(context, sources, evaluation);
+    try {
+      const call = await (input.callTool ?? callContentTool)({
+        models: input.models,
+        system: prompt.system,
+        user: prompt.user,
+        tool: prompt.tool,
+        maxTokens: prompt.maxTokens,
+        timeoutMs: input.timeoutMs,
+      });
+      model = call.model;
+      const costEur = roundEur(estimateCostEur(call.model, call.usage));
+      await recordLlmUsageEvent(service, {
+        organisationId: page.organisation_id,
+        userId: page.started_by,
+        agentId: input.avatarId,
+        mode: PAGE_FACTS_USAGE_MODE,
+        via: "direct",
+        model: call.model,
+        inputTokens: call.usage.inputTokens,
+        outputTokens: call.usage.outputTokens,
+      });
+      facts = pageFactsFromCall({ json: call.json, conversations: sources.length, shortened: prompt.shortened, model: call.model, usage: call.usage, costEur, blocked });
+    } catch (error) {
+      // Overload, rate limit, time limit: the job tries the step again, like every other call.
+      if (error instanceof ContentLlmError && error.retryable) throw error;
+      console.warn("[content] Faktenauszug failed:", error instanceof Error ? error.message : error);
+      facts = emptyPageFacts({ conversations: sources.length, error: error instanceof Error ? error.message : String(error), blocked });
+    }
+  }
+
+  if (!(await pageStillOurs(service, page))) {
+    return { step: def.step, halted: true, discarded: true, model, costEur: facts.cost_eur };
+  }
+  await upsertStep(service, page, def.step, {
+    status: "pending",
+    output: { page_facts: facts },
+    model: model || null,
+    input_tokens: facts.input_tokens,
+    output_tokens: facts.output_tokens,
+    cost_eur: facts.cost_eur,
+    error: null,
+    finished_at: null,
+  });
+  if (facts.cost_eur > 0) {
+    const { error } = await service
+      .from("dt_content_pages")
+      .update({ cost_eur: roundEur(num(page.cost_eur) + facts.cost_eur) })
+      .eq("id", page.id);
+    if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
+  }
+  return { step: def.step, halted: false, partial: true, model, costEur: 0 };
 }
 
 /**
@@ -502,6 +629,7 @@ async function runAktualitaetStep(input: {
   const research = progress.research;
   if (!research) throw new ContentLlmError("Die Recherche der Aktualitätsprüfung fehlt. Der Schritt wird erneut versucht.", true);
   let output: AktualitaetOutput;
+  let stopReason: string | null = null;
   if (aktualitaetNeedsNoResult(research)) {
     output = unchangedAktualitaetOutput(context, research);
   } else {
@@ -509,6 +637,7 @@ async function runAktualitaetStep(input: {
     const { output: written, calls } = await callStep(spec, context, models, Math.max(30_000, deadline - Date.now()));
     for (const call of calls) await bill(call);
     output = written as AktualitaetOutput;
+    stopReason = lastStopReason(calls);
   }
 
   if (!(await pageStillOurs(service, page))) {
@@ -533,6 +662,7 @@ async function runAktualitaetStep(input: {
     output_tokens: progress.output_tokens,
     cost_eur: progress.cost_eur,
     error: null,
+    stop_reason: stopReason,
     finished_at: new Date().toISOString(),
   });
   const { error } = await service.from("dt_content_pages").update(pagePatch).eq("id", page.id);
@@ -712,6 +842,22 @@ export async function skipContentStep(
   return { step, halted, skipped: true, model: "", costEur: 0 };
 }
 
+/** What a failed model call left for the step's log: why it stopped and how much it had written. */
+export type StepFailureDetail = { stopReason?: string | null; outputTokens?: number | null };
+
+/** The log fields of a failed call as the error carries them (`ContentLlmError`); empty for other errors. */
+export function stepFailureDetail(error: unknown): StepFailureDetail {
+  if (!(error instanceof ContentLlmError)) return {};
+  return { stopReason: error.stopReason, outputTokens: error.outputTokens };
+}
+
+function failurePatch(detail: StepFailureDetail): Partial<ContentStepRow> {
+  return {
+    ...(detail.stopReason ? { stop_reason: detail.stopReason } : {}),
+    ...(detail.outputTokens != null ? { output_tokens: detail.outputTokens } : {}),
+  };
+}
+
 /**
  * Pause the page with the error visible in the table and drawer. Not when the page is no
  * longer this job's (stopped, or started again under a new job): the failure of a stopped
@@ -722,6 +868,7 @@ export async function markContentStepError(
   page: ContentPageRow,
   step: number,
   message: string,
+  detail: StepFailureDetail = {},
 ): Promise<void> {
   if (!(await pageStillOurs(service, page))) return;
   const text = message.slice(0, 500);
@@ -729,6 +876,7 @@ export async function markContentStepError(
     status: "error",
     error: text,
     finished_at: new Date().toISOString(),
+    ...failurePatch(detail),
   }).catch((err) => console.error("[content] step error not stored", err));
   const { error } = await service
     .from("dt_content_pages")
@@ -754,6 +902,7 @@ export async function markContentStepRetry(
   page: ContentPageRow,
   step: number,
   message: string,
+  detail: StepFailureDetail = {},
 ): Promise<void> {
   if (!(await pageStillOurs(service, page))) return;
   const text = message.slice(0, 500);
@@ -761,6 +910,7 @@ export async function markContentStepRetry(
     status: "pending",
     error: text,
     finished_at: new Date().toISOString(),
+    ...failurePatch(detail),
   }).catch((err) => console.error("[content] step retry not stored", err));
   await service
     .from("dt_content_pages")

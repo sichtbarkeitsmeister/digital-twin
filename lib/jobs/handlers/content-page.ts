@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { interruptedStepMessage } from "@/lib/dt/content/job-state";
-import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
+import { CONTENT_STOP_REASON_TIMEOUT, CONTENT_TIMEOUT_FINAL_MESSAGE, ContentLlmError } from "@/lib/dt/content/pipeline/llm";
+import { readPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import { questionStopDue } from "@/lib/dt/content/pipeline/question-stop";
 import {
   markContentStepError,
@@ -9,9 +10,11 @@ import {
   runContentStep,
   runQuestionStop,
   skipContentStep,
+  stepFailureDetail,
 } from "@/lib/dt/content/pipeline/run-step";
 import {
   CONTENT_STEP_AKTUALITAET,
+  CONTENT_STEP_ANALYSE,
   CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
@@ -19,14 +22,22 @@ import {
   nextContentStep,
   skipsContentStep,
 } from "@/lib/dt/content/pipeline/steps";
-import { loadContentPageById, loadContentSteps, type ContentPageRow } from "@/lib/dt/content/store";
-import { stepBudgetMs } from "@/lib/jobs/schedule";
+import { loadContentPageById, loadContentSteps, type ContentPageRow, type ContentStepRow } from "@/lib/dt/content/store";
+import { JOB_WORKER_BUDGET_MS, stepBudgetMs } from "@/lib/jobs/schedule";
 import { createServiceClient } from "@/lib/supabase/service";
 
 import type { JobHandler, JobHandlerResult, JobRow } from "../types";
 
 /** A full page needs most of the worker budget. Shorter steps can start later in the tick. */
 const LONG_STEP_MS = 150_000;
+/**
+ * A Claude step that returns the whole page text (SEO, GEO, Hormozi, Vermenschlichung,
+ * Lektorat) starts only with a nearly full tick. Started with 150 s left it got about 135 s,
+ * some 7,300 tokens at the measured 54 per second: an Unterseite of 2,600 words did not fit,
+ * the time limit cut the stream and the stub went on as the text (10.11.). With 200 s left the
+ * call has at least 185 s, about 10,000 tokens; a first step of a tick gets up to 225 s.
+ */
+export const FULL_TEXT_STEP_MS = 200_000;
 const SHORT_STEP_MS = 45_000;
 /**
  * Steps that write no text but whose answer grows with the page: the Faktencheck's findings and
@@ -38,6 +49,17 @@ const LONG_CHECK_STEPS: ReadonlySet<number> = new Set([CONTENT_STEP_FAKTENCHECK,
 const LIVE_TEXT_MS = 20_000;
 /** The stop before the Watermark Entfernung: at most one short call on a few Abschnitte. */
 const QUESTION_STOP_MS = 90_000;
+
+/**
+ * Did this step's previous attempt end at the time limit? Then its row waits to run again
+ * (`pending`) with that reason on it (`markContentStepRetry`); a second time-out is final
+ * (`CONTENT_TIMEOUT_MAX_RETRIES`). A step started again by hand („Weiterlaufen lassen“ after
+ * the error) has an `error` row and gets its one repetition anew.
+ */
+export function stepTimedOutBefore(row: Pick<ContentStepRow, "status" | "error" | "stop_reason"> | null | undefined): boolean {
+  if (!row || row.status !== "pending") return false;
+  return row.stop_reason === CONTENT_STOP_REASON_TIMEOUT || /Zeitlimit erreicht/i.test(row.error ?? "");
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -127,14 +149,15 @@ export async function runContentPageSteps(input: {
   const skipStep = input.runners?.skipStep ?? skipContentStep;
   const questionStop = input.runners?.questionStop ?? runQuestionStop;
   const lastAttempt = job.attempts + 1 >= job.max_attempts;
-  const limit = input.deadline ?? Date.now() + LONG_STEP_MS;
+  // Without a deadline (tests, a direct call) the loop has one full worker tick.
+  const limit = input.deadline ?? Date.now() + JOB_WORKER_BUDGET_MS;
   let continued: JobHandlerResult | null = null;
   let page: ContentPageRow | null = null;
   let next: number | null = null;
 
   try {
-    // One turn per step, plus the stop for questions before the Watermark Entfernung.
-    for (let ran = 0; ran < CONTENT_STEP_COUNT + 2; ran++) {
+    // One turn per step, plus the Faktenauszug before the Analyse and the stop for questions.
+    for (let ran = 0; ran < CONTENT_STEP_COUNT + 3; ran++) {
       page = await loadContentPageById(service, pageId);
       if (!page) return { ok: true, result: { skipped: "page_missing" } };
       if (page.state !== "laeuft") return { ok: true, result: { skipped: page.state } };
@@ -222,9 +245,14 @@ export async function runContentPageSteps(input: {
         const needed =
           def?.provider === "xai"
             ? SHORT_STEP_MS
-            : def?.step === CONTENT_STEP_AKTUALITAET || def?.writesText || (def != null && LONG_CHECK_STEPS.has(def.step))
-              ? LONG_STEP_MS
-              : SHORT_STEP_MS;
+            : def?.step === CONTENT_STEP_ANALYSE && !readPageFacts(steps.find((s) => s.step === next)?.output)
+              ? // The Faktenauszug reads all conversations before the Analyse: a long call.
+                FULL_TEXT_STEP_MS
+              : def?.writesText && def.step !== CONTENT_STEP_AKTUALITAET
+              ? FULL_TEXT_STEP_MS
+              : def?.step === CONTENT_STEP_AKTUALITAET || (def != null && LONG_CHECK_STEPS.has(def.step))
+                ? LONG_STEP_MS
+                : SHORT_STEP_MS;
         const stepBudget = stepBudgetMs(Date.now(), limit, needed);
         if (stepBudget == null) {
           return continued ?? { ok: true, reschedule: true, result: { step: next, deferred: true } };
@@ -262,11 +290,16 @@ export async function runContentPageSteps(input: {
         // Database hiccups while saving are worth another try; a rejected key or a cut-off
         // answer (ContentLlmError, retryable=false) is not.
         const retryable = error instanceof ContentLlmError ? error.retryable : true;
-        if (!retryable || lastAttempt) {
-          await markContentStepError(service, page, next, message);
-          return { ok: false, error: message, retryable: false };
+        const detail = stepFailureDetail(error);
+        // The time limit: one repetition, then the step fails for everyone to see.
+        const timedOut = detail.stopReason === CONTENT_STOP_REASON_TIMEOUT;
+        const timedOutBefore = timedOut && stepTimedOutBefore(steps.find((s) => s.step === next));
+        if (!retryable || lastAttempt || timedOutBefore) {
+          const final = timedOut ? CONTENT_TIMEOUT_FINAL_MESSAGE : message;
+          await markContentStepError(service, page, next, final, detail);
+          return { ok: false, error: final, retryable: false };
         }
-        await markContentStepRetry(service, page, next, message);
+        await markContentStepRetry(service, page, next, message, detail);
         return { ok: false, error: message, retryable: true };
       }
     }

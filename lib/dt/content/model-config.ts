@@ -27,7 +27,6 @@ export const DEFAULT_CONTENT_MODEL = "claude-sonnet-4-6";
 const CONTENT_MODEL_FALLBACKS = [
   DEFAULT_CONTENT_MODEL,
   "claude-sonnet-4-20250514",
-  "claude-3-5-sonnet-latest",
 ] as const;
 
 export const CONTENT_MODEL_ENV = {

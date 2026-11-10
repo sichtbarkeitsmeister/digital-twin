@@ -4,6 +4,7 @@
  * the service client: routes check access first (`gateContentRoute`), the job runner has none.
  */
 
+import { pageFactsSummary, readPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -32,6 +33,7 @@ import {
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
 import {
+  CONTENT_STEP_ANALYSE,
   CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
@@ -141,6 +143,8 @@ export type ContentStepRow = {
   output_tokens: number;
   cost_eur: number | string;
   error: string | null;
+  /** Why the model's last call of the step stopped (`tool_use`, `max_tokens`, `timeout` …); null before migration 20261111. */
+  stop_reason?: string | null;
   started_at: string | null;
   finished_at: string | null;
   approved_by: string | null;
@@ -179,8 +183,26 @@ const SUMMARY_COLUMNS = `id, organisation_id, slug, name, path, level, position,
 /** What the prompts see of the other pages (cannibalisation, deferred questions). */
 const OUTLINE_COLUMNS = "slug, name, path, level, source, page_role, page_type, pillar_name, main_keyword, keywords";
 
-const STEP_COLUMNS =
+const STEP_COLUMNS_BASE =
   "id, page_id, organisation_id, step, name, status, output, model, input_tokens, output_tokens, cost_eur, error, started_at, finished_at, approved_by, approved_at";
+const STEP_COLUMNS = `${STEP_COLUMNS_BASE}, stop_reason`;
+
+/** `dt_content_steps.stop_reason` unknown: migration 20261111 never ran. The steps run without it. */
+export function isMissingStopReasonColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  return Boolean(error) && isMissingContentColumnError(error) && /stop_reason/i.test(error?.message ?? "");
+}
+
+type StepQuery = { order: (column: string, options: { ascending: boolean }) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }> };
+
+/** The step rows with `stop_reason`, or without it while the column does not exist yet. */
+async function selectStepRows(build: (columns: string) => StepQuery): Promise<ContentStepRow[]> {
+  let result = await build(STEP_COLUMNS).order("step", { ascending: true });
+  if (result.error && isMissingStopReasonColumnError(result.error)) {
+    result = await build(STEP_COLUMNS_BASE).order("step", { ascending: true });
+  }
+  if (result.error) throw new Error(contentDbErrorMessage(result.error, "Schritte konnten nicht geladen werden"));
+  return (result.data ?? []) as ContentStepRow[];
+}
 
 const MAX_PAGES = 300;
 /** The page limit of the Texte table, for the takeover of uploaded Word texts. */
@@ -519,13 +541,7 @@ export async function resetContentStepsFrom(service: SupabaseClient, pageId: str
 
 /** Throws on a database error: an empty list would restart the pipeline at step 1. */
 export async function loadContentSteps(service: SupabaseClient, pageId: string): Promise<ContentStepRow[]> {
-  const { data, error } = await service
-    .from("dt_content_steps")
-    .select(STEP_COLUMNS)
-    .eq("page_id", pageId)
-    .order("step", { ascending: true });
-  if (error) throw new Error(contentDbErrorMessage(error, "Schritte konnten nicht geladen werden"));
-  return (data ?? []) as ContentStepRow[];
+  return selectStepRows((columns) => service.from("dt_content_steps").select(columns).eq("page_id", pageId) as unknown as StepQuery);
 }
 
 /** Step rows of several pages at once (the overview needs them for the running ones). */
@@ -535,13 +551,8 @@ export async function loadContentStepsForPages(
 ): Promise<Map<string, ContentStepRow[]>> {
   const byPage = new Map<string, ContentStepRow[]>();
   if (pageIds.length === 0) return byPage;
-  const { data, error } = await service
-    .from("dt_content_steps")
-    .select(STEP_COLUMNS)
-    .in("page_id", [...pageIds])
-    .order("step", { ascending: true });
-  if (error) throw new Error(contentDbErrorMessage(error, "Schritte konnten nicht geladen werden"));
-  for (const row of (data ?? []) as ContentStepRow[]) {
+  const rows = await selectStepRows((columns) => service.from("dt_content_steps").select(columns).in("page_id", [...pageIds]) as unknown as StepQuery);
+  for (const row of rows) {
     const list = byPage.get(row.page_id) ?? [];
     list.push(row);
     byPage.set(row.page_id, list);
@@ -1373,6 +1384,7 @@ export function stepList(
     const row = steps.find((s) => s.step === def.step);
     const status: ContentStepStatus = row?.status ?? "pending";
     const skippable = contentStepSkippable(page, def.key);
+    const ran = status === "done" || status === "waiting" || status === "error";
     return {
       step: def.step,
       key: def.key,
@@ -1385,6 +1397,11 @@ export function stepList(
       skipped_by_user: contentStepSkippedByUser(page.skip_steps, def.step),
       live_text: tookExistingText(row, "live_text"),
       upload_text: tookExistingText(row, "upload_text"),
+      // The log of the step's last run; a row waiting to run again shows nothing stale.
+      output_tokens: ran ? Math.max(0, Math.round(num(row?.output_tokens))) : 0,
+      stop_reason: ran ? row?.stop_reason ?? null : null,
+      model: ran ? row?.model ?? null : null,
+      error: status === "error" || status === "pending" ? row?.error ?? null : null,
     };
   });
 }
@@ -1452,6 +1469,23 @@ export function buildReview(
     freshness: reviewFreshness(page.freshness),
     skip_steps: page.skip_steps,
     steps: stepList(steps, page),
+    page_facts: reviewPageFacts(steps),
     actions: pageActions(page),
+  };
+}
+
+/** The Faktenauszug for the page window: its summary line, the facts and what the conversations lack. */
+export function reviewPageFacts(steps: readonly ContentStepRow[]): ContentReview["page_facts"] {
+  const facts = readPageFacts(steps.find((s) => s.step === CONTENT_STEP_ANALYSE)?.output);
+  if (!facts) return null;
+  return {
+    summary: pageFactsSummary(facts),
+    facts: facts.facts,
+    gaps: facts.gaps,
+    conversations: facts.conversations,
+    shortened: facts.shortened,
+    error: facts.error,
+    skipped: facts.skipped,
+    blocked: facts.blocked,
   };
 }

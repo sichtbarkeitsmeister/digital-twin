@@ -44,7 +44,7 @@ export const GEO_TOOL_TIMEOUT_MS = 270_000;
 const blockSchema = z.object({
   id: z.string().min(1).max(60),
   heading: z.string().nullable(),
-  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
   html: z.string(),
 });
 

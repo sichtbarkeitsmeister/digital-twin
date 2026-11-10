@@ -237,7 +237,7 @@ function testSystemPromptUsesGlobalGeoPrompt() {
   assert.deepEqual(spec.tool, GEO_TOOL);
   assert.equal(spec.tool.name, "submit_geo_text");
   assert.deepEqual(spec.tool.input_schema, TEXT_TOOL_SCHEMA);
-  assert.equal(spec.maxTokens, 12_000);
+  assert.equal(spec.maxTokens, 16_000);
   console.log("system prompt from Globale Prompts: ok");
 }
 

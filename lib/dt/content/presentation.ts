@@ -36,6 +36,39 @@ export function contentActionLabel(kind: string): string | null {
   return CONTENT_ACTION_LABELS[kind as ContentActionKind] ?? null;
 }
 
+/** `stop_reason` of a step's last call in plain German, for the step log in the page window. */
+export function contentStopReasonLabel(stopReason: string | null | undefined): string {
+  switch (stopReason) {
+    case "tool_use":
+    case "end_turn":
+    case "stop":
+      return "vollständig";
+    case "max_tokens":
+    case "length":
+      return "abgeschnitten (Token-Limit)";
+    case "timeout":
+      return "abgebrochen (Zeitlimit)";
+    case "refusal":
+      return "abgelehnt";
+    case "pause_turn":
+      return "pausiert";
+    default:
+      return stopReason ? stopReason : "";
+  }
+}
+
+/**
+ * The step's log line under its name: output tokens and why the model stopped
+ * („6.412 Ausgabe-Tokens · vollständig (tool_use)“). Empty when the step has not run.
+ */
+export function contentStepLogLine(step: { output_tokens: number; stop_reason: string | null }): string {
+  const parts: string[] = [];
+  if (step.output_tokens > 0) parts.push(`${step.output_tokens.toLocaleString("de-DE")} Ausgabe-Tokens`);
+  const label = contentStopReasonLabel(step.stop_reason);
+  if (label) parts.push(label === step.stop_reason ? label : `${label} (${step.stop_reason})`);
+  return parts.join(" · ");
+}
+
 /** Status of a step row in „Details“; a skipped SEO that took over the live text or the Word file's text says so. */
 export function contentStepStatusLabel(status: string, options: { liveText?: boolean; uploadText?: boolean } = {}): string {
   switch (status) {

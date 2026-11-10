@@ -38,6 +38,7 @@ import {
   approveNeedsConfirm,
   contentActionLabel,
   contentSkipWarnings,
+  contentStepLogLine,
   contentStepStatusLabel,
   extractContentBlocks,
   formatEur,
@@ -550,6 +551,79 @@ export function DtContentPageDrawer(props: {
                       </div>
                     )}
 
+                    {review.page_facts ? (
+                      <details className="group rounded-dt border border-sbkm-navy/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white">
+                          <span>
+                            Faktenauszug
+                            <span className="ml-2 font-normal text-sbkm-ink-600 dark:text-white/60">{review.page_facts.summary}</span>
+                          </span>
+                          <ChevronDown className="size-4 shrink-0 transition-transform duration-150 group-open:rotate-180" aria-hidden />
+                        </summary>
+                        <div className="grid gap-3 border-t border-sbkm-navy/8 px-4 py-3 text-sm dark:border-white/8">
+                          <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
+                            Was die Kundengespräche zum Thema dieser Seite sagen. Jeder Schritt bekommt diese Fakten zusätzlich zu den
+                            Anbieterfakten. „Zurücksetzen“ erstellt den Auszug neu.
+                          </p>
+                          {review.page_facts.error ? (
+                            <p className="text-xs text-red-700 dark:text-red-300">
+                              Der Auszug konnte nicht erstellt werden, die Seite lief nur mit den Anbieterfakten: {review.page_facts.error}
+                            </p>
+                          ) : null}
+                          {review.page_facts.skipped ? (
+                            <p className="text-xs text-orange-800 dark:text-orange-200">
+                              Kein Auszug erstellt, die Seite lief nur mit den Anbieterfakten: {review.page_facts.skipped}
+                            </p>
+                          ) : null}
+                          {review.page_facts.shortened ? (
+                            <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
+                              Die Gespräche waren zu lang für einen Aufruf: Der Wortlaut wurde gekürzt, die Zusammenfassungen sind vollständig.
+                            </p>
+                          ) : null}
+                          {review.page_facts.facts.length > 0 ? (
+                            <ol className="grid list-decimal gap-2 pl-5 text-sbkm-navy dark:text-white">
+                              {review.page_facts.facts.map((f, i) => (
+                                <li key={i}>
+                                  {f.topic ? <span className="font-semibold">{f.topic}: </span> : null}
+                                  {f.fact}
+                                  {f.source ? <span className="text-xs text-sbkm-ink-600 dark:text-white/60"> ({f.source})</span> : null}
+                                  {f.quote ? (
+                                    <span className="mt-0.5 block text-xs italic text-sbkm-ink-600 dark:text-white/60">„{f.quote}“</span>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ol>
+                          ) : !review.page_facts.error && !review.page_facts.skipped && review.page_facts.conversations > 0 ? (
+                            <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
+                              In den Gesprächen steht nichts zum Thema dieser Seite.
+                            </p>
+                          ) : null}
+                          {review.page_facts.blocked.length > 0 ? (
+                            <div className="grid gap-1">
+                              <p className="text-xs font-semibold text-sbkm-navy dark:text-white">
+                                Gesperrt (nicht verwenden, auch nicht sinngemäß)
+                              </p>
+                              <ul className="grid list-disc gap-1 pl-5 text-xs text-sbkm-ink-600 dark:text-white/60">
+                                {review.page_facts.blocked.map((b, i) => (
+                                  <li key={i}>{b}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {review.page_facts.gaps.length > 0 ? (
+                            <div className="grid gap-1">
+                              <p className="text-xs font-semibold text-sbkm-navy dark:text-white">Fehlt in den Gesprächen</p>
+                              <ul className="grid list-disc gap-1 pl-5 text-xs text-sbkm-ink-600 dark:text-white/60">
+                                {review.page_facts.gaps.map((g, i) => (
+                                  <li key={i}>{g}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
+
                     <details className="group rounded-dt border border-sbkm-navy/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white">
                         Details: {review.steps.length} Schritte
@@ -557,12 +631,27 @@ export function DtContentPageDrawer(props: {
                       </summary>
                       <ol className="divide-y divide-sbkm-navy/8 border-t border-sbkm-navy/8 dark:divide-white/8 dark:border-white/8">
                         {review.steps.map((s) => (
-                          <li key={s.step} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
-                            <span className="flex min-w-0 items-center gap-3">
-                              <span className="w-5 shrink-0 text-right text-xs tabular-nums text-sbkm-ink-500 dark:text-white/40">
+                          <li key={s.step} className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm">
+                            <span className="flex min-w-0 items-start gap-3">
+                              <span className="w-5 shrink-0 text-right text-xs leading-5 tabular-nums text-sbkm-ink-500 dark:text-white/40">
                                 {s.step}
                               </span>
-                              <span className="truncate text-sbkm-navy dark:text-white">{s.name}</span>
+                              <span className="grid min-w-0 gap-0.5">
+                                <span className="truncate text-sbkm-navy dark:text-white">{s.name}</span>
+                                {contentStepLogLine(s) ? (
+                                  <span className="text-xs tabular-nums text-sbkm-ink-600 dark:text-white/60">{contentStepLogLine(s)}</span>
+                                ) : null}
+                                {s.error ? (
+                                  <span
+                                    className={cn(
+                                      "text-xs",
+                                      s.status === "error" ? "text-red-700 dark:text-red-300" : "text-sbkm-ink-600 dark:text-white/60",
+                                    )}
+                                  >
+                                    {s.error}
+                                  </span>
+                                ) : null}
+                              </span>
                             </span>
                             <span className="flex shrink-0 items-center gap-3 text-xs">
                               <span

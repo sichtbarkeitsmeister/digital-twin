@@ -10,6 +10,8 @@
  * Tonalität, verbotene Wörter), the avatar and the editor's notes.
  */
 
+import { blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { pageFactsBlock, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type Anthropic from "@anthropic-ai/sdk";
 
 import type { ContactPromptData } from "@/lib/dt/contact-data";
@@ -135,6 +137,12 @@ export type ContentPipelineContext = {
    * every later step, shown in the Anbieterfakten block as „Antworten des Kunden“.
    */
   customerAnswers?: Array<{ question: string; answer: string }>;
+  /**
+   * The page's „Faktenauszug“ from the customer's conversations (`page-facts-model.ts`); part of
+   * the Anbieterfakten block of every step. Null on pages started before it existed and in the
+   * standalone tools.
+   */
+  pageFacts?: ContentPageFacts | null;
   /** What is known for the question rules (Kontaktdaten, pool, notes, Anbieterfakten); the pipeline only. */
   knowledge?: ContentKnowledge;
   /**
@@ -241,14 +249,27 @@ export const CONTENT_HERO_BLOCK_ID = "hero";
 /** Sum of the five self-scores (1–10 each) under which the Vermenschlichung tries once more. */
 export const CONTENT_SELF_SCORE_MIN = 35;
 
-const MAX_SECTION_CHARS = 6_000;
+/**
+ * How much of one Anbieter section the prompts read: all of it. The workshop evaluation stores
+ * up to 24,000 characters per point (`POINT_TEXT_MAX` in workshop-model.ts); the former 6,000
+ * dropped the rest of a long point (several workshops, many Leistungen) without a word.
+ */
+const MAX_SECTION_CHARS = 24_000;
 /** The avatar's description (`avatarTextForContent`); fits nine in ten avatar texts whole. */
+/** A confirmed answer of the customer; long ones (a price list, a procedure) used to be cut at 1,000. */
+const MAX_CUSTOMER_ANSWER_CHARS = 4_000;
 const MAX_AVATAR_CHARS = 20_000;
 const MAX_OUTLINE_CHARS = 5_000;
-const MAX_EXISTING_TEXT_CHARS = 6_000;
+/** The live page's text; 6,000 characters (about 900 words) cut a normal service page in half. */
+const MAX_EXISTING_TEXT_CHARS = 20_000;
 /** An upload in the standalone SEO tool is the whole briefing, so it may be longer than a crawl excerpt. */
 export const MAX_STANDALONE_MATERIAL_CHARS = 30_000;
-const MAX_OUTPUT_CHARS = 12_000;
+/**
+ * How much of an earlier step's result (Analyse, Faktencheck, Lektorat) a prompt quotes. It used
+ * to be cut at 12,000 characters in the middle of the JSON, and the Analyse's `usable_facts`
+ * stand at its end. Now whole list entries go first (`shrinkStepOutput`).
+ */
+export const MAX_OUTPUT_CHARS = 40_000;
 
 const SEVERITY_LABELS: Record<string, string> = {
   high: "Wichtig",
@@ -432,17 +453,24 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 // Exported for the standalone GEO and Hormozi tools (lib/dt/text-tools/geo.ts, hormozi.ts),
 // which build the same blocks around an uploaded text instead of a page of the pipeline.
 
-export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers">>): string {
+export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers" | "pageFacts">>): string {
   const filled = context.sections.filter((s) => s.current.trim());
   const answers = (context.customerAnswers ?? []).filter((a) => a.question.trim() && a.answer.trim());
   const answersPart = answers.length
-    ? [`### Antworten des Kunden (bestätigt)\n${answers.map((a) => `- ${clip(a.question, 400)} → ${clip(a.answer, 1_000)}`).join("\n")}`]
+    ? [`### Antworten des Kunden (bestätigt)\n${answers.map((a) => `- ${clip(a.question, 400)} → ${clip(a.answer, MAX_CUSTOMER_ANSWER_CHARS)}`).join("\n")}`]
     : [];
-  if (filled.length === 0 && answersPart.length === 0) return "## Anbieterfakten\n(keine)";
+  const excerpt = pageFactsBlock(context.pageFacts);
+  const excerptPart = excerpt ? [excerpt] : [];
+  // Statements the evaluation marks as blocked, pulled out so no step can overlook the note.
+  const blocked = blockedBlock(extractBlockedStatements(filled));
+  const blockedPart = blocked ? [blocked] : [];
+  if (filled.length === 0 && answersPart.length === 0 && excerptPart.length === 0) return "## Anbieterfakten\n(keine)";
   return [
     "## Anbieterfakten aus Fragebogen und Kundengesprächen (einzige Quelle für Tatsachen)",
     ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`),
     ...answersPart,
+    ...excerptPart,
+    ...blockedPart,
   ].join("\n\n");
 }
 
@@ -633,7 +661,8 @@ export function clientWishesRules(context: { wishes?: ContentClientWishes | null
 
 /**
  * Fixed rule of every step that writes text or asks (SEO, Faktencheck, GEO, Hormozi,
- * Vermenschlichung, Lektorat): ask or leave a placeholder only for what the page cannot be
+ * Vermenschlichung, Lektorat), and of the Analyse and the Endabnahme, whose base rules point to
+ * it (not of the Aktualitätsprüfung): ask or leave a placeholder only for what the page cannot be
  * published without and what is central to this page; otherwise leave the statement out. The
  * code enforces the rest (topic map, pool, limit of three; `questions.ts`).
  */
@@ -697,10 +726,58 @@ export function endabnahmeClientRules(context: Pick<ContentPipelineContext, "con
   return rules.join("\n");
 }
 
+/** Lists that go first when an earlier step's result is too long, least needed first. */
+const OUTPUT_DROP_ORDER = ["dropped_questions", "assumptions", "deferred_questions", "missing_facts"] as const;
+/** Lists that are never shortened: the belegte Fakten of the Analyse. */
+const OUTPUT_KEEP = new Set(["usable_facts"]);
+
+/**
+ * An earlier step's result within `max` characters of JSON, never cut inside an entry: whole
+ * entries are left out from the end of a list, first the dropped questions and the assumptions,
+ * then the deferred questions and the missing facts, then the other lists, the longest first.
+ * `usable_facts` stay whole. `dropped` says how many entries of which list went.
+ */
+export function shrinkStepOutput(output: unknown, max: number = MAX_OUTPUT_CHARS): { json: string; dropped: Record<string, number> } {
+  const dropped: Record<string, number> = {};
+  const text = (value: unknown) => JSON.stringify(value, null, 1);
+  if (!output || typeof output !== "object" || text(output).length <= max) return { json: text(output), dropped };
+
+  if (Array.isArray(output)) {
+    const list = [...output];
+    while (list.length > 0 && text(list).length > max) {
+      list.pop();
+      dropped.Einträge = (dropped.Einträge ?? 0) + 1;
+    }
+    return { json: text(list), dropped };
+  }
+
+  const copy: Record<string, unknown> = { ...(output as Record<string, unknown>) };
+  const lists = () => Object.keys(copy).filter((key) => Array.isArray(copy[key]) && (copy[key] as unknown[]).length > 0 && !OUTPUT_KEEP.has(key));
+  const dropLast = (key: string) => {
+    copy[key] = (copy[key] as unknown[]).slice(0, -1);
+    dropped[key] = (dropped[key] ?? 0) + 1;
+  };
+  for (const key of OUTPUT_DROP_ORDER) {
+    while (text(copy).length > max && Array.isArray(copy[key]) && (copy[key] as unknown[]).length > 0) dropLast(key);
+  }
+  while (text(copy).length > max) {
+    const longest = lists().sort((a, b) => text(copy[b]).length - text(copy[a]).length)[0];
+    if (!longest) break;
+    dropLast(longest);
+  }
+  return { json: text(copy), dropped };
+}
+
+function droppedNote(dropped: Record<string, number>): string {
+  const parts = Object.entries(dropped).map(([key, n]) => `${key}: ${n}`);
+  return parts.length > 0 ? `\n… (gekürzt: ganze Einträge weggelassen – ${parts.join(", ")})` : "";
+}
+
 function outputBlock(context: ContentPipelineContext, step: number, title: string, max = MAX_OUTPUT_CHARS): string {
   const output = context.outputs[step];
   if (!output) return "";
-  return `## ${title}\n${JSON.stringify(output, null, 1).slice(0, max)}`;
+  const { json, dropped } = shrinkStepOutput(output, max);
+  return `## ${title}\n${json}${droppedNote(dropped)}`;
 }
 
 export function currentTextBlock(context: ContentCurrentText): string {
@@ -723,19 +800,21 @@ export function joinPromptParts(parts: readonly string[]): string {
 const join = joinPromptParts;
 
 export const BASE_RULES = `Du arbeitest für eine Agentur, die Webseitentexte für kleine Unternehmen schreibt. Sprache: Deutsch.
-Tatsachen (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte) kommen ausschließlich aus den Anbieterfakten, den Kontaktdaten (bestätigt) und den Anmerkungen der Redaktion. Nichts erfinden, nichts aus Branchenwissen ergänzen. Fehlt eine Angabe, bleibt sie weg oder wird als offene Frage gemeldet.
+Tatsachen über den Anbieter (Leistungen, Zahlen, Namen, Preise, Abläufe, Orte, Zusagen) kommen ausschließlich aus den Anbieterfakten, dem Faktenauszug, den Antworten des Kunden, den Kontaktdaten und den Anmerkungen der Redaktion. Bei Widerspruch gehen die Anbieterfakten dem Faktenauszug vor. Was im Block „Gesperrt“ steht, wird nicht verwendet, auch nicht sinngemäß. Nichts erfinden.
+Allgemeines Fachwissen zur Leistung ist erlaubt, z. B. welche Merkmale den Wert eines Objekts üblicherweise bestimmen, wenn es keine Aussage über den Anbieter ist und keine Zahl, Frist, Rechtsaussage oder zeitkritische Angabe enthält.
+Fehlt eine Angabe über den Anbieter, gilt die feste Regel zu Fragen und Platzhaltern.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`;
 
 export const BLOCKS_SCHEMA = {
   type: "array",
   description:
-    "Der komplette Text als geordnete Abschnitte. Der erste Abschnitt trägt die H1 (level 1), danach H2 (level 2), bei Bedarf H3 (level 3). Bestehende ids beibehalten.",
+    "Der komplette Text als geordnete Abschnitte. Der erste Abschnitt trägt die H1 (level 1), danach H2 (level 2), bei Bedarf H3 (level 3) und H4 (level 4). Bestehende ids beibehalten.",
   items: {
     type: "object",
     properties: {
       id: { type: "string", description: "Kurze, stabile Kennung in Kleinbuchstaben, z. B. hero, zusammenfassung, einleitung, ablauf. Bestehende ids beibehalten." },
       heading: { type: "string", description: "Überschrift ohne HTML. Leer, wenn der Abschnitt keine hat." },
-      level: { type: "integer", enum: [1, 2, 3] },
+      level: { type: "integer", enum: [1, 2, 3, 4] },
       html: {
         type: "string",
         description: "Fließtext als HTML mit <p>, <ul>/<ol>/<li>, <strong>, <em>. Keine Überschrift hier, kein <section>, kein <div>, keine <a>-Tags (interne Links als [LINK: Seitenname]).",
@@ -830,6 +909,8 @@ function analyse(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 6_000,
     system: `${BASE_RULES}
+
+${QUESTION_RULES}
 
 Schritt ${CONTENT_STEP_ANALYSE} Analyse: Du legst fest, wonach Menschen suchen, wenn sie diese Seite brauchen, welche Fragen sie dabei haben, was die Seite leisten muss und welche Fakten dafür belegt sind. Du schreibst die Seite NICHT.
 
@@ -1025,10 +1106,17 @@ export function normalizeAnalyse(json: unknown, context: ContentPipelineContext)
   };
 }
 
+/**
+ * Output budget of every Claude step that returns the whole page text (SEO, GEO, Hormozi,
+ * Vermenschlichung, Lektorat). An Unterseite of 2,600 words is about 7,000–10,000 tokens with
+ * its JSON frame; 16,000 leaves room. A cut-off answer fails the step (`callContentTool`).
+ */
+export const TEXT_STEP_MAX_TOKENS = 16_000;
+
 function seo(context: ContentPipelineContext): ContentStepSpec {
   const general = context.texterPrompt?.trim() || DEFAULT_TEXTER_PROMPT;
   return {
-    maxTokens: 12_000,
+    maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "seo"), context.settings, [
       `Allgemeine Regeln (jeder Seitentyp):\n${general}`,
       `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
@@ -1125,7 +1213,7 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
 }
 
 /** Output size of the GEO rewrite; the standalone GEO tool uses the same budget. */
-export const GEO_MAX_TOKENS = 12_000;
+export const GEO_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 
 const DEFAULT_GEO_INSTRUCTION = resolveContentStepPrompt("geo", null);
 
@@ -1203,7 +1291,7 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
 }
 
 /** Output size of the Hormozi rewrite; the standalone Hormozi tool uses the same budget. */
-export const HORMOZI_MAX_TOKENS = 12_000;
+export const HORMOZI_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
@@ -1252,7 +1340,7 @@ function normalizeSelfScore(raw: unknown): SelfScore | null {
 
 function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
-    maxTokens: 12_000,
+    maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
@@ -1304,7 +1392,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
 
 function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
-    maxTokens: 12_000,
+    maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
@@ -1335,11 +1423,17 @@ function lektorat(context: ContentPipelineContext): ContentStepSpec {
   };
 }
 
+/** The open points as JSON; when they are too many, whole entries go from the end, with a note. */
+function openFindingsJson(findings: readonly unknown[]): string {
+  const { json, dropped } = shrinkStepOutput([...findings]);
+  return `${json}${droppedNote(dropped)}`;
+}
+
 /** Open points still on the page when the Endabnahme runs (the Aktualitätsprüfung's ones survive the later rewrites). */
 function openFindingsBlock(context: Pick<ContentPipelineContext, "openFindings">): string {
   const findings = context.openFindings ?? [];
   if (findings.length === 0) return "";
-  return `## Offene Punkte aus früheren Schritten (z. B. Aktualitätsprüfung) – in unresolved übernehmen, solange sie zutreffen\n${JSON.stringify(findings, null, 1).slice(0, MAX_OUTPUT_CHARS)}`;
+  return `## Offene Punkte aus früheren Schritten (z. B. Aktualitätsprüfung) – in unresolved übernehmen, solange sie zutreffen\n${openFindingsJson(findings)}`;
 }
 
 /**
@@ -1354,6 +1448,8 @@ function endabnahme(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: ENDABNAHME_MAX_TOKENS,
     system: `${BASE_RULES}
+
+${QUESTION_RULES}
 
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
 unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein nicht gefüllter Hero („${CONTENT_HERO_PLACEHOLDER}“ oder „${CONTENT_HERO_PLACEHOLDER_LEGACY}“), eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite, ein offener Punkt der Aktualitätsprüfung. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und der Marker [DATUM] (das Datum setzt das Web-Team beim Veröffentlichen), z. B. „Zuletzt aktualisiert: [DATUM]“ oder „Stand: [DATUM]“.
