@@ -12,7 +12,7 @@ import * as cheerio from "cheerio";
 import type { AnyNode, Element } from "domhandler";
 
 import { DT_MAX_ATTACHMENT_BYTES } from "@/lib/dt/attachments-shared";
-import { CONTENT_MAX_BLOCKS, escapeHtml, normalizeBlocks, parseBlocksFromHtml, sanitizeBlockHtml, type ContentTextBlock } from "@/lib/dt/content/render";
+import { CONTENT_MAX_BLOCK_HTML, CONTENT_MAX_BLOCKS, blockLabel, escapeHtml, normalizeBlocks, oversizedBlock, parseBlocksFromHtml, sanitizeBlockHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 
 /** Same limit as a chat attachment; the text itself is capped separately below. */
 export const TEXT_TOOL_MAX_FILE_BYTES = DT_MAX_ATTACHMENT_BYTES;
@@ -497,6 +497,15 @@ export function blocksFromDocument(
     return {
       ok: false,
       message: `Der Text hat ${total} Abschnitte, erlaubt sind höchstens ${TEXT_TOOL_MAX_BLOCKS}. Bitte den Text aufteilen oder Zwischenüberschriften zusammenfassen.`,
+    };
+  }
+  // The reader splits long sections itself; should one still be over the limit, the upload says
+  // so instead of handing on a text the steps would refuse.
+  const tooLong = oversizedBlock(blocks);
+  if (tooLong) {
+    return {
+      ok: false,
+      message: `Der Abschnitt ${blockLabel(tooLong)} ist zu lang (${tooLong.html.length.toLocaleString("de-DE")} Zeichen HTML, erlaubt sind höchstens ${CONTENT_MAX_BLOCK_HTML.toLocaleString("de-DE")}). Bitte Zwischenüberschriften einfügen oder den Text aufteilen.`,
     };
   }
   return { ok: true, value: { blocks, title, metaDescription, chars } };

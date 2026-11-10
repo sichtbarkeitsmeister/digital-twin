@@ -9,6 +9,8 @@
  * - Customer answers up to 4,000 characters, the live page's text up to 20,000.
  * - Up to 120 Abschnitte (it was 40, cut without a word); more than that fails the step with
  *   „Zu viele Abschnitte (Grenze erreicht)“ and saves nothing.
+ * - One Abschnitt up to 30,000 characters of HTML (it was cut at 12,000 without a word); more
+ *   fails the step with „Abschnitt zu lang (Grenze erreicht)“ and saves nothing.
  * - The fixed base rules as the agency set them on 10.11.
  * No network, no model.
  * Run: npm run test:content-format-limits
@@ -37,19 +39,24 @@ import type { StepOutcome } from "../lib/dt/content/pipeline/run-step";
 import { CONTENT_STEPS } from "../lib/dt/content/pipeline/steps";
 import { extractContentBlocks } from "../lib/dt/content/presentation";
 import {
+  CONTENT_BLOCK_TOO_LONG_MESSAGE,
+  CONTENT_MAX_BLOCK_HTML,
   CONTENT_MAX_BLOCKS,
   CONTENT_TOO_MANY_BLOCKS_MESSAGE,
   ContentBlockLimitError,
+  ContentBlockSizeError,
+  ContentTextLimitError,
   blocksToPromptText,
   htmlToMarkdown,
   normalizeBlocks,
   htmlToPlainText,
   parseBlocksFromHtml,
   renderBlocksHtml,
+  sanitizeBlockHtml,
   type ContentTextBlock,
 } from "../lib/dt/content/render";
 import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
-import { TEXT_TOOL_MAX_BLOCKS } from "../lib/dt/text-tools/ingest";
+import { TEXT_TOOL_MAX_BLOCKS, blocksFromDocument } from "../lib/dt/text-tools/ingest";
 import { runContentPageSteps } from "../lib/jobs/handlers/content-page";
 
 import { FakeDb } from "./fake-supabase";
@@ -193,6 +200,72 @@ async function blockLimitTests() {
   assert.equal(normalizeBlocks(answer(130).blocks, { overLimit: "cut" }).length, 120);
   assert.equal(TEXT_TOOL_MAX_BLOCKS, 120, "uploads: the same limit");
 
+  // --- one Abschnitt: up to 30,000 characters of HTML whole, more is an error, never a cut ---------
+  assert.equal(CONTENT_MAX_BLOCK_HTML, 30_000);
+  const para = (chars: number) => `<p>${"Wort ".repeat(Math.ceil(chars / 5)).slice(0, chars - 11)}ENDE</p>`;
+  const withBody = (html: string) => ({ title: "T", meta_description: "M", blocks: [{ id: "intro", heading: "Die H1", level: 1, html: "<p>Einstieg.</p>" }, { id: "lang", heading: "Der lange Abschnitt", level: 2, html }] });
+
+  // 13,000 characters were cut at 12,000 without a word; now the Abschnitt is whole to its last word.
+  const kept = normalizeTextOutput(withBody(para(13_000)), current).blocks[1]!;
+  assert.deepEqual([kept.html.length, kept.html.endsWith("ENDE</p>")], [13_000, true], "13,000 characters stay whole (cut at 12,000 before)");
+  const atLimit = normalizeTextOutput(withBody(para(30_000)), current).blocks[1]!;
+  assert.deepEqual([atLimit.html.length, atLimit.html.endsWith("ENDE</p>")], [30_000, true], "exactly 30,000 characters are kept");
+  assert.equal(sanitizeBlockHtml(para(40_000)).length, 40_000, "sanitising never shortens");
+
+  // One character more: an error that names the Abschnitt, not 30,000 characters and a missing end.
+  const sizeMessage = "Abschnitt zu lang (Grenze erreicht): Der Abschnitt „Der lange Abschnitt“ hat 30.001 Zeichen HTML, höchstens 30.000 erlaubt. Nichts wurde gespeichert.";
+  assert.throws(
+    () => normalizeTextOutput(withBody(para(30_001)), current),
+    (error: unknown) => error instanceof ContentBlockSizeError && error instanceof ContentTextLimitError && error.blockId === "lang" && error.chars === 30_001 && error.message === sizeMessage,
+  );
+  assert.equal(CONTENT_BLOCK_TOO_LONG_MESSAGE, "Abschnitt zu lang (Grenze erreicht)");
+  assert.ok(new ContentBlockLimitError(121) instanceof ContentTextLimitError, "both limits are the same kind of failure");
+  // An Abschnitt without a heading is named by its id.
+  assert.throws(
+    () => normalizeBlocks([{ id: "intro", heading: "H1", level: 1, html: "<p>x</p>" }, { id: "ohne", heading: "", level: 2, html: para(31_000) }]),
+    /Der Abschnitt mit der id „ohne“ hat 31\.000 Zeichen HTML/,
+  );
+  for (const key of ["seo", "geo", "hormozi", "vermenschlichung", "lektorat"] as const) {
+    const def = CONTENT_STEPS.find((s) => s.key === key)!;
+    assert.throws(() => contentStepSpec(def.step, context()).normalize(withBody(para(30_001)), context()), ContentBlockSizeError, def.name);
+  }
+
+  // An upload never had this problem: its reader splits a long section into several Abschnitte
+  // instead of cutting it. All 900 paragraphs arrive, none of the parts is over the limit.
+  const longUpload = blocksFromDocument({ kind: "html", content: `<body><h1>Titel</h1><p>Einstieg.</p><h2>Lang</h2>${"<p>Ein Absatz mit etwas Text darin.</p>".repeat(900)}</body>` });
+  assert.ok(longUpload.ok);
+  const uploaded = longUpload.value.blocks;
+  assert.equal(uploaded.map((b) => b.html).join("\n").split("<p>Ein Absatz mit etwas Text darin.</p>").length - 1, 900, "no paragraph of the upload is lost");
+  assert.ok(uploaded.length > 2 && uploaded.every((b) => b.html.length <= CONTENT_MAX_BLOCK_HTML));
+
+  // Watermark Entfernung: an answer over the limit is not cut, the section keeps its wording.
+  const before: ContentTextBlock = { id: "lang", heading: "Der lange Abschnitt", level: 2, html: "<p>Der Text, wie das Lektorat ihn gelassen hat.</p>" };
+  const tooMuch = `<section data-block-id="lang"><h2>Der lange Abschnitt</h2>\n${para(30_500)}</section>`;
+  assert.equal(parseRephrasedChunk(tooMuch, [before])[0]!.html, before.html);
+  assert.equal(parseRephrasedChunk(`<h2>Der lange Abschnitt</h2>\n${para(30_500)}`, [before])[0]!.html, before.html);
+
+  // The same in the job loop as for too many Abschnitte: a step failure, not tried again.
+  const sized = new FakeDb({
+    dt_content_pages: [{ id: "p2", organisation_id: "o", slug: "uhren", name: "Uhren", source: "structure", source_url: null, state: "laeuft", step: 1, job_id: "j2", skip_steps: [], question_stop: { handled: [] }, notes: [], findings: [], cost_eur: 0, html: "", freshness: EMPTY_CONTENT_FRESHNESS }],
+    dt_content_steps: [{ page_id: "p2", organisation_id: "o", step: 1, name: "Analyse", status: "done", output: { page_facts: { facts: [], conversations: 0 } } }],
+  });
+  const sizedStep = async (): Promise<StepOutcome> => {
+    try {
+      contentStepSpec(2, context()).normalize(withBody(para(30_001)), context());
+    } catch (error) {
+      // What `callStep` makes of it (run-step.ts).
+      if (error instanceof ContentTextLimitError) throw new ContentLlmError(error.message, false, { stopReason: "tool_use", outputTokens: 9_500 });
+      throw error;
+    }
+    throw new Error("unreachable");
+  };
+  const sizedResult = await runContentPageSteps({ service: sized.service, job: { id: "j2", attempts: 0, max_attempts: 3 }, pageId: "p2", deadline: Date.now() + 240_000, runners: { runStep: sizedStep } });
+  assert.deepEqual(sizedResult, { ok: false, error: sizeMessage, retryable: false });
+  const sizedRow = sized.rows("dt_content_steps").find((r) => r.step === 2) as { status: string; error: string };
+  const sizedPage = sized.rows("dt_content_pages")[0] as { state: string; html: string };
+  assert.deepEqual([sizedRow.status, sizedRow.error, sizedPage.state, sizedPage.html], ["error", sizeMessage, "in_arbeit", ""], "the page stops with the message and no text");
+  console.log("block size: ok");
+
   // The step: the job loop gets a failure that is not tried again, the page stops with the message
   // at the step, and nothing of the answer is on the page.
   const ORG = "11111111-1111-4111-8111-111111111111";
@@ -209,7 +282,7 @@ async function blockLimitTests() {
       contentStepSpec(2, context()).normalize(answer(134), context());
     } catch (error) {
       // What `callStep` makes of it (run-step.ts).
-      if (error instanceof ContentBlockLimitError) throw new ContentLlmError(error.message, false, { stopReason: "tool_use", outputTokens: 11_141 });
+      if (error instanceof ContentTextLimitError) throw new ContentLlmError(error.message, false, { stopReason: "tool_use", outputTokens: 11_141 });
       throw error;
     }
     throw new Error("unreachable");

@@ -73,7 +73,7 @@ import {
   type ContentStepDefinition,
 } from "@/lib/dt/content/pipeline/steps";
 import { estimateCostEur, estimateWebSearchCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { ContentBlockLimitError, htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/content/render";
+import { ContentTextLimitError, htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/content/render";
 import {
   contentDbErrorMessage,
   contentStructureOutline,
@@ -324,8 +324,9 @@ async function callStep(
   try {
     output = spec.normalize(first.json, context);
   } catch (error) {
-    // More Abschnitte than a text may have: the step fails, nothing of the answer is saved.
-    if (error instanceof ContentBlockLimitError) {
+    // More Abschnitte than a text may have, or one that is too long: the step fails, nothing of
+    // the answer is saved.
+    if (error instanceof ContentTextLimitError) {
       throw new ContentLlmError(error.message, false, { stopReason: first.stopReason ?? null, outputTokens: first.usage.outputTokens });
     }
     throw error;
