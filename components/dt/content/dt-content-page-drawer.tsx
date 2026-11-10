@@ -570,6 +570,11 @@ export function DtContentPageDrawer(props: {
                               Der Auszug konnte nicht erstellt werden, die Seite lief nur mit den Anbieterfakten: {review.page_facts.error}
                             </p>
                           ) : null}
+                          {review.page_facts.skipped ? (
+                            <p className="text-xs text-orange-800 dark:text-orange-200">
+                              Kein Auszug erstellt, die Seite lief nur mit den Anbieterfakten: {review.page_facts.skipped}
+                            </p>
+                          ) : null}
                           {review.page_facts.shortened ? (
                             <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
                               Die Gespräche waren zu lang für einen Aufruf: Der Wortlaut wurde gekürzt, die Zusammenfassungen sind vollständig.
@@ -588,10 +593,22 @@ export function DtContentPageDrawer(props: {
                                 </li>
                               ))}
                             </ol>
-                          ) : !review.page_facts.error && review.page_facts.conversations > 0 ? (
+                          ) : !review.page_facts.error && !review.page_facts.skipped && review.page_facts.conversations > 0 ? (
                             <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
                               In den Gesprächen steht nichts zum Thema dieser Seite.
                             </p>
+                          ) : null}
+                          {review.page_facts.blocked.length > 0 ? (
+                            <div className="grid gap-1">
+                              <p className="text-xs font-semibold text-sbkm-navy dark:text-white">
+                                Gesperrt (nicht verwenden, auch nicht sinngemäß)
+                              </p>
+                              <ul className="grid list-disc gap-1 pl-5 text-xs text-sbkm-ink-600 dark:text-white/60">
+                                {review.page_facts.blocked.map((b, i) => (
+                                  <li key={i}>{b}</li>
+                                ))}
+                              </ul>
+                            </div>
                           ) : null}
                           {review.page_facts.gaps.length > 0 ? (
                             <div className="grid gap-1">

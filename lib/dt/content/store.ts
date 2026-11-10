@@ -1485,5 +1485,7 @@ export function reviewPageFacts(steps: readonly ContentStepRow[]): ContentReview
     conversations: facts.conversations,
     shortened: facts.shortened,
     error: facts.error,
+    skipped: facts.skipped,
+    blocked: facts.blocked,
   };
 }

@@ -412,7 +412,8 @@ function testChunkRequestValidation() {
   assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [] }).success, false);
   assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: bigBlocks(5, 5) }).success, false, "more than four blocks");
   assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [{ ...block!, html: "x".repeat(30_000) }] }).success, false, "too much HTML");
-  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [{ ...block!, level: 4 }] }).success, false);
+  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [{ ...block!, level: 4 }] }).success, true, "an H4 block is a block (level 4 since 10.11.)");
+  assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [{ ...block!, level: 5 }] }).success, false);
   assert.equal(watermarkChunkRequestSchema.safeParse({ blocks: [block], slowModels: ["grok-3"] }).success, true);
   console.log("chunk request validation: ok");
 }

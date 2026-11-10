@@ -3,7 +3,8 @@
  * about the topic of one page. The steps used to read only the Anbieter evaluation, thirteen
  * sections for the whole company; what a workshop said about one Leistung in detail rarely
  * reached the page about it. The excerpt is made once per page, before the Analyse
- * (`page-facts.ts`), stored in the Analyse's step row under `page_facts` (no migration) and
+ * (`page-facts.ts`), only with an approved and current Anbieter evaluation, which goes before
+ * the conversations and whose blocked statements (`blocked.ts`) are never pulled; stored in the Analyse's step row under `page_facts` (no migration) and
  * goes into every prompt that carries the Anbieterfakten. Pure; safe for client code and tests.
  */
 
@@ -33,6 +34,13 @@ export type ContentPageFacts = {
   shortened: boolean;
   /** Why there is no excerpt although there are conversations (the call failed); null otherwise. */
   error: string | null;
+  /**
+   * Why no excerpt was made on purpose: the Anbieter evaluation is not approved, or a
+   * conversation is newer than it. Nothing is pulled from conversations nobody has checked.
+   */
+  skipped: string | null;
+  /** The statements the evaluation blocks, as they were handed to the excerpt call and the steps. */
+  blocked: string[];
   at: string;
   model: string | null;
   input_tokens: number;
@@ -81,6 +89,8 @@ export function readPageFacts(stepOutput: unknown): ContentPageFacts | null {
     conversations: count(r.conversations),
     shortened: r.shortened === true,
     error: text(r.error, 500) || null,
+    skipped: text(r.skipped, 500) || null,
+    blocked: (Array.isArray(r.blocked) ? r.blocked : []).map((b) => text(b, 1_400)).filter(Boolean).slice(0, 100),
     at: text(r.at, 40),
     model: text(r.model, 120) || null,
     input_tokens: count(r.input_tokens),
@@ -120,6 +130,7 @@ export function pageFactsBlock(pageFacts: Pick<ContentPageFacts, "facts"> | null
 /** „18 Fakten aus 3 Gesprächen“ for the page window. */
 export function pageFactsSummary(pageFacts: ContentPageFacts): string {
   if (pageFacts.error) return "Faktenauszug fehlgeschlagen";
+  if (pageFacts.skipped) return "Kein Faktenauszug: Anbieter-Auswertung nicht freigegeben";
   if (pageFacts.conversations === 0) return "Kein Faktenauszug: keine Gespräche hochgeladen";
   const n = pageFacts.facts.length;
   const c = pageFacts.conversations;

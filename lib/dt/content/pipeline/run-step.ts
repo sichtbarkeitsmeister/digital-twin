@@ -43,7 +43,8 @@ import {
   type AktualitaetOutput,
 } from "@/lib/dt/content/pipeline/aktualitaet";
 import { ContentLlmError, callContentResearch, callContentTool } from "@/lib/dt/content/pipeline/llm";
-import { PAGE_FACTS_USAGE_MODE, emptyPageFacts, pageFactsFromCall, pageFactsPrompt } from "@/lib/dt/content/pipeline/page-facts";
+import { extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { PAGE_FACTS_USAGE_MODE, emptyPageFacts, evaluationSkipReason, pageFactsFromCall, pageFactsPrompt } from "@/lib/dt/content/pipeline/page-facts";
 import { readPageFacts, withoutPageFacts, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import {
   contentStepSpec,
@@ -92,8 +93,8 @@ import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { loadPageTextUpload } from "@/lib/dt/content/text-uploads";
 import { uploadBlocksToMarkdown } from "@/lib/dt/content/upload-match";
 import { loadCrawledPageInput } from "@/lib/dt/text-tools/crawl-source";
-import type { WorkshopSource } from "@/lib/dt/transcripts/workshop-model";
-import { loadWorkshopSources } from "@/lib/dt/transcripts/workshop-store";
+import type { WorkshopSectionStatus, WorkshopSource } from "@/lib/dt/transcripts/workshop-model";
+import { loadWorkshopState } from "@/lib/dt/transcripts/workshop-store";
 
 export type StepOutcome = {
   step: number;
@@ -114,7 +115,7 @@ export type StepOutcome = {
 };
 
 /** How much of the live page's text the prompts see (pages taken over from the crawl). */
-const EXISTING_TEXT_MAX_CHARS = 6_000;
+const EXISTING_TEXT_MAX_CHARS = 20_000;
 /**
  * How much of an uploaded Word text the prompts see. 6.000 characters (about 900 words) cut a
  * normal service page in half; unlike the crawl text, which is page chrome plus body and only a
@@ -426,7 +427,8 @@ export async function runContentStep(
  * The first part of the Analyse step: the page's Faktenauszug (`page-facts.ts`). One call reads
  * all conversations of the organisation and keeps what they say about this page's topic; the
  * result is saved in the step row and the step hands back `partial`, so the Analyse runs in the
- * next loop turn with its own time. Without conversations no call is made. A call the job can
+ * next loop turn with its own time. Without conversations no call is made, and none while the
+ * Anbieter evaluation is not approved or older than a conversation (the page window says why). A call the job can
  * try again (overload, time limit) fails the step like any other; one it cannot (a refused
  * request, a cut-off answer) does not stop the page: it runs with the Anbieter sections alone,
  * as before, and the page window says that the excerpt is missing and why.
@@ -444,19 +446,29 @@ export async function runPageFactsPart(input: {
 }): Promise<StepOutcome> {
   const { service, page, def, context } = input;
   let sources: WorkshopSource[] = [];
+  let evaluation: Array<{ label: string; current: string }> = [];
+  let status: WorkshopSectionStatus = "empty";
   let loadError: string | null = null;
   try {
-    sources = await loadWorkshopSources(service, page.organisation_id);
+    const state = await loadWorkshopState(service, page.organisation_id);
+    sources = state.sources;
+    evaluation = state.anbieter.items.map((item) => ({ label: item.label, current: item.current }));
+    status = state.anbieter.status;
   } catch (error) {
     loadError = `Die Gespräche konnten nicht gelesen werden: ${error instanceof Error ? error.message : String(error)}`;
   }
+  const blocked = extractBlockedStatements(evaluation);
+  const skipReason = sources.length > 0 ? evaluationSkipReason(status) : null;
 
   let facts: ContentPageFacts;
   let model = "";
   if (sources.length === 0) {
-    facts = emptyPageFacts({ conversations: 0, error: loadError });
+    facts = emptyPageFacts({ conversations: 0, error: loadError, blocked });
+  } else if (skipReason) {
+    // Not approved or older than a conversation: nothing is pulled from unchecked conversations.
+    facts = emptyPageFacts({ conversations: sources.length, skipped: skipReason, blocked });
   } else {
-    const prompt = pageFactsPrompt(context, sources);
+    const prompt = pageFactsPrompt(context, sources, evaluation);
     try {
       const call = await (input.callTool ?? callContentTool)({
         models: input.models,
@@ -478,12 +490,12 @@ export async function runPageFactsPart(input: {
         inputTokens: call.usage.inputTokens,
         outputTokens: call.usage.outputTokens,
       });
-      facts = pageFactsFromCall({ json: call.json, conversations: sources.length, shortened: prompt.shortened, model: call.model, usage: call.usage, costEur });
+      facts = pageFactsFromCall({ json: call.json, conversations: sources.length, shortened: prompt.shortened, model: call.model, usage: call.usage, costEur, blocked });
     } catch (error) {
       // Overload, rate limit, time limit: the job tries the step again, like every other call.
       if (error instanceof ContentLlmError && error.retryable) throw error;
       console.warn("[content] Faktenauszug failed:", error instanceof Error ? error.message : error);
-      facts = emptyPageFacts({ conversations: sources.length, error: error instanceof Error ? error.message : String(error) });
+      facts = emptyPageFacts({ conversations: sources.length, error: error instanceof Error ? error.message : String(error), blocked });
     }
   }
 

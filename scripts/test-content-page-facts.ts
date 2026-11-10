@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { ContentLlmError, type callContentTool } from "../lib/dt/content/pipeline/llm";
-import { PAGE_FACTS_TOOL, PAGE_FACTS_USAGE_MODE, pageFactsCorpus, pageFactsPrompt } from "../lib/dt/content/pipeline/page-facts";
+import { BLOCKED_MARKERS, blockedBlock, extractBlockedStatements } from "../lib/dt/content/pipeline/blocked";
+import { PAGE_FACTS_SYSTEM, PAGE_FACTS_TOOL, PAGE_FACTS_USAGE_MODE, pageFactsCorpus, pageFactsPrompt } from "../lib/dt/content/pipeline/page-facts";
 import {
   PAGE_FACTS_MAX,
   normalizePageFactLists,
@@ -26,6 +27,7 @@ import { CONTENT_STEPS, contentStepDefinition } from "../lib/dt/content/pipeline
 import { reviewPageFacts, type ContentPageRow, type ContentStepRow } from "../lib/dt/content/store";
 import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
 import type { WorkshopSource } from "../lib/dt/transcripts/workshop-model";
+import { loadWorkshopState } from "../lib/dt/transcripts/workshop-store";
 
 import { FakeDb } from "./fake-supabase";
 
@@ -60,13 +62,32 @@ const source = (n: number, patch: Partial<WorkshopSource> = {}): WorkshopSource 
   ...patch,
 });
 
+/** An evaluation with the notes as the agency writes them (invented content). */
+const EVALUATION = [
+  {
+    key: "leistungen",
+    label: "Leistungen & Schwerpunkte",
+    current: `Klaviertransporte bundesweit. Flügel bis 500 kg. Use Case (ausgedacht, Freigabe durch den Inhaber noch offen): Eine Pianistin zog nach Wien um. Der Flügel kam ohne Kratzer an.
+
+Tresortransporte: Wir tragen auch Tresore, z. B. für Banken. Kundennamen nicht nennen, solange keine Erlaubnis vorliegt.`,
+  },
+  { key: "ablauf", label: "Ablauf & Mitwirkung", current: "Besichtigung vor Ort: kostenlos, aber nur bei ernsthaftem Interesse. Nicht aktiv bewerben, damit niemand nur ein Gutachten will." },
+  {
+    key: "preis",
+    label: "Preis & Positionierung",
+    current: "Festpreis nach Besichtigung. Nicht für Content verwenden: Einkaufspreise der Transporter. Keine Rabatte.",
+  },
+  { key: "ziele", label: "Ziele & Weiterentwicklung", current: "Noch nicht verwenden (erst nach Abschluss): Zertifikat Klavierbauer; Standort Köln.\nOffener Punkt: Freigabe Use Case Pianistin durch den Inhaber." },
+  { key: "team", label: "Team & Partner", current: "" },
+];
+
 const facts = (patch: Partial<ContentPageFacts> = {}): ContentPageFacts => ({
   facts: [
     { fact: "Ein Flügeltransport kostet ab 480 Euro.", topic: "Preis", source: "Gespräch 2", quote: "ab 480 Euro, je nach Stockwerk" },
     { fact: "Das Treppenhaus wird vor dem Termin ausgemessen.", topic: "Ablauf", source: "Gespräch 1", quote: "" },
   ],
   gaps: ["Versicherungssumme"],
-  conversations: 2, shortened: false, error: null, at: "2026-11-10T10:00:00.000Z", model: "claude-sonnet-4-6", input_tokens: 90_000, output_tokens: 1_200, cost_eur: 0.27,
+  conversations: 2, shortened: false, error: null, skipped: null, blocked: [], at: "2026-11-10T10:00:00.000Z", model: "claude-sonnet-4-6", input_tokens: 90_000, output_tokens: 1_200, cost_eur: 0.27,
   ...patch,
 });
 
@@ -81,6 +102,24 @@ const facts = (patch: Partial<ContentPageFacts> = {}): ContentPageFacts => ({
   assert.doesNotMatch(prompt.user, /Leistungen & Schwerpunkte/, "the thirteen sections are not the source here");
   assert.equal(prompt.tool, PAGE_FACTS_TOOL);
   assert.equal(prompt.shortened, false);
+
+  // The approved evaluation goes first, and what it blocks is its own block.
+  const withEvaluation = pageFactsPrompt(context(), [source(1), source(2)], EVALUATION);
+  const user = withEvaluation.user;
+  assert.ok(user.indexOf("## Anbieter-Auswertung (vorrangig)") < user.indexOf("## Gesperrt (nicht verwenden, auch nicht sinngemäß)"));
+  assert.ok(user.indexOf("## Gesperrt (nicht verwenden, auch nicht sinngemäß)") < user.indexOf("## Kundengespräche"), "evaluation and blocked statements before the conversations");
+  assert.match(user, /### Leistungen & Schwerpunkte\nKlaviertransporte bundesweit\./);
+  assert.match(user, /- \[Preis & Positionierung\] Nicht für Content verwenden: Einkaufspreise der Transporter\./);
+  assert.equal(withEvaluation.blocked.length, 6);
+  for (const rule of [
+    "Die Anbieter-Auswertung (vorrangig) geht den Gesprächen vor.",
+    "Ein Fakt aus einem Gespräch, der der Anbieter-Auswertung widerspricht, entfällt.",
+    "ziehst du nicht, auch nicht sinngemäß",
+    "Widersprechen sich zwei Gespräche, gilt das spätere",
+  ]) {
+    assert.ok(PAGE_FACTS_SYSTEM.includes(rule), rule);
+  }
+  assert.doesNotMatch(prompt.user, /Gesperrt|Anbieter-Auswertung/, "nothing without an evaluation");
   const schema = PAGE_FACTS_TOOL.input_schema as { properties: { facts: { maxItems: number } } };
   assert.equal(schema.properties.facts.maxItems, PAGE_FACTS_MAX);
 
@@ -131,6 +170,59 @@ const facts = (patch: Partial<ContentPageFacts> = {}): ContentPageFacts => ({
   console.log("excerpt in the prompts: ok");
 }
 
+// --- „Gesperrt“: what the evaluation blocks ------------------------------------------------------
+{
+  const blocked = extractBlockedStatements(EVALUATION);
+  assert.deepEqual(
+    blocked.map((b) => [b.section, b.marker, b.text]),
+    [
+      [
+        "Leistungen & Schwerpunkte",
+        "Freigabe … noch offen",
+        "Use Case (ausgedacht, Freigabe durch den Inhaber noch offen): Eine Pianistin zog nach Wien um. Der Flügel kam ohne Kratzer an.",
+      ],
+      ["Leistungen & Schwerpunkte", "nicht nennen", "Kundennamen nicht nennen, solange keine Erlaubnis vorliegt."],
+      [
+        "Ablauf & Mitwirkung",
+        "nicht aktiv bewerben",
+        "Besichtigung vor Ort: kostenlos, aber nur bei ernsthaftem Interesse. Nicht aktiv bewerben, damit niemand nur ein Gutachten will.",
+      ],
+      ["Preis & Positionierung", "nicht für Content verwenden", "Nicht für Content verwenden: Einkaufspreise der Transporter."],
+      ["Ziele & Weiterentwicklung", "noch nicht verwenden", "Noch nicht verwenden (erst nach Abschluss): Zertifikat Klavierbauer; Standort Köln."],
+      ["Ziele & Weiterentwicklung", "Freigabe offen", "Offener Punkt: Freigabe Use Case Pianistin durch den Inhaber."],
+    ],
+    "a labelled use case runs to the end of its paragraph; a bare note takes the sentence before it; unmarked sentences stay out",
+  );
+  assert.ok(!blocked.some((b) => /Festpreis|Keine Rabatte|Flügel bis 500/.test(b.text)));
+
+  // The other spellings, and a note that heads a list.
+  const more = extractBlockedStatements([
+    { label: "Beweise", current: "Preis ca. 80 € pro Stunde (nicht nennen). Referenz Stadttheater: Freigabe offen. Gutachten nur erwähnen, wenn der Kunde danach fragt.\nNicht verwenden:\n- Kunde Müller\n- 1.200 Transporte im Jahr\nSeit 2009 am Markt." },
+  ]);
+  assert.deepEqual(more.map((b) => b.text), [
+    "Preis ca. 80 € pro Stunde (nicht nennen).",
+    "Referenz Stadttheater: Freigabe offen.",
+    "Gutachten nur erwähnen, wenn der Kunde danach fragt.",
+    "Nicht verwenden: Kunde Müller",
+    "Nicht verwenden: 1.200 Transporte im Jahr",
+  ]);
+  assert.deepEqual(extractBlockedStatements([{ label: "x", current: "Wir verwenden nur Gurte. Das nennen wir Sorgfalt." }]), [], "the words alone block nothing");
+  assert.equal(BLOCKED_MARKERS.length, 9);
+
+  // Every step with Anbieterfakten gets the block, after the sections and the excerpt.
+  const ctx = context({ sections: EVALUATION.filter((e) => e.current), pageFacts: facts() });
+  for (const key of ["analyse", "seo", "faktencheck", "geo", "hormozi", "vermenschlichung", "lektorat", "endabnahme"] as const) {
+    const def = CONTENT_STEPS.find((s) => s.key === key)!;
+    const user = contentStepSpec(def.step, ctx).user;
+    const at = user.indexOf("### Gesperrt (nicht verwenden, auch nicht sinngemäß)");
+    assert.ok(at > user.indexOf("### Faktenauszug für diese Seite"), `${def.name}: the block follows the excerpt`);
+    assert.ok(user.includes("- [Leistungen & Schwerpunkte] Kundennamen nicht nennen, solange keine Erlaubnis vorliegt."), def.name);
+  }
+  assert.ok(!contentStepSpec(2, context()).user.includes("Gesperrt"), "no block when nothing is blocked");
+  assert.equal(blockedBlock([]), "");
+  console.log("blocked statements: ok");
+}
+
 // --- the first part of the Analyse step ----------------------------------------------------------
 const pageRow = (): ContentPageRow => ({
   id: PAGE_ID, organisation_id: ORG, slug: "klaviertransport", name: "Klaviertransport", path: "/umzug/klaviertransport", level: 2, position: 0, source: "structure",
@@ -148,13 +240,33 @@ const transcript = (n: number) => ({
 
 type ToolCall = typeof callContentTool;
 
-async function firstPart(input: { transcripts: number; callTool: ToolCall }) {
+async function firstPart(input: { transcripts: number; callTool: ToolCall; evaluation?: "approved" | "proposed" | "stale" | "none" }) {
+  const transcripts = Array.from({ length: input.transcripts }, (_, i) => transcript(i + 1));
   const db = new FakeDb({
     dt_content_pages: [pageRow() as unknown as Record<string, unknown>],
     dt_content_steps: [{ page_id: PAGE_ID, organisation_id: ORG, step: 1, name: "Analyse", status: "running" }],
-    dt_meeting_transcripts: Array.from({ length: input.transcripts }, (_, i) => transcript(i + 1)),
+    dt_meeting_transcripts: transcripts,
     dt_llm_usage_events: [],
   });
+  const evaluation = input.evaluation ?? "approved";
+  if (evaluation !== "none" && input.transcripts > 0) {
+    // The evaluation as „Anbieter auswerten“ and the approval store it, for today's conversations.
+    const fingerprint = (await loadWorkshopState(db.service, ORG)).fingerprint;
+    db.tables.dt_workshop_corpus = [
+      {
+        organisation_id: ORG,
+        avatar_plan: {},
+        anbieter: {
+          items: [
+            { key: "leistungen", current: EVALUATION[0]!.current },
+            { key: "preis", current: EVALUATION[2]!.current },
+          ],
+          sourceFingerprint: evaluation === "stale" ? "an-older-state" : fingerprint,
+          approvedFingerprint: evaluation === "approved" ? fingerprint : null,
+        },
+      },
+    ];
+  }
   const outcome = await runPageFactsPart({
     service: db.service, page: pageRow(), def: contentStepDefinition(1)!, context: context(), avatarId: null,
     models: ["claude-sonnet-4-6"], timeoutMs: 200_000, callTool: input.callTool,
@@ -186,6 +298,25 @@ async function runnerTests() {
   assert.ok(Number(ok.page.cost_eur) > 0.1, "the call is on the page's cost");
   assert.equal((ok.db.rows("dt_llm_usage_events")[0] as { mode: string }).mode, PAGE_FACTS_USAGE_MODE);
   assert.equal(reviewPageFacts([ok.row])!.summary, "1 Fakt aus 2 Gesprächen");
+
+  assert.match(seen[0]!.user, /## Anbieter-Auswertung \(vorrangig\)[\s\S]*### Leistungen & Schwerpunkte\nKlaviertransporte bundesweit\./, "the approved evaluation is in the call");
+  assert.match(seen[0]!.user, /## Gesperrt[\s\S]*Nicht für Content verwenden: Einkaufspreise der Transporter\./);
+  assert.equal(stored.blocked.length, 3, "what was blocked is kept for the page window");
+  assert.deepEqual(reviewPageFacts([ok.row])!.blocked, stored.blocked);
+
+  // Not approved, or a conversation newer than the evaluation: no call, no excerpt, the reason.
+  for (const [state, reason] of [
+    ["proposed", /noch nicht freigegeben/],
+    ["stale", /Seit der letzten Anbieter-Auswertung wurde ein Gespräch hochgeladen oder geändert/],
+    ["none", /noch keine Anbieter-Auswertung/],
+  ] as const) {
+    const skipped = await firstPart({ transcripts: 2, callTool: async () => { throw new Error("no call expected"); }, evaluation: state });
+    const kept = readPageFacts(skipped.row.output)!;
+    assert.deepEqual([skipped.outcome.partial, kept.facts.length, kept.error, kept.conversations], [true, 0, null, 2], state);
+    assert.match(kept.skipped ?? "", reason);
+    assert.equal(reviewPageFacts([skipped.row])!.summary, "Kein Faktenauszug: Anbieter-Auswertung nicht freigegeben");
+    assert.equal(Number(skipped.page.cost_eur), 0.1, "nothing was paid");
+  }
 
   // No conversations: no call, an empty excerpt, the Analyse runs as before.
   const never: ToolCall = async () => {

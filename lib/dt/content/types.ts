@@ -303,6 +303,10 @@ export type ContentReview = {
     /** The conversations were too long for one call; their wording was shortened. */
     shortened: boolean;
     error: string | null;
+    /** Why no excerpt was made on purpose (evaluation not approved or outdated); null otherwise. */
+    skipped: string | null;
+    /** Statements the evaluation blocks („Gesperrt“), as every step gets them. */
+    blocked: string[];
   } | null;
   public: {
     state: ContentPageState;
