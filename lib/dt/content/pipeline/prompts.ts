@@ -10,6 +10,7 @@
  * Tonalität, verbotene Wörter), the avatar and the editor's notes.
  */
 
+import { pageFactsBlock, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type Anthropic from "@anthropic-ai/sdk";
 
 import type { ContactPromptData } from "@/lib/dt/contact-data";
@@ -135,6 +136,12 @@ export type ContentPipelineContext = {
    * every later step, shown in the Anbieterfakten block as „Antworten des Kunden“.
    */
   customerAnswers?: Array<{ question: string; answer: string }>;
+  /**
+   * The page's „Faktenauszug“ from the customer's conversations (`page-facts-model.ts`); part of
+   * the Anbieterfakten block of every step. Null on pages started before it existed and in the
+   * standalone tools.
+   */
+  pageFacts?: ContentPageFacts | null;
   /** What is known for the question rules (Kontaktdaten, pool, notes, Anbieterfakten); the pipeline only. */
   knowledge?: ContentKnowledge;
   /**
@@ -437,17 +444,20 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 // Exported for the standalone GEO and Hormozi tools (lib/dt/text-tools/geo.ts, hormozi.ts),
 // which build the same blocks around an uploaded text instead of a page of the pipeline.
 
-export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers">>): string {
+export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers" | "pageFacts">>): string {
   const filled = context.sections.filter((s) => s.current.trim());
   const answers = (context.customerAnswers ?? []).filter((a) => a.question.trim() && a.answer.trim());
   const answersPart = answers.length
     ? [`### Antworten des Kunden (bestätigt)\n${answers.map((a) => `- ${clip(a.question, 400)} → ${clip(a.answer, 1_000)}`).join("\n")}`]
     : [];
-  if (filled.length === 0 && answersPart.length === 0) return "## Anbieterfakten\n(keine)";
+  const excerpt = pageFactsBlock(context.pageFacts);
+  const excerptPart = excerpt ? [excerpt] : [];
+  if (filled.length === 0 && answersPart.length === 0 && excerptPart.length === 0) return "## Anbieterfakten\n(keine)";
   return [
     "## Anbieterfakten aus Fragebogen und Kundengesprächen (einzige Quelle für Tatsachen)",
     ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`),
     ...answersPart,
+    ...excerptPart,
   ].join("\n\n");
 }
 

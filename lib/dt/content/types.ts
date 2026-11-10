@@ -3,6 +3,7 @@
  * The pipeline behind the routes runs inside DigitalTwin (`lib/dt/content/pipeline`).
  */
 
+import type { ContentPageFact } from "@/lib/dt/content/pipeline/page-facts-model";
 import type { ContactFieldKey, ContactSource, OrgContactData } from "@/lib/dt/contact-data";
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
@@ -288,6 +289,21 @@ export type ContentReview = {
    * Its outputs do not fit today's steps: the editor resets it.
    */
   legacy_steps: boolean;
+  /**
+   * The page's Faktenauszug from the customer's conversations (made before the Analyse); null
+   * until it exists (page not started, or started before the excerpt was introduced).
+   */
+  page_facts: {
+    /** „18 Fakten aus 3 Gesprächen“ */
+    summary: string;
+    facts: ContentPageFact[];
+    /** What the page would need but no conversation says. */
+    gaps: string[];
+    conversations: number;
+    /** The conversations were too long for one call; their wording was shortened. */
+    shortened: boolean;
+    error: string | null;
+  } | null;
   public: {
     state: ContentPageState;
     label: string;

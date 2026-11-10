@@ -551,6 +551,62 @@ export function DtContentPageDrawer(props: {
                       </div>
                     )}
 
+                    {review.page_facts ? (
+                      <details className="group rounded-dt border border-sbkm-navy/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white">
+                          <span>
+                            Faktenauszug
+                            <span className="ml-2 font-normal text-sbkm-ink-600 dark:text-white/60">{review.page_facts.summary}</span>
+                          </span>
+                          <ChevronDown className="size-4 shrink-0 transition-transform duration-150 group-open:rotate-180" aria-hidden />
+                        </summary>
+                        <div className="grid gap-3 border-t border-sbkm-navy/8 px-4 py-3 text-sm dark:border-white/8">
+                          <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
+                            Was die Kundengespräche zum Thema dieser Seite sagen. Jeder Schritt bekommt diese Fakten zusätzlich zu den
+                            Anbieterfakten. „Zurücksetzen“ erstellt den Auszug neu.
+                          </p>
+                          {review.page_facts.error ? (
+                            <p className="text-xs text-red-700 dark:text-red-300">
+                              Der Auszug konnte nicht erstellt werden, die Seite lief nur mit den Anbieterfakten: {review.page_facts.error}
+                            </p>
+                          ) : null}
+                          {review.page_facts.shortened ? (
+                            <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
+                              Die Gespräche waren zu lang für einen Aufruf: Der Wortlaut wurde gekürzt, die Zusammenfassungen sind vollständig.
+                            </p>
+                          ) : null}
+                          {review.page_facts.facts.length > 0 ? (
+                            <ol className="grid list-decimal gap-2 pl-5 text-sbkm-navy dark:text-white">
+                              {review.page_facts.facts.map((f, i) => (
+                                <li key={i}>
+                                  {f.topic ? <span className="font-semibold">{f.topic}: </span> : null}
+                                  {f.fact}
+                                  {f.source ? <span className="text-xs text-sbkm-ink-600 dark:text-white/60"> ({f.source})</span> : null}
+                                  {f.quote ? (
+                                    <span className="mt-0.5 block text-xs italic text-sbkm-ink-600 dark:text-white/60">„{f.quote}“</span>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ol>
+                          ) : !review.page_facts.error && review.page_facts.conversations > 0 ? (
+                            <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
+                              In den Gesprächen steht nichts zum Thema dieser Seite.
+                            </p>
+                          ) : null}
+                          {review.page_facts.gaps.length > 0 ? (
+                            <div className="grid gap-1">
+                              <p className="text-xs font-semibold text-sbkm-navy dark:text-white">Fehlt in den Gesprächen</p>
+                              <ul className="grid list-disc gap-1 pl-5 text-xs text-sbkm-ink-600 dark:text-white/60">
+                                {review.page_facts.gaps.map((g, i) => (
+                                  <li key={i}>{g}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
+
                     <details className="group rounded-dt border border-sbkm-navy/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white">
                         Details: {review.steps.length} Schritte

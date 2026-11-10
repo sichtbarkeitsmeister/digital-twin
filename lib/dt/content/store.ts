@@ -4,6 +4,7 @@
  * the service client: routes check access first (`gateContentRoute`), the job runner has none.
  */
 
+import { pageFactsSummary, readPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -32,6 +33,7 @@ import {
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
 import {
+  CONTENT_STEP_ANALYSE,
   CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
@@ -1467,6 +1469,21 @@ export function buildReview(
     freshness: reviewFreshness(page.freshness),
     skip_steps: page.skip_steps,
     steps: stepList(steps, page),
+    page_facts: reviewPageFacts(steps),
     actions: pageActions(page),
+  };
+}
+
+/** The Faktenauszug for the page window: its summary line, the facts and what the conversations lack. */
+export function reviewPageFacts(steps: readonly ContentStepRow[]): ContentReview["page_facts"] {
+  const facts = readPageFacts(steps.find((s) => s.step === CONTENT_STEP_ANALYSE)?.output);
+  if (!facts) return null;
+  return {
+    summary: pageFactsSummary(facts),
+    facts: facts.facts,
+    gaps: facts.gaps,
+    conversations: facts.conversations,
+    shortened: facts.shortened,
+    error: facts.error,
   };
 }

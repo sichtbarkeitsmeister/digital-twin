@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { interruptedStepMessage } from "@/lib/dt/content/job-state";
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
+import { readPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import { questionStopDue } from "@/lib/dt/content/pipeline/question-stop";
 import {
   markContentStepError,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/dt/content/pipeline/run-step";
 import {
   CONTENT_STEP_AKTUALITAET,
+  CONTENT_STEP_ANALYSE,
   CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
@@ -143,8 +145,8 @@ export async function runContentPageSteps(input: {
   let next: number | null = null;
 
   try {
-    // One turn per step, plus the stop for questions before the Watermark Entfernung.
-    for (let ran = 0; ran < CONTENT_STEP_COUNT + 2; ran++) {
+    // One turn per step, plus the Faktenauszug before the Analyse and the stop for questions.
+    for (let ran = 0; ran < CONTENT_STEP_COUNT + 3; ran++) {
       page = await loadContentPageById(service, pageId);
       if (!page) return { ok: true, result: { skipped: "page_missing" } };
       if (page.state !== "laeuft") return { ok: true, result: { skipped: page.state } };
@@ -232,7 +234,10 @@ export async function runContentPageSteps(input: {
         const needed =
           def?.provider === "xai"
             ? SHORT_STEP_MS
-            : def?.writesText && def.step !== CONTENT_STEP_AKTUALITAET
+            : def?.step === CONTENT_STEP_ANALYSE && !readPageFacts(steps.find((s) => s.step === next)?.output)
+              ? // The Faktenauszug reads all conversations before the Analyse: a long call.
+                FULL_TEXT_STEP_MS
+              : def?.writesText && def.step !== CONTENT_STEP_AKTUALITAET
               ? FULL_TEXT_STEP_MS
               : def?.step === CONTENT_STEP_AKTUALITAET || (def != null && LONG_CHECK_STEPS.has(def.step))
                 ? LONG_STEP_MS
