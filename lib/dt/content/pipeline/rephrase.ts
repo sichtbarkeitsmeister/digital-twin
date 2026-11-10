@@ -11,7 +11,7 @@
  */
 
 import { stripCodeFences } from "@/lib/ai/anthropic-helpers";
-import { parseBlocksFromHtml, renderBlocksHtml, sanitizeBlockHtml, type ContentTextBlock } from "@/lib/dt/content/render";
+import { CONTENT_MAX_BLOCK_HTML, parseBlocksFromHtml, renderBlocksHtml, sanitizeBlockHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 
 /** Characters of plain text per Grok call: short enough to answer in well under a minute. */
 export const REPHRASE_CHUNK_CHARS = 1_800;
@@ -179,11 +179,12 @@ export function parseRephrasedChunk(answer: string, chunk: readonly ContentTextB
   const text = stripCodeFences(answer.trim());
   let blocks = parseBlocksFromHtml(text)
     .map((b) => ({ ...b, html: sanitizeBlockHtml(b.html) }))
-    .filter((b) => b.html.trim());
+    // An answer over the size limit is not cut: the section keeps its previous wording.
+    .filter((b) => b.html.trim() && b.html.length <= CONTENT_MAX_BLOCK_HTML);
   if (blocks.length === 0 && chunk.length === 1 && /<(p|ul|ol)[\s>]/i.test(text)) {
     const body = text.replace(/^\s*<h[1-4][^>]*>[\s\S]*?<\/h[1-4]>/i, "");
     const html = sanitizeBlockHtml(body);
-    if (html.trim()) blocks = [{ ...chunk[0]!, html }];
+    if (html.trim() && html.length <= CONTENT_MAX_BLOCK_HTML) blocks = [{ ...chunk[0]!, html }];
   }
   return mergeRewrittenBlocks(chunk, blocks);
 }

@@ -26,8 +26,14 @@ const ALLOWED_TAGS = new Set(["p", "ul", "ol", "li", "strong", "em", "b", "i", "
 export const CONTENT_MAX_BLOCKS = 120;
 export const CONTENT_TOO_MANY_BLOCKS_MESSAGE = "Zu viele Abschnitte (Grenze erreicht)";
 
+/**
+ * A model answer over one of the text's limits (number of Abschnitte, size of one Abschnitt).
+ * The step fails with the message; a part of the answer is never saved as the text.
+ */
+export class ContentTextLimitError extends Error {}
+
 /** A text with more Abschnitte than `CONTENT_MAX_BLOCKS`: the step fails instead of saving a part of it. */
-export class ContentBlockLimitError extends Error {
+export class ContentBlockLimitError extends ContentTextLimitError {
   /** How many usable Abschnitte the answer had. */
   readonly count: number;
 
@@ -37,7 +43,39 @@ export class ContentBlockLimitError extends Error {
     this.count = count;
   }
 }
-const MAX_BLOCK_HTML = 12_000;
+
+/**
+ * The most HTML one Abschnitt may hold, in characters. It was 12,000, and a longer Abschnitt was
+ * cut there without a word (possibly inside a tag or a sentence). Now a longer one is an error
+ * (`ContentBlockSizeError`); nothing is shortened.
+ */
+export const CONTENT_MAX_BLOCK_HTML = 30_000;
+export const CONTENT_BLOCK_TOO_LONG_MESSAGE = "Abschnitt zu lang (Grenze erreicht)";
+
+/** How a too long Abschnitt is named in a message: its heading, or its id when it has none. */
+export function blockLabel(block: Pick<ContentTextBlock, "id" | "heading">): string {
+  return block.heading?.trim() ? `„${block.heading.trim().slice(0, 80)}“` : `mit der id „${block.id}“`;
+}
+
+/** An Abschnitt with more HTML than `CONTENT_MAX_BLOCK_HTML`: the step fails instead of cutting it. */
+export class ContentBlockSizeError extends ContentTextLimitError {
+  readonly blockId: string;
+  readonly chars: number;
+
+  constructor(block: Pick<ContentTextBlock, "id" | "heading" | "html">) {
+    super(
+      `${CONTENT_BLOCK_TOO_LONG_MESSAGE}: Der Abschnitt ${blockLabel(block)} hat ${block.html.length.toLocaleString("de-DE")} Zeichen HTML, höchstens ${CONTENT_MAX_BLOCK_HTML.toLocaleString("de-DE")} erlaubt. Nichts wurde gespeichert.`,
+    );
+    this.name = "ContentBlockSizeError";
+    this.blockId = block.id;
+    this.chars = block.html.length;
+  }
+}
+
+/** The first Abschnitt over `CONTENT_MAX_BLOCK_HTML`, or null. */
+export function oversizedBlock<T extends Pick<ContentTextBlock, "html">>(blocks: readonly T[]): T | null {
+  return blocks.find((b) => b.html.length > CONTENT_MAX_BLOCK_HTML) ?? null;
+}
 
 export function escapeHtml(text: string): string {
   return text
@@ -83,7 +121,8 @@ export function sanitizeBlockHtml(html: string): string {
       return `<${tag}>`;
     },
   );
-  return cleaned.replace(/\s+\n/g, "\n").trim().slice(0, MAX_BLOCK_HTML);
+  // Never shortened here: a cut could end inside a tag or a sentence. `normalizeBlocks` checks the size.
+  return cleaned.replace(/\s+\n/g, "\n").trim();
 }
 
 /** Plain text (one paragraph per blank line) → paragraph HTML. */
@@ -109,7 +148,8 @@ function uniqueId(base: string, used: Set<string>): string {
 /**
  * LLM JSON → blocks. Accepts `{id, heading, level, html}` or `{id, heading, text}`; drops
  * empty blocks, fixes ids and levels, sanitizes HTML. Returns [] when nothing usable is there.
- * More than `CONTENT_MAX_BLOCKS` usable blocks throw `ContentBlockLimitError`.
+ * More than `CONTENT_MAX_BLOCKS` usable blocks throw `ContentBlockLimitError`, an Abschnitt with
+ * more than `CONTENT_MAX_BLOCK_HTML` characters of HTML throws `ContentBlockSizeError`.
  */
 export function normalizeBlocks(input: unknown, options: { overLimit?: "throw" | "cut" } = {}): ContentTextBlock[] {
   // A JSON string instead of the array (a known slip of the model) is read leniently.
@@ -138,11 +178,12 @@ export function normalizeBlocks(input: unknown, options: { overLimit?: "throw" |
     const idBase = typeof rec.id === "string" && rec.id.trim() ? rec.id.trim().toLowerCase() : heading || "abschnitt";
     blocks.push({ id: uniqueId(idBase, used), heading: heading || null, level, html: bodyHtml });
   }
-  if (blocks.length > CONTENT_MAX_BLOCKS) {
-    // Only a caller that reports the count itself (an upload's own check) may take the first ones.
-    if (options.overLimit === "cut") return blocks.slice(0, CONTENT_MAX_BLOCKS);
-    throw new ContentBlockLimitError(blocks.length);
-  }
+  // A caller that reports the limits itself (an upload's own checks, with its own messages)
+  // gets every Abschnitt whole and the first `CONTENT_MAX_BLOCKS` of them.
+  if (options.overLimit === "cut") return blocks.slice(0, CONTENT_MAX_BLOCKS);
+  if (blocks.length > CONTENT_MAX_BLOCKS) throw new ContentBlockLimitError(blocks.length);
+  const tooLong = oversizedBlock(blocks);
+  if (tooLong) throw new ContentBlockSizeError(tooLong);
   return blocks;
 }
 
