@@ -47,7 +47,7 @@ import {
   type TextOutput,
 } from "@/lib/dt/content/pipeline/prompts";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { htmlToPlainText, normalizeBlocks, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
+import { CONTENT_MAX_BLOCKS, htmlToPlainText, normalizeBlocks, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import { fillContentStepPrompt, loadContentStepPrompts, resolveContentStepPrompt } from "@/lib/dt/content/step-prompts";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { SEO_TOOL_PAGE_TYPES, type SeoToolPageType } from "@/lib/dt/text-tools/seo";
@@ -76,7 +76,7 @@ export const hormoziToolRequestSchema = z.object({
   pageType: z.enum(SEO_TOOL_PAGE_TYPES),
   /** The avatar picked in the form; required, the conversion layer is written for this reader. */
   avatarId: z.string().uuid(),
-  blocks: z.array(blockSchema).min(1).max(40),
+  blocks: z.array(blockSchema).min(1).max(CONTENT_MAX_BLOCKS),
   /** `<title>` / meta description of an HTML upload, null otherwise. */
   title: z.string().max(200).nullable(),
   metaDescription: z.string().max(400).nullable(),

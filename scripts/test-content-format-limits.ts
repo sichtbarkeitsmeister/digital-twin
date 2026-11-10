@@ -7,6 +7,8 @@
  * - An earlier step's result is never cut inside an entry any more (it was at 12,000 characters,
  *   which dropped the Analyse's belegte Fakten at its end).
  * - Customer answers up to 4,000 characters, the live page's text up to 20,000.
+ * - Up to 120 Abschnitte (it was 40, cut without a word); more than that fails the step with
+ *   „Zu viele Abschnitte (Grenze erreicht)“ and saves nothing.
  * - The fixed base rules as the agency set them on 10.11.
  * No network, no model.
  * Run: npm run test:content-format-limits
@@ -29,18 +31,28 @@ import {
   shrinkStepOutput,
   type ContentPipelineContext,
 } from "../lib/dt/content/pipeline/prompts";
+import { ContentLlmError } from "../lib/dt/content/pipeline/llm";
 import { parseRephrasedChunk, rephraseChunkHtml } from "../lib/dt/content/pipeline/rephrase";
+import type { StepOutcome } from "../lib/dt/content/pipeline/run-step";
 import { CONTENT_STEPS } from "../lib/dt/content/pipeline/steps";
 import { extractContentBlocks } from "../lib/dt/content/presentation";
 import {
+  CONTENT_MAX_BLOCKS,
+  CONTENT_TOO_MANY_BLOCKS_MESSAGE,
+  ContentBlockLimitError,
   blocksToPromptText,
   htmlToMarkdown,
+  normalizeBlocks,
   htmlToPlainText,
   parseBlocksFromHtml,
   renderBlocksHtml,
   type ContentTextBlock,
 } from "../lib/dt/content/render";
 import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
+import { TEXT_TOOL_MAX_BLOCKS } from "../lib/dt/text-tools/ingest";
+import { runContentPageSteps } from "../lib/jobs/handlers/content-page";
+
+import { FakeDb } from "./fake-supabase";
 
 const context = (patch: Partial<ContentPipelineContext> = {}): ContentPipelineContext => ({
   organisationName: "Muster GmbH",
@@ -143,6 +155,76 @@ const context = (patch: Partial<ContentPipelineContext> = {}): ContentPipelineCo
   console.log("H4 and blocks without a heading: ok");
 }
 
+// --- more Abschnitte than a text may have: an error, never a shorter text ---------------------------
+async function blockLimitTests() {
+  assert.equal(CONTENT_MAX_BLOCKS, 120);
+  const answer = (n: number) => ({
+    title: "T",
+    meta_description: "M",
+    blocks: Array.from({ length: n }, (_, i) => ({ id: `abschnitt-${i + 1}`, heading: `Abschnitt ${i + 1}`, level: i === 0 ? 1 : 3, html: `<p>Text ${i + 1}.</p>` })),
+  });
+  const current = { blocks: [], title: null, metaDescription: null };
+
+  // 41 Abschnitte were cut to 40 without a word (the Unterseite of 10.11.); now all of them stay.
+  assert.equal(normalizeTextOutput(answer(41), current).blocks.length, 41);
+  const full = normalizeTextOutput(answer(120), current).blocks;
+  assert.deepEqual([full.length, full[119]!.id], [120, "abschnitt-120"], "120 Abschnitte are kept, the last one included");
+  assert.equal(parseBlocksFromHtml(renderBlocksHtml(full)).length, 120, "stored and read back whole");
+  assert.equal(contentExportFile("txt", { slug: "s", title: "t", html: renderBlocksHtml(full) }).body.includes("Text 120."), true, "the export has the last Abschnitt");
+
+  // One more is an error with the count, not 120 Abschnitte and a missing end.
+  assert.throws(
+    () => normalizeTextOutput(answer(121), current),
+    (error: unknown) =>
+      error instanceof ContentBlockLimitError &&
+      error.count === 121 &&
+      error.message === "Zu viele Abschnitte (Grenze erreicht): 121 Abschnitte geliefert, höchstens 120 erlaubt. Nichts wurde gespeichert.",
+  );
+  assert.equal(CONTENT_TOO_MANY_BLOCKS_MESSAGE, "Zu viele Abschnitte (Grenze erreicht)");
+  // Empty entries do not count; only usable Abschnitte do.
+  const withEmpties = { ...answer(120), blocks: [...answer(120).blocks, { id: "leer", heading: "", level: 2, html: "" }, { id: "leer2", heading: " ", level: 2, html: "  " }] };
+  assert.equal(normalizeTextOutput(withEmpties, current).blocks.length, 120);
+  // Every tool with blocks goes through the same check.
+  for (const key of ["seo", "geo", "hormozi", "vermenschlichung", "lektorat"] as const) {
+    const def = CONTENT_STEPS.find((s) => s.key === key)!;
+    assert.throws(() => contentStepSpec(def.step, context()).normalize(answer(130), context()), ContentBlockLimitError, def.name);
+  }
+  // An upload reports the count itself, so its reader may take the first ones.
+  assert.equal(normalizeBlocks(answer(130).blocks, { overLimit: "cut" }).length, 120);
+  assert.equal(TEXT_TOOL_MAX_BLOCKS, 120, "uploads: the same limit");
+
+  // The step: the job loop gets a failure that is not tried again, the page stops with the message
+  // at the step, and nothing of the answer is on the page.
+  const ORG = "11111111-1111-4111-8111-111111111111";
+  const PAGE_ID = "22222222-2222-4222-8222-222222222222";
+  const JOB_ID = "33333333-3333-4333-8333-333333333333";
+  const db = new FakeDb({
+    dt_content_pages: [{ id: PAGE_ID, organisation_id: ORG, slug: "uhren", name: "Uhren", source: "structure", source_url: null, state: "laeuft", step: 1, job_id: JOB_ID, skip_steps: [], question_stop: { handled: [] }, notes: [], findings: [], cost_eur: 0, html: "", freshness: EMPTY_CONTENT_FRESHNESS }],
+    dt_content_steps: [{ page_id: PAGE_ID, organisation_id: ORG, step: 1, name: "Analyse", status: "done", output: { page_facts: { facts: [], conversations: 0 } } }],
+  });
+  let calls = 0;
+  const runStep = async (): Promise<StepOutcome> => {
+    calls += 1;
+    try {
+      contentStepSpec(2, context()).normalize(answer(134), context());
+    } catch (error) {
+      // What `callStep` makes of it (run-step.ts).
+      if (error instanceof ContentBlockLimitError) throw new ContentLlmError(error.message, false, { stopReason: "tool_use", outputTokens: 11_141 });
+      throw error;
+    }
+    throw new Error("unreachable");
+  };
+  const result = await runContentPageSteps({ service: db.service, job: { id: JOB_ID, attempts: 0, max_attempts: 3 }, pageId: PAGE_ID, deadline: Date.now() + 240_000, runners: { runStep } });
+  const message = "Zu viele Abschnitte (Grenze erreicht): 134 Abschnitte geliefert, höchstens 120 erlaubt. Nichts wurde gespeichert.";
+  assert.deepEqual(result, { ok: false, error: message, retryable: false }, "not tried again: the same answer would come back");
+  const seo = db.rows("dt_content_steps").find((r) => r.step === 2) as { status: string; error: string; output_tokens: number };
+  assert.deepEqual([seo.status, seo.error, seo.output_tokens], ["error", message, 11_141]);
+  const page = db.rows("dt_content_pages")[0] as { state: string; error: string; html: string };
+  assert.deepEqual([page.state, page.error, page.html], ["in_arbeit", message, ""], "the page stops with the message and no text");
+  assert.equal(calls, 1);
+  console.log("block limit: ok");
+}
+
 // --- an earlier step's result: whole entries, never cut inside one --------------------------------
 {
   const long = (label: string, n: number) => Array.from({ length: n }, (_, i) => `${label} ${i + 1}: ${"Text ".repeat(60)}`);
@@ -227,4 +309,9 @@ Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`
   console.log("base rules: ok");
 }
 
-console.log("OK: format and limits tests passed");
+blockLimitTests()
+  .then(() => console.log("OK: format and limits tests passed"))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

@@ -1,7 +1,7 @@
 /**
  * Crawl as the second input of the text tools SEO, GEO and Hormozi: the page list (same rules
  * as Texte), loading a chosen page (live HTML first, stored crawl text as fallback, only URLs
- * of the organisation's crawl), and the import rules for web pages (H1 first, more than 40
+ * of the organisation's crawl), and the import rules for web pages (H1 first, more than 120
  * sections folded instead of refused). Fake database and fetch; no network.
  * Run: npx tsx scripts/test-text-tools-crawl-source.ts
  */
@@ -77,18 +77,18 @@ function testWebImportRules() {
   const upload = blocksFromDocument({ kind: "html", content: html });
   assert.ok(upload.ok && upload.value.blocks[0]!.heading === null, "uploads keep their order");
 
-  // More than 40 sections: refused for an upload, folded for a crawled page (H3 first, no text lost).
-  const many = `<body><h1>Seite</h1>${Array.from({ length: 30 }, (_, i) => `<h2>Teil ${i}</h2><p>Absatz ${i}.</p><h3>Detail ${i}</h3><p>Mehr ${i}.</p>`).join("")}</body>`;
+  // More than 120 sections (40 until 10.11.): refused for an upload, folded for a crawled page (H3 first, no text lost).
+  const many = `<body><h1>Seite</h1>${Array.from({ length: 70 }, (_, i) => `<h2>Teil ${i}</h2><p>Absatz ${i}.</p><h3>Detail ${i}</h3><p>Mehr ${i}.</p>`).join("")}</body>`;
   const strict = blocksFromDocument({ kind: "html", content: many });
-  assert.ok(!strict.ok && /höchstens 40/.test(strict.message));
+  assert.ok(!strict.ok && /höchstens 120/.test(strict.message));
   const fitted = blocksFromDocument({ kind: "html", content: many }, { fitToLimit: true });
   assert.ok(fitted.ok);
   assert.ok(fitted.value.blocks.length <= TEXT_TOOL_MAX_BLOCKS);
   assert.equal(fitted.value.blocks[0]!.heading, "Seite");
   const all = fitted.value.blocks.map((b) => `${b.heading ?? ""} ${b.html}`).join(" ");
-  for (let i = 0; i < 30; i += 1) assert.ok(all.includes(`Mehr ${i}.`) && all.includes(`Detail ${i}`), `section ${i} kept`);
+  for (let i = 0; i < 70; i += 1) assert.ok(all.includes(`Mehr ${i}.`) && all.includes(`Detail ${i}`), `section ${i} kept`);
   // Only as many H3 as needed are folded, from the end: the last ones become bold lines, the first stay headings.
-  assert.match(all, /<p><strong>Detail 29<\/strong><\/p>/, "a folded H3 becomes a bold line");
+  assert.match(all, /<p><strong>Detail 69<\/strong><\/p>/, "a folded H3 becomes a bold line");
   assert.ok(fitted.value.blocks.some((b) => b.heading === "Detail 0" && b.level === 3), "early H3 keep their heading");
 
   // Without H3 left, the shortest sections fold into their predecessor; ids are renumbered.

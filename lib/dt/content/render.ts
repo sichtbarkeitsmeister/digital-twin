@@ -18,7 +18,25 @@ export type ContentTextBlock = {
 
 const BLOCK_ID_RE = /^[a-z0-9][a-z0-9_-]{0,59}$/;
 const ALLOWED_TAGS = new Set(["p", "ul", "ol", "li", "strong", "em", "b", "i", "br", "a", "blockquote"]);
-const MAX_BLOCKS = 40;
+/**
+ * The most Abschnitte a text may have. It was 40, and a model answer with more was cut after
+ * the 40th without a word: an Unterseite with many H3/H4 ended in the middle (10.11.). Now an
+ * answer over the limit is an error (`ContentBlockLimitError`), never a shorter text.
+ */
+export const CONTENT_MAX_BLOCKS = 120;
+export const CONTENT_TOO_MANY_BLOCKS_MESSAGE = "Zu viele Abschnitte (Grenze erreicht)";
+
+/** A text with more Abschnitte than `CONTENT_MAX_BLOCKS`: the step fails instead of saving a part of it. */
+export class ContentBlockLimitError extends Error {
+  /** How many usable Abschnitte the answer had. */
+  readonly count: number;
+
+  constructor(count: number) {
+    super(`${CONTENT_TOO_MANY_BLOCKS_MESSAGE}: ${count} Abschnitte geliefert, höchstens ${CONTENT_MAX_BLOCKS} erlaubt. Nichts wurde gespeichert.`);
+    this.name = "ContentBlockLimitError";
+    this.count = count;
+  }
+}
 const MAX_BLOCK_HTML = 12_000;
 
 export function escapeHtml(text: string): string {
@@ -91,14 +109,15 @@ function uniqueId(base: string, used: Set<string>): string {
 /**
  * LLM JSON → blocks. Accepts `{id, heading, level, html}` or `{id, heading, text}`; drops
  * empty blocks, fixes ids and levels, sanitizes HTML. Returns [] when nothing usable is there.
+ * More than `CONTENT_MAX_BLOCKS` usable blocks throw `ContentBlockLimitError`.
  */
-export function normalizeBlocks(input: unknown): ContentTextBlock[] {
+export function normalizeBlocks(input: unknown, options: { overLimit?: "throw" | "cut" } = {}): ContentTextBlock[] {
   // A JSON string instead of the array (a known slip of the model) is read leniently.
   const raw = typeof input === "string" ? parseJsonLenient(input) : input;
   if (!Array.isArray(raw)) return [];
   const used = new Set<string>();
   const blocks: ContentTextBlock[] = [];
-  for (const item of raw.slice(0, MAX_BLOCKS)) {
+  for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const rec = item as Record<string, unknown>;
     const heading = typeof rec.heading === "string" ? rec.heading.replace(/<[^>]+>/g, "").trim() : "";
@@ -118,6 +137,11 @@ export function normalizeBlocks(input: unknown): ContentTextBlock[] {
           : 2;
     const idBase = typeof rec.id === "string" && rec.id.trim() ? rec.id.trim().toLowerCase() : heading || "abschnitt";
     blocks.push({ id: uniqueId(idBase, used), heading: heading || null, level, html: bodyHtml });
+  }
+  if (blocks.length > CONTENT_MAX_BLOCKS) {
+    // Only a caller that reports the count itself (an upload's own check) may take the first ones.
+    if (options.overLimit === "cut") return blocks.slice(0, CONTENT_MAX_BLOCKS);
+    throw new ContentBlockLimitError(blocks.length);
   }
   return blocks;
 }

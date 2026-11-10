@@ -12,14 +12,14 @@ import * as cheerio from "cheerio";
 import type { AnyNode, Element } from "domhandler";
 
 import { DT_MAX_ATTACHMENT_BYTES } from "@/lib/dt/attachments-shared";
-import { escapeHtml, normalizeBlocks, parseBlocksFromHtml, sanitizeBlockHtml, type ContentTextBlock } from "@/lib/dt/content/render";
+import { CONTENT_MAX_BLOCKS, escapeHtml, normalizeBlocks, parseBlocksFromHtml, sanitizeBlockHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 
 /** Same limit as a chat attachment; the text itself is capped separately below. */
 export const TEXT_TOOL_MAX_FILE_BYTES = DT_MAX_ATTACHMENT_BYTES;
 /** Longer texts do not fit the GEO answer budget (12.000 Tokens) and are refused up front. */
 export const TEXT_TOOL_MAX_TEXT_CHARS = 60_000;
 /** `normalizeBlocks` keeps at most this many blocks; a longer upload is refused, not cut. */
-export const TEXT_TOOL_MAX_BLOCKS = 40;
+export const TEXT_TOOL_MAX_BLOCKS = CONTENT_MAX_BLOCKS;
 export const TEXT_TOOL_ACCEPT = ".txt,.html,.htm,.pdf,.doc,.docx";
 
 export type UploadedDocumentKind = "text" | "html";
@@ -263,7 +263,8 @@ function finishDrafts(drafts: Draft[], options: { fit?: boolean } = {}): Finishe
   const sections = options.fit && raw.length > TEXT_TOOL_MAX_BLOCKS ? fitSectionsToLimit(raw, TEXT_TOOL_MAX_BLOCKS) : raw;
   const chars = sections.reduce((sum, b) => sum + b.heading.length + plainLength(b.html), 0);
   // `normalizeBlocks` sanitizes the HTML again and fixes empty ids/levels like LLM output.
-  return { blocks: normalizeBlocks(sections), total: sections.length, chars };
+  // `total` is what the caller checks against the limit, with its own message for the upload.
+  return { blocks: normalizeBlocks(sections, { overLimit: "cut" }), total: sections.length, chars };
 }
 
 function cleanHeading(text: string): string {
@@ -449,7 +450,7 @@ function textToDrafts(text: string): Draft[] {
  * as it is, ids included; any other HTML and all plain text go through the heuristics above.
  */
 /**
- * `fitToLimit` (crawled web pages only): more than 40 sections are folded together instead of
+ * `fitToLimit` (crawled web pages only): more sections than the limit are folded together instead of
  * refused (`fitSectionsToLimit`). Uploads keep the strict limit, so a person decides there.
  */
 export function blocksFromDocument(

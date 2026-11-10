@@ -73,7 +73,7 @@ import {
   type ContentStepDefinition,
 } from "@/lib/dt/content/pipeline/steps";
 import { estimateCostEur, estimateWebSearchCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/content/render";
+import { ContentBlockLimitError, htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/content/render";
 import {
   contentDbErrorMessage,
   contentStructureOutline,
@@ -320,7 +320,16 @@ async function callStep(
   const invoke = (user: string, timeout: number | undefined): Promise<ModelCall> =>
     callContentTool({ models, system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout });
   const first = await invoke(spec.user, timeoutMs);
-  let output = spec.normalize(first.json, context);
+  let output: unknown;
+  try {
+    output = spec.normalize(first.json, context);
+  } catch (error) {
+    // More Abschnitte than a text may have: the step fails, nothing of the answer is saved.
+    if (error instanceof ContentBlockLimitError) {
+      throw new ContentLlmError(error.message, false, { stopReason: first.stopReason ?? null, outputTokens: first.usage.outputTokens });
+    }
+    throw error;
+  }
   const calls: ModelCall[] = [first];
 
   const hint = spec.retryHint?.(output) ?? null;
