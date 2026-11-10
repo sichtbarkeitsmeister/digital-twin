@@ -7,18 +7,33 @@
  * Pure; safe for client code and tests.
  */
 
-/** The notes that mark a statement as blocked, as the agency writes them in the evaluation. */
-export const BLOCKED_MARKERS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
-  { label: "nicht für Content verwenden", pattern: /nicht\s+für\s+content\s+verwenden/i },
-  { label: "noch nicht verwenden", pattern: /noch\s+nicht\s+verwenden/i },
-  { label: "nicht verwenden", pattern: /nicht\s+verwenden/i },
-  { label: "nicht nennen", pattern: /nicht\s+nennen/i },
-  { label: "nicht aktiv bewerben", pattern: /nicht\s+aktiv\s+bewerben/i },
-  { label: "Freigabe offen", pattern: /freigabe\s+offen/i },
-  { label: "Freigabe … noch offen", pattern: /freigabe\b[^.!?\n]{0,80}?\bnoch\s+offen/i },
+/**
+ * The notes that mark a statement as blocked, as the agency writes them in the evaluation.
+ * `note`: the phrase is a remark about something else („Nicht aktiv bewerben, damit …“), so a
+ * sentence that is nothing but the remark takes the sentence before it along. The others are
+ * rules that stand for themselves („Keine Auktionshäuser namentlich nennen.“).
+ *
+ * Never a bare „kein“, „keine“ or „nicht“: „keine Provision, keine Lagergebühren“, „kein
+ * Pauschalangebot“ and „wird nicht angekauft“ are what the text is supposed to say.
+ */
+export const BLOCKED_MARKERS: ReadonlyArray<{ label: string; pattern: RegExp; note: boolean }> = [
+  { label: "nicht für Content verwenden", pattern: /nicht\s+für\s+content\s+verwenden/i, note: true },
+  { label: "noch nicht verwenden", pattern: /noch\s+nicht\s+verwenden/i, note: true },
+  { label: "nicht verwenden", pattern: /nicht\s+verwenden/i, note: true },
+  { label: "namentlich nennen", pattern: /namentlich\s+nennen/i, note: false },
+  { label: "nicht nennen", pattern: /nicht\s+nennen/i, note: true },
+  { label: "nicht formulieren", pattern: /nicht\s+formulieren/i, note: false },
+  { label: "nicht aktiv bewerben", pattern: /nicht\s+aktiv\s+bewerben/i, note: true },
+  // „nicht aktiv dazu auffordern“, „nicht aktiv anbieten“ …
+  { label: "nicht aktiv", pattern: /nicht\s+aktiv\b/i, note: true },
+  { label: "nie als … darstellen", pattern: /\bnie\s+als\b[^.!?\n]{0,80}?\bdarstellen/i, note: false },
+  // „Keine pauschalen Wertsteigerungs- oder Höchstpreisversprechen“: the noun may be a compound.
+  { label: "keine pauschalen … versprechen", pattern: /\bkeine\s+pauschalen\b[^.!?\n]{0,80}?versprechen/i, note: false },
+  { label: "Freigabe offen", pattern: /freigabe\s+offen/i, note: true },
+  { label: "Freigabe … noch offen", pattern: /freigabe\b[^.!?\n]{0,80}?\bnoch\s+offen/i, note: true },
   // „Offener Punkt: Freigabe Use Case … durch …“ says the same the other way round.
-  { label: "Freigabe offen", pattern: /offene[rn]?\s+punkt[^.!?\n]{0,20}\bfreigabe/i },
-  { label: "nur erwähnen, wenn", pattern: /nur\s+erwähnen,?\s+wenn/i },
+  { label: "Freigabe offen", pattern: /offene[rn]?\s+punkt[^.!?\n]{0,20}\bfreigabe/i, note: true },
+  { label: "nur erwähnen, wenn", pattern: /nur\s+erwähnen,?\s+wenn/i, note: false },
 ];
 
 export const BLOCKED_HEADING = "Gesperrt (nicht verwenden, auch nicht sinngemäß)";
@@ -40,13 +55,10 @@ export function blockedMarkerOf(text: string): string | null {
 /** A note inside a label that ends with a colon: „Use Case (… Freigabe … noch offen): Text“. */
 const LABELLED_NOTE_RE = /^[^.!?:]{0,160}\)\s*:\s+\S/;
 
-/** The statement is nothing but the note and its reason („Nicht aktiv bewerben, damit …“). */
+/** The statement is nothing but a remark and its reason („Nicht aktiv bewerben, damit …“). */
 function startsWithMarker(sentence: string): boolean {
   const start = sentence.replace(/^[\s(\[„"–-]+/, "").slice(0, 60);
-  return BLOCKED_MARKERS.some((m) => {
-    const at = start.search(m.pattern);
-    return at === 0;
-  });
+  return BLOCKED_MARKERS.some((m) => m.note && start.search(m.pattern) === 0);
 }
 
 const BULLET_RE = /^\s*(?:[-–—•*·]|\d{1,2}[.)])\s+/;
@@ -139,7 +151,7 @@ export function blockedBlock(statements: readonly BlockedStatement[], heading: "
   if (statements.length === 0) return "";
   return [
     `${heading} ${BLOCKED_HEADING}`,
-    "Diese Angaben sind in der Anbieter-Auswertung gesperrt. Sie kommen nicht in den Text und nicht in den Faktenauszug, auch nicht umschrieben, auch wenn sie an anderer Stelle (Gespräche, Faktenauszug, bisheriger Text) vorkommen. „nur erwähnen, wenn“: nur unter der genannten Bedingung.",
+    "Diese Angaben sind in der Anbieter-Auswertung gesperrt. Sie kommen nicht in den Text und nicht in den Faktenauszug, auch nicht umschrieben, auch wenn sie an anderer Stelle (Gespräche, Faktenauszug, bisheriger Text) vorkommen. Nennt ein Vermerk nur eine Einschränkung („nur erwähnen, wenn“, „nicht aktiv …“, „namentlich nennen“, „nie als … darstellen“, „keine pauschalen … versprechen“), gilt genau diese Einschränkung.",
     ...statements.map((s) => `- [${s.section}] ${s.text}`),
   ].join("\n");
 }

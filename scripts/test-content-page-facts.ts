@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { ContentLlmError, type callContentTool } from "../lib/dt/content/pipeline/llm";
-import { BLOCKED_MARKERS, blockedBlock, extractBlockedStatements } from "../lib/dt/content/pipeline/blocked";
+import { BLOCKED_MARKERS, blockedBlock, blockedMarkerOf, extractBlockedStatements } from "../lib/dt/content/pipeline/blocked";
 import { PAGE_FACTS_SYSTEM, PAGE_FACTS_TOOL, PAGE_FACTS_USAGE_MODE, pageFactsCorpus, pageFactsPrompt } from "../lib/dt/content/pipeline/page-facts";
 import {
   PAGE_FACTS_MAX,
@@ -207,7 +207,45 @@ const facts = (patch: Partial<ContentPageFacts> = {}): ContentPageFacts => ({
     "Nicht verwenden: 1.200 Transporte im Jahr",
   ]);
   assert.deepEqual(extractBlockedStatements([{ label: "x", current: "Wir verwenden nur Gurte. Das nennen wir Sorgfalt." }]), [], "the words alone block nothing");
-  assert.equal(BLOCKED_MARKERS.length, 9);
+
+  // Rules that stand for themselves: only their own sentence, never the one before.
+  const rules = extractBlockedStatements([
+    {
+      label: "Wettbewerb",
+      current:
+        "Bei Auktionen gehen bis zu 40 % an Gebühren verloren. Konkurrenzangebote: Kunden dürfen vergleichen, wir scheuen keinen Vergleich (nicht aktiv dazu auffordern). Keine Speditionen namentlich nennen. Allgemein formulieren: „eine Spedition in Köln“. Nicht formulieren, dass ein Flügel „garantiert“ heil ankommt. Seit 2009 am Markt – aber nie als „Spedition“ darstellen. Keine pauschalen Preis- oder Terminversprechen – alle Zahlen sind Beispiele.",
+    },
+  ]);
+  assert.deepEqual(
+    rules.map((b) => [b.marker, b.text]),
+    [
+      ["nicht aktiv", "Konkurrenzangebote: Kunden dürfen vergleichen, wir scheuen keinen Vergleich (nicht aktiv dazu auffordern)."],
+      ["namentlich nennen", "Keine Speditionen namentlich nennen."],
+      ["nicht formulieren", "Nicht formulieren, dass ein Flügel „garantiert“ heil ankommt."],
+      ["nie als … darstellen", "Seit 2009 am Markt – aber nie als „Spedition“ darstellen."],
+      ["keine pauschalen … versprechen", "Keine pauschalen Preis- oder Terminversprechen – alle Zahlen sind Beispiele."],
+    ],
+  );
+
+  // Never a bare „kein“, „keine“ or „nicht“: these are what the text is supposed to say.
+  const selling = [
+    "Direktankauf: fester Preis, sofortige Zahlung, keine Provision, keine Lagergebühren.",
+    "Kein Pauschalangebot: Jeder Umzug wird einzeln kalkuliert.",
+    "Kostenlose und unverbindliche Bewertung, kein Verkaufszwang.",
+    "Übriges Kristall wird nicht angekauft.",
+    "Schmuck wird als Schmuck angekauft, nicht bloß nach Materialgewicht.",
+    "Keine versteckten Kosten wie bei Auktionen.",
+    "Wir arbeiten aktiv mit Restauratoren zusammen und nennen Preise offen.",
+    "Ein Verkauf ist nicht garantiert, das Geld kommt nie sofort.",
+    "Keine Anfahrtskosten, keine Mindestmenge, kein Risiko.",
+    "Pauschalen gibt es nicht; wir versprechen einen festen Termin.",
+  ];
+  for (const sentence of selling) {
+    assert.equal(blockedMarkerOf(sentence), null, sentence);
+  }
+  assert.deepEqual(extractBlockedStatements([{ label: "Preis & Positionierung", current: selling.join(" ") }]), [], "no selling point is blocked");
+  assert.ok(!contentStepSpec(2, context({ sections: [{ key: "preis", label: "Preis & Positionierung", current: selling.join(" ") }] })).user.includes("Gesperrt"));
+  assert.ok(BLOCKED_MARKERS.every((m) => !/^(kein|keine|nicht)$/i.test(m.label)), "no marker is a bare negation");
 
   // Every step with Anbieterfakten gets the block, after the sections and the excerpt.
   const ctx = context({ sections: EVALUATION.filter((e) => e.current), pageFacts: facts() });

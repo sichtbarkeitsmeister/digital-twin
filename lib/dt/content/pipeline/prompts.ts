@@ -661,7 +661,8 @@ export function clientWishesRules(context: { wishes?: ContentClientWishes | null
 
 /**
  * Fixed rule of every step that writes text or asks (SEO, Faktencheck, GEO, Hormozi,
- * Vermenschlichung, Lektorat): ask or leave a placeholder only for what the page cannot be
+ * Vermenschlichung, Lektorat), and of the Analyse and the Endabnahme, whose base rules point to
+ * it (not of the Aktualitätsprüfung): ask or leave a placeholder only for what the page cannot be
  * published without and what is central to this page; otherwise leave the statement out. The
  * code enforces the rest (topic map, pool, limit of three; `questions.ts`).
  */
@@ -908,6 +909,8 @@ function analyse(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: 6_000,
     system: `${BASE_RULES}
+
+${QUESTION_RULES}
 
 Schritt ${CONTENT_STEP_ANALYSE} Analyse: Du legst fest, wonach Menschen suchen, wenn sie diese Seite brauchen, welche Fragen sie dabei haben, was die Seite leisten muss und welche Fakten dafür belegt sind. Du schreibst die Seite NICHT.
 
@@ -1445,6 +1448,8 @@ function endabnahme(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: ENDABNAHME_MAX_TOKENS,
     system: `${BASE_RULES}
+
+${QUESTION_RULES}
 
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
 unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], ein nicht gefüllter Hero („${CONTENT_HERO_PLACEHOLDER}“ oder „${CONTENT_HERO_PLACEHOLDER_LEGACY}“), eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite, ein offener Punkt der Aktualitätsprüfung. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team) und der Marker [DATUM] (das Datum setzt das Web-Team beim Veröffentlichen), z. B. „Zuletzt aktualisiert: [DATUM]“ oder „Stand: [DATUM]“.

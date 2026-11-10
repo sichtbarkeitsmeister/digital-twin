@@ -16,12 +16,13 @@ import assert from "node:assert/strict";
 import { contentExportFile } from "../lib/dt/content/export";
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { ANSWERS_TOOL } from "../lib/dt/content/pipeline/answers";
-import { AKTUALITAET_TOOL } from "../lib/dt/content/pipeline/aktualitaet";
+import { AKTUALITAET_TOOL, aktualitaetSystemPrompt } from "../lib/dt/content/pipeline/aktualitaet";
 import {
   BASE_RULES,
   BLOCKS_SCHEMA,
   GEO_TOOL,
   MAX_OUTPUT_CHARS,
+  QUESTION_RULES,
   TEXT_TOOL_SCHEMA,
   contentStepSpec,
   normalizeTextOutput,
@@ -214,6 +215,15 @@ Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten ohne Ausnahme.`
     const def = CONTENT_STEPS.find((s) => s.key === key)!;
     assert.ok(contentStepSpec(def.step, context()).system.includes(BASE_RULES), `${def.name} carries the base rules`);
   }
+  // The base rules point to the rule on questions and placeholders: the Analyse and the
+  // Endabnahme carry it now too, the Aktualitätsprüfung does not.
+  for (const key of ["analyse", "seo", "faktencheck", "geo", "hormozi", "vermenschlichung", "lektorat", "endabnahme"] as const) {
+    const def = CONTENT_STEPS.find((s) => s.key === key)!;
+    const system = contentStepSpec(def.step, context()).system;
+    assert.ok(system.includes(QUESTION_RULES), `${def.name} carries the rule on questions and placeholders`);
+    assert.equal(system.split(QUESTION_RULES).length, 2, `${def.name}: once`);
+  }
+  assert.ok(!aktualitaetSystemPrompt(context()).includes(QUESTION_RULES), "not the Aktualitätsprüfung");
   console.log("base rules: ok");
 }
 

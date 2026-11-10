@@ -642,7 +642,8 @@ function testPromptRules() {
   assert.ok(fakten.system.includes(FAKTENCHECK_QUESTION_RULES));
   const items = ((fakten.tool.input_schema as { properties: { questions: { items: { properties: Record<string, unknown>; required: string[] } } } }).properties.questions.items);
   assert.ok(["scope", "severity", "grundlegend"].every((k) => k in items.properties && items.required.includes(k)), "the model sets scope, severity, grundlegend");
-  assert.doesNotMatch(contentStepSpec(CONTENT_STEP_ENDABNAHME, ctx).system, /Fragen und Platzhalter \(feste Regel\)/, "the Endabnahme asks nothing");
+  // Since 10.11. the base rules point to this rule, so the Endabnahme (and the Analyse) carry it too.
+  assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, ctx).system, /Fragen und Platzhalter \(feste Regel\)/, "the Endabnahme knows the rule its base rules point to");
   console.log("prompts: the rule in the fixed part of the six steps: ok");
 }
 
