@@ -78,6 +78,27 @@ function findMatch(page: ContentBriefingPage, candidates: readonly Candidate[], 
   );
 }
 
+/**
+ * Which row of the Texte table belongs to which page of the Seitenstruktur (page slug → row
+ * slug), with the same rules as the plan below: path first, then slug, each row once. Used by
+ * „Zugeordnete Seiten übernehmen“ (Word files), where every page type counts.
+ */
+export function matchStructureRows(
+  pages: readonly ContentBriefingPage[],
+  rows: readonly StructurePlanRow[],
+): Map<string, string> {
+  const candidates = rows.map(rowCandidate);
+  const taken = new Set<number>();
+  const out = new Map<string, string>();
+  for (const page of pages) {
+    const row = findMatch(page, candidates, taken);
+    if (row < 0) continue;
+    taken.add(row);
+    out.set(page.slug, candidates[row]!.slug);
+  }
+  return out;
+}
+
 export function planImprovementStructure(
   excel: readonly ContentBriefingPage[],
   rows: readonly StructurePlanRow[],

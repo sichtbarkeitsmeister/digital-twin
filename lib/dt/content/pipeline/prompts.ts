@@ -96,8 +96,9 @@ export type ContentPipelineContext = {
   /** The other pages of the organisation (name, type, keyword) for cannibalisation and deferred questions. */
   structureOutline: string;
   /**
-   * Current text of the live page for pages taken over from the crawl; for a standalone
-   * page the uploaded material (briefing or old text); null otherwise.
+   * Current text of the live page for pages taken over from the crawl; for a page with an
+   * uploaded Word file that file's text (headings as Markdown); for a standalone page the
+   * uploaded material (briefing or old text); null otherwise.
    */
   existingText: string | null;
   sections: WorkshopAnbieterSection[];
@@ -495,8 +496,16 @@ function briefingLabel(page: Pick<ContentPipelinePage, "source">): string {
   return page.source === "standalone" ? "aus dem Briefing" : "aus der Excel";
 }
 
+/** A page whose existing text is an uploaded Word file: the website is not live yet. */
+const UPLOAD_SOURCE_WORDING = "aus der hochgeladenen Word-Datei (Website noch nicht live)";
+
 function sourceLine(page: ContentPipelinePage): string {
   if (page.source === "structure") return "Excel-Seitenstruktur (Briefing der Redaktion)";
+  if (page.source === "upload") {
+    return page.page_role
+      ? `Bestehender Text ${UPLOAD_SOURCE_WORDING} mit Briefing aus der Excel-Seitenstruktur`
+      : `Bestehender Text ${UPLOAD_SOURCE_WORDING}; kein Briefing, Keywords und Fragen werden hier erarbeitet`;
+  }
   // A crawl page that a Seitenstruktur matched („Verbesserung“): only the Excel sets a role.
   if (page.source === "crawl" && page.page_role) {
     return "Bestehende Website (Crawl) mit Briefing aus der Excel-Seitenstruktur";
@@ -510,15 +519,16 @@ function sourceLine(page: ContentPipelinePage): string {
 export function pageBlock(context: ContentPipelineContext): string {
   const { page } = context;
   const standalone = page.source === "standalone";
+  const upload = page.source === "upload";
   const briefing = briefingLabel(page);
   const lines = [
     "## Seite",
     `Organisation: ${context.organisationName}`,
     `Seite: ${page.name}`,
     page.path ? `Pfad: ${page.path}` : "",
-    page.url ? `Live-URL: ${page.url}` : "",
+    page.url && !upload ? `Live-URL: ${page.url}` : "",
     `Quelle: ${sourceLine(page)}`,
-    `Rolle in der Struktur: ${page.page_role ? CONTENT_PAGE_ROLE_LABELS[page.page_role] : standalone ? "keine (eigenständige Seite)" : "keine (Crawl-Seite)"} · Ebene ${page.level} (0 = Startseite)`,
+    `Rolle in der Struktur: ${page.page_role ? CONTENT_PAGE_ROLE_LABELS[page.page_role] : standalone ? "keine (eigenständige Seite)" : upload ? "keine (Seite aus Word-Datei)" : "keine (Crawl-Seite)"} · Ebene ${page.level} (0 = Startseite)`,
     `Seitentyp: ${CONTENT_PAGE_TYPE_LABELS[page.page_type]}`,
     page.pillar_name ? `Hauptsilo (übergeordnete Seite): ${page.pillar_name}` : "",
     page.estimated_traffic != null ? `Geschätzter Traffic laut Excel: ${page.estimated_traffic}` : "",
@@ -542,7 +552,9 @@ export function pageBlock(context: ContentPipelineContext): string {
     context.existingText
       ? standalone
         ? `\n## Hochgeladenes Material (Briefing oder bisheriger Text, nur zur Orientierung)\nThema, Umfang, Begriffe, Aufbau. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten oder den Anmerkungen der Redaktion stehen – sonst sind sie unbelegt und bekommen [BITTE PRÜFEN: …].\n${clip(context.existingText, MAX_STANDALONE_MATERIAL_CHARS)}`
-        : `\n## Bisheriger Text der Seite (Live-Website, nur zur Orientierung)\nSo liest sich die Seite heute: Thema, Umfang, Begriffe. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_EXISTING_TEXT_CHARS)}`
+        : upload
+          ? `\n## Bisheriger Text der Seite (${UPLOAD_SOURCE_WORDING}; nur zur Orientierung)\nSo hat der Kunde die Seite bisher geschrieben: Thema, Umfang, Begriffe, Aufbau. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_STANDALONE_MATERIAL_CHARS)}`
+          : `\n## Bisheriger Text der Seite (Live-Website, nur zur Orientierung)\nSo liest sich die Seite heute: Thema, Umfang, Begriffe. Fakten daraus gelten nur, wenn sie auch in den Anbieterfakten stehen – sonst sind sie unbelegt.\n${clip(context.existingText, MAX_EXISTING_TEXT_CHARS)}`
       : "",
   ];
   return lines.filter(Boolean).join("\n");
@@ -813,6 +825,7 @@ export function stepSystem(instruction: string, settings: ContentTextSettings, e
 function analyse(context: ContentPipelineContext): ContentStepSpec {
   const { page } = context;
   const crawl = page.source === "crawl";
+  const upload = page.source === "upload";
   const standalone = page.source === "standalone";
   return {
     maxTokens: 6_000,
@@ -826,6 +839,8 @@ Keywords: ${
         ? `Das Hauptkeyword ${briefingLabel(page)} ist gesetzt – übernimm es wörtlich als main_keyword, nicht ersetzen, nicht umformulieren. Nebenkeywords ${briefingLabel(page)} übernehmen und um 2–5 passende Varianten ergänzen; kein Suchvolumen erfinden.`
         : crawl
           ? "Diese Seite kommt aus dem Crawl, ohne Briefing: Leite Haupt- und Nebenkeywords aus Seite, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab. Der bisherige Text ist nur Orientierung für Thema und Begriffe."
+          : upload
+            ? `Der bisherige Text dieser Seite kommt ${UPLOAD_SOURCE_WORDING}, ein Hauptkeyword ist nicht vorgegeben: Leite Haupt- und Nebenkeywords aus Seite, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab. Der bisherige Text ist nur Orientierung für Thema und Begriffe.`
           : standalone
             ? "Das Briefing nennt kein Hauptkeyword: Leite Haupt- und Nebenkeywords aus Seitenname, hochgeladenem Material, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab, 2–5 Wörter. Das Material ist nur Orientierung für Thema und Begriffe."
             : "Es gibt kein Hauptkeyword aus der Excel: leite es aus Seite, Leistung und Ort (nur aus den Fakten) ab, 2–5 Wörter."

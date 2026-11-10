@@ -49,11 +49,13 @@ import {
   type ContentStepSpec,
   type FaktencheckOutput,
   type TextOutput,
+  MAX_STANDALONE_MATERIAL_CHARS,
 } from "@/lib/dt/content/pipeline/prompts";
 import { readRephraseProgress, rephraseBlockCount, type RephraseProgress } from "@/lib/dt/content/pipeline/rephrase";
 import { runRephraseOnBlocks } from "@/lib/dt/content/pipeline/rephrase-runner";
 import {
   liveTextFailureMessage,
+  uploadTextFailureMessage,
   skippedStepPatch,
   stepPatchFor,
   type LiveTextImport,
@@ -83,6 +85,8 @@ import { loadContentStepPrompts } from "@/lib/dt/content/step-prompts";
 import { loadTexterPrompt } from "@/lib/dt/content/texter-prompt";
 import { loadContentTypePromptsForRun } from "@/lib/dt/content/type-prompts-db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
+import { loadPageTextUpload } from "@/lib/dt/content/text-uploads";
+import { uploadBlocksToMarkdown } from "@/lib/dt/content/upload-match";
 import { loadCrawledPageInput } from "@/lib/dt/text-tools/crawl-source";
 
 export type StepOutcome = {
@@ -105,6 +109,14 @@ export type StepOutcome = {
 
 /** How much of the live page's text the prompts see (pages taken over from the crawl). */
 const EXISTING_TEXT_MAX_CHARS = 6_000;
+/**
+ * How much of an uploaded Word text the prompts see. 6.000 characters (about 900 words) cut a
+ * normal service page in half; unlike the crawl text, which is page chrome plus body and only a
+ * hint, the Word file IS the page the customer wrote and the step improves. 30.000 covers a
+ * page of about 4.500 words whole and is the budget the standalone SEO tool already gives an
+ * uploaded text (`MAX_STANDALONE_MATERIAL_CHARS`); the ingest refuses files over 60.000.
+ */
+export const UPLOAD_EXISTING_TEXT_MAX_CHARS = MAX_STANDALONE_MATERIAL_CHARS;
 /** „Antworten einarbeiten“ with a model call starts only with this much of the job's budget left. */
 const ANSWERS_MIN_MS = 60_000;
 /** A second attempt inside one step (Vermenschlichung) needs this much of the budget left. */
@@ -118,8 +130,18 @@ const AKTUALITAET_RESEARCH_MAX_MS = 150_000;
  */
 const AKTUALITAET_WRITE_MIN_MS = 100_000;
 
-/** The current text of a page taken over from the crawl, or null (structure pages, no crawl row). */
-async function loadExistingText(service: SupabaseClient, page: ContentPageRow): Promise<string | null> {
+/**
+ * The text the page has today, or null (structure pages, no crawl row): for a page taken over
+ * from the crawl the stored text of the live page; for a page with an uploaded Word file that
+ * file's text with its headings as Markdown lines. An upload page never reads the crawl, also
+ * when the row carries a live URL.
+ */
+export async function loadExistingText(service: SupabaseClient, page: ContentPageRow): Promise<string | null> {
+  if (page.source === "upload") {
+    const upload = await loadPageTextUpload(service, page);
+    const markdown = upload ? uploadBlocksToMarkdown(upload.blocks).trim() : "";
+    return markdown ? markdown.slice(0, UPLOAD_EXISTING_TEXT_MAX_CHARS) : null;
+  }
   if (!page.source_url) return null;
   const { data, error } = await service
     .from("dt_site_pages")
@@ -632,7 +654,8 @@ type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 /**
  * SEO switched off on a crawl page: the live page as the text tools read it (live HTML with
- * headings, else the stored crawl text). Any failure is final for this attempt: the page
+ * headings, else the stored crawl text). On a page with an uploaded Word file: that file's
+ * sections, no fetch and no website needed. Any failure is final for this attempt: the page
  * pauses with the reason instead of going on without a text.
  */
 async function loadLiveText(
@@ -640,6 +663,16 @@ async function loadLiveText(
   page: ContentPageRow,
   fetchImpl: FetchLike | undefined,
 ): Promise<LiveTextImport> {
+  if (page.source === "upload") {
+    const upload = await loadPageTextUpload(service, page);
+    if (!upload) throw new ContentLlmError(uploadTextFailureMessage("Zur Seite gibt es keine lesbare Word-Datei (mehr)"), false);
+    return {
+      source: "upload",
+      url: null,
+      file: upload.file_name,
+      ingested: { blocks: upload.blocks, title: upload.title, metaDescription: upload.meta_description },
+    };
+  }
   const allowed = contentStepSkippable(page, "seo");
   if (!allowed.ok || !page.source_url) {
     throw new ContentLlmError(liveTextFailureMessage("Die Seite stammt nicht (mehr) aus dem Crawl der Website"), false);

@@ -232,7 +232,7 @@ export async function loadContentLocalSources(
   supabase: SupabaseClient,
   organisationId: string,
 ): Promise<ContentLocalSources> {
-  const [anbieter, avatars, { data: structure }, pages, crawl] = await Promise.all([
+  const [anbieter, avatars, { data: structure }, pages, crawl, textUploads] = await Promise.all([
     loadContentAnbieterSources(supabase, organisationId),
     loadContentAvatarOptions(supabase, organisationId),
     supabase
@@ -242,6 +242,7 @@ export async function loadContentLocalSources(
       .maybeSingle(),
     countContentPages(supabase, organisationId),
     loadContentCrawlSummary(supabase, organisationId),
+    countTextUploads(supabase, organisationId),
   ]);
   return {
     anbieter: anbieterSummary(anbieter),
@@ -255,7 +256,17 @@ export async function loadContentLocalSources(
       : null,
     crawl,
     pages,
+    textUploads,
   };
+}
+
+/** Word files under „Texte hochladen“; 0 on any error (the table is missing before its migration). */
+async function countTextUploads(supabase: SupabaseClient, organisationId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from("dt_content_text_uploads")
+    .select("id", { count: "exact", head: true })
+    .eq("organisation_id", organisationId);
+  return error ? 0 : (count ?? 0);
 }
 
 async function countContentPages(
@@ -271,9 +282,10 @@ async function countContentPages(
     if (isMissingContentTableError(error) || isMissingContentColumnError(error)) {
       throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
     }
-    return { total: 0, structure: 0, crawl: 0 };
+    return { total: 0, structure: 0, crawl: 0, upload: 0 };
   }
   const rows = data ?? [];
   const crawl = rows.filter((row) => row.source === "crawl").length;
-  return { total: rows.length, structure: rows.length - crawl, crawl };
+  const upload = rows.filter((row) => row.source === "upload").length;
+  return { total: rows.length, structure: rows.length - crawl - upload, crawl, upload };
 }

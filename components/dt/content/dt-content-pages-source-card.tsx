@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, FilePlus2, FileSpreadsheet, Globe, Loader2, Upload } from "lucide-react";
+import { ArrowRight, FilePlus2, FileSpreadsheet, FileText, Globe, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
+import { DtContentTextUploads } from "@/components/dt/content/dt-content-text-uploads";
 import { formatContentDate } from "@/lib/dt/content/presentation";
 import {
   CONTENT_STRUCTURE_FILE_ACCEPT,
@@ -22,9 +23,13 @@ import type {
   ContentStructureCreateResult,
   ContentStructurePlanResult,
   ContentStructureUploadResult,
+  ContentTextUploadsResult,
 } from "@/lib/dt/content/types";
 
 export type ContentPagesMode = "structure" | "crawl";
+
+/** Where „Verbesserung“ takes the existing texts from: the crawl of the live site, or uploaded Word files. */
+export type ContentImprovementSource = "crawl" | "upload";
 
 const CRAWL_POLL_MS = 5_000;
 
@@ -48,8 +53,8 @@ const MODES: Array<{
   {
     id: "crawl",
     title: "Verbesserung",
-    when: "Bestehende Website überarbeiten",
-    text: "Website crawlen und die Seitenstruktur hochladen. Seiten, die es auf der Website noch nicht gibt, können angelegt werden.",
+    when: "Bestehende Texte überarbeiten",
+    text: "Website crawlen oder die vorhandenen Texte als Word-Dateien hochladen, dazu die Seitenstruktur. Seiten ohne bisherigen Text können angelegt werden.",
     icon: Globe,
   },
 ];
@@ -68,10 +73,45 @@ function readStoredMode(organisationId: string): ContentPagesMode | null {
 }
 
 /** Without a stored choice: the mode that already has pages, Excel otherwise. */
-export function inferContentPagesMode(local: Pick<ContentLocalSources, "structure" | "pages"> | null): ContentPagesMode {
+export function inferContentPagesMode(
+  local: (Pick<ContentLocalSources, "structure" | "pages"> & Partial<Pick<ContentLocalSources, "textUploads">>) | null,
+): ContentPagesMode {
   if (!local) return "structure";
+  // Pages from Word files (or files waiting for their takeover) only exist under „Verbesserung“.
+  if (local.pages.upload > 0 || (local.textUploads ?? 0) > 0) return "crawl";
   if (local.pages.crawl > 0 && local.pages.structure === 0 && !local.structure) return "crawl";
   return "structure";
+}
+
+const IMPROVEMENT_SOURCES: Array<{ id: ContentImprovementSource; title: string; text: string; icon: typeof Globe }> = [
+  { id: "crawl", title: "Website crawlen", text: "Die Website ist live: Ihre Seiten kommen aus dem Crawl.", icon: Globe },
+  {
+    id: "upload",
+    title: "Texte hochladen",
+    text: "Noch keine Website: je Seite eine Word-Datei, der Dateiname ist der Seitenname.",
+    icon: FileText,
+  },
+];
+
+function improvementStorageKey(organisationId: string): string {
+  return `dt-content-improvement-source:${organisationId}`;
+}
+
+function readStoredImprovementSource(organisationId: string): ContentImprovementSource | null {
+  try {
+    const raw = window.localStorage.getItem(improvementStorageKey(organisationId));
+    return raw === "crawl" || raw === "upload" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Without a stored choice: „Texte hochladen“ when upload pages (or uploaded files) exist, else „Website crawlen“. */
+export function inferContentImprovementSource(
+  local: (Pick<ContentLocalSources, "pages"> & Partial<Pick<ContentLocalSources, "textUploads">>) | null,
+): ContentImprovementSource {
+  if (!local) return "crawl";
+  return local.pages.upload > 0 || (local.textUploads ?? 0) > 0 ? "upload" : "crawl";
 }
 
 function pagesWord(n: number): string {
@@ -86,24 +126,31 @@ function StructurePlanList(props: {
   plan: ContentStructurePlanResult;
   creating: boolean;
   onCreate: () => void;
+  /** „Texte hochladen“: the listed pages are the ones without a Word file. */
+  variant?: ContentImprovementSource;
 }) {
   const { plan } = props;
   if (!plan.structure) return null;
   const empty = plan.missing.length === 0;
+  const upload = props.variant === "upload";
   return (
     <div className="grid gap-2 border-t border-sbkm-navy/8 pt-3 dark:border-white/8" data-testid="content-structure-plan">
       {empty ? (
         <p className="text-xs font-semibold text-sbkm-navy dark:text-white">
-          {plan.crawled
-            ? "Alle Seiten der Seitenstruktur gibt es bereits auf der Website."
-            : "Alle Seiten der Seitenstruktur stehen bereits in der Tabelle."}
+          {upload
+            ? "Alle Seiten der Seitenstruktur haben eine Word-Datei oder stehen bereits in der Tabelle."
+            : plan.crawled
+              ? "Alle Seiten der Seitenstruktur gibt es bereits auf der Website."
+              : "Alle Seiten der Seitenstruktur stehen bereits in der Tabelle."}
         </p>
       ) : (
         <>
           <p className="text-xs font-semibold text-sbkm-navy dark:text-white">
-            {plan.crawled
-              ? "Diese Seiten stehen in der Seitenstruktur, gibt es auf der Website aber noch nicht."
-              : "Noch kein Crawl. Diese Seiten sind in der Seitenstruktur und können neu angelegt werden."}
+            {upload
+              ? "Diese Seiten der Seitenstruktur haben keine Word-Datei. Sie können angelegt werden und werden dann neu geschrieben."
+              : plan.crawled
+                ? "Diese Seiten stehen in der Seitenstruktur, gibt es auf der Website aber noch nicht."
+                : "Noch kein Crawl. Diese Seiten sind in der Seitenstruktur und können neu angelegt werden."}
           </p>
           <ul className="grid max-h-64 gap-1 overflow-y-auto rounded-lg border border-sbkm-navy/8 bg-white/70 p-2 text-xs scrollbar-subtle dark:border-white/8 dark:bg-white/[0.04]">
             {plan.missing.map((page) => (
@@ -149,6 +196,8 @@ export function DtContentPagesSourceCard(props: {
   const [crawlBusy, setCrawlBusy] = useState<"start" | "import" | null>(null);
   const [plan, setPlan] = useState<ContentStructurePlanResult | null>(null);
   const [creating, setCreating] = useState(false);
+  const [improvement, setImprovement] = useState<ContentImprovementSource | null>(null);
+  const [textUploads, setTextUploads] = useState<ContentTextUploadsResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -160,6 +209,26 @@ export function DtContentPagesSourceCard(props: {
       setMode(inferContentPagesMode(local));
     }
   }, [mode, organisationId, local]);
+
+  useEffect(() => {
+    if (improvement) return;
+    const stored = readStoredImprovementSource(organisationId);
+    if (stored) {
+      setImprovement(stored);
+    } else if (local) {
+      setImprovement(inferContentImprovementSource(local));
+    }
+  }, [improvement, organisationId, local]);
+
+  /** Switching only changes what is shown: crawl pages, Word files and rows all stay. */
+  function chooseImprovement(next: ContentImprovementSource) {
+    setImprovement(next);
+    try {
+      window.localStorage.setItem(improvementStorageKey(organisationId), next);
+    } catch {
+      /* private mode: the choice just does not stick */
+    }
+  }
 
   function chooseMode(next: ContentPagesMode) {
     setMode(next);
@@ -196,18 +265,21 @@ export function DtContentPagesSourceCard(props: {
     void loadPlan();
   }, [mode, loadPlan, structureStamp, pageTotal, crawlStamp]);
 
-  useEffect(() => {
-    if (mode !== "crawl") return;
-    void loadCrawl();
-  }, [mode, loadCrawl]);
+  const crawlShown = mode === "crawl" && improvement === "crawl";
+  const uploadShown = mode === "crawl" && improvement === "upload";
 
   useEffect(() => {
-    if (mode !== "crawl" || !crawlActive) return;
+    if (!crawlShown) return;
+    void loadCrawl();
+  }, [crawlShown, loadCrawl]);
+
+  useEffect(() => {
+    if (!crawlShown || !crawlActive) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadCrawl();
     }, CRAWL_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [mode, crawlActive, loadCrawl]);
+  }, [crawlShown, crawlActive, loadCrawl]);
 
   /**
    * Excel rows go to `/api/dt/content/structure`, which keeps every briefing column on the
@@ -234,8 +306,8 @@ export function DtContentPagesSourceCard(props: {
         const parts = [
           `${pagesWord(d.pages)} in der Datei`,
           d.updated > 0 ? `${d.updated} vorhandene mit Briefing aktualisiert` : "keine vorhandene Seite getroffen",
-          missing > 0 ? `${missing} noch nicht auf der Website` : "",
-          d.plan && d.plan.on_site > 0 ? `${d.plan.on_site} im Crawl, noch nicht übernommen` : "",
+          uploadShown ? "Word-Dateien werden neu zugeordnet" : missing > 0 ? `${missing} noch nicht auf der Website` : "",
+          !uploadShown && d.plan && d.plan.on_site > 0 ? `${d.plan.on_site} im Crawl, noch nicht übernommen` : "",
         ].filter(Boolean);
         toast.success(`Seitenstruktur „${payload.filename}“ gespeichert`, { description: parts.join(" · ") });
         props.onChanged(d.overview);
@@ -260,8 +332,17 @@ export function DtContentPagesSourceCard(props: {
     }
   }
 
+  /**
+   * „Texte hochladen“: pages with an assigned Word file come into the table through
+   * „Zugeordnete Seiten übernehmen“, so the list of pages to write from scratch leaves them out.
+   */
+  const assignedSlugs = new Set((textUploads?.uploads ?? []).map((u) => u.structure?.slug).filter((slug): slug is string => Boolean(slug)));
+  const shownPlan: ContentStructurePlanResult | null =
+    plan && uploadShown ? { ...plan, missing: plan.missing.filter((page) => !assignedSlugs.has(page.slug)) } : plan;
+
   /** „Diese Seiten anlegen“: exactly the listed pages become rows of the table. */
   async function createMissingPages() {
+    const plan = shownPlan;
     if (!plan || plan.missing.length === 0) return;
     setCreating(true);
     try {
@@ -345,7 +426,7 @@ export function DtContentPagesSourceCard(props: {
           {MODES.map((option) => {
             const active = mode === option.id;
             const Icon = option.icon;
-            const count = option.id === "structure" ? local?.pages.structure : local?.pages.crawl;
+            const count = option.id === "structure" ? local?.pages.structure : local ? local.pages.crawl + local.pages.upload : 0;
             return (
               <button
                 key={option.id}
@@ -436,6 +517,42 @@ export function DtContentPagesSourceCard(props: {
         ) : null}
 
         {mode === "crawl" ? (
+          <div role="radiogroup" aria-label="Quelle der bisherigen Texte wählen" className="grid gap-2 sm:grid-cols-2">
+            {IMPROVEMENT_SOURCES.map((option) => {
+              const active = improvement === option.id;
+              const Icon = option.icon;
+              const count = option.id === "crawl" ? local?.pages.crawl : local?.pages.upload;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => chooseImprovement(option.id)}
+                  className={cn(
+                    "grid gap-1 rounded-xl border px-3.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45",
+                    active
+                      ? "border-sbkm-mint bg-sbkm-mint/[0.12] dark:border-sbkm-mint/70 dark:bg-sbkm-mint/[0.08]"
+                      : "border-sbkm-navy/10 bg-white/60 hover:border-sbkm-navy/25 dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/25",
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon className={cn("size-4 shrink-0", active ? "text-sbkm-navy dark:text-sbkm-mint" : "text-sbkm-ink-500 dark:text-white/55")} aria-hidden />
+                    <span className="text-sm font-semibold text-sbkm-navy dark:text-white">{option.title}</span>
+                    {count ? (
+                      <span className="ml-auto rounded-pill bg-white/70 px-2 py-0.5 text-[11px] font-bold tabular-nums text-sbkm-navy dark:bg-white/10 dark:text-white">
+                        {pagesWord(count)}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/65">{option.text}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {crawlShown ? (
           <div className="grid gap-3 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-4 text-sm dark:border-white/8 dark:bg-white/[0.03]">
             {crawlError ? (
               <p className="text-xs text-red-700 dark:text-red-300">{crawlError}</p>
@@ -513,7 +630,8 @@ export function DtContentPagesSourceCard(props: {
           </div>
         ) : null}
 
-        {mode === "crawl" ? (
+        {/* The Seitenstruktur upload is the same for both sources of „Verbesserung“. */}
+        {crawlShown || uploadShown ? (
           <div className="grid gap-3 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-4 text-sm dark:border-white/8 dark:bg-white/[0.03]">
             <p className="text-xs text-sbkm-ink-600 dark:text-white/65">
               {props.loading && !local ? (
@@ -543,12 +661,39 @@ export function DtContentPagesSourceCard(props: {
               </Link>
             </div>
             <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-              {CONTENT_STRUCTURE_FILE_HINT} Seiten, die es schon gibt (in der Tabelle oder im Crawl), bekommen Seitentyp,
-              Hauptsilo, Keywords, H1-Optionen, Nutzerfragen, KI-Prompt und Linkziele aus der Datei; ihr Text und die Live-URL
-              bleiben. Gecrawlte Seiten, die nicht in der Datei stehen, bleiben in der Tabelle. Neue Seiten entstehen nur über
-              „Diese Seiten anlegen“.
+              {uploadShown ? (
+                <>
+                  {CONTENT_STRUCTURE_FILE_HINT} Die Word-Dateien werden den Seiten dieser Datei über den Namen zugeordnet. Seiten, die es
+                  schon in der Tabelle gibt, bekommen Seitentyp, Hauptsilo, Keywords, H1-Optionen, Nutzerfragen, KI-Prompt und Linkziele aus
+                  der Datei; ihr Text bleibt. Neue Seiten entstehen nur über „Zugeordnete Seiten übernehmen“ und „Diese Seiten anlegen“.
+                </>
+              ) : (
+                <>
+                  {CONTENT_STRUCTURE_FILE_HINT} Seiten, die es schon gibt (in der Tabelle oder im Crawl), bekommen Seitentyp, Hauptsilo,
+                  Keywords, H1-Optionen, Nutzerfragen, KI-Prompt und Linkziele aus der Datei; ihr Text und die Live-URL bleiben. Gecrawlte
+                  Seiten, die nicht in der Datei stehen, bleiben in der Tabelle. Neue Seiten entstehen nur über „Diese Seiten anlegen“.
+                </>
+              )}
             </p>
-            {plan ? <StructurePlanList plan={plan} creating={creating} onCreate={() => void createMissingPages()} /> : null}
+            {crawlShown && shownPlan ? (
+              <StructurePlanList plan={shownPlan} creating={creating} onCreate={() => void createMissingPages()} />
+            ) : null}
+          </div>
+        ) : null}
+
+        {uploadShown ? (
+          <DtContentTextUploads
+            organisationId={organisationId}
+            refreshKey={`${structureStamp ?? ""}|${pageTotal ?? ""}`}
+            onLoaded={setTextUploads}
+            onChanged={props.onChanged}
+          />
+        ) : null}
+
+        {uploadShown && shownPlan?.structure ? (
+          <div className="grid gap-3 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-4 text-sm dark:border-white/8 dark:bg-white/[0.03]">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/60">Seiten ohne Word-Datei</h3>
+            <StructurePlanList plan={shownPlan} creating={creating} onCreate={() => void createMissingPages()} variant="upload" />
           </div>
         ) : null}
       </div>

@@ -183,6 +183,8 @@ const STEP_COLUMNS =
   "id, page_id, organisation_id, step, name, status, output, model, input_tokens, output_tokens, cost_eur, error, started_at, finished_at, approved_by, approved_at";
 
 const MAX_PAGES = 300;
+/** The page limit of the Texte table, for the takeover of uploaded Word texts. */
+export const CONTENT_MAX_PAGES = MAX_PAGES;
 /** How many crawled rows are read when taking pages over; the plan keeps the first MAX_PAGES. */
 const MAX_CRAWLED_ROWS = 5_000;
 
@@ -337,10 +339,15 @@ export function normalizeKeywords(value: unknown): ContentPageKeywords | null {
   return { main, secondary: asArray<unknown>(raw.secondary).map(keyword).filter((k): k is NonNullable<typeof k> => Boolean(k)) };
 }
 
+/** `source` as stored; anything unknown counts as a structure page. */
+export function contentPageSourceOf(value: unknown): ContentPageSource {
+  return value === "crawl" || value === "upload" ? value : "structure";
+}
+
 function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
   return {
     ...(raw as unknown as ContentPageRow),
-    source: raw.source === "crawl" ? "crawl" : "structure",
+    source: contentPageSourceOf(raw.source),
     source_url: typeof raw.source_url === "string" && raw.source_url ? raw.source_url : null,
     crawled_at: typeof raw.crawled_at === "string" ? raw.crawled_at : null,
     page_role: isContentPageRole(raw.page_role) ? raw.page_role : null,
@@ -618,6 +625,18 @@ export async function upsertContentPagesFromBriefing(
   }));
   const { error } = await service.from("dt_content_pages").upsert(rows, { onConflict: "organisation_id,slug" });
   if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht angelegt werden"));
+  // The upsert writes „structure“ onto every matched row. A row that uses an uploaded Word text
+  // (`text_upload_id`) stays an upload page: its file is its existing text, whatever briefs it.
+  // Before the migration 20261110 the column does not exist and there is no such row.
+  const { error: keepError } = await service
+    .from("dt_content_pages")
+    .update({ source: "upload" })
+    .eq("organisation_id", organisationId)
+    .not("text_upload_id", "is", null)
+    .neq("source", "upload");
+  if (keepError && !isMissingContentColumnError(keepError)) {
+    throw new Error(contentDbErrorMessage(keepError, "Seiten konnten nicht aktualisiert werden"));
+  }
   return rows.length;
 }
 
@@ -713,7 +732,7 @@ export function hasExcelBriefing(page: Pick<ContentPageRow, "source"> & Partial<
 export function canEditContentPageType(
   page: Pick<ContentPageRow, "source"> & Partial<Pick<ContentPageRow, "page_role">>,
 ): boolean {
-  return page.source === "crawl" || hasExcelBriefing(page);
+  return page.source === "crawl" || page.source === "upload" || hasExcelBriefing(page);
 }
 
 /** Why the type cannot be changed right now (status and German message), or null when it can. */
@@ -743,7 +762,7 @@ export const CONTENT_SKIP_RUNNING_MESSAGE = "Die Seite läuft gerade – erst st
 /**
  * The new list of switched-off steps for „Schritte“ in the page window, or why it is refused:
  * not while the page runs (409, like the Seitentyp), only keys that can be switched off, SEO
- * only on a crawl page. A key already on the list may stay (a page that lost its live URL can
+ * only on a page with an existing text (crawl or uploaded Word file). A key already on the list may stay (a page that lost its live URL can
  * still switch other steps). Stored deduplicated in step order.
  */
 export function planContentSkipSteps(
@@ -836,7 +855,7 @@ export async function loadContentPageOutline(service: SupabaseClient, organisati
     name: String(raw.name ?? ""),
     path: nullableText(raw.path),
     level: Number(raw.level ?? 0) || 0,
-    source: raw.source === "crawl" ? "crawl" : "structure",
+    source: contentPageSourceOf(raw.source),
     page_role: isContentPageRole(raw.page_role) ? raw.page_role : null,
     page_type: isContentPageType(raw.page_type) ? raw.page_type : null,
     pillar_name: nullableText(raw.pillar_name),
@@ -1335,10 +1354,10 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
   }
 }
 
-/** Whether a skipped row took over the live text (SEO switched off on a crawl page). */
-function tookLiveText(row: Pick<ContentStepRow, "status" | "output"> | undefined): boolean {
+/** Whether a skipped row took over an existing text (SEO switched off): the live page's or the Word file's. */
+function tookExistingText(row: Pick<ContentStepRow, "status" | "output"> | undefined, flag: "live_text" | "upload_text"): boolean {
   const output = row?.output;
-  return row?.status === "skipped" && Boolean(output) && typeof output === "object" && (output as { live_text?: unknown }).live_text === true;
+  return row?.status === "skipped" && Boolean(output) && typeof output === "object" && (output as Record<string, unknown>)[flag] === true;
 }
 
 /**
@@ -1364,7 +1383,8 @@ export function stepList(
       skippable: skippable.ok,
       reason_locked: skippable.reason,
       skipped_by_user: contentStepSkippedByUser(page.skip_steps, def.step),
-      live_text: tookLiveText(row),
+      live_text: tookExistingText(row, "live_text"),
+      upload_text: tookExistingText(row, "upload_text"),
     };
   });
 }
