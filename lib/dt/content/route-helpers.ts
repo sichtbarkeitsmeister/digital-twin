@@ -160,6 +160,9 @@ export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "c
     const stand = deDate(local.crawl.lastCrawledAt);
     parts.push(`${pagesWord(local.pages.crawl)} aus dem Crawl${stand ? ` (Stand ${stand})` : ""}`);
   }
+  if (local.pages.upload > 0) {
+    parts.push(`${pagesWord(local.pages.upload)} aus hochgeladenen Word-Dateien`);
+  }
   if (parts.length > 0) return { ok: true, hint: `${parts.join(" · ")}.` };
 
   if (local.structure) {
@@ -177,7 +180,7 @@ export function describeSeiten(local: Pick<ContentLocalSources, "structure" | "c
   }
   return {
     ok: false,
-    hint: "Noch keine Seiten – unter „Seitenquelle“ die Excel-Seitenstruktur hochladen oder die Website crawlen.",
+    hint: "Noch keine Seiten – unter „Seitenquelle“ die Excel-Seitenstruktur hochladen, die Website crawlen oder die Texte als Word-Dateien hochladen.",
   };
 }
 

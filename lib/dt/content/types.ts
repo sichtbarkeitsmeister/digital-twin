@@ -9,6 +9,7 @@ import type { ContentTextSettings } from "@/lib/dt/content/mapping";
 import type { ContentPageRole, ContentPageType } from "@/lib/dt/content/page-types";
 import type { ContentSkippableStepKey, ContentStepKey } from "@/lib/dt/content/pipeline/steps";
 import type { ContentTypePrompts } from "@/lib/dt/content/type-prompts";
+import type { TextUploadStatus } from "@/lib/dt/content/upload-match";
 
 export type ContentPageState =
   | "nicht_begonnen"
@@ -17,8 +18,11 @@ export type ContentPageState =
   | "braucht_sie"
   | "fertig";
 
-/** Where a page row came from: the uploaded Seitenstruktur or the crawl of the live site. */
-export type ContentPageSource = "structure" | "crawl";
+/**
+ * Where a page row came from: the uploaded Seitenstruktur, the crawl of the live site, or a
+ * Word file with the page's existing text („Verbesserung → Texte hochladen“, website not live yet).
+ */
+export type ContentPageSource = "structure" | "crawl" | "upload";
 
 export type ContentReadinessCheckId = "anbieter" | "avatar" | "structure";
 
@@ -212,14 +216,16 @@ export type ContentStep = {
   status: ContentStepStatus | string;
   exists: boolean;
   cost_eur: number;
-  /** The editor may switch this step off for this page (never Analyse and Endabnahme; SEO only on crawl pages). */
+  /** The editor may switch this step off for this page (never Analyse and Endabnahme; SEO only on crawl and upload pages). */
   skippable: boolean;
-  /** Why the switch is locked („Läuft immer …“, „Nur bei Seiten von der Website …“); null when it is not. */
+  /** Why the switch is locked („Läuft immer …“, „Nur bei Seiten mit vorhandenem Text …“); null when it is not. */
   reason_locked: string | null;
   /** The step is on the page's `skip_steps`: the switch shows it off. Not the row status (migration 20261027 also wrote „skipped“). */
   skipped_by_user: boolean;
   /** Skipped SEO on a crawl page: the live text became the starting text („Übersprungen – Live-Text übernommen“). */
   live_text: boolean;
+  /** Skipped SEO on an upload page: the text of the Word file became the starting text. */
+  upload_text: boolean;
 };
 
 export type ContentActionKind =
@@ -344,7 +350,9 @@ export type ContentLocalSources = {
   /** Crawl of the existing website: configured URL and what `dt_site_pages` holds. */
   crawl: { websiteUrl: string | null; pageCount: number; lastCrawledAt: string | null };
   /** Rows in `dt_content_pages`, split by where they came from. */
-  pages: { total: number; structure: number; crawl: number };
+  pages: { total: number; structure: number; crawl: number; upload: number };
+  /** Word files stored under „Texte hochladen“ (0 while the migration is missing). */
+  textUploads: number;
 };
 
 /** `GET /api/dt/content/crawl`: the crawler mode of „Seiten“. */
@@ -376,7 +384,7 @@ export type ContentResetResult = {
 };
 
 /** Where the Seitenstruktur was uploaded: „Neue Website“ (structure) or „Verbesserung“ (crawl). */
-export type ContentStructureMode = ContentPageSource;
+export type ContentStructureMode = "structure" | "crawl";
 
 /** One page of the Seitenstruktur that the website does not have yet („Verbesserung“). */
 export type ContentStructurePlanPage = {
@@ -546,4 +554,58 @@ export type ContentAnswersBody = {
   answers: Array<{ id: string; action: "answer" | "drop"; answer?: string | null }>;
   /** „Antworten einarbeiten & weiter“: every question decided, the run goes on. */
   submit?: boolean;
+};
+
+// --- „Verbesserung → Texte hochladen“ (Word files) ---------------------------------------------
+
+/** One stored Word file in the table „Hochgeladene Texte“. */
+export type ContentTextUploadView = {
+  id: string;
+  file_name: string;
+  status: TextUploadStatus;
+  /** „Fehler: …“, the pages of „mehrdeutig“, the other file of „doppelt“, „Seite nicht mehr in der Seitenstruktur“. */
+  note: string | null;
+  /** The assigned page of the Seitenstruktur. */
+  structure: { slug: string; name: string; path: string | null } | null;
+  sections: number;
+  chars: number;
+  uploaded_at: string | null;
+  /** The row of the Texte table that uses this file (after „Zugeordnete Seiten übernehmen“). */
+  page: { slug: string; name: string; state: ContentPageState } | null;
+};
+
+/** `GET /api/dt/content/uploads`. */
+export type ContentTextUploadsResult = {
+  /** False while the migration is missing; `hint` names the file. */
+  supported: boolean;
+  hint: string | null;
+  /** Whether a Seitenstruktur is uploaded (without one the files wait). */
+  has_structure: boolean;
+  uploads: ContentTextUploadView[];
+  /** Pages of the Seitenstruktur that have no file yet (the choices of the manual assignment). */
+  free_pages: Array<{ slug: string; name: string; path: string | null }>;
+  summary: {
+    assigned: number;
+    unassigned: number;
+    /** Pages of the Seitenstruktur with a text to write („Nicht bearbeiten“ excluded) and no file. */
+    pages_without_text: number;
+    /** Assigned files that „Zugeordnete Seiten übernehmen“ would still bring into the table. */
+    pending: number;
+  };
+};
+
+/** `POST /api/dt/content/uploads`: one Word file read and stored (also when it could not be read: `error`). */
+export type ContentTextUploadResult = { id: string; file_name: string; replaced: boolean; error: string | null };
+
+/** `POST /api/dt/content/uploads/takeover`: „Zugeordnete Seiten übernehmen“. */
+export type ContentTextUploadTakeoverResult = {
+  created: number;
+  attached: number;
+  /** Attached rows that had started already: state and text stay, the file counts from the next run or after „Zurücksetzen“. */
+  kept_started: number;
+  already: number;
+  over_limit: number;
+  skipped: Array<{ file: string; reason: string }>;
+  uploads: ContentTextUploadsResult;
+  overview: ContentOverview;
 };

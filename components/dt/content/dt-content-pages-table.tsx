@@ -169,6 +169,13 @@ export function DtContentPagesTable(props: {
                         >
                           Crawl
                         </span>
+                      ) : page.source === "upload" ? (
+                        <span
+                          className="shrink-0 rounded-pill bg-sbkm-navy/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60"
+                          title="Bisheriger Text aus der hochgeladenen Word-Datei (Website noch nicht live)"
+                        >
+                          Word
+                        </span>
                       ) : null}
                     </span>
                     {page.source_url || page.path ? (

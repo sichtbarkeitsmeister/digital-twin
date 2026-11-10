@@ -224,7 +224,7 @@ const skipWith = (fetchImpl: typeof liveFetch | typeof deadFetch) => (
   }
   assert.deepEqual(contentStepSkippable(crawl, "seo"), { ok: true, reason: null }, "SEO on a crawl page");
   const seoStructure = contentStepSkippable(structure, "seo");
-  assert.ok(!seoStructure.ok && seoStructure.reason === "Nur bei Seiten von der Website: dann wird der aktuelle Live-Text übernommen");
+  assert.ok(!seoStructure.ok && seoStructure.reason === "Nur bei Seiten mit vorhandenem Text (von der Website oder aus einer Word-Datei): dann wird dieser Text übernommen");
   assert.ok(!contentStepSkippable({ source: "crawl", source_url: null }, "seo").ok, "a crawl row without live URL has no live text");
   assert.ok(!contentStepSkippable({ source: "structure", source_url: LIVE_URL }, "seo").ok, "a structure page with an attached URL is no crawl page");
   for (const key of ["faktencheck", "geo", "aktualitaet", "hormozi", "vermenschlichung", "lektorat", "watermark"]) {
@@ -648,10 +648,10 @@ async function actionTests() {
   const by = (key: string) => review.steps.find((s) => s.key === key)!;
   assert.deepEqual([by("analyse").skippable, by("analyse").reason_locked?.startsWith("Läuft immer")], [false, true]);
   assert.deepEqual([by("endabnahme").skippable, by("endabnahme").skipped_by_user], [false, false]);
-  assert.deepEqual([by("seo").skippable, by("seo").reason_locked], [false, "Nur bei Seiten von der Website: dann wird der aktuelle Live-Text übernommen"]);
+  assert.deepEqual([by("seo").skippable, by("seo").reason_locked], [false, "Nur bei Seiten mit vorhandenem Text (von der Website oder aus einer Word-Datei): dann wird dieser Text übernommen"]);
   assert.deepEqual([by("geo").skippable, by("geo").skipped_by_user], [true, true]);
   assert.deepEqual([by("aktualitaet").status, by("aktualitaet").skipped_by_user, by("aktualitaet").live_text], ["skipped", false, false], "a migration-skipped row is no user choice");
-  assert.deepEqual(Object.keys(by("geo")).sort(), ["cost_eur", "exists", "key", "live_text", "name", "reason_locked", "skippable", "skipped_by_user", "status", "step"]);
+  assert.deepEqual(Object.keys(by("geo")).sort(), ["cost_eur", "exists", "key", "live_text", "name", "reason_locked", "skippable", "skipped_by_user", "status", "step", "upload_text"]);
 
   assert.equal(pageSummary(pageRow({ skip_steps: ["geo", "watermark"] })).skipped_count, 2);
   assert.equal(pageSummary(pageRow()).skipped_count, 0);
@@ -693,7 +693,7 @@ async function actionTests() {
     assert.ok(planContentSkipSteps({ ...crawl, state }, ["geo"]).ok, `allowed while ${state}`);
   }
   const seoStructure = planContentSkipSteps(structure, ["seo"]);
-  assert.ok(!seoStructure.ok && seoStructure.status === 400 && /^„SEO“ lässt sich für diese Seite nicht abschalten\. Nur bei Seiten von der Website/.test(seoStructure.message));
+  assert.ok(!seoStructure.ok && seoStructure.status === 400 && /^„SEO“ lässt sich für diese Seite nicht abschalten\. Nur bei Seiten mit vorhandenem Text/.test(seoStructure.message));
   assert.deepEqual(planContentSkipSteps(crawl, ["watermark", "seo", "seo", "geo"]), { ok: true, skipSteps: ["seo", "geo", "watermark"] }, "deduplicated, in step order");
   assert.deepEqual(planContentSkipSteps(crawl, []), { ok: true, skipSteps: [] }, "everything back on");
   assert.ok(planContentSkipSteps({ ...structure, skip_steps: ["seo"] }, ["seo", "geo"]).ok, "a page that lost its live URL may keep SEO on the list while other switches change");

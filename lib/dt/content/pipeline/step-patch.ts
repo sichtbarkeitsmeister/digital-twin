@@ -408,14 +408,23 @@ export type SkippedStepOutput = {
   skipped_by: "user";
   /** SEO on a crawl page: the live text became the starting text. */
   live_text?: true;
-  source?: "live" | "crawl";
+  /** SEO on a page with an uploaded Word file: the file's text became the starting text. */
+  upload_text?: true;
+  source?: "live" | "crawl" | "upload";
   url?: string;
+  /** Name of the Word file (`upload_text`). */
+  file?: string;
   /** Hormozi: the empty hero section was taken out of the text. */
   hero_removed?: true;
 };
 
-/** The live page as `loadCrawledPageInput` imported it (SEO switched off on a crawl page). */
-export type LiveTextImport = { source: "live" | "crawl"; url: string; ingested: Pick<IngestedText, "blocks" | "title" | "metaDescription"> };
+/**
+ * The text a skipped SEO starts from: the live page as `loadCrawledPageInput` imported it
+ * (crawl page), or the sections of the uploaded Word file (`source: "upload"`, no URL).
+ */
+export type LiveTextImport =
+  | { source: "live" | "crawl"; url: string; ingested: Pick<IngestedText, "blocks" | "title" | "metaDescription"> }
+  | { source: "upload"; url: null; file: string; ingested: Pick<IngestedText, "blocks" | "title" | "metaDescription"> };
 
 export const LIVE_TEXT_FAILURE_PREFIX = "Live-Text konnte nicht übernommen werden";
 
@@ -423,6 +432,14 @@ export const LIVE_TEXT_FAILURE_PREFIX = "Live-Text konnte nicht übernommen werd
 export function liveTextFailureMessage(reason: string): string {
   const detail = reason.trim().replace(/\.?$/, ".");
   return `${LIVE_TEXT_FAILURE_PREFIX}: ${detail} Bitte SEO wieder einschalten oder erneut crawlen.`;
+}
+
+export const UPLOAD_TEXT_FAILURE_PREFIX = "Text der Word-Datei konnte nicht übernommen werden";
+
+/** The same for a page with an uploaded Word file. */
+export function uploadTextFailureMessage(reason: string): string {
+  const detail = reason.trim().replace(/\.?$/, ".");
+  return `${UPLOAD_TEXT_FAILURE_PREFIX}: ${detail} Bitte SEO wieder einschalten oder die Datei unter „Texte hochladen“ erneut hochladen.`;
 }
 
 export type SkippedStepPatch = {
@@ -441,7 +458,7 @@ export type SkippedStepPatch = {
  * chunks, the Aktualitätsprüfung's research): its progress is dropped, its cost goes to the
  * page total instead of vanishing with the row.
  *
- *   - SEO: `live` becomes the page text, with the empty hero section after the H1 unless
+ *   - SEO: `live` (the live page, or the uploaded Word file) becomes the page text, with the empty hero section after the H1 unless
  *     Hormozi is off too, title and meta description when the import has them; then the
  *     placeholder check like after every text step. No usable text is an error, never an
  *     empty page.
@@ -463,14 +480,20 @@ export function skippedStepPatch(
     const live = options.live;
     if (!live) throw new ContentLlmError(liveTextFailureMessage("Die Seite hat keine Live-URL aus dem Crawl"), false);
     const blocks = page.skip_steps.includes("hormozi") ? [...live.ingested.blocks] : ensureHeroPlaceholder(live.ingested.blocks);
-    if (blocks.length === 0) throw new ContentLlmError(liveTextFailureMessage("Die Seite enthält keinen Text"), false);
+    if (blocks.length === 0) {
+      throw new ContentLlmError(
+        live.source === "upload" ? uploadTextFailureMessage("Die Datei enthält keinen Text") : liveTextFailureMessage("Die Seite enthält keinen Text"),
+        false,
+      );
+    }
     Object.assign(
       pagePatch,
       textPatch({ blocks, title: live.ingested.title || page.title, meta_description: live.ingested.metaDescription || page.meta_description }),
     );
     // The live text's placeholders are collected like after any text step; nothing stops here.
     collectQuestions(pagePatch, savedBlocks(pagePatch), { step: def.step, current: { questions: page.questions, knowledge: options.knowledge } });
-    Object.assign(output, { live_text: true, source: live.source, url: live.url });
+    if (live.source === "upload") Object.assign(output, { upload_text: true, source: live.source, file: live.file });
+    else Object.assign(output, { live_text: true, source: live.source, url: live.url });
   } else if (def.key === "hormozi") {
     const blocks = parseBlocksFromHtml(page.html);
     const kept = blocks.filter((b) => !isEmptyHeroPlaceholder(b));

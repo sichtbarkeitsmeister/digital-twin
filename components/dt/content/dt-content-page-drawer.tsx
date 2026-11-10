@@ -580,7 +580,7 @@ export function DtContentPageDrawer(props: {
                                     "bg-sbkm-navy/[0.06] text-sbkm-ink-600 dark:bg-white/10 dark:text-white/60",
                                 )}
                               >
-                                {contentStepStatusLabel(s.status, { liveText: s.live_text })}
+                                {contentStepStatusLabel(s.status, { liveText: s.live_text, uploadText: s.upload_text })}
                               </span>
                               <span className="w-14 text-right tabular-nums text-sbkm-ink-600 dark:text-white/60">
                                 {s.cost_eur > 0 ? formatEur(s.cost_eur) : "—"}
@@ -601,7 +601,9 @@ export function DtContentPageDrawer(props: {
                             ? review.briefing.from_excel
                               ? "aus Crawl und Excel"
                               : "aus dem Crawl"
-                            : "aus der Excel"}
+                            : review.briefing.source === "upload"
+                              ? "aus Word-Datei und Excel"
+                              : "aus der Excel"}
                         </span>
                       </h3>
                       <DtSelect
@@ -668,7 +670,7 @@ export function DtContentPageDrawer(props: {
                             );
                           })}
                         </ul>
-                        {contentSkipWarnings(review.skip_steps).map((warning) => (
+                        {contentSkipWarnings(review.skip_steps, review.briefing.source).map((warning) => (
                           <p
                             key={warning}
                             className="flex gap-1.5 text-[11px] leading-snug text-orange-700 dark:text-orange-300"

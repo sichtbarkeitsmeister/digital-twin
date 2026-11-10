@@ -104,15 +104,16 @@ export function isContentSkippableStepKey(value: unknown): value is ContentSkipp
 export const CONTENT_SKIP_LOCKED_REASONS = {
   analyse: "Läuft immer: SEO und GEO bauen auf den Keywords und Fragen der Analyse auf.",
   endabnahme: "Läuft immer: die Endabnahme ist die Kontrolle vor der Freigabe.",
-  seo: "Nur bei Seiten von der Website: dann wird der aktuelle Live-Text übernommen",
+  seo: "Nur bei Seiten mit vorhandenem Text (von der Website oder aus einer Word-Datei): dann wird dieser Text übernommen",
 } as const;
 
 export type ContentStepSkippable = { ok: true; reason: null } | { ok: false; reason: string };
 
 /**
  * Whether the editor may switch the step off for this page, and why not (German, shown at
- * the switch). SEO can be skipped only on a page taken over from the crawl: its live text
- * then becomes the starting text, so a page without a live URL would have no text at all.
+ * the switch). SEO can be skipped only on a page that has a text already: one taken over from
+ * the crawl (its live text becomes the starting text) or one with an uploaded Word file (the
+ * file's text does). Any other page would have no text at all.
  */
 export function contentStepSkippable(
   page: { source: string; source_url: string | null },
@@ -121,7 +122,7 @@ export function contentStepSkippable(
   if (key === "analyse") return { ok: false, reason: CONTENT_SKIP_LOCKED_REASONS.analyse };
   if (key === "endabnahme") return { ok: false, reason: CONTENT_SKIP_LOCKED_REASONS.endabnahme };
   if (!isContentSkippableStepKey(key)) return { ok: false, reason: `Unbekannter Schritt „${key}“.` };
-  if (key === "seo" && !(page.source === "crawl" && page.source_url)) {
+  if (key === "seo" && !((page.source === "crawl" && page.source_url) || page.source === "upload")) {
     return { ok: false, reason: CONTENT_SKIP_LOCKED_REASONS.seo };
   }
   return { ok: true, reason: null };

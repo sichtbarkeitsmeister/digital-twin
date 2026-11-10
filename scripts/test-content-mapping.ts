@@ -721,41 +721,42 @@ const readyFb = readinessFromLocal({
   avatarCount: 1,
   structure: { filename: "s.xlsx", uploadedAt: "2026-03-01T00:00:00Z", nodeCount: 4 },
   crawl: noCrawl,
-  pages: { total: 4, structure: 4, crawl: 0 },
+  pages: { total: 4, structure: 4, crawl: 0, upload: 0 },
+  textUploads: 0,
 });
 assert.equal(readyFb.ready, true, "Fragebogen alone satisfies the Anbieter check");
 assert.equal(readyFb.checks.find((c) => c.id === "structure")?.hint, "4 Seiten aus der Seitenstruktur „s.xlsx“.");
 assert.equal(
-  readinessFromLocal({ anbieter: null, avatarCount: 1, structure: null, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0 } }).checks[0]!.ok,
+  readinessFromLocal({ anbieter: null, avatarCount: 1, structure: null, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0, upload: 0 }, textUploads: 0 }).checks[0]!.ok,
   false,
 );
 const crawlLocal = {
   structure: null,
   crawl: { websiteUrl: "https://x.de", pageCount: 40, lastCrawledAt: "2026-10-07T10:00:00Z" },
-  pages: { total: 12, structure: 0, crawl: 12 },
+  pages: { total: 12, structure: 0, crawl: 12, upload: 0 },
 };
 assert.deepEqual(describeSeiten(crawlLocal), { ok: true, hint: "12 Seiten aus dem Crawl (Stand 7.10.2026)." });
 assert.deepEqual(
-  describeSeiten({ ...crawlLocal, structure: { filename: "s.xlsx", uploadedAt: null, nodeCount: 3 }, pages: { total: 15, structure: 3, crawl: 12 } }),
+  describeSeiten({ ...crawlLocal, structure: { filename: "s.xlsx", uploadedAt: null, nodeCount: 3 }, pages: { total: 15, structure: 3, crawl: 12, upload: 0 } }),
   { ok: true, hint: "3 Seiten aus der Seitenstruktur „s.xlsx“ · 12 Seiten aus dem Crawl (Stand 7.10.2026)." },
   "both sources can feed the table at once",
 );
-const justUploaded = describeSeiten({ structure: { filename: "s.xlsx", uploadedAt: null, nodeCount: 3 }, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0 } });
+const justUploaded = describeSeiten({ structure: { filename: "s.xlsx", uploadedAt: null, nodeCount: 3 }, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0, upload: 0 } });
 assert.equal(justUploaded.ok, true, "an upload counts before the table synced it");
 assert.match(justUploaded.hint, /Seiten werden übernommen/);
-const crawledOnly = describeSeiten({ ...crawlLocal, pages: { total: 0, structure: 0, crawl: 0 } });
+const crawledOnly = describeSeiten({ ...crawlLocal, pages: { total: 0, structure: 0, crawl: 0, upload: 0 } });
 assert.equal(crawledOnly.ok, false, "a crawl is not a page list until it is taken over");
 assert.equal(
   crawledOnly.hint,
   "40 Seiten gecrawlt – unter „Seitenquelle“ die Karte „Verbesserung“ wählen und auf „40 Seiten übernehmen“ klicken.",
 );
-const nothing = describeSeiten({ structure: null, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0 } });
+const nothing = describeSeiten({ structure: null, crawl: noCrawl, pages: { total: 0, structure: 0, crawl: 0, upload: 0 } });
 assert.equal(nothing.ok, false);
 assert.match(nothing.hint, /Excel-Seitenstruktur hochladen/);
 assert.match(nothing.hint, /Website crawlen/);
 assert.doesNotMatch(nothing.hint, /eintragen/, "the typed list is gone");
 assert.equal(
-  describeSeiten({ structure: null, crawl: noCrawl, pages: { total: 2, structure: 2, crawl: 0 } }).hint,
+  describeSeiten({ structure: null, crawl: noCrawl, pages: { total: 2, structure: 2, crawl: 0, upload: 0 } }).hint,
   "2 Seiten in der Tabelle.",
   "rows without a structure file (older manual pages) are still pages",
 );

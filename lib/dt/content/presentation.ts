@@ -36,8 +36,8 @@ export function contentActionLabel(kind: string): string | null {
   return CONTENT_ACTION_LABELS[kind as ContentActionKind] ?? null;
 }
 
-/** Status of a step row in „Details“; a skipped SEO that took over the live text says so. */
-export function contentStepStatusLabel(status: string, options: { liveText?: boolean } = {}): string {
+/** Status of a step row in „Details“; a skipped SEO that took over the live text or the Word file's text says so. */
+export function contentStepStatusLabel(status: string, options: { liveText?: boolean; uploadText?: boolean } = {}): string {
   switch (status) {
     case "done":
       return "Erledigt";
@@ -48,6 +48,7 @@ export function contentStepStatusLabel(status: string, options: { liveText?: boo
     case "error":
       return "Fehler";
     case "skipped":
+      if (options.uploadText) return "Übersprungen – Text der Word-Datei übernommen";
       return options.liveText ? "Übersprungen – Live-Text übernommen" : "Übersprungen";
     case "pending":
       return "Offen";
@@ -61,11 +62,15 @@ export const CONTENT_SKIP_NOTE =
   "Übersprungene Schritte kosten nichts; der Text geht unverändert an den nächsten Schritt. Änderungen gelten für Schritte, die noch nicht gelaufen sind.";
 
 /** Combinations of switched-off steps that leave a gap, as short orange lines under „Schritte“. */
-export function contentSkipWarnings(skipSteps: readonly string[]): string[] {
+export function contentSkipWarnings(skipSteps: readonly string[], source?: string): string[] {
   const off = new Set(skipSteps);
   const warnings: string[] = [];
   if (off.has("seo") && off.has("faktencheck")) {
-    warnings.push("Ohne Faktencheck werden Aussagen aus dem Live-Text nicht gegen die Anbieterfakten geprüft.");
+    warnings.push(
+      source === "upload"
+        ? "Ohne Faktencheck werden Aussagen aus der Word-Datei nicht gegen die Anbieterfakten geprüft."
+        : "Ohne Faktencheck werden Aussagen aus dem Live-Text nicht gegen die Anbieterfakten geprüft.",
+    );
   }
   if (off.has("geo") && !off.has("aktualitaet")) {
     warnings.push("Ohne GEO schickt die Aktualitätsprüfung nicht zurück; veraltete Abschnitte werden offene Punkte.");
