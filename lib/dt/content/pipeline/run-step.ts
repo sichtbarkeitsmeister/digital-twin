@@ -44,6 +44,7 @@ import {
 } from "@/lib/dt/content/pipeline/aktualitaet";
 import { ContentLlmError, callContentResearch, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import { extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { keepPendingPlaceholders } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { PAGE_FACTS_USAGE_MODE, emptyPageFacts, evaluationSkipReason, pageFactsFromCall, pageFactsPrompt } from "@/lib/dt/content/pipeline/page-facts";
 import { readPageFacts, withoutPageFacts, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import {
@@ -73,7 +74,7 @@ import {
   type ContentStepDefinition,
 } from "@/lib/dt/content/pipeline/steps";
 import { estimateCostEur, estimateWebSearchCostEur, roundEur } from "@/lib/dt/content/pricing";
-import { ContentTextLimitError, htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml } from "@/lib/dt/content/render";
+import { ContentTextLimitError, htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import {
   contentDbErrorMessage,
   contentStructureOutline,
@@ -211,7 +212,7 @@ async function loadContext(
   // Made before the Analyse and kept in its row whatever the row's status is.
   const pageFacts = readPageFacts(steps.find((row) => row.step === CONTENT_STEP_ANALYSE)?.output);
 
-  return {
+  const built: { context: ContentPipelineContext; avatarId: string | null } = {
     avatarId: avatarRow?.id ?? null,
     context: {
       organisationName: (organisation?.name as string | undefined)?.trim() || "",
@@ -261,6 +262,9 @@ async function loadContext(
       metaDescription: page.meta_description,
     },
   };
+  // „KUNDE PRÜFT“ answers (pool and notes): every step sees them with their placeholders.
+  built.context.pendingChecks = built.context.knowledge?.pending ?? [];
+  return built;
 }
 
 async function upsertStep(
@@ -303,6 +307,15 @@ async function settleQuestionPlan(
   return patch.questionPlan ? { ...stored, question_plan: patch.questionPlan } : stored;
 }
 
+/** A text step's output with every „KUNDE PRÜFT“ placeholder of the previous text still in it. */
+function keepPending(output: unknown, context: ContentPipelineContext): unknown {
+  const blocks = (output as { blocks?: unknown } | null)?.blocks;
+  if (!Array.isArray(blocks) || !context.pendingChecks?.length) return output;
+  const kept = keepPendingPlaceholders(blocks as ContentTextBlock[], context.blocks, context.pendingChecks);
+  if (kept.restored.length > 0) console.warn("[content] KUNDE-PRÜFT-Platzhalter wiederhergestellt:", kept.restored);
+  return { ...(output as Record<string, unknown>), blocks: kept.blocks };
+}
+
 /**
  * One tool call on Claude, plus the step's own second attempt when its `retryHint` asks for
  * one and enough of the budget is left. Both calls are billed; the better-scored output is
@@ -331,6 +344,7 @@ async function callStep(
     }
     throw error;
   }
+  output = keepPending(output, context);
   const calls: ModelCall[] = [first];
 
   const hint = spec.retryHint?.(output) ?? null;
@@ -339,7 +353,7 @@ async function callStep(
     try {
       const second = await invoke(`${spec.user}\n\n${hint}`, remaining);
       calls.push(second);
-      const retried = spec.normalize(second.json, context);
+      const retried = keepPending(spec.normalize(second.json, context), context);
       const better = spec.score ? spec.score(retried) >= spec.score(output) : true;
       if (better) output = retried;
     } catch (error) {

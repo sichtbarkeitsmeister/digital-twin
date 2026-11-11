@@ -18,6 +18,7 @@
  * cost live in `dt_content_pages.question_stop`, the cost also in the page's `cost_eur`.
  */
 
+import { isKundePrueft, kundePrueftPlaceholder } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { contentGapQuestions } from "@/lib/dt/content/pipeline/gaps";
 import {
   CONTENT_MAX_PAGE_QUESTIONS,
@@ -206,11 +207,21 @@ export function planQuestionStop(input: {
     // A page question the organisation's pool already holds is asked (once) there, not twice.
     const q = raw.scope === "seite" && poolMatch(raw, input.knowledge.pool) ? { ...raw, scope: "firma" as const } : raw;
     const decided = decisions.get(q.id!);
+    if (decided && decided.action === "answer" && isKundePrueft(decided.answer)) {
+      // „KUNDE PRÜFT“ at the stop: a placeholder in the text stays as it is; a question about a
+      // statement gets its placeholder there (the pass sets it, never the words „KUNDE PRÜFT“).
+      if (!isTextPlaceholder(q.placeholder)) {
+        handled.push({ ...handledFrom(q, "answer", kundePrueftPlaceholder(q.question), decided.source), source: decided.source });
+      }
+      continue;
+    }
     if (decided) {
       handled.push({ ...handledFrom(q, decided.action, decided.answer, decided.source), source: decided.source });
       continue;
     }
     const known = knownAnswerFor(q, input.knowledge);
+    // „KUNDE PRÜFT“ known from before: not asked, nothing worked in, the placeholder stays.
+    if (known?.action === "pending") continue;
     if (known) {
       handled.push(handledFrom(q, known.action, known.action === "answer" ? known.value : null, known.source));
       continue;

@@ -160,7 +160,9 @@ function why(before: ContentTextBlock, after: ContentTextBlock, items: readonly 
   }
   if (after.level !== before.level) return "Ebene geändert";
   const answered = new Set(items.filter((h) => isTextPlaceholder(h.placeholder)).map((h) => h.placeholder!.replace(/\s+/g, " ")));
-  const kept = markers(plain(before)).filter((m) => !answered.has(m));
+  // An answer that is itself a placeholder (a „KUNDE PRÜFT“ question about a statement) adds it.
+  const added = items.flatMap((h) => (h.answer && /^\[\s*BITTE\s+PR(?:Ü|UE)FEN\b[^\]]*\]$/iu.test(h.answer.trim()) ? [h.answer.trim().replace(/\s+/g, " ")] : []));
+  const kept = [...markers(plain(before)).filter((m) => !answered.has(m)), ...added].sort();
   if (markers(plain(after)).join("|") !== kept.join("|")) return "Platzhalter oder Marker verändert";
   if (!noNewNumbers(plain(before), plain(after), items.map((h) => h.answer ?? ""))) return "Zahl, die weder im Abschnitt noch in einer Antwort steht";
   if (/https?:\/\/|www\./i.test(plain(after)) && !/https?:\/\/|www\./i.test(`${plain(before)} ${items.map((h) => h.answer ?? "").join(" ")}`)) return "neuer Link";

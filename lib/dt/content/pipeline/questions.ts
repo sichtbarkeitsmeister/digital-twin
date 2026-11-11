@@ -16,6 +16,7 @@
  *     in doubt); that one stops the page right after the Faktencheck.
  */
 
+import { isKundePrueft, pendingCheck, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
 import type { OrgContactData } from "@/lib/dt/contact-data";
 import { extractContactTextFacts } from "@/lib/dt/contact-data-crawl";
 import { CONTENT_STEP_FAKTENCHECK } from "@/lib/dt/content/pipeline/steps";
@@ -175,9 +176,11 @@ export type ContentKnowledge = {
   pool: ContentPoolQuestion[];
   /** Questions already answered on this page (its notes) or in the pool, never asked again. */
   answered: Array<{ question: string; answer: string | null }>;
+  /** Questions answered with „KUNDE PRÜFT“: a placeholder stays, nobody asks again (`kunde-prueft.ts`). */
+  pending: ContentPendingCheck[];
 };
 
-export const EMPTY_CONTENT_KNOWLEDGE: ContentKnowledge = { values: {}, dropped: {}, pool: [], answered: [] };
+export const EMPTY_CONTENT_KNOWLEDGE: ContentKnowledge = { values: {}, dropped: {}, pool: [], answered: [], pending: [] };
 
 function factValues(text: string): Partial<Record<ContentQuestionTopicKey, string>> {
   if (!text.trim()) return {};
@@ -242,9 +245,16 @@ export function buildContentKnowledge(input: {
     if (input.contact.no_google_profile || field("google_profil")) dropped.bewertungen = "kontaktdaten";
   }
   const answered: ContentKnowledge["answered"] = [];
+  const pending: ContentPendingCheck[] = [];
+  const addPending = (question: string) => {
+    if (!pending.some((p) => similarQuestionText(p.question, question))) pending.push(pendingCheck(question));
+  };
   for (const row of input.pool ?? []) {
     const topic = asTopicKey(row.topic_key);
-    if (row.status === "answered" && row.answer?.trim()) {
+    if (row.status === "answered" && isKundePrueft(row.answer)) {
+      // „KUNDE PRÜFT“ is no value for the topic and no fact: the question waits for the customer.
+      addPending(row.question);
+    } else if (row.status === "answered" && row.answer?.trim()) {
       if (topic) set(topic, row.answer, "pool");
       answered.push({ question: row.question, answer: row.answer.trim() });
     } else if (row.status === "no_answer") {
@@ -255,16 +265,36 @@ export function buildContentKnowledge(input: {
   const notes = input.notes ?? [];
   for (const [key, value] of Object.entries(factValues(notes.join("\n"))) as Array<[ContentQuestionTopicKey, string]>) set(key, value, "notiz");
   for (const [key, value] of Object.entries(factValues(input.anbieterText ?? "")) as Array<[ContentQuestionTopicKey, string]>) set(key, value, "fakten");
-  answered.push(...answeredInNotes(notes));
-  return { values, dropped, pool: [...(input.pool ?? [])], answered };
+  for (const note of answeredInNotes(notes)) {
+    if (isKundePrueft(note.answer)) addPending(note.question);
+    else answered.push(note);
+  }
+  return { values, dropped, pool: [...(input.pool ?? [])], answered, pending };
 }
 
 export type KnownAnswer =
   | { action: "answer"; value: string; source: "kontaktdaten" | "pool" | "notiz" | "fakten" | "antwort" }
-  | { action: "drop"; source: "kontaktdaten" | "pool" | "antwort" };
+  | { action: "drop"; source: "kontaktdaten" | "pool" | "antwort" }
+  /** „KUNDE PRÜFT“: not asked again, nothing worked in; the placeholder stays in the text. */
+  | { action: "pending"; source: "kunde_prueft" };
+
+/** Whether the question is one the customer is checking („KUNDE PRÜFT“): by its placeholder or its wording. */
+export function pendingCheckFor(q: Pick<ContentQuestion, "question" | "placeholder">, knowledge: ContentKnowledge): ContentPendingCheck | null {
+  const placeholder = (q.placeholder ?? "").replace(/\s+/g, " ").trim();
+  return (
+    (knowledge.pending ?? []).find(
+      (p) =>
+        (placeholder && placeholder === p.placeholder) ||
+        similarQuestionText(p.question, q.question) ||
+        (placeholder && similarQuestionText(p.question, placeholder.replace(/^\[[^:\]]*:\s*|\]$/g, ""))),
+    ) ?? null
+  );
+}
 
 /** Whether the question is answered already, and with what. Null when only the customer knows. */
 export function knownAnswerFor(q: ContentQuestion, knowledge: ContentKnowledge): KnownAnswer | null {
+  // First: a question the customer is checking is never asked again, whatever else is known.
+  if (pendingCheckFor(q, knowledge)) return { action: "pending", source: "kunde_prueft" };
   const topics = questionTopics(q);
   if (topics.length > 1) {
     // Several topics: known only when every one is; the answer names each value.
@@ -400,6 +430,7 @@ const KNOWN_REASON: Record<string, string> = {
   notiz: "steht in den Anmerkungen der Redaktion",
   fakten: "steht in den Anbieterfakten",
   antwort: "schon beantwortet",
+  kunde_prueft: "Kunde prüft (KUNDE PRÜFT), Platzhalter bleibt",
 };
 
 /**
