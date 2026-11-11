@@ -48,7 +48,7 @@ const seoAnswer = {
   title: "Prophylaxe Münster | Praxis Dr. Test",
   meta_description: "Vorsorge in Münster.",
   blocks: [
-    { id: "h1", heading: "Prophylaxe in Münster", level: 2, html: "" },
+    { id: "h1", heading: "Prophylaxe in Münster", level: 1, html: "" },
     { id: "zusammenfassung", heading: "Das Wichtigste in Kürze", level: 2, html: "<p>Alle sechs Monate.</p>" },
     { id: "kontakt", heading: "Termin vereinbaren", level: 2, html: "<p>Telefon 0251 123456.</p>" },
   ],

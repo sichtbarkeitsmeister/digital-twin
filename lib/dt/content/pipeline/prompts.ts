@@ -413,36 +413,70 @@ export function heroBlock(blocks: readonly ContentTextBlock[]): ContentTextBlock
 }
 
 /**
- * The SEO step's text must carry the hero placeholder right under the H1. The model's own
- * hero block is reset to the placeholder (no real hero before Hormozi); a missing one is
- * inserted; the first block is the H1.
+ * The hero is the page's H1: the block `hero` with level 1 (the agency's Textvorlagen since
+ * November: `hero` = the short SEO-H1, html empty; `zusammenfassung` = the Hero-Überschrift as
+ * H2). The older recipe used `hero` as a slot under the H1 that Hormozi filled.
+ */
+export function isHeroH1(block: ContentTextBlock | null | undefined): boolean {
+  return Boolean(block && block.id === CONTENT_HERO_BLOCK_ID && block.level === 1);
+}
+
+/**
+ * The SEO step's blocks. With the hero as the H1 (current Textvorlagen) the text stays exactly as
+ * the model wrote it. With the older recipe the hero slot sits right under the first block: the
+ * model's own hero is reset to the placeholder, a missing one is inserted.
+ *
+ * No level is ever changed here. It used to set the first remaining block to level 1, which
+ * dropped the SEO-H1 (`hero`, level 1) and made the Hero-Überschrift the H1 (11.11.). A text
+ * without a level-1 block is reported by the step (`missingH1Finding`), never repaired by
+ * promoting another heading.
  */
 export function ensureHeroPlaceholder(blocks: readonly ContentTextBlock[]): ContentTextBlock[] {
+  if (blocks.some(isHeroH1)) return [...blocks];
   const placeholder: ContentTextBlock = { id: CONTENT_HERO_BLOCK_ID, heading: CONTENT_HERO_PLACEHOLDER, level: 2, html: "" };
   const rest = blocks.filter((b) => b.id !== CONTENT_HERO_BLOCK_ID);
   if (rest.length === 0) return [];
   const [first, ...others] = rest;
-  return [{ ...first!, level: 1 }, placeholder, ...others];
+  return [first!, placeholder, ...others];
 }
 
 /**
- * Later rewrites must not lose the hero block (GEO/Lektorat keep the placeholder, Hormozi
- * fills it). When the model dropped it, the previous version returns right after the H1.
+ * Later rewrites must not lose the hero block. When the model dropped it, the previous version
+ * returns where it was: as the first block when it is the H1 (then no other block stays an H1),
+ * else right after the first block (older recipe: GEO/Lektorat keep the placeholder, Hormozi fills it).
  */
 export function keepHeroBlock(blocks: readonly ContentTextBlock[], previous: readonly ContentTextBlock[]): ContentTextBlock[] {
   const before = heroBlock(previous);
   if (!before || heroBlock(blocks) || blocks.length === 0) return [...blocks];
+  if (isHeroH1(before)) {
+    return [{ ...before }, ...blocks.map((b) => (b.level === 1 ? { ...b, level: 2 as const } : b))];
+  }
   const [first, ...others] = blocks;
   return [first!, { ...before }, ...others];
 }
 
+/** The open point a text step reports when its text has no H1 (no block with level 1). */
+export function missingH1Finding(blocks: readonly ContentTextBlock[]): ContentFinding | null {
+  if (blocks.length === 0 || blocks.some((b) => b.level === 1)) return null;
+  return {
+    title: "H1 fehlt",
+    problem: `Der Text hat keinen Abschnitt mit Ebene 1 (H1). Der erste Abschnitt ist „${blocks[0]!.heading?.trim() || blocks[0]!.id}“ auf Ebene ${blocks[0]!.level}. Es wurde keine andere Überschrift zur H1 hochgestuft.`,
+    proposal: "Die SEO-H1 als ersten Abschnitt (id hero, Ebene 1) ergänzen, z. B. über „Mit Anmerkung wiederholen“ ab Schritt 2, oder den Abschnitt von Hand ändern.",
+    severity: "high",
+    severity_label: "Wichtig",
+    block_id: null,
+  };
+}
+
 /**
- * Hormozi's hero: one sentence as a paragraph, no heading, so the H1 stays the only H1 and
- * no H2 carries marketing copy. A sentence the model put into the heading moves into the body.
+ * Hormozi's hero (older recipe): one sentence as a paragraph, no heading, so the H1 stays the only
+ * H1 and no H2 carries marketing copy. A sentence the model put into the heading moves into the
+ * body. A hero that is the H1 is left as it is.
  */
 export function settleHeroSentence(blocks: readonly ContentTextBlock[]): ContentTextBlock[] {
   return blocks.map((b) => {
-    if (b.id !== CONTENT_HERO_BLOCK_ID || isHeroPlaceholder(b)) return b;
+    // The hero as the H1 (current Textvorlagen) keeps its heading: it is the page title.
+    if (b.id !== CONTENT_HERO_BLOCK_ID || isHeroPlaceholder(b) || isHeroH1(b)) return b;
     const heading = b.heading?.trim() ?? "";
     if (!heading) return { ...b, heading: null, level: 2 };
     const body = b.html.trim();
@@ -856,6 +890,16 @@ export const TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
   required: ["title", "meta_description", "blocks"],
 };
 
+/** `blocks` of the SEO step (`submit_seo_text`): the order of the hero section as the Textvorlagen set it. */
+export const SEO_BLOCKS_DESCRIPTION =
+  "Der komplette Text als geordnete Abschnitte. Der erste Block (id hero) trägt die kurze SEO-H1 (level 1, html darf leer sein), der zweite (id zusammenfassung) die Hero-Überschrift als H2. Danach H2 (level 2), bei Bedarf H3 (level 3) und H4 (level 4). Bestehende ids beibehalten.";
+
+export const SEO_TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
+  type: "object",
+  properties: { ...TEXT_PROPERTIES, blocks: { ...BLOCKS_SCHEMA, description: SEO_BLOCKS_DESCRIPTION } },
+  required: ["title", "meta_description", "blocks"],
+};
+
 // --- page type variants of the SEO step --------------------------------------------------------
 
 /**
@@ -1141,7 +1185,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
     tool: {
       name: "submit_seo_text",
       description: "Der vollständige Seitentext in Abschnitten, mit Title und Meta-Description.",
-      input_schema: TEXT_TOOL_SCHEMA,
+      input_schema: SEO_TEXT_TOOL_SCHEMA,
     },
     normalize: (json, ctx): TextOutput => {
       const out = normalizeTextOutput(json, ctx);
