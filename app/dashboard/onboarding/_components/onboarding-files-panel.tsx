@@ -283,7 +283,7 @@ export function OnboardingFilesPanel(props: {
                     {formatSize(file.sizeBytes)} · {formatDate(file.createdAt)}
                   </p>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1 lg:flex-nowrap">
                   <Button
                     type="button"
                     size="sm"

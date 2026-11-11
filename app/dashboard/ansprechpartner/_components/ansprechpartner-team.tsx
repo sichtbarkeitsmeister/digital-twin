@@ -27,13 +27,13 @@ function ContactPhoto({ contact }: { contact: DtOnboardingContact }) {
       <img
         src={contact.photoSrc}
         alt=""
-        className="size-20 shrink-0 rounded-full object-cover"
+        className="size-14 shrink-0 rounded-full object-cover sm:size-20"
       />
     );
   }
   return (
     <div
-      className="grid size-20 shrink-0 place-items-center rounded-full bg-sbkm-mint/50 text-lg font-bold text-sbkm-navy dark:bg-sbkm-mint/20 dark:text-sbkm-mint"
+      className="grid size-14 shrink-0 place-items-center rounded-full bg-sbkm-mint/50 text-base font-bold sm:size-20 sm:text-lg text-sbkm-navy dark:bg-sbkm-mint/20 dark:text-sbkm-mint"
       aria-hidden
     >
       {initials(contact.name)}
@@ -43,7 +43,7 @@ function ContactPhoto({ contact }: { contact: DtOnboardingContact }) {
 
 export function AnsprechpartnerTeam() {
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-none">
       <div className="grid gap-1">
         <h1 className="text-2xl font-bold tracking-tight text-primary">
           Ansprechpartner
@@ -53,14 +53,14 @@ export function AnsprechpartnerTeam() {
         </p>
       </div>
 
-      <ul className="grid gap-4 lg:grid-cols-2">
+      <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {DT_ONBOARDING_CONTACTS.map((contact) => (
           <li
             key={contact.email}
-            className="flex gap-4 rounded-2xl border border-sbkm-navy/10 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]"
+            className="flex gap-3 rounded-2xl border border-sbkm-navy/10 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04] sm:gap-4"
           >
             <ContactPhoto contact={contact} />
-            <div className="min-w-0 grid gap-1">
+            <div className="grid min-w-0 grid-cols-1 gap-1 lg:grid-cols-none">
               <p className="text-base font-semibold text-primary">{contact.name}</p>
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-sbkm-ink-500">
                 {contact.shortRole}
@@ -68,11 +68,16 @@ export function AnsprechpartnerTeam() {
               <p className="text-sm leading-relaxed text-secondary">{contact.role}</p>
               <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
                 <a
-                  className="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+                  className="inline-flex min-w-0 items-center gap-1 text-[13px] font-medium text-primary underline-offset-2 [overflow-wrap:anywhere] hover:underline sm:text-sm lg:min-w-[auto] lg:[overflow-wrap:normal]"
                   href={`mailto:${contact.email}`}
                 >
-                  <Mail className="size-3.5" aria-hidden />
-                  {contact.email}
+                  <Mail className="size-3.5 shrink-0" aria-hidden />
+                  {/* Below lg a long address may break after the @ instead of mid-word. */}
+                  <span className="min-w-0 lg:hidden">
+                    {contact.email.split("@")[0]}@<wbr />
+                    {contact.email.split("@").slice(1).join("@")}
+                  </span>
+                  <span className="hidden lg:inline">{contact.email}</span>
                 </a>
                 <span className="inline-flex items-center gap-1 text-secondary">
                   <Phone className="size-3.5" aria-hidden />

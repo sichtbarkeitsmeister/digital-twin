@@ -51,13 +51,13 @@ export function CenteredModal(props: {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[200] overflow-y-auto overscroll-contain bg-sbkm-navy/60 backdrop-blur-sm"
+          className="dt-touch-inputs fixed inset-0 z-[200] overflow-y-auto overscroll-contain bg-sbkm-navy/60 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby={props.header || props.title ? titleId : undefined}
           onClick={props.closeDisabled ? undefined : props.onClose}
         >
-          <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+          <div className="flex min-h-full items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:p-6">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -71,7 +71,7 @@ export function CenteredModal(props: {
           >
             {props.header ?? (
               <div className="flex shrink-0 items-start justify-between gap-3 border-b border-sbkm-navy/10 px-5 py-4 dark:border-white/10">
-                <div className="min-w-0">
+                <div className="min-w-0 [overflow-wrap:anywhere]">
                   {props.title ? (
                     <h2
                       id={titleId}
@@ -91,7 +91,7 @@ export function CenteredModal(props: {
                   aria-label="Schließen"
                   disabled={props.closeDisabled}
                   onClick={props.onClose}
-                  className="rounded-full p-1.5 text-sbkm-ink-500 transition-colors hover:bg-sbkm-navy/5 hover:text-sbkm-navy disabled:opacity-50 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white"
+                  className="-mr-1.5 -mt-1 shrink-0 rounded-full p-2.5 sm:m-0 sm:p-1.5 text-sbkm-ink-500 transition-colors hover:bg-sbkm-navy/5 hover:text-sbkm-navy disabled:opacity-50 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white"
                 >
                   <X className="h-4 w-4" aria-hidden />
                 </button>

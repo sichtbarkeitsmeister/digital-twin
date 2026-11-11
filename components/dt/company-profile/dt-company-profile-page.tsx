@@ -213,10 +213,10 @@ export function DtCompanyProfilePage(props: {
   );
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-6">
+    <div className="mx-auto grid max-w-4xl grid-cols-1 gap-6">
       <header className="grid gap-3 border-b border-sbkm-navy/8 pb-6 dark:border-white/8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="grid gap-1">
+          <div className="grid min-w-0 grid-cols-1 gap-1 [overflow-wrap:anywhere]">
             <p className="text-xs font-medium uppercase tracking-wide text-sbkm-ink-500 dark:text-white/40">
               {orgName}
             </p>
@@ -232,7 +232,7 @@ export function DtCompanyProfilePage(props: {
             <label className="grid gap-1 text-sm">
               <span className="text-xs font-medium text-sbkm-ink-500">Organisation</span>
               <select
-                className={cn(inputClass, "min-w-[200px]")}
+                className={cn(inputClass, "w-full min-w-0 sm:w-auto sm:min-w-[200px]")}
                 value={orgId}
                 onChange={(event) => {
                   const next = event.target.value;

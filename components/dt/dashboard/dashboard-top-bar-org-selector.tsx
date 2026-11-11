@@ -92,7 +92,7 @@ function MembershipTopBarOrgSelector() {
   if (loading) {
     return (
       <div
-        className="h-9 w-full min-w-[12rem] max-w-sm animate-pulse rounded-pill border border-sbkm-navy/10 bg-white/60 dark:border-white/10 dark:bg-white/10"
+        className="h-9 w-full animate-pulse sm:max-w-sm lg:min-w-[12rem] rounded-pill border border-sbkm-navy/10 bg-white/60 dark:border-white/10 dark:bg-white/10"
         aria-hidden
       />
     );
@@ -108,7 +108,8 @@ function MembershipTopBarOrgSelector() {
 
   return (
     <DtSelect
-      className="w-full min-w-[12rem] max-w-sm"
+      // Below lg the selector must shrink and truncate instead of running under the actions.
+      className="w-full max-lg:grid-cols-1 sm:max-w-sm lg:min-w-[12rem]"
       label={undefined}
       srLabel="Organisation"
       size="sm"
@@ -199,7 +200,7 @@ function ManageTopBarOrgSelector() {
   if (loading) {
     return (
       <div
-        className="h-9 w-full min-w-[12rem] max-w-sm animate-pulse rounded-pill border border-sbkm-navy/10 bg-white/60 dark:border-white/10 dark:bg-white/10"
+        className="h-9 w-full animate-pulse sm:max-w-sm lg:min-w-[12rem] rounded-pill border border-sbkm-navy/10 bg-white/60 dark:border-white/10 dark:bg-white/10"
         aria-hidden
       />
     );
@@ -215,7 +216,8 @@ function ManageTopBarOrgSelector() {
 
   return (
     <DtSelect
-      className="w-full min-w-[12rem] max-w-sm"
+      // Below lg the selector must shrink and truncate instead of running under the actions.
+      className="w-full max-lg:grid-cols-1 sm:max-w-sm lg:min-w-[12rem]"
       label={undefined}
       srLabel="Organisation"
       size="sm"

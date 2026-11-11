@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { DtToaster } from "@/components/dt/dt-toaster";
@@ -13,6 +13,13 @@ export const metadata: Metadata = {
   title: "DigitalTwin — Bevor ein Text online geht, wissen wir, ob er ankommt",
   description:
     "Der DigitalTwin verbindet SEO-Wissen mit der Analyse Ihrer Wunschkunden. Texte werden vor Veröffentlichung geprüft — entwickelt und betreut von Sichtbarkeitsmeister.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Lets fixed UI (drawer, help button) use env(safe-area-inset-*) on notched phones.
+  viewportFit: "cover",
 };
 
 const poppins = Poppins({

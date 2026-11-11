@@ -131,11 +131,11 @@ function MiniSparkline(props: {
 
 function MetricCell(props: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] px-3 py-2.5 dark:border-white/8 dark:bg-white/[0.03]">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-secondary">
+    <div className="min-w-0 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] px-2 py-2.5 dark:border-white/8 dark:bg-white/[0.03] sm:px-3">
+      <p className="truncate text-[10px] font-medium uppercase tracking-wide text-secondary">
         {props.label}
       </p>
-      <p className="mt-0.5 text-lg font-semibold tabular-nums tracking-tight text-primary">
+      <p className="mt-0.5 truncate text-base font-semibold tabular-nums tracking-tight text-primary sm:text-lg">
         {props.value}
       </p>
     </div>
@@ -212,7 +212,7 @@ export function OrgOverviewPanel(props: {
               linkLabel="Details"
             />
             <div className="grid gap-4 p-4 sm:p-5">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                 <MetricCell label="Tokens" value={formatTokens(overview.usage.totalTokens)} />
                 <MetricCell label="Nachrichten" value={overview.usage.messages} />
                 <MetricCell
@@ -234,7 +234,7 @@ export function OrgOverviewPanel(props: {
                 {overview.usage.topUser ? (
                   <p>
                     Top-Nutzer:{" "}
-                    <span className="font-medium text-primary">
+                    <span className="font-medium text-primary [overflow-wrap:anywhere]">
                       {overview.usage.topUser.email ?? overview.usage.topUser.id}
                     </span>{" "}
                     ({formatTokens(overview.usage.topUser.totalTokens)})
@@ -246,7 +246,7 @@ export function OrgOverviewPanel(props: {
         ) : (
           <OverviewCard>
             <CardHeaderRow title="Aktivität" description="Chats und Nutzung" />
-            <div className="flex items-center justify-between gap-4 p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4 sm:flex-nowrap sm:p-5">
               <div className="flex items-center gap-3">
                 <div className="flex size-10 items-center justify-center rounded-xl bg-sbkm-mint/15 dark:bg-sbkm-mint/10">
                   <MessageCircle
@@ -280,7 +280,7 @@ export function OrgOverviewPanel(props: {
           <div className="p-4 sm:p-5">
             {enabledAgents.length > 0 ? (
               <>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {enabledAgents.slice(0, 6).map((agent) => {
                     const kind = agentKindLabel(agent.kind);
                     return (

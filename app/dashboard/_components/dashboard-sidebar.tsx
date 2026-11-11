@@ -52,7 +52,8 @@ function NavLink({ item }: { item: NavItem }) {
       prefetch
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-2.5 text-sm font-medium transition-colors",
+        // min-h-11: 44px tap target in the mobile drawer; the desktop aside (lg) keeps its height.
+        "group flex min-h-11 min-w-0 items-center gap-3 rounded-[14px] px-3 py-2.5 text-sm font-medium transition-colors lg:min-h-0",
         active
           ? "bg-sbkm-navy text-white shadow-dt dark:bg-sbkm-mint dark:text-sbkm-navy"
           : "text-sbkm-ink-700 hover:bg-sbkm-navy/[0.06] dark:text-white/75 dark:hover:bg-white/10",

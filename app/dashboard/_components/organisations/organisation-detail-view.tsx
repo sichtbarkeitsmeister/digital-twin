@@ -173,14 +173,14 @@ export async function OrganisationDetailView({
         <div className={cn(orgDetailCardClass, "relative p-4 sm:p-5")}>
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10" />
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="grid gap-1">
-              <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">
+            <div className="grid min-w-0 grid-cols-1 gap-1">
+              <h1 className="text-xl font-bold tracking-tight text-primary [overflow-wrap:anywhere] sm:text-2xl">
                 {displayTitle}
               </h1>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-secondary sm:text-sm">
                 {showInternalName ? <span>{organisation.name}</span> : null}
                 {organisation.slug ? (
-                  <Badge variant="secondary" className="text-[10px]">
+                  <Badge variant="secondary" className="max-w-full text-[10px] [overflow-wrap:anywhere]">
                     {organisation.slug}
                   </Badge>
                 ) : null}
@@ -320,7 +320,7 @@ export async function OrganisationDetailView({
                           href={href}
                           className="flex flex-wrap items-center justify-between gap-2 px-2 py-2.5 transition-colors duration-150 hover:bg-sbkm-navy/[0.03] dark:hover:bg-white/[0.03]"
                         >
-                          <span className="min-w-0 truncate text-sm font-medium">
+                          <span className="min-w-0 max-w-full truncate text-sm font-medium">
                             {survey.title}
                           </span>
                           <span className="shrink-0 text-xs font-medium text-sbkm-navy dark:text-sbkm-mint">
@@ -403,9 +403,9 @@ export async function OrganisationDetailView({
                           <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sbkm-navy/10 text-xs font-semibold text-sbkm-navy dark:bg-white/10 dark:text-white">
                             {memberInitials(email)}
                           </div>
-                          <div className="min-w-0 grid gap-0.5">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate text-sm font-medium">{label}</span>
+                          <div className="grid min-w-0 grid-cols-1 gap-0.5">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <span className="min-w-0 max-w-full truncate text-sm font-medium">{label}</span>
                               {isSelf ? <Badge variant="secondary">Du</Badge> : null}
                               <Badge variant="outline">{formatOrgRole(member.org_role)}</Badge>
                             </div>
@@ -449,7 +449,7 @@ export async function OrganisationDetailView({
                           <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
                             <Mail className="size-4" aria-hidden />
                           </div>
-                          <div className="min-w-0 grid gap-0.5">
+                          <div className="grid min-w-0 grid-cols-1 gap-0.5">
                             <span className="truncate text-sm font-medium">{invite.email}</span>
                             <p className="text-xs text-secondary">
                               {formatOrgRole(invite.org_role)} ·{" "}

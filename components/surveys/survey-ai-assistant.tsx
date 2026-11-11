@@ -43,10 +43,11 @@ export function SurveyAiAssistant<TContext extends PageContext>({
   const context = useMemo(() => buildContext(), [buildContext]);
 
   return (
-    <div className="fixed bottom-4 right-4 z-[130] flex max-w-[calc(100vw-1rem)] flex-col items-end gap-2">
+    <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[130] flex max-w-[calc(100vw-1rem)] flex-col items-end gap-2">
       {hasOpenedOnce ? (
         <Card
-          className={`flex h-[min(86vh,calc(100dvh-5.5rem))] w-[min(1220px,calc(100vw-1rem))] max-h-[calc(100dvh-5.5rem)] flex-col overflow-hidden shadow-xl ${
+          // Below sm the panel takes the whole screen instead of floating.
+          className={`flex h-[min(86vh,calc(100dvh-5.5rem))] w-[min(1220px,calc(100vw-1rem))] max-h-[calc(100dvh-5.5rem)] flex-col overflow-hidden shadow-xl max-sm:fixed max-sm:inset-0 max-sm:h-auto max-sm:max-h-none max-sm:w-auto max-sm:rounded-none max-sm:border-0 max-sm:pb-[env(safe-area-inset-bottom)] max-sm:pt-[env(safe-area-inset-top)] ${
             open ? "" : "hidden"
           }`}
           onWheelCapture={(e) => {
@@ -71,7 +72,7 @@ export function SurveyAiAssistant<TContext extends PageContext>({
             </div>
           </CardHeader>
           <CardContent className="relative min-h-0 flex-1 overflow-hidden p-0">
-            <div className="absolute inset-x-3 bottom-3 top-0 min-h-0">
+            <div className="absolute inset-x-3 bottom-3 top-0 min-h-0 max-sm:inset-x-0 max-sm:bottom-0">
               <SurveyAiChatShell pageContext={context} />
             </div>
           </CardContent>
@@ -81,7 +82,7 @@ export function SurveyAiAssistant<TContext extends PageContext>({
       <Button
         type="button"
         size="icon"
-        className="h-12 w-12 rounded-full shadow-lg"
+        className={`h-12 w-12 rounded-full shadow-lg ${open ? "max-sm:hidden" : ""}`}
         onClick={() => {
           setOpen((v) => {
             const next = !v;

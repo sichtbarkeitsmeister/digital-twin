@@ -125,9 +125,9 @@ export default async function OrganisationFrageboegenPage({
         />
       </Suspense>
 
-      <div className="grid gap-6">
+      <div className="grid grid-cols-1 gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="grid gap-1">
+          <div className="grid min-w-0 gap-1 [overflow-wrap:anywhere]">
             <h1 className="text-2xl font-bold tracking-tight text-primary">Fragebögen</h1>
             <p className="text-sm text-secondary">
               {showUnassigned
@@ -246,7 +246,7 @@ export default async function OrganisationFrageboegenPage({
                       <div className="min-w-0 grid gap-1">
                         <Link
                           href={href}
-                          className="truncate text-sm font-semibold text-primary hover:underline"
+                          className="text-sm font-semibold text-primary [overflow-wrap:anywhere] hover:underline sm:truncate"
                         >
                           {survey.title}
                         </Link>
