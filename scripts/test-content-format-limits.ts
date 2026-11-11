@@ -139,6 +139,7 @@ const context = (patch: Partial<ContentPipelineContext> = {}): ContentPipelineCo
   assert.match(contentExportFile("fragment", source).body, /<h4>Enge Treppenhäuser<\/h4>/);
   assert.match(contentExportFile("md", source).body, /#### Enge Treppenhäuser/);
   assert.match(contentExportFile("txt", source).body, /\nEnge Treppenhäuser\n/);
+  assert.match(contentExportFile("txt", source, { levelLabels: true }).body, /\n\[H4\] Enge Treppenhäuser\n/);
 
   // The page window's editable blocks: heading and text, one block per section.
   const shown = extractContentBlocks(html);

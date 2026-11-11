@@ -535,6 +535,7 @@ export function DtContentPageDrawer(props: {
                         html={review.html}
                         title={`Text: ${review.name}`}
                         highlightBlockIds={highlightIds}
+                        showHeadingLevels
                       />
                     ) : (
                       <div className="grid gap-1 rounded-dt border border-dashed border-sbkm-navy/15 bg-white/60 px-4 py-12 text-center dark:border-white/15 dark:bg-white/[0.04]">

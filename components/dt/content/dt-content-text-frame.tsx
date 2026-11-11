@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { htmlWithHeadingLevels } from "@/lib/dt/content/render";
+
 const SAFE_BLOCK_ID = /^[a-z0-9_-]+$/i;
 
 function buildSrcDoc(html: string, highlightBlockIds: string[]): string {
@@ -31,13 +33,16 @@ export function DtContentTextFrame(props: {
   html: string;
   title: string;
   highlightBlockIds?: string[];
+  /** „[H2] …“ in front of every heading (the Texte page window); display only. */
+  showHeadingLevels?: boolean;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(480);
   const highlightKey = (props.highlightBlockIds ?? []).join("|");
   const srcDoc = useMemo(
-    () => buildSrcDoc(props.html, highlightKey ? highlightKey.split("|") : []),
-    [props.html, highlightKey],
+    () =>
+      buildSrcDoc(props.showHeadingLevels ? htmlWithHeadingLevels(props.html) : props.html, highlightKey ? highlightKey.split("|") : []),
+    [props.html, highlightKey, props.showHeadingLevels],
   );
 
   const measure = useCallback(() => {
