@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
-import { findingKey, findingTargetBlock, markNewSentences, withoutFinding } from "../lib/dt/content/finding-target";
+import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences, withoutFinding } from "../lib/dt/content/finding-target";
 import { parseContentPagePatch } from "../lib/dt/content/page-patch";
 import { approvalPatch, rerunPagePatch } from "../lib/dt/content/pipeline/actions";
 import type { callContentTool } from "../lib/dt/content/pipeline/llm";
@@ -201,6 +201,24 @@ function checkTests() {
   assert.equal(findingTargetBlock({ ...finding, block_id: "zusammenfassung" }, blocks), "zusammenfassung", "by its block");
   assert.equal(findingTargetBlock({ block_id: null, problem: "Stelle: „Sie besitzen eine Rolex. Wir bewerten sie“", proposal: "" }, blocks), "zusammenfassung", "by a quoted sentence");
   assert.equal(findingTargetBlock({ block_id: null, problem: "Allgemein", proposal: "" }, blocks), null);
+  // A point about several Abschnitte, as the Endabnahme wrote it on 11.11.: no block_id, quotes cut
+  // off with „…“, ids named bare.
+  {
+    const page = [
+      { id: "verlauf", heading: "Wie ein Uhrenverkauf aus dem Nachlass typischerweise verläuft", html: "<p>Die meisten melden sich, wenn sie eine Uhr gefunden haben und nicht wissen, was sie wert ist.</p>" },
+      { id: "verlauf-2", heading: "Erste Schritte", html: "<p>Hier melden sich die meisten mit Fotos und einer kurzen Frage.</p>" },
+      { id: "warum", heading: "Warum Erben zögern", html: "<p>Vier Einwände begegnen uns bei Uhrenverkäufen am häufigsten.</p>" },
+      { id: "andere", heading: "Anderes", html: "<p>Nichts davon.</p>" },
+    ];
+    const multi = {
+      block_id: null,
+      problem: "Im Text stehen Mengenaussagen über das Kundenverhalten. Im Abschnitt verlauf heißt es: „Die meisten melden sich, wenn sie eine Uhr gefunden haben …“. In verlauf-2 steht: „Hier melden sich die meisten: …“. Im Abschnitt warum steht: „Vier Einwände begegnen uns bei Uhrenverkäufen am häufigsten.“",
+      proposal: "Die Häufigkeitsangaben streichen oder neutral formulieren.",
+    };
+    assert.deepEqual(findingTargetBlocks(multi, page), ["verlauf", "verlauf-2", "warum"]);
+    assert.equal(findingTargetBlock(multi, page), "verlauf");
+    assert.deepEqual(findingTargetBlocks({ block_id: null, problem: "Die Seite wirkt allgemein zu lang.", proposal: "" }, page), [], "nothing named");
+  }
   const lists = { findings: [], final_findings: [finding], unresolved: [finding] };
   assert.deepEqual(withoutFinding(lists, findingKey(finding)), { findings: [], final_findings: [], unresolved: [] });
   assert.equal(withoutFinding(lists, "nichts"), null);
@@ -338,6 +356,15 @@ async function actionTests() {
       models: ["m"],
     });
     assert.ok(!gone.ok && gone.status === 409);
+  }
+  // A point about two Abschnitte: the first call keeps it (done_keys empty), the last one removes it.
+  {
+    const page = pageRow({ unresolved: [finding] });
+    const store = db(page, doneUpTo(8));
+    const opts = { callTool: answer({ id: "zusammenfassung", heading: "Ihre Uhr, sicher bewertet", level: 2, html: "<p>Sie besitzen eine Uhr. Wir bewerten sie in Ruhe.</p>" }), context: { context: ctx, avatarId: null }, models: ["m"] };
+    const first = await applyProposals(store.service, page, doneUpTo(8) as unknown as ContentStepRow[], { block_id: "zusammenfassung", finding_keys: [findingKey(finding)], done_keys: [] }, null, opts);
+    assert.ok(first.ok, JSON.stringify(first));
+    assert.equal((store.rows("dt_content_pages")[0] as unknown as ContentPageRow).unresolved.length, 1, "still open after the first Abschnitt");
   }
   // „So lassen“: the point goes, the text stays, the page remembers it.
   {
