@@ -214,6 +214,8 @@ export type AnalyseOutput = {
     traumziel: string;
     hauptschmerz: string;
     groesste_huerde: string;
+    /** The Avatar's 2–4 main objections, in his order (since 12.11.; older outputs have none). */
+    einwaende?: string[];
     moeglicher_beweis: string;
     gewuenschter_cta: string;
   };
@@ -221,6 +223,21 @@ export type AnalyseOutput = {
   missing_facts: string[];
   assumptions: string[];
 };
+
+/** At most this many fan-out questions are marked for the Fragen-Abschnitt („FAQ:“). */
+export const CONTENT_FAQ_MAX = 6;
+
+const FAQ_THEME_RE = /^\s*FAQ\s*:\s*/i;
+
+/** Beyond the first six questions marked „FAQ:“ the mark goes: they are answered in the text. */
+export function limitFaqThemes(fanout: AnalyseOutput["fanout_questions"]): AnalyseOutput["fanout_questions"] {
+  let faq = 0;
+  return fanout.map((q) => {
+    if (!FAQ_THEME_RE.test(q.theme)) return q;
+    faq += 1;
+    return faq <= CONTENT_FAQ_MAX ? q : { ...q, theme: q.theme.replace(FAQ_THEME_RE, "") };
+  });
+}
 
 export type TextOutput = {
   blocks: ContentTextBlock[];
@@ -1010,10 +1027,10 @@ fanout_questions: mindestens 8 Fragen, die eine vollständige Antwort auf main_q
       page.user_questions.length > 0
         ? `Die Nutzerfragen ${standalone ? "aus dem Briefing" : "aus Spalte H"} sind echte Google-Fragen: alle übernehmen, Wortlaut beibehalten, source „Spalte H“. Weitere Fragen ergänzen mit source „Recherche“, „Avatar“ oder „Anbieterfakten“.`
         : "source je Frage: „Recherche“ (aus der Suchlogik), „Avatar“ (aus seinen Sorgen) oder „Anbieterfakten“ (aus dem, was der Anbieter beantworten kann)."
-    } theme: das Unterthema in 1–3 Wörtern.
+    } theme: das Unterthema in 1–3 Wörtern. Markiere mit theme, welche Fragen in den Fragen-Abschnitt gehören (theme beginnt mit ‚FAQ:‘) und welche im Fließtext beantwortet werden sollen. Höchstens ${CONTENT_FAQ_MAX} Fragen für den Fragen-Abschnitt.
 deferred_questions: Fragen, die eine andere Seite der Website besser beantwortet (keine Kannibalisierung) – link_to ist der Name dieser Seite (nur erlaubte Linkziele oder Seiten aus der Website-Liste), short_answer_hint sagt, wie diese Seite in einem Satz darauf verweist.
 dropped_questions: Fragen, die hier nicht hingehören, mit reason.
-hormozi: traumziel (was der Avatar wirklich will), hauptschmerz, groesste_huerde (was ihn vom Auftrag abhält), moeglicher_beweis (nur belegte Beweise aus den Anbieterfakten; sonst „kein belegter Beweis“), gewuenschter_cta (passend zu conversion_goal und den Kontaktwegen aus den Fakten). Nur aus Avatar und Anbieterfakten, nichts erfinden.
+hormozi: traumziel (was der Avatar wirklich will), hauptschmerz, groesste_huerde (was ihn vom Auftrag abhält), einwaende (die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar), moeglicher_beweis (nur belegte Beweise aus den Anbieterfakten; sonst „kein belegter Beweis“), gewuenschter_cta (passend zu conversion_goal und den Kontaktwegen aus den Fakten). Nur aus Avatar und Anbieterfakten, nichts erfinden.
 usable_facts: belegte Fakten für diese Seite, je ein Satz. missing_facts: was der Text bräuchte, aber nirgends belegt ist – lieber benennen als später erfinden. assumptions: was du ohne Beleg annimmst.`,
     user: join([pageBlock(context), anbieterBlock(context), settingsBlock(context.settings), avatarBlock(context), notesBlock(context)]),
     tool: {
@@ -1043,7 +1060,7 @@ usable_facts: belegte Fakten für diese Seite, je ein Satz. missing_facts: was d
               properties: {
                 question: { type: "string" },
                 source: { type: "string", enum: [...CONTENT_QUESTION_SOURCES] },
-                theme: { type: "string" },
+                theme: { type: "string", description: "Unterthema in 1–3 Wörtern; beginnt mit „FAQ:“, wenn die Frage in den Fragen-Abschnitt gehört." },
               },
               required: ["question", "source", "theme"],
             },
@@ -1074,10 +1091,15 @@ usable_facts: belegte Fakten für diese Seite, je ein Satz. missing_facts: was d
               traumziel: { type: "string" },
               hauptschmerz: { type: "string" },
               groesste_huerde: { type: "string" },
+              einwaende: {
+                type: "array",
+                items: { type: "string" },
+                description: "Die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar.",
+              },
               moeglicher_beweis: { type: "string" },
               gewuenschter_cta: { type: "string" },
             },
-            required: ["traumziel", "hauptschmerz", "groesste_huerde", "moeglicher_beweis", "gewuenschter_cta"],
+            required: ["traumziel", "hauptschmerz", "groesste_huerde", "einwaende", "moeglicher_beweis", "gewuenschter_cta"],
           },
           usable_facts: { type: "array", items: { type: "string" } },
           missing_facts: { type: "array", items: { type: "string" } },
@@ -1169,13 +1191,14 @@ export function normalizeAnalyse(json: unknown, context: ContentPipelineContext)
       (k) => k.toLowerCase() !== (excelMain || str(r.main_keyword, 120)).toLowerCase(),
     ),
     main_question: str(r.main_question, 300),
-    fanout_questions: fanout,
+    fanout_questions: limitFaqThemes(fanout),
     deferred_questions: deferred,
     dropped_questions: dropped,
     hormozi: {
       traumziel: str(h.traumziel, 400),
       hauptschmerz: str(h.hauptschmerz, 400),
       groesste_huerde: str(h.groesste_huerde, 400),
+      einwaende: strList(h.einwaende, 4).map((e) => e.slice(0, 400)),
       moeglicher_beweis: str(h.moeglicher_beweis, 400),
       gewuenschter_cta: str(h.gewuenschter_cta, 400),
     },
