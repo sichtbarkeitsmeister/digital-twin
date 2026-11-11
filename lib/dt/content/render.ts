@@ -187,10 +187,20 @@ export function normalizeBlocks(input: unknown, options: { overLimit?: "throw" |
   return blocks;
 }
 
-export function renderBlocksHtml(blocks: readonly ContentTextBlock[]): string {
+/**
+ * „[H2]“: how the page window and the text export mark a heading's level, taken from the block's
+ * `level`. Only for people reading the text: the stored HTML, the HTML export and every prompt
+ * keep the heading without it (the models get the level from `level` alone).
+ */
+export function headingLevelLabel(level: ContentTextBlock["level"]): string {
+  return `[H${level}]`;
+}
+
+export function renderBlocksHtml(blocks: readonly ContentTextBlock[], options: { levelLabels?: boolean } = {}): string {
   return blocks
     .map((b) => {
-      const heading = b.heading ? `<h${b.level}>${escapeHtml(b.heading)}</h${b.level}>` : "";
+      const label = options.levelLabels ? `${headingLevelLabel(b.level)} ` : "";
+      const heading = b.heading ? `<h${b.level}>${label}${escapeHtml(b.heading)}</h${b.level}>` : "";
       return `<section data-block-id="${escapeHtml(b.id)}">${heading}${b.html ? `\n${b.html}` : ""}</section>`;
     })
     .join("\n");
@@ -251,14 +261,27 @@ function decodeEntities(text: string): string {
   return text.replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) => ENTITIES[m] ?? m);
 }
 
-/** Stored HTML → Markdown for the `.md` export and the review payload. */
-export function htmlToMarkdown(html: string): string {
+/**
+ * The page window's view of the stored HTML: every heading with its level in front („[H2] …“),
+ * from the blocks' `level`. Only for display; HTML without blocks comes back unchanged.
+ */
+export function htmlWithHeadingLevels(html: string): string {
+  const blocks = parseBlocksFromHtml(html);
+  return blocks.length > 0 ? renderBlocksHtml(blocks, { levelLabels: true }) : html;
+}
+
+/**
+ * Stored HTML → Markdown for the `.md` export and the review payload. `levelLabels` (the `.md`
+ * export's switch) puts the level after the hashes („## [H2] …“); the stored Markdown never has it.
+ */
+export function htmlToMarkdown(html: string, options: { levelLabels?: boolean } = {}): string {
+  const label = (level: number) => (options.levelLabels ? `${headingLevelLabel(level as ContentTextBlock["level"])} ` : "");
   let out = html.replace(/<section\b[^>]*>|<\/section>/gi, "\n");
   out = out
-    .replace(/<h1>([\s\S]*?)<\/h1>/gi, "# $1\n\n")
-    .replace(/<h2>([\s\S]*?)<\/h2>/gi, "## $1\n\n")
-    .replace(/<h3>([\s\S]*?)<\/h3>/gi, "### $1\n\n")
-    .replace(/<h4>([\s\S]*?)<\/h4>/gi, "#### $1\n\n")
+    .replace(/<h1>([\s\S]*?)<\/h1>/gi, `# ${label(1)}$1\n\n`)
+    .replace(/<h2>([\s\S]*?)<\/h2>/gi, `## ${label(2)}$1\n\n`)
+    .replace(/<h3>([\s\S]*?)<\/h3>/gi, `### ${label(3)}$1\n\n`)
+    .replace(/<h4>([\s\S]*?)<\/h4>/gi, `#### ${label(4)}$1\n\n`)
     .replace(/<ol>([\s\S]*?)<\/ol>/gi, (_, items: string) => {
       let n = 0;
       return `${items.replace(/<li>([\s\S]*?)<\/li>/gi, (_m, li: string) => `${++n}. ${li.trim()}\n`)}\n`;
@@ -278,13 +301,16 @@ export function htmlToMarkdown(html: string): string {
 }
 
 /**
- * Stored HTML → plain text for the `.txt` export: headings on their own line, a blank line
- * between paragraphs, list items with a dash, links as „Text (Adresse)“, no markup at all.
+ * Stored HTML → plain text: headings on their own line, a blank line between paragraphs, list
+ * items with a dash, links as „Text (Adresse)“, no markup at all. `levelLabels` (the `.txt`
+ * export) puts the heading's level in front („[H2] …“); the steps' uses never set it.
  */
-export function htmlToPlainText(html: string): string {
+export function htmlToPlainText(html: string, options: { levelLabels?: boolean } = {}): string {
   let out = html.replace(/<section\b[^>]*>|<\/section>/gi, "\n");
   out = out
-    .replace(/<h[1-4]>([\s\S]*?)<\/h[1-4]>/gi, "\n$1\n\n")
+    .replace(/<h([1-4])>([\s\S]*?)<\/h\1>/gi, (_m, level: string, text: string) =>
+      `\n${options.levelLabels ? `${headingLevelLabel(Number(level) as ContentTextBlock["level"])} ` : ""}${text}\n\n`,
+    )
     .replace(/<ol>([\s\S]*?)<\/ol>/gi, (_, items: string) => {
       let n = 0;
       return `\n${items.replace(/<li>([\s\S]*?)<\/li>/gi, (_m, li: string) => `${++n}. ${li.trim()}\n`)}\n`;

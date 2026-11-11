@@ -25,13 +25,27 @@ export type ContentExportSource = {
 
 export type ContentExportFile = { body: string; filename: string; contentType: string };
 
-export function contentExportFile(format: ContentExportFormat, source: ContentExportSource): ContentExportFile {
+/**
+ * The file of one format. With `levelLabels` the `.txt` and `.md` exports mark every heading with
+ * its level („[H2] …“; Markdown then always from the HTML, since the stored Markdown has no marks).
+ * The Texte page export sets it for `.txt` always and for `.md` on request; the standalone tools
+ * export as before. HTML and the HTML fragment never carry the marks: they are published.
+ */
+export function contentExportFile(
+  format: ContentExportFormat,
+  source: ContentExportSource,
+  options: { levelLabels?: boolean } = {},
+): ContentExportFile {
   switch (format) {
     case "txt":
-      return { body: htmlToPlainText(source.html), filename: `${source.slug}.txt`, contentType: "text/plain; charset=utf-8" };
+      return { body: htmlToPlainText(source.html, { levelLabels: options.levelLabels === true }), filename: `${source.slug}.txt`, contentType: "text/plain; charset=utf-8" };
     case "md":
       return {
-        body: source.markdown?.trim() ? source.markdown : htmlToMarkdown(source.html),
+        body: options.levelLabels
+          ? htmlToMarkdown(source.html, { levelLabels: true })
+          : source.markdown?.trim()
+            ? source.markdown
+            : htmlToMarkdown(source.html),
         filename: `${source.slug}.md`,
         contentType: "text/markdown; charset=utf-8",
       };

@@ -24,6 +24,11 @@ export async function GET(req: Request, context: { params: Promise<{ slug: strin
   if (!page.html) return contentError("Für diese Seite gibt es noch keinen Text.", 404);
 
   return contentExportResponse(
-    contentExportFile(format, { slug, title: page.title || page.name, html: page.html, markdown: page.markdown }),
+    // `levels=1`: the Markdown export with „[H2]“ marks; the text export always has them.
+    contentExportFile(
+      format,
+      { slug, title: page.title || page.name, html: page.html, markdown: page.markdown },
+      { levelLabels: format === "txt" || (format === "md" && url.searchParams.get("levels") === "1") },
+    ),
   );
 }
