@@ -796,6 +796,29 @@ assert.deepEqual(
 );
 assert.equal(normalized.deferred_questions[0]?.link_to, "Seniorenumzug");
 assert.equal(normalized.hormozi.moeglicher_beweis, "kein belegter Beweis");
+assert.deepEqual(normalized.hormozi.einwaende, [], "older answers without objections: empty list");
+
+// 12.11.: FAQ marks (at most six) and the Avatar's objections.
+const faq = normalizeAnalyse(
+  {
+    fanout_questions: Array.from({ length: 9 }, (_, i) => ({ question: `Frage ${i + 1}?`, source: "Recherche", theme: i < 8 ? `FAQ: Thema ${i + 1}` : "Ablauf" })),
+    hormozi: { einwaende: ["Zu teuer", "Kein Vertrauen", "Keine Zeit", "Später", "Fünfter"] },
+  },
+  context(),
+);
+assert.deepEqual(
+  faq.fanout_questions.slice(0, 9).map((q) => q.theme),
+  ["FAQ: Thema 1", "FAQ: Thema 2", "FAQ: Thema 3", "FAQ: Thema 4", "FAQ: Thema 5", "FAQ: Thema 6", "Thema 7", "Thema 8", "Ablauf"],
+  "beyond six the FAQ mark goes",
+);
+assert.deepEqual(faq.hormozi.einwaende, ["Zu teuer", "Kein Vertrauen", "Keine Zeit", "Später"], "at most four");
+const analyseSpec = contentStepSpec(CONTENT_STEP_ANALYSE, context());
+assert.match(analyseSpec.system, /theme: das Unterthema in 1–3 Wörtern\. Markiere mit theme, welche Fragen in den Fragen-Abschnitt gehören \(theme beginnt mit ‚FAQ:‘\) und welche im Fließtext beantwortet werden sollen\. Höchstens 6 Fragen für den Fragen-Abschnitt\./);
+assert.match(analyseSpec.system, /groesste_huerde \(was ihn vom Auftrag abhält\), einwaende \(die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar\), moeglicher_beweis/);
+const analyseSchema = analyseSpec.tool!.input_schema as { properties: Record<string, { properties?: Record<string, unknown>; items?: { properties: Record<string, unknown> }; required?: string[] }> };
+assert.ok(analyseSchema.properties.hormozi!.required!.includes("einwaende"));
+assert.deepEqual(analyseSchema.properties.hormozi!.properties!.einwaende, { type: "array", items: { type: "string" }, description: "Die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar." });
+assert.deepEqual(analyseSchema.properties.fanout_questions!.items!.properties.theme, { type: "string", description: "Unterthema in 1–3 Wörtern; beginnt mit „FAQ:“, wenn die Frage in den Fragen-Abschnitt gehört." });
 console.log("analyse normalisation: ok");
 
 // --- hero placeholder through the steps ---------------------------------------------------------
