@@ -11,7 +11,7 @@
  */
 
 import { pendingChecksBlock, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
-import { blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { BLOCKED_HEADING, blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
 import { pageFactsBlock, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -654,7 +654,20 @@ export type RephrasePromptContext = {
   page?: { ki_prompt: string | null } | null;
   /** Texte only: the client's wishes. The standalone Watermark tool passes none. */
   wishes?: ContentClientWishes | null;
+  /** Texte only: the Anbieterfakten, for their „Gesperrt“ statements. */
+  sections?: ReadonlyArray<{ label: string; current: string }>;
 };
+
+/** The Grok pass gets the blocked statements on their own, with one sentence instead of the long note. */
+export function rephraseBlockedBlock(context: Pick<RephrasePromptContext, "sections">): string {
+  const statements = extractBlockedStatements((context.sections ?? []).filter((s) => s.current.trim()));
+  if (statements.length === 0) return "";
+  return [
+    `## ${BLOCKED_HEADING}`,
+    "Nichts davon darf im Text auftauchen, auch nicht sinngemäß.",
+    ...statements.map((s) => `- [${s.section}] ${s.text}`),
+  ].join("\n");
+}
 
 /** The Vorgaben of a text without Texte settings: whatever the text already does stays. */
 export const REPHRASE_OWN_VORGABEN = [
@@ -1547,7 +1560,7 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
   };
 }
 
-// --- Watermark Entfernung: every sentence rephrased, on Grok -----------------------------------
+// --- Watermark Entfernung: AI-sounding sentences rephrased, on Grok --------------------------------
 
 /**
  * The Watermark step runs on Grok (xAI, see `xai.ts` and `rephrase.ts`), not on Claude, and not through
@@ -1562,6 +1575,7 @@ export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: reado
     user: join([
       `## Abschnitte (bitte in derselben Form zurückgeben, nur der Text darin neu formuliert)\n${rephraseChunkHtml(chunk)}`,
       context.settings ? settingsBlock(context.settings) : REPHRASE_OWN_VORGABEN,
+      rephraseBlockedBlock(context),
       rephraseWishesBlock(context),
       notesBlock(context),
     ]),

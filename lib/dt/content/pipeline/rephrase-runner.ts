@@ -29,6 +29,7 @@ import {
   type XaiTextCall,
   type XaiTextResult,
 } from "@/lib/dt/content/pipeline/xai";
+import { rephraseLosses } from "@/lib/dt/content/pipeline/rephrase-guard";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import type { ContentTextBlock } from "@/lib/dt/content/render";
 
@@ -68,6 +69,12 @@ export type RephraseRunOptions = {
    * reports the error.
    */
   keepOnEmpty?: boolean;
+  /**
+   * Texte: the code check per section (`rephraseLosses`) with the page's protected names and
+   * keywords. A section that fails keeps its previous wording and is listed in `progress.rejected`.
+   * The standalone tool leaves it off.
+   */
+  guard?: { terms: readonly string[] };
 };
 
 export type RephraseRunResult =
@@ -114,7 +121,17 @@ export async function runRephraseOnBlocks(
       model = answer.model;
       const costEur = estimateCostEur(answer.model, answer.usage);
       await options.onUsage({ model: answer.model, inputTokens: answer.usage.inputTokens, outputTokens: answer.usage.outputTokens, costEur });
-      for (const block of parseRephrasedChunk(answer.text, part)) progress.rewritten[block.id] = block.html;
+      for (const block of parseRephrasedChunk(answer.text, part)) {
+        const previous = part.find((b) => b.id === block.id);
+        const losses = options.guard && previous ? rephraseLosses(previous, block, options.guard.terms) : [];
+        if (losses.length > 0 && previous) {
+          progress.rewritten[block.id] = previous.html;
+          progress.rejected = [...(progress.rejected ?? []).filter((r) => r.block_id !== block.id), { block_id: block.id, missing: losses.join("; ").slice(0, 500) }];
+        } else {
+          progress.rewritten[block.id] = block.html;
+          if (progress.rejected?.some((r) => r.block_id === block.id)) progress.rejected = progress.rejected.filter((r) => r.block_id !== block.id);
+        }
+      }
       progress.calls += 1;
       progress.input_tokens += answer.usage.inputTokens;
       progress.output_tokens += answer.usage.outputTokens;

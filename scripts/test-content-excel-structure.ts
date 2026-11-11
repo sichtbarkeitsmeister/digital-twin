@@ -1011,8 +1011,14 @@ assert.deepEqual(manyChunks.flat().map((b) => b.id), many.map((b) => b.id), "eve
 const prompt8 = rephraseChunkPrompt(rephraseContext, chunks[0]!);
 const sentToGrok = `${prompt8.system}\n${prompt8.user}`;
 assert.doesNotMatch(sentToGrok, /watermark|wasserzeichen|detector|detektor|EU AI Act|undetectable|hide AI/i, "the model never sees the step's name or purpose");
-assert.match(prompt8.system, /Schreibe jeden Satz neu/);
-assert.match(prompt8.system, /Kopiere keinen Satz wörtlich/);
+// 12.11.: only sentences with AI patterns are rewritten; DrFlex is gone, spelling is checked.
+assert.match(prompt8.system, /Formuliere Sätze um, die nach typischen KI-Mustern klingen/);
+assert.match(prompt8.system, /Sätze, die bereits natürlich klingen, darfst du stehen lassen\./);
+assert.doesNotMatch(prompt8.system, /Schreibe jeden Satz neu|DrFlex/);
+assert.match(prompt8.system, /Handlungsaufforderungen mit Kontaktweg\. Unverändert bleiben außerdem: Fachbegriffe/);
+assert.match(prompt8.system, /\[FOTO: …\], \[QUELLE …\], \[DATUM\]/);
+assert.match(prompt8.system, /nach der amtlichen deutschen Rechtschreibung\. Du führst keine neuen Fehler ein; bestehende Fehler korrigierst du\./);
+assert.match(prompt8.system, /Was im Block „Gesperrt“ steht, darf nicht im Text auftauchen, auch nicht sinngemäß\./);
 assert.match(prompt8.system, /\[LINK: …\]/);
 assert.match(prompt8.system, /\[BITTE PRÜFEN: …\]/);
 assert.match(prompt8.system, /\[DATUM\]/);

@@ -24,7 +24,7 @@ export default async function VerwaltungWatermarkPage() {
         <div className="grid gap-1">
           <h1 className="text-xl font-bold tracking-tight text-primary sm:text-2xl">Watermark Entfernung</h1>
           <p className="text-xs text-secondary sm:text-sm">
-            Datei hochladen, jeder Satz wird neu formuliert, Ergebnis als HTML oder .txt herunterladen.
+            Datei hochladen, Sätze mit typischen KI-Mustern werden umformuliert, Ergebnis als HTML oder .txt herunterladen.
           </p>
         </div>
         <DtWatermarkTool xaiConfigured={Boolean(resolveXaiApiKey())} xaiMissingMessage={XAI_MISSING_KEY_MESSAGE} />

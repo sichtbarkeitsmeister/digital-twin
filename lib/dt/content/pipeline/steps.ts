@@ -36,7 +36,7 @@ export type ContentStepDefinition = {
  * GEO rewrites for citation, the Aktualitätsprüfung checks every time-sensitive statement
  * with the web search (and may send the text back to GEO once), Hormozi / Vermenschlichung
  * are two rewrites (conversion, wording), Lektorat corrects, Watermark Entfernung rephrases
- * every sentence on Grok, Endabnahme halts for the human release.
+ * the sentences with AI patterns on Grok (checked in code), Endabnahme halts for the human release.
  *
  * Step numbers live only here: everything else uses the constants below. Stored rows carry
  * the numbers, so a new step needs a migration that renumbers them (20261027 did that for

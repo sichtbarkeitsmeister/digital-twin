@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { contentExportFile } from "../lib/dt/content/export";
 import type { ContentTextSettings } from "../lib/dt/content/mapping";
 import { ContentLlmError } from "../lib/dt/content/pipeline/llm";
-import { REPHRASE_OWN_VORGABEN, rephraseChunkPrompt, settingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
+import { REPHRASE_OWN_VORGABEN, rephraseBlockedBlock, rephraseChunkPrompt, settingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
 import {
   REPHRASE_CHUNK_CHARS,
   REPHRASE_MIN_REMAINING_MS,
@@ -24,6 +24,7 @@ import {
   rephrasedBlocks,
   type RephraseProgress,
 } from "../lib/dt/content/pipeline/rephrase";
+import { rephraseLosses, rephraseProtectedTerms, rephraseRejectedFindings } from "../lib/dt/content/pipeline/rephrase-guard";
 import { runRephraseOnBlocks, type RephraseRunOptions } from "../lib/dt/content/pipeline/rephrase-runner";
 import { XAI_MISSING_KEY_MESSAGE, XaiEmptyAnswerError, XaiTimeoutError, callXaiText, type XaiTextCall } from "../lib/dt/content/pipeline/xai";
 import { renderBlocksHtml, type ContentTextBlock } from "../lib/dt/content/render";
@@ -584,7 +585,77 @@ async function testRunnerEmptyAnswers() {
   console.log("runner: empty Grok answers (split, other models, keep in Texte): ok");
 }
 
+/** Texte: the code check after Grok (numbers, placeholders, names, keywords) and the „Gesperrt“ block. */
+async function testGuard() {
+  const before = { html: "<p>Die Rolex Daytona von 1980 brachte 2.500 € mehr. Ankauf bei Antikankauf Krause in Düsseldorf, Ansprechpartner Peter Krause. IWC und eBay prüfen wir auch. [BITTE PRÜFEN: Gutachten?] [LINK: Ankauf] Luxusuhren Ankauf Düsseldorf seit Jahren.</p>" };
+  const terms = rephraseProtectedTerms({
+    contact: {
+      lines: [
+        { label: "Firmenname", value: "Antikankauf Krause" },
+        { label: "Ansprechpartner", value: "Peter Krause (Inhaber)" },
+        { label: "Adresse", value: "Königsallee 12, 40212 Düsseldorf" },
+        { label: "Telefon", value: "0211 123" },
+      ],
+      google_profile_url: null,
+      no_google_profile: false,
+    },
+    page: { keywords: null, main_keyword: null },
+    outputs: { 1: { main_keyword: "Luxusuhren Ankauf Düsseldorf", secondary_keywords: ["Rolex verkaufen"] } },
+  });
+  assert.deepEqual(terms, ["Antikankauf Krause", "Peter Krause", "Königsallee", "Düsseldorf", "Luxusuhren Ankauf Düsseldorf", "Rolex verkaufen"]);
+  assert.deepEqual(rephraseLosses(before, before, terms), [], "unchanged: nothing to check");
+  const good = { html: "<p>1980 gebaut, 2500 € mehr: die Rolex Daytona. Antikankauf Krause in Düsseldorf, Ihr Ansprechpartner ist Peter Krause. Auch IWC und eBay prüfen wir. [BITTE PRÜFEN: Gutachten?] [LINK: Ankauf] Luxusuhren Ankauf Düsseldorf seit Jahren.</p>" };
+  assert.deepEqual(rephraseLosses(before, good, terms), [], "reordered, „2.500“ = „2500“: fine");
+  const bad = { html: "<p>Die Daytona aus den Achtzigern brachte 3 Tausend mehr. Ankauf bei Krause in Düsseldorf. IWC prüfen wir auch. [LINK: Ankauf] Uhrenankauf seit Jahren.</p>" };
+  assert.deepEqual(rephraseLosses(before, bad, terms), [
+    "Zahl 1980, 2500",
+    "neue Zahl 3",
+    "Platzhalter [BITTE PRÜFEN: Gutachten?]",
+    "Name oder Keyword „Antikankauf Krause“, „Peter Krause“, „Luxusuhren Ankauf Düsseldorf“, „eBay“",
+  ]);
+  assert.deepEqual(rephraseLosses({ html: "<p>Drei Schritte.</p>" }, { html: "<p>3 Schritte.</p>" }, []), ["neue Zahl 3"], "written-out numbers count strictly");
+
+  // In the runner: a failing section keeps its wording and is listed; the standalone tool has no guard.
+  const blocks: ContentTextBlock[] = [
+    { id: "a", heading: "A", level: 2, html: "<p>Seit 1980 kaufen wir Uhren an, mit Antikankauf Krause als Ansprechpartner vor Ort.</p>" },
+    { id: "b", heading: "B", level: 2, html: "<p>Wir prüfen jede Uhr am Objekt, ruhig und ohne Druck, mit genug Zeit.</p>" },
+  ];
+  const call: RephraseRunOptions["call"] = async (input) => ({
+    text: [...input.user.matchAll(/data-block-id="([^"]+)"/g)].map((m) => `<section data-block-id="${m[1]}"><p>Neu formuliert ${m[1]} ohne Jahr.</p></section>`).join(""),
+    model: "grok-test-fast",
+    usage: { inputTokens: 10, outputTokens: 10 },
+    finishReason: "stop",
+  });
+  const progress = emptyRephraseProgress(rephraseBlockCount(blocks));
+  const run = await runRephraseOnBlocks({ notes: [] }, blocks, {
+    progress, deadline: Date.now() + 600_000, models: MODELS, call, onUsage: async () => undefined, save: async () => undefined, keepOnEmpty: true,
+    guard: { terms: ["Antikankauf Krause"] },
+  });
+  assert.ok(run.state === "done");
+  if (run.state !== "done") return;
+  assert.equal(run.blocks[0]!.html, blocks[0]!.html, "a: lost 1980 and the company, keeps its wording");
+  assert.equal(run.blocks[1]!.html, "<p>Neu formuliert b ohne Jahr.</p>", "b: fine");
+  assert.deepEqual(progress.rejected, [{ block_id: "a", missing: "Zahl 1980; Name oder Keyword „Antikankauf Krause“" }]);
+  assert.deepEqual(readRephraseProgress(JSON.parse(JSON.stringify(progress)), 2).rejected, progress.rejected, "stored and read back");
+  const tool = await runRephraseOnBlocks({ notes: [] }, blocks, { progress: emptyRephraseProgress(2), deadline: Date.now() + 600_000, models: MODELS, call, onUsage: async () => undefined, save: async () => undefined });
+  assert.ok(tool.state === "done" && tool.blocks[0]!.html.startsWith("<p>Neu formuliert"), "the standalone tool has no guard");
+
+  assert.deepEqual(rephraseRejectedFindings(progress.rejected!, blocks).map((f) => [f.title, f.severity, f.block_id]), [
+    ["Umformulierung verworfen: Zahl 1980; Name oder Keyword „Antikankauf Krause“", "low", "a"],
+  ]);
+  assert.match(rephraseRejectedFindings(progress.rejected!, blocks)[0]!.problem, /^Grok hat beim Abschnitt „A“ etwas verloren oder hinzugefügt/);
+
+  // „Gesperrt“ goes to Grok with one sentence.
+  const sections = [{ label: "Ankauf", current: "Wir kaufen Uhren. Bewertung per Video (nicht verwenden)." }];
+  const blocked = rephraseBlockedBlock({ sections });
+  assert.match(blocked, /^## Gesperrt \(nicht verwenden, auch nicht sinngemäß\)\nNichts davon darf im Text auftauchen, auch nicht sinngemäß\.\n- \[Ankauf\] /);
+  assert.match(rephraseChunkPrompt({ settings, notes: [], sections }, blocks).user, /## Gesperrt/);
+  assert.equal(rephraseBlockedBlock({}), "");
+  console.log("guard and Gesperrt: ok");
+}
+
 async function main() {
+  await testGuard();
   testChunkPlanning();
   testMergeById();
   testPromptMatchesStepEight();

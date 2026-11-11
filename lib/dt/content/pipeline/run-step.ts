@@ -19,6 +19,8 @@ import {
   applyDrops,
   normalizeAnswersOutput,
 } from "@/lib/dt/content/pipeline/answers";
+import type { ContentFinding } from "@/lib/dt/content/types";
+import { rephraseProtectedTerms, rephraseRejectedFindings } from "@/lib/dt/content/pipeline/rephrase-guard";
 import { planQuestionStop, questionStopOutcome, questionStopKeep, questionStopPassItems, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { buildContentKnowledge, customerAnswerNote } from "@/lib/dt/content/pipeline/questions";
 import { parseClientWishes } from "@/lib/dt/content/client-wishes";
@@ -755,6 +757,8 @@ async function runRephraseStep(input: {
     deadline,
     // A section Grok gives no text for keeps its wording and becomes an open point (31.10.).
     keepOnEmpty: true,
+    // Numbers, placeholders, names and keywords stay; a section that loses one keeps its wording.
+    guard: { terms: rephraseProtectedTerms(context) },
     onUsage: (usage) =>
       recordLlmUsageEvent(service, {
         organisationId: page.organisation_id,
@@ -797,6 +801,9 @@ async function runRephraseStep(input: {
         block_id: k.block_id,
       })),
     ];
+  }
+  if (progress.rejected?.length) {
+    pagePatch.findings = [...((pagePatch.findings as ContentFinding[] | undefined) ?? page.findings), ...rephraseRejectedFindings(progress.rejected, context.blocks)];
   }
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + progress.cost_eur);
   await saveProgress(run.model, { status: stepStatus, finished_at: new Date().toISOString() });

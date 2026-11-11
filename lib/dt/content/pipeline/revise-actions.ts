@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { emptyRephraseProgress } from "@/lib/dt/content/pipeline/rephrase";
+import { rephraseProtectedTerms } from "@/lib/dt/content/pipeline/rephrase-guard";
 import { runRephraseOnBlocks } from "@/lib/dt/content/pipeline/rephrase-runner";
 import {
   REVISE_MAX_TOKENS,
@@ -133,6 +134,8 @@ export async function previewRevision(
       progress,
       deadline: Date.now() + REVISE_WATERMARK_MS,
       keepOnEmpty: true,
+      // Grok must keep what the checked revision says; otherwise the revision stays as Claude wrote it.
+      guard: { terms: rephraseProtectedTerms(context) },
       onUsage: (usage) =>
         recordLlmUsageEvent(service, {
           organisationId: page.organisation_id,
@@ -147,7 +150,7 @@ export async function previewRevision(
       save: async () => undefined,
     });
     costEur += progress.cost_eur;
-    if (run.state === "done") {
+    if (run.state === "done" && !progress.rejected?.length) {
       after = run.blocks[0] ?? after;
       watermark = true;
     }
