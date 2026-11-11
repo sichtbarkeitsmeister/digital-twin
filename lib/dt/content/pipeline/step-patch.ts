@@ -34,6 +34,7 @@ import { contentGapQuestions, findContentGaps } from "@/lib/dt/content/pipeline/
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 import { isKeptFinding, type ContentQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import {
+  CONTENT_HERO_BLOCK_ID,
   ensureHeroPlaceholder,
   isEmptyHeroPlaceholder,
   missingH1Finding,
@@ -47,6 +48,7 @@ import {
   isTextPlaceholder,
   loose,
   overflowFindings,
+  pendingCheckFor,
   planContentQuestions,
   questionPlanRecord,
   sourceFindings,
@@ -187,19 +189,74 @@ function withOverflow(findings: readonly ContentFinding[], plan: ContentQuestion
   ];
 }
 
-/** Every placeholder still in the text at the Endabnahme, as an open point (unless the model named it). */
-export function placeholderFindings(blocks: readonly ContentTextBlock[], listed: readonly ContentFinding[]): ContentFinding[] {
+/**
+ * Every placeholder still in the text at the Endabnahme, as an open point (unless the model named
+ * it). A placeholder of a question the customer is checking („KUNDE PRÜFT“) is no gap: it is
+ * listed as „Kunde prüft: …“ with severity low, always by the code (the model is told to leave it).
+ */
+export function placeholderFindings(
+  blocks: readonly ContentTextBlock[],
+  listed: readonly ContentFinding[],
+  knowledge?: ContentKnowledge,
+): ContentFinding[] {
   const said = listed.map((f) => loose(`${f.title} ${f.problem} ${f.proposal}`));
-  return findContentGaps(blocks)
-    .filter((gap) => !said.some((text) => text.includes(loose(gap.placeholder))))
-    .map((gap) => ({
+  const out: ContentFinding[] = [];
+  for (const gap of findContentGaps(blocks)) {
+    const pending = knowledge ? pendingCheckFor({ question: gap.question, placeholder: gap.placeholder }, knowledge) : null;
+    if (pending) {
+      out.push({
+        title: `Kunde prüft: ${pending.question}`.slice(0, 200),
+        problem: `Abschnitt „${gap.section}“: ${gap.placeholder} – „${gap.excerpt}“`,
+        proposal: "Antwort des Kunden abwarten, dann Abschnitt ändern.",
+        severity: "low",
+        severity_label: "Hinweis",
+        block_id: gap.block_id,
+      });
+      continue;
+    }
+    if (said.some((text) => text.includes(loose(gap.placeholder)))) continue;
+    out.push({
       title: "Platzhalter offen",
       problem: `Abschnitt „${gap.section}“: ${gap.placeholder} – „${gap.excerpt}“`,
       proposal: "Angabe ergänzen (Abschnitt ändern) oder den Satz streichen.",
       severity: "high",
       severity_label: "Wichtig",
       block_id: gap.block_id,
-    }));
+    });
+  }
+  return out;
+}
+
+/** The model's open points without those about a „KUNDE PRÜFT“ placeholder: the code lists them as „Kunde prüft: …“. */
+export function withoutPendingPlaceholders(listed: readonly ContentFinding[], blocks: readonly ContentTextBlock[], knowledge?: ContentKnowledge): ContentFinding[] {
+  if (!knowledge) return [...listed];
+  const pending = findContentGaps(blocks)
+    .filter((gap) => pendingCheckFor({ question: gap.question, placeholder: gap.placeholder }, knowledge))
+    .map((gap) => loose(gap.placeholder));
+  if (pending.length === 0) return [...listed];
+  return listed.filter((f) => {
+    const text = loose(`${f.title} ${f.problem} ${f.proposal}`);
+    return !pending.some((p) => text.includes(p));
+  });
+}
+
+/**
+ * The page's start as the Textvorlagen want it: the SEO-H1 (id hero, level 1) first, directly
+ * followed by a level-2 Abschnitt (the hero heading). Pages after the older recipe are reported too.
+ */
+export function heroStructureFinding(blocks: readonly ContentTextBlock[]): ContentFinding | null {
+  if (blocks.length === 0) return null;
+  const [first, second] = blocks;
+  if (first!.id === CONTENT_HERO_BLOCK_ID && first!.level === 1 && second?.level === 2) return null;
+  const describe = (b: ContentTextBlock | undefined) => (b ? `„${b.heading?.trim() || b.id}“ (id ${b.id}, Ebene ${b.level})` : "keiner");
+  return {
+    title: "H1-Aufbau prüfen",
+    problem: `Erwartet: am Anfang der Abschnitt hero als H1 (Ebene 1), direkt danach ein Abschnitt mit Ebene 2. Gefunden: erster Abschnitt ${describe(first)}, zweiter Abschnitt ${describe(second)}.`,
+    proposal: "Die SEO-H1 als ersten Abschnitt (id hero, Ebene 1) und direkt danach die Hero-Überschrift als H2 setzen, z. B. über „Mit Anmerkung wiederholen“ ab Schritt 2.",
+    severity: "medium",
+    severity_label: "Mittel",
+    block_id: first!.id,
+  };
 }
 
 export type FreshnessPlan = {
@@ -363,9 +420,12 @@ export function stepPatchFor(
       const out = output as EndabnahmeOutput;
       // The page asked once, before the Watermark Entfernung. What is still open now (a
       // placeholder left, a question not answered) is listed for the release, not asked again.
-      const left = placeholderFindings(parseBlocksFromHtml(current.html), out.unresolved);
+      const blocks = parseBlocksFromHtml(current.html);
+      const listed = withoutPendingPlaceholders(out.unresolved, blocks, current.knowledge);
+      const left = placeholderFindings(blocks, listed, current.knowledge);
       const unanswered = overflowFindings((current.questions ?? []).filter((q) => !isTextPlaceholder(q.placeholder)));
-      pagePatch.unresolved = [...out.unresolved, ...left, ...unanswered];
+      const hero = heroStructureFinding(blocks);
+      pagePatch.unresolved = [...listed, ...left, ...unanswered, ...(hero ? [hero] : [])];
       pagePatch.questions = [];
       pagePatch.released = false;
       pagePatch.job_id = null;

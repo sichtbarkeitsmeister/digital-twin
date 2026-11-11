@@ -12,7 +12,9 @@ import { parseContentPagePatch } from "../lib/dt/content/page-patch";
 import { approvalPatch, rerunPagePatch } from "../lib/dt/content/pipeline/actions";
 import type { callContentTool } from "../lib/dt/content/pipeline/llm";
 import { keptFindingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
-import { stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
+import { heroStructureFinding, stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
+import { buildContentKnowledge } from "../lib/dt/content/pipeline/questions";
+import { kundePrueftPlaceholder } from "../lib/dt/content/pipeline/kunde-prueft";
 import { isKeptFinding, questionStopKeep, readQuestionStop, reviewStopDue } from "../lib/dt/content/pipeline/question-stop";
 import { emptyRephraseProgress } from "../lib/dt/content/pipeline/rephrase";
 import type { runRephraseOnBlocks } from "../lib/dt/content/pipeline/rephrase-runner";
@@ -367,8 +369,40 @@ function keptTests() {
   const def = contentStepDefinition(CONTENT_STEP_ENDABNAHME)!;
   const again = { title: "Zeitdruck-Formulierungen trotz Tonalität", problem: "neu formuliert", proposal: "streichen", severity: "medium", block_id: "wichtig" };
   const other = { title: "Anredebruch", problem: "„Du“ in Abschnitt wichtig", proposal: "Sie", severity: "high", block_id: "wichtig" };
-  const patch = stepPatchFor(def, { unresolved: [again, other], summary: "s" }, { html: "<section data-block-id=\"wichtig\"><h2>Wichtig</h2><p>Text</p></section>", question_stop: { kept } });
+  const patch = stepPatchFor(def, { unresolved: [again, other], summary: "s" }, { html: "<section data-block-id=\"hero\"><h1>Luxusuhren Ankauf</h1></section><section data-block-id=\"wichtig\"><h2>Wichtig</h2><p>Text</p></section>", question_stop: { kept } });
   assert.deepEqual((patch.pagePatch.unresolved as ContentFinding[]).map((f) => f.title), ["Anredebruch"]);
+
+  // „KUNDE PRÜFT“ placeholders: „Kunde prüft: …“, low, also when the model listed them; others stay „Platzhalter offen“.
+  {
+    const knowledge = buildContentKnowledge({ notes: ["Antwort des Kunden auf „Gibt es eine Echtheitsgarantie?“: KUNDE PRÜFT"] });
+    assert.equal(knowledge.pending.length, 1, "the note makes a pending check");
+    // „Eigene Angabe: KUNDE PRÜFT“ on an open point: its note makes one too, with the same placeholder.
+    const fromRevision = buildContentKnowledge({ notes: [revisionNote({ id: "intro", heading: "Ankauf" }, { finding, info: "KUNDE PRÜFT" })] });
+    assert.deepEqual(fromRevision.pending.map((p) => p.placeholder), [kundePrueftPlaceholder(finding.title)]);
+    assert.deepEqual(fromRevision.answered, [], "and no answer");
+    const text =
+      "<section data-block-id=\"hero\"><h1>Luxusuhren Ankauf</h1></section>" +
+      "<section data-block-id=\"intro\"><h2>Ankauf</h2><p>Wir kaufen an. [BITTE PRÜFEN: Gibt es eine Echtheitsgarantie?] Preis: [BITTE PRÜFEN: Ab welchem Wert?]</p></section>";
+    const modelSaid = { title: "Platzhalter stehen geblieben", problem: "[BITTE PRÜFEN: Gibt es eine Echtheitsgarantie?] steht noch im Text.", proposal: "ergänzen", severity: "high", block_id: "intro" };
+    const patch = stepPatchFor(def, { unresolved: [modelSaid], summary: "s" }, { html: text, knowledge });
+    assert.deepEqual((patch.pagePatch.unresolved as ContentFinding[]).map((f) => [f.title, f.severity]), [
+      ["Kunde prüft: Gibt es eine Echtheitsgarantie?", "low"],
+      ["Platzhalter offen", "high"],
+    ]);
+    assert.equal((patch.pagePatch.unresolved as ContentFinding[])[0]!.proposal, "Antwort des Kunden abwarten, dann Abschnitt ändern.");
+  }
+  // The H1 structure: hero (H1) first, then an H2.
+  {
+    const b = (id: string, level: 1 | 2 | 3, heading = id) => ({ id, heading, level, html: "" });
+    assert.equal(heroStructureFinding([b("hero", 1), b("zusammenfassung", 2), b("ablauf", 2)]), null);
+    assert.equal(heroStructureFinding([]), null);
+    const legacy = heroStructureFinding([b("h1", 1, "Uhren Ankauf"), b("hero", 2, "[HERO – wird von Hormozi gefuellt]")]);
+    assert.equal(legacy?.title, "H1-Aufbau prüfen");
+    assert.equal(legacy?.severity, "medium");
+    assert.match(legacy!.problem, /Gefunden: erster Abschnitt „Uhren Ankauf“ \(id h1, Ebene 1\), zweiter Abschnitt „\[HERO – wird von Hormozi gefuellt\]“ \(id hero, Ebene 2\)\.$/);
+    assert.ok(heroStructureFinding([b("hero", 1), b("ablauf", 3)]), "an H3 right after the H1");
+    assert.ok(heroStructureFinding([b("hero", 1)]), "nothing after the H1");
+  }
 
   // …and is told about it.
   const block = keptFindingsBlock({ keptFindings: kept });

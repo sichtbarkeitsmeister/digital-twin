@@ -212,6 +212,9 @@ export function answeredInNotes(notes: readonly string[]): Array<{ question: str
       if (answered) out.push({ question: answered[1]!, answer: answered[2]!.trim() });
       const none = line.match(/^Keine Angabe des Kunden zu „(.{4,600}?)“/);
       if (none) out.push({ question: none[1]!, answer: null });
+      // „Eigene Angabe: KUNDE PRÜFT“ on an open point (revisionNote): its placeholder is the point's title.
+      const pending = line.match(/^Zu „(.{4,600}?)“: KUNDE PRÜFT – Platzhalter bleibt\.$/);
+      if (pending) out.push({ question: pending[1]!, answer: "KUNDE PRÜFT" });
     }
   }
   return out;
