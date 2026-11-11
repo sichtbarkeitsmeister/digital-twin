@@ -310,7 +310,7 @@ export function DtContentPageDrawer(props: {
     onChangedRef.current();
   }
 
-  /** „Erledigt“: the open point goes, the text stays. */
+  /** „So lassen“: the open point goes, the text stays, and later runs do not report it again. */
   async function dismissOpenPoint(finding: ContentFinding) {
     if (!base) return;
     setBusy("dismiss");
@@ -1039,9 +1039,9 @@ export function DtContentPageDrawer(props: {
                                     className={findingButtonClass}
                                     disabled={Boolean(busy) || Boolean(jobId)}
                                     onClick={() => void dismissOpenPoint(f)}
-                                    title="Der Punkt verschwindet, der Text bleibt, wie er ist."
+                                    title="Der Text bleibt, wie er ist. Der Punkt verschwindet und wird bei einem erneuten Lauf nicht wieder gemeldet."
                                   >
-                                    Erledigt
+                                    So lassen
                                   </button>
                                 </div>
                               ) : null}

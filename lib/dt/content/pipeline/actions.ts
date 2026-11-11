@@ -431,7 +431,7 @@ export function rerunPagePatch(page: Pick<ContentPageRow, "notes" | "freshness">
     released: false,
     freshness: freshnessForRerun(page, step),
     // From the Lektorat or earlier the page reaches its stop again; from Watermark on it stays passed.
-    ...(step <= CONTENT_STEP_LEKTORAT ? { question_stop: questionStopKeep(readQuestionStop(page.question_stop)) } : {}),
+    ...(step <= CONTENT_STEP_LEKTORAT ? { question_stop: questionStopKeep(readQuestionStop(page.question_stop), { keepKept: true }) } : {}),
     ...(step <= CONTENT_STEP_FAKTENCHECK ? { questions: [], findings: [] } : {}),
     ...(step <= CONTENT_STEP_LEKTORAT ? { final_findings: [] } : {}),
     ...(step < CONTENT_STEP_ENDABNAHME ? { unresolved: [] } : {}),

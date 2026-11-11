@@ -19,7 +19,7 @@ import {
   applyDrops,
   normalizeAnswersOutput,
 } from "@/lib/dt/content/pipeline/answers";
-import { planQuestionStop, questionStopOutcome, questionStopPassItems, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
+import { planQuestionStop, questionStopOutcome, questionStopKeep, questionStopPassItems, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { buildContentKnowledge, customerAnswerNote } from "@/lib/dt/content/pipeline/questions";
 import { parseClientWishes } from "@/lib/dt/content/client-wishes";
 import {
@@ -256,6 +256,7 @@ export async function loadContext(
       },
       freshness: page.freshness,
       openFindings: page.findings,
+      keptFindings: readQuestionStop(page.question_stop).kept ?? [],
       outputs,
       blocks: parseBlocksFromHtml(page.html),
       title: page.title,
@@ -989,7 +990,7 @@ export async function runQuestionStop(
           state: "braucht_sie",
           job_id: null,
           questions: plan.ask,
-          question_stop: { status: "waiting", at, asked: plan.ask.length + plan.askPool.length + plan.newFirma.length, handled: plan.handled },
+          question_stop: { ...questionStopKeep(stop, { keepKept: true }), status: "waiting", at, asked: plan.ask.length + plan.askPool.length + plan.newFirma.length, handled: plan.handled },
         })
         .eq("id", page.id);
       if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
@@ -998,7 +999,7 @@ export async function runQuestionStop(
     if (outcome === "go_on") {
       const { error } = await service
         .from("dt_content_pages")
-        .update({ questions: [], question_stop: { status: "done", at, asked: 0, handled: [] } })
+        .update({ questions: [], question_stop: { ...questionStopKeep(stop, { keepKept: true }), status: "done", at, asked: 0, handled: [] } })
         .eq("id", page.id)
         .eq("state", "laeuft");
       if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht gespeichert werden"));
@@ -1063,6 +1064,7 @@ export async function runQuestionStop(
       notes: answerNotes.length > 0 ? [...page.notes, answerNotes.join("\n")].slice(-20) : page.notes,
       cost_eur: roundEur(num(page.cost_eur) + costEur),
       question_stop: {
+        ...questionStopKeep(stop, { keepKept: true }),
         status: "done",
         at,
         asked: stop.asked ?? 0,

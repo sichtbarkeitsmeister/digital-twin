@@ -83,7 +83,19 @@ export type ContentQuestionStop = {
   review?: { status: "waiting" | "done"; at?: string };
   /** The page's switch „Vor der Watermark zur Durchsicht anhalten“ is off (default: on). Kept by „Zurücksetzen“. */
   review_off?: boolean;
+  /**
+   * Open points the editor chose „So lassen“ for: the text stays as it is and no later run
+   * reports them again (the Endabnahme is told, and an identical point is dropped in code).
+   * Kept by „Mit Anmerkung wiederholen“, emptied by „Zurücksetzen“ (the text is written anew).
+   */
+  kept?: ContentKeptFinding[];
 };
+
+/** One open point left as it is („So lassen“). */
+export type ContentKeptFinding = { title: string; problem: string; block_id: string | null; at: string };
+
+/** At most this many kept points per page; the oldest go first. */
+export const CONTENT_KEPT_FINDINGS_MAX = 50;
 
 export const EMPTY_QUESTION_STOP: ContentQuestionStop = { handled: [] };
 
@@ -132,11 +144,19 @@ export function readQuestionStop(raw: unknown): ContentQuestionStop {
           .map((x) => ({ block_id: String(x.block_id), reason: String(x.reason ?? "") })),
       }
     : null;
+  const kept: ContentKeptFinding[] = [];
+  for (const item of Array.isArray(r.kept) ? r.kept : []) {
+    const k = rec(item);
+    const title = text(k.title, 300);
+    if (!title) continue;
+    kept.push({ title, problem: text(k.problem, 2_000) ?? "", block_id: text(k.block_id, 80), at: text(k.at) ?? "" });
+  }
   const rv = rec(r.review);
   const review = rv.status === "waiting" || rv.status === "done" ? { status: rv.status as "waiting" | "done", ...(text(rv.at) ? { at: text(rv.at)! } : {}) } : null;
   return {
     ...(review ? { review } : {}),
     ...(r.review_off === true ? { review_off: true } : {}),
+    ...(kept.length > 0 ? { kept: kept.slice(-CONTENT_KEPT_FINDINGS_MAX) } : {}),
     ...(status ? { status } : {}),
     ...(text(r.at) ? { at: text(r.at)! } : {}),
     ...(typeof r.asked === "number" ? { asked: r.asked } : {}),
@@ -177,9 +197,29 @@ export function reviewStopDue(
   return !(watermark && (watermark.status === "done" || watermark.status === "skipped"));
 }
 
-/** What a reset or a rerun of the stop keeps of it: only the page's switch. */
-export function questionStopKeep(stop: Pick<ContentQuestionStop, "review_off">): Record<string, unknown> {
-  return stop.review_off ? { review_off: true } : {};
+/**
+ * What a reset or a rerun of the stop keeps of it: the page's switch, and on a rerun
+ * („Mit Anmerkung wiederholen“) the points left as they are („So lassen“). A reset writes the
+ * text anew, so its kept points go.
+ */
+export function questionStopKeep(
+  stop: Pick<ContentQuestionStop, "review_off" | "kept">,
+  options: { keepKept?: boolean } = {},
+): Record<string, unknown> {
+  return {
+    ...(stop.review_off ? { review_off: true } : {}),
+    ...(options.keepKept && stop.kept && stop.kept.length > 0 ? { kept: stop.kept } : {}),
+  };
+}
+
+/** Whether an open point is one the editor left as it is: the same point, or the same title on the same Abschnitt. */
+export function isKeptFinding(f: { title: string; problem: string; block_id?: string | null }, kept: readonly ContentKeptFinding[]): boolean {
+  const title = f.title.trim().toLowerCase();
+  return kept.some(
+    (k) =>
+      k.title.trim().toLowerCase() === title &&
+      ((k.block_id ?? "") === (f.block_id ?? "") || k.problem.trim() === f.problem.trim()),
+  );
 }
 
 export type ContentQuestionStopPlan = {

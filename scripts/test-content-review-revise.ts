@@ -1,6 +1,6 @@
 /**
  * Texte: „Zur Durchsicht“ before the Watermark Entfernung, „Abschnitt überarbeiten lassen“ and the
- * buttons on the open points („Vorschlag umsetzen“, „Eigene Angabe“, „Erledigt“).
+ * buttons on the open points („Vorschlag umsetzen“, „Eigene Angabe“, „So lassen“).
  * In-memory database, stubbed model calls; no network.
  * Run: npm run test:content-review-revise
  */
@@ -11,14 +11,15 @@ import { findingKey, findingTargetBlock, markNewSentences, withoutFinding } from
 import { parseContentPagePatch } from "../lib/dt/content/page-patch";
 import { approvalPatch, rerunPagePatch } from "../lib/dt/content/pipeline/actions";
 import type { callContentTool } from "../lib/dt/content/pipeline/llm";
-import type { ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
-import { questionStopKeep, readQuestionStop, reviewStopDue } from "../lib/dt/content/pipeline/question-stop";
+import { keptFindingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
+import { stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
+import { isKeptFinding, questionStopKeep, readQuestionStop, reviewStopDue } from "../lib/dt/content/pipeline/question-stop";
 import { emptyRephraseProgress } from "../lib/dt/content/pipeline/rephrase";
 import type { runRephraseOnBlocks } from "../lib/dt/content/pipeline/rephrase-runner";
 import { REVISE_RULES, REVISE_TOOL, checkRevision, revisionNote, revisionOrder, revisionPrompt } from "../lib/dt/content/pipeline/revise";
-import { applyRevision, dismissFinding, previewRevision } from "../lib/dt/content/pipeline/revise-actions";
+import { applyRevision, keepFinding, previewRevision } from "../lib/dt/content/pipeline/revise-actions";
 import type { StepOutcome } from "../lib/dt/content/pipeline/run-step";
-import { CONTENT_STEP_WATERMARK } from "../lib/dt/content/pipeline/steps";
+import { CONTENT_STEP_ENDABNAHME, CONTENT_STEP_WATERMARK, contentStepDefinition } from "../lib/dt/content/pipeline/steps";
 import { parseBlocksFromHtml, renderBlocksHtml, type ContentTextBlock } from "../lib/dt/content/render";
 import { buildReview, pageActions, pageDetail, type ContentPageRow, type ContentStepRow } from "../lib/dt/content/store";
 import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
@@ -303,19 +304,49 @@ async function actionTests() {
     const conflict = await applyRevision(db(pageRow()).service, pageRow(), { block_id: "ablauf", before: { heading: "Alt", html: "<p>alt</p>" }, after: { heading: "Neu", html: "<p>neu</p>" } });
     assert.ok(!conflict.ok && conflict.status === 409);
   }
-  // „Erledigt“.
+  // „So lassen“: the point goes, the text stays, the page remembers it.
   {
     const store = db(pageRow());
-    assert.ok((await dismissFinding(store.service, pageRow(), findingKey(finding))).ok);
-    assert.deepEqual((store.rows("dt_content_pages")[0] as unknown as ContentPageRow).unresolved, []);
-    assert.equal((store.rows("dt_content_pages")[0] as unknown as ContentPageRow).html, html, "the text stays");
-    assert.equal((await dismissFinding(store.service, pageRow({ unresolved: [] }), findingKey(finding))).ok, false);
+    assert.ok((await keepFinding(store.service, pageRow(), findingKey(finding), new Date("2026-11-11T12:00:00Z"))).ok);
+    const saved = store.rows("dt_content_pages")[0] as unknown as ContentPageRow;
+    assert.deepEqual(saved.unresolved, []);
+    assert.equal(saved.html, html, "the text stays");
+    assert.deepEqual(readQuestionStop(saved.question_stop).kept, [
+      { title: finding.title, problem: finding.problem, block_id: finding.block_id || null, at: "2026-11-11T12:00:00.000Z" },
+    ]);
+    assert.equal((await keepFinding(store.service, pageRow({ unresolved: [] }), findingKey(finding))).ok, false);
   }
   assert.ok(emptyRephraseProgress(1).total === 1);
-  console.log("preview, apply, dismiss: ok");
+  console.log("preview, apply, so lassen: ok");
+}
+
+/** „So lassen“: kept points survive a rerun, go with a reset, and are never listed again. */
+function keptTests() {
+  const kept = [{ title: "Zeitdruck-Formulierungen trotz Tonalität", problem: "„Gerade jetzt entscheiden …“", block_id: "wichtig", at: "2026-11-11T12:00:00Z" }];
+  const stop = { handled: [], review_off: true, kept };
+  assert.deepEqual(questionStopKeep(stop), { review_off: true }, "Zurücksetzen: the kept points go");
+  assert.deepEqual(questionStopKeep(stop, { keepKept: true }), { review_off: true, kept }, "Wiederholen: they stay");
+  assert.ok(isKeptFinding({ title: "zeitdruck-formulierungen trotz tonalität", problem: "anders formuliert", block_id: "wichtig" }, kept), "same title, same Abschnitt");
+  assert.ok(isKeptFinding({ title: "Zeitdruck-Formulierungen trotz Tonalität", problem: "„Gerade jetzt entscheiden …“", block_id: "" }, kept), "same point without block");
+  assert.ok(!isKeptFinding({ title: "Anredebruch", problem: "x", block_id: "wichtig" }, kept), "another point on the same Abschnitt stays");
+
+  // The Endabnahme drops a kept point, also when it reports it again under the same title.
+  const def = contentStepDefinition(CONTENT_STEP_ENDABNAHME)!;
+  const again = { title: "Zeitdruck-Formulierungen trotz Tonalität", problem: "neu formuliert", proposal: "streichen", severity: "medium", block_id: "wichtig" };
+  const other = { title: "Anredebruch", problem: "„Du“ in Abschnitt wichtig", proposal: "Sie", severity: "high", block_id: "wichtig" };
+  const patch = stepPatchFor(def, { unresolved: [again, other], summary: "s" }, { html: "<section data-block-id=\"wichtig\"><h2>Wichtig</h2><p>Text</p></section>", question_stop: { kept } });
+  assert.deepEqual((patch.pagePatch.unresolved as ContentFinding[]).map((f) => f.title), ["Anredebruch"]);
+
+  // …and is told about it.
+  const block = keptFindingsBlock({ keptFindings: kept });
+  assert.match(block, /^## Von der Redaktion bewusst so gelassen \(kein Befund\)\nDiese Punkte hat die Redaktion geprüft/);
+  assert.match(block, /- Zeitdruck-Formulierungen trotz Tonalität: „Gerade jetzt entscheiden …“ \(Abschnitt wichtig\)/);
+  assert.equal(keptFindingsBlock({ keptFindings: [] }), "");
+  console.log("so lassen: ok");
 }
 
 reviewStopTests()
+  .then(() => keptTests())
   .then(() => checkTests())
   .then(() => actionTests())
   .then(() => console.log("OK: review and revise tests passed"))

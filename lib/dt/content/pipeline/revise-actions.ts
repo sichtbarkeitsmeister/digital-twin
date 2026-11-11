@@ -1,7 +1,7 @@
 /**
  * The server side of „Abschnitt überarbeiten lassen“ and of the open points' buttons: the preview
  * (one Claude call, checked in code; after the Watermark Entfernung the Abschnitt also goes through
- * Grok on its own), taking it over, and „Erledigt“. Every call is billed on the page.
+ * Grok on its own), taking it over, and „So lassen“. Every call is billed on the page.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -22,6 +22,7 @@ import {
   type ContentRevisionRequest,
 } from "@/lib/dt/content/pipeline/revise";
 import type { ContentPipelineContext } from "@/lib/dt/content/pipeline/prompts";
+import { CONTENT_KEPT_FINDINGS_MAX, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { loadContext } from "@/lib/dt/content/pipeline/run-step";
 import { CONTENT_STEP_WATERMARK } from "@/lib/dt/content/pipeline/steps";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
@@ -199,11 +200,28 @@ export async function applyRevision(
   return { ok: true };
 }
 
-/** „Erledigt“: the open point goes, the text stays as it is. */
-export async function dismissFinding(service: SupabaseClient, page: ContentPageRow, key: string): Promise<{ ok: true } | Failure> {
+/**
+ * „So lassen“: the open point goes, the text stays as it is, and the page remembers the point
+ * (`question_stop.kept`) so a later Endabnahme does not report it again.
+ */
+export async function keepFinding(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  key: string,
+  now: Date = new Date(),
+): Promise<{ ok: true } | Failure> {
+  const finding = [...page.findings, ...page.final_findings, ...page.unresolved].find((f) => findingKey(f) === key);
   const next = withoutFinding(page, key);
-  if (!next) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
-  const { error } = await service.from("dt_content_pages").update(next).eq("id", page.id);
+  if (!finding || !next) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
+  const stop = readQuestionStop(page.question_stop);
+  const kept = [
+    ...(stop.kept ?? []),
+    { title: finding.title, problem: finding.problem, block_id: finding.block_id || null, at: now.toISOString() },
+  ].slice(-CONTENT_KEPT_FINDINGS_MAX);
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({ ...next, question_stop: { ...stop, kept } })
+    .eq("id", page.id);
   if (error) return { ok: false, status: 500, message: contentDbErrorMessage(error, "Offener Punkt konnte nicht gespeichert werden") };
   return { ok: true };
 }
