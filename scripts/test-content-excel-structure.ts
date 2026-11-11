@@ -750,7 +750,9 @@ for (const step of [CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_LEKTORAT, CONTENT_STE
   assert.match(contentStepSpec(step, context()).user, /Anbieterfakten/, `step ${step} still gets the facts`);
 }
 assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, /Schritt 10 Endabnahme/);
-assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, new RegExp(CONTENT_HERO_PLACEHOLDER_LEGACY.replace(/[[\]]/g, "\\$&")), "the Endabnahme still knows the old hero placeholder");
+// 12.11.: the Endabnahme no longer looks for the hero placeholders; the code checks the H1 structure instead.
+assert.doesNotMatch(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, /HERO – wird/, "no hero placeholder in the Endabnahme");
+assert.match(contentStepSpec(CONTENT_STEP_ENDABNAHME, context()).system, /und Platzhalter aus „Offen – der Kunde prüft noch“ \(die meldet das System selbst\)\./);
 assert.match(contentStepSpec(CONTENT_STEP_SEO, context()).system, /Schritt 6 \(Hormozi\) füllt ihn/, "the SEO default names Hormozi's new number");
 assert.match(contentStepSpec(CONTENT_STEP_FAKTENCHECK, context()).system, new RegExp(CONTENT_HERO_PLACEHOLDER_LEGACY.replace(/[[\]]/g, "\\$&")), "the Faktencheck accepts both hero placeholders");
 assert.throws(() => contentStepSpec(11, context()), /Unbekannter Schritt/);
@@ -946,7 +948,8 @@ console.log("halting rules: ok");
   // Endabnahme: a placeholder left after the stop is an open point for the release, not a question again.
   const endGap = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" }, { html: gapHtml });
   assert.deepEqual([endGap.halted, endGap.pagePatch.state, endGap.pagePatch.released, (endGap.pagePatch.questions as unknown[]).length], [true, "fertig", false, 0]);
-  assert.deepEqual((endGap.pagePatch.unresolved as Array<{ title: string; block_id: string }>).map((f) => [f.title, f.block_id]), [["Platzhalter offen", "kosten"]]);
+  // The fixture has no H1 „hero“ at the start: the code reports the structure too (12.11.).
+  assert.deepEqual((endGap.pagePatch.unresolved as Array<{ title: string; block_id: string }>).map((f) => [f.title, f.block_id]), [["Platzhalter offen", "kosten"], ["H1-Aufbau prüfen", "intro"]]);
   const endClean = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" }, { html: renderBlocksHtml(markersOnly) });
   assert.deepEqual([endClean.pagePatch.state, endClean.pagePatch.questions], ["fertig", []]);
 

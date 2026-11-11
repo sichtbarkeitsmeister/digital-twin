@@ -632,7 +632,12 @@ async function testLifecycle() {
   // Endabnahme: a placeholder left is an open point, the page is „fertig“, no stop for questions again.
   const end = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "ok" }, { html: HTML, questions: [] });
   assert.deepEqual([end.pagePatch.state, (end.pagePatch.questions as unknown[]).length], ["fertig", 0]);
-  assert.deepEqual((end.pagePatch.unresolved as Array<{ block_id: string }>).map((f) => f.block_id), ["kosten", "kontakt"]);
+  // The fixture starts with an H1 that is not „hero“: the code reports the structure (12.11.).
+  assert.deepEqual((end.pagePatch.unresolved as Array<{ title: string; block_id: string }>).map((f) => [f.title, f.block_id]), [
+    ["Platzhalter offen", "kosten"],
+    ["Platzhalter offen", "kontakt"],
+    ["H1-Aufbau prüfen", "h1"],
+  ]);
 
   assert.match(contentDbErrorMessage({ code: "42703", message: "column dt_content_pages.question_stop does not exist" }, "x"), /20261104_dt_content_fewer_questions\.sql/);
   assert.match(contentDbErrorMessage({ code: "PGRST205", message: "Could not find the table 'public.dt_content_org_questions' in the schema cache" }, "x"), /20261104/);
