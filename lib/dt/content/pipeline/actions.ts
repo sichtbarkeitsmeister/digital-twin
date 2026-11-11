@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { EMPTY_CONTENT_FRESHNESS } from "@/lib/dt/content/freshness";
 import { loadOrgQuestions } from "@/lib/dt/content/org-questions";
-import { readQuestionStop, type ContentHandledQuestion } from "@/lib/dt/content/pipeline/question-stop";
+import { readQuestionStop, type ContentHandledQuestion, questionStopKeep } from "@/lib/dt/content/pipeline/question-stop";
 import { customerAnswerNote } from "@/lib/dt/content/pipeline/questions";
 import {
   CONTENT_STEP_COUNT,
@@ -169,7 +169,12 @@ export async function approveContentStep(
 export function approvalPatch(page: Pick<ContentPageRow, "questions" | "question_stop">, now: string): Record<string, unknown> {
   const stop = readQuestionStop(page.question_stop);
   if (stop.status === "waiting" || stop.status === "answered") {
-    return { questions: [], question_stop: { ...stop, status: "done", at: now } };
+    // Released at the stop for questions: the text was read, the page does not stop again for it.
+    return { questions: [], question_stop: { ...stop, status: "done", at: now, review: { status: "done", at: now } } };
+  }
+  if (stop.review?.status === "waiting") {
+    // „Freigeben und fertigstellen“: the Watermark Entfernung and the Endabnahme run.
+    return { questions: [], question_stop: { ...stop, review: { status: "done", at: now } } };
   }
   if (page.questions.some((q) => q.grundlegend)) {
     return { questions: page.questions.filter((q) => !q.grundlegend) };
@@ -301,7 +306,7 @@ export async function resetContentPage(service: SupabaseClient, page: ContentPag
   if (stepsError) return { ok: false, status: 500, message: `Schritte konnten nicht gelöscht werden: ${stepsError.message}` };
   const { error } = await service
     .from("dt_content_pages")
-    .update({ ...RESET_PATCH, main_keyword: page.keywords?.main.text ?? null })
+    .update({ ...RESET_PATCH, question_stop: questionStopKeep(readQuestionStop(page.question_stop)), main_keyword: page.keywords?.main.text ?? null })
     .eq("id", page.id);
   if (error) return { ok: false, status: 500, message: error.message };
   return { ok: true, jobId: null };
@@ -419,14 +424,14 @@ export async function rerunContentStep(
 }
 
 /** What „Mit Anmerkung wiederholen“ from `step` writes on the page. */
-export function rerunPagePatch(page: Pick<ContentPageRow, "notes" | "freshness">, step: number, note: string): Record<string, unknown> {
+export function rerunPagePatch(page: Pick<ContentPageRow, "notes" | "freshness"> & Partial<Pick<ContentPageRow, "question_stop">>, step: number, note: string): Record<string, unknown> {
   return {
     notes: [...page.notes, note.trim()].slice(-20),
     step,
     released: false,
     freshness: freshnessForRerun(page, step),
     // From the Lektorat or earlier the page reaches its stop again; from Watermark on it stays passed.
-    ...(step <= CONTENT_STEP_LEKTORAT ? { question_stop: {} } : {}),
+    ...(step <= CONTENT_STEP_LEKTORAT ? { question_stop: questionStopKeep(readQuestionStop(page.question_stop)) } : {}),
     ...(step <= CONTENT_STEP_FAKTENCHECK ? { questions: [], findings: [] } : {}),
     ...(step <= CONTENT_STEP_LEKTORAT ? { final_findings: [] } : {}),
     ...(step < CONTENT_STEP_ENDABNAHME ? { unresolved: [] } : {}),

@@ -34,6 +34,7 @@ import {
 } from "@/lib/dt/content/page-types";
 import {
   CONTENT_STEP_ANALYSE,
+  CONTENT_STEP_WATERMARK,
   CONTENT_STEP_COUNT,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
@@ -821,6 +822,24 @@ export async function updateContentClientWishes(
     : { ok: true };
 }
 
+/**
+ * „Vor der Watermark zur Durchsicht anhalten“ for one page. Stored in `question_stop.review_off`
+ * (no migration); the stop's other fields are read fresh so a running step loses nothing.
+ */
+export async function updateContentReviewStop(
+  service: SupabaseClient,
+  page: Pick<ContentPageRow, "id">,
+  enabled: boolean,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { data, error: readError } = await service.from("dt_content_pages").select("question_stop").eq("id", page.id).maybeSingle();
+  if (readError) return { ok: false, status: 500, error: contentDbErrorMessage(readError, "Einstellung konnte nicht gelesen werden") };
+  const stop = { ...(readQuestionStop((data as { question_stop?: unknown } | null)?.question_stop) as Record<string, unknown>) };
+  if (enabled) delete stop.review_off;
+  else stop.review_off = true;
+  const { error } = await service.from("dt_content_pages").update({ question_stop: stop }).eq("id", page.id);
+  return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Einstellung konnte nicht gespeichert werden") } : { ok: true };
+}
+
 export type ContentOutlinePage = Pick<
   ContentPageRow,
   "slug" | "name" | "path" | "level" | "source" | "page_role" | "page_type" | "pillar_name" | "main_keyword" | "keywords"
@@ -1223,6 +1242,9 @@ export function pageDetail(page: ContentPageRow, extra: ContentPageExtra = {}): 
     case "laeuft":
       return describeRunningPage(page, extra.steps ?? null, extra.verdict ?? null);
     case "braucht_sie":
+      if (page.question_stop.review?.status === "waiting" && page.question_stop.status !== "waiting") {
+        return "Zur Durchsicht – Abschnitte prüfen und überarbeiten, dann „Freigeben und fertigstellen“";
+      }
       if (page.question_stop.status === "waiting") {
         const n = page.question_stop.asked ?? page.questions.length;
         return `${n} ${n === 1 ? "Frage" : "Fragen"} vor der Watermark Entfernung – einmal beantworten, dann geht es weiter`;
@@ -1333,8 +1355,13 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
       return [{ kind: "stop", label: "Stoppen" }, reset, remove];
     case "braucht_sie":
       return [
-        { kind: "approve", step: waitingStepFor(page), label: "Freigeben" },
+        {
+          kind: "approve",
+          step: waitingStepFor(page),
+          label: page.question_stop.review?.status === "waiting" && page.question_stop.status !== "waiting" ? "Freigeben und fertigstellen" : "Freigeben",
+        },
         { kind: "edit", step: waitingStepFor(page), label: "Abschnitt ändern" },
+        ...(page.html ? [{ kind: "revise" as const, label: "Abschnitt überarbeiten lassen" }] : []),
         rerunAction(page, rerunStepFor(page)),
         ...exportAction,
         reset,
@@ -1344,6 +1371,7 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
       return [
         { kind: "run_through", label: "Weiterlaufen lassen" },
         ...(page.html ? [{ kind: "edit" as const, step: rerunStepFor(page), label: "Abschnitt ändern" }] : []),
+        ...(page.html ? [{ kind: "revise" as const, label: "Abschnitt überarbeiten lassen" }] : []),
         rerunAction(page, rerunStepFor(page)),
         ...exportAction,
         reset,
@@ -1351,10 +1379,11 @@ export function pageActions(page: ContentPageRow): ContentAction[] {
       ];
     case "fertig":
       return page.released
-        ? [...exportAction, reset, remove]
+        ? [{ kind: "revise", label: "Abschnitt überarbeiten lassen" }, ...exportAction, reset, remove]
         : [
             { kind: "approve", step: CONTENT_STEP_ENDABNAHME, label: "Freigeben" },
             { kind: "edit", step: CONTENT_STEP_LEKTORAT, label: "Abschnitt ändern" },
+            { kind: "revise", label: "Abschnitt überarbeiten lassen" },
             rerunAction(page, CONTENT_STEP_LEKTORAT),
             ...exportAction,
             reset,
@@ -1462,6 +1491,11 @@ export function buildReview(
       asked: page.question_stop.asked ?? 0,
       handled: page.question_stop.handled,
       pass_cost: page.question_stop.pass ? formatEur(page.question_stop.pass.cost_eur) : null,
+    },
+    review_stop: {
+      enabled: !page.question_stop.review_off,
+      status: page.question_stop.review?.status ?? "none",
+      watermark_done: steps.some((s) => s.step === CONTENT_STEP_WATERMARK && s.status === "done"),
     },
     org_questions: (extra.orgQuestions ?? [])
       .filter((q) => q.page_slugs.includes(page.slug))

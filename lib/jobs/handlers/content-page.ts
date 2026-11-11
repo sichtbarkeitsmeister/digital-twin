@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { interruptedStepMessage } from "@/lib/dt/content/job-state";
 import { CONTENT_STOP_REASON_TIMEOUT, CONTENT_TIMEOUT_FINAL_MESSAGE, ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 import { readPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
-import { questionStopDue } from "@/lib/dt/content/pipeline/question-stop";
+import { questionStopDue, reviewStopDue } from "@/lib/dt/content/pipeline/question-stop";
 import {
   markContentStepError,
   markContentStepRetry,
@@ -225,6 +225,22 @@ export async function runContentPageSteps(input: {
           }
           return { ok: false, error: message, retryable: true };
         }
+      }
+
+      // „Zur Durchsicht“: with the questions settled, the page waits for a person before the
+      // Watermark Entfernung. Abschnitte can be revised there; „Freigeben und fertigstellen“ goes on.
+      if (reviewStopDue(page.question_stop, steps, next)) {
+        const { error } = await service
+          .from("dt_content_pages")
+          .update({
+            state: "braucht_sie",
+            job_id: null,
+            question_stop: { ...page.question_stop, review: { status: "waiting", at: new Date().toISOString() } },
+          })
+          .eq("id", pageId)
+          .eq("job_id", job.id);
+        if (error) throw new Error(`Seite konnte nicht zur Durchsicht angehalten werden: ${error.message}`);
+        return { ok: true, result: { step: next, halted: true, review: true } };
       }
 
       // Switched off by the editor and still to run (pending, error, no row): marked in passing.

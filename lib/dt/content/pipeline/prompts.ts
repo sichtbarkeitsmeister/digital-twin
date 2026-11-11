@@ -906,7 +906,7 @@ export const SEO_TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
  * The recipe („Textvorlage“) for this page's type, from the agency's editable set; the
  * defaults are the rules that used to be fixed here. Each page writes with its own type.
  */
-function pageTypeRules(context: ContentPipelineContext): string {
+export function pageTypeRules(context: ContentPipelineContext): string {
   return renderContentTypePrompt(context.typePrompts, context.page.page_type, context.page.pillar_name);
 }
 
