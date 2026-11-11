@@ -3,6 +3,7 @@
  * The pipeline behind the routes runs inside DigitalTwin (`lib/dt/content/pipeline`).
  */
 
+import type { ContentZielgruppen } from "@/lib/dt/content/zielgruppen";
 import type { ContentPageFact } from "@/lib/dt/content/pipeline/page-facts-model";
 import type { ContactFieldKey, ContactSource, OrgContactData } from "@/lib/dt/contact-data";
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
@@ -42,6 +43,8 @@ export type ContentReadiness = {
 export type ContentPageSummary = {
   name: string;
   slug: string;
+  /** Zielgruppen of the page (avatar ids); null without the migration 20261112. */
+  zielgruppen: Pick<ContentZielgruppen, "primary" | "secondary" | "status"> | null;
   level: number;
   path: string | null;
   source: ContentPageSource;
@@ -285,6 +288,11 @@ export type ContentPageBriefing = {
 export type ContentReview = {
   name: string;
   briefing: ContentPageBriefing;
+  /**
+   * Zielgruppen of this page (primary / secondary, suggestion or confirmed); empty lists = the
+   * Standard-Zielgruppe. Null while the database has no column for them (migration 20261112).
+   */
+  zielgruppen: ContentZielgruppen | null;
   /**
    * The page was started with the previous step order (Recherche, Gliederung, Rohtext …).
    * Its outputs do not fit today's steps: the editor resets it.

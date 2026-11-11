@@ -61,6 +61,21 @@ function PageTypeCell(props: {
   );
 }
 
+/** „Primär: Isabelle Hartmann · Sekundär: Birgit Lehmann (Vorschlag)“ under the page name. */
+export function zielgruppenLine(
+  z: NonNullable<ContentPageSummary["zielgruppen"]>,
+  names: ReadonlyMap<string, string> | undefined,
+): string {
+  const name = (id: string) => names?.get(id) ?? "?";
+  return [
+    `Primär: ${z.primary.map(name).join(", ")}`,
+    z.secondary.length > 0 ? `Sekundär: ${z.secondary.map(name).join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ")
+    .concat(z.status === "bestaetigt" ? "" : " (Vorschlag)");
+}
+
 export function DtContentPagesTable(props: {
   pages: ContentPageSummary[];
   selected: Set<string>;
@@ -75,6 +90,8 @@ export function DtContentPagesTable(props: {
   onTypeChange?: (page: ContentPageSummary, type: ContentPageType) => void;
   /** Slug whose type change is in flight. */
   changingType?: string | null;
+  /** Names of the Zielgruppen avatars by id, for the line under the page name. */
+  zielgruppenNames?: ReadonlyMap<string, string>;
 }) {
   const selectable = props.pages.filter(isContentPageSelectable);
   const allSelected =
@@ -184,6 +201,14 @@ export function DtContentPagesTable(props: {
                         title={page.source_url ?? page.path ?? undefined}
                       >
                         {page.source_url ?? page.path}
+                      </span>
+                    ) : null}
+                    {page.zielgruppen && page.zielgruppen.primary.length > 0 ? (
+                      <span
+                        className="truncate text-xs text-sbkm-ink-500 dark:text-white/45"
+                        title={page.zielgruppen.status === "bestaetigt" ? "Zielgruppen festgelegt" : "Vorschlag des Zwillings, noch nicht bestätigt"}
+                      >
+                        {zielgruppenLine(page.zielgruppen, props.zielgruppenNames)}
                       </span>
                     ) : null}
                     {page.main_keyword || page.user_questions > 0 ? (

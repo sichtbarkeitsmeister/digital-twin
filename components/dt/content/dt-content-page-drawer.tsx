@@ -26,6 +26,7 @@ import { downloadContentExport } from "@/components/dt/content/download";
 import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-questions-panel";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
+import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
 import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences } from "@/lib/dt/content/finding-target";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
@@ -131,6 +132,8 @@ export function DtContentPageDrawer(props: {
   open: boolean;
   onClose: () => void;
   onChanged: () => void;
+  /** The organisation's Zielgruppen avatars (without the Mix), for „Zielgruppen“. */
+  zielgruppenOptions?: readonly ContentZielgruppeOption[];
 }) {
   const { organisationId, page, open, onClose } = props;
   const onChangedRef = useRef(props.onChanged);
@@ -937,6 +940,19 @@ export function DtContentPageDrawer(props: {
                         size="sm"
                         fullWidth
                       />
+                      <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
+                        <DtContentZielgruppenPanel
+                          organisationId={organisationId}
+                          pageBase={base ?? ""}
+                          review={review}
+                          options={props.zielgruppenOptions ?? []}
+                          disabled={Boolean(busy)}
+                          onReview={(next) => {
+                            setReview(next);
+                            onChangedRef.current();
+                          }}
+                        />
+                      </div>
                       <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
                         <p className="text-xs font-semibold text-sbkm-navy dark:text-white">Schritte</p>
                         <ul className="grid gap-1">

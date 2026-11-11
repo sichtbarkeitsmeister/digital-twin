@@ -28,9 +28,12 @@ import {
   loadContentAnbieterSources,
   loadContentAvatarOptions,
   loadContentAvatarRow,
+  loadContentZielgruppenAvatars,
 } from "@/lib/dt/content/load-sources";
 import { readAktualitaetProgress, type AktualitaetProgress } from "@/lib/dt/content/freshness";
 import { avatarFromAgent } from "@/lib/dt/content/mapping";
+import { EMPTY_CONTENT_ZIELGRUPPEN, hasContentZielgruppen } from "@/lib/dt/content/zielgruppen";
+import { suggestContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-suggest";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import {
@@ -203,8 +206,29 @@ export async function loadContext(
   if (!avatarId) {
     avatarId = defaultAvatarOptionId(await loadContentAvatarOptions(service, page.organisation_id));
   }
-  const avatarRow = avatarId ? await loadContentAvatarRow(service, page.organisation_id, avatarId) : null;
+  let avatarRow = avatarId ? await loadContentAvatarRow(service, page.organisation_id, avatarId) : null;
   const avatar = avatarRow ? avatarFromAgent(avatarRow) : null;
+
+  // Zielgruppen of this page: they replace the Standard-Zielgruppe for every step. Avatars that were
+  // deleted or switched off meanwhile drop out; without a primary one left, the standard applies.
+  const zielgruppen = page.zielgruppen ?? EMPTY_CONTENT_ZIELGRUPPEN;
+  let audience: ContentPipelineContext["audience"] = null;
+  if (hasContentZielgruppen(zielgruppen)) {
+    const rows = await loadContentZielgruppenAvatars(service, page.organisation_id);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const member = (id: string) => {
+      const row = byId.get(id);
+      if (!row) return null;
+      const a = avatarFromAgent(row);
+      return { name: a.name, role: a.role, beschreibung: a.beschreibung };
+    };
+    const primary = zielgruppen.primary.map(member).filter((m): m is NonNullable<typeof m> => m !== null);
+    if (primary.length > 0) {
+      audience = { primary, secondary: zielgruppen.secondary.map(member).filter((m): m is NonNullable<typeof m> => m !== null) };
+      // Usage events name the first primary Zielgruppe.
+      avatarRow = byId.get(zielgruppen.primary.find((id) => byId.has(id))!) ?? avatarRow;
+    }
+  }
 
   const outputs: ContentPipelineContext["outputs"] = {};
   for (const row of steps) {
@@ -239,6 +263,7 @@ export async function loadContext(
       sections,
       settings: settingsFromRow(settingsRow),
       avatar: avatar ? { name: avatar.name, role: avatar.role, beschreibung: avatar.beschreibung } : null,
+      audience,
       typePrompts,
       texterPrompt,
       stepPrompts,
@@ -384,6 +409,22 @@ export async function runContentStep(
     finished_at: null,
   });
   await service.from("dt_content_pages").update({ step, error: null }).eq("id", page.id);
+
+  // Zielgruppen je Seite: a page without any gets the DigitalTwin's suggestion before the Analyse
+  // and runs with it (unconfirmed is fine). A failure never stops the page: it runs with the
+  // Standard-Zielgruppe as before. Without the migration (`zielgruppen` not read) nothing happens.
+  if (def.step === CONTENT_STEP_ANALYSE && page.zielgruppen && !hasContentZielgruppen(page.zielgruppen)) {
+    const suggested = await suggestContentZielgruppen(service, page, page.started_by).catch((error: unknown) => ({
+      ok: false as const,
+      status: 500,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    if (suggested.ok) {
+      page = { ...page, zielgruppen: suggested.zielgruppen, cost_eur: roundEur(num(page.cost_eur) + suggested.cost_eur) };
+    } else {
+      console.warn("[dt/content] Zielgruppen-Vorschlag vor der Analyse:", suggested.message);
+    }
+  }
 
   const { context, avatarId } = await loadContext(service, page, steps);
   if (def.provider === "xai") {
