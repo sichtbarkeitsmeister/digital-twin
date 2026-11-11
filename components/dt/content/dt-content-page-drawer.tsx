@@ -11,6 +11,8 @@ import {
   FileText,
   Loader2,
   Lock,
+  Maximize2,
+  Minimize2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -62,6 +64,8 @@ const sectionTitleClass =
   "flex items-center justify-between gap-2 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55";
 
 const JOB_POLL_MS = 4_000;
+
+const FULLSCREEN_KEY = "dt-content-drawer-fullscreen";
 
 const findingButtonClass =
   "rounded-pill border border-sbkm-navy/15 bg-white px-2.5 py-1 text-[11px] font-semibold text-sbkm-navy transition-colors hover:border-sbkm-navy/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-white/[0.06] dark:text-white";
@@ -154,6 +158,26 @@ export function DtContentPageDrawer(props: {
   const [jobId, setJobId] = useState<string | null>(null);
   /** „Zusätzliche Wünsche für diese Seite“ as typed; null while it equals the stored text. */
   const [pageWishes, setPageWishes] = useState<string | null>(null);
+  /** „Vollbild“: the window over the whole screen instead of the wide panel; remembered in this browser. */
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    try {
+      setFullscreen(window.localStorage.getItem(FULLSCREEN_KEY) === "1");
+    } catch {
+      // No storage (private window): the wide panel.
+    }
+  }, []);
+  function toggleFullscreen() {
+    setFullscreen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(FULLSCREEN_KEY, next ? "1" : "0");
+      } catch {
+        // Not remembered, still switched.
+      }
+      return next;
+    });
+  }
 
   const base = page
     ? `/api/dt/content/pages/${encodeURIComponent(page.slug)}`
@@ -643,7 +667,10 @@ export function DtContentPageDrawer(props: {
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 320 }}
-            className="flex h-full w-full max-w-6xl flex-col border-l border-sbkm-navy/10 bg-[#F7F7FA] shadow-dt-lg dark:border-white/10 dark:bg-sbkm-navy"
+            className={cn(
+              "flex h-full w-full flex-col border-l border-sbkm-navy/10 bg-[#F7F7FA] shadow-dt-lg dark:border-white/10 dark:bg-sbkm-navy",
+              fullscreen ? "max-w-none" : "max-w-[min(1720px,94vw)]",
+            )}
             onClick={(e) => e.stopPropagation()}
           >
             <header className="flex shrink-0 items-start justify-between gap-3 border-b border-sbkm-navy/10 bg-white px-4 py-4 dark:border-white/10 dark:bg-sbkm-navy sm:px-6">
@@ -677,15 +704,26 @@ export function DtContentPageDrawer(props: {
                   </div>
                 ) : null}
               </div>
-              <button
-                type="button"
-                onClick={handleClose}
-                disabled={Boolean(busy)}
-                className="flex size-9 shrink-0 items-center justify-center rounded-lg text-sbkm-ink-500 transition-colors hover:bg-sbkm-navy/8 hover:text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white"
-                aria-label="Schließen"
-              >
-                <X className="size-5" aria-hidden />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="hidden size-9 items-center justify-center rounded-lg text-sbkm-ink-500 transition-colors hover:bg-sbkm-navy/8 hover:text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white sm:flex"
+                  aria-label={fullscreen ? "Vollbild verlassen" : "Vollbild"}
+                  title={fullscreen ? "Vollbild verlassen" : "Vollbild"}
+                >
+                  {fullscreen ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  disabled={Boolean(busy)}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-sbkm-ink-500 transition-colors hover:bg-sbkm-navy/8 hover:text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white"
+                  aria-label="Schließen"
+                >
+                  <X className="size-5" aria-hidden />
+                </button>
+              </div>
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
@@ -699,7 +737,7 @@ export function DtContentPageDrawer(props: {
                   {error}
                 </div>
               ) : review ? (
-                <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+                <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start 2xl:grid-cols-[minmax(0,1fr)_420px]">
                   <div className="grid min-w-0 gap-4">
                     {review.legacy_steps && !review.public.released ? (
                       <div className="flex gap-2 rounded-dt border border-orange-300/70 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
