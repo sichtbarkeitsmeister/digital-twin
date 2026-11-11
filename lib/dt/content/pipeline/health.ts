@@ -15,7 +15,7 @@ import {
   type ContentJobState,
   type ContentJobVerdict,
 } from "@/lib/dt/content/job-state";
-import type { ContentPageRow } from "@/lib/dt/content/store";
+import { loadContentPageById, type ContentPageRow } from "@/lib/dt/content/store";
 
 export const CONTENT_JOB_GONE_MESSAGE =
   "Der Durchlauf wurde unterbrochen. Mit „Weiterlaufen lassen“ geht es an dieser Stelle weiter.";
@@ -92,6 +92,11 @@ export async function loadContentJobStates(
 /**
  * Repairs stale running pages and returns the rows as they are now, plus what each remaining
  * running page's job is doing (for the detail text). Pages that are not `laeuft` cost nothing.
+ *
+ * The page rows are read before the jobs. A run that ends in between (page saved as „fertig“,
+ * then its job marked „succeeded“) looks like a page whose job is gone. The repair only applies
+ * to a page that is still `laeuft`; any other is returned as it is now, without the message
+ * „Der Durchlauf wurde unterbrochen“ (shown wrongly before, 11.11.).
  */
 export async function reconcileContentPages(
   service: SupabaseClient,
@@ -109,15 +114,28 @@ export async function reconcileContentPages(
   const repaired = new Map(plan.repairs.map((r) => [r.pageId, r]));
   const finishedAt = new Date(now).toISOString();
 
+  // Pages that changed between reading the row and reading its job: shown as they are now.
+  const fresh = new Map<string, ContentPageRow>();
   for (const repair of plan.repairs) {
-    const { error } = await service
+    const { data: hit, error } = await service
       .from("dt_content_pages")
       .update({ state: "in_arbeit", error: repair.error, job_id: null })
       .eq("id", repair.pageId)
-      .eq("state", "laeuft");
+      .eq("state", "laeuft")
+      .select("id");
     if (error) {
       console.error("[content] page repair failed", error);
       repaired.delete(repair.pageId);
+      continue;
+    }
+    if (!hit || hit.length === 0) {
+      // Not „laeuft“ any more: the run ended between the two reads (the page is saved as
+      // „fertig“ or „braucht Sie“ a moment before its job is marked done). Nothing was
+      // interrupted; the table must not say so. It shows the row as it is now instead.
+      repaired.delete(repair.pageId);
+      plan.verdicts.delete(repair.pageId);
+      const now = await loadContentPageById(service, repair.pageId).catch(() => null);
+      if (now) fresh.set(repair.pageId, now);
       continue;
     }
     await service
@@ -142,6 +160,8 @@ export async function reconcileContentPages(
   }
 
   const next = pages.map((page) => {
+    const now = fresh.get(page.id);
+    if (now) return now;
     const repair = repaired.get(page.id);
     return repair ? { ...page, state: "in_arbeit" as const, error: repair.error, job_id: null } : page;
   });
