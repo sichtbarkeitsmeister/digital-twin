@@ -25,7 +25,9 @@ import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-ques
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
+import { findingKey, findingTargetBlock, markNewSentences } from "@/lib/dt/content/finding-target";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
+import { htmlToPlainText, parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
   CONTENT_PAGE_TYPE_LABELS,
   CONTENT_PAGE_TYPE_OPTIONS,
@@ -60,6 +62,9 @@ const sectionTitleClass =
   "flex items-center justify-between gap-2 text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55";
 
 const JOB_POLL_MS = 4_000;
+
+const findingButtonClass =
+  "rounded-pill border border-sbkm-navy/15 bg-white px-2.5 py-1 text-[11px] font-semibold text-sbkm-navy transition-colors hover:border-sbkm-navy/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-white/[0.06] dark:text-white";
 
 function severityClass(severity: string): string {
   switch (severity) {
@@ -98,7 +103,20 @@ function showFreshness(review: ContentReview): boolean {
   );
 }
 
-type Mode = { kind: "edit"; action: ContentAction } | { kind: "rerun"; action: ContentAction } | null;
+type Mode =
+  | { kind: "edit"; action: ContentAction }
+  | { kind: "rerun"; action: ContentAction }
+  /** „Abschnitt überarbeiten lassen“, or an open point's „Vorschlag umsetzen“ / „Eigene Angabe“. */
+  | { kind: "revise"; finding: ContentFinding | null; ask: "instruction" | "proposal" | "info" }
+  | null;
+
+/** A revised Abschnitt waiting for „Übernehmen“. */
+type RevisionPreviewData = {
+  before: { id: string; heading: string | null; level: number; html: string };
+  after: { id: string; heading: string | null; level: number; html: string };
+  watermark: boolean;
+  cost_eur: number;
+};
 
 /** Actions that sit on the right of the footer: the two exports and the two destructive ones. */
 const RIGHT_ACTIONS = new Set<string>(["export", "export_txt", "reset", "delete"]);
@@ -127,6 +145,8 @@ export function DtContentPageDrawer(props: {
   const [blockId, setBlockId] = useState("");
   const [blockText, setBlockText] = useState("");
   const [note, setNote] = useState("");
+  const [reviseText, setReviseText] = useState("");
+  const [revisePreview, setRevisePreview] = useState<RevisionPreviewData | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   /** „Zusätzliche Wünsche für diese Seite“ as typed; null while it equals the stored text. */
   const [pageWishes, setPageWishes] = useState<string | null>(null);
@@ -153,6 +173,8 @@ export function DtContentPageDrawer(props: {
     setReview(null);
     setMode(null);
     setNote("");
+    setReviseText("");
+    setRevisePreview(null);
     setJobId(null);
     setPageWishes(null);
     void loadReview();
@@ -224,6 +246,99 @@ export function DtContentPageDrawer(props: {
     setBlockId(first);
     setBlockText(blocks.find((b) => b.id === first)?.text ?? "");
     setMode({ kind: "edit", action });
+  }
+
+  /** „Abschnitt überarbeiten lassen“; from an open point with its Abschnitt chosen when the point names one. */
+  function startRevise(finding: ContentFinding | null, ask: "instruction" | "proposal" | "info") {
+    const parsed = parseBlocksFromHtml(review?.html ?? "");
+    const target = finding ? findingTargetBlock(finding, parsed) : null;
+    setBlockId(target ?? highlightIds[0] ?? blocks[0]?.id ?? "");
+    setReviseText("");
+    setRevisePreview(null);
+    setMode({ kind: "revise", finding, ask });
+  }
+
+  async function requestRevision() {
+    if (!base || mode?.kind !== "revise" || !blockId) return;
+    setBusy("revise");
+    setRevisePreview(null);
+    const text = reviseText.trim();
+    const res = await contentApi<RevisionPreviewData>(`${base}/revise`, {
+      method: "POST",
+      body: {
+        organisationId,
+        block_id: blockId,
+        finding_key: mode.finding ? findingKey(mode.finding) : null,
+        info: mode.ask === "info" ? text : null,
+        instruction: mode.ask === "info" ? null : text || null,
+      },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setRevisePreview(res.data);
+  }
+
+  async function applyRevisionPreview() {
+    if (!base || mode?.kind !== "revise" || !revisePreview) return;
+    setBusy("revise_apply");
+    const text = reviseText.trim();
+    const res = await contentApi<{ review: ContentReview }>(`${base}/revise/apply`, {
+      method: "POST",
+      body: {
+        organisationId,
+        block_id: revisePreview.before.id,
+        before: { heading: revisePreview.before.heading, html: revisePreview.before.html },
+        after: { heading: revisePreview.after.heading, html: revisePreview.after.html },
+        finding_key: mode.finding ? findingKey(mode.finding) : null,
+        info: mode.ask === "info" ? text : null,
+        instruction: mode.ask === "info" ? null : text || null,
+      },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    setMode(null);
+    setRevisePreview(null);
+    setReviseText("");
+    toast.success("Abschnitt übernommen");
+    onChangedRef.current();
+  }
+
+  /** „Erledigt“: the open point goes, the text stays. */
+  async function dismissOpenPoint(finding: ContentFinding) {
+    if (!base) return;
+    setBusy("dismiss");
+    const res = await contentApi<{ review: ContentReview }>(`${base}/findings/dismiss`, {
+      method: "POST",
+      body: { organisationId, finding_key: findingKey(finding) },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    onChangedRef.current();
+  }
+
+  /** „Vor der Watermark zur Durchsicht anhalten“ for this page. */
+  async function toggleReviewStop(enabled: boolean) {
+    if (!base) return;
+    setBusy("review_stop");
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, { method: "PATCH", body: { organisationId, review_stop: enabled } });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    toast.success(enabled ? "Hält vor der Watermark zur Durchsicht an" : "Läuft ohne Durchsicht bis zum Ende");
   }
 
   async function runStepAction(
@@ -407,6 +522,9 @@ export function DtContentPageDrawer(props: {
       case "edit":
         startEdit(action);
         return;
+      case "revise":
+        startRevise(null, "instruction");
+        return;
       case "rerun_with_note":
         setMode({ kind: "rerun", action });
         return;
@@ -527,6 +645,16 @@ export function DtContentPageDrawer(props: {
                           Diese Seite wurde mit einer älteren Schrittfolge begonnen (Recherche, Gliederung, Rohtext … oder
                           die Endabnahme als Schritt 8). Die aktuellen {CONTENT_STEP_COUNT} Schritte passen nicht dazu: bitte
                           „Zurücksetzen“ und neu starten.
+                        </p>
+                      </div>
+                    ) : null}
+                    {review.review_stop.status === "waiting" && review.public.state === "braucht_sie" && review.question_stop.status !== "waiting" ? (
+                      <div className="grid gap-1 rounded-dt border border-sbkm-mint/50 bg-sbkm-mint/[0.08] px-4 py-3 text-sm text-sbkm-navy dark:border-sbkm-mint/30 dark:text-white">
+                        <p className="font-semibold">Zur Durchsicht – vor der Watermark Entfernung</p>
+                        <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/70">
+                          Lesen Sie den Text und lassen Sie einzelne Abschnitte überarbeiten („Abschnitt überarbeiten lassen“ oder die Knöpfe
+                          an den offenen Punkten). Mit „Freigeben und fertigstellen“ laufen die Watermark Entfernung und die Endabnahme.
+                          Die Watermark Entfernung formuliert danach jeden Satz im Fließtext neu; Überschriften bleiben, wie sie sind.
                         </p>
                       </div>
                     ) : null}
@@ -760,6 +888,18 @@ export function DtContentPageDrawer(props: {
                             );
                           })}
                         </ul>
+                        <div className="flex items-center justify-between gap-2 border-t border-sbkm-navy/8 pt-2 text-xs dark:border-white/8">
+                          <span className="text-sbkm-navy dark:text-white/85" title="Die Seite wartet vor der Watermark Entfernung, bis jemand den Text durchgesehen hat.">
+                            Vor der Watermark zur Durchsicht anhalten
+                          </span>
+                          <DtAgentStatusToggle
+                            compact
+                            enabled={review.review_stop.enabled}
+                            disabled={Boolean(busy) || Boolean(jobId)}
+                            onChange={(on) => void toggleReviewStop(on)}
+                            label={review.review_stop.enabled ? "Ohne Durchsicht durchlaufen" : "Vor der Watermark anhalten"}
+                          />
+                        </div>
                         {contentSkipWarnings(review.skip_steps, review.briefing.source).map((warning) => (
                           <p
                             key={warning}
@@ -873,6 +1013,37 @@ export function DtContentPageDrawer(props: {
                                   <span className="font-semibold">Vorschlag: </span>
                                   {f.proposal}
                                 </p>
+                              ) : null}
+                              {review.html && review.public.state !== "laeuft" ? (
+                                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                  {f.proposal ? (
+                                    <button
+                                      type="button"
+                                      className={findingButtonClass}
+                                      disabled={Boolean(busy) || Boolean(jobId)}
+                                      onClick={() => startRevise(f, "proposal")}
+                                    >
+                                      Vorschlag umsetzen
+                                    </button>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    className={findingButtonClass}
+                                    disabled={Boolean(busy) || Boolean(jobId)}
+                                    onClick={() => startRevise(f, "info")}
+                                  >
+                                    Eigene Angabe
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={findingButtonClass}
+                                    disabled={Boolean(busy) || Boolean(jobId)}
+                                    onClick={() => void dismissOpenPoint(f)}
+                                    title="Der Punkt verschwindet, der Text bleibt, wie er ist."
+                                  >
+                                    Erledigt
+                                  </button>
+                                </div>
                               ) : null}
                             </li>
                           ))}
@@ -994,6 +1165,123 @@ export function DtContentPageDrawer(props: {
                   </div>
                 ) : null}
 
+                {mode?.kind === "revise" ? (
+                  <div className="mb-3 grid gap-2">
+                    {mode.finding ? (
+                      <p className="text-xs text-sbkm-ink-600 dark:text-white/65">
+                        <span className="font-semibold text-sbkm-navy dark:text-white">Offener Punkt: </span>
+                        {mode.finding.title}
+                        {mode.ask === "proposal" && mode.finding.proposal ? ` – Vorschlag: ${mode.finding.proposal}` : ""}
+                      </p>
+                    ) : null}
+                    <DtSelect
+                      label="Abschnitt"
+                      value={blockId}
+                      onValueChange={(id) => {
+                        setBlockId(id);
+                        setRevisePreview(null);
+                      }}
+                      options={blockOptions}
+                      elevated
+                      side="top"
+                      fullWidth
+                    />
+                    <textarea
+                      className={textareaClass}
+                      value={reviseText}
+                      onChange={(e) => {
+                        setReviseText(e.target.value);
+                        setRevisePreview(null);
+                      }}
+                      placeholder={
+                        mode.ask === "info"
+                          ? "Ihre Angabe, z. B. „Ja, pro Uhr gibt es eine schriftliche Aufstellung.“ Zahlen, Namen und Fristen werden genau so übernommen. „KUNDE PRÜFT“ setzt einen Platzhalter."
+                          : mode.ask === "proposal"
+                            ? "Optional: zusätzlicher Hinweis zum Vorschlag"
+                            : "Was soll anders werden? z. B. „Hero-Überschrift kürzer und mehr auf Erben zugeschnitten.“"
+                      }
+                      aria-label={mode.ask === "info" ? "Ihre Angabe" : "Auftrag für den Abschnitt"}
+                    />
+                    {revisePreview ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {(["before", "after"] as const).map((side) => {
+                          const b = revisePreview[side];
+                          return (
+                            <div
+                              key={side}
+                              className={cn(
+                                "grid max-h-56 gap-1 overflow-y-auto rounded-xl border p-3 text-xs leading-relaxed",
+                                side === "after"
+                                  ? "border-sbkm-mint/60 bg-sbkm-mint/[0.08] dark:border-sbkm-mint/40"
+                                  : "border-sbkm-navy/10 bg-sbkm-navy/[0.02] dark:border-white/10 dark:bg-white/[0.03]",
+                              )}
+                            >
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-600 dark:text-white/55">
+                                {side === "before" ? "Vorher" : revisePreview.watermark ? "Nachher (mit Watermark Entfernung)" : "Nachher"}
+                              </p>
+                              {b.heading ? (
+                                <p className="font-semibold text-sbkm-navy dark:text-white">
+                                  [H{b.level}] {b.heading}
+                                </p>
+                              ) : null}
+                              {b.html && side === "before" ? (
+                                <p className="whitespace-pre-line text-sbkm-navy dark:text-white/85">{htmlToPlainText(b.html)}</p>
+                              ) : null}
+                              {b.html && side === "after" ? (
+                                <p className="text-sbkm-navy dark:text-white/85">
+                                  {markNewSentences(htmlToPlainText(revisePreview.before.html), htmlToPlainText(b.html)).map((part, k) =>
+                                    part.isNew ? (
+                                      <mark key={k} className="rounded-sm bg-yellow-200/70 px-0.5 text-sbkm-navy dark:bg-yellow-300/30 dark:text-white" title="Neu oder geändert: bitte prüfen">
+                                        {part.text}{" "}
+                                      </mark>
+                                    ) : (
+                                      <span key={k}>{part.text} </span>
+                                    ),
+                                  )}
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {revisePreview ? (
+                        <DtPillButton size="sm" variant="mint" disabled={Boolean(busy)} onClick={() => void applyRevisionPreview()}>
+                          {busy === "revise_apply" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                          Übernehmen
+                        </DtPillButton>
+                      ) : null}
+                      <DtPillButton
+                        size="sm"
+                        variant={revisePreview ? "outline" : "mint"}
+                        disabled={!blockId || Boolean(busy) || (mode.ask !== "proposal" && !reviseText.trim())}
+                        onClick={() => void requestRevision()}
+                      >
+                        {busy === "revise" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                        {revisePreview ? "Neu erstellen" : "Vorschlag erstellen"}
+                      </DtPillButton>
+                      <DtPillButton
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setMode(null);
+                          setRevisePreview(null);
+                        }}
+                      >
+                        {revisePreview ? "Verwerfen" : "Abbrechen"}
+                      </DtPillButton>
+                      {revisePreview ? (
+                        <span className="text-[11px] text-sbkm-ink-600 dark:text-white/55">
+                          Gelb markiert: neu oder geändert, bitte gegen die Fakten prüfen · Kosten: {formatEur(revisePreview.cost_eur)}
+                        </span>
+                      ) : busy === "revise" ? (
+                        <span className="text-[11px] text-sbkm-ink-600 dark:text-white/55">Wird überarbeitet, das dauert bis zu einer Minute …</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
                 {mode?.kind === "rerun" ? (
                   <div className="mb-3 grid gap-2">
                     <textarea
@@ -1056,7 +1344,7 @@ export function DtContentPageDrawer(props: {
                           ) : action.kind === "export_txt" ? (
                             <FileText className="size-3.5" aria-hidden />
                           ) : null}
-                          {contentActionLabel(action.kind)}
+                          {action.kind === "approve" ? action.label : contentActionLabel(action.kind)}
                         </DtPillButton>
                       );
                       // A disabled button shows no tooltip: the reason sits on a wrapper.

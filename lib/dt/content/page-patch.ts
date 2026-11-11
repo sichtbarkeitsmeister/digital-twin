@@ -23,8 +23,10 @@ const patchSchema = z
     skip_steps: z.array(z.enum(CONTENT_SKIPPABLE_STEP_KEYS)).max(CONTENT_SKIPPABLE_STEP_KEYS.length * 2).optional(),
     /** „Zusätzliche Wünsche für diese Seite“, one per line; also while the page runs (the next step reads them). */
     client_wishes: z.string().max(CLIENT_WISHES_TEXT_MAX).optional(),
+    /** „Vor der Watermark zur Durchsicht anhalten“ (default on). */
+    review_stop: z.boolean().optional(),
   })
-  .refine((body) => body.page_type !== undefined || body.skip_steps !== undefined || body.client_wishes !== undefined);
+  .refine((body) => body.page_type !== undefined || body.skip_steps !== undefined || body.client_wishes !== undefined || body.review_stop !== undefined);
 
 export type ContentPagePatchBody = z.infer<typeof patchSchema>;
 

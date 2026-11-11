@@ -165,7 +165,7 @@ export async function loadExistingText(service: SupabaseClient, page: ContentPag
   return text ? text.slice(0, EXISTING_TEXT_MAX_CHARS) : null;
 }
 
-async function loadContext(
+export async function loadContext(
   service: SupabaseClient,
   page: ContentPageRow,
   steps: ContentStepRow[],

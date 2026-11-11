@@ -22,6 +22,7 @@
     "test:content-format-limits": "tsx scripts/test-content-format-limits.ts",
     "test:content-heading-levels": "tsx scripts/test-content-heading-levels.ts",
     "test:content-hero-h1": "tsx scripts/test-content-hero-h1.ts",
+    "test:content-review-revise": "tsx scripts/test-content-review-revise.ts",
     "test:wunschkunden-seo-knowledge": "tsx scripts/test-wunschkunden-seo-knowledge.ts",
     "test:seo-batch-b": "tsx scripts/test-seo-batch-b.ts",
     "test:chat-agent-selection": "tsx scripts/test-dt-chat-agent-selection.ts",

@@ -23,6 +23,7 @@ export function contentStateMeta(state: string): { label: string; tone: ContentS
 export const CONTENT_ACTION_LABELS: Record<ContentActionKind, string> = {
   approve: "Freigeben",
   edit: "Abschnitt ändern",
+  revise: "Abschnitt überarbeiten lassen",
   rerun_with_note: "Mit Anmerkung wiederholen",
   run_through: "Weiterlaufen lassen",
   export: "HTML exportieren",

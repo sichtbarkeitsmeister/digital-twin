@@ -88,7 +88,8 @@ type Row = FakeRow;
 /** The stop before the Watermark Entfernung, stubbed: nothing to ask, the run goes on (its own tests: test-content-fewer-questions). */
 function stopGoesOn(db: FakeContentDb) {
   return async () => {
-    Object.assign(db.page(), { question_stop: { status: "done", handled: [] } });
+    // „Zur Durchsicht“ switched off: these tests are about skipped steps (its own test: test-content-review-revise).
+    Object.assign(db.page(), { question_stop: { status: "done", handled: [], review_off: true } });
     return { action: "go_on" as const, halted: false, model: "", costEur: 0 };
   };
 }

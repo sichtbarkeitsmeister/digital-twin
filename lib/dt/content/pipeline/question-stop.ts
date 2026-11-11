@@ -75,6 +75,14 @@ export type ContentQuestionStop = {
   asked?: number;
   handled: ContentHandledQuestion[];
   pass?: ContentAnswersPassRecord | null;
+  /**
+   * „Zur Durchsicht“: after the questions, the page waits before the Watermark Entfernung until
+   * someone has read the text (and revised Abschnitte). `waiting` while it waits, `done` after
+   * „Freigeben und fertigstellen“.
+   */
+  review?: { status: "waiting" | "done"; at?: string };
+  /** The page's switch „Vor der Watermark zur Durchsicht anhalten“ is off (default: on). Kept by „Zurücksetzen“. */
+  review_off?: boolean;
 };
 
 export const EMPTY_QUESTION_STOP: ContentQuestionStop = { handled: [] };
@@ -124,7 +132,11 @@ export function readQuestionStop(raw: unknown): ContentQuestionStop {
           .map((x) => ({ block_id: String(x.block_id), reason: String(x.reason ?? "") })),
       }
     : null;
+  const rv = rec(r.review);
+  const review = rv.status === "waiting" || rv.status === "done" ? { status: rv.status as "waiting" | "done", ...(text(rv.at) ? { at: text(rv.at)! } : {}) } : null;
   return {
+    ...(review ? { review } : {}),
+    ...(r.review_off === true ? { review_off: true } : {}),
     ...(status ? { status } : {}),
     ...(text(r.at) ? { at: text(r.at)! } : {}),
     ...(typeof r.asked === "number" ? { asked: r.asked } : {}),
@@ -147,6 +159,27 @@ export function questionStopDue(
   if (stop.status === "done") return false;
   const watermark = steps.find((s) => s.step === CONTENT_STEP_WATERMARK);
   return !(watermark && (watermark.status === "done" || watermark.status === "skipped"));
+}
+
+/**
+ * Whether the page now stops „Zur Durchsicht“: the questions are settled (`done`), the switch is
+ * on, nobody has released the text yet, and the run is about to reach the Watermark Entfernung
+ * (or, with that switched off, the Endabnahme). Pages already past the Watermark keep their course.
+ */
+export function reviewStopDue(
+  stop: Pick<ContentQuestionStop, "status" | "review" | "review_off">,
+  steps: readonly { step: number; status: string }[],
+  next: number | null,
+): boolean {
+  if (next == null || next < CONTENT_QUESTION_STOP_BEFORE) return false;
+  if (stop.status !== "done" || stop.review_off || stop.review?.status === "done") return false;
+  const watermark = steps.find((s) => s.step === CONTENT_STEP_WATERMARK);
+  return !(watermark && (watermark.status === "done" || watermark.status === "skipped"));
+}
+
+/** What a reset or a rerun of the stop keeps of it: only the page's switch. */
+export function questionStopKeep(stop: Pick<ContentQuestionStop, "review_off">): Record<string, unknown> {
+  return stop.review_off ? { review_off: true } : {};
 }
 
 export type ContentQuestionStopPlan = {

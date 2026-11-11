@@ -16,6 +16,7 @@ import {
   loadContentSteps,
   planContentSkipSteps,
   updateContentClientWishes,
+  updateContentReviewStop,
   updateContentPageType,
   updateContentSkipSteps,
 } from "@/lib/dt/content/store";
@@ -42,7 +43,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
   try {
     const page = await loadContentPage(gate.service, gate.organisationId, slug);
     if (!page) return contentError("Seite nicht gefunden.", 404);
-    const { page_type: pageType, skip_steps: skipSteps, client_wishes: clientWishes } = parsed.data;
+    const { page_type: pageType, skip_steps: skipSteps, client_wishes: clientWishes, review_stop: reviewStop } = parsed.data;
     // Everything is checked before anything is written.
     if (pageType !== undefined) {
       const blocker = contentPageTypeChangeBlocker(page);
@@ -63,6 +64,10 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
     }
     if (clientWishes !== undefined) {
       const saved = await updateContentClientWishes(gate.service, page, clientWishes);
+      if (!saved.ok) return contentError(saved.error, saved.status);
+    }
+    if (reviewStop !== undefined) {
+      const saved = await updateContentReviewStop(gate.service, page, reviewStop);
       if (!saved.ok) return contentError(saved.error, saved.status);
     }
 

@@ -409,7 +409,8 @@ async function testStopInTheLoop() {
     // After the stop: the run goes on with Watermark and the Endabnahme, and does not stop again.
     const db = new PageDb({
       jobs: [{ id: JOB_ID, status: "running" }],
-      dt_content_pages: [pageRow({ step: 8, question_stop: { status: "done", handled: [] } }) as unknown as FakeRow],
+      // The stop „Zur Durchsicht“ is switched off here; it has its own test (test-content-review-revise).
+      dt_content_pages: [pageRow({ step: 8, question_stop: { status: "done", handled: [], review_off: true } }) as unknown as FakeRow],
       dt_content_steps: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => stepRow(n)),
     });
     const calls: string[] = [];
@@ -600,7 +601,7 @@ async function testLifecycle() {
 
   // Freigeben at the stop: done, no question asked again; at a „grundlegend“ halt the others wait; old pages as before.
   const now = NOW.toISOString();
-  assert.deepEqual(approvalPatch({ questions: [q("A")], question_stop: { status: "waiting", handled: [] } }, now), { questions: [], question_stop: { status: "done", handled: [], at: now } });
+  assert.deepEqual(approvalPatch({ questions: [q("A")], question_stop: { status: "waiting", handled: [] } }, now), { questions: [], question_stop: { status: "done", handled: [], at: now, review: { status: "done", at: now } } }, "released at the stop: the text was read, no stop „Zur Durchsicht“ after it");
   assert.deepEqual(approvalPatch({ questions: [q("A", { grundlegend: true }), q("B")], question_stop: { handled: [] } }, now), { questions: [q("B")] });
   assert.deepEqual(approvalPatch({ questions: [q("Alt")], question_stop: { handled: [] } }, now), { questions: [] }, "old „Braucht Sie“ pages: cleared as before");
 

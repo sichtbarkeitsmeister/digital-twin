@@ -239,6 +239,7 @@ export type ContentStep = {
 export type ContentActionKind =
   | "approve"
   | "edit"
+  | "revise"
   | "rerun_with_note"
   | "run_through"
   | "export"
@@ -333,6 +334,13 @@ export type ContentReview = {
     handled: Array<{ id: string; action: "answer" | "drop"; answer: string | null; source: string; question: string }>;
     /** Cost of „Antworten einarbeiten“, once it ran. */
     pass_cost: string | null;
+  };
+  /** „Zur Durchsicht“ before the Watermark Entfernung: the page's switch and where the page is. */
+  review_stop: {
+    enabled: boolean;
+    status: "none" | "waiting" | "done";
+    /** The Watermark Entfernung has run: a revised Abschnitt goes through it on its own. */
+    watermark_done: boolean;
   };
   /** Company questions this page raised („Fragen zum Unternehmen“; one answer for all pages). */
   org_questions: ContentOrgQuestionView[];

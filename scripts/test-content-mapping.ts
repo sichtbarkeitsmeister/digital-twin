@@ -601,13 +601,13 @@ const cases: Array<[Partial<ContentPageRow>, string[], string | null]> = [
   [{}, ["run_through", "delete"], null],
   [{ page_type: "nicht_bearbeiten" }, ["delete"], null],
   [{ state: "laeuft", step: 2 }, ["stop", "reset", "delete"], "Schritt 2 von 10: SEO läuft"],
-  [{ state: "braucht_sie", step: 3, html, questions: [q] }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Abschnitt „faq“ braucht eine Angabe"],
-  [{ state: "braucht_sie", step: 3, html, questions: [{ ...q, block_id: null }] }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
+  [{ state: "braucht_sie", step: 3, html, questions: [q] }, ["approve", "edit", "revise", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Abschnitt „faq“ braucht eine Angabe"],
+  [{ state: "braucht_sie", step: 3, html, questions: [{ ...q, block_id: null }] }, ["approve", "edit", "revise", "rerun_with_note", "export", "export_txt", "reset", "delete"], "1 Frage an den Kunden, bevor es weitergeht"],
   [{ state: "in_arbeit", step: 2, error: "Ratenlimit" }, ["run_through", "rerun_with_note", "reset", "delete"], "Fehler in Schritt 2: Ratenlimit"],
-  [{ state: "in_arbeit", step: CONTENT_STEP_HORMOZI, html }, ["run_through", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Pausiert nach Schritt 6: Hormozi"],
-  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Pausiert nach Schritt 5: Aktualitätsprüfung"],
-  [{ state: "fertig", step: CONTENT_STEP_ENDABNAHME, html }, ["approve", "edit", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Wartet auf Freigabe"],
-  [{ state: "fertig", step: CONTENT_STEP_ENDABNAHME, html, released: true }, ["export", "export_txt", "reset", "delete"], "Freigegeben"],
+  [{ state: "in_arbeit", step: CONTENT_STEP_HORMOZI, html }, ["run_through", "edit", "revise", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Pausiert nach Schritt 6: Hormozi"],
+  [{ state: "in_arbeit", step: 5, html }, ["run_through", "edit", "revise", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Pausiert nach Schritt 5: Aktualitätsprüfung"],
+  [{ state: "fertig", step: CONTENT_STEP_ENDABNAHME, html }, ["approve", "edit", "revise", "rerun_with_note", "export", "export_txt", "reset", "delete"], "Wartet auf Freigabe"],
+  [{ state: "fertig", step: CONTENT_STEP_ENDABNAHME, html, released: true }, ["revise", "export", "export_txt", "reset", "delete"], "Freigegeben"],
 ];
 for (const [patch, kinds, detail] of cases) {
   const page = { ...base, ...patch };
