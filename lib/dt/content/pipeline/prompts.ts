@@ -10,6 +10,7 @@
  * Tonalität, verbotene Wörter), the avatar and the editor's notes.
  */
 
+import { pendingChecksBlock, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
 import { pageFactsBlock, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -143,6 +144,8 @@ export type ContentPipelineContext = {
    * standalone tools.
    */
   pageFacts?: ContentPageFacts | null;
+  /** Questions answered with „KUNDE PRÜFT“ and their placeholders; part of the Anbieterfakten block. */
+  pendingChecks?: ContentPendingCheck[];
   /** What is known for the question rules (Kontaktdaten, pool, notes, Anbieterfakten); the pipeline only. */
   knowledge?: ContentKnowledge;
   /**
@@ -453,22 +456,24 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 // Exported for the standalone GEO and Hormozi tools (lib/dt/text-tools/geo.ts, hormozi.ts),
 // which build the same blocks around an uploaded text instead of a page of the pipeline.
 
-export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers" | "pageFacts">>): string {
+export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers" | "pageFacts" | "pendingChecks">>): string {
   const filled = context.sections.filter((s) => s.current.trim());
   const answers = (context.customerAnswers ?? []).filter((a) => a.question.trim() && a.answer.trim());
   const answersPart = answers.length
     ? [`### Antworten des Kunden (bestätigt)\n${answers.map((a) => `- ${clip(a.question, 400)} → ${clip(a.answer, MAX_CUSTOMER_ANSWER_CHARS)}`).join("\n")}`]
     : [];
+  const pendingPart = pendingChecksBlock(context.pendingChecks) ? [pendingChecksBlock(context.pendingChecks)] : [];
   const excerpt = pageFactsBlock(context.pageFacts);
   const excerptPart = excerpt ? [excerpt] : [];
   // Statements the evaluation marks as blocked, pulled out so no step can overlook the note.
   const blocked = blockedBlock(extractBlockedStatements(filled));
   const blockedPart = blocked ? [blocked] : [];
-  if (filled.length === 0 && answersPart.length === 0 && excerptPart.length === 0) return "## Anbieterfakten\n(keine)";
+  if (filled.length === 0 && answersPart.length === 0 && excerptPart.length === 0 && pendingPart.length === 0) return "## Anbieterfakten\n(keine)";
   return [
     "## Anbieterfakten aus Fragebogen und Kundengesprächen (einzige Quelle für Tatsachen)",
     ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`),
     ...answersPart,
+    ...pendingPart,
     ...excerptPart,
     ...blockedPart,
   ].join("\n\n");
@@ -666,7 +671,7 @@ export function clientWishesRules(context: { wishes?: ContentClientWishes | null
  * published without and what is central to this page; otherwise leave the statement out. The
  * code enforces the rest (topic map, pool, limit of three; `questions.ts`).
  */
-export const QUESTION_RULES = `Fragen und Platzhalter (feste Regel): Eine fehlende Angabe wird nur dann zu einer Frage an den Kunden oder zu einem Platzhalter [BITTE PRÜFEN: …], wenn die Seite ohne sie nicht korrekt veröffentlicht werden kann UND die Angabe zentral für genau diese Seite ist (z. B. der Preis auf einer Preisseite, die Hauptleistung einer Leistungsseite). Sonst lässt du die Aussage weg und schreibst keinen Platzhalter. Nie fragen und nie einen Platzhalter setzen für etwas, das bekannt ist: Anbieterfakten, Antworten des Kunden, Kontaktdaten, Wünsche des Kunden, Anmerkungen der Redaktion. Angaben über das Unternehmen, die auf jeder Seite gleich sind (Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner), fehlen nie so sehr, dass die Seite sie braucht: dann weglassen. Diese Regel geht dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor: Verlangen diese bei fehlenden Angaben einen Platzhalter, setzt du ihn nur unter der Bedingung oben, sonst formulierst du ohne die Angabe. Das Veröffentlichungsdatum ist immer der Marker [DATUM], nie [BITTE PRÜFEN: …].`;
+export const QUESTION_RULES = `Fragen und Platzhalter (feste Regel): Eine fehlende Angabe wird nur dann zu einer Frage an den Kunden oder zu einem Platzhalter [BITTE PRÜFEN: …], wenn die Seite ohne sie nicht korrekt veröffentlicht werden kann UND die Angabe zentral für genau diese Seite ist (z. B. der Preis auf einer Preisseite, die Hauptleistung einer Leistungsseite). Sonst lässt du die Aussage weg und schreibst keinen Platzhalter. Nie fragen und nie einen Platzhalter setzen für etwas, das bekannt ist: Anbieterfakten, Antworten des Kunden, Kontaktdaten, Wünsche des Kunden, Anmerkungen der Redaktion. Angaben über das Unternehmen, die auf jeder Seite gleich sind (Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner), fehlen nie so sehr, dass die Seite sie braucht: dann weglassen. Diese Regel geht dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor: Verlangen diese bei fehlenden Angaben einen Platzhalter, setzt du ihn nur unter der Bedingung oben, sonst formulierst du ohne die Angabe. Das Veröffentlichungsdatum ist immer der Marker [DATUM], nie [BITTE PRÜFEN: …]. Ausnahme: Lautet eine Antwort oder Anmerkung der Redaktion ‚KUNDE PRÜFT‘ (auch sinngemäß), wird an der passenden Stelle ein Platzhalter [BITTE PRÜFEN: <die offene Frage in einem Satz>] gesetzt. Der Wortlaut der Anmerkung kommt nie in den Text. Ein solcher Platzhalter (siehe „Offen – der Kunde prüft noch“) bleibt in jedem späteren Schritt unverändert stehen, und zu ihm wird keine neue Frage gestellt.`;
 
 /** The Faktencheck's own part of the rule: scope, severity and the one „grundlegend“ question. */
 export const FAKTENCHECK_QUESTION_RULES = `Fragen im Faktencheck (feste Regel): Stelle höchstens wenige Fragen, die wichtigsten zuerst; alles andere ist ein finding mit dem Vorschlag, die Aussage wegzulassen. Jede Frage bekommt scope „firma“ (Angabe über das Unternehmen, auf jeder Seite gleich: Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner …) oder „seite“ (nur diese Seite), und severity high (ohne Antwort nicht veröffentlichbar), medium oder low. grundlegend = true nur, wenn das Hauptthema der Seite selbst zweifelhaft ist (z. B. „Wird diese Leistung überhaupt angeboten?“) – höchstens eine Frage, sonst false. Platzhalter im Text erfasst der Code selbst; als question nur, wenn die Regel oben sie erlaubt.`;

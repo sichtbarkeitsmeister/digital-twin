@@ -5,6 +5,7 @@
  * applies to all pages. Service client: routes check access first, the job runner has none.
  */
 
+import { isKundePrueft } from "@/lib/dt/content/pipeline/kunde-prueft";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CONTACT_FIELD_KEYS, type ContactFieldKey } from "@/lib/dt/contact-data";
@@ -177,6 +178,7 @@ export async function answerOrgQuestion(
 /** Answers that are no Kontaktdaten field: confirmed facts for every later step („Antworten des Kunden“). */
 export function customerAnswersFromPool(rows: readonly ContentPoolQuestion[]): Array<{ question: string; answer: string }> {
   return rows
-    .filter((r) => r.status === "answered" && r.answer?.trim() && !contactFieldsForAnswer(asTopicKey(r.topic_key), r.answer))
+    // „KUNDE PRÜFT“ is no answer: it goes to the prompts as an open check (`pendingChecksBlock`).
+    .filter((r) => r.status === "answered" && r.answer?.trim() && !isKundePrueft(r.answer) && !contactFieldsForAnswer(asTopicKey(r.topic_key), r.answer))
     .map((r) => ({ question: r.question, answer: r.answer!.trim() }));
 }

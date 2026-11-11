@@ -17,6 +17,7 @@
     "test:content-mapping": "tsx scripts/test-content-mapping.ts",
     "test:content-step-truncation": "tsx scripts/test-content-step-truncation.ts",
     "test:content-page-facts": "tsx scripts/test-content-page-facts.ts",
+    "test:content-kunde-prueft": "tsx scripts/test-content-kunde-prueft.ts",
     "test:content-format-limits": "tsx scripts/test-content-format-limits.ts",
     "test:content-heading-levels": "tsx scripts/test-content-heading-levels.ts",
     "test:wunschkunden-seo-knowledge": "tsx scripts/test-wunschkunden-seo-knowledge.ts",
