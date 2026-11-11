@@ -39,6 +39,8 @@ export type RevisionInput = {
   instruction?: string | null;
   info?: string | null;
   finding_key?: string | null;
+  /** „Jetzt umsetzen“: several open points on this Abschnitt, all proposals at once. */
+  finding_keys?: string[] | null;
 };
 
 type Failure = { ok: false; status: number; message: string; reasons?: string[]; cost_eur?: number };
@@ -60,6 +62,12 @@ function findingOf(page: Pick<ContentPageRow, "findings" | "final_findings" | "u
 }
 
 function requestOf(page: ContentPageRow, input: RevisionInput): ContentRevisionRequest | Failure {
+  if (input.finding_keys && input.finding_keys.length > 0) {
+    const found = input.finding_keys.map((key) => findingOf(page, key));
+    if (found.some((f) => !f)) return { ok: false, status: 409, message: "Einen dieser offenen Punkte gibt es nicht mehr. Bitte die Seite neu laden." };
+    const findings = found as ContentFinding[];
+    return { instruction: input.instruction?.trim() || null, info: null, finding: findings.length === 1 ? findings[0]! : null, findings };
+  }
   const finding = findingOf(page, input.finding_key);
   if (input.finding_key && !finding) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
   const request: ContentRevisionRequest = { instruction: input.instruction?.trim() || null, info: input.info?.trim() || null, finding };
@@ -195,9 +203,38 @@ export async function applyRevision(
     ...(page.released ? { released: false, released_at: null } : {}),
   };
   if (finding && input.finding_key) Object.assign(patch, withoutFinding(page, input.finding_key) ?? {});
+  if (!("ok" in request) && input.finding_keys && input.finding_keys.length > 0) {
+    let lists: Pick<ContentPageRow, "findings" | "final_findings" | "unresolved"> = page;
+    for (const key of input.finding_keys) lists = withoutFinding(lists, key) ?? lists;
+    Object.assign(patch, { findings: lists.findings, final_findings: lists.final_findings, unresolved: lists.unresolved });
+  }
   const { error } = await service.from("dt_content_pages").update(patch).eq("id", page.id).neq("state", "laeuft");
   if (error) return { ok: false, status: 500, message: contentDbErrorMessage(error, "Abschnitt konnte nicht gespeichert werden") };
   return { ok: true };
+}
+
+/**
+ * „Jetzt umsetzen“ for one Abschnitt: the proposals of the chosen open points in one call, checked
+ * like a preview (and through Grok after the Watermark Entfernung), then taken over at once. The
+ * editor chose the proposals already, so there is no preview to confirm.
+ */
+export async function applyProposals(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  steps: ContentStepRow[],
+  input: { block_id: string; finding_keys: string[] },
+  userId: string | null,
+  deps: Parameters<typeof previewRevision>[5] = {},
+): Promise<{ ok: true; cost_eur: number } | Failure> {
+  const preview = await previewRevision(service, page, steps, input, userId, deps);
+  if (!preview.ok) return preview;
+  const applied = await applyRevision(service, page, {
+    block_id: input.block_id,
+    before: { heading: preview.before.heading, html: preview.before.html },
+    after: { heading: preview.after.heading, html: preview.after.html },
+    finding_keys: input.finding_keys,
+  });
+  return applied.ok ? { ok: true, cost_eur: preview.cost_eur } : { ...applied, cost_eur: preview.cost_eur };
 }
 
 /**

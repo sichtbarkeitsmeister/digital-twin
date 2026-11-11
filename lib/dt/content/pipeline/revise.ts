@@ -41,7 +41,15 @@ export type ContentRevisionRequest = {
   info?: string | null;
   /** The open point the request is about („Vorschlag umsetzen“, „Eigene Angabe“). */
   finding?: Pick<ContentFinding, "title" | "problem" | "proposal"> | null;
+  /** Several open points on the same Abschnitt, all of whose proposals are worked in at once („Jetzt umsetzen“). */
+  findings?: Array<Pick<ContentFinding, "title" | "problem" | "proposal">> | null;
 };
+
+/** The open points of a request: the several ones of „Jetzt umsetzen“, or the one. */
+export function requestFindings(request: ContentRevisionRequest): Array<Pick<ContentFinding, "title" | "problem" | "proposal">> {
+  if (request.findings && request.findings.length > 0) return request.findings;
+  return request.finding ? [request.finding] : [];
+}
 
 export const REVISE_RULES = `Du überarbeitest genau einen Abschnitt eines fertigen Webseitentexts nach dem Auftrag der Redaktion.
 - Gib nur diesen einen Abschnitt zurück: dieselbe id, dieselbe Ebene (level).
@@ -69,7 +77,16 @@ function clean(text: string | null | undefined, max = REVISE_INSTRUCTION_MAX): s
 /** The request in plain words, as the model and the page's notes get it. */
 export function revisionOrder(request: ContentRevisionRequest): string {
   const lines: string[] = [];
-  const f = request.finding;
+  const several = request.findings && request.findings.length > 1 ? request.findings : null;
+  if (several) {
+    lines.push("Mehrere offene Punkte in diesem Abschnitt. Setze alle Vorschläge um, jeden nur an der Stelle, die er betrifft:");
+    several.forEach((p, i) => {
+      lines.push(`${i + 1}. Offener Punkt: ${clean(p.title, 200)}`);
+      if (p.problem) lines.push(`   Problem: ${clean(p.problem, 1_000)}`);
+      if (p.proposal) lines.push(`   Vorschlag (umsetzen): ${clean(p.proposal, 1_000)}`);
+    });
+  }
+  const f = several ? null : request.finding ?? request.findings?.[0] ?? null;
   if (f) {
     lines.push(`Offener Punkt: ${clean(f.title, 200)}`);
     if (f.problem) lines.push(`Problem: ${clean(f.problem, 1_000)}`);
@@ -160,9 +177,13 @@ export function checkRevision(json: unknown, before: ContentTextBlock, request: 
   let added = now.filter((m) => !was.includes(m) && m !== pending);
   // An open point about a missing customer fact may end in one placeholder for it (instead of an
   // invented sentence): one new [BITTE PRÜFEN: …] is allowed then, never another marker.
-  if (request.finding && !request.info) {
-    const check = added.findIndex((m) => /^\[\s*BITTE\s+PR(?:Ü|UE)FEN\b/iu.test(m));
-    if (check >= 0) added = added.filter((_, i) => i !== check);
+  if (!request.info) {
+    // One per open point of the request.
+    for (let n = requestFindings(request).length; n > 0; n--) {
+      const check = added.findIndex((m) => /^\[\s*BITTE\s+PR(?:Ü|UE)FEN\b/iu.test(m));
+      if (check < 0) break;
+      added = added.filter((_, i) => i !== check);
+    }
   }
   if (added.length > 0) reasons.push(`Neuer Platzhalter oder Marker: ${added.join(", ")}`);
   if (/kunde\s+pr(?:ü|ue)ft/i.test(plain(after)) && !/kunde\s+pr(?:ü|ue)ft/i.test(plain(before))) reasons.push("„KUNDE PRÜFT“ steht im Text");
@@ -200,6 +221,12 @@ export function revisionNote(target: Pick<ContentTextBlock, "id" | "heading">, r
       ? `Zu „${clean(request.finding.title, 200)}“: KUNDE PRÜFT – Platzhalter bleibt.`
       : `Angabe der Redaktion zu „${clean(request.finding.title, 200)}“ (Abschnitt ${name}): ${clean(request.info)}`;
   }
+  const several = requestFindings(request);
+  if (several.length > 1) {
+    const titles = several.map((p) => `„${clean(p.title, 120)}“`).join(", ");
+    return `Abschnitt ${name} überarbeitet nach den Vorschlägen zu ${titles}: ${several.map((p) => clean(p.proposal, 300)).join(" | ")}`.slice(0, 2_000);
+  }
+  if (several.length === 1 && !request.finding) request = { ...request, finding: several[0] };
   if (request.finding) return `Abschnitt ${name} überarbeitet nach Vorschlag zu „${clean(request.finding.title, 200)}“: ${clean(request.finding.proposal, 600)}`;
   return `Abschnitt ${name} überarbeitet: ${clean(request.instruction, 600)}`;
 }

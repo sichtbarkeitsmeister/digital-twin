@@ -147,6 +147,10 @@ export function DtContentPageDrawer(props: {
   const [note, setNote] = useState("");
   const [reviseText, setReviseText] = useState("");
   const [revisePreview, setRevisePreview] = useState<RevisionPreviewData | null>(null);
+  /** „Vorschlag übernehmen“: the open points (by key) whose proposals „Jetzt umsetzen“ works in together. */
+  const [chosen, setChosen] = useState<string[]>([]);
+  /** While „Jetzt umsetzen“ runs: Abschnitt n of total. */
+  const [applying, setApplying] = useState<{ done: number; total: number } | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   /** „Zusätzliche Wünsche für diese Seite“ as typed; null while it equals the stored text. */
   const [pageWishes, setPageWishes] = useState<string | null>(null);
@@ -226,6 +230,13 @@ export function DtContentPageDrawer(props: {
 
   const blocks = useMemo(() => extractContentBlocks(review?.html ?? ""), [review?.html]);
   const findings = useMemo(() => (review ? openFindings(review) : []), [review]);
+  /** The Abschnitt each open point is about, when the text shows it („Vorschlag übernehmen“ needs one). */
+  const findingTargets = useMemo(() => {
+    const parsed = parseBlocksFromHtml(review?.html ?? "");
+    return new Map(findings.map((f) => [findingKey(f), findingTargetBlock(f, parsed)] as const));
+  }, [findings, review?.html]);
+  // Chosen points that are gone (done, or the page changed) drop out of the choice.
+  const chosenNow = chosen.filter((key) => findingTargets.has(key));
   const questions = useMemo(() => review?.questions ?? [], [review]);
   // Open points and the Abschnitte a question is about are marked in the text.
   const highlightIds = useMemo(
@@ -308,6 +319,52 @@ export function DtContentPageDrawer(props: {
     setReviseText("");
     toast.success("Abschnitt übernommen");
     onChangedRef.current();
+  }
+
+  function toggleChosen(finding: ContentFinding) {
+    const key = findingKey(finding);
+    setChosen((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  /**
+   * „Jetzt umsetzen“: the chosen proposals, one call per Abschnitt (several points on one
+   * Abschnitt go together), each taken over at once. A point whose result fails the checks stays
+   * open and chosen, with the reason in a message.
+   */
+  async function applyChosen() {
+    if (!base || chosenNow.length === 0) return;
+    const groups = new Map<string, string[]>();
+    for (const key of chosenNow) {
+      const target = findingTargets.get(key);
+      if (target) groups.set(target, [...(groups.get(target) ?? []), key]);
+    }
+    const parsed = parseBlocksFromHtml(review?.html ?? "");
+    const order = parsed.map((b) => b.id).filter((id) => groups.has(id));
+    setBusy("apply_chosen");
+    setApplying({ done: 0, total: order.length });
+    const failed: string[] = [];
+    let changed = false;
+    for (const [i, id] of order.entries()) {
+      const keys = groups.get(id)!;
+      const res = await contentApi<{ review: ContentReview }>(`${base}/revise/auto`, {
+        method: "POST",
+        body: { organisationId, block_id: id, finding_keys: keys },
+      });
+      if (res.ok) {
+        changed = true;
+        setReview(res.data.review);
+        setChosen((prev) => prev.filter((k) => !keys.includes(k)));
+      } else {
+        const name = parsed.find((b) => b.id === id)?.heading || id;
+        failed.push(`„${name}“: ${res.message}`);
+      }
+      setApplying({ done: i + 1, total: order.length });
+    }
+    setBusy(null);
+    setApplying(null);
+    if (changed) onChangedRef.current();
+    if (failed.length === 0) toast.success(order.length === 1 ? "Vorschläge umgesetzt" : `Vorschläge in ${order.length} Abschnitten umgesetzt`);
+    else toast.error(`Nicht umgesetzt (Punkte bleiben offen): ${failed.join(" · ")}`, { duration: 15_000 });
   }
 
   /** „So lassen“: the open point goes, the text stays, and later runs do not report it again. */
@@ -992,7 +1049,12 @@ export function DtContentPageDrawer(props: {
                           {findings.map((f, i) => (
                             <li
                               key={`${f.title}-${i}`}
-                              className="grid gap-1.5 rounded-xl border border-sbkm-navy/8 bg-sbkm-navy/[0.02] p-3 dark:border-white/8 dark:bg-white/[0.03]"
+                              className={cn(
+                                "grid gap-1.5 rounded-xl border p-3",
+                                chosenNow.includes(findingKey(f))
+                                  ? "border-emerald-400 bg-emerald-50/70 dark:border-emerald-400/50 dark:bg-emerald-500/10"
+                                  : "border-sbkm-navy/8 bg-sbkm-navy/[0.02] dark:border-white/8 dark:bg-white/[0.03]",
+                              )}
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <p className="text-sm font-semibold leading-snug text-sbkm-navy dark:text-white">
@@ -1016,12 +1078,28 @@ export function DtContentPageDrawer(props: {
                               ) : null}
                               {review.html && review.public.state !== "laeuft" ? (
                                 <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                  {f.proposal ? (
+                                  {f.proposal && findingTargets.get(findingKey(f)) ? (
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        findingButtonClass,
+                                        chosenNow.includes(findingKey(f)) &&
+                                          "border-emerald-500 bg-emerald-50 text-emerald-800 hover:border-emerald-600 dark:border-emerald-400/60 dark:bg-emerald-500/15 dark:text-emerald-200",
+                                      )}
+                                      disabled={Boolean(busy) || Boolean(jobId)}
+                                      aria-pressed={chosenNow.includes(findingKey(f))}
+                                      onClick={() => toggleChosen(f)}
+                                      title="Vormerken. Alle vorgemerkten Vorschläge werden mit „Jetzt umsetzen“ gemeinsam umgesetzt."
+                                    >
+                                      {chosenNow.includes(findingKey(f)) ? "✓ Vorschlag übernommen" : "Vorschlag übernehmen"}
+                                    </button>
+                                  ) : f.proposal ? (
                                     <button
                                       type="button"
                                       className={findingButtonClass}
                                       disabled={Boolean(busy) || Boolean(jobId)}
                                       onClick={() => startRevise(f, "proposal")}
+                                      title="Der Abschnitt ist nicht eindeutig: hier einzeln mit Abschnittswahl umsetzen."
                                     >
                                       Vorschlag umsetzen
                                     </button>
@@ -1049,6 +1127,23 @@ export function DtContentPageDrawer(props: {
                           ))}
                         </ul>
                       )}
+                      {chosenNow.length > 0 || applying ? (
+                        <div className="sticky bottom-0 grid gap-1.5 rounded-xl border border-emerald-400 bg-emerald-50 p-3 dark:border-emerald-400/50 dark:bg-emerald-950">
+                          <p className="text-xs text-emerald-900 dark:text-emerald-100">
+                            {applying
+                              ? `Wird umgesetzt … Abschnitt ${Math.min(applying.done + 1, applying.total)} von ${applying.total}`
+                              : `${chosenNow.length} ${chosenNow.length === 1 ? "Vorschlag" : "Vorschläge"} vorgemerkt. Mehrere Punkte im selben Abschnitt werden zusammen umgesetzt. Was die Prüfung nicht besteht, bleibt offen.`}
+                          </p>
+                          <button
+                            type="button"
+                            className="rounded-pill bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={Boolean(busy) || Boolean(jobId) || chosenNow.length === 0}
+                            onClick={() => void applyChosen()}
+                          >
+                            {applying ? "Wird umgesetzt …" : "Jetzt umsetzen"}
+                          </button>
+                        </div>
+                      ) : null}
                     </section>
 
                     <DtContentQuestionsPanel

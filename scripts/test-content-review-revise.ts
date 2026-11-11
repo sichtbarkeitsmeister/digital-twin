@@ -16,8 +16,8 @@ import { stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
 import { isKeptFinding, questionStopKeep, readQuestionStop, reviewStopDue } from "../lib/dt/content/pipeline/question-stop";
 import { emptyRephraseProgress } from "../lib/dt/content/pipeline/rephrase";
 import type { runRephraseOnBlocks } from "../lib/dt/content/pipeline/rephrase-runner";
-import { REVISE_RULES, REVISE_TOOL, checkRevision, revisionNote, revisionOrder, revisionPrompt } from "../lib/dt/content/pipeline/revise";
-import { applyRevision, keepFinding, previewRevision } from "../lib/dt/content/pipeline/revise-actions";
+import { REVISE_RULES, REVISE_TOOL, checkRevision, revisionNote, revisionOrder, revisionPrompt, type ContentRevisionRequest } from "../lib/dt/content/pipeline/revise";
+import { applyProposals, applyRevision, keepFinding, previewRevision } from "../lib/dt/content/pipeline/revise-actions";
 import type { StepOutcome } from "../lib/dt/content/pipeline/run-step";
 import { CONTENT_STEP_ENDABNAHME, CONTENT_STEP_WATERMARK, contentStepDefinition } from "../lib/dt/content/pipeline/steps";
 import { parseBlocksFromHtml, renderBlocksHtml, type ContentTextBlock } from "../lib/dt/content/render";
@@ -212,6 +212,10 @@ function checkTests() {
       { text: "Online-Verkauf bieten wir nicht an.", isNew: false },
     ],
   );
+  // Several points: one [BITTE PRÜFEN: …] each.
+  const two: ContentRevisionRequest = { findings: [finding, { ...finding, title: "Zweiter Punkt" }] };
+  assert.ok(checkRevision(withCheck(2), blocks[1]!, two, allowed).ok, "two points, two placeholders");
+  assert.ok(!checkRevision(withCheck(2), blocks[1]!, { findings: [finding] }, allowed).ok, "one point, one placeholder");
   assert.match(REVISE_RULES, /Auch keine Ausnahme, Bedingung oder Alternative, die dort nicht steht\./);
   console.log("revision checks: ok");
 }
@@ -303,6 +307,35 @@ async function actionTests() {
   {
     const conflict = await applyRevision(db(pageRow()).service, pageRow(), { block_id: "ablauf", before: { heading: "Alt", html: "<p>alt</p>" }, after: { heading: "Neu", html: "<p>neu</p>" } });
     assert.ok(!conflict.ok && conflict.status === 409);
+  }
+  // „Jetzt umsetzen“: two chosen points on one Abschnitt, one call, taken over at once, both points gone.
+  {
+    const second = { title: "Satz holprig", problem: "„Fotos schicken, Termin, Angebot.“", proposal: "Als ganzen Satz formulieren.", severity: "medium", severity_label: "Mittel", block_id: "ablauf" };
+    const page = pageRow({ unresolved: [finding, second] });
+    const store = db(page, doneUpTo(8));
+    let user = "";
+    const call: Call = async (input) => {
+      user = input.user;
+      return answer({ id: "ablauf", heading: "So läuft der Ankauf", level: 2, html: "<p>Sie schicken Fotos, wir vereinbaren einen Termin und machen ein Angebot. [BITTE PRÜFEN: Gibt es eine Aufstellung pro Uhr?]</p>" })(input);
+    };
+    const result = await applyProposals(store.service, page, doneUpTo(8) as unknown as ContentStepRow[], { block_id: "ablauf", finding_keys: [findingKey(finding), findingKey(second)] }, null, {
+      callTool: call,
+      context: { context: ctx, avatarId: null },
+      models: ["claude-sonnet-5-5"],
+    });
+    assert.ok(result.ok, JSON.stringify(result));
+    assert.match(user, /Mehrere offene Punkte in diesem Abschnitt\. Setze alle Vorschläge um, jeden nur an der Stelle, die er betrifft:\n1\. Offener Punkt: Offene Frage \(nicht gestellt\)[\s\S]*\n2\. Offener Punkt: Satz holprig\n   Problem: „Fotos schicken, Termin, Angebot\.“\n   Vorschlag \(umsetzen\): Als ganzen Satz formulieren\./);
+    const saved = store.rows("dt_content_pages")[0] as unknown as ContentPageRow;
+    assert.deepEqual(saved.unresolved, [], "both points gone");
+    assert.match(saved.html, /wir vereinbaren einen Termin/);
+    assert.match(saved.notes.at(-1)!, /^Abschnitt „So läuft der Ankauf“ überarbeitet nach den Vorschlägen zu „Offene Frage \(nicht gestellt\)“, „Satz holprig“: /);
+    // A point that is gone meanwhile: nothing is called.
+    const gone = await applyProposals(db(page).service, pageRow({ unresolved: [second] }), [], { block_id: "ablauf", finding_keys: [findingKey(finding), findingKey(second)] }, null, {
+      callTool: async () => assert.fail("no call"),
+      context: { context: ctx, avatarId: null },
+      models: ["m"],
+    });
+    assert.ok(!gone.ok && gone.status === 409);
   }
   // „So lassen“: the point goes, the text stays, the page remembers it.
   {
