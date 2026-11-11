@@ -40,12 +40,41 @@ function brands(text: string): string[] {
   return [...new Set(text.replace(MARKER_RE, " ").match(BRAND_RE) ?? [])];
 }
 
-/** The protected names of a Texte page: Kontaktdaten (company, person, street, town) and the keywords. */
-export function rephraseProtectedTerms(context: {
-  contact?: ContactPromptData | null;
+type KeywordSource = {
   page?: { keywords?: { main: { text: string }; secondary: Array<{ text: string }> } | null; main_keyword?: string | null } | null;
   outputs?: Record<number, unknown>;
-}): string[] {
+};
+
+function unique(terms: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  return terms
+    .map((t) => (typeof t === "string" ? t.replace(/\s+/g, " ").trim() : ""))
+    .filter((t) => t.length >= 2 && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+}
+
+/** The page's main and secondary keywords: from the Excel/briefing and from the Analyse. */
+export function rephraseKeywords(context: KeywordSource): string[] {
+  const analyse = context.outputs?.[CONTENT_STEP_ANALYSE] as Partial<AnalyseOutput> | undefined;
+  return unique([
+    context.page?.keywords?.main.text,
+    ...(context.page?.keywords?.secondary.map((k) => k.text) ?? []),
+    context.page?.main_keyword,
+    analyse?.main_keyword,
+    ...(Array.isArray(analyse?.secondary_keywords) ? analyse.secondary_keywords : []),
+  ]);
+}
+
+/**
+ * The keywords Grok gets as „Keywords (wörtlich beibehalten)“ for one chunk: only those that are in
+ * the chunk's text (a keyword the sections do not have is no order to work it in).
+ */
+export function rephraseChunkKeywords(context: KeywordSource, chunk: ReadonlyArray<Pick<ContentTextBlock, "html">>): string[] {
+  const text = norm(chunk.map((b) => plain(b)).join(" "));
+  return rephraseKeywords(context).filter((k) => text.includes(norm(k)));
+}
+
+/** The protected names of a Texte page: Kontaktdaten (company, person, street, town) and the keywords. */
+export function rephraseProtectedTerms(context: KeywordSource & { contact?: ContactPromptData | null }): string[] {
   const terms: string[] = [];
   for (const line of context.contact?.lines ?? []) {
     if (line.label === "Firmenname") terms.push(line.value);
@@ -56,18 +85,7 @@ export function rephraseProtectedTerms(context: {
       if (city) terms.push(city.replace(/^\d{4,5}\s*/, ""));
     }
   }
-  const analyse = context.outputs?.[CONTENT_STEP_ANALYSE] as Partial<AnalyseOutput> | undefined;
-  terms.push(
-    context.page?.keywords?.main.text ?? "",
-    ...(context.page?.keywords?.secondary.map((k) => k.text) ?? []),
-    context.page?.main_keyword ?? "",
-    analyse?.main_keyword ?? "",
-    ...(Array.isArray(analyse?.secondary_keywords) ? analyse.secondary_keywords : []),
-  );
-  const seen = new Set<string>();
-  return terms
-    .map((t) => (typeof t === "string" ? t.replace(/\s+/g, " ").trim() : ""))
-    .filter((t) => t.length >= 2 && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+  return unique([...terms, ...rephraseKeywords(context)]);
 }
 
 /**

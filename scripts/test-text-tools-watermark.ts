@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { contentExportFile } from "../lib/dt/content/export";
 import type { ContentTextSettings } from "../lib/dt/content/mapping";
 import { ContentLlmError } from "../lib/dt/content/pipeline/llm";
-import { REPHRASE_OWN_VORGABEN, rephraseBlockedBlock, rephraseChunkPrompt, settingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
+import { REPHRASE_OWN_VORGABEN, rephraseBlockedBlock, rephraseKeywordsBlock, rephraseChunkPrompt, settingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
 import {
   REPHRASE_CHUNK_CHARS,
   REPHRASE_MIN_REMAINING_MS,
@@ -24,7 +24,7 @@ import {
   rephrasedBlocks,
   type RephraseProgress,
 } from "../lib/dt/content/pipeline/rephrase";
-import { rephraseLosses, rephraseProtectedTerms, rephraseRejectedFindings } from "../lib/dt/content/pipeline/rephrase-guard";
+import { rephraseChunkKeywords, rephraseKeywords, rephraseLosses, rephraseProtectedTerms, rephraseRejectedFindings } from "../lib/dt/content/pipeline/rephrase-guard";
 import { runRephraseOnBlocks, type RephraseRunOptions } from "../lib/dt/content/pipeline/rephrase-runner";
 import { XAI_MISSING_KEY_MESSAGE, XaiEmptyAnswerError, XaiTimeoutError, callXaiText, type XaiTextCall } from "../lib/dt/content/pipeline/xai";
 import { renderBlocksHtml, type ContentTextBlock } from "../lib/dt/content/render";
@@ -644,6 +644,20 @@ async function testGuard() {
     ["Umformulierung verworfen: Zahl 1980; Name oder Keyword „Antikankauf Krause“", "low", "a"],
   ]);
   assert.match(rephraseRejectedFindings(progress.rejected!, blocks)[0]!.problem, /^Grok hat beim Abschnitt „A“ etwas verloren oder hinzugefügt/);
+
+  // The keywords go to Grok too, only those in the chunk, word for word.
+  const kwContext = {
+    notes: [],
+    page: { ki_prompt: null, keywords: { main: { text: "Luxusuhren Ankauf Düsseldorf" }, secondary: [{ text: "Rolex verkaufen" }] }, main_keyword: "Luxusuhren Ankauf Düsseldorf" },
+    outputs: { 1: { main_keyword: "Luxusuhren Ankauf Düsseldorf", secondary_keywords: ["Uhren Ankauf", "rolex verkaufen"] } },
+  };
+  assert.deepEqual(rephraseKeywords(kwContext), ["Luxusuhren Ankauf Düsseldorf", "Rolex verkaufen", "Uhren Ankauf"], "Excel and Analyse, once each");
+  const kwChunk: ContentTextBlock[] = [{ id: "a", heading: "A", level: 2, html: "<p>Beim luxusuhren Ankauf Düsseldorf zählt der Zustand. Uhren Ankauf seit Jahren.</p>" }];
+  assert.deepEqual(rephraseChunkKeywords(kwContext, kwChunk), ["Luxusuhren Ankauf Düsseldorf", "Uhren Ankauf"], "only the ones in the chunk");
+  assert.equal(rephraseKeywordsBlock(kwContext, kwChunk), "## Keywords (wörtlich beibehalten)\n- Luxusuhren Ankauf Düsseldorf\n- Uhren Ankauf");
+  assert.equal(rephraseKeywordsBlock({ notes: [] }, kwChunk), "", "the standalone tool has no keywords");
+  assert.match(rephraseChunkPrompt({ ...kwContext, settings }, kwChunk).user, /## Keywords \(wörtlich beibehalten\)\n- Luxusuhren Ankauf Düsseldorf/);
+  assert.match(REPHRASE_SYSTEM, /alle Fakten, Namen, Zahlen, die Keywords aus dem Block ‚Keywords‘, \[LINK: …\]/);
 
   // „Gesperrt“ goes to Grok with one sentence.
   const sections = [{ label: "Ankauf", current: "Wir kaufen Uhren. Bewertung per Video (nicht verwenden)." }];

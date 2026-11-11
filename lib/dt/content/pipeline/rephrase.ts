@@ -25,7 +25,7 @@ const MAX_CHUNK_BLOCKS = 4;
 
 export const REPHRASE_SYSTEM = `Du überarbeitest den fertigen Seitentext sprachlich.
 Formuliere Sätze um, die nach typischen KI-Mustern klingen (gleichförmiger Rhythmus, Floskeln, Dreierlisten als Reflex, Nominalstil). Sätze, die bereits natürlich klingen, darfst du stehen lassen.
-Behalte unverändert: HTML-Blöcke und ids, H1, alle Überschriften (auch Fragen-Überschriften), alle Fakten, Namen, Zahlen, [LINK: …], [BITTE PRÜFEN: …], [FOTO: …], [QUELLE …], [DATUM], Handlungsaufforderungen mit Kontaktweg. Unverändert bleiben außerdem: Fachbegriffe und ihre Erklärungen, wörtliche Zitate und Leitsätze, Hinweise wie ‚Einzelfall‘ oder ‚keine Zusage‘ und Formulierungen, die typische Kundenfragen wiedergeben.
+Behalte unverändert: HTML-Blöcke und ids, H1, alle Überschriften (auch Fragen-Überschriften), alle Fakten, Namen, Zahlen, die Keywords aus dem Block ‚Keywords‘, [LINK: …], [BITTE PRÜFEN: …], [FOTO: …], [QUELLE …], [DATUM], Handlungsaufforderungen mit Kontaktweg. Unverändert bleiben außerdem: Fachbegriffe und ihre Erklärungen, wörtliche Zitate und Leitsätze, Hinweise wie ‚Einzelfall‘ oder ‚keine Zusage‘ und Formulierungen, die typische Kundenfragen wiedergeben.
 Natürliches Deutsch: Satzlängen mischen, keine Werbe-Floskeln (Endlich, wirklich, nicht nur eine Floskel, sprechen eine klare Sprache, Machen Sie noch heute den ersten Schritt).
 Achte auf fehlerfreie Rechtschreibung, Grammatik und Zeichensetzung nach der amtlichen deutschen Rechtschreibung. Du führst keine neuen Fehler ein; bestehende Fehler korrigierst du.
 Erfinde nichts. Keine neuen Leistungen, Zahlen oder Bewertungen.
