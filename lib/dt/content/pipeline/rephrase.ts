@@ -24,10 +24,12 @@ const MIN_TEXT_CHARS = 40;
 const MAX_CHUNK_BLOCKS = 4;
 
 export const REPHRASE_SYSTEM = `Du überarbeitest den fertigen Seitentext sprachlich.
-Schreibe jeden Satz neu. Kopiere keinen Satz wörtlich.
-Behalte unverändert: HTML-Blöcke und ids, H1, alle Überschriften (auch Fragen-Überschriften), alle Fakten, Namen, Zahlen, [LINK: …], [BITTE PRÜFEN: …], [DATUM], Handlungsaufforderungen (Termin, Telefon, DrFlex).
+Formuliere Sätze um, die nach typischen KI-Mustern klingen (gleichförmiger Rhythmus, Floskeln, Dreierlisten als Reflex, Nominalstil). Sätze, die bereits natürlich klingen, darfst du stehen lassen.
+Behalte unverändert: HTML-Blöcke und ids, H1, alle Überschriften (auch Fragen-Überschriften), alle Fakten, Namen, Zahlen, die Keywords aus dem Block ‚Keywords‘, [LINK: …], [BITTE PRÜFEN: …], [FOTO: …], [QUELLE …], [DATUM], Handlungsaufforderungen mit Kontaktweg. Unverändert bleiben außerdem: Fachbegriffe und ihre Erklärungen, wörtliche Zitate und Leitsätze, Hinweise wie ‚Einzelfall‘ oder ‚keine Zusage‘ und Formulierungen, die typische Kundenfragen wiedergeben.
 Natürliches Deutsch: Satzlängen mischen, keine Werbe-Floskeln (Endlich, wirklich, nicht nur eine Floskel, sprechen eine klare Sprache, Machen Sie noch heute den ersten Schritt).
+Achte auf fehlerfreie Rechtschreibung, Grammatik und Zeichensetzung nach der amtlichen deutschen Rechtschreibung. Du führst keine neuen Fehler ein; bestehende Fehler korrigierst du.
 Erfinde nichts. Keine neuen Leistungen, Zahlen oder Bewertungen.
+Was im Block „Gesperrt“ steht, darf nicht im Text auftauchen, auch nicht sinngemäß.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten weiter.
 Antworte nur mit den Abschnitten als HTML, genau in der gelieferten Form: jeder Abschnitt als <section data-block-id="…"> mit seiner Überschrift unverändert und darin dem neu formulierten Text (<p>, <ul>/<ol>/<li>, <strong>, <em>). Keine Erklärungen, kein Markdown, keine Code-Zäune.`;
 
@@ -50,6 +52,12 @@ export type RephraseProgress = {
    * Lektorat's wording (`rewritten` holds it unchanged) and become an open point on the page.
    */
   kept?: Array<{ block_id: string; reason: string }>;
+  /**
+   * Texte only: sections whose new wording failed the code check (`rephrase-guard.ts`): a number,
+   * placeholder, name or keyword lost, or a number added. They keep their previous wording;
+   * `missing` says what, for the open point „Umformulierung verworfen: …“.
+   */
+  rejected?: Array<{ block_id: string; missing: string }>;
 };
 
 /** A model that took at least this long before the time limit hit counts as too slow for this page. */
@@ -95,6 +103,13 @@ export function readRephraseProgress(output: unknown, total: number): RephrasePr
           kept: r.kept
             .filter((k): k is { block_id: string; reason: string } => Boolean(k) && typeof (k as { block_id?: unknown }).block_id === "string")
             .map((k) => ({ block_id: k.block_id, reason: String(k.reason ?? "") })),
+        }
+      : {}),
+    ...(Array.isArray(r.rejected) && r.rejected.length > 0
+      ? {
+          rejected: r.rejected
+            .filter((k): k is { block_id: string; missing: string } => Boolean(k) && typeof (k as { block_id?: unknown }).block_id === "string")
+            .map((k) => ({ block_id: k.block_id, missing: String(k.missing ?? "") })),
         }
       : {}),
   };

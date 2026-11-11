@@ -76,7 +76,7 @@ function saveFile(format: WatermarkExportFormat, doc: WatermarkDocument, blocks:
 }
 
 /**
- * Verwaltung → Watermark Entfernung: upload a file, every sentence is rewritten on Grok
+ * Verwaltung → Watermark Entfernung: upload a file, AI-sounding sentences are rewritten on Grok
  * (the Watermark Entfernung step of Texte, in the same groups of sections), download the result as HTML or .txt.
  * The browser drives the run, one request per group; nothing is stored on the server.
  */

@@ -711,7 +711,7 @@ export function DtContentPageDrawer(props: {
                         <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/70">
                           Lesen Sie den Text und lassen Sie einzelne Abschnitte überarbeiten („Abschnitt überarbeiten lassen“ oder die Knöpfe
                           an den offenen Punkten). Mit „Freigeben und fertigstellen“ laufen die Watermark Entfernung und die Endabnahme.
-                          Die Watermark Entfernung formuliert danach jeden Satz im Fließtext neu; Überschriften bleiben, wie sie sind.
+                          Die Watermark Entfernung formuliert danach Sätze mit typischen KI-Mustern um; Überschriften, Zahlen, Platzhalter, Namen und Keywords bleiben.
                         </p>
                       </div>
                     ) : null}

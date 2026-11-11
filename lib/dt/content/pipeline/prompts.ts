@@ -11,7 +11,8 @@
  */
 
 import { pendingChecksBlock, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
-import { blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { BLOCKED_HEADING, blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { rephraseChunkKeywords } from "@/lib/dt/content/pipeline/rephrase-guard";
 import { pageFactsBlock, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -651,10 +652,37 @@ export function editorNotesBlock(notes: readonly string[]): string {
 export type RephrasePromptContext = {
   settings?: ContentTextSettings | null;
   notes: readonly string[];
-  page?: { ki_prompt: string | null } | null;
+  /** The page; in Texte also its keywords (Excel/briefing and the stored main keyword). */
+  page?: {
+    ki_prompt: string | null;
+    keywords?: { main: { text: string }; secondary: Array<{ text: string }> } | null;
+    main_keyword?: string | null;
+  } | null;
   /** Texte only: the client's wishes. The standalone Watermark tool passes none. */
   wishes?: ContentClientWishes | null;
+  /** Texte only: the Anbieterfakten, for their „Gesperrt“ statements. */
+  sections?: ReadonlyArray<{ label: string; current: string }>;
+  /** Texte only: the step outputs, for the Analyse's keywords. */
+  outputs?: Record<number, unknown>;
 };
+
+/** The page's keywords that are in this chunk, for Grok to keep word for word; empty without any. */
+export function rephraseKeywordsBlock(context: RephrasePromptContext, chunk: readonly ContentTextBlock[]): string {
+  const keywords = rephraseChunkKeywords(context, chunk);
+  if (keywords.length === 0) return "";
+  return ["## Keywords (wörtlich beibehalten)", ...keywords.map((k) => `- ${k}`)].join("\n");
+}
+
+/** The Grok pass gets the blocked statements on their own, with one sentence instead of the long note. */
+export function rephraseBlockedBlock(context: Pick<RephrasePromptContext, "sections">): string {
+  const statements = extractBlockedStatements((context.sections ?? []).filter((s) => s.current.trim()));
+  if (statements.length === 0) return "";
+  return [
+    `## ${BLOCKED_HEADING}`,
+    "Nichts davon darf im Text auftauchen, auch nicht sinngemäß.",
+    ...statements.map((s) => `- [${s.section}] ${s.text}`),
+  ].join("\n");
+}
 
 /** The Vorgaben of a text without Texte settings: whatever the text already does stays. */
 export const REPHRASE_OWN_VORGABEN = [
@@ -1547,7 +1575,7 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
   };
 }
 
-// --- Watermark Entfernung: every sentence rephrased, on Grok -----------------------------------
+// --- Watermark Entfernung: AI-sounding sentences rephrased, on Grok --------------------------------
 
 /**
  * The Watermark step runs on Grok (xAI, see `xai.ts` and `rephrase.ts`), not on Claude, and not through
@@ -1562,6 +1590,8 @@ export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: reado
     user: join([
       `## Abschnitte (bitte in derselben Form zurückgeben, nur der Text darin neu formuliert)\n${rephraseChunkHtml(chunk)}`,
       context.settings ? settingsBlock(context.settings) : REPHRASE_OWN_VORGABEN,
+      rephraseKeywordsBlock(context, chunk),
+      rephraseBlockedBlock(context),
       rephraseWishesBlock(context),
       notesBlock(context),
     ]),
