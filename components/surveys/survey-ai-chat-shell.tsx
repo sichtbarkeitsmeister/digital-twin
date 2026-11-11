@@ -163,6 +163,13 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
   const [isBusy, setIsBusy] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Phones (below sm) show either the chat list or the chat — never both side by side.
+  const isPhoneViewport = () =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 639.98px)").matches;
+  useEffect(() => {
+    if (isPhoneViewport()) setSidebarCollapsed(true);
+  }, []);
   const preferredChatIdRef = useRef<string | null>(null);
   const hasFinishedInitialLoadRef = useRef(false);
   const lastPersistedAssistantRulesRef = useRef("");
@@ -932,8 +939,8 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       className={`grid h-full max-h-full min-h-0 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-xl overscroll-contain ${
         sidebarCollapsed
           ? "grid-cols-[54px_minmax(0,1fr)]"
-          : "grid-cols-[280px_minmax(0,1fr)]"
-      }`}
+          : "grid-cols-[280px_minmax(0,1fr)] max-sm:grid-cols-[minmax(0,1fr)]"
+      } max-sm:rounded-none max-sm:border-x-0 max-sm:border-b-0 max-sm:shadow-none`}
       onWheelCapture={handleShellWheelCapture}
     >
       {sidebarCollapsed ? (
@@ -976,8 +983,14 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
             setQuery(v);
             void loadChats(v, showArchived);
           }}
-          onCreateChat={createChat}
-          onSelectChat={setSelectedChatId}
+          onCreateChat={() => {
+            if (isPhoneViewport()) setSidebarCollapsed(true);
+            return createChat();
+          }}
+          onSelectChat={(id) => {
+            setSelectedChatId(id);
+            if (isPhoneViewport()) setSidebarCollapsed(true);
+          }}
           onRenameChat={renameChat}
           onArchiveToggle={archiveToggle}
           onDeleteChat={deleteChat}
@@ -997,7 +1010,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
       <div
         className={`relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-transparent transition-colors ${
           dropHighlight && selectedChatId ? "bg-primary/[0.04]" : ""
-        }`}
+        } ${sidebarCollapsed ? "" : "max-sm:hidden"}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1045,7 +1058,7 @@ export function SurveyAiChatShell(props: { pageContext: PageContext }) {
               </p>
             ) : null}
           </div>
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
             <Button
               type="button"
               size="icon"

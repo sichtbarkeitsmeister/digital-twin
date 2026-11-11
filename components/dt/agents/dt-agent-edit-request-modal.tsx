@@ -99,7 +99,7 @@ export function DtAgentEditRequestModal(props: {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[200] flex items-end justify-center overflow-y-auto overscroll-contain bg-sbkm-navy/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          className="dt-touch-inputs fixed inset-0 z-[200] flex items-end justify-center overflow-y-auto overscroll-contain bg-sbkm-navy/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="agent-request-title"

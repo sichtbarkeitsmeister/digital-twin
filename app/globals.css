@@ -256,3 +256,15 @@
     }
   }
 }
+
+/*
+ * Dashboard on phones: iOS Safari zooms the page when a focused field is below
+ * 16px. Applies to the dashboard shell and its portalled modals only.
+ */
+@media (max-width: 639.98px) {
+  .dt-touch-inputs input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  .dt-touch-inputs textarea,
+  .dt-touch-inputs select {
+    font-size: 16px;
+  }
+}

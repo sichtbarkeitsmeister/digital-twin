@@ -48,13 +48,13 @@ export function OrganisationSwitcher({
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          className="min-w-[220px] justify-between gap-2"
+          className="w-full min-w-0 max-w-full justify-between gap-2 sm:w-auto sm:min-w-[220px]"
           aria-label="Organisation wechseln"
         >
-          <span className="truncate">
+          <span className="min-w-0 truncate">
             {selected ? organisationOptionLabel(selected) : "Organisation wählen"}
           </span>
-          <ChevronsUpDown className="h-4 w-4 opacity-70" />
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-70" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

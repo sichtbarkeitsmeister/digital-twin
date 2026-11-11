@@ -74,13 +74,13 @@ export default async function InboxPage() {
   const inboxInvites = (inboxInvitesRaw ?? []) as unknown as InviteRow[];
 
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-1 gap-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div className="grid gap-1">
           <h1 className="text-2xl font-bold tracking-tight text-primary">
             Posteingang
           </h1>
-          <p className="text-secondary">
+          <p className="text-secondary [overflow-wrap:anywhere]">
             Angemeldet als <span className="text-primary">{email}</span>
           </p>
         </div>
@@ -114,7 +114,7 @@ export default async function InboxPage() {
                 <Card key={invite.id}>
                   <CardHeader>
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <CardTitle className="text-base">
+                      <CardTitle className="min-w-0 text-base [overflow-wrap:anywhere]">
                         {org?.name ?? "Organisation"}
                       </CardTitle>
                       <Badge variant="outline">
@@ -126,7 +126,7 @@ export default async function InboxPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm text-secondary">
+                    <p className="min-w-0 text-sm text-secondary [overflow-wrap:anywhere]">
                       Einladung für{" "}
                       <span className="text-primary">{invite.email}</span>
                     </p>

@@ -1,17 +1,18 @@
+import * as React from "react";
+
 import { cn } from "@/components/dt/cn";
 
 type DtIconButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   size?: "sm" | "md";
 };
 
-export function DtIconButton({
-  className,
-  size = "md",
-  children,
-  ...props
-}: DtIconButtonProps) {
+export const DtIconButton = React.forwardRef<HTMLButtonElement, DtIconButtonProps>(function DtIconButton(
+  { className, size = "md", children, ...props },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type="button"
       className={cn(
         "inline-grid place-items-center rounded-pill border-0 bg-white/60 text-sbkm-navy transition-colors hover:bg-sbkm-navy/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15",
@@ -23,4 +24,4 @@ export function DtIconButton({
       {children}
     </button>
   );
-}
+});
