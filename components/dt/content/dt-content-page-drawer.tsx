@@ -25,7 +25,7 @@ import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-ques
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
-import { findingKey, findingTargetBlock, markNewSentences } from "@/lib/dt/content/finding-target";
+import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences } from "@/lib/dt/content/finding-target";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
 import { htmlToPlainText, parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
@@ -233,7 +233,7 @@ export function DtContentPageDrawer(props: {
   /** The Abschnitt each open point is about, when the text shows it („Vorschlag übernehmen“ needs one). */
   const findingTargets = useMemo(() => {
     const parsed = parseBlocksFromHtml(review?.html ?? "");
-    return new Map(findings.map((f) => [findingKey(f), findingTargetBlock(f, parsed)] as const));
+    return new Map(findings.map((f) => [findingKey(f), findingTargetBlocks(f, parsed)] as const));
   }, [findings, review?.html]);
   // Chosen points that are gone (done, or the page changed) drop out of the choice.
   const chosenNow = chosen.filter((key) => findingTargets.has(key));
@@ -333,13 +333,17 @@ export function DtContentPageDrawer(props: {
    */
   async function applyChosen() {
     if (!base || chosenNow.length === 0) return;
+    // A point about several Abschnitte goes into each one's call and is removed with the last.
     const groups = new Map<string, string[]>();
     for (const key of chosenNow) {
-      const target = findingTargets.get(key);
-      if (target) groups.set(target, [...(groups.get(target) ?? []), key]);
+      for (const target of findingTargets.get(key) ?? []) groups.set(target, [...(groups.get(target) ?? []), key]);
     }
     const parsed = parseBlocksFromHtml(review?.html ?? "");
     const order = parsed.map((b) => b.id).filter((id) => groups.has(id));
+    const lastOf = new Map<string, string>();
+    for (const id of order) for (const key of groups.get(id)!) lastOf.set(key, id);
+    // A point whose earlier Abschnitt failed stays open, even when its last one works.
+    const failedKeys = new Set<string>();
     setBusy("apply_chosen");
     setApplying({ done: 0, total: order.length });
     const failed: string[] = [];
@@ -348,13 +352,15 @@ export function DtContentPageDrawer(props: {
       const keys = groups.get(id)!;
       const res = await contentApi<{ review: ContentReview }>(`${base}/revise/auto`, {
         method: "POST",
-        body: { organisationId, block_id: id, finding_keys: keys },
+        body: { organisationId, block_id: id, finding_keys: keys, done_keys: keys.filter((k) => lastOf.get(k) === id && !failedKeys.has(k)) },
       });
       if (res.ok) {
         changed = true;
         setReview(res.data.review);
-        setChosen((prev) => prev.filter((k) => !keys.includes(k)));
+        const done = keys.filter((k) => lastOf.get(k) === id && !failedKeys.has(k));
+        setChosen((prev) => prev.filter((k) => !done.includes(k)));
       } else {
+        for (const k of keys) failedKeys.add(k);
         const name = parsed.find((b) => b.id === id)?.heading || id;
         failed.push(`„${name}“: ${res.message}`);
       }
@@ -1078,7 +1084,7 @@ export function DtContentPageDrawer(props: {
                               ) : null}
                               {review.html && review.public.state !== "laeuft" ? (
                                 <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                  {f.proposal && findingTargets.get(findingKey(f)) ? (
+                                  {f.proposal && (findingTargets.get(findingKey(f))?.length ?? 0) > 0 ? (
                                     <button
                                       type="button"
                                       className={cn(

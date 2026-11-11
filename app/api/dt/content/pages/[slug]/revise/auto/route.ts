@@ -12,6 +12,8 @@ const bodySchema = z.object({
   organisationId: z.string().uuid(),
   block_id: z.string().min(1).max(80),
   finding_keys: z.array(z.string().min(1).max(4_000)).min(1).max(20),
+  /** The points that go with this Abschnitt (a point about several goes with its last one). */
+  done_keys: z.array(z.string().min(1).max(4_000)).max(20).optional().nullable(),
 });
 
 /**

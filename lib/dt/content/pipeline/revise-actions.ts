@@ -42,6 +42,11 @@ export type RevisionInput = {
   finding_key?: string | null;
   /** „Jetzt umsetzen“: several open points on this Abschnitt, all proposals at once. */
   finding_keys?: string[] | null;
+  /**
+   * Of `finding_keys`, the points that go once this Abschnitt is taken over. A point about several
+   * Abschnitte goes with its last one; defaults to all of `finding_keys`.
+   */
+  done_keys?: string[] | null;
 };
 
 type Failure = { ok: false; status: number; message: string; reasons?: string[]; cost_eur?: number };
@@ -208,7 +213,7 @@ export async function applyRevision(
   if (finding && input.finding_key) Object.assign(patch, withoutFinding(page, input.finding_key) ?? {});
   if (!("ok" in request) && input.finding_keys && input.finding_keys.length > 0) {
     let lists: Pick<ContentPageRow, "findings" | "final_findings" | "unresolved"> = page;
-    for (const key of input.finding_keys) lists = withoutFinding(lists, key) ?? lists;
+    for (const key of input.done_keys ?? input.finding_keys) lists = withoutFinding(lists, key) ?? lists;
     Object.assign(patch, { findings: lists.findings, final_findings: lists.final_findings, unresolved: lists.unresolved });
   }
   const { error } = await service.from("dt_content_pages").update(patch).eq("id", page.id).neq("state", "laeuft");
@@ -225,7 +230,7 @@ export async function applyProposals(
   service: SupabaseClient,
   page: ContentPageRow,
   steps: ContentStepRow[],
-  input: { block_id: string; finding_keys: string[] },
+  input: { block_id: string; finding_keys: string[]; done_keys?: string[] | null },
   userId: string | null,
   deps: Parameters<typeof previewRevision>[5] = {},
 ): Promise<{ ok: true; cost_eur: number } | Failure> {
@@ -236,6 +241,7 @@ export async function applyProposals(
     before: { heading: preview.before.heading, html: preview.before.html },
     after: { heading: preview.after.heading, html: preview.after.html },
     finding_keys: input.finding_keys,
+    done_keys: input.done_keys ?? null,
   });
   return applied.ok ? { ok: true, cost_eur: preview.cost_eur } : { ...applied, cost_eur: preview.cost_eur };
 }
