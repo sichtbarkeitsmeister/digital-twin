@@ -35,6 +35,7 @@ import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
 import {
   ensureHeroPlaceholder,
   isEmptyHeroPlaceholder,
+  missingH1Finding,
   type AnalyseOutput,
   type EndabnahmeOutput,
   type FaktencheckOutput,
@@ -391,6 +392,14 @@ export function stepPatchFor(
         }
       }
     }
+  }
+  // A text without an H1 is reported, never repaired by promoting another heading.
+  if (def.writesText && typeof pagePatch.html === "string") {
+    const noH1 = missingH1Finding(savedBlocks(pagePatch));
+    const base = (pagePatch.findings as ContentFinding[] | undefined) ?? [...(current.findings ?? [])];
+    const without = base.filter((f) => f.title !== "H1 fehlt");
+    if (noH1) pagePatch.findings = [...without, noH1];
+    else if (without.length !== base.length) pagePatch.findings = without;
   }
   const result: StepPatch = { pagePatch, stepStatus, halted };
   if (resetFrom != null) result.resetFrom = resetFrom;

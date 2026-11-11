@@ -34,7 +34,7 @@ Lehnt ein Modell die erzwungene Werkzeugwahl ab (HTTP 400), wiederholt der Code 
       },
       "blocks": {
         "type": "array",
-        "description": "Der komplette Text als geordnete Abschnitte. Der erste Abschnitt trägt die H1 (level 1), danach H2 (level 2), bei Bedarf H3 (level 3) und H4 (level 4). Bestehende ids beibehalten.",
+        "description": "Der komplette Text als geordnete Abschnitte. Der erste Block (id hero) trägt die kurze SEO-H1 (level 1, html darf leer sein), der zweite (id zusammenfassung) die Hero-Überschrift als H2. Danach H2 (level 2), bei Bedarf H3 (level 3) und H4 (level 4). Bestehende ids beibehalten.",
         "items": {
           "type": "object",
           "properties": {
@@ -66,7 +66,7 @@ Lehnt ein Modell die erzwungene Werkzeugwahl ab (HTTP 400), wiederholt der Code 
 
 ## Dieselbe Abschnittsliste in den anderen Werkzeugen
 
-`blocks` ist überall dieselbe Definition (`BLOCKS_SCHEMA`), also auch mit `level` 1 bis 4: `submit_geo_text`, `submit_hormozi_text`, `submit_vermenschlichung_text` (zusätzlich `self_score`), `submit_lektorat` (zusätzlich `final_findings`), das Ergebnis der Aktualitätsprüfung, „Antworten einarbeiten“ und die Werkzeuge SEO, GEO und Hormozi unter Verwaltung.
+`blocks` hat überall dieselben Felder (`BLOCKS_SCHEMA`), also auch `level` 1 bis 4. Nur die Beschreibung von `blocks` ist bei `submit_seo_text` eigen (Reihenfolge hero, zusammenfassung). Dieselben Felder haben: `submit_geo_text`, `submit_hormozi_text`, `submit_vermenschlichung_text` (zusätzlich `self_score`), `submit_lektorat` (zusätzlich `final_findings`), das Ergebnis der Aktualitätsprüfung, „Antworten einarbeiten“ und die Werkzeuge SEO, GEO und Hormozi unter Verwaltung.
 
 ## Was der Code mit der Antwort macht
 
@@ -74,8 +74,10 @@ Lehnt ein Modell die erzwungene Werkzeugwahl ab (HTTP 400), wiederholt der Code 
 2. **Erst wird geprüft, ob die Antwort fertig ist** (`callContentTool`). `stop_reason: max_tokens` → der Schritt schlägt fehl mit „Ausgabe abgeschnitten (Token-Limit)“. Kein `stop_reason`, weil das Zeitlimit den Stream gekappt hat → „Ausgabe unvollständig (Zeitlimit erreicht)“, eine Wiederholung, danach hält die Seite an. Eine abgeschnittene Antwort wird nie als Text übernommen, auch wenn sich ihr JSON schließen lässt.
 3. `reviveStringifiedToolInput` liest `blocks` zurück, falls das Modell die Liste als JSON-Zeichenkette geschickt hat.
 4. `normalizeTextOutput` übernimmt `blocks`, `title` (höchstens 200 Zeichen) und `meta_description` (höchstens 400 Zeichen). Höchstens 120 Abschnitte; mehr lässt den Schritt fehlschlagen („Zu viele Abschnitte (Grenze erreicht)“), es wird nie still gekürzt. Je Abschnitt höchstens 30.000 Zeichen HTML; ein längerer lässt den Schritt fehlschlagen („Abschnitt zu lang (Grenze erreicht)“), auch hier wird nie gekürzt. Eine leere Abschnittsliste lässt den bisherigen Text stehen.
-5. `level`: 3 und 4 bleiben, der erste Abschnitt ohne Angabe wird 1, alles andere wird 2.
-6. `ensureHeroPlaceholder` setzt den ersten Abschnitt auf H1 und fügt direkt danach den Hero-Platzhalter ein.
+5. `level`: Der erste Abschnitt behält seine Ebene (ohne Angabe wird er 1). Danach bleiben 2, 3 und 4; ein weiteres `level` 1 wird 2, damit es nur eine H1 gibt.
+6. `ensureHeroPlaceholder` ändert keine Ebene. Ist `hero` die H1 (aktuelle Textvorlagen), bleibt der Text, wie er ist. Nach der älteren Vorlage (hero als Platzhalter unter der H1) setzt es den Platzhalter direkt nach den ersten Abschnitt.
+7. Hat der Text keinen Abschnitt mit `level` 1, meldet der Schritt den offenen Punkt „H1 fehlt“; keine andere Überschrift wird hochgestuft.
+8. Ein Abschnitt mit Überschrift und leerem `html` (die SEO-H1) bleibt in Anzeige, Speicher und allen Exporten erhalten.
 
 ## Abschnitt ohne Überschrift
 

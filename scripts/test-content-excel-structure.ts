@@ -802,11 +802,11 @@ console.log("analyse normalisation: ok");
 
 const h1 = { id: "intro", heading: "Privatumzug Köln", level: 1 as const, html: "" };
 const body = { id: "ablauf", heading: "Wie läuft der Umzug ab?", level: 2 as const, html: "<p>So.</p>" };
-const seoBlocks = ensureHeroPlaceholder([{ ...h1, level: 2 }, { id: "hero", heading: "Toller Hero", level: 2, html: "<p>nein</p>" }, body]);
+const seoBlocks = ensureHeroPlaceholder([h1, { id: "hero", heading: "Toller Hero", level: 2, html: "<p>nein</p>" }, body]);
 assert.deepEqual(
   seoBlocks.map((b) => [b.id, b.heading, b.level, b.html]),
   [["intro", "Privatumzug Köln", 1, ""], ["hero", CONTENT_HERO_PLACEHOLDER, 2, ""], ["ablauf", "Wie läuft der Umzug ab?", 2, "<p>So.</p>"]],
-  "SEO never writes a real hero and the first block is the H1",
+  "older recipe: SEO never writes a real hero; the H1 stays the first block (levels are never changed, test-content-hero-h1)",
 );
 const seoOut = contentStepSpec(2, context()).normalize({ title: "T", meta_description: "M", blocks: [h1, body] }, context()) as TextOutput;
 assert.equal(seoOut.blocks[1]?.id, "hero", "a missing hero block is inserted");

@@ -15,6 +15,7 @@
     "test:survey-clarifications": "tsx scripts/test-survey-clarifications.ts",
     "test:anbieter-to-seo": "tsx scripts/test-anbieter-to-seo.ts",
     "test:content-mapping": "tsx scripts/test-content-mapping.ts",
+    "test:content-hero-h1": "tsx scripts/test-content-hero-h1.ts",
     "test:content-step-truncation": "tsx scripts/test-content-step-truncation.ts",
     "test:content-page-facts": "tsx scripts/test-content-page-facts.ts",
     "test:content-kunde-prueft": "tsx scripts/test-content-kunde-prueft.ts",
