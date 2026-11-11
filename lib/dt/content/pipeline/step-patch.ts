@@ -32,6 +32,7 @@ import {
 import type { AktualitaetOutput } from "@/lib/dt/content/pipeline/aktualitaet";
 import { contentGapQuestions, findContentGaps } from "@/lib/dt/content/pipeline/gaps";
 import { ContentLlmError } from "@/lib/dt/content/pipeline/llm";
+import { isKeptFinding, type ContentQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import {
   ensureHeroPlaceholder,
   isEmptyHeroPlaceholder,
@@ -284,6 +285,8 @@ export type StepPatchCurrent = {
   questions?: readonly ContentQuestion[];
   /** What is known already: Kontaktdaten, the pool, notes, Anbieterfakten (`buildContentKnowledge`). */
   knowledge?: ContentKnowledge;
+  /** The page's stop; its `kept` points („So lassen“) are never listed again. */
+  question_stop?: Pick<ContentQuestionStop, "kept">;
 };
 
 /**
@@ -400,6 +403,14 @@ export function stepPatchFor(
     const without = base.filter((f) => f.title !== "H1 fehlt");
     if (noH1) pagePatch.findings = [...without, noH1];
     else if (without.length !== base.length) pagePatch.findings = without;
+  }
+  // „So lassen“: a point the editor left as it is does not come back, whichever step names it.
+  const kept = current.question_stop?.kept ?? [];
+  if (kept.length > 0) {
+    for (const list of ["findings", "final_findings", "unresolved"] as const) {
+      const value = pagePatch[list];
+      if (Array.isArray(value)) pagePatch[list] = (value as ContentFinding[]).filter((f) => !isKeptFinding(f, kept));
+    }
   }
   const result: StepPatch = { pagePatch, stepStatus, halted };
   if (resetFrom != null) result.resetFrom = resetFrom;

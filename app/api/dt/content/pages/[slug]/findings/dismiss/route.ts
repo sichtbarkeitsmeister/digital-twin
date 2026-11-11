@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 import { loadOrgQuestions } from "@/lib/dt/content/org-questions";
-import { dismissFinding } from "@/lib/dt/content/pipeline/revise-actions";
+import { keepFinding } from "@/lib/dt/content/pipeline/revise-actions";
 import { contentError, contentOk, gateContentRoute, isValidContentSlug, readJsonBody } from "@/lib/dt/content/route-helpers";
 import { buildReview, loadContentPage, loadContentSteps } from "@/lib/dt/content/store";
 
 const bodySchema = z.object({ organisationId: z.string().uuid(), finding_key: z.string().min(1).max(4_000) });
 
-/** „Erledigt“ on an open point: it goes, the text stays. Returns the review. */
+/** „So lassen“ on an open point: it goes, the text stays, the page remembers it. Returns the review. */
 export async function POST(req: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   if (!isValidContentSlug(slug)) return contentError("Ungültige Seite.", 400);
@@ -19,7 +19,7 @@ export async function POST(req: Request, context: { params: Promise<{ slug: stri
   try {
     const page = await loadContentPage(gate.service, gate.organisationId, slug);
     if (!page) return contentError("Seite nicht gefunden.", 404);
-    const result = await dismissFinding(gate.service, page, parsed.data.finding_key);
+    const result = await keepFinding(gate.service, page, parsed.data.finding_key);
     if (!result.ok) return contentError(result.message, result.status);
     const [fresh, steps, pool] = await Promise.all([
       loadContentPage(gate.service, gate.organisationId, slug),

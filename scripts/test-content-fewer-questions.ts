@@ -500,6 +500,13 @@ async function testStopAsksOnce() {
   const db3 = new PageDb({ dt_content_pages: [pageRow({ step: 8, html: renderBlocksHtml(BLOCKS.filter((b) => b.id !== "kosten" && b.id !== "kontakt")) }) as unknown as FakeRow] });
   const clean = await runQuestionStop(db3.service as never, pageRow({ step: 8, html: renderBlocksHtml(BLOCKS.filter((b) => b.id !== "kosten" && b.id !== "kontakt")) }), [], 240_000, { context: context(), now: NOW });
   assert.deepEqual([clean.action, clean.halted, readQuestionStop(db3.page().question_stop).status], ["go_on", false, "done"]);
+  // The page's switch and its „So lassen“ points survive the stop (before, the switch was lost here).
+  const kept = [{ title: "Zeitdruck", problem: "„Jetzt …“", block_id: "kosten", at: NOW.toISOString() }];
+  const switched = pageRow({ step: 8, html: renderBlocksHtml(BLOCKS.filter((b) => b.id !== "kosten" && b.id !== "kontakt")), question_stop: { handled: [], review_off: true, kept } });
+  const db4 = new PageDb({ dt_content_pages: [switched as unknown as FakeRow] });
+  await runQuestionStop(db4.service as never, switched, [], 240_000, { context: context(), now: NOW });
+  const kept4 = readQuestionStop(db4.page().question_stop);
+  assert.deepEqual([kept4.status, kept4.review_off, kept4.kept], ["done", true, kept]);
   console.log("A: the stop asks once, or fills in what is known: ok");
 }
 

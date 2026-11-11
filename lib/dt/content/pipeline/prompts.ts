@@ -155,6 +155,8 @@ export type ContentPipelineContext = {
   freshness?: ContentFreshness;
   /** Open points on the page (`dt_content_pages.findings`); the Endabnahme lists the ones still open. */
   openFindings?: ContentFinding[];
+  /** Open points the editor left as they are („So lassen“, `question_stop.kept`): the Endabnahme does not report them again. */
+  keptFindings?: ReadonlyArray<{ title: string; problem: string; block_id: string | null }>;
   /** Normalised outputs of earlier steps, by step number. */
   outputs: Partial<Record<number, unknown>>;
   /** Current text (page HTML parsed into blocks); empty before the SEO step. */
@@ -1485,6 +1487,16 @@ function openFindingsBlock(context: Pick<ContentPipelineContext, "openFindings">
   return `## Offene Punkte aus früheren Schritten (z. B. Aktualitätsprüfung) – in unresolved übernehmen, solange sie zutreffen\n${openFindingsJson(findings)}`;
 }
 
+/** „So lassen“: the points the editor decided to leave, so the Endabnahme does not report them again. */
+export function keptFindingsBlock(context: Pick<ContentPipelineContext, "keptFindings">): string {
+  const kept = context.keptFindings ?? [];
+  if (kept.length === 0) return "";
+  const lines = kept.map((k) => `- ${k.title}: ${k.problem.replace(/\s+/g, " ").slice(0, 400)}${k.block_id ? ` (Abschnitt ${k.block_id})` : ""}`);
+  return `## Von der Redaktion bewusst so gelassen (kein Befund)
+Diese Punkte hat die Redaktion geprüft und entschieden, dass der Text so bleibt. Melde sie nicht erneut, auch nicht mit anderen Worten. Ein neuer, anderer Verstoß an derselben Stelle ist weiterhin ein Befund.
+${lines.join("\n")}`;
+}
+
 /**
  * Output budget of the Endabnahme. It carries the open points of earlier steps into
  * `unresolved`: with GEO switched off for the page the Faktencheck's findings are still open
@@ -1508,6 +1520,7 @@ summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Fre
       currentTextBlock(context),
       outputBlock(context, CONTENT_STEP_LEKTORAT, `Lektorat (Schritt ${CONTENT_STEP_LEKTORAT}) – gemeldete Befunde`),
       openFindingsBlock(context),
+      keptFindingsBlock(context),
       anbieterBlock(context),
       kontaktBlock(context),
       settingsBlock(context.settings),
