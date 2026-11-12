@@ -12,6 +12,7 @@ import {
   AVATAR_PLAN_MIN,
 } from "@/lib/dt/transcripts/avatar-plan-bounds";
 import {
+  type DateOrigin,
   type ExtractionStore,
   type FactKind,
   type MissingFact,
@@ -62,6 +63,8 @@ export type AnbieterClaim = {
   text: string;
   source: string;
   date: string | null;
+  /** Where the date comes from; „upload“ means the document itself states none. */
+  dateOrigin?: DateOrigin;
   /** The claim from the latest source. It is marked, not chosen. */
   newest: boolean;
   ids: string[];
@@ -90,6 +93,10 @@ export type AnbieterReview = {
   unassignedCount: number;
   /** Facts and names of the Bestand that the result does not show. */
   missingFacts: MissingFact[];
+  /** Statements marked as not for publication. They are in no point. */
+  internal: Array<{ id: string; text: string; source: string }>;
+  /** What the internal notes mean for texts: prohibitions only, never the internal fact itself. */
+  guardrails: Array<{ rule: string; ids: string[] }>;
   /** Statements an instruction removed on purpose; they are not reported again. */
   dismissedIds: string[];
   /** What the last „Änderung anwenden“ dropped although nobody asked for it. */
@@ -792,6 +799,17 @@ export function describeAvatarStand(plan: Pick<AvatarPlanState, "notWanted" | "a
     .join("\n\n");
 }
 
+/** Open matters a reviewer should have seen before approving. */
+export function anbieterOpenIssues(state: Pick<AnbieterState, "items" | "review">): {
+  missingFacts: number;
+  conflicts: number;
+} {
+  return {
+    missingFacts: state.review?.missingFacts.length ?? 0,
+    conflicts: state.items.reduce((sum, item) => sum + (item.conflicts?.length ?? 0), 0),
+  };
+}
+
 /** The state as the browser gets it: without the stored statements of stage 1. */
 export function anbieterForClient(state: AnbieterState): Omit<AnbieterState, "extraction"> {
   const { extraction: _extraction, ...rest } = state;
@@ -926,6 +944,8 @@ function idList(raw: unknown, max: number): string[] {
     : [];
 }
 
+const DATE_ORIGINS: readonly DateOrigin[] = ["gespraech", "dokument", "dateiname", "upload"];
+
 function readConflicts(raw: unknown): AnbieterConflict[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -938,6 +958,7 @@ function readConflicts(raw: unknown): AnbieterConflict[] {
             text: asString(c?.text, 4_000),
             source: asString(c?.source, 400),
             date: asString(c?.date, 20) || null,
+            ...(DATE_ORIGINS.includes(c?.dateOrigin as DateOrigin) ? { dateOrigin: c?.dateOrigin as DateOrigin } : {}),
             newest: c?.newest === true,
             ids: idList(c?.ids, 200),
           };
@@ -979,7 +1000,11 @@ function readExtraction(raw: unknown): ExtractionStore {
     if (!chunk || !/^[0-9a-f]{32}$/.test(hash)) continue;
     const strings = (list: unknown) =>
       Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
-    store[hash] = { statements: strings(chunk.statements), names: strings(chunk.names) };
+    const statements = strings(chunk.statements);
+    const internal = Array.isArray(chunk.internal)
+      ? chunk.internal.filter((n): n is number => Number.isInteger(n) && n >= 0 && n < statements.length)
+      : [];
+    store[hash] = { statements, names: strings(chunk.names), internal };
   }
   return store;
 }
@@ -992,6 +1017,14 @@ function readReview(raw: unknown): AnbieterReview | null {
     .map((row) => ({ id: asString(row.id, 12), text: asString(row.text, 2_000), source: asString(row.source, 400) }))
     .filter((row) => row.id && row.text)
     .slice(0, REVIEW_UNASSIGNED_MAX);
+  const internal = rows(record.internal)
+    .map((row) => ({ id: asString(row.id, 12), text: asString(row.text, 2_000), source: asString(row.source, 400) }))
+    .filter((row) => row.id && row.text)
+    .slice(0, REVIEW_UNASSIGNED_MAX);
+  const guardrails = rows(record.guardrails)
+    .map((row) => ({ rule: asString(row.rule, 400), ids: idList(row.ids, 400) }))
+    .filter((row) => row.rule)
+    .slice(0, 200);
   const missingFacts = rows(record.missingFacts)
     .map((row) => ({
       kind: asString(row.kind, 20) as FactKind,
@@ -1018,6 +1051,8 @@ function readReview(raw: unknown): AnbieterReview | null {
     unassigned,
     unassignedCount: Math.max(count(record.unassignedCount, 0), unassigned.length),
     missingFacts,
+    internal,
+    guardrails,
     dismissedIds: idList(record.dismissedIds, 5_000),
     lostInRevision,
   };

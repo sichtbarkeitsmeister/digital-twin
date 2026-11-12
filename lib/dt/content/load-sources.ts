@@ -14,7 +14,8 @@ import type { ContentLocalSources } from "@/lib/dt/content/types";
 import { listSurveysForOrganisation } from "@/lib/dt/list-organisation-surveys";
 import { extractSurveyFacts } from "@/lib/dt/survey-facts";
 import type { SurveyFieldQuestionRow } from "@/lib/dt/survey-to-agent-context";
-import { normalizeAnbieterItems } from "@/lib/dt/transcripts/workshop-model";
+import { anbieterLeitplankenSection } from "@/lib/dt/transcripts/anbieter-markdown";
+import { readAnbieterState } from "@/lib/dt/transcripts/workshop-model";
 import { loadWorkshopState } from "@/lib/dt/transcripts/workshop-store";
 
 export type ContentAvatarOption = {
@@ -57,11 +58,19 @@ export async function loadContentWorkshopAnbieter(
     .maybeSingle();
   if (error) throw new Error(error.message);
   const anbieter = isRecord(data?.anbieter) ? data.anbieter : null;
-  return normalizeAnbieterItems(anbieter?.items).map((item) => ({
+  const state = readAnbieterState(anbieter, "");
+  const sections: WorkshopAnbieterSection[] = state.items.map((item) => ({
     key: item.key,
     label: item.label,
     current: item.current,
   }));
+  // Internal notes and unresolved contradictions come along as prohibitions, never as facts.
+  const leitplanken = anbieterLeitplankenSection({
+    items: state.items,
+    guardrails: (state.review?.guardrails ?? []).map((guardrail) => guardrail.rule),
+  });
+  if (leitplanken) sections.push({ key: "leitplanken", ...leitplanken });
+  return sections;
 }
 
 export type ContentFragebogen = {

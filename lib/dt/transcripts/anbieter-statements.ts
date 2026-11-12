@@ -7,18 +7,27 @@ import { createHash } from "node:crypto";
 
 export const STATEMENT_CHUNK_CHARS = 20_000;
 /** Raised when the extraction rules change, so stored extractions are not reused. */
-const EXTRACTION_VERSION = "v1";
+const EXTRACTION_VERSION = "v2";
 
-export type ExtractionChunk = { statements: string[]; names: string[] };
+export type ExtractionChunk = {
+  statements: string[];
+  names: string[];
+  /** Positions in `statements` the extraction marked as internal. */
+  internal: number[];
+};
 /** Extracted statements per chunk of source text, keyed by the hash of that text. */
 export type ExtractionStore = Record<string, ExtractionChunk>;
+
+/** Where the date of a source comes from. Only „upload“ is a guess. */
+export type DateOrigin = "gespraech" | "dokument" | "dateiname" | "upload";
 
 export type StatementSource = {
   id: string;
   /** „12.03.2026 · Workshop 2“ */
   label: string;
-  /** ISO date of the conversation, when known. */
+  /** ISO date that decides which source is newer. */
   date: string | null;
+  dateOrigin: DateOrigin;
   text: string;
 };
 
@@ -29,10 +38,16 @@ export type Statement = {
   sourceNo: number;
   source: string;
   date: string | null;
+  dateOrigin: DateOrigin;
+  /** Not for publication: it never becomes a fact of a point, only a guard rail. */
+  internal: boolean;
 };
 
-export function chunkHash(text: string): string {
-  return createHash("sha256").update(`${EXTRACTION_VERSION}\n${text}`).digest("hex").slice(0, 32);
+export function chunkHash(text: string, internal = false): string {
+  return createHash("sha256")
+    .update(`${EXTRACTION_VERSION}${internal ? "|intern" : ""}\n${text}`)
+    .digest("hex")
+    .slice(0, 32);
 }
 
 /** Cuts a text at line ends into pieces of at most {@link STATEMENT_CHUNK_CHARS}. */
@@ -61,20 +76,105 @@ export function chunkSourceText(text: string, max = STATEMENT_CHUNK_CHARS): stri
   return chunks;
 }
 
-export type PendingChunk = { hash: string; text: string; source: string; part: number; parts: number };
+// ---------------------------------------------------------------------------
+// Internal notes
+// ---------------------------------------------------------------------------
 
-/** Every chunk of every source, with the ones that still lack an extraction marked. */
+/** Phrases that mark content as not for publication wherever they stand. */
+const INTERNAL_STRONG =
+  /\bnur\s+(?:für\s+)?intern\w*|\b(?:rein\s+)?intern(?:e[rsn]?)?\s+(?:hinweis|notiz|info|information|anmerkung|vermerk)\w*|\bnicht\s+(?:zu[rm]?\s+)?veröffentlich\w*|\bnicht\s+(?:in|für|auf)\s+(?:die\s+|der\s+|den\s+|unsere[rn]?\s+)?(?:website|webseiten?|homepage|web)[- ]?(?:texte?n?)?\b|\bnicht\s+für\s+(?:den\s+)?content\b|\bnicht\s+(?:für\s+die\s+)?öffentlich\w*|\bvertraulich\w*/i;
+/** In a heading these also mark the whole part below it. */
+const INTERNAL_HEADING = /\bnicht\s+(?:\S+\s+){0,2}?(?:verwenden|nennen|kommunizieren)\b|\bintern(?:e[rsn]?)?\b/i;
+
+/** Whether a single statement says of itself that it is internal. */
+export function isInternalText(text: string): boolean {
+  return INTERNAL_STRONG.test(text);
+}
+
+function isInternalHeading(text: string): boolean {
+  return INTERNAL_STRONG.test(text) || INTERNAL_HEADING.test(text);
+}
+
+export type SourceRegion = { text: string; internal: boolean; heading: string | null };
+
+/**
+ * Cuts a source where a heading marks a whole part as internal („## Teil B: Nur intern“,
+ * „Nicht in Website-Texte verwenden:“). A Markdown heading holds until the next heading of
+ * the same or a higher level; a plain heading line holds until the next heading line. The
+ * code decides this, so no statement of such a part depends on the model noticing it.
+ */
+export function splitInternalRegions(text: string): SourceRegion[] {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const regions: SourceRegion[] = [];
+  let buffer: string[] = [];
+  let internal = false;
+  let heading: string | null = null;
+  /** Markdown level of the heading that opened the internal part; 0 for a plain heading line. */
+  let level = 0;
+  const flush = () => {
+    const body = buffer.join("\n").trim();
+    if (body) regions.push({ text: body, internal, heading: internal ? heading : null });
+    buffer = [];
+  };
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+    const hash = /^(#{1,6})\s+\S/.exec(trimmed);
+    const standalone =
+      !hash &&
+      trimmed.length > 0 &&
+      trimmed.length <= 90 &&
+      !(lines[i - 1] ?? "").trim() &&
+      !/[.!?…]$/.test(trimmed) &&
+      (/:$/.test(trimmed) || /^\*\*.+\*\*$/.test(trimmed) || !(lines[i + 1] ?? "").trim());
+    if (hash || standalone) {
+      const marks = isInternalHeading(trimmed);
+      const closes = internal && (hash ? level === 0 || hash[1]!.length <= level : level === 0);
+      if (marks && (!internal || closes)) {
+        flush();
+        internal = true;
+        heading = trimmed.replace(/^#{1,6}\s+/, "").replace(/^\*\*|\*\*$|:$/g, "").trim();
+        level = hash ? hash[1]!.length : 0;
+      } else if (closes) {
+        flush();
+        internal = false;
+        heading = null;
+        level = 0;
+      }
+    }
+    buffer.push(line);
+  }
+  flush();
+  return regions;
+}
+
+export type PendingChunk = {
+  hash: string;
+  text: string;
+  source: string;
+  part: number;
+  parts: number;
+  /** The whole piece stands under a heading that marks it as internal. */
+  internal: boolean;
+  heading: string | null;
+};
+
+function chunksOf(source: Pick<StatementSource, "text" | "label">): PendingChunk[] {
+  const pieces = splitInternalRegions(source.text).flatMap((region) =>
+    chunkSourceText(region.text).map((text) => ({ text, internal: region.internal, heading: region.heading })),
+  );
+  return pieces.map((piece, index) => ({
+    ...piece,
+    hash: chunkHash(piece.text, piece.internal),
+    source: source.label,
+    part: index + 1,
+    parts: pieces.length,
+  }));
+}
+
+/** Every chunk of every source. */
 export function sourceChunks(sources: StatementSource[]): PendingChunk[] {
-  return sources.flatMap((source) => {
-    const chunks = chunkSourceText(source.text);
-    return chunks.map((text, index) => ({
-      hash: chunkHash(text),
-      text,
-      source: source.label,
-      part: index + 1,
-      parts: chunks.length,
-    }));
-  });
+  return sources.flatMap((source) => chunksOf(source));
 }
 
 export function pendingChunks(sources: StatementSource[], store: ExtractionStore): PendingChunk[] {
@@ -100,17 +200,21 @@ function cleanStatement(value: unknown): string {
 export function normalizeExtractionChunk(raw: unknown, chunkText: string): ExtractionChunk {
   const record = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
-  const statements = [
-    ...new Set(
-      list(record.aussagen ?? record.statements)
-        .map((entry) =>
-          cleanStatement(
-            entry && typeof entry === "object" ? ((entry as Record<string, unknown>).text ?? "") : entry,
-          ),
-        )
-        .filter(Boolean),
-    ),
-  ].slice(0, 600);
+  const statements: string[] = [];
+  const internal: number[] = [];
+  const position = new Map<string, number>();
+  for (const entry of list(record.aussagen ?? record.statements)) {
+    const row = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+    const text = cleanStatement(row ? (row.text ?? row.aussage ?? "") : entry);
+    if (!text || statements.length >= 600) continue;
+    let index = position.get(text);
+    if (index == null) {
+      index = statements.length;
+      position.set(text, index);
+      statements.push(text);
+    }
+    if ((row?.intern === true || row?.intern === "true") && !internal.includes(index)) internal.push(index);
+  }
   const haystack = chunkText.toLowerCase();
   const names = [
     ...new Set(
@@ -119,22 +223,41 @@ export function normalizeExtractionChunk(raw: unknown, chunkText: string): Extra
         .filter((name) => name.length >= 2 && haystack.includes(name.toLowerCase())),
     ),
   ].slice(0, 200);
-  return { statements, names };
+  return { statements, names, internal };
 }
 
-/** All statements of the Bestand, numbered per source from old to new. Sources must come in that order. */
+/**
+ * All statements of the Bestand, numbered per source from old to new. Sources must come in
+ * that order. A statement is internal when its part of the source is marked so, when the
+ * extraction marked it, or when it says so itself.
+ */
 export function numberStatements(sources: StatementSource[], store: ExtractionStore): Statement[] {
   const out: Statement[] = [];
   sources.forEach((source, index) => {
     let n = 0;
-    const seen = new Set<string>();
-    for (const text of chunkSourceText(source.text)) {
-      for (const statement of store[chunkHash(text)]?.statements ?? []) {
-        if (seen.has(statement)) continue;
-        seen.add(statement);
+    const seen = new Map<string, Statement>();
+    for (const chunk of chunksOf(source)) {
+      const extracted = store[chunk.hash];
+      (extracted?.statements ?? []).forEach((text, position) => {
+        const internal = chunk.internal || (extracted?.internal ?? []).includes(position) || isInternalText(text);
+        const known = seen.get(text);
+        if (known) {
+          known.internal ||= internal;
+          return;
+        }
         n += 1;
-        out.push({ id: `${index + 1}.${n}`, text: statement, sourceNo: index + 1, source: source.label, date: source.date });
-      }
+        const statement: Statement = {
+          id: `${index + 1}.${n}`,
+          text,
+          sourceNo: index + 1,
+          source: source.label,
+          date: source.date,
+          dateOrigin: source.dateOrigin,
+          internal,
+        };
+        seen.set(text, statement);
+        out.push(statement);
+      });
     }
   });
   return out;
@@ -214,6 +337,9 @@ const MONTHS = [
   "juli", "august", "september", "oktober", "november", "dezember",
 ];
 const MONTH_PATTERN = "Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember";
+
+/** „zwei Standorte“ is the same fact as „2 Standorte“. Index + 2 is the value. */
+const NUMBER_WORDS = ["zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf"];
 
 function canonNumber(whole: string, fraction?: string): string {
   const digits = whole.replace(/\./g, "").replace(/^0+(?=\d)/, "");
@@ -297,10 +423,18 @@ export function extractFacts(text: string): Fact[] {
     canon: canonNumber(String(m[1]), m[2] as string | undefined),
   }));
   take(/\b(?:19|20)\d{2}\b/g, (m) => ({ kind: "jahr", canon: m[0] }));
-  take(/\b(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?\b/g, (m) => {
+  // A number that opens a line is a list number, with or without a full stop.
+  blank(/^[ \t]*(?:[-*•][ \t]+)?\d{1,2}(?=[ \t])/gm);
+  take(/\b(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?\b(?=(\s+[A-ZÄÖÜ][a-zäöüß]{2,})?)/g, (m) => {
     const canon = canonNumber(String(m[1]), m[2] as string | undefined);
-    return canon.replace(/\..*$/, "").length >= 2 ? { kind: "zahl", canon } : null;
+    // One digit counts only with a noun right behind it: „2 Standorte“, „3 Büros“.
+    if (canon.replace(/\..*$/, "").length < 2 && !m[3]) return null;
+    return canon === "0" ? null : { kind: "zahl", canon };
   });
+  take(new RegExp(`\\b(${NUMBER_WORDS.join("|")})(?=\\s+[A-ZÄÖÜ][a-zäöüß]{2,})`, "gi"), (m) => ({
+    kind: "zahl",
+    canon: String(NUMBER_WORDS.indexOf(String(m[1]).toLowerCase()) + 2),
+  }));
   return facts.sort((a, b) => a.index - b.index);
 }
 
@@ -381,8 +515,8 @@ export function missingFacts(input: {
       });
     }
     const sourceLower = source.text.toLowerCase();
-    for (const text of chunkSourceText(source.text)) {
-      for (const name of input.store[chunkHash(text)]?.names ?? []) {
+    for (const chunk of chunksOf(source)) {
+      for (const name of input.store[chunk.hash]?.names ?? []) {
         const lower = name.toLowerCase();
         if (resultLower.includes(lower)) continue;
         add(`name:${lower}`, {
@@ -415,4 +549,73 @@ export function droppedFacts(before: string, after: string, spared = ""): Array<
 /** Whether an instruction asks for something to be removed at all. */
 export function instructionDeletes(instruction: string): boolean {
   return /\b(?:lösch\w*|entfern\w*|streich\w*|rausnehmen|raus\b|weglassen|weg\b|nicht mehr|tilg\w*)/i.test(instruction);
+}
+
+
+// ---------------------------------------------------------------------------
+// The date of a source
+// ---------------------------------------------------------------------------
+
+function isoDate(year: number, month: number, day: number): string | null {
+  if (year < 1990 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function readDate(text: string): string | null {
+  const iso = /\b(20\d{2}|19\d{2})-(\d{1,2})-(\d{1,2})\b/.exec(text);
+  if (iso) return isoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const dotted = /\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4}|\d{2})\b/.exec(text);
+  if (dotted) return isoDate(Number(fullYear(dotted[3]!)), Number(dotted[2]), Number(dotted[1]));
+  const named = new RegExp(`\\b(?:(\\d{1,2})\\.\\s?)?(${MONTH_PATTERN})\\s+(\\d{4})\\b`, "i").exec(text);
+  if (named) return isoDate(Number(named[3]), MONTHS.indexOf(named[2]!.toLowerCase()) + 1, Number(named[1] ?? 1));
+  const slash = /\b(\d{1,2})\/(\d{4})\b/.exec(text);
+  if (slash) return isoDate(Number(slash[2]), Number(slash[1]), 1);
+  return null;
+}
+
+/** „Stand: 12.03.2026“, „Version vom …“, „aktualisiert am …“ near the top or the end of a document. */
+export function documentStandDate(text: string): string | null {
+  const scope = text.length > 6_000 ? `${text.slice(0, 4_000)}\n${text.slice(-2_000)}` : text;
+  const label =
+    /\b(?:Stand|Datum|Version|Fassung|Dokumentenstand|aktualisiert|erstellt|Gespräch|Workshop|Termin|Meeting|Call)\b[^\n]{0,24}?(?:vom|am|:|–|-)?\s*([^\n]{0,40})/gi;
+  for (const match of scope.matchAll(label)) {
+    const date = readDate(match[1] ?? "");
+    if (date) return date;
+  }
+  return null;
+}
+
+/** A date in a file name: 2026-03-12, 20260312, 12.03.2026, 12-03-2026, 2026_03_12. */
+export function filenameDate(filename: string | null | undefined): string | null {
+  const name = (filename ?? "").trim();
+  if (!name) return null;
+  const ymd = /(?<!\d)(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})(?!\d)/.exec(name);
+  if (ymd) {
+    const date = isoDate(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+    if (date) return date;
+  }
+  const dmy = /(?<!\d)(\d{2})[-_.](\d{2})[-_.](20\d{2})(?!\d)/.exec(name);
+  if (dmy) return isoDate(Number(dmy[3]), Number(dmy[2]), Number(dmy[1]));
+  return null;
+}
+
+/**
+ * The date that decides which source is newer: the conversation date someone entered, else
+ * the date the document states, else the date in its file name. The upload date is the last
+ * resort and is marked as such.
+ */
+export function resolveSourceDate(input: {
+  spokenOn: string | null;
+  text: string;
+  filename: string | null;
+  title: string | null;
+  createdAt: string;
+}): { date: string | null; origin: DateOrigin } {
+  if (input.spokenOn && /^\d{4}-\d{2}-\d{2}$/.test(input.spokenOn)) return { date: input.spokenOn, origin: "gespraech" };
+  const stand = documentStandDate(input.text);
+  if (stand) return { date: stand, origin: "dokument" };
+  const named = filenameDate(input.filename) ?? filenameDate(input.title);
+  if (named) return { date: named, origin: "dateiname" };
+  const upload = /^\d{4}-\d{2}-\d{2}/.exec(input.createdAt)?.[0] ?? null;
+  return { date: upload, origin: "upload" };
 }

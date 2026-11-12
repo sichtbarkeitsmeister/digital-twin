@@ -185,6 +185,7 @@ export async function syncAnbieterToSeoAdvisor(input: {
   const body = buildCurrentAnbieterMarkdown({
     organisationName: input.organisationName,
     items: input.anbieter.items,
+    guardrails: (input.anbieter.review?.guardrails ?? []).map((guardrail) => guardrail.rule),
   });
   const withCorpus = mergeMarkedBlock(
     seoAgent.prompt_append,

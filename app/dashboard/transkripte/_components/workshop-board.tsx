@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { downloadMarkdown } from "@/app/dashboard/transkripte/_components/download-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CenteredModal } from "@/components/ui/centered-modal";
 import {
   Card,
   CardContent,
@@ -49,7 +50,14 @@ type AnbieterItem = {
   sources: string;
   conflicts?: {
     topic: string;
-    claims: { text: string; source: string; date: string | null; newest: boolean; ids: string[] }[];
+    claims: {
+      text: string;
+      source: string;
+      date: string | null;
+      dateOrigin?: "gespraech" | "dokument" | "dateiname" | "upload";
+      newest: boolean;
+      ids: string[];
+    }[];
   }[];
 };
 
@@ -70,6 +78,8 @@ type AnbieterReview = {
   unassigned: { id: string; text: string; source: string }[];
   unassignedCount: number;
   missingFacts: { kind: string; value: string; sources: string[]; context: string }[];
+  internal?: { id: string; text: string; source: string }[];
+  guardrails?: { rule: string; ids: string[] }[];
   lostInRevision: { id: string | null; text: string; source: string; point: string }[];
 };
 
@@ -83,6 +93,13 @@ const FACT_LABEL: Record<string, string> = {
   email: "E-Mail-Adresse",
   telefon: "Telefonnummer",
   name: "Eigenname",
+};
+
+const DATE_ORIGIN_NOTE: Record<string, string> = {
+  gespraech: "Gesprächsdatum",
+  dokument: "Stand laut Dokument",
+  dateiname: "Datum aus dem Dateinamen",
+  upload: "Upload-Datum, im Dokument steht keins",
 };
 
 function formatIsoDate(iso: string | null): string {
@@ -224,6 +241,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const [anbieterNote, setAnbieterNote] = useState("");
   /** Progress line of a running Anbieter evaluation. */
   const [anbieterStep, setAnbieterStep] = useState<string | null>(null);
+  /** Open missing facts or contradictions: approving asks once more. */
+  const [confirmApprove, setConfirmApprove] = useState(false);
   const [avatarNote, setAvatarNote] = useState("");
   /** Empty = KI wählt die Anzahl; eine Zahl ist Override. */
   const [countText, setCountText] = useState("");
@@ -577,6 +596,12 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     (sum, item) => sum + (item.conflicts?.length ?? 0),
     0,
   );
+  const anbieterInternal = anbieterReview?.internal ?? [];
+  const anbieterGuardrails = anbieterReview?.guardrails ?? [];
+  const anbieterGuardedIds = new Set(anbieterGuardrails.flatMap((guardrail) => guardrail.ids));
+  const anbieterInternalUncovered = anbieterInternal.filter((s) => !anbieterGuardedIds.has(s.id)).length;
+  const anbieterMissingCount = anbieterReview?.missingFacts.length ?? 0;
+  const anbieterNeedsConfirm = anbieterMissingCount > 0 || anbieterConflictCount > 0;
   const anbieterLost = new Map((anbieter?.openWithSource ?? []).map((point) => [point.key, point]));
   const missingSummaries = sources
     .map((source, index) => ({ id: source.id, label: sourceLabel(source, index), hasSummary: source.hasSummary }))
@@ -595,6 +620,47 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
 
   return (
     <div className="grid gap-6">
+      <CenteredModal
+        open={confirmApprove}
+        onClose={() => setConfirmApprove(false)}
+        title="Trotzdem freigeben?"
+        description="Die Kontrolle gegen den Bestand hat offene Punkte gefunden."
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setConfirmApprove(false)}>
+              Zurück und prüfen
+            </Button>
+            <Button
+              type="button"
+              className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+              onClick={() => {
+                setConfirmApprove(false);
+                void postAnbieter("approve");
+              }}
+            >
+              Trotzdem freigeben
+            </Button>
+          </div>
+        }
+      >
+        <ul className="list-disc pl-5 text-sm text-primary">
+          {anbieterMissingCount > 0 ? (
+            <li>
+              {anbieterMissingCount === 1
+                ? "1 Fakt aus dem Bestand fehlt im Ergebnis."
+                : `${anbieterMissingCount} Fakten aus dem Bestand fehlen im Ergebnis.`}
+            </li>
+          ) : null}
+          {anbieterConflictCount > 0 ? (
+            <li>
+              {anbieterConflictCount === 1
+                ? "1 Widerspruch ist ungeklärt."
+                : `${anbieterConflictCount} Widersprüche sind ungeklärt.`}{" "}
+              Der SEO-Berater bekommt dazu nur „nicht verwenden, bis geklärt“.
+            </li>
+          ) : null}
+        </ul>
+      </CenteredModal>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Bestand</CardTitle>
@@ -684,7 +750,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                 type="button"
                 className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
                 disabled={busy != null}
-                onClick={() => void postAnbieter("approve")}
+                onClick={() => (anbieterNeedsConfirm ? setConfirmApprove(true) : void postAnbieter("approve"))}
               >
                 {busy === "anbieter-approve" ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -750,6 +816,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                       `${buildCurrentAnbieterMarkdown({
                         organisationName: props.organisationName,
                         items: anbieter.items,
+                        guardrails: (anbieter.review?.guardrails ?? []).map((guardrail) => guardrail.rule),
                       })}\n`,
                     )
                   }
@@ -799,7 +866,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                 {anbieterReview.sourceCount === 1 ? "Quelle" : "Quellen"} ·{" "}
                 {anbieterReview.unassignedCount} nicht zugeordnet · {anbieterReview.missingFacts.length}{" "}
                 fehlende Fakten · {anbieterConflictCount}{" "}
-                {anbieterConflictCount === 1 ? "Widerspruch" : "Widersprüche"}
+                {anbieterConflictCount === 1 ? "Widerspruch" : "Widersprüche"} · {anbieterInternal.length}{" "}
+                {anbieterInternal.length === 1 ? "interner Hinweis" : "interne Hinweise"}
               </p>
               {anbieterReview.lostInRevision.length > 0 ? (
                 <div role="alert" className="grid gap-1 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2">
@@ -839,6 +907,47 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                         {fact.context ? (
                           <span className="block text-xs text-secondary">{fact.context}</span>
                         ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              {anbieterInternal.length > 0 ? (
+                <details className="rounded-lg border border-sbkm-navy/10 px-3 py-2 dark:border-white/10" open>
+                  <summary className="cursor-pointer text-sm font-semibold text-primary">
+                    Interne Hinweise ({anbieterInternal.length})
+                  </summary>
+                  <p className="mt-1 text-xs text-secondary">
+                    Im Bestand als intern oder „nicht verwenden“ gekennzeichnet. Diese Aussagen
+                    stehen in keinem der 13 Punkte. Der SEO-Berater bekommt nur die Leitplanken,
+                    nicht die Hinweise selbst.
+                  </p>
+                  <p className="mt-2 text-xs font-semibold text-primary">Leitplanken für den SEO-Berater</p>
+                  {anbieterGuardrails.length > 0 ? (
+                    <ul className="mt-1 list-disc pl-5 text-sm text-primary">
+                      {anbieterGuardrails.map((guardrail) => (
+                        <li key={guardrail.rule}>{guardrail.rule}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {anbieterInternalUncovered > 0 ? (
+                    <p className="mt-1 text-sm text-destructive">
+                      {anbieterInternalUncovered === 1
+                        ? "1 interner Hinweis hat keine Leitplanke."
+                        : `${anbieterInternalUncovered} interne Hinweise haben keine Leitplanke.`}{" "}
+                      Bitte neu auswerten.
+                    </p>
+                  ) : null}
+                  <p className="mt-2 text-xs font-semibold text-primary">Hinweise im Wortlaut (bleiben intern)</p>
+                  <ul className="mt-1 grid gap-1.5 text-sm text-primary">
+                    {anbieterInternal.map((statement) => (
+                      <li key={statement.id}>
+                        {statement.text}
+                        <span className="text-secondary">
+                          {" "}
+                          · {statement.source} · Aussage {statement.id}
+                          {anbieterGuardedIds.has(statement.id) ? "" : " · ohne Leitplanke"}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -908,8 +1017,10 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                             <span className="text-secondary">
                               {" "}
                               · {claim.source}
-                              {formatIsoDate(claim.date) && !claim.source.includes(formatIsoDate(claim.date))
-                                ? ` · ${formatIsoDate(claim.date)}`
+                              {formatIsoDate(claim.date)
+                                ? ` · ${formatIsoDate(claim.date)}${
+                                    claim.dateOrigin ? ` (${DATE_ORIGIN_NOTE[claim.dateOrigin]})` : ""
+                                  }`
                                 : ""}
                             </span>
                             {claim.newest ? (

@@ -765,7 +765,7 @@ void (async () => {
   const facts = (text: string) => st.extractFacts(text).map((fact) => `${fact.kind}:${fact.canon}`);
   assert.deepEqual(
     facts("Ab 1.500 € bzw. 49,90 Euro, 12 % Rabatt, seit März 2024, am 3.4.2025, 120 Kunden, 3 Büros."),
-    ["euro:1500", "euro:49.9", "prozent:12", "datum:3.2024", "datum:3.4.2025", "zahl:120"],
+    ["euro:1500", "euro:49.9", "prozent:12", "datum:3.2024", "datum:3.4.2025", "zahl:120", "zahl:3"],
   );
   assert.deepEqual(facts("Mail info@fischer.de, Web https://www.fischer-moers.de/kontakt/ Tel. 02841 123456."), [
     "email:info@fischer.de",
@@ -844,6 +844,7 @@ void (async () => {
     ["80 Euro", false, "2025-01-01"],
     ["90 Euro", true, "2026-01-01"],
   ]);
+  assert.equal(conflict?.claims[0]?.dateOrigin, "gespraech");
   assert.deepEqual(full.review.unassigned.map((s) => s.id), ["1.3"], "an unassigned statement is shown, not dropped");
   assert.match(full.review.unassigned[0]?.source ?? "", /Quelle alt/);
   assert.equal(full.review.statementCount, 6);
@@ -854,9 +855,9 @@ void (async () => {
   );
   assert.match(full.review.missingFacts[0]?.sources[0] ?? "", /Quelle neu/);
   const md = markdown({ organisationName: "Fischer", items: full.items });
-  assert.match(md, /Ungeklärter Widerspruch \(Preis der Beratung\)/);
-  assert.match(md, /- 90 Euro \(.*neuere Quelle\)/);
-  assert.equal(/- Preis & Positionierung/.test(md), false, "a point with a contradiction is not „Noch offen“");
+  assert.match(md, /## Nicht verwenden, bis geklärt\n[^\n]+\n- Preis & Positionierung: Preis der Beratung/);
+  assert.equal(/80 Euro|90 Euro/.test(md), false, "neither side of a contradiction reaches the SEO-Berater");
+  assert.equal(/- Preis & Positionierung$/m.test(md), false, "a point with a contradiction is not „Noch offen“");
 
   // The review survives the round trip through the saved row; the browser never gets the statements.
   const restored = readAnbieterState(
@@ -928,6 +929,112 @@ void (async () => {
     /noch nicht aus allen Quellen/,
   );
   assert.equal(buildAnbieterReview({ sources: statementSources(bestand), store, statements: numbered, items: full.items }).unassignedCount, 1);
+
+  // --- Internal notes ---------------------------------------------------------------
+  assert.deepEqual(facts("Es gibt 2 Standorte und zwei Büros, Punkt 3 gilt.\n3 Gründe\n12 Kunden"), ["zahl:2", "zahl:2"]);
+  assert.deepEqual(st.droppedFacts("3 Büros", "drei Büros"), []);
+
+  const regions = st.splitInternalRegions(
+    ["# Profil", "Makler in Moers.", "## Kundenbestand (nur intern)", "1.200 Kunden.", "### Details", "Davon 300 Gewerbe.", "## Leistungen", "PKV und bAV."].join("\n"),
+  );
+  assert.deepEqual(
+    regions.map((region) => [region.internal, region.text.split("\n")[0]]),
+    [[false, "# Profil"], [true, "## Kundenbestand (nur intern)"], [false, "## Leistungen"]],
+    "an internal heading holds until the next heading of its level",
+  );
+  assert.equal(st.isInternalText("Wir nutzen Calendly (nur intern)."), true);
+  assert.equal(st.isInternalText("Das Wort „günstig“ nicht verwenden."), false, "a wording rule is no internal note");
+
+  assert.equal(st.documentStandDate("Anbieterprofil\nStand: 12.03.2026\n\nText"), "2026-03-12");
+  assert.equal(st.documentStandDate("Version vom 3. März 2025"), "2025-03-03");
+  assert.equal(st.filenameDate("2026-02-01_fischer_briefing.md"), "2026-02-01");
+  assert.equal(st.filenameDate("briefing-01.02.2026.md"), "2026-02-01");
+  const dated = (over: Partial<Parameters<typeof st.resolveSourceDate>[0]>) =>
+    st.resolveSourceDate({ spokenOn: null, text: "Text", filename: "a.md", title: null, createdAt: "2026-05-05T10:00:00Z", ...over });
+  assert.deepEqual(dated({ text: "Stand: 01.04.2026" }), { date: "2026-04-01", origin: "dokument" });
+  assert.deepEqual(dated({ filename: "20260115-notiz.md" }), { date: "2026-01-15", origin: "dateiname" });
+  assert.deepEqual(dated({}), { date: "2026-05-05", origin: "upload" });
+  assert.deepEqual(dated({ spokenOn: "2025-12-24", text: "Stand: 01.04.2026" }), { date: "2025-12-24", origin: "gespraech" });
+
+  // The document date decides „newer“, not the upload order.
+  const lateUpload = { ...source("spaet", "Stand: 01.01.2024\nAlte Angabe."), spokenOn: null, createdAt: "2026-06-01T00:00:00Z" };
+  const earlyUpload = { ...source("frueh", "Stand: 01.01.2026\nNeue Angabe."), spokenOn: null, createdAt: "2026-01-01T00:00:00Z" };
+  assert.deepEqual(statementSources([earlyUpload, lateUpload]).map((s) => [s.id, s.dateOrigin]), [
+    ["spaet", "dokument"],
+    ["frueh", "dokument"],
+  ]);
+
+  const mixed = {
+    ...source(
+      "mix",
+      ["## Leistungen", "PKV und bAV.", "Wir buchen über Calendly.", "## Nur intern", "Der Bestand umfasst 1.200 Kunden.", "Stiftung Warentest hat uns schlecht bewertet."].join("\n"),
+    ),
+    spokenOn: "2026-02-02",
+  };
+  const mixCall: Call = async ({ user, tool }) => {
+    if (tool.name === "submit_aussagen") {
+      const internalPart = user.includes("als intern gekennzeichnet");
+      return {
+        json: internalPart
+          ? { aussagen: [{ text: "Der Bestand umfasst 1.200 Kunden.", intern: false }, { text: "Stiftung Warentest hat uns schlecht bewertet.", intern: false }], eigennamen: ["Stiftung Warentest"] }
+          : { aussagen: [{ text: "PKV und bAV.", intern: false }, { text: "Wir buchen über Calendly.", intern: true }], eigennamen: ["Calendly"] },
+        usage,
+        model: "m",
+      };
+    }
+    if (tool.name === "submit_leitplanken") {
+      assert.equal(user.includes("PKV und bAV"), false);
+      return {
+        json: {
+          leitplanken: [
+            { regel: "Kundenbestand nicht nennen.", ids: ["1.3"] },
+            { regel: "1.200 Kunden nicht nennen.", ids: ["1.3"] },
+            { regel: "Keine Stiftung-Warentest-Ergebnisse verwenden.", ids: ["1.4"] },
+          ],
+        },
+        usage,
+        model: "m",
+      };
+    }
+    assert.equal(/1\.200|Warentest|Calendly/.test(user), false, "no internal statement reaches the assignment");
+    const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
+    const json: Record<string, unknown> = Object.fromEntries(keys.map((key) => [key, point("", [])]));
+    if ("leistungen" in json) json.leistungen = point("PKV und bAV.", ["1.1"]);
+    return { json, usage, model: "m" };
+  };
+  let mixStore: Awaited<ReturnType<typeof extractPendingStatements>>["store"] = {};
+  mixStore = (await extractPendingStatements({ sources: [mixed], store: mixStore, call: mixCall })).store;
+  const mix = await evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: [mixed], store: mixStore, call: mixCall });
+  assert.deepEqual(mix.review.internal.map((s) => s.id), ["1.2", "1.3", "1.4"], "marked by the model, and by the heading in code");
+  assert.deepEqual(mix.review.guardrails, [
+    { rule: "Kundenbestand nicht nennen.", ids: ["1.3"] },
+    { rule: "Keine Stiftung-Warentest-Ergebnisse verwenden.", ids: ["1.4"] },
+  ], "a rule with a number would leak the note and is dropped");
+  assert.deepEqual(mix.review.unassigned, [], "internal statements are not „unassigned“");
+  assert.deepEqual(mix.review.missingFacts, [], "what the internal area shows is not missing");
+  assert.equal(mix.items.some((entry) => /1\.200|Warentest|Calendly/.test(entry.current)), false);
+  const mixMd = markdown({
+    organisationName: "Fischer",
+    items: mix.items,
+    guardrails: mix.review.guardrails.map((guardrail) => guardrail.rule),
+  });
+  assert.match(mixMd, /## Leitplanken \(verbindlich\)[\s\S]*- Kundenbestand nicht nennen\./);
+  assert.equal(/1\.200|schlecht bewertet|Calendly/.test(mixMd), false, "the SEO-Berater gets the prohibition, not the note");
+  const { anbieterLeitplankenSection } = await import("../lib/dt/transcripts/anbieter-markdown");
+  const { extractBlockedStatements } = await import("../lib/dt/content/pipeline/blocked");
+  const section = anbieterLeitplankenSection({
+    items: full.items,
+    guardrails: mix.review.guardrails.map((guardrail) => guardrail.rule),
+  });
+  assert.deepEqual(
+    extractBlockedStatements([section!]).map((blocked) => blocked.text.replace(/^Nicht verwenden, auch nicht sinngemäß:\s*/, "")),
+    [
+      "Kundenbestand nicht nennen.",
+      "Keine Stiftung-Warentest-Ergebnisse verwenden.",
+      "Preis & Positionierung: Preis der Beratung (Angaben widersprechen sich, bis zur Klärung nicht verwenden)",
+    ],
+    "the content pipeline reads every guard rail as blocked",
+  );
   console.log("anbieter statements, coverage, facts, contradictions, revision ok");
 })().catch((err) => {
   console.error(err);

@@ -16,6 +16,7 @@ import {
   type StatementSource,
   FACT_KIND_LABEL,
   droppedFacts,
+  extractFacts,
   formatStatements,
   instructionDeletes,
   missingFacts,
@@ -24,6 +25,7 @@ import {
   parseStatementIds,
   pendingChunks,
   pruneExtraction,
+  resolveSourceDate,
   sourceChunks,
   unassignedStatements,
 } from "@/lib/dt/transcripts/anbieter-statements";
@@ -53,18 +55,31 @@ type Usage = { inputTokens: number; outputTokens: number };
 const MIN_CALL_MS = 30_000;
 const ALL_KEYS = ANBIETER_POINTS.map((point) => point.key);
 
-/** The text each source contributes: the wording of a raw transcript, else the summary. */
+/**
+ * The text each source contributes (the wording of a raw transcript, else the summary), in
+ * the order that decides „newer“: by the date of the conversation or the document, the
+ * upload date only where neither is known.
+ */
 export function statementSources(sources: WorkshopSource[]): StatementSource[] {
-  return orderWorkshopSources(sources).map((source, index) => {
-    const raw = source.rawText.trim();
-    const summary = source.summary?.trim() ?? "";
-    return {
-      id: source.id,
-      label: sourceLabel(source, index),
-      date: source.spokenOn,
-      text: source.sourceKind === "raw" && raw ? raw : summary || raw,
-    };
-  });
+  return orderWorkshopSources(sources)
+    .map((source, index) => {
+      const raw = source.rawText.trim();
+      const summary = source.summary?.trim() ?? "";
+      const text = source.sourceKind === "raw" && raw ? raw : summary || raw;
+      const { date, origin } = resolveSourceDate({
+        spokenOn: source.spokenOn,
+        text,
+        filename: source.filename,
+        title: source.title,
+        createdAt: source.createdAt,
+      });
+      return { id: source.id, label: sourceLabel(source, index), date, dateOrigin: origin, text, createdAt: source.createdAt };
+    })
+    .sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "") || a.createdAt.localeCompare(b.createdAt))
+    .map(({ createdAt: _createdAt, ...source }) => {
+      void _createdAt;
+      return source;
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -79,8 +94,18 @@ const EXTRACTION_TOOL: Anthropic.Tool = {
     properties: {
       aussagen: {
         type: "array",
-        items: { type: "string" },
         description: "Eine Aussage pro Eintrag, in der Reihenfolge des Textes.",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Die Aussage, für sich verständlich." },
+            intern: {
+              type: "boolean",
+              description: "true, wenn die Aussage laut Text nicht in Website-Texte oder nicht nach außen darf.",
+            },
+          },
+          required: ["text", "intern"],
+        },
       },
       eigennamen: {
         type: "array",
@@ -104,7 +129,14 @@ Regeln:
 - Auch Einschränkungen, Ausnahmen, Verbote, Wünsche, Pläne, offene Fragen und zugesagte Nachlieferungen sind Aussagen.
 - Sagt dasselbe Textstück etwas zweimal mit gleichem Inhalt, reicht ein Eintrag.
 - Kein Eintrag ist nur reine Gesprächsorganisation ohne Inhalt: Begrüßung, Technikprobe, „hörst du mich“, Verabschiedung. Im Zweifel ist es ein Eintrag.
-- Nichts zusammenfassen, nichts deuten, nichts ergänzen.`;
+- Nichts zusammenfassen, nichts deuten, nichts ergänzen.
+
+Intern:
+- intern ist true, wenn der Text selbst sagt, dass der Inhalt nicht nach außen darf: „nur intern“, „nicht verwenden“, „nicht in Website-Texte“, „nicht veröffentlichen“, „nicht nennen“, „vertraulich“, „bleibt unter uns“ oder gleichbedeutend.
+- Steht ein solcher Vermerk in einer Überschrift oder über einer Liste, gilt er für jede Aussage darunter, bis die nächste Überschrift gleicher Ebene kommt.
+- Der Vermerk bleibt im Eintrag stehen („… (nur intern)“), damit man sieht, warum er intern ist.
+- Eine Vorgabe zur Sprache der Texte („das Wort ‚günstig‘ nicht verwenden“, „keine Superlative“) ist KEIN interner Inhalt. Sie ist eine normale Aussage, intern ist false.
+- Ohne solchen Vermerk ist intern false. Du entscheidest nicht selbst, was heikel sein könnte.`;
 
 export type ExtractStatementsInput = {
   sources: WorkshopSource[];
@@ -152,9 +184,14 @@ export async function extractPendingStatements(input: ExtractStatementsInput): P
           system: EXTRACTION_SYSTEM,
           user: [
             `Quelle: ${chunk.source}${chunk.parts > 1 ? ` (Teil ${chunk.part} von ${chunk.parts})` : ""}`,
+            chunk.internal
+              ? `Dieses ganze Textstück steht unter der Überschrift „${chunk.heading ?? "intern"}“ und ist damit als intern gekennzeichnet. Jede Aussage daraus ist intern.`
+              : "",
             "",
             chunk.text,
-          ].join("\n"),
+          ]
+            .filter((line, index) => line || index >= 2)
+            .join("\n"),
           tool: EXTRACTION_TOOL,
           maxTokens: 32_000,
           timeoutMs: input.deadline == null ? undefined : input.deadline - now(),
@@ -283,6 +320,39 @@ const LEFTOVER_TOOL: Anthropic.Tool = {
   },
 };
 
+const GUARDRAIL_TOOL: Anthropic.Tool = {
+  name: "submit_leitplanken",
+  description: "Verbote für Website-Texte, abgeleitet aus internen Hinweisen.",
+  input_schema: {
+    type: "object",
+    properties: {
+      leitplanken: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            regel: { type: "string", description: "Ein Verbot in einem kurzen Satz, z. B. „Kundenbestand nicht nennen.“" },
+            ids: { type: "array", items: { type: "string" }, description: "IDs der Hinweise, die diese Regel abdeckt." },
+          },
+          required: ["regel", "ids"],
+        },
+      },
+    },
+    required: ["leitplanken"],
+  },
+};
+
+const GUARDRAIL_SYSTEM = `Du erhältst interne Hinweise aus Kundengesprächen. Sie dürfen in keinem Website-Text stehen.
+Du machst daraus Leitplanken für die Person, die Texte schreibt: reine Verbote. Sie erfährt dadurch, WORÜBER sie nicht schreiben darf, aber nicht den internen Inhalt selbst.
+
+Regeln:
+- Jede Leitplanke ist ein kurzes Verbot: „Kundenbestand nicht nennen.“ „Keine Stiftung-Warentest-Ergebnisse verwenden.“ „Buchungssoftware nicht namentlich nennen.“ „Wettbewerber nicht namentlich nennen.“
+- Die Leitplanke nennt das Thema, nicht den Inhalt. Keine Zahlen, keine Beträge, keine Jahreszahlen, keine internen Einzelheiten.
+- Namen von Personen, Wettbewerbern, Kunden und Werkzeugen stehen nicht in der Leitplanke; nenne die Gattung („Wettbewerber“, „Buchungssoftware“). Ausnahme: Ein Name, ohne den das Verbot nicht befolgt werden kann, etwa eine Institution, deren Ergebnisse nicht zitiert werden dürfen.
+- Mehrere Hinweise zum selben Thema ergeben eine Leitplanke mit allen ihren IDs.
+- Jede ID steht in mindestens einer Leitplanke.
+- Nichts erfinden: kein Verbot ohne Hinweis.`;
+
 function pointLabels(keys: readonly AnbieterPointKey[]): string {
   const wanted = new Set(keys);
   return ANBIETER_POINTS.filter((point) => wanted.has(point.key))
@@ -315,6 +385,7 @@ function readConflicts(raw: unknown, byId: ReadonlyMap<string, Statement>): Anbi
         ids,
         source: [...new Set(statements.map((s) => s.source))].join("; "),
         date: latest.date,
+        dateOrigin: latest.dateOrigin,
         newest: false,
         order: latest.sourceNo,
       });
@@ -390,11 +461,18 @@ export function buildAnbieterReview(input: {
   store: ExtractionStore;
   statements: Statement[];
   items: AnbieterItem[];
+  guardrails?: AnbieterReview["guardrails"];
   dismissedIds?: string[];
   lostInRevision?: AnbieterReview["lostInRevision"];
 }): AnbieterReview {
   const dismissed = input.dismissedIds ?? [];
-  const unassigned = unassignedStatements(input.statements, assignedIds(input.items), dismissed);
+  const internal = input.statements.filter((statement) => statement.internal);
+  // Internal statements are accounted for in their own area; they are never „unassigned“.
+  const unassigned = unassignedStatements(
+    input.statements.filter((statement) => !statement.internal),
+    assignedIds(input.items),
+    dismissed,
+  );
   return {
     statementCount: input.statements.length,
     sourceCount: input.sources.length,
@@ -405,8 +483,12 @@ export function buildAnbieterReview(input: {
     missingFacts: missingFacts({
       sources: input.sources,
       store: input.store,
-      resultText: resultText(input.items, unassigned),
+      resultText: resultText(input.items, [...unassigned, ...internal]),
     }),
+    internal: internal
+      .slice(0, REVIEW_UNASSIGNED_MAX)
+      .map((statement) => ({ id: statement.id, text: statement.text, source: statement.source })),
+    guardrails: input.guardrails ?? [],
     dismissedIds: dismissed,
     lostInRevision: input.lostInRevision ?? [],
   };
@@ -451,9 +533,13 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
   }
   const statements = numberStatements(sources, input.store);
   if (statements.length === 0) throw new Error("Aus dem Bestand kam keine einzige Aussage. Bitte erneut auswerten.");
-  const byId = new Map(statements.map((statement) => [statement.id, statement]));
+  // Internal statements never reach the assignment: no point can take them as a fact.
+  const open = statements.filter((statement) => !statement.internal);
+  const internal = statements.filter((statement) => statement.internal);
+  if (open.length === 0) throw new Error("Der Bestand enthält nur interne Hinweise. Daraus entsteht kein Anbieterstand.");
+  const byId = new Map(open.map((statement) => [statement.id, statement]));
   const known = new Set(byId.keys());
-  const corpus = [`Organisation: ${input.organisationName}`, "", "# Aussagen", formatStatements(statements)].join("\n");
+  const corpus = [`Organisation: ${input.organisationName}`, "", "# Aussagen", formatStatements(open)].join("\n");
   const usage: Usage = { inputTokens: 0, outputTokens: 0 };
   let model: string | null = null;
   let calls = 0;
@@ -502,7 +588,36 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
     };
   };
 
-  const done = (items: AnbieterItem[], extra: { dismissedIds?: string[]; lostInRevision?: AnbieterReview["lostInRevision"] } = {}) => ({
+  /** The internal notes as prohibitions. A rule that carries a number is dropped: it would leak the note. */
+  const guard = async (): Promise<AnbieterReview["guardrails"]> => {
+    if (internal.length === 0) return [];
+    const internalIds = new Set(internal.map((statement) => statement.id));
+    const json = await run({
+      system: GUARDRAIL_SYSTEM,
+      user: formatStatements(internal),
+      tool: GUARDRAIL_TOOL,
+      maxTokens: 16_000,
+    });
+    const rows = Array.isArray(asRecord(json)?.leitplanken) ? (asRecord(json)?.leitplanken as unknown[]) : [];
+    const rules = new Map<string, Set<string>>();
+    for (const row of rows) {
+      const record = asRecord(row);
+      const rule = typeof record?.regel === "string" ? record.regel.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+      const ids = parseStatementIds(record?.ids, internalIds);
+      if (!rule || ids.length === 0 || extractFacts(rule).length > 0) continue;
+      rules.set(rule, new Set([...(rules.get(rule) ?? []), ...ids]));
+    }
+    return [...rules].map(([rule, ids]) => ({ rule, ids: [...ids] }));
+  };
+
+  const done = (
+    items: AnbieterItem[],
+    extra: {
+      guardrails?: AnbieterReview["guardrails"];
+      dismissedIds?: string[];
+      lostInRevision?: AnbieterReview["lostInRevision"];
+    } = {},
+  ) => ({
     items,
     review: buildAnbieterReview({ sources, store: input.store, statements, items, ...extra }),
     usage,
@@ -573,16 +688,21 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
         lost.push({ id: null, text: `${FACT_KIND_LABEL[fact.kind]} ${fact.value}`, source: "", point: item.label });
       }
     }
-    return done(items, { dismissedIds, lostInRevision: lost });
+    const internalIds = new Set(internal.map((statement) => statement.id));
+    const guardrails = (saved.review.guardrails ?? [])
+      .map((guardrail) => ({ ...guardrail, ids: guardrail.ids.filter((id) => internalIds.has(id)) }))
+      .filter((guardrail) => guardrail.ids.length > 0);
+    return done(items, { guardrails, dismissedIds, lostInRevision: lost });
   }
 
   // --- Full run -------------------------------------------------------------
+  const guardrailsRun = guard().catch(() => [] as AnbieterReview["guardrails"]);
   const groups = await Promise.all(anbieterPointGroups().map((keys) => fill(keys, { required: true })));
   let items = normalizeAnbieterItems([]).map((empty) => groups.flatMap((g) => g.items).find((item) => item.key === empty.key) ?? empty);
 
   // A point that came back empty although a source has a section with its name: once more, alone.
   const lostPoints = openPointsWithSource(items, input.sources);
-  const leftover = unassignedStatements(statements, assignedIds(items));
+  const leftover = unassignedStatements(open, assignedIds(items));
   const [again, zuordnung] = await Promise.all([
     hasTime()
       ? Promise.all(
@@ -634,5 +754,5 @@ Eine Aussage über den Anbieter, die zu keinem Punkt perfekt passt, kommt in den
   if (!items.some((item) => item.current.trim())) {
     throw new Error("Die KI-Antwort enthielt keine auswertbaren Anbieter-Punkte. Bitte erneut auswerten.");
   }
-  return done(items);
+  return done(items, { guardrails: await guardrailsRun });
 }
