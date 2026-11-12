@@ -24,8 +24,14 @@ import {
   type ContentRevisionRequest,
 } from "@/lib/dt/content/pipeline/revise";
 import type { ContentPipelineContext } from "@/lib/dt/content/pipeline/prompts";
-import { findingCheckPlaceholders, kundePrueftNoteLine, kundePrueftQuestionsInNotes } from "@/lib/dt/content/pipeline/kunde-prueft";
-import { findingTargetBlocks } from "@/lib/dt/content/finding-target";
+import {
+  checkPlaceholdersIn,
+  findingCheckPlaceholders,
+  kundePrueftNoteLine,
+  kundePrueftPlaceholder,
+  kundePrueftQuestionsInNotes,
+} from "@/lib/dt/content/pipeline/kunde-prueft";
+import { findingTargetBlock, findingTargetBlocks } from "@/lib/dt/content/finding-target";
 import { CONTENT_KEPT_FINDINGS_MAX, readQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { loadContext } from "@/lib/dt/content/pipeline/run-step";
 import { CONTENT_STEP_WATERMARK } from "@/lib/dt/content/pipeline/steps";
@@ -280,23 +286,45 @@ export async function keepFinding(
 }
 
 /**
- * „KUNDE PRÜFT“ on an open point whose placeholder is already in the text: the page notes that
- * the customer is checking it (the later steps then leave the placeholder alone and the window
- * and the exports show it as „KUNDE PRÜFT“), and the point goes like with „So lassen“. No model.
- * `marked` 0: the text has no placeholder for the point; nothing was written.
+ * „KUNDE PRÜFT“ on an open point: the page notes that the customer is checking it (the later
+ * steps then leave the placeholder alone and the window and the exports show it as „KUNDE
+ * PRÜFT“), and the point goes like with „So lassen“. No model, no cost. A placeholder that is
+ * already in the text is used as it is; otherwise one with the point's title is set as its own
+ * paragraph at the end of the Abschnitt the point is about (`inserted_in`), or at the end of the
+ * text when the point names none.
  */
 export async function markFindingKundePrueft(
   service: SupabaseClient,
   page: ContentPageRow,
   key: string,
   now: Date = new Date(),
-): Promise<{ ok: true; marked: number } | Failure> {
+): Promise<{ ok: true; marked: number; inserted_in: string | null } | Failure> {
   const finding = [...page.findings, ...page.final_findings, ...page.unresolved].find((f) => findingKey(f) === key);
   const next = withoutFinding(page, key);
   if (!finding || !next) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
   const blocks = parseBlocksFromHtml(page.html ?? "");
   const questions = findingCheckPlaceholders(finding, blocks, findingTargetBlocks(finding, blocks));
-  if (questions.length === 0) return { ok: true, marked: 0 };
+  const patch: Record<string, unknown> = {};
+  let insertedIn: string | null = null;
+  if (questions.length === 0) {
+    const blocker = revisionBlocker(page);
+    if (blocker) return { ok: false, status: 409, message: blocker };
+    if (blocks.length === 0) return { ok: false, status: 409, message: "Für diese Seite gibt es noch keinen Text." };
+    const placeholder = kundePrueftPlaceholder(finding.title);
+    const question = checkPlaceholdersIn(placeholder)[0]?.question ?? "";
+    if (question.length < 4) return { ok: false, status: 422, message: "Der offene Punkt hat keinen Titel, der als Platzhalter taugt." };
+    const targetId = findingTargetBlock(finding, blocks);
+    const target = blocks.find((b) => b.id === targetId) ?? blocks[blocks.length - 1]!;
+    const marker = `<p>${placeholder.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`;
+    if (!blocks.some((b) => b.html.includes(marker))) {
+      target.html = `${target.html}${target.html ? "\n" : ""}${marker}`;
+      const html = renderBlocksHtml(blocks);
+      // A released text that changes has to be released again.
+      Object.assign(patch, { html, markdown: htmlToMarkdown(html), ...(page.released ? { released: false, released_at: null } : {}) });
+    }
+    insertedIn = target.heading?.trim() || (targetId ? target.id : "Ende des Textes");
+    questions.push(question);
+  }
   const known = new Set(kundePrueftQuestionsInNotes(page.notes));
   const fresh = questions.filter((q) => !known.has(q));
   const notes = fresh.length > 0 ? [...page.notes, fresh.map(kundePrueftNoteLine).join("\n")].slice(-20) : page.notes;
@@ -307,10 +335,10 @@ export async function markFindingKundePrueft(
   ].slice(-CONTENT_KEPT_FINDINGS_MAX);
   const { error } = await service
     .from("dt_content_pages")
-    .update({ ...next, notes, question_stop: { ...stop, kept } })
+    .update({ ...patch, ...next, notes, question_stop: { ...stop, kept } })
     .eq("id", page.id);
   if (error) return { ok: false, status: 500, message: contentDbErrorMessage(error, "Offener Punkt konnte nicht gespeichert werden") };
-  return { ok: true, marked: questions.length };
+  return { ok: true, marked: questions.length, inserted_in: insertedIn };
 }
 
 export { ContentLlmError };
