@@ -1,5 +1,8 @@
 # Indexierung & Indexierbarkeit
 
+Confluence-/Wiki-Text für Beratung und Support (GSC-Zahlen vs. Twin):
+[`docs/wiki-seitenindexierung-gsc-vs-zwilling.md`](./wiki-seitenindexierung-gsc-vs-zwilling.md).
+
 ## Was der SEO-Berater heute kann
 
 | Werkzeug | Antwortet auf |
@@ -51,7 +54,7 @@ Die Search-Console-API stellt den Coverage-/Indexierungsbericht **nicht** bereit
 - `sitemaps.*` — eingereichte Sitemaps und ihr Verarbeitungsstatus
 - `sites.*` — Properties
 
-Es gibt keinen Endpunkt, der die GSC-UI-Liste „alle nicht indexierten Seiten“ inkl. Ausschlussgründen liefert. Der Crawl-Viewer approximiert das über Leistungsdaten + Crawl/Sitemap.
+Es gibt keinen Endpunkt, der die GSC-UI-Liste „alle nicht indexierten Seiten“ inkl. Ausschlussgründen liefert. Der Crawl-Viewer approximiert das über Leistungsdaten + Crawl/Sitemap. Ausführliche Erklärung fürs Wiki: [`wiki-seitenindexierung-gsc-vs-zwilling.md`](./wiki-seitenindexierung-gsc-vs-zwilling.md).
 
 ## Google-Indexstatus per URL-Inspection (Stichprobe)
 
