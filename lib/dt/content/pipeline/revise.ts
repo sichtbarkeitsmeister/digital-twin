@@ -132,6 +132,9 @@ export function revisionPrompt(context: ContentPipelineContext, target: ContentT
   };
 }
 
+/** The only reason of a revision that came back as it went in: the Abschnitt may need no change. */
+export const REVISION_UNCHANGED_REASON = "Die KI hat nichts geändert.";
+
 const MARKER_RE = /\[\s*(?:BITTE\s+PR(?:Ü|UE)FEN|QUELLE\s+BITTE|PREIS\s+BITTE|LINK\s*:|DATUM|FOTO\s*:|HERO)[^\]]*\]/giu;
 
 function plain(block: Pick<ContentTextBlock, "heading" | "html">): string {
@@ -197,7 +200,7 @@ export function checkRevision(json: unknown, before: ContentTextBlock, request: 
   const newUrls = urls(after.html).filter((u) => !knownUrls.has(u));
   if (newUrls.length > 0) reasons.push(`Neuer Link: ${newUrls.join(", ")}`);
 
-  if (after.heading === before.heading && after.html.trim() === before.html.trim()) reasons.push("Die KI hat nichts geändert.");
+  if (after.heading === before.heading && after.html.trim() === before.html.trim()) reasons.push(REVISION_UNCHANGED_REASON);
   return reasons.length > 0 ? { ok: false, reasons } : { ok: true, block: after };
 }
 

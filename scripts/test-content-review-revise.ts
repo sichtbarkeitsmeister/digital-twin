@@ -366,6 +366,23 @@ async function actionTests() {
     assert.ok(first.ok, JSON.stringify(first));
     assert.equal((store.rows("dt_content_pages")[0] as unknown as ContentPageRow).unresolved.length, 1, "still open after the first Abschnitt");
   }
+  // An Abschnitt that is right already (the model changes nothing): no failure and no change. The
+  // point stays unless its proposal changed an earlier Abschnitt (`touched_keys`), then it goes.
+  {
+    const same = parseBlocksFromHtml(html).find((b) => b.id === "zusammenfassung")!;
+    const opts = { callTool: answer({ id: same.id, heading: same.heading, level: same.level, html: same.html }), context: { context: ctx, avatarId: null }, models: ["m"] };
+    const key = findingKey(finding);
+    const page = pageRow({ unresolved: [finding] });
+    const store = db(page, doneUpTo(8));
+    const alone = await applyProposals(store.service, page, doneUpTo(8) as unknown as ContentStepRow[], { block_id: "zusammenfassung", finding_keys: [key], done_keys: [key] }, null, opts);
+    assert.ok(alone.ok && alone.unchanged === true, JSON.stringify(alone));
+    const kept = store.rows("dt_content_pages")[0] as unknown as ContentPageRow;
+    assert.equal(kept.unresolved.length, 1, "nothing changed anywhere: the point stays open");
+    assert.equal(kept.html, html, "the text stays");
+    const after = await applyProposals(store.service, page, doneUpTo(8) as unknown as ContentStepRow[], { block_id: "zusammenfassung", finding_keys: [key], done_keys: [key], touched_keys: [key] }, null, opts);
+    assert.ok(after.ok && after.unchanged === true, JSON.stringify(after));
+    assert.deepEqual((store.rows("dt_content_pages")[0] as unknown as ContentPageRow).unresolved, [], "changed elsewhere before: the point goes");
+  }
   // „So lassen“: the point goes, the text stays, the page remembers it.
   {
     const store = db(pageRow());
