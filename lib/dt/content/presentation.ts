@@ -3,6 +3,7 @@ import type {
   ContentPageState,
   ContentPageSummary,
 } from "@/lib/dt/content/types";
+import { contentStepSkippable, normalizeSkipSteps, type ContentSkippableStepKey } from "@/lib/dt/content/pipeline/steps";
 
 export type ContentStateTone = "grey" | "blue" | "yellow" | "orange" | "green";
 
@@ -94,6 +95,20 @@ export function contentStepStatusLabel(status: string, options: { liveText?: boo
 /** Under „Schritte“ in the page window. */
 export const CONTENT_SKIP_NOTE =
   "Übersprungene Schritte kosten nichts; der Text geht unverändert an den nächsten Schritt. Änderungen gelten für Schritte, die noch nicht gelaufen sind.";
+
+/** „Schritte“ in the dashboard: the choice written to every ticked page (the page window keeps its own block). */
+export type ContentBulkSteps = { skip_steps: ContentSkippableStepKey[]; review_stop: boolean };
+
+/**
+ * What the dashboard choice means for one page: SEO can only be skipped on a page that has a
+ * text already, so it is left out for every other page instead of failing the whole page.
+ */
+export function contentBulkSkipStepsForPage(
+  page: { source: string; source_url: string | null },
+  skipSteps: readonly ContentSkippableStepKey[],
+): ContentSkippableStepKey[] {
+  return normalizeSkipSteps(skipSteps.filter((key) => contentStepSkippable(page, key).ok));
+}
 
 /** Combinations of switched-off steps that leave a gap, as short orange lines under „Schritte“. */
 export function contentSkipWarnings(skipSteps: readonly string[], source?: string): string[] {
