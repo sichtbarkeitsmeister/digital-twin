@@ -224,13 +224,12 @@ export function DtContentWorkspace(props: {
   const selectedCount = selected.size;
 
   /**
-   * „Blättern“ in the page window: through the pages of the table as it is filtered, in its
-   * order. Pages without a text are passed over, unless the open page is one of them itself.
+   * „Blättern“ in the page window: through every page of the table as it is filtered (search,
+   * status), in its order. Pages without a text are included; the status filter narrows it.
    */
   const pager = useMemo(() => {
     if (!openPage) return undefined;
-    const current = visible.find((p) => p.slug === openPage.slug);
-    const list = current && !current.started ? visible : visible.filter((p) => p.started);
+    const list = visible;
     const index = list.findIndex((p) => p.slug === openPage.slug);
     if (index < 0) return undefined;
     const go = (to: number) => {
