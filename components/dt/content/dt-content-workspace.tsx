@@ -8,6 +8,7 @@ import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
+import { DtContentBulkStepsPanel } from "@/components/dt/content/dt-content-bulk-steps-panel";
 import { DtContentContactCard } from "@/components/dt/content/dt-content-contact-card";
 import { DtContentOrgQuestionsCard } from "@/components/dt/content/dt-content-org-questions-card";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
@@ -33,11 +34,13 @@ import { CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
 import {
   EMPTY_CONTENT_PAGE_FILTER,
   anyContentPageRunning,
+  contentBulkSkipStepsForPage,
   currentContentProblems,
   describeEmptyContentFilter,
   filterContentPages,
   formatContentDate,
   isContentPageFilterActive,
+  type ContentBulkSteps,
   type ContentPageFilter,
 } from "@/lib/dt/content/presentation";
 import type {
@@ -117,6 +120,10 @@ export function DtContentWorkspace(props: {
   const [bulkZielgruppen, setBulkZielgruppen] = useState<{ primary: string[]; secondary: string[] } | null>(null);
   /** „Zielgruppen vorschlagen / festlegen“ running over the ticked pages: page n of total. */
   const [zielgruppenRun, setZielgruppenRun] = useState<{ done: number; total: number } | null>(null);
+  /** „Schritte“ under the Standard-Zielgruppe: null = untouched, every page keeps its own setting. */
+  const [bulkSteps, setBulkSteps] = useState<ContentBulkSteps | null>(null);
+  /** The „Schritte“ choice being written to the ticked pages: page n of total. */
+  const [stepsRun, setStepsRun] = useState<{ done: number; total: number } | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
   const [changingType, setChangingType] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
@@ -241,6 +248,43 @@ export function DtContentWorkspace(props: {
     if (ok > 0) toast.success(kind === "suggest" ? `Zielgruppen für ${ok} ${ok === 1 ? "Seite" : "Seiten"} vorgeschlagen` : `Zielgruppen für ${ok} ${ok === 1 ? "Seite" : "Seiten"} festgelegt`);
     if (failed.length > 0) toast.error(`Nicht geklappt: ${failed.join(" · ")}`, { duration: 15_000 });
   }
+
+  /**
+   * Writes the dashboard's „Schritte“ choice to the given pages (the same PATCH as the switches
+   * in the page window, one request per page). Returns the pages that took it: a page that
+   * refused must not start, it would run steps the editor switched off.
+   */
+  async function applyBulkSteps(slugs: string[], choice: ContentBulkSteps): Promise<string[]> {
+    setStepsRun({ done: 0, total: slugs.length });
+    const okSlugs: string[] = [];
+    const failed: string[] = [];
+    for (const [i, slug] of slugs.entries()) {
+      const page = pages.find((p) => p.slug === slug);
+      const res = await contentApi(`/api/dt/content/pages/${encodeURIComponent(slug)}`, {
+        method: "PATCH",
+        body: {
+          organisationId,
+          skip_steps: page ? contentBulkSkipStepsForPage(page, choice.skip_steps) : choice.skip_steps,
+          review_stop: choice.review_stop,
+        },
+      });
+      if (res.ok) okSlugs.push(slug);
+      else failed.push(`${page?.name ?? slug}: ${res.message}`);
+      setStepsRun({ done: i + 1, total: slugs.length });
+    }
+    setStepsRun(null);
+    if (failed.length > 0) toast.error(`Schritte nicht übernommen: ${failed.join(" · ")}`, { duration: 15_000 });
+    return okSlugs;
+  }
+
+  /** „Jetzt anwenden“: the choice goes to the ticked pages without starting them. */
+  async function applyBulkStepsNow() {
+    if (!bulkSteps || selectedCount === 0 || stepsRun || starting) return;
+    const done = await applyBulkSteps([...selected], bulkSteps);
+    if (done.length > 0) toast.success(`Schritte für ${done.length} ${done.length === 1 ? "Seite" : "Seiten"} übernommen`);
+    void loadOverview();
+  }
+
   const notReady = readiness ? !readiness.ready : false;
   const settingsOpen = !settings || editingSettings;
 
@@ -277,9 +321,17 @@ export function DtContentWorkspace(props: {
     setStarting(true);
     try {
       if (!(await sendClientData(settings))) return;
+      let slugs = [...selected];
+      if (bulkSteps) {
+        slugs = await applyBulkSteps(slugs, bulkSteps);
+        if (slugs.length === 0) {
+          void loadOverview();
+          return;
+        }
+      }
       const res = await contentApi<ContentRunThroughResult>("/api/dt/content/run-through", {
         method: "POST",
-        body: { organisationId, pages: [...selected] },
+        body: { organisationId, pages: slugs },
       });
       if (!res.ok) {
         toast.error(res.message);
@@ -468,7 +520,7 @@ export function DtContentWorkspace(props: {
             <DtPillButton
               type="button"
               className="h-11"
-              disabled={selectedCount === 0 || starting || notReady || settingsOpen}
+              disabled={selectedCount === 0 || starting || stepsRun != null || notReady || settingsOpen}
               onClick={() => void startTexts()}
             >
               {starting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
@@ -477,6 +529,14 @@ export function DtContentWorkspace(props: {
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
           </div>
         </div>
+        <DtContentBulkStepsPanel
+          value={bulkSteps}
+          onChange={setBulkSteps}
+          selectedCount={selectedCount}
+          progress={stepsRun}
+          disabled={starting}
+          onApply={() => void applyBulkStepsNow()}
+        />
         {zielgruppenOptions.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-t border-sbkm-navy/8 pt-3 dark:border-white/8">
             <span className="text-xs font-semibold text-sbkm-navy dark:text-white">Zielgruppen der angehakten Seiten:</span>
