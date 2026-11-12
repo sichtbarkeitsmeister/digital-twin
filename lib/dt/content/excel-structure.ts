@@ -30,7 +30,13 @@ import { slugify } from "@/lib/dt/content/render";
 import type { SheetCell, SheetRows } from "@/lib/dt/seo/website-structure-xlsx";
 
 export type ContentKeyword = { text: string; volume?: number };
-export type ContentPageKeywords = { main: ContentKeyword; secondary: ContentKeyword[] };
+/**
+ * Where a page's keywords come from when not from the Seitenstruktur (Excel): the DigitalTwin's
+ * suggestion („Keywords analysieren“) or the editor's own entry in the page window. Absent for
+ * keywords of the Seitenstruktur, which go first.
+ */
+export type ContentKeywordSource = "analyse" | "manuell";
+export type ContentPageKeywords = { main: ContentKeyword; secondary: ContentKeyword[]; source?: ContentKeywordSource };
 
 /** One page as the Excel briefs it; the store writes it onto `dt_content_pages`. */
 export type ContentBriefingPage = {

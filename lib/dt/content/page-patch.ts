@@ -24,6 +24,13 @@ const patchSchema = z
     skip_steps: z.array(z.enum(CONTENT_SKIPPABLE_STEP_KEYS)).max(CONTENT_SKIPPABLE_STEP_KEYS.length * 2).optional(),
     /** „Zusätzliche Wünsche für diese Seite“, one per line; also while the page runs (the next step reads them). */
     client_wishes: z.string().max(CLIENT_WISHES_TEXT_MAX).optional(),
+    /** Hauptkeyword and Nebenkeywords entered by hand; an empty main keyword clears them. */
+    keywords: z
+      .object({
+        main: z.string().max(200),
+        secondary: z.array(z.string().max(200)).max(60),
+      })
+      .optional(),
     /** „Vor der Watermark zur Durchsicht anhalten“ (default on). */
     review_stop: z.boolean().optional(),
     /** Zielgruppen of the page, confirmed by the editor; an empty primary list = Standard-Zielgruppe again. */
@@ -41,6 +48,7 @@ const patchSchema = z
       body.skip_steps !== undefined ||
       body.client_wishes !== undefined ||
       body.review_stop !== undefined ||
+      body.keywords !== undefined ||
       body.zielgruppen !== undefined,
   );
 
@@ -69,6 +77,7 @@ export function parseContentPagePatch(
     return { ok: false, message: skipStepsMessage(raw.skip_steps) };
   }
   if ("page_type" in raw) return { ok: false, message: "Ungültiger Seitentyp." };
+  if ("keywords" in raw) return { ok: false, message: "Ungültige Keywords (je Keyword höchstens 200 Zeichen)." };
   if ("zielgruppen" in raw) return { ok: false, message: `Ungültige Zielgruppen (höchstens ${CONTENT_SECONDARY_MAX} sekundäre).` };
   if ("client_wishes" in raw) return { ok: false, message: `Die Hinweise für diese Seite dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.` };
   return { ok: false, message: "Ungültige Anfrage." };

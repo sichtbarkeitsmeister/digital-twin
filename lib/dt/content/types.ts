@@ -51,6 +51,8 @@ export type ContentPageSummary = {
   /** Live URL for pages taken over from the crawl. */
   source_url: string | null;
   main_keyword: string | null;
+  /** Where the keywords come from; null: the page has none yet (`contentKeywordOrigin`). */
+  keyword_source: ContentKeywordOrigin | null;
   /** Which writing variant the SEO step uses; null for rows from before the briefing migration. */
   page_type: ContentPageType | null;
   page_role: ContentPageRole | null;
@@ -259,6 +261,20 @@ export type ContentAction = {
   disabled_reason?: string;
 };
 
+/**
+ * Where a page's keywords come from: the Seitenstruktur (Excel, goes first), the Zwilling's
+ * suggestion („Keywords analysieren“), the editor's entry, or the Analyse of a text run (only
+ * the main keyword is stored then).
+ */
+export type ContentKeywordOrigin = "struktur" | "analyse" | "manuell" | "lauf";
+
+export const CONTENT_KEYWORD_ORIGIN_LABELS: Record<ContentKeywordOrigin, string> = {
+  struktur: "aus der Seitenstruktur",
+  analyse: "Vorschlag des Zwillings",
+  manuell: "von Hand eingetragen",
+  lauf: "aus der Analyse des Textlaufs",
+};
+
 /** What the Excel briefing (or the crawl guess) knows about a page; shown compactly in the drawer. */
 export type ContentPageBriefing = {
   source: ContentPageSource;
@@ -275,6 +291,8 @@ export type ContentPageBriefing = {
   main_keyword: string | null;
   /** Monthly search volume of the main keyword when the Excel had one. */
   main_keyword_volume: number | null;
+  /** Where the keywords come from; null: the page has none yet (`contentKeywordOrigin`). */
+  keyword_source: ContentKeywordOrigin | null;
   secondary_keywords: string[];
   h1_options: string[];
   user_questions: string[];
