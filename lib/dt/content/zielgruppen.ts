@@ -9,8 +9,30 @@
  */
 
 export const CONTENT_ZIELGRUPPEN_MIGRATION_FILE = "database/migrations/20261112_dt_content_zielgruppen.sql";
+/** Primary Zielgruppen of a page with a limit (Unterseite, Hauptseite, Standort-, Über-uns-Seite …). */
 export const CONTENT_PRIMARY_MAX = 2;
 export const CONTENT_SECONDARY_MAX = 3;
+/** At most this many Zielgruppen in any list: the organisation's avatars (a Mix is built from at most 30). */
+export const CONTENT_ZIELGRUPPEN_LIST_MAX = 30;
+
+/**
+ * Page types that speak to many Zielgruppen at once: every Zielgruppe of the organisation may be
+ * primary. The Startseite (usually all main Zielgruppen), a Hauptsilo-Seite (all for whom the
+ * silo's topic is a main concern), a Ratgeberartikel (all whose question it answers).
+ */
+export const CONTENT_UNLIMITED_PRIMARY_TYPES = ["startseite", "hauptsilo", "ratgeber"] as const;
+
+/** How many primary Zielgruppen the page type allows; null = no limit. */
+export function contentPrimaryMax(pageType: string | null | undefined): number | null {
+  return pageType && (CONTENT_UNLIMITED_PRIMARY_TYPES as readonly string[]).includes(pageType) ? null : CONTENT_PRIMARY_MAX;
+}
+
+/** The rule under the Zielgruppen, for the page type. */
+export function contentZielgruppenRule(pageType: string | null | undefined): string {
+  return contentPrimaryMax(pageType) == null
+    ? "Primär: keine Obergrenze bei diesem Seitentyp, für sie wird geschrieben. Sekundär: höchstens drei, werden mitbedient. Gilt ab dem nächsten Schritt."
+    : "Primär: höchstens zwei bei diesem Seitentyp, für sie wird geschrieben. Sekundär: höchstens drei, werden mitbedient. Gilt ab dem nächsten Schritt.";
+}
 
 export type ContentZielgruppenStatus = "vorschlag" | "bestaetigt";
 
@@ -44,24 +66,30 @@ function ids(value: unknown): string[] {
 }
 
 /**
- * The lists cleaned: no avatar twice, primary at most two, secondary at most three and never a
- * primary one; with `known` only ids of the organisation's Zielgruppen avatars.
+ * The lists cleaned: no avatar twice, primary within `primaryMax` (null = no limit; default two),
+ * secondary at most three and never a primary one; with `known` only ids of the organisation's
+ * Zielgruppen avatars. Primary ones over the limit move to the front of secondary (the page type
+ * changed, or one choice for pages of several types), so nobody is dropped silently while room is left.
  */
 export function normalizeZielgruppenLists(
   primary: readonly string[],
   secondary: readonly string[],
   known?: ReadonlySet<string>,
+  primaryMax: number | null = CONTENT_PRIMARY_MAX,
 ): { primary: string[]; secondary: string[] } {
   const ok = (id: string) => !known || known.has(id);
-  const p = ids(primary).filter(ok).slice(0, CONTENT_PRIMARY_MAX);
-  const s = ids(secondary).filter((id) => ok(id) && !p.includes(id)).slice(0, CONTENT_SECONDARY_MAX);
+  const all = ids(primary).filter(ok).slice(0, CONTENT_ZIELGRUPPEN_LIST_MAX);
+  const p = primaryMax == null ? all : all.slice(0, primaryMax);
+  const over = all.slice(p.length);
+  const s = [...over, ...ids(secondary)].filter((id, i, list) => ok(id) && !p.includes(id) && list.indexOf(id) === i).slice(0, CONTENT_SECONDARY_MAX);
   return { primary: p, secondary: s };
 }
 
 export function readContentZielgruppen(raw: unknown): ContentZielgruppen {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...EMPTY_CONTENT_ZIELGRUPPEN };
   const r = raw as Record<string, unknown>;
-  const lists = normalizeZielgruppenLists(ids(r.primary), ids(r.secondary));
+  // Read as stored (no type limit here): the run and the page window apply the page type's limit.
+  const lists = normalizeZielgruppenLists(ids(r.primary), ids(r.secondary), undefined, null);
   const reasons: Record<string, string> = {};
   if (r.reasons && typeof r.reasons === "object" && !Array.isArray(r.reasons)) {
     for (const [id, text] of Object.entries(r.reasons as Record<string, unknown>)) {
@@ -89,21 +117,110 @@ export function zielgruppeLevel(z: Pick<ContentZielgruppen, "primary" | "seconda
 }
 
 /**
- * One switch moved: the avatar's new level, the others as they were. A third primary pushes the
- * oldest primary down to secondary; the lists stay within their limits.
+ * One switch moved: the avatar's new level, the others as they were. Over the page type's limit
+ * (`primaryMax`, null = none) a new primary pushes the oldest primary down to secondary; the lists
+ * stay within their limits.
  */
 export function withZielgruppeLevel(
   z: Pick<ContentZielgruppen, "primary" | "secondary">,
   id: string,
   level: ContentZielgruppeLevel,
+  primaryMax: number | null = CONTENT_PRIMARY_MAX,
 ): { primary: string[]; secondary: string[] } {
   let primary = z.primary.filter((x) => x !== id);
   let secondary = z.secondary.filter((x) => x !== id);
   if (level === "primary") {
     primary = [...primary, id];
-    while (primary.length > CONTENT_PRIMARY_MAX) secondary = [...secondary, primary.shift()!];
+    while (primaryMax != null && primary.length > primaryMax) secondary = [...secondary, primary.shift()!];
   } else if (level === "secondary") {
     secondary = [...secondary, id];
   }
-  return normalizeZielgruppenLists(primary, secondary.slice(-CONTENT_SECONDARY_MAX));
+  return normalizeZielgruppenLists(primary, secondary.slice(-CONTENT_SECONDARY_MAX), undefined, primaryMax);
+}
+
+// --- the Zielgruppen block in the prompts: never cut, checked against a budget ------------------
+
+/**
+ * The whole „Zielgruppen dieser Seite“ block may have this many characters. Profiles are never
+ * shortened: a block over it is refused (warning in the page window, step 1 fails before any call).
+ */
+export const CONTENT_AUDIENCE_MAX_CHARS = 120_000;
+
+export const AUDIENCE_BLOCK_TITLE = "## Zielgruppen dieser Seite";
+export const AUDIENCE_PRIMARY_LINE = "Primär (für sie ist der Text geschrieben; sie bestimmt Ansprache, Beispiele und Reihenfolge):";
+export const AUDIENCE_SECONDARY_LINE =
+  "Sekundär (mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen):";
+
+export type AudienceMember = { name: string; role: string; beschreibung: string };
+
+function audienceMemberText(m: AudienceMember): string {
+  const head = `### ${m.name.trim()}${m.role.trim() ? ` – ${m.role.trim()}` : ""}`;
+  const text = m.beschreibung.trim();
+  return text ? `${head}\n${text}` : head;
+}
+
+/** The block exactly as every step gets it: each profile complete. */
+export function audienceBlockText(audience: { primary: readonly AudienceMember[]; secondary: readonly AudienceMember[] }): string {
+  return [
+    AUDIENCE_BLOCK_TITLE,
+    AUDIENCE_PRIMARY_LINE,
+    ...audience.primary.map(audienceMemberText),
+    ...(audience.secondary.length > 0 ? [AUDIENCE_SECONDARY_LINE, ...audience.secondary.map(audienceMemberText)] : []),
+  ].join("\n");
+}
+
+export type AudienceBudgetEntry = { name: string; level: "primary" | "secondary"; chars: number };
+
+export type AudienceBudget = {
+  /** Characters of the whole block (headings included). */
+  total: number;
+  limit: number;
+  over: boolean;
+  /** Each selected Zielgruppe with the characters of its profile, largest first. */
+  entries: AudienceBudgetEntry[];
+};
+
+/** A Zielgruppe by size: name, role and the length of its (trimmed) profile text. */
+export type AudienceSize = { name: string; role: string; chars: number };
+
+/** The length of `audienceBlockText` from the sizes alone (the page window has no profile texts). */
+export function audienceBlockLength(primary: readonly AudienceSize[], secondary: readonly AudienceSize[]): number {
+  const member = (m: AudienceSize) => `### ${m.name.trim()}${m.role.trim() ? ` – ${m.role.trim()}` : ""}`.length + (m.chars > 0 ? 1 + m.chars : 0);
+  const lines = [AUDIENCE_BLOCK_TITLE.length, AUDIENCE_PRIMARY_LINE.length, ...primary.map(member), ...(secondary.length > 0 ? [AUDIENCE_SECONDARY_LINE.length, ...secondary.map(member)] : [])];
+  return lines.reduce((a, b) => a + b, 0) + lines.length - 1;
+}
+
+/** The block's size for Zielgruppen given by size, against CONTENT_AUDIENCE_MAX_CHARS. */
+export function audienceBudgetOf(primary: readonly AudienceSize[], secondary: readonly AudienceSize[]): AudienceBudget {
+  const total = audienceBlockLength(primary, secondary);
+  const entries: AudienceBudgetEntry[] = [
+    ...primary.map((m) => ({ name: m.name.trim(), level: "primary" as const, chars: m.chars })),
+    ...secondary.map((m) => ({ name: m.name.trim(), level: "secondary" as const, chars: m.chars })),
+  ].sort((a, b) => b.chars - a.chars);
+  return { total, limit: CONTENT_AUDIENCE_MAX_CHARS, over: total > CONTENT_AUDIENCE_MAX_CHARS, entries };
+}
+
+/** The block's size for these Zielgruppen (the run's check). */
+export function audienceBudget(audience: { primary: readonly AudienceMember[]; secondary: readonly AudienceMember[] }): AudienceBudget {
+  const size = (m: AudienceMember): AudienceSize => ({ name: m.name, role: m.role, chars: m.beschreibung.trim().length });
+  return audienceBudgetOf(audience.primary.map(size), audience.secondary.map(size));
+}
+
+function formatChars(n: number): string {
+  return n.toLocaleString("de-DE");
+}
+
+/**
+ * The explanation for a block over the limit, the same in the page window and when step 1 fails:
+ * which Zielgruppen, how many characters each, sum and limit, and what to do.
+ */
+export function audienceBudgetMessage(budget: AudienceBudget): string {
+  const list = budget.entries
+    .map((e) => `${e.name} (${e.level === "primary" ? "primär" : "sekundär"}): ${formatChars(e.chars)} Zeichen`)
+    .join("; ");
+  return (
+    `Die Zielgruppen dieser Seite passen nicht in den Prompt: zusammen ${formatChars(budget.total)} Zeichen, erlaubt sind ${formatChars(budget.limit)}. ` +
+    `Ausgewählt: ${list}. Avatar-Texte werden nicht gekürzt. ` +
+    "Was tun: Zielgruppen auf „Aus“ setzen oder Avatar-Texte unter Agenten kürzen. „Sekundär“ spart keine Zeichen, auch sekundäre Profile gehen vollständig in den Prompt."
+  );
 }

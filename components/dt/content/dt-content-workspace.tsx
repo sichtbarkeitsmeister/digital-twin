@@ -11,6 +11,7 @@ import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentContactCard } from "@/components/dt/content/dt-content-contact-card";
 import { DtContentOrgQuestionsCard } from "@/components/dt/content/dt-content-org-questions-card";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
+import { ZielgruppenBudgetWarning } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { DtContentPagesSourceCard } from "@/components/dt/content/dt-content-pages-source-card";
 import { DtContentPagesToolbar } from "@/components/dt/content/dt-content-pages-toolbar";
 import {
@@ -192,7 +193,7 @@ export function DtContentWorkspace(props: {
 
   /** The Zielgruppen avatars (everything in the dropdown but the Mix), for „Zielgruppen je Seite“. */
   const zielgruppenOptions = useMemo(
-    () => props.avatars.filter((a) => !a.isMix).map((a) => ({ id: a.id, name: a.name, role: a.role })),
+    () => props.avatars.filter((a) => !a.isMix).map((a) => ({ id: a.id, name: a.name, role: a.role, chars: a.profileChars })),
     [props.avatars],
   );
   const zielgruppenNames = useMemo(() => new Map(zielgruppenOptions.map((o) => [o.id, o.name])), [zielgruppenOptions]);
@@ -731,7 +732,7 @@ export function DtContentWorkspace(props: {
         closeDisabled={zielgruppenRun != null}
         titleId="content-bulk-zielgruppen-title"
         title={`Zielgruppen für ${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} festlegen`}
-        description="Gilt für alle angehakten Seiten und ersetzt deren bisherige Zielgruppen. Primär: höchstens zwei, für sie wird geschrieben. Sekundär: höchstens drei, werden mitbedient."
+        description="Gilt für alle angehakten Seiten und ersetzt deren bisherige Zielgruppen. Primär: für sie wird geschrieben – bei Startseite, Hauptsilo-Seite und Ratgeberartikel ohne Obergrenze, bei allen anderen Seitentypen höchstens zwei (dort zählen weitere als sekundär). Sekundär: höchstens drei, werden mitbedient."
         footer={
           <div className="flex flex-wrap justify-end gap-2">
             <DtPillButton type="button" size="sm" variant="ghost" disabled={zielgruppenRun != null} onClick={() => setBulkZielgruppen(null)}>
@@ -771,7 +772,8 @@ export function DtContentWorkspace(props: {
                       type="button"
                       aria-pressed={level === value}
                       disabled={zielgruppenRun != null}
-                      onClick={() => setBulkZielgruppen((prev) => (prev ? withZielgruppeLevel(prev, o.id, value) : prev))}
+                      // No limit here: each page applies its own type's limit when it is saved.
+                      onClick={() => setBulkZielgruppen((prev) => (prev ? withZielgruppeLevel(prev, o.id, value, null) : prev))}
                       className={cn(
                         "px-2.5 py-1 text-xs font-semibold transition-colors",
                         level === value
@@ -791,6 +793,11 @@ export function DtContentWorkspace(props: {
             );
           })}
         </ul>
+        {bulkZielgruppen ? (
+          <div className="mt-3">
+            <ZielgruppenBudgetWarning primary={bulkZielgruppen.primary} secondary={bulkZielgruppen.secondary} options={zielgruppenOptions} />
+          </div>
+        ) : null}
       </CenteredModal>
 
       <DtContentPageDrawer

@@ -32,7 +32,14 @@ import {
 } from "@/lib/dt/content/load-sources";
 import { readAktualitaetProgress, type AktualitaetProgress } from "@/lib/dt/content/freshness";
 import { avatarFromAgent } from "@/lib/dt/content/mapping";
-import { EMPTY_CONTENT_ZIELGRUPPEN, hasContentZielgruppen } from "@/lib/dt/content/zielgruppen";
+import {
+  EMPTY_CONTENT_ZIELGRUPPEN,
+  audienceBudget,
+  audienceBudgetMessage,
+  contentPrimaryMax,
+  hasContentZielgruppen,
+  normalizeZielgruppenLists,
+} from "@/lib/dt/content/zielgruppen";
 import { suggestContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-suggest";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
@@ -211,7 +218,9 @@ export async function loadContext(
 
   // Zielgruppen of this page: they replace the Standard-Zielgruppe for every step. Avatars that were
   // deleted or switched off meanwhile drop out; without a primary one left, the standard applies.
-  const zielgruppen = page.zielgruppen ?? EMPTY_CONTENT_ZIELGRUPPEN;
+  // The page type's limit applies here too: after a change of type, primary ones over it count as secondary.
+  const stored = page.zielgruppen ?? EMPTY_CONTENT_ZIELGRUPPEN;
+  const zielgruppen = { ...stored, ...normalizeZielgruppenLists(stored.primary, stored.secondary, undefined, contentPrimaryMax(page.page_type)) };
   let audience: ContentPipelineContext["audience"] = null;
   if (hasContentZielgruppen(zielgruppen)) {
     const rows = await loadContentZielgruppenAvatars(service, page.organisation_id);
@@ -392,6 +401,16 @@ async function callStep(
   return { output, calls };
 }
 
+/**
+ * The step's refusal when the page's Zielgruppen do not fit into the prompt (profiles are never
+ * shortened): a final error with the explanation, raised before any model call. Null when they fit.
+ */
+export function audienceBudgetError(context: Pick<ContentPipelineContext, "audience">): ContentLlmError | null {
+  if (!context.audience) return null;
+  const budget = audienceBudget(context.audience);
+  return budget.over ? new ContentLlmError(audienceBudgetMessage(budget), false) : null;
+}
+
 export async function runContentStep(
   service: SupabaseClient,
   page: ContentPageRow,
@@ -427,6 +446,10 @@ export async function runContentStep(
   }
 
   const { context, avatarId } = await loadContext(service, page, steps);
+  // Profiles are never shortened: a Zielgruppen block over the limit stops the step before any
+  // model call, with the explanation (which Zielgruppen, how long, what to do). Nothing is saved.
+  const tooLong = audienceBudgetError(context);
+  if (tooLong) throw tooLong;
   if (def.provider === "xai") {
     return runRephraseStep({ service, page, def, steps, context, avatarId, timeoutMs });
   }

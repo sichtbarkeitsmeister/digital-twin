@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isMixAgent, mixOptionLabel, readMixInfo } from "@/lib/dt/agents/mix";
+import { avatarFromAgent } from "@/lib/dt/content/mapping";
 import { isDefaultTwinAgent, isSeoAdvisorAgent } from "@/lib/dt/agents/seo-advisor";
 import {
   filledWorkshopSections,
@@ -27,6 +28,8 @@ export type ContentAvatarOption = {
   isMix: boolean;
   /** What the dropdown shows: the name, for the Mix „Mix (aus {N} Zielgruppen)“. */
   label: string;
+  /** Length of the profile text the steps get (`avatarFromAgent(…).beschreibung`), for the Zielgruppen budget. */
+  profileChars: number;
 };
 
 export type ContentAvatarRow = {
@@ -164,7 +167,7 @@ export async function loadContentAvatarOptions(
 ): Promise<ContentAvatarOption[]> {
   const { data } = await supabase
     .from("dt_agents")
-    .select("id, name, role, kind, slug, created_at, avatar_data")
+    .select("id, name, role, kind, slug, created_at, avatar_data, prompt_template, prompt_append, uses_global_prompt")
     .eq("organisation_id", organisationId)
     .eq("is_enabled", true)
     .order("created_at", { ascending: false });
@@ -182,6 +185,7 @@ export async function loadContentAvatarOptions(
         createdAt: row.created_at as string,
         isMix,
         label: mix ? mixOptionLabel(mix.sourceAgentIds.length) : (row.name as string),
+        profileChars: avatarFromAgent(row as ContentAvatarRow).beschreibung.trim().length,
       };
     });
   return [...options.filter((option) => option.isMix), ...options.filter((option) => !option.isMix)];

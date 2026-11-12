@@ -12,6 +12,7 @@
 
 import { pendingChecksBlock, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { BLOCKED_HEADING, blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { audienceBlockText } from "@/lib/dt/content/zielgruppen";
 import { rephraseChunkKeywords } from "@/lib/dt/content/pipeline/rephrase-guard";
 import { pageFactsBlock, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -573,27 +574,14 @@ export function analyseAudienceRule(context: Partial<Pick<ContentPipelineContext
   return "Bei mehreren Zielgruppen: traumziel, hauptschmerz, groesste_huerde und einwaende kommen aus der primären Zielgruppe. Einen wichtigen Einwand einer sekundären Zielgruppe darfst du in einwaende ergänzen, mit ihrem Namen in Klammern.\n";
 }
 
-/** A secondary Zielgruppe's profile is cut to this many characters: it is served along, not written for. */
-export const MAX_SECONDARY_AVATAR_CHARS = 3_000;
-
+/**
+ * The Zielgruppen of the page, each profile complete (never shortened). The block's size is
+ * checked against CONTENT_AUDIENCE_MAX_CHARS before any call (`audienceBudget`): over it, the
+ * step fails with the explanation instead of cutting a profile.
+ */
 export function avatarBlock(context: Pick<ContentPipelineContext, "avatar"> & Partial<Pick<ContentPipelineContext, "audience">>): string {
   const audience = context.audience;
-  if (audience && audience.primary.length > 0) {
-    const member = (m: { name: string; role: string; beschreibung: string }, max: number) =>
-      [`### ${m.name}${m.role ? ` – ${m.role}` : ""}`, clip(m.beschreibung, max)].filter(Boolean).join("\n");
-    const primaryMax = Math.floor(MAX_AVATAR_CHARS / audience.primary.length);
-    return [
-      "## Zielgruppen dieser Seite",
-      "Primär (für sie ist der Text geschrieben; sie bestimmt Ansprache, Beispiele und Reihenfolge):",
-      ...audience.primary.map((m) => member(m, primaryMax)),
-      ...(audience.secondary.length > 0
-        ? [
-            "Sekundär (mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen):",
-            ...audience.secondary.map((m) => member(m, MAX_SECONDARY_AVATAR_CHARS)),
-          ]
-        : []),
-    ].join("\n");
-  }
+  if (audience && audience.primary.length > 0) return audienceBlockText(audience);
   if (!context.avatar) return "## Avatar (Wunschkunde)\n(kein Avatar hinterlegt)";
   return [
     "## Avatar (Wunschkunde, für den der Text geschrieben wird)",
