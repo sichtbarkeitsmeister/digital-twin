@@ -1,5 +1,6 @@
 import { contentExportFile, contentExportResponse, isContentExportFormat } from "@/lib/dt/content/export";
 import { contentError, gateContentRoute, isValidContentSlug } from "@/lib/dt/content/route-helpers";
+import { kundePrueftQuestionsInNotes, markKundePrueftHtml } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { loadContentPage } from "@/lib/dt/content/store";
 
 export async function GET(req: Request, context: { params: Promise<{ slug: string }> }) {
@@ -23,11 +24,16 @@ export async function GET(req: Request, context: { params: Promise<{ slug: strin
   if (!page) return contentError("Seite nicht gefunden.", 404);
   if (!page.html) return contentError("Für diese Seite gibt es noch keinen Text.", 404);
 
+  // Placeholders the customer is checking leave the tool as a bold „[KUNDE PRÜFT: …]“ in every format.
+  const pending = kundePrueftQuestionsInNotes(page.notes);
+  const html = markKundePrueftHtml(page.html, pending);
+  const marked = html !== page.html;
+
   return contentExportResponse(
     // `levels=1`: the Markdown export with „[H2]“ marks; the text export always has them.
     contentExportFile(
       format,
-      { slug, title: page.title || page.name, html: page.html, markdown: page.markdown },
+      { slug, title: page.title || page.name, html, markdown: marked ? null : page.markdown },
       { levelLabels: format === "txt" || (format === "md" && url.searchParams.get("levels") === "1") },
     ),
   );

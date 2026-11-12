@@ -93,3 +93,69 @@ export function keepPendingPlaceholders(
   }
   return { blocks, restored };
 }
+
+/** The note line that marks a question as „KUNDE PRÜFT“ (`answeredInNotes` reads it back). */
+export function kundePrueftNoteLine(question: string): string {
+  return `Zu „${question.replace(/\s+/g, " ").trim().slice(0, 600)}“: KUNDE PRÜFT – Platzhalter bleibt.`;
+}
+
+/** The questions the page's notes mark as „KUNDE PRÜFT“, each once. */
+export function kundePrueftQuestionsInNotes(notes: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const note of notes) {
+    for (const line of note.split("\n")) {
+      const m = line.match(/^Zu „(.{4,600}?)“: KUNDE PRÜFT – Platzhalter bleibt\.$/);
+      if (m) out.add(m[1]!);
+    }
+  }
+  return [...out];
+}
+
+const CHECK_PLACEHOLDER_RE = /\[\s*BITTE\s+PR(?:Ü|UE)FEN\s*:?\s*([^\]]*)\]/giu;
+const fold1 = (text: string) => text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+
+/** Every [BITTE PRÜFEN: …] placeholder in a text, with the question inside it. */
+export function checkPlaceholdersIn(text: string): Array<{ placeholder: string; question: string }> {
+  return [...text.matchAll(CHECK_PLACEHOLDER_RE)].map((m) => ({ placeholder: fold1(m[0]), question: fold1(m[1] ?? "") }));
+}
+
+/** Whether the placeholder (its question) is one the customer is checking. */
+function isPendingQuestion(question: string, pendingQuestions: readonly string[]): boolean {
+  const q = fold1(question);
+  return pendingQuestions.some((p) => fold1(p) === q || kundePrueftPlaceholder(p) === kundePrueftPlaceholder(q));
+}
+
+/**
+ * For the page window and the exports: every [BITTE PRÜFEN: …] placeholder the customer is checking
+ * becomes a bold „[KUNDE PRÜFT: …]“, so the customer cannot overlook it. The stored text keeps the
+ * placeholder as it is (the steps rely on it). `className` only for the page window.
+ */
+export function markKundePrueftHtml(html: string, pendingQuestions: readonly string[], options: { className?: string } = {}): string {
+  if (pendingQuestions.length === 0) return html;
+  const open = options.className ? `<strong class="${options.className}">` : "<strong>";
+  return html.replace(CHECK_PLACEHOLDER_RE, (match: string, inner: string) =>
+    isPendingQuestion(inner ?? "", pendingQuestions) ? `${open}[KUNDE PRÜFT: ${(inner ?? "").trim()}]</strong>` : match,
+  );
+}
+
+/**
+ * „KUNDE PRÜFT“ on an open point: the placeholders in the text the point is about. Those it quotes
+ * come first; a point that talks about a placeholder without quoting it takes the ones in its own
+ * Abschnitte. Empty when the text has no placeholder for it yet (then the Abschnitt is revised).
+ */
+export function findingCheckPlaceholders(
+  finding: { title: string; problem: string; proposal?: string | null },
+  blocks: readonly Pick<ContentTextBlock, "id" | "heading" | "html">[],
+  targetIds: readonly string[],
+): string[] {
+  const said = fold1(`${finding.title}\n${finding.problem}\n${finding.proposal ?? ""}`);
+  const perBlock = blocks.map((b) => ({ id: b.id, found: checkPlaceholdersIn(plainOf(b).replace(/<[^>]+>/g, " ")) }));
+  const quoted = perBlock.flatMap((b) => b.found).filter((p) => p.question.length >= 4 && said.includes(p.question));
+  const picked =
+    quoted.length > 0
+      ? quoted
+      : /BITTE\s+PR(?:Ü|UE)FEN|Platzhalter/iu.test(said)
+        ? perBlock.filter((b) => targetIds.includes(b.id)).flatMap((b) => b.found)
+        : [];
+  return [...new Set(picked.map((p) => p.question).filter((q) => q.length >= 4))];
+}

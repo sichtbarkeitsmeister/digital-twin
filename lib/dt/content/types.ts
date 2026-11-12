@@ -350,6 +350,8 @@ export type ContentReview = {
     /** The Watermark Entfernung has run: a revised Abschnitt goes through it on its own. */
     watermark_done: boolean;
   };
+  /** Questions the page's notes mark as „KUNDE PRÜFT“: their placeholders show as „[KUNDE PRÜFT: …]“ in the text. */
+  kunde_prueft: string[];
   /** Company questions this page raised („Fragen zum Unternehmen“; one answer for all pages). */
   org_questions: ContentOrgQuestionView[];
   /** Updates with their sources and the send-back to GEO; the sources stay in the app, never in an export. */

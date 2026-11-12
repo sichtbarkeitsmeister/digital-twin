@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { markKundePrueftHtml } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { htmlWithHeadingLevels } from "@/lib/dt/content/render";
 
 const SAFE_BLOCK_ID = /^[a-z0-9_-]+$/i;
@@ -23,6 +24,7 @@ function buildSrcDoc(html: string, highlightBlockIds: string[]): string {
     li{margin:4px 0}
     a{color:#2E2E50}
     [data-block-id]{border-left:3px solid transparent;padding:2px 0 2px 14px;margin-left:-17px;border-radius:2px}
+    .kunde-prueft{font-weight:700;color:#2E2E50;background:#FDE047;padding:1px 5px;border-radius:4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
     ${highlights ? `${highlights}{border-left-color:#F97316;background:rgba(249,115,22,.06)}` : ""}
   `;
   return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><base target="_blank"><style>${css}</style></head><body>${html}</body></html>`;
@@ -35,14 +37,22 @@ export function DtContentTextFrame(props: {
   highlightBlockIds?: string[];
   /** „[H2] …“ in front of every heading (the Texte page window); display only. */
   showHeadingLevels?: boolean;
+  /** Questions the customer is checking: their placeholders show as a bold, marked „[KUNDE PRÜFT: …]“. */
+  kundePrueft?: readonly string[];
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(480);
   const highlightKey = (props.highlightBlockIds ?? []).join("|");
+  const pendingKey = (props.kundePrueft ?? []).join("\n");
   const srcDoc = useMemo(
     () =>
-      buildSrcDoc(props.showHeadingLevels ? htmlWithHeadingLevels(props.html) : props.html, highlightKey ? highlightKey.split("|") : []),
-    [props.html, highlightKey, props.showHeadingLevels],
+      buildSrcDoc(
+        markKundePrueftHtml(props.showHeadingLevels ? htmlWithHeadingLevels(props.html) : props.html, pendingKey ? pendingKey.split("\n") : [], {
+          className: "kunde-prueft",
+        }),
+        highlightKey ? highlightKey.split("|") : [],
+      ),
+    [props.html, highlightKey, props.showHeadingLevels, pendingKey],
   );
 
   const measure = useCallback(() => {
