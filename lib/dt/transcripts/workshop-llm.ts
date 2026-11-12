@@ -17,14 +17,14 @@ import {
   type WorkshopToolCall,
 } from "@/lib/dt/transcripts/avatar-plan-llm";
 import {
-  ANBIETER_POINTS,
-  type AnbieterItem,
-  type WorkshopSource,
-  buildCorpusPrompt,
-  describeAnbieterStand,
-  formatRevisionBlock,
-  normalizeAnbieterItems,
-} from "@/lib/dt/transcripts/workshop-model";
+  evaluateAnbieterCorpusWith,
+  extractPendingStatements,
+  prepareAnbieterGuard,
+  type EvaluateAnbieterInput,
+  type EvaluateAnbieterResult,
+  type ExtractStatementsInput,
+  type ExtractStatementsResult,
+} from "@/lib/dt/transcripts/anbieter-eval";
 
 export type { WorkshopToolCall };
 
@@ -35,13 +35,7 @@ export function workshopFailureMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-const CORPUS_RULES = `Du liest ALLE Gespräche als einen Bestand, in der Reihenfolge von alt nach neu.
-Eine einzelne Stelle ist kein Ergebnis. Das Ergebnis ist, was über alle Gespräche hinweg als Letztes gilt.
-Wird derselbe Punkt später schärfer oder anders gesagt, gilt nur die spätere Aussage.
-Die frühere Aussage kommt ins Feld earlier, die geltende ins Feld current.
-Verschiedene Themen ergänzen sich. Nichts erfinden. Was nicht gesagt wurde, bleibt leer.
-Jede konkrete Angabe bleibt erhalten: Namen, Zahlen, Preise, Leistungen, Ausnahmen, Abläufe, Zitate.
-Nichts kürzen, nichts weglassen, weil es nebensächlich wirkt. Nichts abschneiden.`;
+const CALL_TIMEOUT_MS = 270_000;
 
 const callTool: WorkshopToolCall = async (input) => {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
@@ -51,7 +45,7 @@ const callTool: WorkshopToolCall = async (input) => {
     anthropic,
     models: resolveSurveyActionModels(),
     maxTokens: input.maxTokens ?? 16_384,
-    timeoutMs: 270_000,
+    timeoutMs: Math.min(CALL_TIMEOUT_MS, Math.max(1_000, input.timeoutMs ?? CALL_TIMEOUT_MS)),
     stream: true,
     system: input.system,
     tools: [input.tool],
@@ -61,6 +55,9 @@ const callTool: WorkshopToolCall = async (input) => {
   if (!result) throw new Error("Kein verfügbares Modell.");
   const usage = sumAnthropicUsage(result.response.usage);
   const json = extractToolUseInput(result.response, input.tool.name);
+  console.info(
+    `[workshop] ${input.tool.name}: model=${result.model} stop_reason=${result.response.stop_reason} output_tokens=${usage.outputTokens} max_tokens=${input.maxTokens ?? 16_384}`,
+  );
   if (!json) throw new Error("Die KI-Antwort war unvollständig.");
   if (result.response.stop_reason === "max_tokens") {
     throw new Error(
@@ -102,85 +99,20 @@ export async function summarizeTranscript(input: {
   return { summary, usage, model };
 }
 
-function anbieterPayloadHint(value: unknown): string {
-  if (Array.isArray(value)) return `Liste mit ${value.length} Einträgen`;
-  if (!value || typeof value !== "object") return typeof value;
-  const keys = Object.keys(value as Record<string, unknown>);
-  return keys.length > 0 ? `Felder: ${keys.slice(0, 8).join(", ")}` : "leeres Objekt";
+export function evaluateAnbieterCorpus(input: Omit<EvaluateAnbieterInput, "call">): Promise<EvaluateAnbieterResult> {
+  return evaluateAnbieterCorpusWith({ ...input, call: callTool });
 }
 
-export async function evaluateAnbieterCorpus(input: {
-  organisationName: string;
-  sources: WorkshopSource[];
-  instruction?: string;
-  currentItems?: AnbieterItem[];
-}): Promise<{ items: AnbieterItem[]; usage: { inputTokens: number; outputTokens: number }; model: string | null }> {
-  const pointProperties = Object.fromEntries(
-    ANBIETER_POINTS.map((point) => [
-      point.key,
-      {
-        type: "string",
-        description:
-          point.key === "ablauf"
-            ? "Ablauf & Mitwirkung. Weg vom ersten Kontakt bis zum spürbaren Ergebnis: Schritte, genannte Dauern, was der Kunde tun muss. Eine zugesagte Nachlieferung bleibt als offener Punkt stehen. Leer nur, wenn der Ablauf nicht beschrieben wurde."
-            : `${point.label}. Alle belegten Fakten im Wortlaut der Gespräche, nichts kürzen. Leer nur, wenn niemand dazu etwas gesagt hat.`,
-      },
-    ]),
-  );
-  const tool: Anthropic.Tool = {
-    name: "submit_anbieter",
-    description: "Aktueller Anbieterstand aus allen Gesprächen. Ein Textfeld pro Checklistenpunkt.",
-    input_schema: {
-      type: "object",
-      properties: pointProperties,
-      required: ANBIETER_POINTS.map((point) => point.key),
-    },
-  };
-  const revision = formatRevisionBlock(
-    input.instruction ?? "",
-    describeAnbieterStand(input.currentItems ?? []),
-  );
-  const user = [
-    `Organisation: ${input.organisationName}`,
-    "",
-    buildCorpusPrompt(input.sources),
-    revision ? `\n${revision}` : "",
-  ].join("\n");
-  const system = `${CORPUS_RULES}
+/** One round of stage 1 of the Anbieter evaluation; see `extractPendingStatements`. */
+export function extractAnbieterStatements(input: Omit<ExtractStatementsInput, "call">): Promise<ExtractStatementsResult> {
+  return extractPendingStatements({ ...input, call: callTool });
+}
 
-Du füllst die Anbieter-Checkliste direkt in die Felder ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
-Jedes Feld enthält alle belegten Fakten dieses Punkts, nicht nur eine Kurzfassung.
-Was niemand gesagt hat, bleibt ein leerer String. Erfundene Fakten sind verboten.
-Eine Angabe, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.
-${revision ? "Liegt eine Anweisung bei, setzt du sie an den genannten Punkten um. Eine fehlerhafte Transkription verliert gegen diese Anweisung." : ""}`;
-  const first = await callTool({ system, user, tool, maxTokens: 32_000 });
-  let items = normalizeAnbieterItems(first.json);
-  let usage = first.usage;
-  let model = first.model;
-  let lastPayload: unknown = first.json;
-  if (!items.some((item) => item.current.trim())) {
-    const second = await callTool({
-      system: `Lies die Gespräche vollständig. Schreibe für jeden dieser Schlüssel den kompletten belegten Text: ${ANBIETER_POINTS.map((point) => point.key).join(", ")}.
-Nichts kürzen. Nicht erfinden. Unbelegte Schlüssel bleiben "".`,
-      user,
-      tool,
-      maxTokens: 32_000,
-    });
-    lastPayload = second.json;
-    const secondItems = normalizeAnbieterItems(second.json);
-    if (secondItems.some((item) => item.current.trim())) items = secondItems;
-    usage = {
-      inputTokens: usage.inputTokens + second.usage.inputTokens,
-      outputTokens: usage.outputTokens + second.usage.outputTokens,
-    };
-    model = second.model ?? model;
-  }
-  if (!items.some((item) => item.current.trim())) {
-    throw new Error(
-      `Die KI-Antwort enthielt keine auswertbaren Anbieter-Punkte (${anbieterPayloadHint(lastPayload)}). Bitte erneut auswerten.`,
-    );
-  }
-  return { items, usage, model };
+/** The guard rails for the coming run; see `prepareAnbieterGuard`. */
+export function prepareAnbieterGuardrails(
+  input: Omit<Parameters<typeof prepareAnbieterGuard>[0], "call">,
+): ReturnType<typeof prepareAnbieterGuard> {
+  return prepareAnbieterGuard({ ...input, call: callTool });
 }
 
 export function proposeAvatarPlan(input: Omit<ProposeAvatarPlanInput, "call">): Promise<ProposeAvatarPlanResult> {

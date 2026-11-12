@@ -106,6 +106,7 @@ import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { loadPageTextUpload } from "@/lib/dt/content/text-uploads";
 import { uploadBlocksToMarkdown } from "@/lib/dt/content/upload-match";
 import { loadCrawledPageInput } from "@/lib/dt/text-tools/crawl-source";
+import { anbieterLeitplankenSection } from "@/lib/dt/transcripts/anbieter-markdown";
 import type { WorkshopSectionStatus, WorkshopSource } from "@/lib/dt/transcripts/workshop-model";
 import { loadWorkshopState } from "@/lib/dt/transcripts/workshop-store";
 
@@ -544,6 +545,13 @@ export async function runPageFactsPart(input: {
     const state = await loadWorkshopState(service, page.organisation_id);
     sources = state.sources;
     evaluation = state.anbieter.items.map((item) => ({ label: item.label, current: item.current }));
+    // Internal notes and unresolved contradictions: the Faktenauszug reads the conversations
+    // themselves, so it must know what it may not take from them.
+    const leitplanken = anbieterLeitplankenSection({
+      items: state.anbieter.items,
+      guardrails: (state.anbieter.review?.guardrails ?? []).map((guardrail) => guardrail.rule),
+    });
+    if (leitplanken) evaluation.push(leitplanken);
     status = state.anbieter.status;
   } catch (error) {
     loadError = `Die Gespräche konnten nicht gelesen werden: ${error instanceof Error ? error.message : String(error)}`;

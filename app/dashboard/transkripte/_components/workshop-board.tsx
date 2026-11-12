@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { downloadMarkdown } from "@/app/dashboard/transkripte/_components/download-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CenteredModal } from "@/components/ui/centered-modal";
 import {
   Card,
   CardContent,
@@ -47,6 +48,17 @@ type AnbieterItem = {
   current: string;
   earlier: string | null;
   sources: string;
+  conflicts?: {
+    topic: string;
+    claims: {
+      text: string;
+      source: string;
+      date: string | null;
+      dateOrigin?: "gespraech" | "dokument" | "dateiname" | "upload";
+      newest: boolean;
+      ids: string[];
+    }[];
+  }[];
 };
 
 type AnbieterState = {
@@ -56,7 +68,49 @@ type AnbieterState = {
   revisionNote: string;
   items: AnbieterItem[];
   savedAt: string | null;
+  openWithSource?: { key: string; label: string; sources: string[] }[];
+  review?: AnbieterReview | null;
+  sync?: { added: string[]; changed: string[]; removed: number };
 };
+
+type AnbieterMode = "full" | "merge" | "remove";
+
+type AnbieterReview = {
+  statementCount: number;
+  sourceCount: number;
+  unassigned: { id: string; text: string; source: string }[];
+  unassignedCount: number;
+  missingFacts: { kind: string; value: string; sources: string[]; context: string }[];
+  internal?: { id: string; text: string; source: string; blocked?: boolean }[];
+  internalConflicts?: NonNullable<AnbieterItem["conflicts"]>;
+  customerIds?: string[];
+  guardrails?: { rule: string; ids: string[] }[];
+  lostInRevision: { id: string | null; text: string; source: string; point: string }[];
+};
+
+const FACT_LABEL: Record<string, string> = {
+  euro: "Euro-Betrag",
+  prozent: "Prozentangabe",
+  datum: "Datum",
+  jahr: "Jahreszahl",
+  zahl: "Zahl",
+  url: "URL",
+  email: "E-Mail-Adresse",
+  telefon: "Telefonnummer",
+  name: "Eigenname",
+};
+
+const DATE_ORIGIN_NOTE: Record<string, string> = {
+  gespraech: "Gesprächsdatum",
+  dokument: "Stand laut Dokument",
+  dateiname: "Datum aus dem Dateinamen",
+  upload: "Upload-Datum, im Dokument steht keins",
+};
+
+function formatIsoDate(iso: string | null): string {
+  const [year, month, day] = (iso ?? "").split("-");
+  return year && month && day ? `${day}.${month}.${year}` : "";
+}
 
 type AvatarCase = {
   service: string;
@@ -190,6 +244,12 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const [anbieterError, setAnbieterError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [anbieterNote, setAnbieterNote] = useState("");
+  /** Progress line of a running Anbieter evaluation. */
+  const [anbieterStep, setAnbieterStep] = useState<string | null>(null);
+  /** Open missing facts or contradictions: approving asks once more. */
+  const [confirmApprove, setConfirmApprove] = useState(false);
+  /** A source was deleted: ask what happens to its content in the stand. */
+  const [askRemoved, setAskRemoved] = useState(false);
   const [avatarNote, setAvatarNote] = useState("");
   /** Empty = KI wählt die Anzahl; eine Zahl ist Override. */
   const [countText, setCountText] = useState("");
@@ -229,6 +289,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
       }
       setSources(json.sources ?? []);
       setAnbieter(json.anbieter);
+      setAskRemoved((json.anbieter.sync?.removed ?? 0) > 0);
       applyPlan(json.avatarPlan);
       setAnbieterNote(json.anbieter.revisionNote ?? "");
       setAvatarNote(json.avatarPlan.revisionNote ?? "");
@@ -265,7 +326,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     { ok: true; json: T } | { ok: false; message: string; json: Record<string, unknown> | null }
   > {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 280_000);
+    const timer = setTimeout(() => controller.abort(), 295_000);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -296,14 +357,81 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     }
   }
 
-  async function postAnbieter(action: "evaluate" | "approve", instruction?: string) {
+  async function postAnbieter(
+    action: "evaluate" | "approve" | "keep-removed",
+    instruction?: string,
+    mode: AnbieterMode = "full",
+  ) {
     const revising = action === "evaluate" && Boolean(instruction?.trim());
-    setBusy(action === "approve" ? "anbieter-approve" : revising ? "anbieter-revise" : "anbieter-evaluate");
+    setBusy(
+      action === "approve"
+        ? "anbieter-approve"
+        : action === "keep-removed"
+          ? "anbieter-keep"
+          : revising
+            ? "anbieter-revise"
+            : mode === "full"
+              ? "anbieter-evaluate"
+              : `anbieter-${mode}`,
+    );
     setAnbieterError(null);
+    setAnbieterStep(null);
     try {
+      if (action === "evaluate") {
+        // Stage 1: statements out of every source, a few pieces per request, until none is left.
+        let lastPending = Number.POSITIVE_INFINITY;
+        let stalled = 0;
+        for (;;) {
+          setAnbieterStep((step) => step ?? "Schritt 1 von 2: Aussagen aus den Quellen ziehen…");
+          const round = await postJson<{ pending?: number; total?: number; read?: number; done?: boolean }>(
+            "/api/dt/workshop/anbieter",
+            {
+              organisationId: props.organisationId,
+              action: "extract",
+              ...(mode !== "full" ? { mode } : {}),
+              ...(instruction?.trim() ? { instruction: instruction.trim() } : {}),
+            },
+          );
+          if (!round.ok) {
+            setAnbieterError(round.message);
+            toast.error(round.message);
+            return;
+          }
+          const pending = round.json.pending ?? 0;
+          if (round.json.done) break;
+          if (pending === 0) {
+            // All sources are read; the next request turns the internal notes into guard rails.
+            setAnbieterStep("Schritt 1 von 2: Interne Hinweise in Leitplanken fassen…");
+            stalled += 1;
+            if (stalled >= 4) break;
+            continue;
+          }
+          stalled = pending < lastPending ? 0 : stalled + 1;
+          lastPending = pending;
+          if (stalled >= 2) {
+            const message = "Aus einem Teil der Quellen ließen sich keine Aussagen ziehen. Bitte erneut auswerten.";
+            setAnbieterError(message);
+            toast.error(message);
+            return;
+          }
+          setAnbieterStep(
+            `Schritt 1 von 2: Aussagen aus den Quellen ziehen… ${round.json.read ?? 0} von ${round.json.total ?? 0} Abschnitten gelesen.`,
+          );
+        }
+        setAnbieterStep(
+          revising
+            ? "Schritt 2 von 2: Änderung einarbeiten und gegen den vorherigen Stand prüfen…"
+            : mode === "merge"
+              ? "Schritt 2 von 2: Neue Aussagen in die bestehenden Punkte einarbeiten…"
+              : mode === "remove"
+                ? "Schritt 2 von 2: Inhalte der gelöschten Quelle aus den Punkten nehmen…"
+                : "Schritt 2 von 2: Aussagen den Punkten zuordnen und Abdeckung prüfen…",
+        );
+      }
       const result = await postJson<{ anbieter?: AnbieterState }>("/api/dt/workshop/anbieter", {
         organisationId: props.organisationId,
         action,
+        ...(action === "evaluate" && mode !== "full" ? { mode } : {}),
         ...(instruction?.trim() ? { instruction: instruction.trim() } : {}),
       });
       if (!result.ok) {
@@ -326,14 +454,22 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
       }
       setAnbieter(result.json.anbieter);
       if (revising) setAnbieterNote(result.json.anbieter.revisionNote ?? "");
+      setAskRemoved(false);
       toast.success(
-        revising
+        action === "keep-removed"
+          ? "Die Inhalte bleiben im Anbieterwissen stehen."
+          : mode === "merge"
+            ? "Die neue Quelle ist eingearbeitet. Bitte prüfen und freigeben."
+            : mode === "remove"
+              ? "Die Inhalte der gelöschten Quelle sind entfernt. Bitte prüfen und freigeben."
+              : revising
           ? "Die Änderung ist eingearbeitet. Bitte prüfen und freigeben."
           : action === "evaluate"
             ? "Anbieterstand liegt vor. Bitte prüfen und freigeben."
             : "Freigegeben. Der SEO-Berater hat den aktuellen Stand.",
       );
     } finally {
+      setAnbieterStep(null);
       setBusy(null);
     }
   }
@@ -500,6 +636,28 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const planEditable = avatarPlan?.status === "proposed";
   // The saved points stay visible in every status, also when the Bestand changed since.
   const anbieterHasPoints = anbieterHasSavedPoints(anbieter?.items ?? []);
+  // Empty points for which a source has a filled section under this very heading.
+  const anbieterReview = anbieter?.review ?? null;
+  const anbieterConflictCount = (anbieter?.items ?? []).reduce(
+    (sum, item) => sum + (item.conflicts?.length ?? 0),
+    0,
+  );
+  const anbieterSync = anbieter?.sync ?? { added: [], changed: [], removed: 0 };
+  // Working in a new source needs a checked stand, and no source may have changed meanwhile.
+  const anbieterCanMerge =
+    anbieter?.status === "stale" &&
+    Boolean(anbieterReview) &&
+    anbieterSync.added.length > 0 &&
+    anbieterSync.changed.length === 0;
+  const anbieterInternal = anbieterReview?.internal ?? [];
+  const anbieterGuardrails = anbieterReview?.guardrails ?? [];
+  const anbieterGuardedIds = new Set(anbieterGuardrails.flatMap((guardrail) => guardrail.ids));
+  const anbieterInternalUncovered = anbieterInternal.filter((s) => !s.blocked && !anbieterGuardedIds.has(s.id)).length;
+  const anbieterInternalConflicts = anbieterReview?.internalConflicts ?? [];
+  const anbieterCustomerCount = anbieterReview?.customerIds?.length ?? 0;
+  const anbieterMissingCount = anbieterReview?.missingFacts.length ?? 0;
+  const anbieterNeedsConfirm = anbieterMissingCount > 0 || anbieterConflictCount > 0;
+  const anbieterLost = new Map((anbieter?.openWithSource ?? []).map((point) => [point.key, point]));
   const missingSummaries = sources
     .map((source, index) => ({ id: source.id, label: sourceLabel(source, index), hasSummary: source.hasSummary }))
     .filter((source) => !source.hasSummary);
@@ -517,6 +675,92 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
 
   return (
     <div className="grid gap-6">
+      <CenteredModal
+        open={askRemoved && busy == null && anbieterSync.removed > 0}
+        onClose={() => setAskRemoved(false)}
+        title="Quelle gelöscht"
+        description="Inhalte dieser Quelle aus dem Anbieterwissen entfernen oder stehen lassen?"
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setAskRemoved(false)}>
+              Später entscheiden
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setAskRemoved(false);
+                void postAnbieter("keep-removed");
+              }}
+            >
+              Stehen lassen
+            </Button>
+            <Button
+              type="button"
+              className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+              onClick={() => {
+                setAskRemoved(false);
+                void postAnbieter("evaluate", undefined, "remove");
+              }}
+            >
+              Inhalte entfernen
+            </Button>
+          </div>
+        }
+      >
+        <ul className="list-disc pl-5 text-sm text-primary">
+          <li>
+            <strong>Inhalte entfernen:</strong> Die Punkte, in denen Aussagen dieser Quelle stehen,
+            werden aus den übrigen Quellen neu geschrieben. Alle anderen Punkte bleiben wörtlich. Danach
+            ist eine neue Freigabe nötig.
+          </li>
+          <li>
+            <strong>Stehen lassen:</strong> Das Anbieterwissen bleibt Wort für Wort, wie es ist, und
+            behält seine Freigabe.
+          </li>
+        </ul>
+      </CenteredModal>
+      <CenteredModal
+        open={confirmApprove}
+        onClose={() => setConfirmApprove(false)}
+        title="Trotzdem freigeben?"
+        description="Die Kontrolle gegen den Bestand hat offene Punkte gefunden."
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setConfirmApprove(false)}>
+              Zurück und prüfen
+            </Button>
+            <Button
+              type="button"
+              className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+              onClick={() => {
+                setConfirmApprove(false);
+                void postAnbieter("approve");
+              }}
+            >
+              Trotzdem freigeben
+            </Button>
+          </div>
+        }
+      >
+        <ul className="list-disc pl-5 text-sm text-primary">
+          {anbieterMissingCount > 0 ? (
+            <li>
+              {anbieterMissingCount === 1
+                ? "1 Fakt aus dem Bestand fehlt im Ergebnis."
+                : `${anbieterMissingCount} Fakten aus dem Bestand fehlen im Ergebnis.`}
+            </li>
+          ) : null}
+          {anbieterConflictCount > 0 ? (
+            <li>
+              {anbieterConflictCount === 1
+                ? "1 Widerspruch ist ungeklärt."
+                : `${anbieterConflictCount} Widersprüche sind ungeklärt.`}{" "}
+              Der SEO-Berater bekommt dazu nur „nicht verwenden, bis geklärt“.
+            </li>
+          ) : null}
+        </ul>
+      </CenteredModal>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Bestand</CardTitle>
@@ -575,6 +819,17 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="flex flex-wrap gap-2">
+            {anbieterCanMerge ? (
+              <Button
+                type="button"
+                className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+                disabled={loading || busy != null}
+                onClick={() => void postAnbieter("evaluate", undefined, "merge")}
+              >
+                {busy === "anbieter-merge" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                {busy === "anbieter-merge" ? "Arbeitet ein…" : "Nur einarbeiten"}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
@@ -586,9 +841,11 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               ) : null}
               {busy === "anbieter-evaluate"
                 ? "Wertet aus…"
-                : anbieter && anbieter.status !== "empty"
-                  ? "Bestand neu auswerten"
-                  : "Bestand auswerten"}
+                : anbieterCanMerge
+                  ? "Komplett neu auswerten"
+                  : anbieter && anbieter.status !== "empty"
+                    ? "Bestand neu auswerten"
+                    : "Bestand auswerten"}
             </Button>
             <Button
               type="button"
@@ -606,7 +863,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                 type="button"
                 className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
                 disabled={busy != null}
-                onClick={() => void postAnbieter("approve")}
+                onClick={() => (anbieterNeedsConfirm ? setConfirmApprove(true) : void postAnbieter("approve"))}
               >
                 {busy === "anbieter-approve" ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -619,12 +876,45 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               </Button>
             ) : null}
           </div>
-          {busy === "anbieter-evaluate" || busy === "anbieter-revise" ? (
+          {anbieterCanMerge && busy == null ? (
+            <p className="text-sm text-primary">
+              Neu im Bestand: {anbieterSync.added.join(", ")}. „Nur einarbeiten“ liest nur diese{" "}
+              {anbieterSync.added.length === 1 ? "Quelle" : "Quellen"} und ergänzt die bestehenden Punkte;
+              der vorhandene Text bleibt wörtlich. „Komplett neu auswerten“ schreibt alle Punkte aus allen
+              Quellen neu.
+            </p>
+          ) : null}
+          {anbieterSync.changed.length > 0 && anbieter?.status === "stale" && busy == null ? (
+            <p className="text-sm text-primary">
+              Geändert wurde: {anbieterSync.changed.join(", ")}. Eine geänderte Quelle lässt sich nicht
+              einarbeiten, nur komplett neu auswerten.
+            </p>
+          ) : null}
+          {anbieterSync.removed > 0 && busy == null ? (
+            <div className="grid gap-2 rounded-xl border border-sbkm-navy/10 px-3 py-3 dark:border-white/10">
+              <p className="text-sm text-primary">
+                {anbieterSync.removed === 1
+                  ? "Eine Quelle wurde gelöscht. Ihre Inhalte stehen noch im Anbieterwissen."
+                  : `${anbieterSync.removed} Quellen wurden gelöscht. Ihre Inhalte stehen noch im Anbieterwissen.`}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => void postAnbieter("evaluate", undefined, "remove")}>
+                  Inhalte entfernen
+                </Button>
+                <Button type="button" variant="outline" onClick={() => void postAnbieter("keep-removed")}>
+                  Stehen lassen
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {busy === "anbieter-evaluate" || busy === "anbieter-revise" || busy === "anbieter-merge" || busy === "anbieter-remove" ? (
             <p className="flex items-center gap-2 text-sm text-primary">
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              {busy === "anbieter-revise"
-                ? "Die Änderung wird in den Anbieterstand eingearbeitet. Die Buttons sind solange gesperrt."
-                : "Die Auswertung läuft. Das kann einige Minuten dauern. Die Buttons sind solange gesperrt."}
+              {anbieterStep ??
+                (busy === "anbieter-revise"
+                  ? "Die Änderung wird in den Anbieterstand eingearbeitet."
+                  : "Die Auswertung läuft.")}{" "}
+              Das kann einige Minuten dauern. Die Buttons sind solange gesperrt.
             </p>
           ) : null}
           <div className="grid gap-1.5">
@@ -632,7 +922,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
             <Textarea
               value={anbieterNote}
               onChange={(event) => setAnbieterNote(event.target.value)}
-              placeholder="Was soll anders werden? Nur diese Punkte werden angepasst, der übrige Bestand bleibt."
+              placeholder="Was soll anders werden? Nenne die Punkte mit Namen, z. B. „Preis & Positionierung“. Nur diese werden neu geschrieben, alle anderen bleiben wörtlich."
               className="min-h-[88px]"
             />
           </div>
@@ -670,6 +960,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                       `${buildCurrentAnbieterMarkdown({
                         organisationName: props.organisationName,
                         items: anbieter.items,
+                        guardrails: (anbieter.review?.guardrails ?? []).map((guardrail) => guardrail.rule),
                       })}\n`,
                     )
                   }
@@ -682,6 +973,192 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               <p className="text-xs text-secondary">{formatSavedAt(anbieter.savedAt)}</p>
             </div>
           ) : null}
+          {anbieter && anbieterHasPoints && anbieterLost.size > 0 ? (
+            <div
+              role="alert"
+              className="grid gap-1 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-3"
+            >
+              <p className="text-sm font-semibold text-destructive">
+                {anbieterLost.size === 1
+                  ? "1 Punkt ist leer, obwohl der Bestand einen Abschnitt dazu hat"
+                  : `${anbieterLost.size} Punkte sind leer, obwohl der Bestand Abschnitte dazu hat`}
+              </p>
+              <ul className="list-disc pl-5 text-sm text-primary">
+                {[...anbieterLost.values()].map((point) => (
+                  <li key={point.key}>
+                    {point.label}: Abschnitt in {point.sources.join(", ")}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm text-primary">
+                Bitte neu auswerten oder die Punkte im Feld „Änderung“ mit ihrem Namen nennen, bevor
+                du freigibst.
+              </p>
+            </div>
+          ) : null}
+          {anbieter && anbieterHasPoints && !anbieterReview ? (
+            <p className="text-sm text-secondary">
+              Dieser Stand stammt aus der Zeit vor der Abdeckungsprüfung. Erst „Bestand neu
+              auswerten“ prüft ihn Aussage für Aussage gegen die Quellen.
+            </p>
+          ) : null}
+          {anbieter && anbieterHasPoints && anbieterReview ? (
+            <div className="grid gap-3 rounded-xl border border-sbkm-navy/10 px-3 py-3 dark:border-white/10">
+              <p className="text-sm font-semibold text-primary">Kontrolle gegen den Bestand</p>
+              <p className="text-sm text-primary">
+                {anbieterReview.statementCount} Aussagen aus {anbieterReview.sourceCount}{" "}
+                {anbieterReview.sourceCount === 1 ? "Quelle" : "Quellen"} ·{" "}
+                {anbieterReview.unassignedCount} nicht zugeordnet · {anbieterReview.missingFacts.length}{" "}
+                fehlende Fakten · {anbieterConflictCount}{" "}
+                {anbieterConflictCount === 1 ? "Widerspruch" : "Widersprüche"} · {anbieterInternal.length}{" "}
+                {anbieterInternal.length === 1 ? "interner Hinweis" : "interne Hinweise"}
+              </p>
+              {anbieterReview.lostInRevision.length > 0 ? (
+                <div role="alert" className="grid gap-1 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2">
+                  <p className="text-sm font-semibold text-destructive">
+                    Durch die letzte Änderung entfallen ({anbieterReview.lostInRevision.length})
+                  </p>
+                  <p className="text-xs text-primary">
+                    Das stand vorher im Anbieterstand und fehlt jetzt, ohne dass die Anweisung es
+                    gestrichen hat.
+                  </p>
+                  <ul className="list-disc pl-5 text-sm text-primary">
+                    {anbieterReview.lostInRevision.map((lost, index) => (
+                      <li key={`${lost.id ?? "fact"}-${index}`}>
+                        {lost.text}
+                        <span className="text-secondary">
+                          {" "}
+                          · aus „{lost.point}“{lost.source ? ` · ${lost.source}` : ""}
+                          {lost.id ? ` · Aussage ${lost.id}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {anbieterReview.missingFacts.length > 0 ? (
+                <details className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2" open>
+                  <summary className="cursor-pointer text-sm font-semibold text-destructive">
+                    Fakten aus dem Bestand, die im Ergebnis fehlen ({anbieterReview.missingFacts.length})
+                  </summary>
+                  <ul className="mt-2 grid gap-1.5 text-sm text-primary">
+                    {anbieterReview.missingFacts.map((fact, index) => (
+                      <li key={`${fact.kind}-${fact.value}-${index}`}>
+                        <span className="font-semibold text-destructive">
+                          {FACT_LABEL[fact.kind] ?? fact.kind}: {fact.value}
+                        </span>
+                        <span className="text-secondary"> · {fact.sources.join("; ")}</span>
+                        {fact.context ? (
+                          <span className="block text-xs text-secondary">{fact.context}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              {anbieterInternal.length > 0 ? (
+                <details className="rounded-lg border border-sbkm-navy/10 px-3 py-2 dark:border-white/10" open>
+                  <summary className="cursor-pointer text-sm font-semibold text-primary">
+                    Interne Hinweise ({anbieterInternal.length})
+                  </summary>
+                  <p className="mt-1 text-xs text-secondary">
+                    Im Bestand als intern oder „nicht verwenden“ gekennzeichnet. Diese Aussagen
+                    stehen in keinem der 13 Punkte. Der SEO-Berater bekommt nur die Leitplanken,
+                    nicht die Hinweise selbst.
+                  </p>
+                  <p className="mt-2 text-xs font-semibold text-primary">Leitplanken für den SEO-Berater</p>
+                  {anbieterGuardrails.length > 0 ? (
+                    <ul className="mt-1 list-disc pl-5 text-sm text-primary">
+                      {anbieterGuardrails.map((guardrail) => (
+                        <li key={guardrail.rule}>{guardrail.rule}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {anbieterInternalUncovered > 0 ? (
+                    <p className="mt-1 text-sm text-destructive">
+                      {anbieterInternalUncovered === 1
+                        ? "1 interner Hinweis hat keine Leitplanke."
+                        : `${anbieterInternalUncovered} interne Hinweise haben keine Leitplanke.`}{" "}
+                      Bitte neu auswerten.
+                    </p>
+                  ) : null}
+                  {anbieterInternalConflicts.length > 0 ? (
+                    <>
+                      <p className="mt-2 text-xs font-semibold text-destructive">
+                        Widersprüche unter den internen Hinweisen ({anbieterInternalConflicts.length})
+                      </p>
+                      <ul className="mt-1 grid gap-1.5 text-sm text-primary">
+                        {anbieterInternalConflicts.map((conflict, index) => (
+                          <li key={index}>
+                            <span className="font-semibold">{conflict.topic || "Widerspruch"}</span>
+                            <ul className="list-disc pl-5">
+                              {conflict.claims.map((claim, claimIndex) => (
+                                <li key={claimIndex}>
+                                  {claim.text}
+                                  <span className="text-secondary"> · {claim.source}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  <p className="mt-2 text-xs font-semibold text-primary">Hinweise im Wortlaut (bleiben intern)</p>
+                  <ul className="mt-1 grid gap-1.5 text-sm text-primary">
+                    {anbieterInternal.map((statement) => (
+                      <li key={statement.id}>
+                        {statement.text}
+                        <span className="text-secondary">
+                          {" "}
+                          · {statement.source} · Aussage {statement.id}
+                          {statement.blocked
+                            ? " · in der Quelle nicht markiert, über eine Leitplanke gesperrt"
+                            : anbieterGuardedIds.has(statement.id)
+                              ? ""
+                              : " · ohne Leitplanke"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              {anbieterCustomerCount > 0 ? (
+                <p className="text-sm text-secondary">
+                  {anbieterCustomerCount} Aussagen beschreiben nur Kunden und Zielgruppen. Sie gehören in
+                  die Avatare, nicht in den Anbieterstand, und zählen nicht als „nicht zugeordnet“.
+                </p>
+              ) : null}
+              {anbieterReview.unassignedCount > 0 ? (
+                <details className="rounded-lg border border-sbkm-navy/10 px-3 py-2 dark:border-white/10">
+                  <summary className="cursor-pointer text-sm font-semibold text-primary">
+                    Nicht zugeordnet ({anbieterReview.unassignedCount})
+                  </summary>
+                  <p className="mt-1 text-xs text-secondary">
+                    Diese Aussagen stehen im Bestand, aber in keinem der 13 Punkte. Sie werden nicht
+                    verworfen. Gehört eine in den Anbieterstand, nenne den Punkt im Feld „Änderung“.
+                  </p>
+                  <ul className="mt-2 grid gap-1.5 text-sm text-primary">
+                    {anbieterReview.unassigned.map((statement) => (
+                      <li key={statement.id}>
+                        {statement.text}
+                        <span className="text-secondary">
+                          {" "}
+                          · {statement.source} · Aussage {statement.id}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {anbieterReview.unassignedCount > anbieterReview.unassigned.length ? (
+                    <p className="mt-2 text-xs text-secondary">
+                      Angezeigt sind die ersten {anbieterReview.unassigned.length} von{" "}
+                      {anbieterReview.unassignedCount}.
+                    </p>
+                  ) : null}
+                </details>
+              ) : null}
+            </div>
+          ) : null}
           {anbieter && anbieterHasPoints ? (
             <ul className="grid gap-3">
               {anbieter.items.map((item) => (
@@ -692,9 +1169,50 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                   <p className="text-sm font-semibold text-primary">{item.label}</p>
                   {item.current ? (
                     <p className="mt-1 whitespace-pre-wrap text-sm text-primary">{item.current}</p>
+                  ) : anbieterLost.has(item.key) ? (
+                    <p className="mt-1 text-sm text-destructive">
+                      Leer, obwohl ein Abschnitt „{item.label}“ im Bestand steht (
+                      {anbieterLost.get(item.key)?.sources.join(", ")}). Die Auswertung hat ihn nicht
+                      übernommen.
+                    </p>
                   ) : (
                     <p className="mt-1 text-sm text-secondary">Offen. Wird nicht erfunden.</p>
                   )}
+                  {(item.conflicts ?? []).map((conflict, index) => (
+                    <div
+                      key={`${item.key}-conflict-${index}`}
+                      className="mt-2 grid gap-1 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2"
+                    >
+                      <p className="text-sm font-semibold text-destructive">
+                        Widerspruch{conflict.topic ? `: ${conflict.topic}` : ""}
+                      </p>
+                      <ul className="grid gap-1 text-sm text-primary">
+                        {conflict.claims.map((claim, claimIndex) => (
+                          <li key={claimIndex}>
+                            {claim.text}
+                            <span className="text-secondary">
+                              {" "}
+                              · {claim.source}
+                              {formatIsoDate(claim.date)
+                                ? ` · ${formatIsoDate(claim.date)}${
+                                    claim.dateOrigin ? ` (${DATE_ORIGIN_NOTE[claim.dateOrigin]})` : ""
+                                  }`
+                                : ""}
+                            </span>
+                            {claim.newest ? (
+                              <span className="ml-1 rounded bg-sbkm-navy/10 px-1.5 py-0.5 text-xs font-semibold text-primary dark:bg-white/10">
+                                neuere Quelle
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-xs text-secondary">
+                        Keine Angabe wurde ausgewählt. Kläre es im Feld „Änderung“ mit dem Namen des
+                        Punkts.
+                      </p>
+                    </div>
+                  ))}
                   {item.earlier ? (
                     <p className="mt-2 text-xs text-secondary">
                       Zuerst: {item.earlier}

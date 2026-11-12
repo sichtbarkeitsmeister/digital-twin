@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureSeoAdvisorAgent } from "@/lib/dt/seo/ensure-seo-agent";
+import { anbieterSyncPlan } from "@/lib/dt/transcripts/anbieter-eval";
 import { mergeMarkedBlock } from "@/lib/dt/transcripts/apply-knowledge";
 import {
   TRANSCRIPT_ANBIETER_END,
@@ -22,6 +23,11 @@ import {
   readAnbieterState,
   readAvatarPlan,
 } from "@/lib/dt/transcripts/workshop-model";
+
+/** What changed in the Bestand since the stand was written; derived, never read from the row. */
+function withSync(anbieter: AnbieterState, sources: WorkshopSource[]): AnbieterState {
+  return { ...anbieter, sync: anbieterSyncPlan(anbieter.review, sources) };
+}
 
 const SOURCE_SELECT =
   "id,title,filename,source_kind,spoken_on,created_at,updated_at,summary,raw_text";
@@ -85,7 +91,7 @@ export async function loadWorkshopState(
   return {
     fingerprint,
     sources,
-    anbieter: data ? readAnbieterState(data.anbieter, fingerprint) : emptyAnbieterState(),
+    anbieter: data ? withSync(readAnbieterState(data.anbieter, fingerprint, sources), sources) : emptyAnbieterState(),
     avatarPlan: data ? readAvatarPlan(data.avatar_plan, fingerprint) : emptyAvatarPlan(),
   };
 }
@@ -185,6 +191,7 @@ export async function syncAnbieterToSeoAdvisor(input: {
   const body = buildCurrentAnbieterMarkdown({
     organisationName: input.organisationName,
     items: input.anbieter.items,
+    guardrails: (input.anbieter.review?.guardrails ?? []).map((guardrail) => guardrail.rule),
   });
   const withCorpus = mergeMarkedBlock(
     seoAgent.prompt_append,
