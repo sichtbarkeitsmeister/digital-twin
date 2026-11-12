@@ -408,17 +408,28 @@ export function DtContentPageDrawer(props: {
     setApplying({ done: 0, total: order.length });
     const failed: string[] = [];
     let changed = false;
+    // Points whose proposal changed at least one Abschnitt; one about several Abschnitte often
+    // finds some of them right already (nothing to change there, no failure).
+    const touched = new Set<string>();
+    const untouched: string[] = [];
     for (const [i, id] of order.entries()) {
       const keys = groups.get(id)!;
-      const res = await contentApi<{ review: ContentReview }>(`${base}/revise/auto`, {
+      const ending = keys.filter((k) => lastOf.get(k) === id && !failedKeys.has(k));
+      const res = await contentApi<{ review: ContentReview; unchanged?: boolean }>(`${base}/revise/auto`, {
         method: "POST",
-        body: { organisationId, block_id: id, finding_keys: keys, done_keys: keys.filter((k) => lastOf.get(k) === id && !failedKeys.has(k)) },
+        body: { organisationId, block_id: id, finding_keys: keys, done_keys: ending, touched_keys: keys.filter((k) => touched.has(k)) },
       });
       if (res.ok) {
         changed = true;
         setReview(res.data.review);
-        const done = keys.filter((k) => lastOf.get(k) === id && !failedKeys.has(k));
+        if (!res.data.unchanged) for (const k of keys) touched.add(k);
+        const done = ending.filter((k) => touched.has(k));
         setChosen((prev) => prev.filter((k) => !done.includes(k)));
+        for (const k of ending) {
+          if (touched.has(k)) continue;
+          const title = findings.find((f) => findingKey(f) === k)?.title;
+          untouched.push(`„${title ?? "Offener Punkt"}“`);
+        }
       } else {
         for (const k of keys) failedKeys.add(k);
         const name = parsed.find((b) => b.id === id)?.heading || id;
@@ -429,8 +440,14 @@ export function DtContentPageDrawer(props: {
     setBusy(null);
     setApplying(null);
     if (changed) onChangedRef.current();
-    if (failed.length === 0) toast.success(order.length === 1 ? "Vorschläge umgesetzt" : `Vorschläge in ${order.length} Abschnitten umgesetzt`);
-    else toast.error(`Nicht umgesetzt (Punkte bleiben offen): ${failed.join(" · ")}`, { duration: 15_000 });
+    if (failed.length === 0 && untouched.length === 0) toast.success(order.length === 1 ? "Vorschläge umgesetzt" : `Vorschläge in ${order.length} Abschnitten umgesetzt`);
+    if (untouched.length > 0) {
+      toast.warning(`Nichts zu ändern gefunden bei ${untouched.join(", ")}`, {
+        description: "Die KI sieht in den betroffenen Abschnitten nichts, was dem Vorschlag widerspricht. Der Punkt bleibt offen: mit „So lassen“ schließen oder über „Eigene Angabe“ genauer sagen, was sich ändern soll.",
+        duration: 15_000,
+      });
+    }
+    if (failed.length > 0) toast.error(`Nicht umgesetzt (Punkte bleiben offen): ${failed.join(" · ")}`, { duration: 15_000 });
   }
 
   /**

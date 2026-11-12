@@ -12,6 +12,7 @@ import { rephraseProtectedTerms } from "@/lib/dt/content/pipeline/rephrase-guard
 import { audienceBudget, audienceBudgetMessage } from "@/lib/dt/content/zielgruppen";
 import { runRephraseOnBlocks } from "@/lib/dt/content/pipeline/rephrase-runner";
 import {
+  REVISION_UNCHANGED_REASON,
   REVISE_MAX_TOKENS,
   REVISE_TOOL,
   REVISE_USAGE_MODE,
@@ -243,11 +244,29 @@ export async function applyProposals(
   service: SupabaseClient,
   page: ContentPageRow,
   steps: ContentStepRow[],
-  input: { block_id: string; finding_keys: string[]; done_keys?: string[] | null },
+  input: { block_id: string; finding_keys: string[]; done_keys?: string[] | null; touched_keys?: string[] | null },
   userId: string | null,
   deps: Parameters<typeof previewRevision>[5] = {},
-): Promise<{ ok: true; cost_eur: number } | Failure> {
+): Promise<{ ok: true; cost_eur: number; unchanged?: boolean } | Failure> {
   const preview = await previewRevision(service, page, steps, input, userId, deps);
+  // A point about several Abschnitte (one spelling everywhere, say) reaches Abschnitte that are
+  // right already: the model changes nothing there. That is no failure. The text stays, and of the
+  // points that end here only those go whose proposal changed an earlier Abschnitt (`touched_keys`).
+  if (!preview.ok && preview.reasons?.length === 1 && preview.reasons[0] === REVISION_UNCHANGED_REASON) {
+    const touched = new Set(input.touched_keys ?? []);
+    const done = (input.done_keys ?? input.finding_keys).filter((key) => input.finding_keys.includes(key) && touched.has(key));
+    if (done.length > 0) {
+      let lists: Pick<ContentPageRow, "findings" | "final_findings" | "unresolved"> = page;
+      for (const key of done) lists = withoutFinding(lists, key) ?? lists;
+      const { error } = await service
+        .from("dt_content_pages")
+        .update({ findings: lists.findings, final_findings: lists.final_findings, unresolved: lists.unresolved })
+        .eq("id", page.id)
+        .neq("state", "laeuft");
+      if (error) return { ok: false, status: 500, message: contentDbErrorMessage(error, "Offener Punkt konnte nicht gespeichert werden"), cost_eur: preview.cost_eur };
+    }
+    return { ok: true, cost_eur: preview.cost_eur ?? 0, unchanged: true };
+  }
   if (!preview.ok) return preview;
   const applied = await applyRevision(service, page, {
     block_id: input.block_id,

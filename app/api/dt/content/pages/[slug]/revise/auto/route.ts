@@ -14,6 +14,8 @@ const bodySchema = z.object({
   finding_keys: z.array(z.string().min(1).max(4_000)).min(1).max(20),
   /** The points that go with this Abschnitt (a point about several goes with its last one). */
   done_keys: z.array(z.string().min(1).max(4_000)).max(20).optional().nullable(),
+  /** The points whose proposal already changed an earlier Abschnitt: they may go here even when this one needs no change. */
+  touched_keys: z.array(z.string().min(1).max(4_000)).max(20).optional().nullable(),
 });
 
 /**
@@ -42,7 +44,7 @@ export async function POST(req: Request, context: { params: Promise<{ slug: stri
       loadContentSteps(gate.service, page.id),
       loadOrgQuestions(gate.service, gate.organisationId),
     ]);
-    return contentOk({ review: buildReview(fresh ?? page, freshSteps, null, { orgQuestions: pool }), cost_eur: result.cost_eur });
+    return contentOk({ review: buildReview(fresh ?? page, freshSteps, null, { orgQuestions: pool }), cost_eur: result.cost_eur, unchanged: result.unchanged === true });
   } catch (error) {
     if (error instanceof ContentLlmError) return contentError(error.message, error.retryable ? 503 : 400);
     return contentError(llmErrorMessage(error), 502);
