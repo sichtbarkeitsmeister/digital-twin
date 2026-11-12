@@ -914,7 +914,7 @@ export function DtContentPageDrawer(props: {
                     </details>
                   </div>
 
-                  <aside className="grid gap-4 lg:sticky lg:top-0">
+                  <aside className="grid min-w-0 gap-4 lg:sticky lg:top-0">
                     <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <h3 className={sectionTitleClass}>
                         Briefing

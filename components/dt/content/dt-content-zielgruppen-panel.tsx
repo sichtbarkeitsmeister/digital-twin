@@ -90,8 +90,8 @@ export function DtContentZielgruppenPanel(props: {
   const own = hasContentZielgruppen(z);
   const off = Boolean(busy) || disabled;
   return (
-    <div className="grid gap-1.5">
-      <div className="flex items-center justify-between gap-2">
+    <div className="grid min-w-0 gap-1.5">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <p className="text-xs font-semibold text-sbkm-navy dark:text-white">Zielgruppen</p>
         {busy === "suggest" ? (
           <span className="inline-flex items-center gap-1 text-[11px] text-sky-700 dark:text-sky-300">
@@ -111,16 +111,17 @@ export function DtContentZielgruppenPanel(props: {
           </span>
         ) : null}
       </div>
-      <ul className="grid gap-1.5">
+      <ul className="grid min-w-0 gap-2">
         {options.map((o) => {
           const level = zielgruppeLevel(z, o.id);
           const reason = level !== "off" ? z.reasons[o.id] : undefined;
           return (
-            <li key={o.id} className="grid gap-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 text-xs text-sbkm-navy dark:text-white/85">
+            <li key={o.id} className="grid min-w-0 gap-1">
+              {/* Name and role wrap; the switch drops below them when the column is narrow. */}
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                <span className="min-w-0 flex-1 basis-40 break-words text-xs text-sbkm-navy dark:text-white/85">
                   <span className="font-semibold">{o.name}</span>
-                  {o.role ? <span className="block truncate text-[11px] text-sbkm-ink-500 dark:text-white/45">{o.role}</span> : null}
+                  {o.role ? <span className="block text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">{o.role}</span> : null}
                 </span>
                 <div className="flex shrink-0 overflow-hidden rounded-pill border border-sbkm-navy/15 dark:border-white/15" role="group" aria-label={`Zielgruppe ${o.name}`}>
                   {LEVELS.map((l) => (
@@ -150,7 +151,7 @@ export function DtContentZielgruppenPanel(props: {
                   ))}
                 </div>
               </div>
-              {reason ? <p className="text-[11px] leading-snug text-sbkm-ink-600 dark:text-white/55">{reason}</p> : null}
+              {reason ? <p className="break-words text-[11px] leading-snug text-sbkm-ink-600 dark:text-white/55">{reason}</p> : null}
             </li>
           );
         })}
