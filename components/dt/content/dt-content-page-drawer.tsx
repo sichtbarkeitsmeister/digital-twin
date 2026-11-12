@@ -403,14 +403,14 @@ export function DtContentPageDrawer(props: {
   }
 
   /**
-   * „KUNDE PRÜFT“: the customer checks the point. A placeholder that is already in the text is
-   * marked at once (no AI, no cost) and the point goes; without one, „Eigene Angabe“ opens with
-   * „KUNDE PRÜFT“ filled in, and the Abschnitt gets its placeholder there.
+   * „KUNDE PRÜFT“: the customer checks the point. One click, no AI, no cost: a placeholder that
+   * is already in the text is marked, otherwise one is set at the end of the point's Abschnitt,
+   * and the point goes.
    */
   async function markKundePrueft(finding: ContentFinding) {
     if (!base) return;
     setBusy("kunde_prueft");
-    const res = await contentApi<{ review: ContentReview; marked: number }>(`${base}/findings/kunde-prueft`, {
+    const res = await contentApi<{ review: ContentReview; marked: number; inserted_in: string | null }>(`${base}/findings/kunde-prueft`, {
       method: "POST",
       body: { organisationId, finding_key: findingKey(finding) },
     });
@@ -419,15 +419,14 @@ export function DtContentPageDrawer(props: {
       toast.error(res.message);
       return;
     }
-    if (res.data.marked === 0) {
-      startRevise(finding, "info", "KUNDE PRÜFT");
-      toast.message("Im Text steht dazu noch kein Platzhalter", {
-        description: "Unten ist „KUNDE PRÜFT“ schon eingetragen: Abschnitt prüfen und überarbeiten lassen, dann setzt die KI den Platzhalter.",
-      });
-      return;
-    }
     setReview(res.data.review);
-    toast.success("Als KUNDE PRÜFT markiert", { description: "Die Stelle steht jetzt fett und gelb markiert im Text und in den Exporten." });
+    setMode(null);
+    setRevisePreview(null);
+    toast.success("Als KUNDE PRÜFT markiert", {
+      description: res.data.inserted_in
+        ? `Der Hinweis steht jetzt fett und gelb markiert im Text: ${res.data.inserted_in === "Ende des Textes" ? "am Ende des Textes" : `am Ende von „${res.data.inserted_in}“`}.`
+        : "Die Stelle steht jetzt fett und gelb markiert im Text und in den Exporten.",
+    });
     onChangedRef.current();
   }
 

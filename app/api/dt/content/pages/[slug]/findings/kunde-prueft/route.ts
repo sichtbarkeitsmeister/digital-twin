@@ -7,7 +7,7 @@ import { buildReview, loadContentPage, loadContentSteps } from "@/lib/dt/content
 
 const bodySchema = z.object({ organisationId: z.string().uuid(), finding_key: z.string().min(1).max(4_000) });
 
-/** „KUNDE PRÜFT“ on an open point: its placeholder in the text is marked as with the customer and the point goes. `marked` 0: no placeholder yet, nothing changed. */
+/** „KUNDE PRÜFT“ on an open point: its placeholder in the text is marked as with the customer and the point goes. Without one in the text yet, it is set at the end of the point's Abschnitt (`inserted_in`). */
 export async function POST(req: Request, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   if (!isValidContentSlug(slug)) return contentError("Ungültige Seite.", 400);
@@ -26,7 +26,7 @@ export async function POST(req: Request, context: { params: Promise<{ slug: stri
       loadContentSteps(gate.service, page.id),
       loadOrgQuestions(gate.service, gate.organisationId),
     ]);
-    return contentOk({ review: buildReview(fresh ?? page, steps, null, { orgQuestions: pool }), marked: result.marked });
+    return contentOk({ review: buildReview(fresh ?? page, steps, null, { orgQuestions: pool }), marked: result.marked, inserted_in: result.inserted_in });
   } catch (error) {
     return contentError(error instanceof Error ? error.message : "Offener Punkt konnte nicht gespeichert werden.", 500);
   }
