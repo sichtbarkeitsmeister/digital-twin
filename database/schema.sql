@@ -440,22 +440,41 @@ $$;
 -- 6) RPCs (SECURITY DEFINER)
 -- =============================
 
--- Transfer ownership (owner or platform admin)
+-- Transfer ownership (owner or platform admin).
+-- remove_previous_owner deletes the old owner from the team.
+-- Pending owner invites are always revoked.
 CREATE OR REPLACE FUNCTION public.transfer_organisation_ownership(
   org_id uuid,
-  new_owner_user_id uuid
+  new_owner_user_id uuid,
+  remove_previous_owner boolean DEFAULT false
 )
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
+SET row_security = off
 AS $$
 DECLARE
   is_admin boolean;
   my_role public.org_role;
+  do_remove boolean := coalesce(remove_previous_owner, false);
+  previous_ids uuid[];
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'not_authenticated';
+  END IF;
+
+  IF new_owner_user_id IS NULL THEN
+    RAISE EXCEPTION 'invalid_user';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.organisations o
+    WHERE o.id = org_id
+      AND o.archived_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'org_not_found';
   END IF;
 
   is_admin := public.is_platform_admin(auth.uid());
@@ -465,25 +484,117 @@ BEGIN
     RAISE EXCEPTION 'forbidden';
   END IF;
 
-  -- ensure new owner is a member
+  previous_ids := ARRAY(
+    SELECT om.user_id
+    FROM public.organisation_members om
+    WHERE om.organisation_id = org_id
+      AND om.org_role = 'owner'
+      AND om.user_id IS DISTINCT FROM new_owner_user_id
+  );
+
   INSERT INTO public.organisation_members (organisation_id, user_id, org_role, created_by_user_id)
-  VALUES (org_id, new_owner_user_id, 'admin', auth.uid())
-  ON CONFLICT (organisation_id, user_id) DO NOTHING;
+  VALUES (org_id, new_owner_user_id, 'owner', auth.uid())
+  ON CONFLICT (organisation_id, user_id) DO UPDATE
+    SET org_role = 'owner';
 
-  -- promote new owner
-  UPDATE public.organisation_members
-  SET org_role = 'owner'
-  WHERE organisation_id = org_id AND user_id = new_owner_user_id;
+  IF do_remove THEN
+    DELETE FROM public.organisation_members
+    WHERE organisation_id = org_id
+      AND user_id = ANY(previous_ids);
+  ELSE
+    UPDATE public.organisation_members
+    SET org_role = 'admin'
+    WHERE organisation_id = org_id
+      AND user_id = ANY(previous_ids);
+  END IF;
 
-  -- demote previous owner to admin (if any)
-  UPDATE public.organisation_members
-  SET org_role = 'admin'
-  WHERE organisation_id = org_id
-    AND org_role = 'owner'
-    AND user_id <> new_owner_user_id;
+  UPDATE public.organisation_invites oi
+  SET
+    status = 'revoked',
+    revoked_at = timezone('utc'::text, now())
+  WHERE oi.organisation_id = org_id
+    AND oi.status = 'pending'
+    AND (
+      oi.org_role = 'owner'
+      OR (
+        do_remove
+        AND lower(oi.email) IN (
+          SELECT lower(p.email)
+          FROM public.profiles p
+          WHERE p.id = ANY(previous_ids)
+            AND p.email IS NOT NULL
+        )
+      )
+    );
 
   UPDATE public.organisations
   SET owner_user_id = new_owner_user_id
+  WHERE id = org_id;
+END;
+$$;
+
+-- Platform admin: drop the current owner (member and pending owner invite).
+CREATE OR REPLACE FUNCTION public.clear_organisation_owner(org_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $$
+DECLARE
+  previous_ids uuid[];
+  recorded_owner uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'not_authenticated';
+  END IF;
+
+  IF NOT public.is_platform_admin(auth.uid()) THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+
+  SELECT o.owner_user_id
+  INTO recorded_owner
+  FROM public.organisations o
+  WHERE o.id = org_id
+    AND o.archived_at IS NULL;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'org_not_found';
+  END IF;
+
+  previous_ids := ARRAY(
+    SELECT om.user_id
+    FROM public.organisation_members om
+    WHERE om.organisation_id = org_id
+      AND (
+        om.org_role = 'owner'
+        OR om.user_id IS NOT DISTINCT FROM recorded_owner
+      )
+  );
+
+  DELETE FROM public.organisation_members
+  WHERE organisation_id = org_id
+    AND user_id = ANY(previous_ids);
+
+  UPDATE public.organisation_invites oi
+  SET
+    status = 'revoked',
+    revoked_at = timezone('utc'::text, now())
+  WHERE oi.organisation_id = org_id
+    AND oi.status = 'pending'
+    AND (
+      oi.org_role = 'owner'
+      OR lower(oi.email) IN (
+        SELECT lower(p.email)
+        FROM public.profiles p
+        WHERE p.id = ANY(previous_ids)
+          AND p.email IS NOT NULL
+      )
+    );
+
+  UPDATE public.organisations
+  SET owner_user_id = NULL
   WHERE id = org_id;
 END;
 $$;

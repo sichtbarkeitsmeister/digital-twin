@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 
+import { ChangeOwnerControls } from "@/app/dashboard/_components/organisations/change-owner-controls";
 import { formatOrgDate } from "@/lib/dashboard/organisation-ui";
 import type {
   PlatformAdminOrgRow,
@@ -110,6 +111,7 @@ export function PlatformAdminOrgHub(props: {
         org.displayName ?? "",
         org.slug ?? "",
         org.ownerEmail ?? "",
+        ...org.pendingEmails,
       ]
         .join(" ")
         .toLowerCase();
@@ -304,6 +306,7 @@ export function PlatformAdminOrgHub(props: {
                           <span className="inline-flex min-w-0 items-center gap-1 truncate">
                             <Crown className="size-3 shrink-0" aria-hidden />
                             {org.ownerEmail}
+                            {org.ownerPending ? " · Einladung offen" : ""}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
@@ -331,6 +334,11 @@ export function PlatformAdminOrgHub(props: {
                   </div>
 
                   <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <ChangeOwnerControls
+                      organisationId={org.id}
+                      currentOwnerEmail={org.ownerEmail}
+                      canRemove
+                    />
                     <Button
                       asChild
                       size="sm"
