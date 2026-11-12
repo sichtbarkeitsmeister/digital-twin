@@ -444,7 +444,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "services_ranked",
         title: "Welche Leistungen oder Angebote werden am häufigsten gebucht oder nachgefragt?",
         description:
-          "Nicht nochmal das Angebot aufzählen. Dieselbe Liste wie oben: nach oben, was am häufigsten nachgefragt wird — nicht, was am liebsten angeboten wird.",
+          "Nicht nochmal das Angebot aufzählen. Dieselbe Liste wie bereits gehabt: nach oben, was am häufigsten nachgefragt wird — nicht, was am liebsten angeboten wird.",
         type: "ranking",
         options: opts("svc_rank", PORTFOLIO_PLACEHOLDERS),
         allowExtraEntries: true,
@@ -472,7 +472,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "response_channels",
         title: "Auf welchem Weg wird meistens reagiert?",
         description:
-          "Auf die neue Anfrage, nicht die Marketing-Kanäle weiter unten. Mehrfach möglich. z. B. erst per Telefon, Bestätigung danach per E-Mail.",
+          "Auf die neue Anfrage, nicht die Kanäle, auf denen ihr selbst sichtbar seid. Mehrfach möglich. z. B. erst per Telefon, Bestätigung danach per E-Mail.",
         type: "checkbox",
         options: opts("resp_ch", RESPONSE_CHANNELS),
         allowOtherOption: true,
@@ -510,7 +510,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Welches Einzugsgebiet gilt – lokal, mit Anfahrt oder bundesweit – und gibt es Ausnahmen?",
         description:
-          "Die Regel, wen ihr annehmt oder wohin ihr fahrt — nicht der Standort oben. z. B. „überwiegend Stadt und Umland; weiter nur nach Absprache.“ Bei reiner Online-Arbeit bitte „bundesweit / online“ eintragen.",
+          "Die Regel, wen ihr annehmt oder wohin ihr fahrt — nicht der Standort. z. B. „überwiegend Stadt und Umland; weiter nur nach Absprache.“ Bei reiner Online-Arbeit bitte „bundesweit / online“ eintragen.",
         type: "text",
       },
     ],
@@ -605,7 +605,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "philosophy_quotes",
         title:
           "Gibt es einen Satz oder eine Aussage der Geschäftsführung, der oder die die eigene Haltung besonders gut auf den Punkt bringt? Bitte wortwörtlich.",
-        description: "Ein Satz, den man in Texten wiederverwenden darf — nicht der USP von oben.",
+        description: "Ein Satz, den man in Texten wiederverwenden darf — nicht der USP.",
         type: "text",
       },
     ],
@@ -675,7 +675,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "why_stay",
         title: "Aus welchem Grund bleiben Kunden langfristig, statt nach einem Auftrag nicht wiederzukommen?",
         description:
-          "Warum jemand wiederkommt oder weiterempfiehlt — nicht der USP und nicht die Wahrnehmung weiter unten.",
+          "Warum jemand wiederkommt oder weiterempfiehlt — nicht der USP und nicht die gewünschte Wahrnehmung.",
         type: "text",
         prefillHint: "why_stay",
       },
@@ -721,7 +721,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "attention_channels",
         title: "Wie wird ein neuer Kunde meistens zuerst auf die Firma aufmerksam? Bitte in eine Reihenfolge bringen.",
         description:
-          "Der erste Kontaktweg. Nicht die Kanäle, auf denen ihr aktiv seid — die kommen weiter unten.",
+          "Der erste Kontaktweg. Nicht die Kanäle, auf denen ihr aktiv seid.",
         type: "ranking",
         options: opts("attn", ATTENTION_CHANNELS),
         allowCustomEntries: true,
@@ -743,7 +743,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wie würde jemand sein Problem in eigenen Worten in die Google-Suche eintippen? (Problembegriffe)",
         description:
-          "Die Worte des Kunden, nicht die Fachbegriffe von oben. So, wie jemand das Problem einem Freund oder nachts in die Suche schreiben würde.",
+          "Die Worte des Kunden, nicht die Fachbegriffe. So, wie jemand das Problem einem Freund oder nachts in die Suche schreiben würde.",
         type: "text_list",
         options: emptySlots("kw_problem", 3),
         allowExtraEntries: true,
@@ -753,7 +753,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         key: "keyword_place",
         title: "Mit welchem Ort oder welcher Region soll die Firma bei Google gefunden werden?",
         description:
-          "Nur der Ort, den Kunden wirklich eingeben — ohne das Angebot von oben. z. B. Stadtteil, Stadt, „Ruhrgebiet“, „NRW“.",
+          "Nur der Ort, den Kunden wirklich eingeben — ohne das Angebot. z. B. Stadtteil, Stadt, „Ruhrgebiet“, „NRW“.",
         type: "text_list",
         options: emptySlots("kw_place", 3),
         allowExtraEntries: true,
@@ -797,7 +797,7 @@ export const ANBIETER_CORE_QUESTIONS: CoreQuestionTemplate[] = [
         title:
           "Wie soll die Firma heute und in Zukunft wahrgenommen werden – was sollen Menschen über sie denken oder sagen?",
         description:
-          "Der Satz, den Menschen über euch sagen sollen. Nicht der praktische USP oben und nicht die Selbstbeschreibung am Ende.",
+          "Der Satz, den Menschen über euch sagen sollen. Nicht der praktische USP und nicht die Selbstbeschreibung.",
         type: "text",
       },
     ],
