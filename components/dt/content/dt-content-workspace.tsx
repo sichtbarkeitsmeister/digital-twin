@@ -224,6 +224,23 @@ export function DtContentWorkspace(props: {
   const selectedCount = selected.size;
 
   /**
+   * „Blättern“ in the page window: through the pages of the table as it is filtered, in its
+   * order. Pages without a text are passed over, unless the open page is one of them itself.
+   */
+  const pager = useMemo(() => {
+    if (!openPage) return undefined;
+    const current = visible.find((p) => p.slug === openPage.slug);
+    const list = current && !current.started ? visible : visible.filter((p) => p.started);
+    const index = list.findIndex((p) => p.slug === openPage.slug);
+    if (index < 0) return undefined;
+    const go = (to: number) => {
+      const next = list[to];
+      return next ? () => setOpenPage({ slug: next.slug, name: next.name }) : undefined;
+    };
+    return { position: index + 1, total: list.length, onPrev: go(index - 1), onNext: go(index + 1) };
+  }, [openPage, visible]);
+
+  /**
    * „Zielgruppen vorschlagen“ / „Zielgruppen festlegen“ for every ticked page, one request per page
    * (a suggestion is a short call each). A confirmed choice stays when only suggesting.
    */
@@ -876,6 +893,7 @@ export function DtContentWorkspace(props: {
         onClose={() => setOpenPage(null)}
         onChanged={() => void loadOverview()}
         zielgruppenOptions={zielgruppenOptions}
+        pager={pager}
       />
     </div>
   );
