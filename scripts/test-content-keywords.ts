@@ -10,7 +10,9 @@ import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ContentBriefingPage } from "../lib/dt/content/excel-structure";
+import { keywordStatus, keywordsCsv } from "../components/dt/content/dt-content-keywords-overview";
 import { parseContentPagePatch } from "../lib/dt/content/page-patch";
+import type { ContentPageSummary } from "../lib/dt/content/types";
 import {
   KEYWORDS_CLASSIFY_SYSTEM,
   applyKeywordRoles,
@@ -28,6 +30,7 @@ import {
   contentKeywordOrigin,
   contentKeywordTodo,
   keywordKey,
+  readKeywordExempt,
   mainKeywordTakenBy,
   normalizeKeywords,
   type ContentOutlinePage,
@@ -128,6 +131,15 @@ function testOrigin() {
   assert.equal(todo({ main: { text: "A" }, secondary: [] }), null, "one keyword: nothing to assign");
   assert.equal(todo({ main: { text: "A" }, secondary: [{ text: "B" }], sorted: true }), null, "assigned: done");
   assert.equal(todo({ main: { text: "A" }, secondary: [{ text: "B" }], source: "manuell" }), null, "by hand: the editor decided");
+  // Kein Suchziel: remembered, so the page is not offered again; a page without text needs none.
+  assert.deepEqual(readKeywordExempt({ none: true, reason: "Reine Kontaktseite." }), { reason: "Reine Kontaktseite." });
+  assert.equal(readKeywordExempt({ main: { text: "A" } }), null);
+  assert.equal(normalizeKeywords({ none: true, reason: "x" }), null, "an exemption is no keyword");
+  assert.equal(contentKeywordOrigin({ keywords: null, main_keyword: null, keywords_exempt: { reason: "x" } }), "ohne");
+  assert.equal(contentKeywordTodo({ keywords: null, main_keyword: null, keywords_exempt: { reason: "x" } }), null);
+  assert.equal(contentKeywordTodo({ keywords: null, main_keyword: null, name: "Datenschutz", level: 1, page_type: "nicht_bearbeiten" }), null, "no text, no keyword");
+  assert.equal(contentKeywordTodo({ keywords: null, main_keyword: null, name: "Akupunktur", level: 1, page_type: "unterseite" }), "suchen");
+  assert.equal(normalizeKeywords({ main: { text: "A" }, secondary: [], reason: " Weil. " })?.reason, "Weil.");
   console.log("origin: Seitenstruktur, suggestion, by hand, none: ok");
 }
 
@@ -200,7 +212,7 @@ async function testSuggest() {
   const roles = stubTool([{ main_keyword: "Akupunktur Köln", secondary_keywords: ["TCM Köln", "erfundenes Keyword"], reason: "Die Seite handelt von Akupunktur." }]);
   const sorted = await suggestContentKeywords(service(), list, null, { ...base, callTool: roles.callTool });
   assert.ok(sorted.ok && !sorted.skipped && sorted.reason === "Die Seite handelt von Akupunktur.");
-  assert.deepEqual(saved.at(-1), { main: "Akupunktur Köln", secondary: ["TCM Köln", "Praxis für Naturheilkunde", "Nadeltherapie"], source: "struktur" }, "nothing invented, nothing lost, the Excel's first keyword is no placeholder any more");
+  assert.deepEqual(saved.at(-1), { main: "Akupunktur Köln", secondary: ["TCM Köln", "Praxis für Naturheilkunde", "Nadeltherapie"], source: "struktur", reason: "Die Seite handelt von Akupunktur." }, "nothing invented, nothing lost, the Excel's first keyword is no placeholder any more");
   assert.match(roles.prompts[0]!, /## Keywords der Seitenstruktur \(zu dieser Seite, Rollen offen\)\n- Praxis für Naturheilkunde \(1900\/Monat\)\n- Akupunktur Köln \(320\/Monat\)/);
   assert.doesNotMatch(roles.prompts[0]!, /gesetzt, nicht ersetzen/, "the placeholder main keyword is not presented as set");
   const forced = await suggestContentKeywords(service(), sortedList, null, { ...base, callTool: roles.callTool, force: true });
@@ -219,7 +231,7 @@ async function testSuggest() {
   const good = stubTool([{ main_keyword: "Akupunktur Köln", secondary_keywords: ["TCM Köln", "Osteopathie Köln", "Akupunktur Behandlung"], reason: "Passt zur Seite." }]);
   const ok = await suggestContentKeywords(service(), pageRow(), null, { ...base, callTool: good.callTool });
   assert.ok(ok.ok && !ok.skipped && ok.keywords?.source === "analyse" && ok.cost_eur > 0);
-  assert.deepEqual(saved.at(-1), { main: "Akupunktur Köln", secondary: ["TCM Köln", "Akupunktur Behandlung"], source: "analyse" });
+  assert.deepEqual(saved.at(-1), { main: "Akupunktur Köln", secondary: ["TCM Köln", "Akupunktur Behandlung"], source: "analyse", reason: "Passt zur Seite." });
 
   // A main keyword another page has: one retry that names it, then the second answer is taken.
   const retry = stubTool([
@@ -239,9 +251,31 @@ async function testSuggest() {
 
   // A page without a search goal gets none.
   const legal = stubTool([{ no_keyword: true, main_keyword: "", secondary_keywords: [], reason: "Impressum ohne Suchziel." }]);
-  const noKeyword = await suggestContentKeywords(service(), pageRow({ slug: "impressum", name: "Impressum" }), null, { ...base, callTool: legal.callTool });
-  assert.ok(!noKeyword.ok && noKeyword.status === 422 && /Kein Keyword vorgeschlagen: Impressum ohne Suchziel\./.test(noKeyword.message));
-  assert.equal(normalizeKeywordsAnswer({ main_keyword: 5 }).no_keyword, true);
+  const marked: Array<{ slug: string; reason: string }> = [];
+  const markNone = (async (_s: unknown, p: ContentPageRow, reason: string) => {
+    marked.push({ slug: p.slug, reason });
+    return { ok: true as const };
+  }) as unknown as NonNullable<Parameters<typeof suggestContentKeywords>[3]>["markNone"];
+  const noKeyword = await suggestContentKeywords(service(), pageRow({ slug: "kontakt", name: "Kontakt", page_type: "unterseite" }), null, { ...base, callTool: legal.callTool, markNone });
+  assert.ok(noKeyword.ok && noKeyword.no_keyword === true && noKeyword.keywords === null && noKeyword.reason === "Impressum ohne Suchziel." && noKeyword.cost_eur > 0);
+  assert.deepEqual(marked, [{ slug: "kontakt", reason: "Impressum ohne Suchziel." }], "remembered with the reason, not a failure");
+  // Remembered: the next click does not call the model again; „Neu vorschlagen“ does.
+  const again = stubTool([]);
+  const exempt = pageRow({ slug: "kontakt", name: "Kontakt", page_type: "unterseite", keywords_exempt: { reason: "Reine Kontaktseite." } });
+  const skippedAgain = await suggestContentKeywords(service(), exempt, null, { ...base, callTool: again.callTool });
+  assert.ok(skippedAgain.ok && skippedAgain.skipped === "kein_suchziel" && skippedAgain.no_keyword === true && again.prompts.length === 0);
+  const forcedAgain = await suggestContentKeywords(service(), exempt, null, { ...base, callTool: stubTool([{ main_keyword: "Kontakt Heilpraktiker Köln", secondary_keywords: [], reason: "r" }]).callTool, force: true });
+  assert.ok(forcedAgain.ok && forcedAgain.keywords?.main.text === "Kontakt Heilpraktiker Köln");
+  // A page that gets no text is not asked at all.
+  const noText = await suggestContentKeywords(service(), pageRow({ slug: "datenschutz", name: "Datenschutz", page_type: "nicht_bearbeiten" }), null, { ...base, callTool: again.callTool });
+  assert.ok(noText.ok && noText.skipped === "kein_text" && again.prompts.length === 0);
+  // An empty answer without „kein Suchziel“ is a failure, not a verdict.
+  const garbage = await suggestContentKeywords(service(), pageRow(), null, { ...base, callTool: stubTool([{ main_keyword: 5 }]).callTool });
+  assert.ok(!garbage.ok && garbage.status === 422 && /kein verwertbares Keyword/.test(garbage.message));
+  assert.equal(normalizeKeywordsAnswer({ main_keyword: 5 }).no_keyword, false);
+  assert.equal(normalizeKeywordsAnswer({ no_keyword: true }).no_keyword, true);
+  // The reason of the suggestion is stored with the keywords.
+  assert.equal((saved.at(-1) as { reason?: string }).reason, "r");
   console.log("suggestion: keeps what is set, retries a taken keyword, never saves a duplicate: ok");
 }
 
@@ -265,6 +299,41 @@ function testRoles() {
   console.log("roles: only the list, nothing lost, taken keywords give way: ok");
 }
 
+function summary(extra: Partial<ContentPageSummary>): ContentPageSummary {
+  return {
+    name: "Akupunktur",
+    slug: "akupunktur",
+    path: "/akupunktur",
+    source_url: null,
+    main_keyword: null,
+    keyword_source: null,
+    keyword_sorted: false,
+    keyword_todo: "suchen",
+    keyword_note: null,
+    secondary_keywords: [],
+    ...extra,
+  } as unknown as ContentPageSummary;
+}
+
+function testOverview() {
+  assert.equal(keywordStatus(summary({})), "fehlt");
+  assert.equal(keywordStatus(summary({ keyword_source: "lauf", main_keyword: "A" })), "lauf", "only a main keyword: Nebenkeywords missing");
+  assert.equal(keywordStatus(summary({ keyword_source: "struktur", keyword_todo: "einteilen" })), "einteilen");
+  assert.equal(keywordStatus(summary({ keyword_source: "analyse", keyword_todo: null })), "analyse");
+  assert.equal(keywordStatus(summary({ keyword_source: "ohne", keyword_todo: null })), "ohne");
+  assert.equal(keywordStatus(summary({ keyword_source: null, keyword_todo: null })), "kein_text");
+  const csv = keywordsCsv([
+    summary({ main_keyword: "Akupunktur Köln", secondary_keywords: ["TCM Köln", "Nadeltherapie"], keyword_source: "analyse", keyword_todo: null, keyword_note: "Passt \"genau\"." }),
+    summary({ name: "Kontakt", path: "/kontakt", keyword_source: "ohne", keyword_todo: null, keyword_note: "Reine Kontaktseite." }),
+  ]);
+  const lines = csv.replace("\uFEFF", "").split("\r\n");
+  assert.ok(csv.startsWith("\uFEFF"), "BOM for German Excel");
+  assert.equal(lines[0], '"Seite";"Pfad";"Hauptkeyword";"Nebenkeywords";"Status";"Herkunft";"Hinweis"');
+  assert.equal(lines[1], '"Akupunktur";"/akupunktur";"Akupunktur Köln";"TCM Köln, Nadeltherapie";"Vorschlag des Zwillings";"Vorschlag des Zwillings";"Passt ""genau""."');
+  assert.equal(lines[2], '"Kontakt";"/kontakt";"";"";"Kein Suchziel";"kein Suchziel, kein Keyword nötig";"Reine Kontaktseite."');
+  console.log("overview: status per page, CSV: ok");
+}
+
 function testPatch() {
   const ok = parseContentPagePatch({ organisationId: ORG, keywords: { main: "Akupunktur Köln", secondary: ["TCM Köln"] } });
   assert.ok(ok.ok && ok.data.keywords?.main === "Akupunktur Köln");
@@ -281,6 +350,7 @@ async function main() {
   testStructureFirst();
   testPrompts();
   testRoles();
+  testOverview();
   await testSuggest();
   testPatch();
   console.log("OK: content keywords tests passed");

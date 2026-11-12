@@ -41,7 +41,14 @@ export type ContentKeywordSource = "analyse" | "manuell";
  * keywords of a page in one cell without saying which one is the main keyword (the first one is
  * only a placeholder); a list from the Excel without `sorted` still waits for that assignment.
  */
-export type ContentPageKeywords = { main: ContentKeyword; secondary: ContentKeyword[]; source?: ContentKeywordSource; sorted?: true };
+export type ContentPageKeywords = {
+  main: ContentKeyword;
+  secondary: ContentKeyword[];
+  source?: ContentKeywordSource;
+  sorted?: true;
+  /** The Zwilling's one-sentence reason for the main keyword (shown in the Keywords-Übersicht). */
+  reason?: string;
+};
 
 /** One page as the Excel briefs it; the store writes it onto `dt_content_pages`. */
 export type ContentBriefingPage = {

@@ -39,6 +39,7 @@ export async function POST(req: Request, context: { params: Promise<{ slug: stri
       cost_eur: result.cost_eur,
       reason: result.reason,
       skipped: result.skipped ?? null,
+      no_keyword: result.no_keyword === true,
     });
   } catch (error) {
     return contentError(error instanceof Error ? error.message : "Keyword-Analyse fehlgeschlagen.", 500);

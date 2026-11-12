@@ -683,7 +683,7 @@ export function DtContentPageDrawer(props: {
   async function analyseKeywords(force: boolean) {
     if (!base) return;
     setBusy("keywords_analyse");
-    const res = await contentApi<{ review: ContentReview; reason: string }>(`${base}/keywords`, {
+    const res = await contentApi<{ review: ContentReview; reason: string; no_keyword?: boolean }>(`${base}/keywords`, {
       method: "POST",
       body: { organisationId, force },
     });
@@ -695,6 +695,10 @@ export function DtContentPageDrawer(props: {
     setReview(res.data.review);
     setKeywordDraft(null);
     onChangedRef.current();
+    if (res.data.no_keyword) {
+      toast.success(res.data.reason ? `Kein Keyword nötig: ${res.data.reason}` : "Kein Keyword nötig: die Seite hat kein Suchziel.", { duration: 10_000 });
+      return;
+    }
     toast.success(res.data.reason ? `Keywords eingetragen. ${res.data.reason}` : "Keywords eingetragen.", { duration: 10_000 });
   }
 
@@ -1244,6 +1248,9 @@ export function DtContentPageDrawer(props: {
                             </span>
                           )}
                         </div>
+                        {review.briefing.keyword_note ? (
+                          <p className="text-[11px] leading-snug text-sbkm-ink-600 dark:text-white/60">{review.briefing.keyword_note}</p>
+                        ) : null}
                         <label htmlFor="content-page-keyword-main" className="text-[11px] text-sbkm-ink-600 dark:text-white/60">
                           Hauptkeyword
                         </label>
@@ -1303,7 +1310,9 @@ export function DtContentPageDrawer(props: {
                                   : "Keywords einteilen"
                                 : review.briefing.keyword_source === "analyse" || review.briefing.keyword_source === "manuell"
                                   ? "Neu vorschlagen"
-                                  : "Keywords analysieren"}
+                                  : review.briefing.keyword_source === "ohne"
+                                    ? "Trotzdem ein Keyword vorschlagen"
+                                    : "Keywords analysieren"}
                             </DtPillButton>
                           ) : null}
                           <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
