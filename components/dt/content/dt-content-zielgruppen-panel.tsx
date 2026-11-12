@@ -15,6 +15,8 @@ import { contentApi } from "@/components/dt/content/content-api";
 import type { ContentPagePatchResult, ContentReview } from "@/lib/dt/content/types";
 import {
   CONTENT_ZIELGRUPPEN_MIGRATION_FILE,
+  contentPrimaryMax,
+  contentZielgruppenRule,
   hasContentZielgruppen,
   withZielgruppeLevel,
   zielgruppeLevel,
@@ -88,6 +90,10 @@ export function DtContentZielgruppenPanel(props: {
   }
 
   const own = hasContentZielgruppen(z);
+  const pageType = review.briefing.page_type;
+  const primaryMax = contentPrimaryMax(pageType);
+  // Stored before a change of Seitentyp: more primary ones than the type allows.
+  const overLimit = primaryMax != null && z.primary.length > primaryMax;
   const off = Boolean(busy) || disabled;
   return (
     <div className="grid min-w-0 gap-1.5">
@@ -132,7 +138,7 @@ export function DtContentZielgruppenPanel(props: {
                       aria-pressed={level === l.level}
                       onClick={() => {
                         if (level === l.level) return;
-                        const next = withZielgruppeLevel(z, o.id, l.level);
+                        const next = withZielgruppeLevel(z, o.id, l.level, primaryMax);
                         void save(next.primary, next.secondary, next.primary.length === 0 ? "Keine primäre Zielgruppe mehr: es gilt die Standard-Zielgruppe." : "Zielgruppen gespeichert – gilt ab dem nächsten Schritt.");
                       }}
                       className={cn(
@@ -170,9 +176,12 @@ export function DtContentZielgruppenPanel(props: {
           {own ? "Neu vorschlagen" : "Vorschlagen lassen"}
         </button>
       </div>
-      <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
-        Primär: höchstens zwei, für sie wird geschrieben. Sekundär: höchstens drei, werden mitbedient. Gilt ab dem nächsten Schritt.
-      </p>
+      {overLimit ? (
+        <p className="text-[11px] leading-snug text-orange-700 dark:text-orange-300">
+          Dieser Seitentyp erlaubt höchstens zwei primäre Zielgruppen: Es gelten die ersten zwei, die übrigen zählen als sekundär.
+        </p>
+      ) : null}
+      <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">{contentZielgruppenRule(pageType)}</p>
     </div>
   );
 }

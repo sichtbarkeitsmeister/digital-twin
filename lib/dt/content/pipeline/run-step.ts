@@ -32,7 +32,7 @@ import {
 } from "@/lib/dt/content/load-sources";
 import { readAktualitaetProgress, type AktualitaetProgress } from "@/lib/dt/content/freshness";
 import { avatarFromAgent } from "@/lib/dt/content/mapping";
-import { EMPTY_CONTENT_ZIELGRUPPEN, hasContentZielgruppen } from "@/lib/dt/content/zielgruppen";
+import { EMPTY_CONTENT_ZIELGRUPPEN, contentPrimaryMax, hasContentZielgruppen, normalizeZielgruppenLists } from "@/lib/dt/content/zielgruppen";
 import { suggestContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-suggest";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
@@ -211,7 +211,9 @@ export async function loadContext(
 
   // Zielgruppen of this page: they replace the Standard-Zielgruppe for every step. Avatars that were
   // deleted or switched off meanwhile drop out; without a primary one left, the standard applies.
-  const zielgruppen = page.zielgruppen ?? EMPTY_CONTENT_ZIELGRUPPEN;
+  // The page type's limit applies here too: after a change of type, primary ones over it count as secondary.
+  const stored = page.zielgruppen ?? EMPTY_CONTENT_ZIELGRUPPEN;
+  const zielgruppen = { ...stored, ...normalizeZielgruppenLists(stored.primary, stored.secondary, undefined, contentPrimaryMax(page.page_type)) };
   let audience: ContentPipelineContext["audience"] = null;
   if (hasContentZielgruppen(zielgruppen)) {
     const rows = await loadContentZielgruppenAvatars(service, page.organisation_id);

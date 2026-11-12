@@ -8,9 +8,19 @@ import assert from "node:assert/strict";
 
 import type { ContentAvatarRow } from "../lib/dt/content/load-sources";
 import type { callContentTool } from "../lib/dt/content/pipeline/llm";
-import { analyseAudienceRule, avatarBlock, MAX_SECONDARY_AVATAR_CHARS, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
+import {
+  analyseAudienceRule,
+  audienceCharShares,
+  avatarBlock,
+  MAX_SECONDARY_AVATAR_CHARS,
+  shareCharBudget,
+  type ContentPipelineContext,
+} from "../lib/dt/content/pipeline/prompts";
+
+const MAX_AVATAR_CHARS_FOR_TEST = 20_000;
 import {
   ZIELGRUPPEN_SUGGEST_SYSTEM,
+  zielgruppenSuggestSystem,
   normalizeZielgruppenAnswer,
   saveContentZielgruppen,
   suggestContentZielgruppen,
@@ -19,6 +29,9 @@ import {
 import { loadContentPage, type ContentPageRow } from "../lib/dt/content/store";
 import {
   EMPTY_CONTENT_ZIELGRUPPEN,
+  contentPrimaryMax,
+  contentZielgruppenRule,
+  normalizeZielgruppenLists,
   readContentZielgruppen,
   withZielgruppeLevel,
   zielgruppeLevel,
@@ -31,7 +44,8 @@ function testModel() {
   const empty = readContentZielgruppen(undefined);
   assert.deepEqual(empty, EMPTY_CONTENT_ZIELGRUPPEN);
   const read = readContentZielgruppen({ primary: ["a", "a", "b", "c"], secondary: ["a", "d", "e", "f", "g"], status: "bestaetigt", reasons: { a: " weil " } });
-  assert.deepEqual([read.primary, read.secondary, read.status, read.reasons], [["a", "b"], ["d", "e", "f"], "bestaetigt", { a: "weil" }], "limits: 2 primary, 3 secondary, no avatar twice");
+  // Read as stored (12.11.: the page type's limit is applied when saving and in the run).
+  assert.deepEqual([read.primary, read.secondary, read.status, read.reasons], [["a", "b", "c"], ["d", "e", "f"], "bestaetigt", { a: "weil" }], "no avatar twice, 3 secondary");
   let z = { primary: ["a"], secondary: [] as string[] };
   z = withZielgruppeLevel(z, "b", "primary");
   assert.deepEqual(z, { primary: ["a", "b"], secondary: [] });
@@ -41,6 +55,18 @@ function testModel() {
   assert.deepEqual(z, { primary: ["b", "c"], secondary: [] });
   assert.equal(zielgruppeLevel(z, "c"), "primary");
   assert.equal(zielgruppeLevel(z, "x"), "off");
+
+  // Limits by page type: Startseite, Hauptsilo-Seite, Ratgeber none; all others two.
+  for (const type of ["startseite", "hauptsilo", "ratgeber"]) assert.equal(contentPrimaryMax(type), null, type);
+  for (const type of ["unterseite", "hauptseite", "standort", "ueber_uns", null]) assert.equal(contentPrimaryMax(type), 2, String(type));
+  assert.match(contentZielgruppenRule("startseite"), /^Primär: keine Obergrenze bei diesem Seitentyp/);
+  assert.match(contentZielgruppenRule("unterseite"), /^Primär: höchstens zwei bei diesem Seitentyp/);
+  const five = ["a", "b", "c", "d", "e"];
+  assert.deepEqual(normalizeZielgruppenLists(five, [], undefined, null), { primary: five, secondary: [] }, "no limit");
+  assert.deepEqual(normalizeZielgruppenLists(five, ["x"], undefined, 2), { primary: ["a", "b"], secondary: ["c", "d", "e"] }, "over the limit: secondary, in order");
+  let wide = { primary: ["a", "b"], secondary: [] as string[] };
+  wide = withZielgruppeLevel(wide, "c", "primary", null);
+  assert.deepEqual(wide.primary, ["a", "b", "c"], "a third primary on a Startseite");
   console.log("model: ok");
 }
 
@@ -53,7 +79,7 @@ function testPromptBlock() {
     /^## Zielgruppen dieser Seite\nPrimär \(für sie ist der Text geschrieben; sie bestimmt Ansprache, Beispiele und Reihenfolge\):\n### Isabelle Hartmann – Verkäuferin hochwertiger Luxusuhren\nProfil Isabelle\.\nSekundär \(mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen\):\n### Birgit Lehmann – Erbengemeinschaft\nB+/,
   );
   assert.doesNotMatch(block, /Mix-Profil/, "the page's Zielgruppen replace the Standard-Zielgruppe");
-  assert.ok(block.length < MAX_SECONDARY_AVATAR_CHARS + 1_000, "a secondary profile is shortened");
+  assert.ok(block.length < MAX_SECONDARY_AVATAR_CHARS + 1_000, "a secondary profile is shortened (at most 3,000)");
   assert.match(avatarBlock({ avatar: { name: "Mix", role: "", beschreibung: "Mix-Profil" }, audience: null }), /^## Avatar \(Wunschkunde, für den der Text geschrieben wird\)\nName: Mix/, "without own Zielgruppen: as before");
   assert.doesNotMatch(avatarBlock({ avatar: null, audience: { primary: [isabelle], secondary: [] } }), /Sekundär/, "no secondary line without one");
   assert.equal(analyseAudienceRule({ audience: { primary: [isabelle], secondary: [] } }), "", "one Zielgruppe: no rule");
@@ -61,6 +87,25 @@ function testPromptBlock() {
     analyseAudienceRule({ audience: { primary: [isabelle], secondary: [birgit] } }),
     "Bei mehreren Zielgruppen: traumziel, hauptschmerz, groesste_huerde und einwaende kommen aus der primären Zielgruppe. Einen wichtigen Einwand einer sekundären Zielgruppe darfst du in einwaende ergänzen, mit ihrem Namen in Klammern.\n",
   );
+
+  // Many Zielgruppen: all profile texts together stay within 20,000 characters, short ones whole.
+  const long = (name: string, n: number) => ({ name, role: "", beschreibung: `${name} `.repeat(Math.ceil(n / (name.length + 1))).slice(0, n) });
+  const many = { primary: Array.from({ length: 8 }, (_, i) => long(`P${i}`, 9_000)), secondary: Array.from({ length: 3 }, (_, i) => long(`S${i}`, 6_000)) };
+  const shares = audienceCharShares(many.primary.map((m) => m.beschreibung.length), many.secondary.map((m) => m.beschreibung.length));
+  const total = [...shares.primary, ...shares.secondary].reduce((a, b) => a + b, 0);
+  assert.ok(total <= MAX_AVATAR_CHARS_FOR_TEST, `profiles together ${total} ≤ 20,000`);
+  assert.deepEqual(shares.secondary, [2_000, 2_000, 2_000], "secondary at most 30 % together");
+  assert.deepEqual(shares.primary, Array(8).fill(1_750), "the rest shared fairly among the primary ones");
+  assert.deepEqual(shareCharBudget([500, 9_000, 9_000], 10_000), [500, 4_750, 4_750], "a short profile stays whole, its rest goes to the others");
+  assert.deepEqual(audienceCharShares([1_000, 2_000], [800]), { primary: [1_000, 2_000], secondary: [800] }, "nothing cut when it fits");
+  // The whole block (headings and „gekürzt“ marks included) stays within 20,000 characters.
+  for (const [p, sec] of [[4, 0], [8, 3], [12, 0], [30, 3]] as const) {
+    const audience = { primary: Array.from({ length: p }, (_, i) => long(`P${i}`, 9_000)), secondary: Array.from({ length: sec }, (_, i) => long(`S${i}`, 6_000)) };
+    const length = avatarBlock({ avatar: null, audience }).length;
+    assert.ok(length <= MAX_AVATAR_CHARS_FOR_TEST, `${p} primary + ${sec} secondary: ${length} ≤ 20,000`);
+  }
+  const shortOnes = { primary: [isabelle, { ...isabelle, name: "Zweite" }], secondary: [] };
+  assert.match(avatarBlock({ avatar: null, audience: shortOnes }), /Profil Isabelle\.$/, "short profiles stay whole");
   console.log("prompt block: ok");
 }
 
@@ -89,6 +134,14 @@ function page(extra: Partial<ContentPageRow> = {}): ContentPageRow {
 
 async function testSuggest() {
   assert.match(ZIELGRUPPEN_SUGGEST_SYSTEM, /^Du ordnest einer Seite einer Website die Zielgruppen des Anbieters zu\. Du schreibst nichts für die Seite\.\nPrimär: die Zielgruppe, die diese Seite hauptsächlich sucht und für die sie geschrieben wird – genau eine, höchstens zwei/);
+  assert.match(zielgruppenSuggestSystem("startseite"), /\nPrimär: Das ist die Startseite – in der Regel alle Hauptzielgruppen des Anbieters\. Nur eine Zielgruppe, die für das Angebot eine Nebenrolle spielt, ist sekundär oder nicht zugeordnet\. Keine Obergrenze\.\nSekundär:/);
+  assert.match(zielgruppenSuggestSystem("ratgeber"), /\nPrimär: Das ist ein Ratgeberartikel – alle Zielgruppen, für deren Frage der Artikel relevant ist\. Keine Obergrenze\.\n/);
+  assert.match(zielgruppenSuggestSystem("hauptsilo"), /\nPrimär: Das ist eine Hauptsilo-Seite – alle Zielgruppen, für die das Thema dieses Silos ein Hauptanliegen ist\. Keine Obergrenze\.\n/);
+  assert.equal(zielgruppenSuggestSystem("unterseite"), ZIELGRUPPEN_SUGGEST_SYSTEM, "other types: the text as before");
+  assert.equal(((zielgruppenTool(["a"], null).input_schema as { properties: { primary: { description: string } } }).properties.primary.description), "Mindestens eine primäre Zielgruppe, keine Obergrenze.");
+  const fourPrimary = { primary: ["a", "b", "c", "d"].map((agent_id) => ({ agent_id, reason: "r" })), secondary: [] };
+  assert.deepEqual(normalizeZielgruppenAnswer(fourPrimary, new Set(["a", "b", "c", "d"]), null).primary, ["a", "b", "c", "d"], "Startseite: all four primary");
+  assert.deepEqual(normalizeZielgruppenAnswer(fourPrimary, new Set(["a", "b", "c", "d"]), 2), { primary: ["a", "b"], secondary: ["c", "d"], reasons: { a: "r", b: "r", c: "r", d: "r" } }, "Unterseite: two, the rest secondary");
   const tool = zielgruppenTool(["a", "b"]);
   assert.deepEqual((tool.input_schema as { required: string[] }).required, ["primary", "secondary"]);
   assert.deepEqual(
@@ -167,6 +220,12 @@ async function testSave() {
   if (saved.ok) assert.deepEqual([saved.zielgruppen.primary, saved.zielgruppen.secondary, saved.zielgruppen.status, saved.zielgruppen.reasons], [["b"], ["a"], "bestaetigt", { a: "weil" }]);
   const cleared = await saveContentZielgruppen(db.service as never, current, { primary: [], secondary: ["a"] }, { avatars });
   assert.ok(cleared.ok && cleared.zielgruppen.primary.length === 0 && cleared.zielgruppen.secondary.length === 0, "no primary: back to the Standard-Zielgruppe");
+  // Startseite: no limit; Unterseite: two, the rest secondary.
+  const four = [avatar("a", "A"), avatar("b", "B"), avatar("c", "C"), avatar("d", "D")];
+  const start = await saveContentZielgruppen(db.service as never, page({ page_type: "startseite", zielgruppen: { ...EMPTY_CONTENT_ZIELGRUPPEN } }), { primary: ["a", "b", "c", "d"], secondary: [] }, { avatars: four });
+  assert.ok(start.ok && start.zielgruppen.primary.length === 4, "Startseite: four primary");
+  const sub = await saveContentZielgruppen(db.service as never, page({ page_type: "unterseite", zielgruppen: { ...EMPTY_CONTENT_ZIELGRUPPEN } }), { primary: ["a", "b", "c", "d"], secondary: [] }, { avatars: four });
+  assert.ok(sub.ok && sub.zielgruppen.primary.join() === "a,b" && sub.zielgruppen.secondary.join() === "c,d", "Unterseite: two primary, the others secondary");
   const unknown = await saveContentZielgruppen(db.service as never, current, { primary: ["x"], secondary: [] }, { avatars });
   assert.ok(!unknown.ok && unknown.status === 400);
   console.log("save: ok");

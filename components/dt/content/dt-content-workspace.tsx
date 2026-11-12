@@ -731,7 +731,7 @@ export function DtContentWorkspace(props: {
         closeDisabled={zielgruppenRun != null}
         titleId="content-bulk-zielgruppen-title"
         title={`Zielgruppen für ${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} festlegen`}
-        description="Gilt für alle angehakten Seiten und ersetzt deren bisherige Zielgruppen. Primär: höchstens zwei, für sie wird geschrieben. Sekundär: höchstens drei, werden mitbedient."
+        description="Gilt für alle angehakten Seiten und ersetzt deren bisherige Zielgruppen. Primär: für sie wird geschrieben – bei Startseite, Hauptsilo-Seite und Ratgeberartikel ohne Obergrenze, bei allen anderen Seitentypen höchstens zwei (dort zählen weitere als sekundär). Sekundär: höchstens drei, werden mitbedient."
         footer={
           <div className="flex flex-wrap justify-end gap-2">
             <DtPillButton type="button" size="sm" variant="ghost" disabled={zielgruppenRun != null} onClick={() => setBulkZielgruppen(null)}>
@@ -771,7 +771,8 @@ export function DtContentWorkspace(props: {
                       type="button"
                       aria-pressed={level === value}
                       disabled={zielgruppenRun != null}
-                      onClick={() => setBulkZielgruppen((prev) => (prev ? withZielgruppeLevel(prev, o.id, value) : prev))}
+                      // No limit here: each page applies its own type's limit when it is saved.
+                      onClick={() => setBulkZielgruppen((prev) => (prev ? withZielgruppeLevel(prev, o.id, value, null) : prev))}
                       className={cn(
                         "px-2.5 py-1 text-xs font-semibold transition-colors",
                         level === value

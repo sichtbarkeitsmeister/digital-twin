@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { CONTENT_PAGE_TYPES } from "@/lib/dt/content/page-types";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
-import { CONTENT_PRIMARY_MAX, CONTENT_SECONDARY_MAX } from "@/lib/dt/content/zielgruppen";
+import { CONTENT_SECONDARY_MAX, CONTENT_ZIELGRUPPEN_LIST_MAX } from "@/lib/dt/content/zielgruppen";
 import {
   CONTENT_SKIPPABLE_STEP_KEYS,
   contentStepByKey,
@@ -29,7 +29,8 @@ const patchSchema = z
     /** Zielgruppen of the page, confirmed by the editor; an empty primary list = Standard-Zielgruppe again. */
     zielgruppen: z
       .object({
-        primary: z.array(z.string().min(1).max(80)).max(CONTENT_PRIMARY_MAX),
+        // The page type's limit (two, or none) is applied when it is saved.
+        primary: z.array(z.string().min(1).max(80)).max(CONTENT_ZIELGRUPPEN_LIST_MAX),
         secondary: z.array(z.string().min(1).max(80)).max(CONTENT_SECONDARY_MAX),
       })
       .optional(),
@@ -68,7 +69,7 @@ export function parseContentPagePatch(
     return { ok: false, message: skipStepsMessage(raw.skip_steps) };
   }
   if ("page_type" in raw) return { ok: false, message: "Ungültiger Seitentyp." };
-  if ("zielgruppen" in raw) return { ok: false, message: `Höchstens ${CONTENT_PRIMARY_MAX} primäre und ${CONTENT_SECONDARY_MAX} sekundäre Zielgruppen.` };
+  if ("zielgruppen" in raw) return { ok: false, message: `Ungültige Zielgruppen (höchstens ${CONTENT_SECONDARY_MAX} sekundäre).` };
   if ("client_wishes" in raw) return { ok: false, message: `Die Wünsche für diese Seite dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.` };
   return { ok: false, message: "Ungültige Anfrage." };
 }

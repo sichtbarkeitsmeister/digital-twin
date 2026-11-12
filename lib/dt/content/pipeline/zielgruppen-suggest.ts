@@ -16,7 +16,13 @@ import { anbieterBlock, notesBlock, pageBlock, type ContentPipelineContext } fro
 import { loadContext } from "@/lib/dt/content/pipeline/run-step";
 import { estimateCostEur, roundEur } from "@/lib/dt/content/pricing";
 import { contentDbErrorMessage, isMissingZielgruppenColumnError, num, type ContentPageRow } from "@/lib/dt/content/store";
-import { CONTENT_ZIELGRUPPEN_MIGRATION_FILE, normalizeZielgruppenLists, type ContentZielgruppen } from "@/lib/dt/content/zielgruppen";
+import {
+  CONTENT_PRIMARY_MAX,
+  CONTENT_ZIELGRUPPEN_MIGRATION_FILE,
+  contentPrimaryMax,
+  normalizeZielgruppenLists,
+  type ContentZielgruppen,
+} from "@/lib/dt/content/zielgruppen";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
 export const ZIELGRUPPEN_USAGE_MODE = "content.zielgruppen";
@@ -25,15 +31,36 @@ const SUGGEST_MAX_TOKENS = 1_500;
 const PROFILE_CHARS = 2_500;
 const ANBIETER_CHARS = 12_000;
 
+/** The „Primär“ line of the suggestion, by page type (Startseite, Hauptsilo-Seite, Ratgeber: no limit). */
+export function zielgruppenPrimaryLine(pageType: string | null | undefined): string {
+  switch (pageType) {
+    case "startseite":
+      return "Primär: Das ist die Startseite – in der Regel alle Hauptzielgruppen des Anbieters. Nur eine Zielgruppe, die für das Angebot eine Nebenrolle spielt, ist sekundär oder nicht zugeordnet. Keine Obergrenze.";
+    case "hauptsilo":
+      return "Primär: Das ist eine Hauptsilo-Seite – alle Zielgruppen, für die das Thema dieses Silos ein Hauptanliegen ist. Keine Obergrenze.";
+    case "ratgeber":
+      return "Primär: Das ist ein Ratgeberartikel – alle Zielgruppen, für deren Frage der Artikel relevant ist. Keine Obergrenze.";
+    default:
+      return "Primär: die Zielgruppe, die diese Seite hauptsächlich sucht und für die sie geschrieben wird – genau eine, höchstens zwei, wenn die Seite zwei Zielgruppen gleich stark anspricht.";
+  }
+}
+
+/** The system prompt of the suggestion for the page type. */
+export function zielgruppenSuggestSystem(pageType: string | null | undefined): string {
+  return ZIELGRUPPEN_SUGGEST_SYSTEM.replace(ZIELGRUPPEN_PRIMARY_DEFAULT, zielgruppenPrimaryLine(pageType));
+}
+
+const ZIELGRUPPEN_PRIMARY_DEFAULT = zielgruppenPrimaryLine(null);
+
 export const ZIELGRUPPEN_SUGGEST_SYSTEM = `Du ordnest einer Seite einer Website die Zielgruppen des Anbieters zu. Du schreibst nichts für die Seite.
-Primär: die Zielgruppe, die diese Seite hauptsächlich sucht und für die sie geschrieben wird – genau eine, höchstens zwei, wenn die Seite zwei Zielgruppen gleich stark anspricht.
+${ZIELGRUPPEN_PRIMARY_DEFAULT}
 Sekundär: Zielgruppen, die die Seite ebenfalls lesen und deren Fragen sie mitbeantworten sollte – keine bis drei.
 Alle anderen: nicht zugeordnet.
 Grundlage: Seitenname, Seitentyp, Keywords, Nutzerfragen, KI-Prompt und Anmerkungen der Seite, das Hauptsilo, die Profile der Zielgruppen und die Anbieterfakten. Eine Startseite oder Über-uns-Seite spricht meist mehrere Zielgruppen an, eine Leistungsseite meist eine.
 Begründe jede Zuordnung in einem Satz, der sich auf diese Seite bezieht. Nichts erfinden.`;
 
 /** The tool, with the organisation's avatar ids as the only allowed values. */
-export function zielgruppenTool(ids: readonly string[]): Anthropic.Tool {
+export function zielgruppenTool(ids: readonly string[], primaryMax: number | null = CONTENT_PRIMARY_MAX): Anthropic.Tool {
   const entry = {
     type: "object" as const,
     properties: {
@@ -48,7 +75,11 @@ export function zielgruppenTool(ids: readonly string[]): Anthropic.Tool {
     input_schema: {
       type: "object",
       properties: {
-        primary: { type: "array", items: entry, description: "Genau eine, höchstens zwei primäre Zielgruppen." },
+        primary: {
+          type: "array",
+          items: entry,
+          description: primaryMax == null ? "Mindestens eine primäre Zielgruppe, keine Obergrenze." : "Genau eine, höchstens zwei primäre Zielgruppen.",
+        },
         secondary: { type: "array", items: entry, description: "Keine bis drei sekundäre Zielgruppen." },
       },
       required: ["primary", "secondary"],
@@ -80,7 +111,11 @@ export function zielgruppenSuggestPrompt(context: ContentPipelineContext, avatar
 type Entry = { agent_id?: unknown; reason?: unknown };
 
 /** The model's answer: known ids only, within the limits, with their reasons. */
-export function normalizeZielgruppenAnswer(json: unknown, known: ReadonlySet<string>): Pick<ContentZielgruppen, "primary" | "secondary" | "reasons"> {
+export function normalizeZielgruppenAnswer(
+  json: unknown,
+  known: ReadonlySet<string>,
+  primaryMax: number | null = CONTENT_PRIMARY_MAX,
+): Pick<ContentZielgruppen, "primary" | "secondary" | "reasons"> {
   const r = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
   const entries = (value: unknown): Entry[] => (Array.isArray(value) ? (value as Entry[]) : []);
   const reasons: Record<string, string> = {};
@@ -92,7 +127,7 @@ export function normalizeZielgruppenAnswer(json: unknown, known: ReadonlySet<str
         return id;
       })
       .filter(Boolean);
-  const lists = normalizeZielgruppenLists(idsOf(entries(r.primary)), idsOf(entries(r.secondary)), known);
+  const lists = normalizeZielgruppenLists(idsOf(entries(r.primary)), idsOf(entries(r.secondary)), known, primaryMax);
   const kept = new Set([...lists.primary, ...lists.secondary]);
   for (const id of Object.keys(reasons)) if (!kept.has(id)) delete reasons[id];
   return { ...lists, reasons };
@@ -143,13 +178,14 @@ export async function suggestContentZielgruppen(
       return { ok: false, status: 409, message: error instanceof Error ? error.message : "Die Seite konnte nicht geladen werden." };
     }
     const ids = avatars.map((a) => a.id);
+    const primaryMax = contentPrimaryMax(page.page_type);
     try {
       const models = options.models ?? (await loadContentModelConfig(service)).check;
       const call = await (options.callTool ?? callContentTool)({
         models,
-        system: ZIELGRUPPEN_SUGGEST_SYSTEM,
+        system: zielgruppenSuggestSystem(page.page_type),
         user: zielgruppenSuggestPrompt(context, avatars),
-        tool: zielgruppenTool(ids),
+        tool: zielgruppenTool(ids, primaryMax),
         maxTokens: SUGGEST_MAX_TOKENS,
         timeoutMs: SUGGEST_TIMEOUT_MS,
       });
@@ -164,7 +200,7 @@ export async function suggestContentZielgruppen(
         inputTokens: call.usage.inputTokens,
         outputTokens: call.usage.outputTokens,
       });
-      picked = normalizeZielgruppenAnswer(call.json, new Set(ids));
+      picked = normalizeZielgruppenAnswer(call.json, new Set(ids), primaryMax);
     } catch (error) {
       return { ok: false, status: 502, message: error instanceof Error ? error.message : "Der Vorschlag ist fehlgeschlagen." };
     }
@@ -204,7 +240,8 @@ export async function saveContentZielgruppen(
   const known = new Set(avatars.map((a) => a.id));
   const unknown = [...input.primary, ...input.secondary].filter((id) => !known.has(id));
   if (unknown.length > 0) return { ok: false, status: 400, message: "Diese Zielgruppe gibt es (nicht mehr). Bitte die Seite neu laden." };
-  const lists = normalizeZielgruppenLists(input.primary, input.secondary, known);
+  // The page type's limit: primary ones over it become secondary.
+  const lists = normalizeZielgruppenLists(input.primary, input.secondary, known, contentPrimaryMax(page.page_type));
   const at = (options.now ?? new Date()).toISOString();
   const zielgruppen: ContentZielgruppen =
     lists.primary.length === 0
