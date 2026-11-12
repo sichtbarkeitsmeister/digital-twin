@@ -573,6 +573,13 @@ export function analyseAudienceRule(context: Partial<Pick<ContentPipelineContext
   return "Bei mehreren Zielgruppen: traumziel, hauptschmerz, groesste_huerde und einwaende kommen aus der primären Zielgruppe. Einen wichtigen Einwand einer sekundären Zielgruppe darfst du in einwaende ergänzen, mit ihrem Namen in Klammern.\n";
 }
 
+/**
+ * The whole „Zielgruppen dieser Seite“ block (several profiles, headings included). Twice the single
+ * avatar's 20,000: about 12,500 input tokens per call, about 0.20 € per text over all steps
+ * (Sonnet 5.5), so a Startseite with eight Zielgruppen still gets about 3,800 characters per profile.
+ */
+export const MAX_AUDIENCE_CHARS = 40_000;
+
 /** A secondary Zielgruppe's profile is cut to at most this many characters: it is served along, not written for. */
 export const MAX_SECONDARY_AVATAR_CHARS = 3_000;
 /** The secondary profiles together take at most this share of the budget; the rest is the primary ones'. */
@@ -606,13 +613,13 @@ export function shareCharBudget(lengths: readonly number[], budget: number, cap 
 
 /**
  * The characters each profile may have in the Zielgruppen block, all together within
- * MAX_AVATAR_CHARS: the secondary ones first (each at most 3,000, together at most 30 % of the
+ * MAX_AUDIENCE_CHARS: the secondary ones first (each at most 3,000, together at most 30 % of the
  * budget), the rest shared fairly among the primary ones. Short profiles stay whole.
  */
 export function audienceCharShares(
   primary: readonly number[],
   secondary: readonly number[],
-  budget: number = MAX_AVATAR_CHARS,
+  budget: number = MAX_AUDIENCE_CHARS,
 ): { primary: number[]; secondary: number[] } {
   const secondaryShares = shareCharBudget(secondary, Math.floor(budget * SECONDARY_BUDGET_SHARE), MAX_SECONDARY_AVATAR_CHARS);
   const used = secondaryShares.reduce((a, b) => a + b, 0);
@@ -635,14 +642,14 @@ export function avatarBlock(context: Pick<ContentPipelineContext, "avatar"> & Pa
         ? ["Sekundär (mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen):"]
         : []),
     ];
-    // The whole block stays within MAX_AVATAR_CHARS: headings, line breaks and the „gekürzt“ marks
+    // The whole block stays within MAX_AUDIENCE_CHARS: headings, line breaks and the „gekürzt“ marks
     // come off the budget first, the rest is shared among the profiles.
     const all = [...audience.primary, ...audience.secondary];
     const frame = intro.join("\n").length + all.reduce((sum, m) => sum + head(m).length + 2 + CLIP_MARK_CHARS, 0);
     const shares = audienceCharShares(
       audience.primary.map((m) => m.beschreibung.trim().length),
       audience.secondary.map((m) => m.beschreibung.trim().length),
-      Math.max(0, MAX_AVATAR_CHARS - frame),
+      Math.max(0, MAX_AUDIENCE_CHARS - frame),
     );
     return [
       intro[0]!,

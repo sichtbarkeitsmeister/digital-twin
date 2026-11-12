@@ -17,7 +17,7 @@ import {
   type ContentPipelineContext,
 } from "../lib/dt/content/pipeline/prompts";
 
-const MAX_AVATAR_CHARS_FOR_TEST = 20_000;
+const MAX_AUDIENCE_CHARS_FOR_TEST = 40_000;
 import {
   ZIELGRUPPEN_SUGGEST_SYSTEM,
   zielgruppenSuggestSystem,
@@ -88,21 +88,21 @@ function testPromptBlock() {
     "Bei mehreren Zielgruppen: traumziel, hauptschmerz, groesste_huerde und einwaende kommen aus der primären Zielgruppe. Einen wichtigen Einwand einer sekundären Zielgruppe darfst du in einwaende ergänzen, mit ihrem Namen in Klammern.\n",
   );
 
-  // Many Zielgruppen: all profile texts together stay within 20,000 characters, short ones whole.
+  // Many Zielgruppen: all profile texts together stay within 40,000 characters, short ones whole.
   const long = (name: string, n: number) => ({ name, role: "", beschreibung: `${name} `.repeat(Math.ceil(n / (name.length + 1))).slice(0, n) });
   const many = { primary: Array.from({ length: 8 }, (_, i) => long(`P${i}`, 9_000)), secondary: Array.from({ length: 3 }, (_, i) => long(`S${i}`, 6_000)) };
   const shares = audienceCharShares(many.primary.map((m) => m.beschreibung.length), many.secondary.map((m) => m.beschreibung.length));
   const total = [...shares.primary, ...shares.secondary].reduce((a, b) => a + b, 0);
-  assert.ok(total <= MAX_AVATAR_CHARS_FOR_TEST, `profiles together ${total} ≤ 20,000`);
-  assert.deepEqual(shares.secondary, [2_000, 2_000, 2_000], "secondary at most 30 % together");
-  assert.deepEqual(shares.primary, Array(8).fill(1_750), "the rest shared fairly among the primary ones");
+  assert.ok(total <= MAX_AUDIENCE_CHARS_FOR_TEST, `profiles together ${total} ≤ 40,000`);
+  assert.deepEqual(shares.secondary, [3_000, 3_000, 3_000], "secondary at most 3,000 each");
+  assert.deepEqual(shares.primary, Array(8).fill(3_875), "the rest shared fairly among the primary ones");
   assert.deepEqual(shareCharBudget([500, 9_000, 9_000], 10_000), [500, 4_750, 4_750], "a short profile stays whole, its rest goes to the others");
   assert.deepEqual(audienceCharShares([1_000, 2_000], [800]), { primary: [1_000, 2_000], secondary: [800] }, "nothing cut when it fits");
-  // The whole block (headings and „gekürzt“ marks included) stays within 20,000 characters.
+  // The whole block (headings and „gekürzt“ marks included) stays within 40,000 characters.
   for (const [p, sec] of [[4, 0], [8, 3], [12, 0], [30, 3]] as const) {
     const audience = { primary: Array.from({ length: p }, (_, i) => long(`P${i}`, 9_000)), secondary: Array.from({ length: sec }, (_, i) => long(`S${i}`, 6_000)) };
     const length = avatarBlock({ avatar: null, audience }).length;
-    assert.ok(length <= MAX_AVATAR_CHARS_FOR_TEST, `${p} primary + ${sec} secondary: ${length} ≤ 20,000`);
+    assert.ok(length <= MAX_AUDIENCE_CHARS_FOR_TEST, `${p} primary + ${sec} secondary: ${length} ≤ 40,000`);
   }
   const shortOnes = { primary: [isabelle, { ...isabelle, name: "Zweite" }], secondary: [] };
   assert.match(avatarBlock({ avatar: null, audience: shortOnes }), /Profil Isabelle\.$/, "short profiles stay whole");
