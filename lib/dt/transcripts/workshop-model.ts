@@ -11,6 +11,13 @@ import {
   AVATAR_PLAN_MAX,
   AVATAR_PLAN_MIN,
 } from "@/lib/dt/transcripts/avatar-plan-bounds";
+import {
+  type ExtractionStore,
+  type FactKind,
+  type MissingFact,
+  FACT_KIND_LABEL,
+  MISSING_FACTS_MAX,
+} from "@/lib/dt/transcripts/anbieter-statements";
 import { normalizePersonaKey, slugFromPersonaName } from "@/lib/dt/transcripts/sanitize";
 
 export { AVATAR_PLAN_MAX, AVATAR_PLAN_MIN };
@@ -50,13 +57,46 @@ export type WorkshopSource = {
   rawText: string;
 };
 
+/** One side of a contradiction, with where and when it was said. */
+export type AnbieterClaim = {
+  text: string;
+  source: string;
+  date: string | null;
+  /** The claim from the latest source. It is marked, not chosen. */
+  newest: boolean;
+  ids: string[];
+};
+
+/** Sources disagree on one matter. Both claims stay; nobody picks one silently. */
+export type AnbieterConflict = { topic: string; claims: AnbieterClaim[] };
+
 export type AnbieterItem = {
   key: AnbieterPointKey;
   label: string;
   current: string;
   earlier: string | null;
   sources: string;
+  /** IDs of the statements this point covers, contradictions included. */
+  statementIds?: string[];
+  conflicts?: AnbieterConflict[];
 };
+
+/** What the code found when it checked the evaluation against the Bestand. */
+export type AnbieterReview = {
+  statementCount: number;
+  sourceCount: number;
+  /** Statements no point lists. Shown, never dropped. */
+  unassigned: Array<{ id: string; text: string; source: string }>;
+  unassignedCount: number;
+  /** Facts and names of the Bestand that the result does not show. */
+  missingFacts: MissingFact[];
+  /** Statements an instruction removed on purpose; they are not reported again. */
+  dismissedIds: string[];
+  /** What the last „Änderung anwenden“ dropped although nobody asked for it. */
+  lostInRevision: Array<{ id: string | null; text: string; source: string; point: string }>;
+};
+
+export const REVIEW_UNASSIGNED_MAX = 1_000;
 
 export type WorkshopSectionStatus = "empty" | "proposed" | "approved" | "stale";
 
@@ -145,6 +185,10 @@ export type AnbieterState = {
    * Derived from the sources on every load, never trusted from the saved row.
    */
   openWithSource: AnbieterOpenPoint[];
+  /** Statements per chunk of source text. Server only; never sent to the browser. */
+  extraction: ExtractionStore;
+  /** Result of the coverage and fact check of the last run. Null for stands from before the check. */
+  review: AnbieterReview | null;
 };
 
 /** An empty point and the sources that carry a section with its name. */
@@ -559,7 +603,13 @@ export function mergeRevisedAnbieterItems(input: {
     const after = revisedByKey.get(point.key);
     if (!after || !returned.has(point.key)) return before;
     if (!after.current.trim() && !named.has(point.key)) return before;
-    return { ...before, current: after.current, earlier: after.earlier ?? before.earlier };
+    return {
+      ...before,
+      current: after.current,
+      earlier: after.earlier ?? before.earlier,
+      statementIds: after.statementIds ?? before.statementIds,
+      conflicts: after.conflicts ?? before.conflicts,
+    };
   });
 }
 
@@ -742,6 +792,13 @@ export function describeAvatarStand(plan: Pick<AvatarPlanState, "notWanted" | "a
     .join("\n\n");
 }
 
+/** The state as the browser gets it: without the stored statements of stage 1. */
+export function anbieterForClient(state: AnbieterState): Omit<AnbieterState, "extraction"> {
+  const { extraction: _extraction, ...rest } = state;
+  void _extraction;
+  return rest;
+}
+
 export function emptyAnbieterState(): AnbieterState {
   return {
     status: "empty",
@@ -751,6 +808,8 @@ export function emptyAnbieterState(): AnbieterState {
     items: normalizeAnbieterItems([]),
     savedAt: null,
     openWithSource: [],
+    extraction: {},
+    review: null,
   };
 }
 
@@ -861,13 +920,116 @@ export function normalizeGeneratorState(raw: unknown): AvatarGeneratorState | nu
   };
 }
 
+function idList(raw: unknown, max: number): string[] {
+  return Array.isArray(raw)
+    ? raw.filter((id): id is string => typeof id === "string" && /^\d{1,3}\.\d{1,4}$/.test(id)).slice(0, max)
+    : [];
+}
+
+function readConflicts(raw: unknown): AnbieterConflict[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      const record = asRecord(entry);
+      const claims = (Array.isArray(record?.claims) ? record.claims : [])
+        .map((claim) => {
+          const c = asRecord(claim);
+          return {
+            text: asString(c?.text, 4_000),
+            source: asString(c?.source, 400),
+            date: asString(c?.date, 20) || null,
+            newest: c?.newest === true,
+            ids: idList(c?.ids, 200),
+          };
+        })
+        .filter((claim) => claim.text);
+      return { topic: asString(record?.topic, 400), claims };
+    })
+    .filter((conflict) => conflict.claims.length >= 2)
+    .slice(0, 40);
+}
+
+/** Statement IDs and contradictions sit on the saved rows; the tolerant reader above only knows texts. */
+function withItemExtras(items: AnbieterItem[], rawItems: unknown): AnbieterItem[] {
+  if (!Array.isArray(rawItems)) return items;
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const row of rawItems) {
+    const record = asRecord(row);
+    if (record && typeof record.key === "string") byKey.set(record.key, record);
+  }
+  return items.map((item) => {
+    const row = byKey.get(item.key);
+    if (!row) return item;
+    const statementIds = idList(row.statementIds, 5_000);
+    const conflicts = readConflicts(row.conflicts);
+    return {
+      ...item,
+      ...(statementIds.length > 0 ? { statementIds } : {}),
+      ...(conflicts.length > 0 ? { conflicts } : {}),
+    };
+  });
+}
+
+function readExtraction(raw: unknown): ExtractionStore {
+  const record = asRecord(raw);
+  if (!record) return {};
+  const store: ExtractionStore = {};
+  for (const [hash, value] of Object.entries(record)) {
+    const chunk = asRecord(value);
+    if (!chunk || !/^[0-9a-f]{32}$/.test(hash)) continue;
+    const strings = (list: unknown) =>
+      Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
+    store[hash] = { statements: strings(chunk.statements), names: strings(chunk.names) };
+  }
+  return store;
+}
+
+function readReview(raw: unknown): AnbieterReview | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const rows = (list: unknown) => (Array.isArray(list) ? list.map(asRecord).filter((row) => row != null) : []);
+  const unassigned = rows(record.unassigned)
+    .map((row) => ({ id: asString(row.id, 12), text: asString(row.text, 2_000), source: asString(row.source, 400) }))
+    .filter((row) => row.id && row.text)
+    .slice(0, REVIEW_UNASSIGNED_MAX);
+  const missingFacts = rows(record.missingFacts)
+    .map((row) => ({
+      kind: asString(row.kind, 20) as FactKind,
+      value: asString(row.value, 400),
+      sources: Array.isArray(row.sources) ? row.sources.map((source) => asString(source, 400)).filter(Boolean) : [],
+      context: asString(row.context, 600),
+    }))
+    .filter((row) => row.value && row.kind in FACT_KIND_LABEL)
+    .slice(0, MISSING_FACTS_MAX);
+  const lostInRevision = rows(record.lostInRevision)
+    .map((row) => ({
+      id: asString(row.id, 12) || null,
+      text: asString(row.text, 2_000),
+      source: asString(row.source, 400),
+      point: asString(row.point, 200),
+    }))
+    .filter((row) => row.text)
+    .slice(0, 400);
+  const count = (value: unknown, fallback: number) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
+  return {
+    statementCount: count(record.statementCount, 0),
+    sourceCount: count(record.sourceCount, 0),
+    unassigned,
+    unassignedCount: Math.max(count(record.unassignedCount, 0), unassigned.length),
+    missingFacts,
+    dismissedIds: idList(record.dismissedIds, 5_000),
+    lostInRevision,
+  };
+}
+
 export function readAnbieterState(
   raw: unknown,
   fingerprint: string,
   sources: WorkshopSource[] = [],
 ): AnbieterState {
   const record = asRecord(raw);
-  const items = normalizeAnbieterItems(record?.items);
+  const items = withItemExtras(normalizeAnbieterItems(record?.items), record?.items);
   const hasContent = items.some((item) => item.current.trim() || item.earlier);
   const sourceFingerprint = asString(record?.sourceFingerprint, 40) || null;
   const approvedFingerprint = asString(record?.approvedFingerprint, 40) || null;
@@ -879,6 +1041,8 @@ export function readAnbieterState(
     revisionNote: asString(record?.revisionNote, REVISION_NOTE_MAX),
     savedAt: savedAt && Number.isFinite(Date.parse(savedAt)) ? savedAt : null,
     openWithSource: hasContent ? openPointsWithSource(items, sources) : [],
+    extraction: readExtraction(record?.extraction),
+    review: hasContent ? readReview(record?.review) : null,
     status: sectionStatus({
       fingerprint,
       sourceFingerprint,

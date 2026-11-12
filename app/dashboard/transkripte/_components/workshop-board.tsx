@@ -47,6 +47,10 @@ type AnbieterItem = {
   current: string;
   earlier: string | null;
   sources: string;
+  conflicts?: {
+    topic: string;
+    claims: { text: string; source: string; date: string | null; newest: boolean; ids: string[] }[];
+  }[];
 };
 
 type AnbieterState = {
@@ -57,7 +61,34 @@ type AnbieterState = {
   items: AnbieterItem[];
   savedAt: string | null;
   openWithSource?: { key: string; label: string; sources: string[] }[];
+  review?: AnbieterReview | null;
 };
+
+type AnbieterReview = {
+  statementCount: number;
+  sourceCount: number;
+  unassigned: { id: string; text: string; source: string }[];
+  unassignedCount: number;
+  missingFacts: { kind: string; value: string; sources: string[]; context: string }[];
+  lostInRevision: { id: string | null; text: string; source: string; point: string }[];
+};
+
+const FACT_LABEL: Record<string, string> = {
+  euro: "Euro-Betrag",
+  prozent: "Prozentangabe",
+  datum: "Datum",
+  jahr: "Jahreszahl",
+  zahl: "Zahl",
+  url: "URL",
+  email: "E-Mail-Adresse",
+  telefon: "Telefonnummer",
+  name: "Eigenname",
+};
+
+function formatIsoDate(iso: string | null): string {
+  const [year, month, day] = (iso ?? "").split("-");
+  return year && month && day ? `${day}.${month}.${year}` : "";
+}
 
 type AvatarCase = {
   service: string;
@@ -191,6 +222,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const [anbieterError, setAnbieterError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [anbieterNote, setAnbieterNote] = useState("");
+  /** Progress line of a running Anbieter evaluation. */
+  const [anbieterStep, setAnbieterStep] = useState<string | null>(null);
   const [avatarNote, setAvatarNote] = useState("");
   /** Empty = KI wählt die Anzahl; eine Zahl ist Override. */
   const [countText, setCountText] = useState("");
@@ -301,7 +334,43 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     const revising = action === "evaluate" && Boolean(instruction?.trim());
     setBusy(action === "approve" ? "anbieter-approve" : revising ? "anbieter-revise" : "anbieter-evaluate");
     setAnbieterError(null);
+    setAnbieterStep(null);
     try {
+      if (action === "evaluate") {
+        // Stage 1: statements out of every source, a few pieces per request, until none is left.
+        let lastPending = Number.POSITIVE_INFINITY;
+        let stalled = 0;
+        for (;;) {
+          setAnbieterStep((step) => step ?? "Schritt 1 von 2: Aussagen aus den Quellen ziehen…");
+          const round = await postJson<{ pending?: number; total?: number; read?: number }>(
+            "/api/dt/workshop/anbieter",
+            { organisationId: props.organisationId, action: "extract" },
+          );
+          if (!round.ok) {
+            setAnbieterError(round.message);
+            toast.error(round.message);
+            return;
+          }
+          const pending = round.json.pending ?? 0;
+          if (pending === 0) break;
+          stalled = pending < lastPending ? 0 : stalled + 1;
+          lastPending = pending;
+          if (stalled >= 2) {
+            const message = "Aus einem Teil der Quellen ließen sich keine Aussagen ziehen. Bitte erneut auswerten.";
+            setAnbieterError(message);
+            toast.error(message);
+            return;
+          }
+          setAnbieterStep(
+            `Schritt 1 von 2: Aussagen aus den Quellen ziehen… ${round.json.read ?? 0} von ${round.json.total ?? 0} Abschnitten gelesen.`,
+          );
+        }
+        setAnbieterStep(
+          revising
+            ? "Schritt 2 von 2: Änderung einarbeiten und gegen den vorherigen Stand prüfen…"
+            : "Schritt 2 von 2: Aussagen den Punkten zuordnen und Abdeckung prüfen…",
+        );
+      }
       const result = await postJson<{ anbieter?: AnbieterState }>("/api/dt/workshop/anbieter", {
         organisationId: props.organisationId,
         action,
@@ -335,6 +404,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
             : "Freigegeben. Der SEO-Berater hat den aktuellen Stand.",
       );
     } finally {
+      setAnbieterStep(null);
       setBusy(null);
     }
   }
@@ -502,6 +572,11 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   // The saved points stay visible in every status, also when the Bestand changed since.
   const anbieterHasPoints = anbieterHasSavedPoints(anbieter?.items ?? []);
   // Empty points for which a source has a filled section under this very heading.
+  const anbieterReview = anbieter?.review ?? null;
+  const anbieterConflictCount = (anbieter?.items ?? []).reduce(
+    (sum, item) => sum + (item.conflicts?.length ?? 0),
+    0,
+  );
   const anbieterLost = new Map((anbieter?.openWithSource ?? []).map((point) => [point.key, point]));
   const missingSummaries = sources
     .map((source, index) => ({ id: source.id, label: sourceLabel(source, index), hasSummary: source.hasSummary }))
@@ -625,9 +700,11 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
           {busy === "anbieter-evaluate" || busy === "anbieter-revise" ? (
             <p className="flex items-center gap-2 text-sm text-primary">
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              {busy === "anbieter-revise"
-                ? "Die Änderung wird in den Anbieterstand eingearbeitet. Die Buttons sind solange gesperrt."
-                : "Die Auswertung läuft. Das kann einige Minuten dauern. Die Buttons sind solange gesperrt."}
+              {anbieterStep ??
+                (busy === "anbieter-revise"
+                  ? "Die Änderung wird in den Anbieterstand eingearbeitet."
+                  : "Die Auswertung läuft.")}{" "}
+              Das kann einige Minuten dauern. Die Buttons sind solange gesperrt.
             </p>
           ) : null}
           <div className="grid gap-1.5">
@@ -708,6 +785,95 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               </p>
             </div>
           ) : null}
+          {anbieter && anbieterHasPoints && !anbieterReview ? (
+            <p className="text-sm text-secondary">
+              Dieser Stand stammt aus der Zeit vor der Abdeckungsprüfung. Erst „Bestand neu
+              auswerten“ prüft ihn Aussage für Aussage gegen die Quellen.
+            </p>
+          ) : null}
+          {anbieter && anbieterHasPoints && anbieterReview ? (
+            <div className="grid gap-3 rounded-xl border border-sbkm-navy/10 px-3 py-3 dark:border-white/10">
+              <p className="text-sm font-semibold text-primary">Kontrolle gegen den Bestand</p>
+              <p className="text-sm text-primary">
+                {anbieterReview.statementCount} Aussagen aus {anbieterReview.sourceCount}{" "}
+                {anbieterReview.sourceCount === 1 ? "Quelle" : "Quellen"} ·{" "}
+                {anbieterReview.unassignedCount} nicht zugeordnet · {anbieterReview.missingFacts.length}{" "}
+                fehlende Fakten · {anbieterConflictCount}{" "}
+                {anbieterConflictCount === 1 ? "Widerspruch" : "Widersprüche"}
+              </p>
+              {anbieterReview.lostInRevision.length > 0 ? (
+                <div role="alert" className="grid gap-1 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2">
+                  <p className="text-sm font-semibold text-destructive">
+                    Durch die letzte Änderung entfallen ({anbieterReview.lostInRevision.length})
+                  </p>
+                  <p className="text-xs text-primary">
+                    Das stand vorher im Anbieterstand und fehlt jetzt, ohne dass die Anweisung es
+                    gestrichen hat.
+                  </p>
+                  <ul className="list-disc pl-5 text-sm text-primary">
+                    {anbieterReview.lostInRevision.map((lost, index) => (
+                      <li key={`${lost.id ?? "fact"}-${index}`}>
+                        {lost.text}
+                        <span className="text-secondary">
+                          {" "}
+                          · aus „{lost.point}“{lost.source ? ` · ${lost.source}` : ""}
+                          {lost.id ? ` · Aussage ${lost.id}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {anbieterReview.missingFacts.length > 0 ? (
+                <details className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2" open>
+                  <summary className="cursor-pointer text-sm font-semibold text-destructive">
+                    Fakten aus dem Bestand, die im Ergebnis fehlen ({anbieterReview.missingFacts.length})
+                  </summary>
+                  <ul className="mt-2 grid gap-1.5 text-sm text-primary">
+                    {anbieterReview.missingFacts.map((fact, index) => (
+                      <li key={`${fact.kind}-${fact.value}-${index}`}>
+                        <span className="font-semibold text-destructive">
+                          {FACT_LABEL[fact.kind] ?? fact.kind}: {fact.value}
+                        </span>
+                        <span className="text-secondary"> · {fact.sources.join("; ")}</span>
+                        {fact.context ? (
+                          <span className="block text-xs text-secondary">{fact.context}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              {anbieterReview.unassignedCount > 0 ? (
+                <details className="rounded-lg border border-sbkm-navy/10 px-3 py-2 dark:border-white/10">
+                  <summary className="cursor-pointer text-sm font-semibold text-primary">
+                    Nicht zugeordnet ({anbieterReview.unassignedCount})
+                  </summary>
+                  <p className="mt-1 text-xs text-secondary">
+                    Diese Aussagen stehen im Bestand, aber in keinem der 13 Punkte. Sie werden nicht
+                    verworfen. Gehört eine in den Anbieterstand, nenne den Punkt im Feld „Änderung“.
+                  </p>
+                  <ul className="mt-2 grid gap-1.5 text-sm text-primary">
+                    {anbieterReview.unassigned.map((statement) => (
+                      <li key={statement.id}>
+                        {statement.text}
+                        <span className="text-secondary">
+                          {" "}
+                          · {statement.source} · Aussage {statement.id}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {anbieterReview.unassignedCount > anbieterReview.unassigned.length ? (
+                    <p className="mt-2 text-xs text-secondary">
+                      Angezeigt sind die ersten {anbieterReview.unassigned.length} von{" "}
+                      {anbieterReview.unassignedCount}.
+                    </p>
+                  ) : null}
+                </details>
+              ) : null}
+            </div>
+          ) : null}
           {anbieter && anbieterHasPoints ? (
             <ul className="grid gap-3">
               {anbieter.items.map((item) => (
@@ -727,6 +893,39 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                   ) : (
                     <p className="mt-1 text-sm text-secondary">Offen. Wird nicht erfunden.</p>
                   )}
+                  {(item.conflicts ?? []).map((conflict, index) => (
+                    <div
+                      key={`${item.key}-conflict-${index}`}
+                      className="mt-2 grid gap-1 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2"
+                    >
+                      <p className="text-sm font-semibold text-destructive">
+                        Widerspruch{conflict.topic ? `: ${conflict.topic}` : ""}
+                      </p>
+                      <ul className="grid gap-1 text-sm text-primary">
+                        {conflict.claims.map((claim, claimIndex) => (
+                          <li key={claimIndex}>
+                            {claim.text}
+                            <span className="text-secondary">
+                              {" "}
+                              · {claim.source}
+                              {formatIsoDate(claim.date) && !claim.source.includes(formatIsoDate(claim.date))
+                                ? ` · ${formatIsoDate(claim.date)}`
+                                : ""}
+                            </span>
+                            {claim.newest ? (
+                              <span className="ml-1 rounded bg-sbkm-navy/10 px-1.5 py-0.5 text-xs font-semibold text-primary dark:bg-white/10">
+                                neuere Quelle
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-xs text-secondary">
+                        Keine Angabe wurde ausgewählt. Kläre es im Feld „Änderung“ mit dem Namen des
+                        Punkts.
+                      </p>
+                    </div>
+                  ))}
                   {item.earlier ? (
                     <p className="mt-2 text-xs text-secondary">
                       Zuerst: {item.earlier}

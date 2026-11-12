@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAuthUser } from "@/lib/dt/db";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
-import { orderWorkshopSources } from "@/lib/dt/transcripts/workshop-model";
+import { anbieterForClient, orderWorkshopSources } from "@/lib/dt/transcripts/workshop-model";
 import { loadWorkshopState, reconcileAvatarAgents } from "@/lib/dt/transcripts/workshop-store";
 
 export async function GET(req: Request) {
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
         createdAt: source.createdAt,
         hasSummary: Boolean(source.summary?.trim()),
       })),
-      anbieter: state.anbieter,
+      anbieter: anbieterForClient(state.anbieter),
       avatarPlan,
     });
   } catch (err) {

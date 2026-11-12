@@ -4,14 +4,19 @@ import { z } from "zod";
 import { requireAuthUser } from "@/lib/dt/db";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 import { requireTranscriptAccess } from "@/lib/dt/transcripts/access";
-import { evaluateAnbieterCorpus, workshopFailureMessage } from "@/lib/dt/transcripts/workshop-llm";
+import {
+  evaluateAnbieterCorpus,
+  extractAnbieterStatements,
+  workshopFailureMessage,
+} from "@/lib/dt/transcripts/workshop-llm";
+import { anbieterForClient } from "@/lib/dt/transcripts/workshop-model";
 import { loadWorkshopState, saveAnbieterState, syncAnbieterToSeoAdvisor } from "@/lib/dt/transcripts/workshop-store";
 
 export const maxDuration = 300;
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  action: z.enum(["evaluate", "approve"]),
+  action: z.enum(["extract", "evaluate", "approve"]),
   instruction: z.string().trim().max(4_000).optional(),
 });
 
@@ -40,7 +45,7 @@ export async function POST(req: Request) {
   const gate = await requireTranscriptAccess(auth.supabase, auth.userId, parsed.data.organisationId);
   if (!gate.ok) return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
 
-  const deadline = Date.now() + 280_000;
+  const deadline = Date.now() + 255_000;
   try {
     const state = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
     if (state.sources.length === 0) {
@@ -48,14 +53,49 @@ export async function POST(req: Request) {
     }
     const name = await organisationName(auth.supabase, parsed.data.organisationId);
 
+    // Stage 1: statements out of every source. The browser repeats this until nothing is pending.
+    if (parsed.data.action === "extract") {
+      const result = await extractAnbieterStatements({
+        sources: state.sources,
+        store: state.anbieter.extraction,
+        deadline,
+      });
+      if (result.calls > 0) {
+        await recordLlmUsageEvent(auth.supabase, {
+          organisationId: parsed.data.organisationId,
+          userId: auth.userId,
+          via: "direct",
+          mode: "transcript",
+          model: result.model,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+        });
+      }
+      // Re-read before saving: only the statements change, never a stand saved meanwhile.
+      const latest = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
+      await saveAnbieterState(auth.supabase, parsed.data.organisationId, {
+        ...latest.anbieter,
+        extraction: result.store,
+      });
+      const read = result.total - result.pending;
+      if (result.error && result.calls === 0) {
+        return NextResponse.json({ ok: false, message: result.error }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, pending: result.pending, total: result.total, read });
+    }
+
     if (parsed.data.action === "evaluate") {
       const instruction = parsed.data.instruction?.trim() ?? "";
       const result = await evaluateAnbieterCorpus({
         organisationName: name,
         sources: state.sources,
+        store: state.anbieter.extraction,
         instruction,
-        // A changed Bestand is read anew as a whole; only an up-to-date stand is revised point by point.
-        currentItems: instruction && state.anbieter.status !== "stale" ? state.anbieter.items : undefined,
+        // A changed Bestand is read anew as a whole; only an up-to-date, checked stand is revised point by point.
+        current:
+          instruction && state.anbieter.status !== "stale"
+            ? { items: state.anbieter.items, review: state.anbieter.review }
+            : undefined,
         deadline,
       });
       await recordLlmUsageEvent(auth.supabase, {
@@ -75,10 +115,12 @@ export async function POST(req: Request) {
         items: result.items,
         savedAt: new Date().toISOString(),
         openWithSource: [],
+        extraction: state.anbieter.extraction,
+        review: result.review,
       };
       await saveAnbieterState(auth.supabase, parsed.data.organisationId, anbieter);
       const fresh = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
-      return NextResponse.json({ ok: true, anbieter: fresh.anbieter });
+      return NextResponse.json({ ok: true, anbieter: anbieterForClient(fresh.anbieter) });
     }
 
     if (state.anbieter.status !== "proposed") {
@@ -113,7 +155,7 @@ export async function POST(req: Request) {
     }
     await saveAnbieterState(auth.supabase, parsed.data.organisationId, approved);
     const fresh = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
-    return NextResponse.json({ ok: true, anbieter: fresh.anbieter });
+    return NextResponse.json({ ok: true, anbieter: anbieterForClient(fresh.anbieter) });
   } catch (err) {
     const message = workshopFailureMessage(err, "Anbieter-Auswertung fehlgeschlagen.");
     return NextResponse.json(

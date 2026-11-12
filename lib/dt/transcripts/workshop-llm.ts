@@ -18,8 +18,11 @@ import {
 } from "@/lib/dt/transcripts/avatar-plan-llm";
 import {
   evaluateAnbieterCorpusWith,
+  extractPendingStatements,
   type EvaluateAnbieterInput,
   type EvaluateAnbieterResult,
+  type ExtractStatementsInput,
+  type ExtractStatementsResult,
 } from "@/lib/dt/transcripts/anbieter-eval";
 
 export type { WorkshopToolCall };
@@ -97,6 +100,11 @@ export async function summarizeTranscript(input: {
 
 export function evaluateAnbieterCorpus(input: Omit<EvaluateAnbieterInput, "call">): Promise<EvaluateAnbieterResult> {
   return evaluateAnbieterCorpusWith({ ...input, call: callTool });
+}
+
+/** One round of stage 1 of the Anbieter evaluation; see `extractPendingStatements`. */
+export function extractAnbieterStatements(input: Omit<ExtractStatementsInput, "call">): Promise<ExtractStatementsResult> {
+  return extractPendingStatements({ ...input, call: callTool });
 }
 
 export function proposeAvatarPlan(input: Omit<ProposeAvatarPlanInput, "call">): Promise<ProposeAvatarPlanResult> {
