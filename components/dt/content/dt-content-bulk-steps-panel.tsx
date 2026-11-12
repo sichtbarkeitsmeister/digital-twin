@@ -29,9 +29,13 @@ export function DtContentBulkStepsPanel(props: {
   const disabled = Boolean(props.disabled) || progress != null;
 
   return (
-    <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-3 dark:border-white/8 sm:max-w-sm">
-      <p className="text-xs font-semibold text-sbkm-navy dark:text-white">Schritte (für die angehakten Seiten)</p>
-      <ul className="grid gap-1">
+    <div className="grid gap-2.5">
+      <div className="grid gap-0.5">
+        <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Schritte</h2>
+        <p className="text-xs text-sbkm-ink-600 dark:text-white/60">Für die angehakten Seiten: welche Schritte laufen sollen.</p>
+      </div>
+      {/* Two columns from sm up, read downwards: 1–5 left, 6–10 right. */}
+      <ul className="grid gap-x-10 gap-y-1.5 sm:grid-flow-col sm:grid-cols-2 sm:grid-rows-5">
         {CONTENT_STEPS.map((s) => {
           const key = s.key;
           const off = isContentSkippableStepKey(key) && skip.includes(key);
@@ -69,7 +73,7 @@ export function DtContentBulkStepsPanel(props: {
           );
         })}
       </ul>
-      <div className="flex items-center justify-between gap-2 border-t border-sbkm-navy/8 pt-2 text-xs dark:border-white/8">
+      <div className="flex items-center justify-between gap-3 border-t border-sbkm-navy/8 pt-2.5 text-xs dark:border-white/8 sm:justify-start">
         <span className="text-sbkm-navy dark:text-white/85" title="Die Seite wartet vor der Watermark Entfernung, bis jemand den Text durchgesehen hat.">
           Vor der Watermark zur Durchsicht anhalten
         </span>

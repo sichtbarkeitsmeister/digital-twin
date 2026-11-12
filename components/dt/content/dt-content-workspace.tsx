@@ -505,40 +505,36 @@ export function DtContentWorkspace(props: {
       <DtContentOrgQuestionsCard organisationId={organisationId} refreshKey={orgQuestionsRefresh} />
 
       <section className={cn(cardClass, "grid gap-4 p-4 sm:p-5")} aria-label="Texte erstellen">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <DtSelect
-            label="Standard-Zielgruppe (für Seiten ohne eigene)"
-            value={avatarId}
-            onValueChange={setAvatarId}
-            options={avatarOptions}
-            placeholder="Kein Avatar vorhanden"
-            disabled={avatarOptions.length === 0}
-            className="sm:w-72"
-            fullWidth
-          />
-          <div className="flex flex-col items-start gap-1.5 lg:items-end">
-            <DtPillButton
-              type="button"
-              className="h-11"
-              disabled={selectedCount === 0 || starting || stepsRun != null || notReady || settingsOpen}
-              onClick={() => void startTexts()}
-            >
-              {starting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
-              Texte erstellen ({selectedCount})
-            </DtPillButton>
-            <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
+        <div className="grid gap-5 lg:grid-cols-[19rem_minmax(0,1fr)] lg:gap-0">
+          <div className="grid content-start gap-2.5 lg:pr-6">
+            <div className="grid gap-0.5">
+              <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Standard-Zielgruppe</h2>
+              <p className="text-xs text-sbkm-ink-600 dark:text-white/60">Für Seiten ohne eigene Zielgruppen.</p>
+            </div>
+            <DtSelect
+              srLabel="Standard-Zielgruppe (für Seiten ohne eigene)"
+              value={avatarId}
+              onValueChange={setAvatarId}
+              options={avatarOptions}
+              placeholder="Kein Avatar vorhanden"
+              disabled={avatarOptions.length === 0}
+              fullWidth
+            />
+          </div>
+          <div className="border-t border-sbkm-navy/8 pt-4 dark:border-white/8 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            <DtContentBulkStepsPanel
+              value={bulkSteps}
+              onChange={setBulkSteps}
+              selectedCount={selectedCount}
+              progress={stepsRun}
+              disabled={starting}
+              onApply={() => void applyBulkStepsNow()}
+            />
           </div>
         </div>
-        <DtContentBulkStepsPanel
-          value={bulkSteps}
-          onChange={setBulkSteps}
-          selectedCount={selectedCount}
-          progress={stepsRun}
-          disabled={starting}
-          onApply={() => void applyBulkStepsNow()}
-        />
+        <div className="flex flex-col gap-4 border-t border-sbkm-navy/8 pt-4 dark:border-white/8 lg:flex-row lg:items-center lg:justify-between">
         {zielgruppenOptions.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 border-t border-sbkm-navy/8 pt-3 dark:border-white/8">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-sbkm-navy dark:text-white">Zielgruppen der angehakten Seiten:</span>
             <DtPillButton
               type="button"
@@ -574,6 +570,19 @@ export function DtContentWorkspace(props: {
             )}
           </div>
         ) : null}
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3 lg:ml-auto">
+            <p className="max-w-xs text-xs text-sbkm-ink-600 dark:text-white/55 sm:order-first lg:text-right">{startHint}</p>
+            <DtPillButton
+              type="button"
+              className="h-11 shrink-0"
+              disabled={selectedCount === 0 || starting || stepsRun != null || notReady || settingsOpen}
+              onClick={() => void startTexts()}
+            >
+              {starting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
+              Texte erstellen ({selectedCount})
+            </DtPillButton>
+          </div>
+        </div>
 
         {confirmedProblems.length > 0 ? (
           <ul className="list-disc rounded-xl border border-orange-300/60 bg-orange-50 py-2 pl-7 pr-3 text-xs text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
