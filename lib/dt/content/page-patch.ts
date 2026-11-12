@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { CONTENT_PAGE_TYPES } from "@/lib/dt/content/page-types";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
+import { CONTENT_PRIMARY_MAX, CONTENT_SECONDARY_MAX } from "@/lib/dt/content/zielgruppen";
 import {
   CONTENT_SKIPPABLE_STEP_KEYS,
   contentStepByKey,
@@ -25,8 +26,22 @@ const patchSchema = z
     client_wishes: z.string().max(CLIENT_WISHES_TEXT_MAX).optional(),
     /** „Vor der Watermark zur Durchsicht anhalten“ (default on). */
     review_stop: z.boolean().optional(),
+    /** Zielgruppen of the page, confirmed by the editor; an empty primary list = Standard-Zielgruppe again. */
+    zielgruppen: z
+      .object({
+        primary: z.array(z.string().min(1).max(80)).max(CONTENT_PRIMARY_MAX),
+        secondary: z.array(z.string().min(1).max(80)).max(CONTENT_SECONDARY_MAX),
+      })
+      .optional(),
   })
-  .refine((body) => body.page_type !== undefined || body.skip_steps !== undefined || body.client_wishes !== undefined || body.review_stop !== undefined);
+  .refine(
+    (body) =>
+      body.page_type !== undefined ||
+      body.skip_steps !== undefined ||
+      body.client_wishes !== undefined ||
+      body.review_stop !== undefined ||
+      body.zielgruppen !== undefined,
+  );
 
 export type ContentPagePatchBody = z.infer<typeof patchSchema>;
 
@@ -53,6 +68,7 @@ export function parseContentPagePatch(
     return { ok: false, message: skipStepsMessage(raw.skip_steps) };
   }
   if ("page_type" in raw) return { ok: false, message: "Ungültiger Seitentyp." };
+  if ("zielgruppen" in raw) return { ok: false, message: `Höchstens ${CONTENT_PRIMARY_MAX} primäre und ${CONTENT_SECONDARY_MAX} sekundäre Zielgruppen.` };
   if ("client_wishes" in raw) return { ok: false, message: `Die Wünsche für diese Seite dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.` };
   return { ok: false, message: "Ungültige Anfrage." };
 }

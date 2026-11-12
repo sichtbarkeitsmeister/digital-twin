@@ -20,6 +20,7 @@ import {
 import { CONTACT_DATA_MIGRATION_FILE } from "@/lib/dt/contact-data";
 import { readContentFreshness, reviewFreshness } from "@/lib/dt/content/freshness";
 import { CONTENT_ORG_QUESTIONS_MIGRATION_FILE, isMissingOrgQuestionsError } from "@/lib/dt/content/org-questions";
+import { readContentZielgruppen, type ContentZielgruppen } from "@/lib/dt/content/zielgruppen";
 import { readQuestionStop, type ContentQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
 import type { ContentAnrede, ContentTextSettings } from "@/lib/dt/content/mapping";
@@ -123,6 +124,11 @@ export type ContentPageRow = {
   client_wishes: string;
   /** The page's one stop for questions before the Watermark Entfernung (migration 20261104); `{}` until reached. */
   question_stop: ContentQuestionStop;
+  /**
+   * Zielgruppen of this page (migration 20261112); empty = the Standard-Zielgruppe. Read only when
+   * the column exists: without the migration every page is empty and Texte runs as before.
+   */
+  zielgruppen?: ContentZielgruppen;
   error: string | null;
   job_id: string | null;
   cost_eur: number | string;
@@ -393,6 +399,8 @@ function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
     skip_steps: normalizeSkipSteps(raw.skip_steps),
     client_wishes: typeof raw.client_wishes === "string" ? raw.client_wishes : "",
     question_stop: readQuestionStop(raw.question_stop),
+    // Only when the column was read (migration 20261112): absent = Zielgruppen je Seite not available yet.
+    ...("zielgruppen" in raw ? { zielgruppen: readContentZielgruppen(raw.zielgruppen) } : {}),
   };
 }
 
@@ -471,17 +479,28 @@ export async function saveContentSettings(
 
 // --- pages ------------------------------------------------------------------------------------
 
+/** `dt_content_pages.zielgruppen` unknown: migration 20261112 never ran. Pages are read without it. */
+export function isMissingZielgruppenColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  return Boolean(error) && isMissingContentColumnError(error) && /zielgruppen/i.test(error?.message ?? "");
+}
+
+type PageSelectResult = { data: unknown; error: { code?: string; message?: string } | null };
+
+/** A page read with `zielgruppen`, or without it while the column does not exist yet. */
+async function selectPagesTolerant(columns: string, run: (columns: string) => PromiseLike<PageSelectResult>): Promise<PageSelectResult> {
+  const result = await run(`${columns}, zielgruppen`);
+  if (result.error && isMissingZielgruppenColumnError(result.error)) return run(columns);
+  return result;
+}
+
 export async function loadContentPage(
   service: SupabaseClient,
   organisationId: string,
   slug: string,
 ): Promise<ContentPageRow | null> {
-  const { data, error } = await service
-    .from("dt_content_pages")
-    .select(PAGE_COLUMNS)
-    .eq("organisation_id", organisationId)
-    .eq("slug", slug)
-    .maybeSingle();
+  const { data, error } = await selectPagesTolerant(PAGE_COLUMNS, (columns) =>
+    service.from("dt_content_pages").select(columns).eq("organisation_id", organisationId).eq("slug", slug).maybeSingle(),
+  );
   if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht geladen werden"));
   return data ? normalizePageRow(data as Record<string, unknown>) : null;
 }
@@ -494,7 +513,9 @@ export async function loadContentPageById(
   service: SupabaseClient,
   pageId: string,
 ): Promise<ContentPageRow | null> {
-  const { data, error } = await service.from("dt_content_pages").select(PAGE_COLUMNS).eq("id", pageId).maybeSingle();
+  const { data, error } = await selectPagesTolerant(PAGE_COLUMNS, (columns) =>
+    service.from("dt_content_pages").select(columns).eq("id", pageId).maybeSingle(),
+  );
   if (error) throw new Error(contentDbErrorMessage(error, "Seite konnte nicht geladen werden"));
   return data ? normalizePageRow(data as Record<string, unknown>) : null;
 }
@@ -505,12 +526,9 @@ export async function loadContentPages(
   options?: { withHtml?: boolean },
 ): Promise<ContentPageRow[]> {
   const columns: string = options?.withHtml ? PAGE_COLUMNS : SUMMARY_COLUMNS;
-  const { data, error } = await service
-    .from("dt_content_pages")
-    .select(columns)
-    .eq("organisation_id", organisationId)
-    .order("position", { ascending: true })
-    .limit(MAX_PAGES);
+  const { data, error } = await selectPagesTolerant(columns, (cols) =>
+    service.from("dt_content_pages").select(cols).eq("organisation_id", organisationId).order("position", { ascending: true }).limit(MAX_PAGES),
+  );
   if (error) throw new Error(contentDbErrorMessage(error, "Seiten konnten nicht geladen werden"));
   return ((data ?? []) as unknown as Record<string, unknown>[]).map(normalizePageRow);
 }
@@ -1265,6 +1283,9 @@ export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}):
   return {
     name: page.name,
     slug: page.slug,
+    zielgruppen: page.zielgruppen
+      ? { primary: page.zielgruppen.primary, secondary: page.zielgruppen.secondary, status: page.zielgruppen.status }
+      : null,
     level: page.level,
     path: page.path,
     source: page.source,
@@ -1469,6 +1490,7 @@ export function buildReview(
   return {
     name: page.name,
     briefing: pageBriefing(page),
+    zielgruppen: page.zielgruppen ?? null,
     legacy_steps: hasLegacyContentSteps(steps),
     public: {
       state: page.state,

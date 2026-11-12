@@ -201,6 +201,25 @@ export async function loadContentAvatarRow(
   return (data as ContentAvatarRow | null) ?? null;
 }
 
+/**
+ * The organisation's Zielgruppen avatars for „Zielgruppen je Seite“: every enabled avatar of the
+ * Texte dropdown except the Mix (the per-page choice replaces it), with the fields the text uses.
+ */
+export async function loadContentZielgruppenAvatars(
+  supabase: SupabaseClient,
+  organisationId: string,
+): Promise<ContentAvatarRow[]> {
+  const { data } = await supabase
+    .from("dt_agents")
+    .select("id, name, role, kind, slug, prompt_template, prompt_append, uses_global_prompt, avatar_data, created_at")
+    .eq("organisation_id", organisationId)
+    .eq("is_enabled", true)
+    .order("created_at", { ascending: false });
+  return ((data ?? []) as Array<ContentAvatarRow & { kind?: string | null }>).filter(
+    (row) => !isSeoAdvisorAgent(row) && !isDefaultTwinAgent(row) && !isMixAgent(row),
+  );
+}
+
 /** What the crawl of the live site has for this organisation (the second „Seiten“ mode). */
 export async function loadContentCrawlSummary(
   supabase: SupabaseClient,

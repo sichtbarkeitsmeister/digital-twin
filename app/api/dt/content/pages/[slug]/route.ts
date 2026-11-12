@@ -21,6 +21,7 @@ import {
   updateContentSkipSteps,
 } from "@/lib/dt/content/store";
 import type { ContentPagePatchResult } from "@/lib/dt/content/types";
+import { saveContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-suggest";
 
 /**
  * „Seitentyp“ in the table and in the drawer, „Schritte“ in the drawer (`skip_steps`, the
@@ -43,7 +44,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
   try {
     const page = await loadContentPage(gate.service, gate.organisationId, slug);
     if (!page) return contentError("Seite nicht gefunden.", 404);
-    const { page_type: pageType, skip_steps: skipSteps, client_wishes: clientWishes, review_stop: reviewStop } = parsed.data;
+    const { page_type: pageType, skip_steps: skipSteps, client_wishes: clientWishes, review_stop: reviewStop, zielgruppen } = parsed.data;
     // Everything is checked before anything is written.
     if (pageType !== undefined) {
       const blocker = contentPageTypeChangeBlocker(page);
@@ -69,6 +70,11 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
     if (reviewStop !== undefined) {
       const saved = await updateContentReviewStop(gate.service, page, reviewStop);
       if (!saved.ok) return contentError(saved.error, saved.status);
+    }
+    // Zielgruppen apply from the next step, also while the page runs (like the wishes).
+    if (zielgruppen !== undefined) {
+      const saved = await saveContentZielgruppen(gate.service, page, zielgruppen);
+      if (!saved.ok) return contentError(saved.message, saved.status);
     }
 
     const [fresh, steps, overview, orgQuestions] = await Promise.all([

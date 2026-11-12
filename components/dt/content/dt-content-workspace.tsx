@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eraser, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Eraser, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -23,6 +23,7 @@ import { DtContentTypePromptsCard } from "@/components/dt/content/dt-content-typ
 import { DtContentWishesCard } from "@/components/dt/content/dt-content-wishes-card";
 import { DtTexterPromptCard } from "@/components/dt/content/dt-texter-prompt-card";
 import { CenteredModal } from "@/components/ui/centered-modal";
+import { withZielgruppeLevel, zielgruppeLevel, type ContentZielgruppeLevel } from "@/lib/dt/content/zielgruppen";
 import { defaultAvatarOptionId } from "@/lib/dt/agents/mix";
 import type { ContentAvatarOption } from "@/lib/dt/content/load-sources";
 import type { ContentTextSettings, ContentTextSettingsSuggestion } from "@/lib/dt/content/mapping";
@@ -111,6 +112,10 @@ export function DtContentWorkspace(props: {
   const [resetting, setResetting] = useState<"reset" | "delete" | "all" | null>(null);
   /** Which bulk action waits for the person's confirmation in the modal; „all“ is the whole tool. */
   const [confirmBulk, setConfirmBulk] = useState<"reset" | "delete" | "all" | null>(null);
+  /** „Zielgruppen festlegen“ for the ticked pages: the choice in the dialog (null = closed). */
+  const [bulkZielgruppen, setBulkZielgruppen] = useState<{ primary: string[]; secondary: string[] } | null>(null);
+  /** „Zielgruppen vorschlagen / festlegen“ running over the ticked pages: page n of total. */
+  const [zielgruppenRun, setZielgruppenRun] = useState<{ done: number; total: number } | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
   const [changingType, setChangingType] = useState<string | null>(null);
   const [settings, setSettings] = useState<ContentTextSettings | null>(props.initialSettings);
@@ -185,6 +190,13 @@ export function DtContentWorkspace(props: {
     }));
   }, [props.avatars]);
 
+  /** The Zielgruppen avatars (everything in the dropdown but the Mix), for „Zielgruppen je Seite“. */
+  const zielgruppenOptions = useMemo(
+    () => props.avatars.filter((a) => !a.isMix).map((a) => ({ id: a.id, name: a.name, role: a.role })),
+    [props.avatars],
+  );
+  const zielgruppenNames = useMemo(() => new Map(zielgruppenOptions.map((o) => [o.id, o.name])), [zielgruppenOptions]);
+
   const pages = useMemo(() => overview?.pages ?? [], [overview]);
   const visible = useMemo(() => filterContentPages(pages, filter), [pages, filter]);
   const filterActive = isContentPageFilterActive(filter);
@@ -202,6 +214,32 @@ export function DtContentWorkspace(props: {
   }, [visible]);
 
   const selectedCount = selected.size;
+
+  /**
+   * „Zielgruppen vorschlagen“ / „Zielgruppen festlegen“ for every ticked page, one request per page
+   * (a suggestion is a short call each). A confirmed choice stays when only suggesting.
+   */
+  async function runZielgruppen(kind: "suggest" | "set", choice?: { primary: string[]; secondary: string[] }) {
+    const slugs = [...selected];
+    if (slugs.length === 0) return;
+    setZielgruppenRun({ done: 0, total: slugs.length });
+    const failed: string[] = [];
+    for (const [i, slug] of slugs.entries()) {
+      const base = `/api/dt/content/pages/${encodeURIComponent(slug)}`;
+      const res =
+        kind === "suggest"
+          ? await contentApi(`${base}/zielgruppen`, { method: "POST", body: { organisationId, force: false } })
+          : await contentApi(base, { method: "PATCH", body: { organisationId, zielgruppen: choice } });
+      if (!res.ok) failed.push(`${pages.find((p) => p.slug === slug)?.name ?? slug}: ${res.message}`);
+      setZielgruppenRun({ done: i + 1, total: slugs.length });
+    }
+    setZielgruppenRun(null);
+    setBulkZielgruppen(null);
+    void loadOverview();
+    const ok = slugs.length - failed.length;
+    if (ok > 0) toast.success(kind === "suggest" ? `Zielgruppen für ${ok} ${ok === 1 ? "Seite" : "Seiten"} vorgeschlagen` : `Zielgruppen für ${ok} ${ok === 1 ? "Seite" : "Seiten"} festgelegt`);
+    if (failed.length > 0) toast.error(`Nicht geklappt: ${failed.join(" · ")}`, { duration: 15_000 });
+  }
   const notReady = readiness ? !readiness.ready : false;
   const settingsOpen = !settings || editingSettings;
 
@@ -416,7 +454,7 @@ export function DtContentWorkspace(props: {
       <section className={cn(cardClass, "grid gap-4 p-4 sm:p-5")} aria-label="Texte erstellen">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <DtSelect
-            label="Avatar"
+            label="Standard-Zielgruppe (für Seiten ohne eigene)"
             value={avatarId}
             onValueChange={setAvatarId}
             options={avatarOptions}
@@ -438,6 +476,43 @@ export function DtContentWorkspace(props: {
             <p className="max-w-md text-xs text-sbkm-ink-600 dark:text-white/55 lg:text-right">{startHint}</p>
           </div>
         </div>
+        {zielgruppenOptions.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-t border-sbkm-navy/8 pt-3 dark:border-white/8">
+            <span className="text-xs font-semibold text-sbkm-navy dark:text-white">Zielgruppen der angehakten Seiten:</span>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedCount === 0 || zielgruppenRun != null}
+              onClick={() => void runZielgruppen("suggest")}
+              title="Der Zwilling schlägt für jede angehakte Seite Zielgruppen vor (wenige Cent je Seite). Festgelegte bleiben."
+            >
+              <Sparkles className="size-3.5" aria-hidden />
+              Vorschlagen ({selectedCount})
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectedCount === 0 || zielgruppenRun != null}
+              onClick={() => setBulkZielgruppen({ primary: [], secondary: [] })}
+              title="Dieselben Zielgruppen für alle angehakten Seiten festlegen."
+            >
+              <Users className="size-3.5" aria-hidden />
+              Festlegen ({selectedCount})
+            </DtPillButton>
+            {zielgruppenRun ? (
+              <span className="inline-flex items-center gap-1 text-xs text-sky-700 dark:text-sky-300">
+                <Loader2 className="size-3 animate-spin" aria-hidden />
+                Seite {Math.min(zielgruppenRun.done + 1, zielgruppenRun.total)} von {zielgruppenRun.total} …
+              </span>
+            ) : (
+              <span className="text-xs text-sbkm-ink-500 dark:text-white/45">
+                Seiten ohne eigene Zielgruppen bekommen beim Start automatisch den Vorschlag des Zwillings.
+              </span>
+            )}
+          </div>
+        ) : null}
 
         {confirmedProblems.length > 0 ? (
           <ul className="list-disc rounded-xl border border-orange-300/60 bg-orange-50 py-2 pl-7 pr-3 text-xs text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
@@ -563,6 +638,7 @@ export function DtContentWorkspace(props: {
               stopping={stopping}
               onTypeChange={(page, pageType) => void changePageType(page, pageType)}
               changingType={changingType}
+              zielgruppenNames={zielgruppenNames}
             />
           )}
         </div>
@@ -647,12 +723,83 @@ export function DtContentWorkspace(props: {
         </ul>
       </CenteredModal>
 
+      <CenteredModal
+        open={bulkZielgruppen != null}
+        onClose={() => {
+          if (!zielgruppenRun) setBulkZielgruppen(null);
+        }}
+        closeDisabled={zielgruppenRun != null}
+        titleId="content-bulk-zielgruppen-title"
+        title={`Zielgruppen für ${selectedCount} ${selectedCount === 1 ? "Seite" : "Seiten"} festlegen`}
+        description="Gilt für alle angehakten Seiten und ersetzt deren bisherige Zielgruppen. Primär: höchstens zwei, für sie wird geschrieben. Sekundär: höchstens drei, werden mitbedient."
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <DtPillButton type="button" size="sm" variant="ghost" disabled={zielgruppenRun != null} onClick={() => setBulkZielgruppen(null)}>
+              Abbrechen
+            </DtPillButton>
+            <DtPillButton
+              type="button"
+              size="sm"
+              disabled={zielgruppenRun != null || !bulkZielgruppen || bulkZielgruppen.primary.length === 0}
+              onClick={() => bulkZielgruppen && void runZielgruppen("set", bulkZielgruppen)}
+            >
+              {zielgruppenRun ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+              Für {selectedCount} {selectedCount === 1 ? "Seite" : "Seiten"} festlegen
+            </DtPillButton>
+          </div>
+        }
+      >
+        <ul className="grid gap-2">
+          {zielgruppenOptions.map((o) => {
+            const level = bulkZielgruppen ? zielgruppeLevel(bulkZielgruppen, o.id) : "off";
+            return (
+              <li key={o.id} className="flex items-center justify-between gap-3">
+                <span className="min-w-0 text-sm text-sbkm-navy dark:text-white">
+                  <span className="font-semibold">{o.name}</span>
+                  {o.role ? <span className="block truncate text-xs text-sbkm-ink-500 dark:text-white/45">{o.role}</span> : null}
+                </span>
+                <div className="flex shrink-0 overflow-hidden rounded-pill border border-sbkm-navy/15 dark:border-white/15" role="group" aria-label={`Zielgruppe ${o.name}`}>
+                  {(
+                    [
+                      ["primary", "Primär"],
+                      ["secondary", "Sekundär"],
+                      ["off", "Aus"],
+                    ] as Array<[ContentZielgruppeLevel, string]>
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={level === value}
+                      disabled={zielgruppenRun != null}
+                      onClick={() => setBulkZielgruppen((prev) => (prev ? withZielgruppeLevel(prev, o.id, value) : prev))}
+                      className={cn(
+                        "px-2.5 py-1 text-xs font-semibold transition-colors",
+                        level === value
+                          ? value === "primary"
+                            ? "bg-emerald-600 text-white"
+                            : value === "secondary"
+                              ? "bg-sky-600 text-white"
+                              : "bg-sbkm-navy/10 text-sbkm-navy dark:bg-white/15 dark:text-white"
+                          : "bg-white text-sbkm-ink-600 hover:bg-sbkm-navy/5 dark:bg-transparent dark:text-white/60",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </CenteredModal>
+
       <DtContentPageDrawer
         organisationId={organisationId}
         page={openPage}
         open={openPage != null}
         onClose={() => setOpenPage(null)}
         onChanged={() => void loadOverview()}
+        zielgruppenOptions={zielgruppenOptions}
       />
     </div>
   );
