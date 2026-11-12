@@ -14,6 +14,8 @@ const bodySchema = z.object({
   finding_keys: z.array(z.string().min(1).max(4_000)).min(1).max(20),
   /** The points that go with this Abschnitt (a point about several goes with its last one). */
   done_keys: z.array(z.string().min(1).max(4_000)).max(20).optional().nullable(),
+  /** „Kunde prüft“: the answer „KUNDE PRÜFT“ for exactly one open point, as under „Eigene Angabe“. */
+  info: z.string().max(200).optional().nullable(),
 });
 
 /**

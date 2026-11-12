@@ -37,6 +37,9 @@ export function isKundePrueft(text: string | null | undefined): boolean {
   return words.every((w) => CUSTOMER.test(w) || CHECK.test(w) || FILLER.has(w));
 }
 
+/** What the button „Kunde prüft“ enters as the answer (open points and questions to the customer). */
+export const KUNDE_PRUEFT_ANSWER = "KUNDE PRÜFT";
+
 /** The placeholder for a question the customer is checking: the question in one sentence. */
 export function kundePrueftPlaceholder(question: string): string {
   const one = question.replace(/\s+/g, " ").trim().replace(/[\[\]]/g, "");

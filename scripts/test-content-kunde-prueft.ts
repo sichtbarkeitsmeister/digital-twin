@@ -13,6 +13,7 @@ import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { normalizeAnswersOutput, type AnswersPassResult } from "../lib/dt/content/pipeline/answers";
 import { contentGapQuestions } from "../lib/dt/content/pipeline/gaps";
 import {
+  KUNDE_PRUEFT_ANSWER,
   isKundePrueft,
   keepPendingPlaceholders,
   kundePrueftPlaceholder,
@@ -39,6 +40,8 @@ const PLACEHOLDER = "[BITTE PRÜFEN: Gibt es eine schriftliche Einzelaufstellung
 
 // --- recognising „KUNDE PRÜFT“ -----------------------------------------------------------------
 {
+  // What the button „Kunde prüft“ enters (open points, questions at the stop, company questions).
+  assert.equal(isKundePrueft(KUNDE_PRUEFT_ANSWER), true, "the button's answer is recognised");
   for (const yes of ["KUNDE PRÜFT", "Kunde prüft", "kunde prueft noch", "Der Kunde prüft das noch.", "wird vom Kunden geprüft", "Kundin klärt das intern", "prüft der Kunde", "Kunde prüft – bitte warten"]) {
     assert.equal(isKundePrueft(yes), true, yes);
   }
@@ -173,7 +176,7 @@ const context = (patch: Partial<ContentPipelineContext> = {}): ContentPipelineCo
   const gapId = contentQuestionId(gap);
   const onPlaceholder = planQuestionStop({
     blocks, questions: [], knowledge: fresh, slug: "uhren",
-    decisions: [{ id: gapId, question: gap.question, placeholder: PLACEHOLDER, block_id: "ablauf", excerpt: null, scope: "seite", action: "answer", answer: "KUNDE PRÜFT", source: "kunde" }],
+    decisions: [{ id: gapId, question: gap.question, placeholder: PLACEHOLDER, block_id: "ablauf", excerpt: null, scope: "seite", action: "answer", answer: KUNDE_PRUEFT_ANSWER, source: "kunde" }],
   });
   assert.equal(onPlaceholder.handled.length, 0, "a placeholder in the text stays as it is");
 
