@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { filterAgentsHiddenFromOrgMembers } from "@/lib/dt/agents/seo-advisor";
+import { filterAgentsHiddenFromOrgMembers, withoutSeededStandardAvatars } from "@/lib/dt/agents/seo-advisor";
+import { removeSeededStandardAvatars } from "@/lib/dt/agents/remove-standard-avatar";
 import { loadAgentsForOrgManage, requireAuthUser } from "@/lib/dt/db";
 import { canDirectlyEditDtAgents, canManageDtAgents } from "@/lib/dt/org-access";
 
@@ -30,12 +31,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, message: "Keine Berechtigung." }, { status: 403 });
   }
 
+  await removeSeededStandardAvatars(parsed.data.org);
+
   const [agents, canDirectlyEdit] = await Promise.all([
     loadAgentsForOrgManage(parsed.data.org, auth.supabase),
     canDirectlyEditDtAgents(auth.supabase, auth.userId),
   ]);
-  const visibleAgents = canDirectlyEdit
-    ? agents
-    : filterAgentsHiddenFromOrgMembers(agents);
+  const visibleAgents = withoutSeededStandardAvatars(
+    canDirectlyEdit ? agents : filterAgentsHiddenFromOrgMembers(agents),
+  );
   return NextResponse.json({ ok: true, agents: visibleAgents, canDirectlyEdit });
 }
