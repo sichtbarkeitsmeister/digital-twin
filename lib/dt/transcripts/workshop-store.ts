@@ -85,7 +85,7 @@ export async function loadWorkshopState(
   return {
     fingerprint,
     sources,
-    anbieter: data ? readAnbieterState(data.anbieter, fingerprint) : emptyAnbieterState(),
+    anbieter: data ? readAnbieterState(data.anbieter, fingerprint, sources) : emptyAnbieterState(),
     avatarPlan: data ? readAvatarPlan(data.avatar_plan, fingerprint) : emptyAvatarPlan(),
   };
 }

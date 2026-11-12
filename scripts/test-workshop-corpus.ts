@@ -674,3 +674,142 @@ testAnbieterSavedAt();
 testSummaryOnlyPlanInput();
 testGeneratorStateRestore();
 console.log("workshop corpus: all ok");
+
+
+// Evaluation in groups, point-wise revision and the warning for lost sections.
+void (async () => {
+  const {
+    anbieterPointGroups,
+    mergeRevisedAnbieterItems,
+    openPointsWithSource,
+    pointsNamedInInstruction,
+    ANBIETER_POINTS: POINTS,
+  } = await import("../lib/dt/transcripts/workshop-model");
+  const { evaluateAnbieterCorpusWith } = await import("../lib/dt/transcripts/anbieter-eval");
+
+  const groups = anbieterPointGroups();
+  assert.deepEqual(groups.map((group) => group.length), [4, 3, 3, 3]);
+  assert.deepEqual(groups.flat(), POINTS.map((point) => point.key));
+  assert.deepEqual(anbieterPointGroups(["ziele", "preis"]), [["preis", "ziele"]]);
+
+  assert.deepEqual(
+    pointsNamedInInstruction("Bitte Preis & Positionierung, Anfragen und Kanäle sowie Ziele & Weiterentwicklung füllen."),
+    ["preis", "kanaele", "ziele"],
+  );
+  assert.deepEqual(pointsNamedInInstruction("Der Preis ist falsch, es sind 90 Euro."), []);
+  assert.deepEqual(pointsNamedInInstruction("Wettbewerb kürzen"), ["wettbewerb"]);
+
+  const source = (id: string, rawText: string) => ({
+    id,
+    title: `Quelle ${id}`,
+    filename: `${id}.md`,
+    sourceKind: "summary" as const,
+    spokenOn: "2026-01-01",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    summary: rawText,
+    rawText,
+  });
+  const doc = source(
+    "a",
+    [
+      "## 1. Unternehmen & Kern",
+      "Makler in Moers.",
+      "## 10. Sprache & Ton",
+      "Sie-Form.",
+      "## 11. Preis & Positionierung",
+      "Beratung ohne Honorar.",
+      "## 12. Anfragen & Kanäle",
+      "",
+      "## 13. Ziele & Weiterentwicklung",
+      "Zweites Büro.",
+    ].join("\n"),
+  );
+  const filled = (texts: Record<string, string>) =>
+    normalizeAnbieterItems(Object.entries(texts).map(([key, current]) => ({ key, current })));
+
+  const open = openPointsWithSource(filled({ unternehmen: "Makler in Moers.", sprache: "Sie-Form." }), [doc]);
+  assert.deepEqual(open.map((point) => point.key), ["preis", "ziele"], "an empty section and a filled point raise no warning");
+  assert.match(open[0]?.sources[0] ?? "", /Quelle a/);
+  assert.deepEqual(openPointsWithSource(filled({ unternehmen: "x" }), [source("b", "Preis: 20 Euro\nmehr Text")]), []);
+  assert.deepEqual(
+    readAnbieterState({ items: filled({ unternehmen: "x" }), sourceFingerprint: "f" }, "f", [doc]).openWithSource.map((p) => p.key),
+    ["sprache", "preis", "ziele"],
+  );
+
+  const current = filled({ unternehmen: "Alt U", sprache: "Alt S", preis: "Alt P" });
+  const merged = mergeRevisedAnbieterItems({
+    current,
+    revised: filled({ unternehmen: "Neu U", ziele: "Neu Z" }),
+    returned: ["unternehmen", "sprache", "preis", "ziele"],
+    named: ["preis", "ziele"],
+  });
+  const text = (items: typeof merged, key: string) => items.find((item) => item.key === key)?.current;
+  assert.equal(text(merged, "unternehmen"), "Neu U");
+  assert.equal(text(merged, "sprache"), "Alt S", "an empty answer never deletes a point nobody named");
+  assert.equal(text(merged, "preis"), "", "a named point can be emptied");
+  assert.equal(text(merged, "ziele"), "Neu Z");
+
+  type Call = Parameters<typeof evaluateAnbieterCorpusWith>[0]["call"];
+  const keysOf = (tool: Parameters<Call>[0]["tool"]) =>
+    Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
+  const usage = { inputTokens: 1, outputTokens: 1 };
+
+  // Full run: one call per group; a lost section is asked for once more on its own.
+  const seen: string[][] = [];
+  const full = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: [doc],
+    call: async ({ tool, user }) => {
+      const keys = keysOf(tool);
+      seen.push(keys);
+      const json = Object.fromEntries(
+        keys.map((key) => [key, key === "preis" && !user.includes("kam leer zurück") ? "" : `Text ${key}`]),
+      );
+      return { json, usage, model: "m" };
+    },
+  });
+  assert.deepEqual(seen.slice(0, 4).map((keys) => keys.length).sort(), [3, 3, 3, 4]);
+  assert.deepEqual(seen.slice(4), [["preis"]]);
+  assert.equal(full.calls, 5);
+  assert.equal(text(full.items, "preis"), "Text preis");
+  assert.equal(text(full.items, "ziele"), "Text ziele");
+
+  // Revision with named points: only those are asked for, everything else stays word for word.
+  const revisedKeys: string[][] = [];
+  const revision = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: [doc],
+    instruction: "Preis & Positionierung und Ziele & Weiterentwicklung füllen.",
+    currentItems: current,
+    call: async ({ tool }) => {
+      const keys = keysOf(tool);
+      revisedKeys.push(keys);
+      return { json: Object.fromEntries(keys.map((key) => [key, `Neu ${key}`])), usage, model: "m" };
+    },
+  });
+  assert.deepEqual(revisedKeys, [["preis", "ziele"]]);
+  assert.equal(text(revision.items, "unternehmen"), "Alt U");
+  assert.equal(text(revision.items, "sprache"), "Alt S");
+  assert.equal(text(revision.items, "preis"), "Neu preis");
+  assert.equal(text(revision.items, "ziele"), "Neu ziele");
+
+  // Revision without a named point: the model returns what it changes; empties change nothing.
+  const loose = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: [doc],
+    instruction: "Die Beratung kostet 90 Euro.",
+    currentItems: current,
+    call: async ({ tool }) => {
+      assert.deepEqual((tool.input_schema as { required?: string[] }).required, []);
+      return { json: { preis: "90 Euro.", sprache: "", unternehmen: "" }, usage, model: "m" };
+    },
+  });
+  assert.equal(text(loose.items, "preis"), "90 Euro.");
+  assert.equal(text(loose.items, "sprache"), "Alt S");
+  assert.equal(text(loose.items, "unternehmen"), "Alt U");
+  console.log("anbieter groups, revision and lost-section warning ok");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

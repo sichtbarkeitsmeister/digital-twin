@@ -32,6 +32,8 @@ export type WorkshopToolCall = (input: {
   user: string;
   tool: Anthropic.Tool;
   maxTokens?: number;
+  /** Upper bound for this one call; the default is the helper's own limit. */
+  timeoutMs?: number;
 }) => Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string | null }>;
 
 export type ProposeAvatarPlanInput = {

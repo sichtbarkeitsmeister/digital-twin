@@ -56,6 +56,7 @@ type AnbieterState = {
   revisionNote: string;
   items: AnbieterItem[];
   savedAt: string | null;
+  openWithSource?: { key: string; label: string; sources: string[] }[];
 };
 
 type AvatarCase = {
@@ -500,6 +501,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const planEditable = avatarPlan?.status === "proposed";
   // The saved points stay visible in every status, also when the Bestand changed since.
   const anbieterHasPoints = anbieterHasSavedPoints(anbieter?.items ?? []);
+  // Empty points for which a source has a filled section under this very heading.
+  const anbieterLost = new Map((anbieter?.openWithSource ?? []).map((point) => [point.key, point]));
   const missingSummaries = sources
     .map((source, index) => ({ id: source.id, label: sourceLabel(source, index), hasSummary: source.hasSummary }))
     .filter((source) => !source.hasSummary);
@@ -632,7 +635,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
             <Textarea
               value={anbieterNote}
               onChange={(event) => setAnbieterNote(event.target.value)}
-              placeholder="Was soll anders werden? Nur diese Punkte werden angepasst, der übrige Bestand bleibt."
+              placeholder="Was soll anders werden? Nenne die Punkte mit Namen, z. B. „Preis & Positionierung“. Nur diese werden neu geschrieben, alle anderen bleiben wörtlich."
               className="min-h-[88px]"
             />
           </div>
@@ -682,6 +685,29 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               <p className="text-xs text-secondary">{formatSavedAt(anbieter.savedAt)}</p>
             </div>
           ) : null}
+          {anbieter && anbieterHasPoints && anbieterLost.size > 0 ? (
+            <div
+              role="alert"
+              className="grid gap-1 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-3"
+            >
+              <p className="text-sm font-semibold text-destructive">
+                {anbieterLost.size === 1
+                  ? "1 Punkt ist leer, obwohl der Bestand einen Abschnitt dazu hat"
+                  : `${anbieterLost.size} Punkte sind leer, obwohl der Bestand Abschnitte dazu hat`}
+              </p>
+              <ul className="list-disc pl-5 text-sm text-primary">
+                {[...anbieterLost.values()].map((point) => (
+                  <li key={point.key}>
+                    {point.label}: Abschnitt in {point.sources.join(", ")}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm text-primary">
+                Bitte neu auswerten oder die Punkte im Feld „Änderung“ mit ihrem Namen nennen, bevor
+                du freigibst.
+              </p>
+            </div>
+          ) : null}
           {anbieter && anbieterHasPoints ? (
             <ul className="grid gap-3">
               {anbieter.items.map((item) => (
@@ -692,6 +718,12 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                   <p className="text-sm font-semibold text-primary">{item.label}</p>
                   {item.current ? (
                     <p className="mt-1 whitespace-pre-wrap text-sm text-primary">{item.current}</p>
+                  ) : anbieterLost.has(item.key) ? (
+                    <p className="mt-1 text-sm text-destructive">
+                      Leer, obwohl ein Abschnitt „{item.label}“ im Bestand steht (
+                      {anbieterLost.get(item.key)?.sources.join(", ")}). Die Auswertung hat ihn nicht
+                      übernommen.
+                    </p>
                   ) : (
                     <p className="mt-1 text-sm text-secondary">Offen. Wird nicht erfunden.</p>
                   )}

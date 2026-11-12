@@ -140,7 +140,15 @@ export type AnbieterState = {
   items: AnbieterItem[];
   /** When the points were last saved (an evaluation or a revision), ISO. Null for older rows. */
   savedAt: string | null;
+  /**
+   * Points that are empty although a source has a filled section under this very heading.
+   * Derived from the sources on every load, never trusted from the saved row.
+   */
+  openWithSource: AnbieterOpenPoint[];
 };
+
+/** An empty point and the sources that carry a section with its name. */
+export type AnbieterOpenPoint = { key: AnbieterPointKey; label: string; sources: string[] };
 
 export type AvatarPlanState = {
   status: WorkshopSectionStatus;
@@ -431,6 +439,130 @@ export function normalizeAnbieterItems(raw: unknown): AnbieterItem[] {
   });
 }
 
+/** At most this many points go into one evaluation call, so a long early field cannot starve a later one. */
+export const ANBIETER_EVAL_GROUP_SIZE = 4;
+
+/** The points in checklist order, cut into evenly sized groups; one evaluation call fills one group. */
+export function anbieterPointGroups(
+  keys: readonly AnbieterPointKey[] = ANBIETER_POINTS.map((point) => point.key),
+): AnbieterPointKey[][] {
+  const wanted = new Set(keys);
+  const ordered = ANBIETER_POINTS.map((point) => point.key).filter((key) => wanted.has(key));
+  const count = Math.ceil(ordered.length / ANBIETER_EVAL_GROUP_SIZE);
+  const groups: AnbieterPointKey[][] = [];
+  let start = 0;
+  for (let i = 0; i < count; i += 1) {
+    const size = Math.ceil((ordered.length - start) / (count - i));
+    groups.push(ordered.slice(start, start + size));
+    start += size;
+  }
+  return groups;
+}
+
+/**
+ * The points an instruction names by their full label („Preis & Positionierung“, also with
+ * „und“ or without a joiner) or by a one-word label. A loose word like „Preis“ in a sentence
+ * names no point; the model then decides which points the instruction touches.
+ */
+export function pointsNamedInInstruction(instruction: string): AnbieterPointKey[] {
+  const compact = compactPointName(instruction);
+  if (!compact) return [];
+  return ANBIETER_POINTS.filter((point) => {
+    const label = compactPointName(point.label);
+    return compact.includes(label) || compact.includes(compactPointName(point.label.replace(/&/g, " ")));
+  }).map((point) => point.key);
+}
+
+/** The point a heading line names: „## 11. Preis & Positionierung“, „**Preis & Positionierung**“, „Preis & Positionierung:“. */
+function headingPointKey(line: string): AnbieterPointKey | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 120) return null;
+  const hashed = /^#{1,6}\s+/.test(trimmed);
+  const name = trimmed
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^[*_]+|[*_:\s]+$/g, "")
+    .replace(/^(?:punkt\s+)?\d{1,2}\s*[.):-]\s*/i, "")
+    .replace(/^[*_]+|[*_:\s]+$/g, "");
+  const compact = compactPointName(name);
+  if (!compact) return null;
+  const exact = ANBIETER_POINTS.find(
+    (point) => compact === compactPointName(point.label) || (hashed && compact === point.key),
+  );
+  return exact?.key ?? null;
+}
+
+function isHeadingLine(line: string): boolean {
+  return /^#{1,6}\s+\S/.test(line.trim());
+}
+
+/** The points one text carries as a heading with text below it. */
+function filledHeadingPoints(text: string): Set<AnbieterPointKey> {
+  const found = new Set<AnbieterPointKey>();
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const key = headingPointKey(lines[i] ?? "");
+    if (!key) continue;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const next = lines[j] ?? "";
+      if (!next.trim()) continue;
+      if (isHeadingLine(next) || headingPointKey(next)) break;
+      found.add(key);
+      break;
+    }
+  }
+  return found;
+}
+
+/**
+ * Empty points for which a source has a filled section under exactly this heading. Such a
+ * point is not „nobody said anything“: the evaluation lost it.
+ */
+export function openPointsWithSource(
+  items: Pick<AnbieterItem, "key" | "current">[],
+  sources: WorkshopSource[],
+): AnbieterOpenPoint[] {
+  const empty = new Set(items.filter((item) => !item.current.trim()).map((item) => item.key));
+  if (empty.size === 0) return [];
+  const byKey = new Map<AnbieterPointKey, string[]>();
+  orderWorkshopSources(sources).forEach((source, index) => {
+    const text = [source.summary ?? "", source.rawText].join("\n");
+    for (const key of filledHeadingPoints(text)) {
+      if (!empty.has(key)) continue;
+      byKey.set(key, [...(byKey.get(key) ?? []), sourceLabel(source, index)]);
+    }
+  });
+  return ANBIETER_POINTS.filter((point) => byKey.has(point.key)).map((point) => ({
+    key: point.key,
+    label: point.label,
+    sources: byKey.get(point.key) ?? [],
+  }));
+}
+
+/**
+ * A revision changes only what it was asked to change. A point the revision did not return
+ * stays word for word. An empty answer deletes a point only when the instruction named it.
+ */
+export function mergeRevisedAnbieterItems(input: {
+  current: AnbieterItem[];
+  revised: AnbieterItem[];
+  returned: readonly AnbieterPointKey[];
+  named: readonly AnbieterPointKey[];
+}): AnbieterItem[] {
+  const returned = new Set(input.returned);
+  const named = new Set(input.named);
+  const revisedByKey = new Map(input.revised.map((item) => [item.key, item]));
+  const currentByKey = new Map(input.current.map((item) => [item.key, item]));
+  return ANBIETER_POINTS.map((point) => {
+    const before =
+      currentByKey.get(point.key) ??
+      ({ key: point.key, label: point.label, current: "", earlier: null, sources: "" } satisfies AnbieterItem);
+    const after = revisedByKey.get(point.key);
+    if (!after || !returned.has(point.key)) return before;
+    if (!after.current.trim() && !named.has(point.key)) return before;
+    return { ...before, current: after.current, earlier: after.earlier ?? before.earlier };
+  });
+}
+
 export { buildCurrentAnbieterMarkdown };
 
 export function sectionStatus(input: {
@@ -618,6 +750,7 @@ export function emptyAnbieterState(): AnbieterState {
     revisionNote: "",
     items: normalizeAnbieterItems([]),
     savedAt: null,
+    openWithSource: [],
   };
 }
 
@@ -728,7 +861,11 @@ export function normalizeGeneratorState(raw: unknown): AvatarGeneratorState | nu
   };
 }
 
-export function readAnbieterState(raw: unknown, fingerprint: string): AnbieterState {
+export function readAnbieterState(
+  raw: unknown,
+  fingerprint: string,
+  sources: WorkshopSource[] = [],
+): AnbieterState {
   const record = asRecord(raw);
   const items = normalizeAnbieterItems(record?.items);
   const hasContent = items.some((item) => item.current.trim() || item.earlier);
@@ -741,6 +878,7 @@ export function readAnbieterState(raw: unknown, fingerprint: string): AnbieterSt
     approvedFingerprint,
     revisionNote: asString(record?.revisionNote, REVISION_NOTE_MAX),
     savedAt: savedAt && Number.isFinite(Date.parse(savedAt)) ? savedAt : null,
+    openWithSource: hasContent ? openPointsWithSource(items, sources) : [],
     status: sectionStatus({
       fingerprint,
       sourceFingerprint,

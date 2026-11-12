@@ -40,6 +40,7 @@ export async function POST(req: Request) {
   const gate = await requireTranscriptAccess(auth.supabase, auth.userId, parsed.data.organisationId);
   if (!gate.ok) return NextResponse.json({ ok: false, message: gate.message }, { status: gate.status });
 
+  const deadline = Date.now() + 280_000;
   try {
     const state = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
     if (state.sources.length === 0) {
@@ -53,7 +54,9 @@ export async function POST(req: Request) {
         organisationName: name,
         sources: state.sources,
         instruction,
-        currentItems: instruction ? state.anbieter.items : undefined,
+        // A changed Bestand is read anew as a whole; only an up-to-date stand is revised point by point.
+        currentItems: instruction && state.anbieter.status !== "stale" ? state.anbieter.items : undefined,
+        deadline,
       });
       await recordLlmUsageEvent(auth.supabase, {
         organisationId: parsed.data.organisationId,
@@ -71,6 +74,7 @@ export async function POST(req: Request) {
         revisionNote: instruction || state.anbieter.revisionNote,
         items: result.items,
         savedAt: new Date().toISOString(),
+        openWithSource: [],
       };
       await saveAnbieterState(auth.supabase, parsed.data.organisationId, anbieter);
       const fresh = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
