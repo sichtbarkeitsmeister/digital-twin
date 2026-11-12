@@ -13,7 +13,7 @@ const bodySchema = z.object({
 /** „Kundenwünsche“: binding for every text step of the organisation, from the next step that runs. */
 export async function PUT(req: Request) {
   const parsed = bodySchema.safeParse(await readJsonBody(req));
-  if (!parsed.success) return contentError(`Die Kundenwünsche dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.`, 400);
+  if (!parsed.success) return contentError(`Die Hinweise zum Texten dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.`, 400);
   const gated = await gateContentRoute(parsed.data.organisationId);
   if (!gated.ok) return gated.response;
   const text = parsed.data.client_wishes.replace(/\r\n?/g, "\n").trim();

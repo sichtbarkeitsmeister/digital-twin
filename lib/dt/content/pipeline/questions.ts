@@ -393,7 +393,7 @@ export function poolMatch(q: ContentQuestion, pool: readonly ContentPoolQuestion
  * customer (the rule wins, see `CLIENT_WISHES_RULES`); the model sometimes asks anyway.
  */
 export function isWishConflictQuestion(q: Pick<ContentQuestion, "question">): boolean {
-  return /\b(?:kunden)?wunsch\b|\bwünsche des kunden\b/i.test(q.question) && /kollidier|widersprich|widerspruch|konflikt|vereinbar/i.test(q.question);
+  return /\b(?:kunden)?wunsch\b|\bwünsche des kunden\b|\bhinweis(?:e|en)? zum texten\b/i.test(q.question) && /kollidier|widersprich|widerspruch|konflikt|vereinbar/i.test(q.question);
 }
 
 /**
@@ -418,9 +418,9 @@ export function sourceFindings(questions: readonly ContentQuestion[]): ContentFi
 
 export function wishConflictFindings(questions: readonly ContentQuestion[]): ContentFinding[] {
   return questions.map((q) => ({
-    title: "Kundenwunsch im Konflikt",
+    title: "Hinweis zum Texten im Konflikt",
     problem: q.question,
-    proposal: "Der Wunsch weicht einer festen Regel (Fakten, Anrede, verbotene Wörter, Branchenregel). Bitte prüfen, ob der Wunsch angepasst werden soll.",
+    proposal: "Der Hinweis weicht einer festen Regel (Fakten, Anrede, verbotene Wörter, Branchenregel). Bitte prüfen, ob der Hinweis angepasst werden soll.",
     severity: "medium",
     severity_label: "Mittel",
     block_id: q.block_id ?? null,

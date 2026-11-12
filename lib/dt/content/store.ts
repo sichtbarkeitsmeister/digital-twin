@@ -837,7 +837,7 @@ export async function updateContentClientWishes(
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const { error } = await service.from("dt_content_pages").update({ client_wishes: wishes.trim() }).eq("id", page.id);
   return error
-    ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Wünsche für diese Seite konnten nicht gespeichert werden") }
+    ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Hinweise für diese Seite konnten nicht gespeichert werden") }
     : { ok: true };
 }
 
