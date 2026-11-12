@@ -289,11 +289,11 @@ export function DtContentPageDrawer(props: {
   }
 
   /** „Abschnitt überarbeiten lassen“; from an open point with its Abschnitt chosen when the point names one. */
-  function startRevise(finding: ContentFinding | null, ask: "instruction" | "proposal" | "info") {
+  function startRevise(finding: ContentFinding | null, ask: "instruction" | "proposal" | "info", text = "") {
     const parsed = parseBlocksFromHtml(review?.html ?? "");
     const target = finding ? findingTargetBlock(finding, parsed) : null;
     setBlockId(target ?? highlightIds[0] ?? blocks[0]?.id ?? "");
-    setReviseText("");
+    setReviseText(text);
     setRevisePreview(null);
     setMode({ kind: "revise", finding, ask });
   }
@@ -400,6 +400,35 @@ export function DtContentPageDrawer(props: {
     if (changed) onChangedRef.current();
     if (failed.length === 0) toast.success(order.length === 1 ? "Vorschläge umgesetzt" : `Vorschläge in ${order.length} Abschnitten umgesetzt`);
     else toast.error(`Nicht umgesetzt (Punkte bleiben offen): ${failed.join(" · ")}`, { duration: 15_000 });
+  }
+
+  /**
+   * „KUNDE PRÜFT“: the customer checks the point. A placeholder that is already in the text is
+   * marked at once (no AI, no cost) and the point goes; without one, „Eigene Angabe“ opens with
+   * „KUNDE PRÜFT“ filled in, and the Abschnitt gets its placeholder there.
+   */
+  async function markKundePrueft(finding: ContentFinding) {
+    if (!base) return;
+    setBusy("kunde_prueft");
+    const res = await contentApi<{ review: ContentReview; marked: number }>(`${base}/findings/kunde-prueft`, {
+      method: "POST",
+      body: { organisationId, finding_key: findingKey(finding) },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    if (res.data.marked === 0) {
+      startRevise(finding, "info", "KUNDE PRÜFT");
+      toast.message("Im Text steht dazu noch kein Platzhalter", {
+        description: "Unten ist „KUNDE PRÜFT“ schon eingetragen: Abschnitt prüfen und überarbeiten lassen, dann setzt die KI den Platzhalter.",
+      });
+      return;
+    }
+    setReview(res.data.review);
+    toast.success("Als KUNDE PRÜFT markiert", { description: "Die Stelle steht jetzt fett und gelb markiert im Text und in den Exporten." });
+    onChangedRef.current();
   }
 
   /** „So lassen“: the open point goes, the text stays, and later runs do not report it again. */
@@ -674,7 +703,7 @@ export function DtContentPageDrawer(props: {
             transition={{ type: "spring", damping: 28, stiffness: 320 }}
             className={cn(
               "flex h-full w-full flex-col border-l border-sbkm-navy/10 bg-[#F7F7FA] shadow-dt-lg dark:border-white/10 dark:bg-sbkm-navy",
-              fullscreen ? "max-w-none" : "max-w-[min(1720px,94vw)]",
+              fullscreen ? "max-w-none" : "max-w-[min(2400px,98vw)]",
             )}
             onClick={(e) => e.stopPropagation()}
           >
@@ -702,11 +731,11 @@ export function DtContentPageDrawer(props: {
                     ) : null}
                     {wordCount > 0 ? (
                       <span
-                        className="inline-flex items-baseline gap-1 rounded-pill border border-sbkm-navy/10 bg-sbkm-navy/[0.04] px-2.5 py-0.5 text-sbkm-navy dark:border-white/10 dark:bg-white/[0.06] dark:text-white"
+                        className="inline-flex items-baseline gap-1.5 rounded-pill bg-fuchsia-600 px-3 py-1 text-white shadow-sm"
                         title="Wörter im aktuellen Text: Überschriften und Fließtext, ohne Platzhalter in eckigen Klammern"
                       >
-                        <span className="text-xs font-bold tabular-nums">{wordCount.toLocaleString("de-DE")}</span>
-                        <span className="text-[11px] opacity-75">{wordCount === 1 ? "Wort" : "Wörter"}</span>
+                        <span className="text-sm font-bold tabular-nums">{wordCount.toLocaleString("de-DE")}</span>
+                        <span className="text-xs font-semibold">{wordCount === 1 ? "Wort" : "Wörter"}</span>
                       </span>
                     ) : null}
                     {jobId ? (
@@ -780,6 +809,7 @@ export function DtContentPageDrawer(props: {
                         title={`Text: ${review.name}`}
                         highlightBlockIds={highlightIds}
                         showHeadingLevels
+                        kundePrueft={review.kunde_prueft}
                       />
                     ) : (
                       <div className="grid gap-1 rounded-dt border border-dashed border-sbkm-navy/15 bg-white/60 px-4 py-12 text-center dark:border-white/15 dark:bg-white/[0.04]">
@@ -1183,6 +1213,15 @@ export function DtContentPageDrawer(props: {
                                     onClick={() => startRevise(f, "info")}
                                   >
                                     Eigene Angabe
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={cn(findingButtonClass, "border-yellow-400 bg-yellow-300 font-bold tracking-wide text-sbkm-navy hover:border-yellow-500 dark:border-yellow-400 dark:bg-yellow-300 dark:text-sbkm-navy")}
+                                    disabled={Boolean(busy) || Boolean(jobId)}
+                                    onClick={() => void markKundePrueft(f)}
+                                    title="Der Kunde prüft diesen Punkt: Die Stelle bleibt im Text und wird fett als „KUNDE PRÜFT“ markiert, auch im Export."
+                                  >
+                                    KUNDE PRÜFT
                                   </button>
                                   <button
                                     type="button"

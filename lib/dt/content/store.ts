@@ -4,6 +4,7 @@
  * the service client: routes check access first (`gateContentRoute`), the job runner has none.
  */
 
+import { kundePrueftQuestionsInNotes } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { pageFactsSummary, readPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -1519,6 +1520,7 @@ export function buildReview(
       status: page.question_stop.review?.status ?? "none",
       watermark_done: steps.some((s) => s.step === CONTENT_STEP_WATERMARK && s.status === "done"),
     },
+    kunde_prueft: kundePrueftQuestionsInNotes(page.notes),
     org_questions: (extra.orgQuestions ?? [])
       .filter((q) => q.page_slugs.includes(page.slug))
       .map((q) => ({ id: q.id, question: q.question, placeholder: q.placeholder, status: q.status, answer: q.answer, pages: q.page_slugs.length })),
