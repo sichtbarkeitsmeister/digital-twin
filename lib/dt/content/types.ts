@@ -53,6 +53,10 @@ export type ContentPageSummary = {
   main_keyword: string | null;
   /** Where the keywords come from; null: the page has none yet (`contentKeywordOrigin`). */
   keyword_source: ContentKeywordOrigin | null;
+  /** The Zwilling assigned main and secondary keywords of the Seitenstruktur's list. */
+  keyword_sorted: boolean;
+  /** What the keyword analysis still has to do; null: nothing. */
+  keyword_todo: ContentKeywordTodo | null;
   /** Which writing variant the SEO step uses; null for rows from before the briefing migration. */
   page_type: ContentPageType | null;
   page_role: ContentPageRole | null;
@@ -268,12 +272,20 @@ export type ContentAction = {
  */
 export type ContentKeywordOrigin = "struktur" | "analyse" | "manuell" | "lauf";
 
+/** What the keyword analysis still does for a page: suggest keywords, or assign the roles of a list from the Seitenstruktur. */
+export type ContentKeywordTodo = "suchen" | "einteilen";
+
 export const CONTENT_KEYWORD_ORIGIN_LABELS: Record<ContentKeywordOrigin, string> = {
   struktur: "aus der Seitenstruktur",
   analyse: "Vorschlag des Zwillings",
   manuell: "von Hand eingetragen",
   lauf: "aus der Analyse des Textlaufs",
 };
+
+/** The origin as shown to the editor; a list of the Seitenstruktur says whether its roles are assigned. */
+export function contentKeywordOriginLabel(origin: ContentKeywordOrigin, sorted: boolean): string {
+  return origin === "struktur" && sorted ? "aus der Seitenstruktur, vom Zwilling eingeteilt" : CONTENT_KEYWORD_ORIGIN_LABELS[origin];
+}
 
 /** What the Excel briefing (or the crawl guess) knows about a page; shown compactly in the drawer. */
 export type ContentPageBriefing = {
@@ -293,6 +305,8 @@ export type ContentPageBriefing = {
   main_keyword_volume: number | null;
   /** Where the keywords come from; null: the page has none yet (`contentKeywordOrigin`). */
   keyword_source: ContentKeywordOrigin | null;
+  keyword_sorted: boolean;
+  keyword_todo: ContentKeywordTodo | null;
   secondary_keywords: string[];
   h1_options: string[];
   user_questions: string[];

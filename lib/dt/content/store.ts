@@ -66,6 +66,7 @@ import type {
   ContentFinding,
   ContentFreshness,
   ContentKeywordOrigin,
+  ContentKeywordTodo,
   ContentOverview,
   ContentPageBriefing,
   ContentPageSource,
@@ -356,7 +357,7 @@ function nullableText(value: unknown): string | null {
 /** `keywords` as stored: `{ main: { text, volume? }, secondary: [...], source? }`; anything else counts as none. */
 export function normalizeKeywords(value: unknown): ContentPageKeywords | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const raw = value as { main?: unknown; secondary?: unknown; source?: unknown };
+  const raw = value as { main?: unknown; secondary?: unknown; source?: unknown; sorted?: unknown };
   const keyword = (k: unknown) => {
     if (!k || typeof k !== "object") return null;
     const r = k as { text?: unknown; volume?: unknown };
@@ -368,7 +369,22 @@ export function normalizeKeywords(value: unknown): ContentPageKeywords | null {
   const main = keyword(raw.main);
   if (!main) return null;
   const secondary = asArray<unknown>(raw.secondary).map(keyword).filter((k): k is NonNullable<typeof k> => Boolean(k));
-  return raw.source === "analyse" || raw.source === "manuell" ? { main, secondary, source: raw.source } : { main, secondary };
+  const result: ContentPageKeywords = { main, secondary };
+  if (raw.source === "analyse" || raw.source === "manuell") result.source = raw.source;
+  if (raw.sorted === true) result.sorted = true;
+  return result;
+}
+
+/**
+ * What the keyword analysis still has to do for a page: „suchen“ (no keywords yet: suggest
+ * them) or „einteilen“ (the Seitenstruktur named several keywords without saying which one is
+ * the main keyword: the Zwilling assigns the roles). Null: nothing to do.
+ */
+export function contentKeywordTodo(page: Pick<ContentPageRow, "keywords" | "main_keyword">): ContentKeywordTodo | null {
+  const origin = contentKeywordOrigin(page);
+  if (origin === null || origin === "lauf") return "suchen";
+  if (origin === "struktur" && page.keywords && page.keywords.secondary.length > 0 && !page.keywords.sorted) return "einteilen";
+  return null;
 }
 
 /**
@@ -426,7 +442,7 @@ export function mainKeywordTakenBy(
 export async function saveContentPageKeywords(
   service: SupabaseClient,
   page: ContentPageRow,
-  input: { main: string; secondary: readonly string[]; source: NonNullable<ContentPageKeywords["source"]> },
+  input: { main: string; secondary: readonly string[]; source: NonNullable<ContentPageKeywords["source"]> | "struktur" },
 ): Promise<{ ok: true; keywords: ContentPageKeywords | null } | { ok: false; status: number; error: string }> {
   const cleaned = cleanKeywordInput(input.main, input.secondary);
   if (!cleaned.main) {
@@ -445,7 +461,8 @@ export async function saveContentPageKeywords(
   const keywords: ContentPageKeywords = {
     main: withVolume(cleaned.main),
     secondary: cleaned.secondary.map(withVolume),
-    source: input.source,
+    // Keywords of the Seitenstruktur keep that origin; the Zwilling only assigned their roles.
+    ...(input.source === "struktur" ? { sorted: true as const } : { source: input.source }),
   };
   const { error } = await service.from("dt_content_pages").update({ keywords, main_keyword: cleaned.main }).eq("id", page.id);
   return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Keywords konnten nicht gespeichert werden") } : { ok: true, keywords };
@@ -1375,6 +1392,8 @@ export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}):
     source_url: page.source_url,
     main_keyword: page.keywords?.main.text ?? page.main_keyword,
     keyword_source: contentKeywordOrigin(page),
+    keyword_sorted: page.keywords?.sorted === true,
+    keyword_todo: contentKeywordTodo(page),
     page_type: page.page_type,
     page_role: page.page_role,
     type_editable: canEditContentPageType(page),
@@ -1552,6 +1571,8 @@ export function pageBriefing(page: ContentPageRow): ContentPageBriefing {
     main_keyword: page.keywords?.main.text ?? page.main_keyword,
     main_keyword_volume: page.keywords?.main.volume ?? null,
     keyword_source: contentKeywordOrigin(page),
+    keyword_sorted: page.keywords?.sorted === true,
+    keyword_todo: contentKeywordTodo(page),
     secondary_keywords: page.keywords?.secondary.map((k) => k.text) ?? [],
     h1_options: page.h1_options,
     user_questions: page.user_questions,

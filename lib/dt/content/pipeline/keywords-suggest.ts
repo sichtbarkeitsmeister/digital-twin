@@ -1,6 +1,11 @@
 /**
- * „Keywords analysieren und eintragen“: the DigitalTwin's keywords for a page that has none from
- * the Seitenstruktur (`dt_content_pages.keywords`, `source: "analyse"`). One short call (model
+ * „Keywords analysieren und eintragen“. Two jobs, both one short call per page:
+ *   - „suchen“: a page with no keywords gets the DigitalTwin's (`dt_content_pages.keywords`,
+ *     `source: "analyse"`).
+ *   - „einteilen“: the Seitenstruktur names several keywords for a page in one cell without
+ *     saying which is the main keyword. The Zwilling assigns the roles from exactly that list:
+ *     nothing added, nothing dropped, the search volumes stay (`sorted: true`).
+ * Search volume: nothing here knows one. Model
  * tier „check“) per page with what the live page is aimed at today (Title, H1, Meta-Description,
  * its text), the Anbieterfakten, the Zielgruppe and the other pages of the website. No search
  * volume: nothing here knows one. A main keyword exists once on the website: the keywords the
@@ -19,6 +24,7 @@ import {
   cleanKeywordInput,
   contentDbErrorMessage,
   contentKeywordOrigin,
+  contentKeywordTodo,
   keywordKey,
   loadContentPageOutline,
   mainKeywordTakenBy,
@@ -49,6 +55,35 @@ Nebenkeywords: 3–8 Synonyme, Varianten und eng verwandte Suchbegriffe derselbe
 Kein Suchvolumen nennen oder schätzen.
 Eine Seite ohne Suchziel (Impressum, Datenschutz, AGB, Widerruf, Danke-Seite, reine Kontaktseite) bekommt kein Keyword: no_keyword = true.
 reason: ein Satz, warum dieses Hauptkeyword zu dieser Seite passt und wie es sich von den Nachbarseiten abgrenzt.`;
+
+export const KEYWORDS_CLASSIFY_SYSTEM = `Die Seitenstruktur nennt für eine Seite mehrere Keywords, ohne zu sagen, welches davon das Hauptkeyword ist. Du teilst sie ein. Du schreibst nichts für die Seite.
+Du erfindest kein Keyword und lässt keines weg: Jedes Keyword der Liste ist entweder das Hauptkeyword oder ein Nebenkeyword. Die Reihenfolge in der Liste ist keine Vorgabe.
+Hauptkeyword: genau eines, das, was die Seite am besten trägt. Grundlage, in dieser Reihenfolge:
+1. Worauf die Seite heute ausgerichtet ist (Title, H1, Meta-Description, Pfad, bisheriger Text).
+2. Die Ausrichtung des Unternehmens laut Anbieterfakten.
+3. Wie die Zielgruppe sucht.
+4. Die Rolle der Seite in der Website: Die Startseite und eine Hauptsilo-Seite tragen den breiten Begriff, ihre Unterseiten die engeren.
+Das Suchvolumen ist ein Hinweis unter mehreren, nicht allein ausschlaggebend: Ein hohes Volumen für einen Begriff, den die Seite nicht trägt, ist kein Hauptkeyword.
+Jedes Hauptkeyword gibt es auf der Website nur einmal. Die Liste „Bereits vergebene Hauptkeywords“ ist gesperrt, auch in anderer Schreibweise oder Wortstellung; nimm dann das beste der übrigen.
+Nebenkeywords: alle übrigen, nach Relevanz für diese Seite geordnet, die wichtigsten zuerst.
+reason: ein Satz, warum dieses Keyword das Hauptkeyword dieser Seite ist.`;
+
+/** The tool for the assignment: only the keywords of the list are allowed. */
+export function keywordsClassifyTool(list: readonly string[]): Anthropic.Tool {
+  return {
+    name: "submit_keyword_roles",
+    description: "Hauptkeyword und Nebenkeywords, eingeteilt aus der Liste der Seitenstruktur.",
+    input_schema: {
+      type: "object",
+      properties: {
+        main_keyword: { type: "string", enum: [...list], description: "Das eine Hauptkeyword, genau wie in der Liste geschrieben." },
+        secondary_keywords: { type: "array", items: { type: "string", enum: [...list] }, description: "Alle übrigen Keywords der Liste, wichtigste zuerst." },
+        reason: { type: "string", description: "Ein Satz Begründung für das Hauptkeyword." },
+      },
+      required: ["main_keyword", "secondary_keywords", "reason"],
+    },
+  };
+}
 
 export const KEYWORDS_TOOL: Anthropic.Tool = {
   name: "submit_keywords",
@@ -114,6 +149,46 @@ export function keywordsSuggestPrompt(
     .join("\n\n");
 }
 
+/** The list of the Seitenstruktur as the prompt shows it, with the search volumes. */
+export function keywordsClassifyPrompt(
+  context: ContentPipelineContext,
+  list: ReadonlyArray<{ text: string; volume?: number }>,
+  live: LivePageSignals | null,
+  taken: ReadonlyArray<{ keyword: string; page: string }>,
+): string {
+  // The page block must not call the placeholder main keyword „gesetzt“: the roles are open.
+  const open: ContentPipelineContext = { ...context, page: { ...context.page, keywords: null } };
+  const base = keywordsSuggestPrompt(open, live, taken);
+  const lines = list.map((k) => `- ${k.text}${k.volume != null ? ` (${k.volume}/Monat)` : ""}`);
+  return [`## Keywords der Seitenstruktur (zu dieser Seite, Rollen offen)\n${lines.join("\n")}`, base].join("\n\n");
+}
+
+/**
+ * The model's assignment onto the Excel's list: only keywords of the list count, in the Excel's
+ * own spelling; what the model left out stays as a secondary keyword (nothing is lost). The main
+ * keyword is the first of the model's choice that no other page carries; null when all are taken.
+ */
+export function applyKeywordRoles(
+  list: ReadonlyArray<{ text: string; volume?: number }>,
+  json: unknown,
+  taken: ReadonlyArray<{ keyword: string; page: string }>,
+): { main: string; secondary: string[]; reason: string } | null {
+  const r = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
+  const byKey = new Map(list.map((k) => [keywordKey(k.text), k.text]));
+  const known = (value: unknown): string | null => (typeof value === "string" ? byKey.get(keywordKey(value)) ?? null : null);
+  const order: string[] = [];
+  const add = (text: string | null) => {
+    if (text && !order.includes(text)) order.push(text);
+  };
+  add(known(r.main_keyword));
+  if (Array.isArray(r.secondary_keywords)) for (const k of r.secondary_keywords) add(known(k));
+  for (const k of list) add(k.text);
+  const takenKeys = new Set(taken.map((t) => keywordKey(t.keyword)));
+  const main = order.find((text) => !takenKeys.has(keywordKey(text)));
+  if (!main) return null;
+  return { main, secondary: order.filter((text) => text !== main), reason: typeof r.reason === "string" ? r.reason.trim().slice(0, 400) : "" };
+}
+
 export type KeywordsAnswer = { no_keyword: boolean; main: string; secondary: string[]; reason: string };
 
 /** The model's answer, cleaned like an entry by hand. */
@@ -166,11 +241,9 @@ export async function suggestContentKeywords(
   } = {},
 ): Promise<KeywordsSuggestResult> {
   const origin = contentKeywordOrigin(page);
-  if (origin === "struktur") {
-    return options.force
-      ? { ok: false, status: 409, cost_eur: 0, message: "Die Keywords dieser Seite kommen aus der Seitenstruktur und gehen vor. Zum Ändern bitte von Hand eintragen." }
-      : { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
-  }
+  // Keywords of the Seitenstruktur always stay; only their roles are open while a list is unsorted.
+  const classify = origin === "struktur" && page.keywords != null && page.keywords.secondary.length > 0 && (contentKeywordTodo(page) === "einteilen" || options.force === true);
+  if (origin === "struktur" && !classify) return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
   if ((origin === "manuell" || origin === "analyse") && !options.force) {
     return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
   }
@@ -188,6 +261,45 @@ export async function suggestContentKeywords(
     options.live !== undefined ? options.live : loadLiveSignals(service, page),
   ]);
   const taken = takenMainKeywords(outline, page.slug);
+
+  if (classify && page.keywords) {
+    const list = [page.keywords.main, ...page.keywords.secondary];
+    let costEur = 0;
+    let json: unknown;
+    try {
+      const models = options.models ?? (await loadContentModelConfig(service)).check;
+      const call = await (options.callTool ?? callContentTool)({
+        models,
+        system: KEYWORDS_CLASSIFY_SYSTEM,
+        user: keywordsClassifyPrompt(context, list, live, taken),
+        tool: keywordsClassifyTool(list.map((k) => k.text)),
+        maxTokens: SUGGEST_MAX_TOKENS,
+        timeoutMs: SUGGEST_TIMEOUT_MS,
+      });
+      json = call.json;
+      costEur = roundEur(estimateCostEur(call.model, call.usage));
+      await recordLlmUsageEvent(service, {
+        organisationId: page.organisation_id,
+        userId,
+        agentId: avatarId,
+        mode: KEYWORDS_USAGE_MODE,
+        via: "direct",
+        model: call.model,
+        inputTokens: call.usage.inputTokens,
+        outputTokens: call.usage.outputTokens,
+      });
+    } catch (error) {
+      return { ok: false, status: 502, cost_eur: costEur, message: error instanceof Error ? error.message : "Die Einteilung der Keywords ist fehlgeschlagen." };
+    }
+    const roles = applyKeywordRoles(list, json, taken);
+    await addCost(service, page, costEur);
+    if (!roles) {
+      return { ok: false, status: 422, cost_eur: costEur, message: "Alle Keywords dieser Seite sind schon Hauptkeyword einer anderen Seite. Bitte in der Seitenstruktur oder von Hand klären." };
+    }
+    const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: roles.main, secondary: roles.secondary, source: "struktur" });
+    if (!saved.ok) return { ok: false, status: saved.status, cost_eur: costEur, message: saved.error };
+    return { ok: true, keywords: saved.keywords, cost_eur: costEur, reason: roles.reason };
+  }
 
   let costEur = 0;
   let answer: KeywordsAnswer | null = null;

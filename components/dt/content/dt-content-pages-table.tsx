@@ -12,7 +12,7 @@ import {
   type ContentPageType,
 } from "@/lib/dt/content/page-types";
 import { formatContentDate } from "@/lib/dt/content/presentation";
-import { CONTENT_KEYWORD_ORIGIN_LABELS, type ContentPageSummary } from "@/lib/dt/content/types";
+import { contentKeywordOriginLabel, type ContentPageSummary } from "@/lib/dt/content/types";
 
 const checkboxClass =
   "size-4 shrink-0 cursor-pointer rounded border-sbkm-navy/30 accent-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:cursor-not-allowed disabled:opacity-40 dark:accent-sbkm-mint";
@@ -214,11 +214,11 @@ export function DtContentPagesTable(props: {
                     {page.main_keyword || page.user_questions > 0 ? (
                       <span
                         className="truncate text-xs text-sbkm-ink-500 dark:text-white/45"
-                        title={page.keyword_source ? `Keyword ${CONTENT_KEYWORD_ORIGIN_LABELS[page.keyword_source]}` : undefined}
+                        title={page.keyword_source ? `Keyword ${contentKeywordOriginLabel(page.keyword_source, page.keyword_sorted)}` : undefined}
                       >
                         {[
                           page.main_keyword
-                            ? `${page.main_keyword}${page.keyword_source && page.keyword_source !== "struktur" ? ` (${CONTENT_KEYWORD_ORIGIN_LABELS[page.keyword_source]})` : ""}`
+                            ? `${page.main_keyword}${page.keyword_source && page.keyword_source !== "struktur" ? ` (${contentKeywordOriginLabel(page.keyword_source, page.keyword_sorted)})` : ""}`
                             : "",
                           page.user_questions > 0 ? `${page.user_questions} Nutzerfragen` : "",
                         ]
@@ -226,10 +226,14 @@ export function DtContentPagesTable(props: {
                           .join(" · ")}
                       </span>
                     ) : null}
-                    {!page.keyword_source ? (
+                    {page.keyword_todo ? (
                       <span className="inline-flex w-fit items-center gap-1 text-xs font-medium text-orange-700 dark:text-orange-300">
                         <AlertTriangle className="size-3 shrink-0" aria-hidden />
-                        Keine Keywords
+                        {page.keyword_todo === "einteilen"
+                          ? "Haupt-/Nebenkeywords noch nicht eingeteilt"
+                          : page.keyword_source === "lauf"
+                            ? "Nebenkeywords fehlen"
+                            : "Keine Keywords"}
                       </span>
                     ) : null}
                   </div>

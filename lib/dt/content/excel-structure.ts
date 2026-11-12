@@ -36,7 +36,12 @@ export type ContentKeyword = { text: string; volume?: number };
  * keywords of the Seitenstruktur, which go first.
  */
 export type ContentKeywordSource = "analyse" | "manuell";
-export type ContentPageKeywords = { main: ContentKeyword; secondary: ContentKeyword[]; source?: ContentKeywordSource };
+/**
+ * `sorted`: the DigitalTwin assigned the roles („Keywords analysieren“). The Excel names the
+ * keywords of a page in one cell without saying which one is the main keyword (the first one is
+ * only a placeholder); a list from the Excel without `sorted` still waits for that assignment.
+ */
+export type ContentPageKeywords = { main: ContentKeyword; secondary: ContentKeyword[]; source?: ContentKeywordSource; sorted?: true };
 
 /** One page as the Excel briefs it; the store writes it onto `dt_content_pages`. */
 export type ContentBriefingPage = {

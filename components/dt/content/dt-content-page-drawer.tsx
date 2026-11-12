@@ -60,7 +60,7 @@ import type {
   ContentReview,
   ContentStep,
 } from "@/lib/dt/content/types";
-import { CONTENT_KEYWORD_ORIGIN_LABELS } from "@/lib/dt/content/types";
+import { contentKeywordOriginLabel } from "@/lib/dt/content/types";
 
 const textareaClass =
   "min-h-[120px] w-full resize-y rounded-dt border border-sbkm-navy/15 bg-white/80 px-3 py-2.5 text-sm leading-relaxed text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.04)] outline-none transition duration-150 placeholder:text-sbkm-ink-500 focus-visible:border-sbkm-mint/40 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 disabled:opacity-50 dark:border-white/15 dark:bg-white/10 dark:text-white dark:placeholder:text-white/40";
@@ -1234,7 +1234,7 @@ export function DtContentPageDrawer(props: {
                           <span className="text-xs font-semibold text-sbkm-navy dark:text-white">Keywords</span>
                           {review.briefing.keyword_source ? (
                             <span className="rounded-full border border-sbkm-navy/12 px-2 py-0.5 text-[11px] text-sbkm-ink-600 dark:border-white/15 dark:text-white/60">
-                              {CONTENT_KEYWORD_ORIGIN_LABELS[review.briefing.keyword_source]}
+                              {contentKeywordOriginLabel(review.briefing.keyword_source, review.briefing.keyword_sorted)}
                               {review.briefing.main_keyword_volume != null ? ` · ${review.briefing.main_keyword_volume}/Monat` : ""}
                             </span>
                           ) : (
@@ -1286,7 +1286,7 @@ export function DtContentPageDrawer(props: {
                             {busy === "keywords" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
                             Speichern
                           </DtPillButton>
-                          {review.briefing.keyword_source !== "struktur" ? (
+                          {review.briefing.keyword_source !== "struktur" || review.briefing.secondary_keywords.length > 0 ? (
                             <DtPillButton
                               type="button"
                               size="sm"
@@ -1294,15 +1294,21 @@ export function DtContentPageDrawer(props: {
                               className="h-7 px-3 text-xs"
                               disabled={Boolean(busy)}
                               onClick={() => void analyseKeywords(true)}
-                              title="Der Zwilling legt Haupt- und Nebenkeywords fest: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Kein Hauptkeyword einer anderen Seite. Wenige Cent."
+                              title="Der Zwilling entscheidet, was Hauptkeyword und was Nebenkeyword ist: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Nennt die Seitenstruktur Keywords, teilt er genau diese ein; sonst legt er welche fest. Kein Hauptkeyword einer anderen Seite. Wenige Cent."
                             >
                               {busy === "keywords_analyse" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Sparkles className="size-3" aria-hidden />}
-                              {review.briefing.keyword_source === "analyse" || review.briefing.keyword_source === "manuell" ? "Neu vorschlagen" : "Keywords analysieren"}
+                              {review.briefing.keyword_source === "struktur"
+                                ? review.briefing.keyword_sorted
+                                  ? "Neu einteilen"
+                                  : "Keywords einteilen"
+                                : review.briefing.keyword_source === "analyse" || review.briefing.keyword_source === "manuell"
+                                  ? "Neu vorschlagen"
+                                  : "Keywords analysieren"}
                             </DtPillButton>
                           ) : null}
                           <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
                             {review.briefing.keyword_source === "struktur"
-                              ? "Keywords der Seitenstruktur gehen vor; von Hand lassen sie sich ändern."
+                              ? "Die Keywords stammen aus der Seitenstruktur, der Zwilling teilt sie in Haupt und Neben ein. Von Hand lassen sie sich ändern."
                               : "Jedes Hauptkeyword gibt es nur einmal; gilt ab dem nächsten Schritt."}
                           </span>
                         </div>

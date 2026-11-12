@@ -12,6 +12,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ContentBriefingPage } from "../lib/dt/content/excel-structure";
 import { parseContentPagePatch } from "../lib/dt/content/page-patch";
 import {
+  KEYWORDS_CLASSIFY_SYSTEM,
+  applyKeywordRoles,
+  keywordsClassifyPrompt,
+  keywordsClassifyTool,
   KEYWORDS_SUGGEST_SYSTEM,
   keywordsSuggestPrompt,
   normalizeKeywordsAnswer,
@@ -22,6 +26,7 @@ import { pageBlock, type ContentPipelineContext } from "../lib/dt/content/pipeli
 import {
   cleanKeywordInput,
   contentKeywordOrigin,
+  contentKeywordTodo,
   keywordKey,
   mainKeywordTakenBy,
   normalizeKeywords,
@@ -114,6 +119,15 @@ function testOrigin() {
   assert.equal(contentKeywordOrigin({ keywords: normalizeKeywords({ main: { text: "A", volume: 10 }, secondary: [] }), main_keyword: "A" }), "struktur");
   assert.equal(normalizeKeywords({ main: { text: "A" }, secondary: [{ text: "B" }], source: "analyse" })?.source, "analyse");
   assert.equal(normalizeKeywords({ main: { text: "A" }, secondary: [], source: "sonstwas" })?.source, undefined, "an unknown source counts as Seitenstruktur");
+  assert.equal(normalizeKeywords({ main: { text: "A" }, secondary: [{ text: "B" }], sorted: true })?.sorted, true);
+  assert.equal(normalizeKeywords({ main: { text: "A" }, secondary: [], sorted: "ja" })?.sorted, undefined);
+  const todo = (keywords: unknown, main_keyword: string | null = null) => contentKeywordTodo({ keywords: normalizeKeywords(keywords), main_keyword });
+  assert.equal(todo(null), "suchen", "none: suggest");
+  assert.equal(todo(null, "Akupunktur Köln"), "suchen", "a text run's main keyword has no list");
+  assert.equal(todo({ main: { text: "A" }, secondary: [{ text: "B" }] }), "einteilen", "a list of the Seitenstruktur: roles open");
+  assert.equal(todo({ main: { text: "A" }, secondary: [] }), null, "one keyword: nothing to assign");
+  assert.equal(todo({ main: { text: "A" }, secondary: [{ text: "B" }], sorted: true }), null, "assigned: done");
+  assert.equal(todo({ main: { text: "A" }, secondary: [{ text: "B" }], source: "manuell" }), null, "by hand: the editor decided");
   console.log("origin: Seitenstruktur, suggestion, by hand, none: ok");
 }
 
@@ -169,13 +183,34 @@ async function testSuggest() {
   }) as unknown as NonNullable<Parameters<typeof suggestContentKeywords>[3]>["save"];
   const base = { context: context(), outline: OUTLINE, live: null, models: ["claude-haiku-5-5"], save };
 
-  // Keywords of the Seitenstruktur stay, without a call.
+  // One keyword of the Seitenstruktur, or an assigned list: nothing to do, no call.
   const none = stubTool([]);
   const fromExcel = pageRow({ keywords: { main: { text: "Akupunktur Köln", volume: 320 }, secondary: [] }, main_keyword: "Akupunktur Köln" });
   const kept = await suggestContentKeywords(service(), fromExcel, null, { ...base, callTool: none.callTool });
   assert.ok(kept.ok && kept.skipped === "vorhanden" && none.prompts.length === 0);
-  const forced = await suggestContentKeywords(service(), fromExcel, null, { ...base, callTool: none.callTool, force: true });
-  assert.ok(!forced.ok && forced.status === 409 && /Seitenstruktur/.test(forced.message) && none.prompts.length === 0);
+  const sortedList = pageRow({ keywords: { main: { text: "Akupunktur Köln" }, secondary: [{ text: "TCM Köln" }], sorted: true } });
+  const keptSorted = await suggestContentKeywords(service(), sortedList, null, { ...base, callTool: none.callTool });
+  assert.ok(keptSorted.ok && keptSorted.skipped === "vorhanden" && none.prompts.length === 0);
+
+  // A list of the Seitenstruktur: the Zwilling decides main and secondary, from exactly that list.
+  const list = pageRow({
+    keywords: { main: { text: "Praxis für Naturheilkunde", volume: 1900 }, secondary: [{ text: "Akupunktur Köln", volume: 320 }, { text: "TCM Köln" }, { text: "Nadeltherapie" }] },
+    main_keyword: "Praxis für Naturheilkunde",
+  });
+  const roles = stubTool([{ main_keyword: "Akupunktur Köln", secondary_keywords: ["TCM Köln", "erfundenes Keyword"], reason: "Die Seite handelt von Akupunktur." }]);
+  const sorted = await suggestContentKeywords(service(), list, null, { ...base, callTool: roles.callTool });
+  assert.ok(sorted.ok && !sorted.skipped && sorted.reason === "Die Seite handelt von Akupunktur.");
+  assert.deepEqual(saved.at(-1), { main: "Akupunktur Köln", secondary: ["TCM Köln", "Praxis für Naturheilkunde", "Nadeltherapie"], source: "struktur" }, "nothing invented, nothing lost, the Excel's first keyword is no placeholder any more");
+  assert.match(roles.prompts[0]!, /## Keywords der Seitenstruktur \(zu dieser Seite, Rollen offen\)\n- Praxis für Naturheilkunde \(1900\/Monat\)\n- Akupunktur Köln \(320\/Monat\)/);
+  assert.doesNotMatch(roles.prompts[0]!, /gesetzt, nicht ersetzen/, "the placeholder main keyword is not presented as set");
+  const forced = await suggestContentKeywords(service(), sortedList, null, { ...base, callTool: roles.callTool, force: true });
+  assert.ok(forced.ok && !forced.skipped, "„Neu einteilen“ assigns the roles again from the same list");
+  // Every keyword of the list is another page's main keyword: nothing is saved.
+  const savedBefore = saved.length;
+  const allTaken = pageRow({ keywords: { main: { text: "Heilpraktiker Köln" }, secondary: [{ text: "Osteopathie Köln" }] } });
+  const blocked = await suggestContentKeywords(service(), allTaken, null, { ...base, callTool: stubTool([{ main_keyword: "Heilpraktiker Köln", secondary_keywords: ["Osteopathie Köln"], reason: "" }]).callTool });
+  assert.ok(!blocked.ok && blocked.status === 422 && /schon Hauptkeyword einer anderen Seite/.test(blocked.message));
+  assert.equal(saved.length, savedBefore);
   const byHand = pageRow({ keywords: { main: { text: "Akupunktur Köln" }, secondary: [], source: "manuell" } });
   const keptHand = await suggestContentKeywords(service(), byHand, null, { ...base, callTool: none.callTool });
   assert.ok(keptHand.ok && keptHand.skipped === "vorhanden" && none.prompts.length === 0, "an entry by hand stays unless forced");
@@ -210,6 +245,26 @@ async function testSuggest() {
   console.log("suggestion: keeps what is set, retries a taken keyword, never saves a duplicate: ok");
 }
 
+function testRoles() {
+  const list = [{ text: "Praxis für Naturheilkunde", volume: 1900 }, { text: "Akupunktur Köln", volume: 320 }, { text: "TCM Köln" }];
+  const taken = [{ keyword: "Praxis für Naturheilkunde", page: "Startseite" }];
+  assert.deepEqual(applyKeywordRoles(list, { main_keyword: "akupunktur köln", secondary_keywords: [], reason: "r" }, []), {
+    main: "Akupunktur Köln",
+    secondary: ["Praxis für Naturheilkunde", "TCM Köln"],
+    reason: "r",
+  }, "the Excel's spelling, what the model left out stays secondary");
+  assert.equal(applyKeywordRoles(list, { main_keyword: "Praxis für Naturheilkunde", secondary_keywords: ["Akupunktur Köln"] }, taken)?.main, "Akupunktur Köln", "a taken main keyword gives way to the next one");
+  assert.equal(applyKeywordRoles(list, "kaputt", [])?.main, "Praxis für Naturheilkunde", "an unusable answer keeps the list as it is");
+  assert.equal(applyKeywordRoles(list, {}, list.map((k) => ({ keyword: k.text, page: "x" }))), null, "all taken");
+  const tool = keywordsClassifyTool(list.map((k) => k.text));
+  assert.deepEqual((tool.input_schema.properties as Record<string, { enum?: string[] }>).main_keyword!.enum, list.map((k) => k.text), "only the list is allowed");
+  assert.match(KEYWORDS_CLASSIFY_SYSTEM, /Du erfindest kein Keyword und lässt keines weg/);
+  assert.match(KEYWORDS_CLASSIFY_SYSTEM, /Die Reihenfolge in der Liste ist keine Vorgabe/);
+  assert.match(KEYWORDS_CLASSIFY_SYSTEM, /nicht allein ausschlaggebend/);
+  assert.match(keywordsClassifyPrompt(context({ main: { text: "X" }, secondary: [] }), list, null, taken), /Bereits vergebene Hauptkeywords \(gesperrt\)\n- Praxis für Naturheilkunde \(Seite: Startseite\)/);
+  console.log("roles: only the list, nothing lost, taken keywords give way: ok");
+}
+
 function testPatch() {
   const ok = parseContentPagePatch({ organisationId: ORG, keywords: { main: "Akupunktur Köln", secondary: ["TCM Köln"] } });
   assert.ok(ok.ok && ok.data.keywords?.main === "Akupunktur Köln");
@@ -225,6 +280,7 @@ async function main() {
   testCleanAndClash();
   testStructureFirst();
   testPrompts();
+  testRoles();
   await testSuggest();
   testPatch();
   console.log("OK: content keywords tests passed");

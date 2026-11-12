@@ -224,12 +224,18 @@ export function DtContentWorkspace(props: {
   }, [visible]);
 
   const selectedCount = selected.size;
-  // Pages without keywords of their own: none from the Seitenstruktur, none suggested, none entered
-  // (a main keyword a text run found counts as missing: the list of Nebenkeywords is not stored).
+  // Pages the keyword analysis still has work on: no keywords yet („suchen“; a main keyword a text
+  // run found counts as none, the list of Nebenkeywords is not stored), or a list from the
+  // Seitenstruktur whose main and secondary keywords are not assigned yet („einteilen“).
   // Of the ticked pages when any is ticked, else of the whole table.
-  const keywordless = useMemo(() => {
-    const missing = pages.filter((p) => !p.keyword_source || p.keyword_source === "lauf");
-    return selected.size > 0 ? missing.filter((p) => selected.has(p.slug)) : missing;
+  const keywordWork = useMemo(() => {
+    const open = pages.filter((p) => p.keyword_todo != null);
+    const scoped = selected.size > 0 ? open.filter((p) => selected.has(p.slug)) : open;
+    return {
+      pages: scoped,
+      search: scoped.filter((p) => p.keyword_todo === "suchen").length,
+      sort: scoped.filter((p) => p.keyword_todo === "einteilen").length,
+    };
   }, [pages, selected]);
 
   /**
@@ -276,11 +282,12 @@ export function DtContentWorkspace(props: {
 
   /**
    * „Keywords analysieren und eintragen“: every page without keywords gets the Zwilling's
-   * Hauptkeyword and Nebenkeywords, one request per page and one after the other, so each page
-   * sees the keywords the pages before it got (a main keyword exists once on the website).
+   * Hauptkeyword and Nebenkeywords; every page whose Seitenstruktur lists several keywords gets
+   * them assigned to main and secondary. One request per page and one after the other, so each
+   * page sees the keywords the pages before it got (a main keyword exists once on the website).
    */
   async function runKeywords() {
-    const todo = keywordless.map((p) => ({ slug: p.slug, name: p.name }));
+    const todo = keywordWork.pages.map((p) => ({ slug: p.slug, name: p.name }));
     if (todo.length === 0 || keywordsRun) return;
     setKeywordsRun({ done: 0, total: todo.length });
     const failed: string[] = [];
@@ -295,10 +302,10 @@ export function DtContentWorkspace(props: {
     setKeywordsRun(null);
     void loadOverview();
     const ok = todo.length - failed.length;
-    if (ok > 0) toast.success(`Keywords für ${ok} ${ok === 1 ? "Seite" : "Seiten"} eingetragen`);
+    if (ok > 0) toast.success(`Keywords für ${ok} ${ok === 1 ? "Seite" : "Seiten"} eingetragen und eingeteilt`);
     if (failed.length > 0) {
       const shown = failed.slice(0, 6).join(" · ");
-      toast.error(`Ohne Keywords geblieben (${failed.length}): ${shown}${failed.length > 6 ? " …" : ""}`, { duration: 20_000 });
+      toast.error(`Nicht geklappt (${failed.length}): ${shown}${failed.length > 6 ? " …" : ""}`, { duration: 20_000 });
     }
   }
 
@@ -587,26 +594,32 @@ export function DtContentWorkspace(props: {
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-sbkm-navy/8 pt-4 dark:border-white/8">
           <span className="text-xs font-semibold text-sbkm-navy dark:text-white">Keywords:</span>
-          {keywordless.length > 0 ? (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-700 dark:text-orange-300">
+          {keywordWork.pages.length > 0 ? (
+            <span className="inline-flex flex-wrap items-center gap-x-1.5 text-xs font-medium text-orange-700 dark:text-orange-300">
               <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-              {keywordless.length} {selectedCount > 0 ? "der angehakten Seiten" : keywordless.length === 1 ? "Seite" : "Seiten"} ohne Keywords
+              {[
+                keywordWork.search > 0 ? `${keywordWork.search} ohne Keywords` : "",
+                keywordWork.sort > 0 ? `${keywordWork.sort} mit Keywords aus der Seitenstruktur, noch nicht in Haupt und Neben eingeteilt` : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              {selectedCount > 0 ? " (angehakte Seiten)" : ""}
             </span>
           ) : (
             <span className="text-xs text-sbkm-ink-600 dark:text-white/60">
-              {pages.length === 0 ? "noch keine Seiten" : selectedCount > 0 ? "Alle angehakten Seiten haben Keywords." : "Alle Seiten haben Keywords."}
+              {pages.length === 0 ? "noch keine Seiten" : selectedCount > 0 ? "Alle angehakten Seiten haben eingeteilte Keywords." : "Alle Seiten haben eingeteilte Keywords."}
             </span>
           )}
           <DtPillButton
             type="button"
             size="sm"
             variant="outline"
-            disabled={keywordless.length === 0 || keywordsRun != null}
+            disabled={keywordWork.pages.length === 0 || keywordsRun != null}
             onClick={() => void runKeywords()}
-            title="Der Zwilling legt für jede Seite ohne Keywords ein Hauptkeyword und Nebenkeywords fest: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Kein Hauptkeyword wird doppelt vergeben. Keywords aus der Seitenstruktur und von Hand eingetragene bleiben. Wenige Cent je Seite."
+            title="Der Zwilling entscheidet je Seite, was Hauptkeyword und was Nebenkeyword ist. Nennt die Seitenstruktur Keywords, teilt er genau diese ein; ohne Keywords legt er welche fest: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Kein Hauptkeyword wird doppelt vergeben, von Hand Eingetragenes bleibt. Wenige Cent je Seite."
           >
             {keywordsRun ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <KeyRound className="size-3.5" aria-hidden />}
-            Keywords analysieren und eintragen ({keywordless.length})
+            Keywords analysieren und eintragen ({keywordWork.pages.length})
           </DtPillButton>
           {keywordsRun ? (
             <span className="inline-flex items-center gap-1 text-xs text-sky-700 dark:text-sky-300">
@@ -615,7 +628,7 @@ export function DtContentWorkspace(props: {
             </span>
           ) : (
             <span className="text-xs text-sbkm-ink-500 dark:text-white/45">
-              Keywords aus der Seitenstruktur gehen vor. Ohne Suchvolumen; im Seitenfenster lassen sie sich ändern.
+              Keywords aus der Seitenstruktur gehen vor, der Zwilling teilt sie nur ein. Ohne Suchvolumen; im Seitenfenster lassen sie sich ändern.
             </span>
           )}
         </div>
