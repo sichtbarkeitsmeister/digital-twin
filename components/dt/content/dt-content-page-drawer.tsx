@@ -70,6 +70,9 @@ const JOB_POLL_MS = 4_000;
 
 const FULLSCREEN_KEY = "dt-content-drawer-fullscreen";
 
+/** The word count in the header is red below this many words and green from it on. */
+const CONTENT_WORDS_TARGET = 1500;
+
 /** The two arrows in the header that page through the texts. */
 const pagerButtonClass =
   "flex size-9 items-center justify-center rounded-full bg-sbkm-navy text-white shadow-sm transition-colors hover:bg-sbkm-mint hover:text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/60 disabled:cursor-not-allowed disabled:bg-sbkm-navy/10 disabled:text-sbkm-navy/30 disabled:shadow-none dark:bg-white dark:text-sbkm-navy dark:hover:bg-sbkm-mint dark:disabled:bg-white/10 dark:disabled:text-white/30";
@@ -807,8 +810,12 @@ export function DtContentPageDrawer(props: {
                     ) : null}
                     {wordCount > 0 ? (
                       <span
-                        className="inline-flex items-baseline gap-1.5 rounded-pill bg-fuchsia-600 px-3 py-1 text-white shadow-sm"
-                        title="Wörter im aktuellen Text: Überschriften und Fließtext, ohne Platzhalter in eckigen Klammern"
+                        className={cn(
+                          "inline-flex items-baseline gap-1.5 rounded-pill px-3 py-1 text-white shadow-sm",
+                          // Red below the target length, a dark green (not the brand mint) from it on.
+                          wordCount < CONTENT_WORDS_TARGET ? "bg-red-600" : "bg-green-800",
+                        )}
+                        title={`${wordCount < CONTENT_WORDS_TARGET ? `Unter ${CONTENT_WORDS_TARGET.toLocaleString("de-DE")} Wörtern` : `Mindestens ${CONTENT_WORDS_TARGET.toLocaleString("de-DE")} Wörter`}. Gezählt werden Überschriften und Fließtext, ohne Platzhalter in eckigen Klammern.`}
                       >
                         <span className="text-sm font-bold tabular-nums">{wordCount.toLocaleString("de-DE")}</span>
                         <span className="text-xs font-semibold">{wordCount === 1 ? "Wort" : "Wörter"}</span>
