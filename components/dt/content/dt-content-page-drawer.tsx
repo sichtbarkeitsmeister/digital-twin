@@ -170,7 +170,7 @@ export function DtContentPageDrawer(props: {
   /** While „Jetzt umsetzen“ runs: Abschnitt n of total. */
   const [applying, setApplying] = useState<{ done: number; total: number } | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
-  /** „Zusätzliche Wünsche für diese Seite“ as typed; null while it equals the stored text. */
+  /** „Zusätzliche Hinweise für diese Seite“ as typed; null while it equals the stored text. */
   const [pageWishes, setPageWishes] = useState<string | null>(null);
   /** „Vollbild“: the window over the whole screen instead of the wide panel; remembered in this browser. */
   const [fullscreen, setFullscreen] = useState(false);
@@ -631,7 +631,7 @@ export function DtContentPageDrawer(props: {
     onChangedRef.current();
   }
 
-  /** „Zusätzliche Wünsche für diese Seite“: saved at once; the next step that runs reads them. */
+  /** „Zusätzliche Hinweise für diese Seite“: saved at once; the next step that runs reads them. */
   async function savePageWishes() {
     if (!base || pageWishes == null) return;
     setBusy("client_wishes");
@@ -646,7 +646,7 @@ export function DtContentPageDrawer(props: {
     }
     setReview(res.data.review);
     setPageWishes(null);
-    toast.success("Wünsche für diese Seite gespeichert – gilt ab dem nächsten Schritt.");
+    toast.success("Hinweise für diese Seite gespeichert – gilt ab dem nächsten Schritt.");
   }
 
   async function runThrough() {
@@ -1148,7 +1148,7 @@ export function DtContentPageDrawer(props: {
                       </div>
                       <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
                         <label htmlFor="content-page-wishes" className="text-xs font-semibold text-sbkm-navy dark:text-white">
-                          Zusätzliche Wünsche für diese Seite
+                          Zusätzliche Hinweise für diese Seite
                         </label>
                         <textarea
                           id="content-page-wishes"
@@ -1157,7 +1157,7 @@ export function DtContentPageDrawer(props: {
                           onChange={(e) => setPageWishes(e.target.value)}
                           maxLength={CLIENT_WISHES_TEXT_MAX}
                           disabled={Boolean(busy)}
-                          placeholder="Ein Wunsch pro Zeile, z. B. „Notdienst nicht erwähnen“"
+                          placeholder="Ein Hinweis pro Zeile, z. B. „Notdienst nicht erwähnen“"
                         />
                         <div className="flex flex-wrap items-center gap-2">
                           <DtPillButton

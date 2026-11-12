@@ -70,6 +70,6 @@ export function parseContentPagePatch(
   }
   if ("page_type" in raw) return { ok: false, message: "Ungültiger Seitentyp." };
   if ("zielgruppen" in raw) return { ok: false, message: `Ungültige Zielgruppen (höchstens ${CONTENT_SECONDARY_MAX} sekundäre).` };
-  if ("client_wishes" in raw) return { ok: false, message: `Die Wünsche für diese Seite dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.` };
+  if ("client_wishes" in raw) return { ok: false, message: `Die Hinweise für diese Seite dürfen höchstens ${CLIENT_WISHES_TEXT_MAX} Zeichen lang sein.` };
   return { ok: false, message: "Ungültige Anfrage." };
 }

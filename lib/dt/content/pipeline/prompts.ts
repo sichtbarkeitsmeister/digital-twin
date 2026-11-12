@@ -138,7 +138,7 @@ export type ContentPipelineContext = {
    */
   contact?: ContactPromptData | null;
   /**
-   * „Kundenwünsche“: the organisation's (`dt_content_settings.client_wishes`) and this page's
+   * „Hinweise zum Texten“ (stored as `client_wishes`): the organisation's (`dt_content_settings.client_wishes`) and this page's
    * (`dt_content_pages.client_wishes`), one wish per entry, read fresh for every step. Every
    * step that writes text gets them, and the Watermark step of Texte; the standalone tools never.
    */
@@ -748,7 +748,7 @@ export function clientWishesBlock(context: { wishes?: ContentClientWishes | null
   let n = 0;
   const numbered = (list: readonly string[]) => list.map((w) => `${++n}. ${w}`).join("\n");
   return [
-    "## Wünsche des Kunden (verbindlich)",
+    "## Hinweise zum Texten (verbindlich)",
     wishes.organisation.length > 0 ? `Für alle Seiten:\n${numbered(wishes.organisation)}` : "",
     wishes.page.length > 0 ? `Nur für diese Seite:\n${numbered(wishes.page)}` : "",
   ]
@@ -761,7 +761,7 @@ export function clientWishesBlock(context: { wishes?: ContentClientWishes | null
  * the wishes go before the Texter-Prompt, the Textvorlage and the step's own instruction, never
  * before the facts rules, the Anrede, the verbotene Wörter and the Branchenregel.
  */
-export const CLIENT_WISHES_RULES = `Wünsche des Kunden (feste Regel): Die Wünsche im Abschnitt „Wünsche des Kunden (verbindlich)“ gelten für den ganzen Text. Sie gehen dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor. Sie gehen nie vor: den Regeln zu Tatsachen (nichts erfinden, nur belegte Fakten), der Anrede, den verbotenen Wörtern und der Branchenregel. Widerspricht ein Wunsch einer dieser Regeln, folgst du der Regel und meldest einen offenen Punkt, der den Wunsch wörtlich nennt – als Befund, wo dieser Schritt Befunde hat; sonst meldet ihn die Endabnahme. Ein solcher Konflikt ist nie eine Frage an den Kunden. Wie das Unternehmen im Fließtext genannt wird (Kurzform, Schreibweise) oder welche Wörter es benutzt, ist eine Sprachvorgabe und kein Widerspruch zu den Fakten oder Kontaktdaten.`;
+export const CLIENT_WISHES_RULES = `Hinweise zum Texten (feste Regel): Die Hinweise im Abschnitt „Hinweise zum Texten (verbindlich)“ sagen, worauf beim Texten zu achten ist – Vorgaben der Redaktion ebenso wie Wünsche des Kunden. Sie gelten für den ganzen Text. Ein als Prüffrage formulierter Hinweis („… vorhanden?“, „… durchgehend?“) ist die Vorgabe, dass der Text sie mit Ja beantwortet. Die Hinweise gehen dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor. Sie gehen nie vor: den Regeln zu Tatsachen (nichts erfinden, nur belegte Fakten), der Anrede, den verbotenen Wörtern und der Branchenregel. Widerspricht ein Hinweis einer dieser Regeln, folgst du der Regel und meldest einen offenen Punkt, der den Hinweis wörtlich nennt – als Befund, wo dieser Schritt Befunde hat; sonst meldet ihn die Endabnahme. Ein solcher Konflikt ist nie eine Frage an den Kunden. Wie das Unternehmen im Fließtext genannt wird (Kurzform, Schreibweise) oder welche Wörter es benutzt, ist eine Sprachvorgabe und kein Widerspruch zu den Fakten oder Kontaktdaten.`;
 
 /** The wishes rule when the page has wishes; nothing otherwise (the prompt stays as before). */
 export function clientWishesRules(context: { wishes?: ContentClientWishes | null }): string[] {
@@ -775,7 +775,7 @@ export function clientWishesRules(context: { wishes?: ContentClientWishes | null
  * published without and what is central to this page; otherwise leave the statement out. The
  * code enforces the rest (topic map, pool, limit of three; `questions.ts`).
  */
-export const QUESTION_RULES = `Fragen und Platzhalter (feste Regel): Eine fehlende Angabe wird nur dann zu einer Frage an den Kunden oder zu einem Platzhalter [BITTE PRÜFEN: …], wenn die Seite ohne sie nicht korrekt veröffentlicht werden kann UND die Angabe zentral für genau diese Seite ist (z. B. der Preis auf einer Preisseite, die Hauptleistung einer Leistungsseite). Sonst lässt du die Aussage weg und schreibst keinen Platzhalter. Nie fragen und nie einen Platzhalter setzen für etwas, das bekannt ist: Anbieterfakten, Antworten des Kunden, Kontaktdaten, Wünsche des Kunden, Anmerkungen der Redaktion. Angaben über das Unternehmen, die auf jeder Seite gleich sind (Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner), fehlen nie so sehr, dass die Seite sie braucht: dann weglassen. Diese Regel geht dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor: Verlangen diese bei fehlenden Angaben einen Platzhalter, setzt du ihn nur unter der Bedingung oben, sonst formulierst du ohne die Angabe. Das Veröffentlichungsdatum ist immer der Marker [DATUM], nie [BITTE PRÜFEN: …]. Ausnahme: Lautet eine Antwort oder Anmerkung der Redaktion ‚KUNDE PRÜFT‘ (auch sinngemäß), wird an der passenden Stelle ein Platzhalter [BITTE PRÜFEN: <die offene Frage in einem Satz>] gesetzt. Der Wortlaut der Anmerkung kommt nie in den Text. Ein solcher Platzhalter (siehe „Offen – der Kunde prüft noch“) bleibt in jedem späteren Schritt unverändert stehen, und zu ihm wird keine neue Frage gestellt.`;
+export const QUESTION_RULES = `Fragen und Platzhalter (feste Regel): Eine fehlende Angabe wird nur dann zu einer Frage an den Kunden oder zu einem Platzhalter [BITTE PRÜFEN: …], wenn die Seite ohne sie nicht korrekt veröffentlicht werden kann UND die Angabe zentral für genau diese Seite ist (z. B. der Preis auf einer Preisseite, die Hauptleistung einer Leistungsseite). Sonst lässt du die Aussage weg und schreibst keinen Platzhalter. Nie fragen und nie einen Platzhalter setzen für etwas, das bekannt ist: Anbieterfakten, Antworten des Kunden, Kontaktdaten, Hinweise zum Texten, Anmerkungen der Redaktion. Angaben über das Unternehmen, die auf jeder Seite gleich sind (Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner), fehlen nie so sehr, dass die Seite sie braucht: dann weglassen. Diese Regel geht dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor: Verlangen diese bei fehlenden Angaben einen Platzhalter, setzt du ihn nur unter der Bedingung oben, sonst formulierst du ohne die Angabe. Das Veröffentlichungsdatum ist immer der Marker [DATUM], nie [BITTE PRÜFEN: …]. Ausnahme: Lautet eine Antwort oder Anmerkung der Redaktion ‚KUNDE PRÜFT‘ (auch sinngemäß), wird an der passenden Stelle ein Platzhalter [BITTE PRÜFEN: <die offene Frage in einem Satz>] gesetzt. Der Wortlaut der Anmerkung kommt nie in den Text. Ein solcher Platzhalter (siehe „Offen – der Kunde prüft noch“) bleibt in jedem späteren Schritt unverändert stehen, und zu ihm wird keine neue Frage gestellt.`;
 
 /** The Faktencheck's own part of the rule: scope, severity and the one „grundlegend“ question. */
 export const FAKTENCHECK_QUESTION_RULES = `Fragen im Faktencheck (feste Regel): Stelle höchstens wenige Fragen, die wichtigsten zuerst; alles andere ist ein finding mit dem Vorschlag, die Aussage wegzulassen. Jede Frage bekommt scope „firma“ (Angabe über das Unternehmen, auf jeder Seite gleich: Telefon, Adresse, Öffnungszeiten, Google-Profil, Bewertungen, Ansprechpartner …) oder „seite“ (nur diese Seite), und severity high (ohne Antwort nicht veröffentlichbar), medium oder low. grundlegend = true nur, wenn das Hauptthema der Seite selbst zweifelhaft ist (z. B. „Wird diese Leistung überhaupt angeboten?“) – höchstens eine Frage, sonst false. Platzhalter im Text erfasst der Code selbst; als question nur, wenn die Regel oben sie erlaubt.`;
@@ -813,7 +813,7 @@ export function faktencheckClientRules(context: Pick<ContentPipelineContext, "co
   }
   if (hasClientWishes(context.wishes)) {
     rules.push(
-      "Wünsche des Kunden (feste Regel): Prüfe jeden Wunsch einzeln. Jeder Verstoß ist ein finding mit severity high, dessen title mit „Kundenwunsch:“ beginnt und dessen problem den Wunsch wörtlich nennt.",
+      "Hinweise zum Texten (feste Regel): Prüfe jeden Hinweis einzeln. Jeder Verstoß ist ein finding mit severity high, dessen title mit „Hinweis zum Texten:“ beginnt und dessen problem den Hinweis wörtlich nennt.",
     );
   }
   return rules;
@@ -824,7 +824,7 @@ export function endabnahmeClientRules(context: Pick<ContentPipelineContext, "con
   const rules: string[] = [];
   if (hasClientWishes(context.wishes)) {
     rules.push(
-      "Prüfe jeden Wunsch des Kunden einzeln. Jeder Verstoß – auch ein Wunsch, der einer festen Regel weichen musste – kommt in unresolved: title beginnt mit „Kundenwunsch:“, problem nennt den Wunsch wörtlich. Ein eingehaltener Wunsch ist kein offener Punkt, auch wenn er der Tonalität, dem Text-Prompt oder der Seitentyp-Vorlage widerspricht: Der Wunsch geht diesen vor.",
+      "Prüfe jeden Hinweis zum Texten einzeln. Jeder Verstoß – auch ein Hinweis, der einer festen Regel weichen musste – kommt in unresolved: title beginnt mit „Hinweis zum Texten:“, problem nennt den Hinweis wörtlich. Ein eingehaltener Hinweis ist kein offener Punkt, auch wenn er der Tonalität, dem Text-Prompt oder der Seitentyp-Vorlage widerspricht: Der Hinweis geht diesen vor.",
     );
   }
   if (context.contact) {
@@ -1651,7 +1651,7 @@ export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: reado
 export function rephraseWishesBlock(context: Pick<RephrasePromptContext, "wishes">): string {
   const block = clientWishesBlock(context);
   if (!block) return "";
-  return `${block}\nDiese Wünsche gelten auch beim Neuformulieren, außer sie widersprechen den Fakten, der Anrede oder den verbotenen Wörtern; dann gilt die Regel.`;
+  return `${block}\nDiese Hinweise gelten auch beim Neuformulieren, außer sie widersprechen den Fakten, der Anrede oder den verbotenen Wörtern; dann gilt die Regel.`;
 }
 
 const SPECS: Record<number, (context: ContentPipelineContext) => ContentStepSpec> = {

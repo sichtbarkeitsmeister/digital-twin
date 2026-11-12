@@ -216,7 +216,7 @@ function testLimitAndOverflow() {
     { html: renderBlocksHtml(BLOCKS.filter((b) => b.id !== "kosten" && b.id !== "kontakt")) },
   );
   assert.deepEqual([(conflict.pagePatch.questions as unknown[]).length, conflict.firmaQuestions?.length ?? 0], [0, 0], "a wish conflict is no question");
-  assert.ok((conflict.pagePatch.findings as Array<{ title: string }>).some((f) => f.title === "Kundenwunsch im Konflikt"), "but an open point");
+  assert.ok((conflict.pagePatch.findings as Array<{ title: string }>).some((f) => f.title === "Hinweis zum Texten im Konflikt"), "but an open point");
   console.log("B: three per page, the rest as open points: ok");
 }
 
@@ -650,7 +650,7 @@ function testPromptRules() {
     assert.ok(contentStepSpec(step, ctx).system.includes(QUESTION_RULES), `step ${step}: the rule is in the fixed part, also with a saved prompt`);
   }
   assert.match(QUESTION_RULES, /Sonst lässt du die Aussage weg und schreibst keinen Platzhalter/);
-  assert.match(QUESTION_RULES, /Nie fragen .* Anbieterfakten, Antworten des Kunden, Kontaktdaten, Wünsche des Kunden, Anmerkungen der Redaktion/);
+  assert.match(QUESTION_RULES, /Nie fragen .* Anbieterfakten, Antworten des Kunden, Kontaktdaten, Hinweise zum Texten, Anmerkungen der Redaktion/);
   const fakten = contentStepSpec(CONTENT_STEP_FAKTENCHECK, ctx);
   assert.ok(fakten.system.includes(FAKTENCHECK_QUESTION_RULES));
   const items = ((fakten.tool.input_schema as { properties: { questions: { items: { properties: Record<string, unknown>; required: string[] } } } }).properties.questions.items);

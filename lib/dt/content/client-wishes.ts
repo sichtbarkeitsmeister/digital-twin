@@ -1,5 +1,6 @@
 /**
- * „Kundenwünsche“: the client's standing wishes for the texts, one per line. The organisation's
+ * „Hinweise zum Texten“ (formerly „Kundenwünsche“, hence the names): what the texts must observe,
+ * the client's standing wishes as well as the editors' own guidelines, one per line. The organisation's
  * live in `dt_content_settings.client_wishes`, a page's own in `dt_content_pages.client_wishes`
  * (migration 20261103). Pure, so the cards in the browser and the prompts read them alike.
  */

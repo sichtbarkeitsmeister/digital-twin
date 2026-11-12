@@ -625,7 +625,7 @@ function testWishesInEveryWritingStep() {
   const writing = [CONTENT_STEP_SEO, CONTENT_STEP_GEO, CONTENT_STEP_HORMOZI, CONTENT_STEP_VERMENSCHLICHUNG, CONTENT_STEP_LEKTORAT];
   for (const step of [...writing, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_ENDABNAHME]) {
     const spec = contentStepSpec(step, context);
-    assert.match(spec.user, /## Wünsche des Kunden \(verbindlich\)\nFür alle Seiten:\n1\. Immer ‚Kanzlei‘ statt ‚Büro‘/, `step ${step}: wishes in the user message`);
+    assert.match(spec.user, /## Hinweise zum Texten \(verbindlich\)\nFür alle Seiten:\n1\. Immer ‚Kanzlei‘ statt ‚Büro‘/, `step ${step}: wishes in the user message`);
     assert.match(spec.user, /Nur für diese Seite:\n4\. Notdienst nicht erwähnen/, `step ${step}: page wishes`);
   }
   for (const step of writing) {
@@ -638,7 +638,7 @@ function testWishesInEveryWritingStep() {
   assert.ok(seo.indexOf("Seitentyp-Vorlage") < seo.indexOf(CLIENT_WISHES_RULES) && seo.indexOf(CLIENT_WISHES_RULES) < seo.indexOf("Branchenregel"));
   assert.match(CLIENT_WISHES_RULES, /gehen dem Text-Prompt, der Seitentyp-Vorlage und der Schrittanweisung vor/);
   assert.match(CLIENT_WISHES_RULES, /nie vor: den Regeln zu Tatsachen .*der Anrede, den verbotenen Wörtern und der Branchenregel/);
-  assert.match(CLIENT_WISHES_RULES, /offenen Punkt, der den Wunsch wörtlich nennt/);
+  assert.match(CLIENT_WISHES_RULES, /offenen Punkt, der den Hinweis wörtlich nennt/);
 
   // A saved step instruction (Globale Prompts) cannot remove it.
   const own = pipelineContext({ wishes: WISHES, stepPrompts: { hormozi: "Eigener Hormozi-Text ohne Wünsche." } });
@@ -646,7 +646,7 @@ function testWishesInEveryWritingStep() {
 
   // Aktualitätsprüfung: the result call writes text and gets them; the research call gets no wish text in its user message.
   const write = aktualitaetWriteSpec(context, { text: "Zeitkritische Aussagen: 0", sources: [], searches: 1, fetches: 0, search_limit_hit: false, claims: 0 });
-  assert.match(write.user, /## Wünsche des Kunden \(verbindlich\)/);
+  assert.match(write.user, /## Hinweise zum Texten \(verbindlich\)/);
   assert.ok(write.system.includes(CLIENT_WISHES_RULES));
   assert.doesNotMatch(aktualitaetResearchPrompt(context).user, /Kanzlei‘ statt|Dr\. Müller/, "no wish text near a search query");
 
@@ -662,7 +662,7 @@ function testWishesInEveryWritingStep() {
   const plain = pipelineContext();
   for (const step of [...writing, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_ENDABNAHME]) {
     const spec = contentStepSpec(step, plain);
-    assert.doesNotMatch(`${spec.system}\n${spec.user}`, /## Wünsche des Kunden|Wünsche des Kunden \(feste Regel\)|## Kontaktdaten \(bestätigt\)/, `step ${step}: nothing without client data`);
+    assert.doesNotMatch(`${spec.system}\n${spec.user}`, /## Hinweise zum Texten|Hinweise zum Texten \(feste Regel\)|## Kontaktdaten \(bestätigt\)/, `step ${step}: nothing without client data`);
   }
   console.log("Kundenwünsche: in every writing step: ok");
 }
@@ -670,10 +670,10 @@ function testWishesInEveryWritingStep() {
 function testWishesInTexteWatermarkOnly() {
   const chunk: ContentTextBlock[] = [{ id: "einleitung", heading: "Einleitung", level: 2, html: "<p>Unser Büro hilft Ihnen.</p>" }];
   const texte = rephraseChunkPrompt(pipelineContext({ wishes: WISHES }), chunk);
-  assert.match(texte.user, /## Wünsche des Kunden \(verbindlich\)/, "the Texte Watermark prompt carries the wishes");
+  assert.match(texte.user, /## Hinweise zum Texten \(verbindlich\)/, "the Texte Watermark prompt carries the wishes");
   assert.match(texte.user, /gelten auch beim Neuformulieren/);
   const standalone = rephraseChunkPrompt({ notes: [] }, chunk);
-  assert.doesNotMatch(`${standalone.system}\n${standalone.user}`, /Wünsche des Kunden/, "the standalone Watermark tool has none");
+  assert.doesNotMatch(`${standalone.system}\n${standalone.user}`, /Hinweise zum Texten/, "the standalone Watermark tool has none");
   assert.equal(texte.system, standalone.system, "the shared system prompt is unchanged");
   assert.match(readFileSync("lib/dt/text-tools/watermark.ts", "utf8"), /runRephraseOnBlocks\(\{ notes: \[\] \}/, "the tool passes no wishes");
 
@@ -683,7 +683,7 @@ function testWishesInTexteWatermarkOnly() {
   const geo = geoToolSpec({ organisationName: "X", fileName: "a.docx", pageName: "Y", sections, avatar: null, geoPrompt: null, blocks, title: null, metaDescription: null });
   const hormozi = hormoziToolSpec({ organisationName: "X", fileName: "a.docx", pageName: "Y", pageType: "unterseite", sections, avatar: { name: "Anna", role: "Kundin", beschreibung: "45." }, hormoziPrompt: null, blocks, title: null, metaDescription: null });
   for (const [name, spec] of [["SEO", seo], ["GEO", geo], ["Hormozi", hormozi]] as const) {
-    assert.doesNotMatch(`${spec.system}\n${spec.user}`, /Wünsche des Kunden|Kontaktdaten \(bestätigt\)/, `standalone ${name}: no client data`);
+    assert.doesNotMatch(`${spec.system}\n${spec.user}`, /Hinweise zum Texten|Kontaktdaten \(bestätigt\)/, `standalone ${name}: no client data`);
   }
   console.log("Kundenwünsche: Texte Watermark yes, standalone tools no: ok");
 }
@@ -691,22 +691,22 @@ function testWishesInTexteWatermarkOnly() {
 function testChecksOfFaktencheckAndEndabnahme() {
   const context = pipelineContext({ wishes: WISHES, contact: contactPromptData(KNOWN) });
   const fakten = contentStepSpec(CONTENT_STEP_FAKTENCHECK, context).system;
-  assert.match(fakten, /Prüfe jeden Wunsch einzeln\. Jeder Verstoß ist ein finding/);
+  assert.match(fakten, /Prüfe jeden Hinweis einzeln\. Jeder Verstoß ist ein finding/);
   assert.match(fakten, /Prüfe den Text auch gegen die Kontaktdaten/);
   const endabnahme = contentStepSpec(CONTENT_STEP_ENDABNAHME, context).system;
-  assert.match(endabnahme, /Prüfe jeden Wunsch des Kunden einzeln\. Jeder Verstoß .* kommt in unresolved/);
-  assert.match(endabnahme, /Ein eingehaltener Wunsch ist kein offener Punkt/, "a kept wish is no open point (seen in a real run)");
+  assert.match(endabnahme, /Prüfe jeden Hinweis zum Texten einzeln\. Jeder Verstoß .* kommt in unresolved/);
+  assert.match(endabnahme, /Ein eingehaltener Hinweis ist kein offener Punkt/, "a kept wish is no open point (seen in a real run)");
   assert.match(endabnahme, /Prüfe Firmenname, Adresse und Telefon im Text gegen die Kontaktdaten/);
 
   // The Endabnahme's violations become the page's open points.
   const out: EndabnahmeOutput = {
     unresolved: [
-      { title: "Kundenwunsch: Büro statt Kanzlei", problem: "Wunsch „Immer ‚Kanzlei‘ statt ‚Büro‘“: Abschnitt Einleitung sagt „Büro“.", proposal: "„Kanzlei“ schreiben.", severity: "high", severity_label: "Wichtig", block_id: "einleitung" },
+      { title: "Hinweis zum Texten: Büro statt Kanzlei", problem: "Wunsch „Immer ‚Kanzlei‘ statt ‚Büro‘“: Abschnitt Einleitung sagt „Büro“.", proposal: "„Kanzlei“ schreiben.", severity: "high", severity_label: "Wichtig", block_id: "einleitung" },
     ],
     summary: "Fast fertig.",
   };
   const patch = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, out, { html: "<h1>Steuerberatung</h1>" });
-  assert.deepEqual((patch.pagePatch.unresolved as Array<{ title: string }>).map((f) => f.title), ["Kundenwunsch: Büro statt Kanzlei"]);
+  assert.deepEqual((patch.pagePatch.unresolved as Array<{ title: string }>).map((f) => f.title), ["Hinweis zum Texten: Büro statt Kanzlei"]);
   console.log("Kundenwünsche: Faktencheck and Endabnahme check each wish: ok");
 }
 
