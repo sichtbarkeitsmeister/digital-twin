@@ -32,6 +32,8 @@ export type WorkshopToolCall = (input: {
   user: string;
   tool: Anthropic.Tool;
   maxTokens?: number;
+  /** Abort after this many ms; a cut answer throws instead of returning partial JSON. */
+  timeoutMs?: number;
 }) => Promise<{ json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string | null }>;
 
 export type ProposeAvatarPlanInput = {

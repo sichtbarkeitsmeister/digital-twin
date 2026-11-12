@@ -2,6 +2,8 @@
  * Workshop corpus: order, fingerprint, checklist, SEO text, saved summaries, plan input.
  * Run: npx tsx scripts/test-workshop-corpus.ts
  */
+import "./support/stub-server-only";
+
 import assert from "node:assert/strict";
 
 import {
@@ -40,8 +42,20 @@ import {
   readAvatarPlan,
   sectionStatus,
   sourcesWithoutSummary,
+  type AnbieterItem,
   type WorkshopSource,
 } from "../lib/dt/transcripts/workshop-model";
+import type { WorkshopToolCall } from "../lib/dt/transcripts/avatar-plan-llm";
+import {
+  ANBIETER_GROUPS,
+  ANBIETER_GROUP_TIMEOUT_MS,
+  ANBIETER_REFILL_MAX_MS,
+  WORKSHOP_TIMEOUT_MESSAGE,
+  WorkshopTimeoutError,
+  evaluateAnbieterCorpusWith,
+  readWorkshopToolResult,
+  workshopFailureMessage,
+} from "../lib/dt/transcripts/workshop-llm";
 
 function source(partial: Partial<WorkshopSource> & Pick<WorkshopSource, "id">): WorkshopSource {
   return {
@@ -667,10 +681,217 @@ function testGeneratorStateRestore() {
   console.log("generator state restore: ok");
 }
 
+function toolMessage(input: Record<string, unknown>, stopReason: "tool_use" | "max_tokens" | null) {
+  return {
+    id: "msg",
+    type: "message",
+    role: "assistant",
+    model: "m",
+    content: [{ type: "tool_use", id: "t", name: "submit_anbieter", input }],
+    stop_reason: stopReason,
+    stop_sequence: null,
+    usage: { input_tokens: 10, output_tokens: 5 },
+  } as never;
+}
+
+function testTimedOutCallThrows() {
+  const partial = { unternehmen: "Versicherungsmakler", gruendung: "1990" };
+  assert.throws(
+    () => readWorkshopToolResult({ response: toolMessage(partial, null), model: "m", timedOut: true }, "submit_anbieter"),
+    (err: Error) => err instanceof WorkshopTimeoutError && err.message === WORKSHOP_TIMEOUT_MESSAGE,
+  );
+  assert.match(WORKSHOP_TIMEOUT_MESSAGE, /^Die KI-Antwort wurde wegen Zeitüberschreitung abgebrochen/);
+  // The route shows this message as it is, not the generic one.
+  assert.equal(workshopFailureMessage(new WorkshopTimeoutError(), "x"), WORKSHOP_TIMEOUT_MESSAGE);
+  assert.throws(
+    () => readWorkshopToolResult({ response: toolMessage(partial, "max_tokens"), model: "m" }, "submit_anbieter"),
+    /abgeschnitten/,
+  );
+  assert.throws(() => readWorkshopToolResult(null, "submit_anbieter"), /Kein verfügbares Modell/);
+  const ok = readWorkshopToolResult({ response: toolMessage(partial, "tool_use"), model: "m" }, "submit_anbieter");
+  assert.deepEqual(ok.json, partial);
+  assert.deepEqual(ok.usage, { inputTokens: 10, outputTokens: 5 });
+  console.log("timed-out call throws: ok");
+}
+
+type Call = Parameters<WorkshopToolCall>[0];
+
+function schemaKeys(call: Call): string[] {
+  return Object.keys((call.tool.input_schema as { properties: Record<string, unknown> }).properties);
+}
+
+/** Answers each key with `<key> text`, except the keys in `blank`. */
+function answering(calls: Call[], blank: (call: Call, key: string) => boolean = () => false): WorkshopToolCall {
+  return async (call) => {
+    calls.push(call);
+    const json = Object.fromEntries(schemaKeys(call).map((key) => [key, blank(call, key) ? "" : `${key} text`]));
+    return { json, usage: { inputTokens: 100, outputTokens: 10 }, model: "m" };
+  };
+}
+
+const corpusSources = [source({ id: "a", spokenOn: "2026-09-01", title: "Auftakt", summary: "Makler seit 1990." })];
+
+async function testGroupsMergeIntoThirteen() {
+  assert.deepEqual(
+    ANBIETER_GROUPS.flat().slice().sort(),
+    ANBIETER_POINTS.map((point) => point.key).slice().sort(),
+  );
+  assert.deepEqual(ANBIETER_GROUPS[0], ["unternehmen", "gruendung", "leistungen", "ablauf"]);
+  assert.deepEqual(ANBIETER_GROUPS[2], ["sprache", "preis", "kanaele", "ziele"]);
+  const calls: Call[] = [];
+  const result = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer Continentale",
+    sources: corpusSources,
+    call: answering(calls),
+  });
+  assert.equal(calls.length, 3);
+  calls.forEach((call, index) => {
+    assert.deepEqual(schemaKeys(call), ANBIETER_GROUPS[index]);
+    assert.deepEqual((call.tool.input_schema as { required: string[] }).required, ANBIETER_GROUPS[index]);
+    assert.equal(call.timeoutMs, ANBIETER_GROUP_TIMEOUT_MS);
+    assert.match(call.user, /Makler seit 1990\./);
+    assert.equal(call.user, calls[0]!.user);
+    assert.match(call.system, /Nichts kürzen, nichts weglassen/);
+    assert.match(call.system, new RegExp(`in die Felder ${ANBIETER_GROUPS[index]!.join(", ")}\\.`));
+  });
+  assert.equal(result.items.length, ANBIETER_POINTS.length);
+  for (const item of result.items) assert.equal(item.current, `${item.key} text`);
+  assert.deepEqual(result.usage, { inputTokens: 300, outputTokens: 30 });
+  assert.equal(result.model, "m");
+
+  // A group that writes outside its keys does not overwrite another group's point.
+  const stray: WorkshopToolCall = async (call) => {
+    const keys = schemaKeys(call);
+    const json: Record<string, string> = Object.fromEntries(keys.map((key) => [key, `${key} text`]));
+    if (keys.includes("sprache")) json.unternehmen = "falsch";
+    return { json, usage: { inputTokens: 1, outputTokens: 1 }, model: "m" };
+  };
+  const strayResult = await evaluateAnbieterCorpusWith({ organisationName: "X", sources: corpusSources, call: stray });
+  assert.equal(strayResult.items.find((item) => item.key === "unternehmen")?.current, "unternehmen text");
+
+  // One failed group fails the whole evaluation.
+  const failing: WorkshopToolCall = async (call) => {
+    if (schemaKeys(call).includes("preis")) throw new WorkshopTimeoutError();
+    return { json: Object.fromEntries(schemaKeys(call).map((key) => [key, "x"])), usage: { inputTokens: 1, outputTokens: 1 }, model: "m" };
+  };
+  await assert.rejects(
+    () => evaluateAnbieterCorpusWith({ organisationName: "X", sources: corpusSources, call: failing }),
+    (err: Error) => err.message === WORKSHOP_TIMEOUT_MESSAGE,
+  );
+  console.log("three groups merge into 13 points: ok");
+}
+
+async function testRefillOnlyEmptyKeys() {
+  const calls: Call[] = [];
+  const blankInGroups = new Set(["gruendung", "preis", "ziele"]);
+  const result = await evaluateAnbieterCorpusWith({
+    organisationName: "X",
+    sources: corpusSources,
+    // Groups leave three points empty; the refill finds preis, ziele stays empty.
+    call: answering(calls, (call, key) =>
+      call.timeoutMs === ANBIETER_GROUP_TIMEOUT_MS ? blankInGroups.has(key) : key !== "preis",
+    ),
+  });
+  assert.equal(calls.length, 4);
+  const refill = calls[3]!;
+  assert.deepEqual(schemaKeys(refill), ["gruendung", "preis", "ziele"]);
+  assert.equal(refill.timeoutMs, ANBIETER_REFILL_MAX_MS);
+  assert.equal(refill.user, calls[0]!.user);
+  assert.match(refill.system, /Leer nur, wenn wirklich niemand etwas dazu gesagt hat\./);
+  assert.match(refill.system, /Nichts kürzen, nichts weglassen/);
+  const byKey = new Map(result.items.map((item) => [item.key, item.current]));
+  assert.equal(byKey.get("preis"), "preis text");
+  assert.equal(byKey.get("gruendung"), "");
+  assert.equal(byKey.get("ziele"), "");
+  assert.equal(byKey.get("unternehmen"), "unternehmen text");
+  assert.deepEqual(result.usage, { inputTokens: 400, outputTokens: 40 });
+
+  // No empty point: no refill.
+  const full: Call[] = [];
+  await evaluateAnbieterCorpusWith({ organisationName: "X", sources: corpusSources, call: answering(full) });
+  assert.equal(full.length, 3);
+
+  // Groups used up the time: the refill is skipped, the points stay empty.
+  let clock = 0;
+  const late: Call[] = [];
+  const skipped = await evaluateAnbieterCorpusWith({
+    organisationName: "X",
+    sources: corpusSources,
+    now: () => clock,
+    call: async (call) => {
+      clock = 270_000;
+      return answering(late, (_call, key) => key === "preis")(call);
+    },
+  });
+  assert.equal(late.length, 3);
+  assert.equal(skipped.items.find((item) => item.key === "preis")?.current, "");
+
+  // Less than the full refill time left: the refill gets only what is left.
+  clock = 0;
+  const tight: Call[] = [];
+  await evaluateAnbieterCorpusWith({
+    organisationName: "X",
+    sources: corpusSources,
+    now: () => clock,
+    call: async (call) => {
+      if (call.timeoutMs === ANBIETER_GROUP_TIMEOUT_MS) clock = 230_000;
+      return answering(tight, (_call, key) => key === "preis")(call);
+    },
+  });
+  assert.equal(tight.length, 4);
+  assert.equal(tight[3]!.timeoutMs, 50_000);
+  console.log("refill asks only for empty keys: ok");
+}
+
+async function testRevisionPassesGroupItems() {
+  const currentItems: AnbieterItem[] = normalizeAnbieterItems({
+    unternehmen: "Makler in Münchenheim",
+    beweise: "Kunde Bantek",
+    preis: "Stundenhonorar",
+  });
+  const calls: Call[] = [];
+  await evaluateAnbieterCorpusWith({
+    organisationName: "X",
+    sources: corpusSources,
+    instruction: "Der Sitz ist Mülheim.",
+    currentItems,
+    call: answering(calls),
+  });
+  const [first, second, third] = calls;
+  for (const call of calls) {
+    assert.match(call.user, /Der Sitz ist Mülheim\./);
+    assert.match(call.system, /Liegt eine Anweisung bei/);
+  }
+  assert.match(first!.user, /Makler in Münchenheim/);
+  assert.doesNotMatch(first!.user, /Bantek|Stundenhonorar/);
+  assert.match(second!.user, /Kunde Bantek/);
+  assert.doesNotMatch(second!.user, /Münchenheim|Stundenhonorar/);
+  assert.match(third!.user, /Stundenhonorar/);
+  assert.doesNotMatch(third!.user, /Münchenheim|Bantek/);
+
+  // Without an instruction no revision block.
+  const plain: Call[] = [];
+  await evaluateAnbieterCorpusWith({ organisationName: "X", sources: corpusSources, call: answering(plain) });
+  for (const call of plain) {
+    assert.doesNotMatch(call.user, /Bisheriger Vorschlag|prüfenden Person/);
+    assert.doesNotMatch(call.system, /Liegt eine Anweisung bei/);
+  }
+  console.log("revision passes the group's items: ok");
+}
+
 testMissingAgentLink();
 testAvatarPromptKeepsDossier();
 testSavedSummaryReading();
 testAnbieterSavedAt();
 testSummaryOnlyPlanInput();
 testGeneratorStateRestore();
-console.log("workshop corpus: all ok");
+testTimedOutCallThrows();
+void (async () => {
+  await testGroupsMergeIntoThirteen();
+  await testRefillOnlyEmptyKeys();
+  await testRevisionPassesGroupItems();
+  console.log("workshop corpus: all ok");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
