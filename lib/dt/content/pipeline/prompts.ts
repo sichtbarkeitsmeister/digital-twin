@@ -605,6 +605,16 @@ function briefingLabel(page: Pick<ContentPipelinePage, "source">): string {
   return page.source === "standalone" ? "aus dem Briefing" : "aus der Excel";
 }
 
+/**
+ * Where the page's set keywords come from, as the prompt names it: the briefing (Excel), the
+ * Zwilling's keyword analysis or the editor's own entry. All three are set and not replaced.
+ */
+function keywordLabel(page: Pick<ContentPipelinePage, "source" | "keywords">): string {
+  if (page.keywords?.source === "analyse") return "aus der Keyword-Analyse";
+  if (page.keywords?.source === "manuell") return "von der Redaktion";
+  return briefingLabel(page);
+}
+
 /** A page whose existing text is an uploaded Word file: the website is not live yet. */
 const UPLOAD_SOURCE_WORDING = "aus der hochgeladenen Word-Datei (Website noch nicht live)";
 
@@ -642,10 +652,10 @@ export function pageBlock(context: ContentPipelineContext): string {
     page.pillar_name ? `Hauptsilo (übergeordnete Seite): ${page.pillar_name}` : "",
     page.estimated_traffic != null ? `Geschätzter Traffic laut Excel: ${page.estimated_traffic}` : "",
     page.keywords
-      ? `Hauptkeyword ${briefing} (gesetzt, nicht ersetzen): ${keywordText(page.keywords.main)}`
+      ? `Hauptkeyword ${keywordLabel(page)} (gesetzt, nicht ersetzen): ${keywordText(page.keywords.main)}`
       : "Hauptkeyword: nicht vorgegeben",
     page.keywords && page.keywords.secondary.length > 0
-      ? `Nebenkeywords ${briefing}: ${page.keywords.secondary.map(keywordText).join(", ")}`
+      ? `Nebenkeywords ${keywordLabel(page)}: ${page.keywords.secondary.map(keywordText).join(", ")}`
       : "",
     page.h1_options.length > 0 ? `H1-Optionen ${briefing}:\n${list(page.h1_options)}` : "",
     page.user_questions.length > 0
@@ -1035,7 +1045,7 @@ Schritt ${CONTENT_STEP_ANALYSE} Analyse: Du legst fest, wonach Menschen suchen, 
 Suchintention: intent.primary ist genau einer von ${CONTENT_INTENTS.join(" | ")}; modifiers aus ${CONTENT_INTENT_MODIFIERS.join(" | ")} (mehrere möglich, ymyl = Gesundheit, Recht, Geld). journey_phase: ${CONTENT_JOURNEY_PHASES.join(" | ")}. conversion_goal: ${CONTENT_CONVERSION_GOALS.join(" | ")}. content_angle: ${CONTENT_ANGLES.join(" | ")}. Nur diese Werte.
 Keywords: ${
       page.keywords
-        ? `Das Hauptkeyword ${briefingLabel(page)} ist gesetzt – übernimm es wörtlich als main_keyword, nicht ersetzen, nicht umformulieren. Nebenkeywords ${briefingLabel(page)} übernehmen und um 2–5 passende Varianten ergänzen; kein Suchvolumen erfinden.`
+        ? `Das Hauptkeyword ${keywordLabel(page)} ist gesetzt – übernimm es wörtlich als main_keyword, nicht ersetzen, nicht umformulieren. Nebenkeywords ${keywordLabel(page)} übernehmen und um 2–5 passende Varianten ergänzen; kein Suchvolumen erfinden.`
         : crawl
           ? "Diese Seite kommt aus dem Crawl, ohne Briefing: Leite Haupt- und Nebenkeywords aus Seite, Leistung, Avatar und Ort (nur wenn der Anbieter regional arbeitet und ein Ort in den Fakten steht) ab. Der bisherige Text ist nur Orientierung für Thema und Begriffe."
           : upload

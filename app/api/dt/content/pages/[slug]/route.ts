@@ -12,9 +12,13 @@ import {
 import {
   buildReview,
   contentPageTypeChangeBlocker,
+  cleanKeywordInput,
   loadContentPage,
+  loadContentPageOutline,
   loadContentSteps,
+  mainKeywordTakenBy,
   planContentSkipSteps,
+  saveContentPageKeywords,
   updateContentClientWishes,
   updateContentReviewStop,
   updateContentPageType,
@@ -26,7 +30,7 @@ import { saveContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-su
 /**
  * „Seitentyp“ in the table and in the drawer, „Schritte“ in the drawer (`skip_steps`, the
  * whole list of steps switched off) and „Zusätzliche Wünsche für diese Seite“
- * (`client_wishes`). Every page: the Excel type and the crawl guess are suggestions the editor
+ * (`client_wishes`) and the keywords entered by hand (`keywords`). Every page: the Excel type and the crawl guess are suggestions the editor
  * overrides by hand. Type and steps do not change while the page runs (409); the wishes do,
  * they apply from the next step that runs.
  */
@@ -44,7 +48,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
   try {
     const page = await loadContentPage(gate.service, gate.organisationId, slug);
     if (!page) return contentError("Seite nicht gefunden.", 404);
-    const { page_type: pageType, skip_steps: skipSteps, client_wishes: clientWishes, review_stop: reviewStop, zielgruppen } = parsed.data;
+    const { page_type: pageType, skip_steps: skipSteps, client_wishes: clientWishes, review_stop: reviewStop, zielgruppen, keywords } = parsed.data;
     // Everything is checked before anything is written.
     if (pageType !== undefined) {
       const blocker = contentPageTypeChangeBlocker(page);
@@ -53,6 +57,13 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
     if (skipSteps !== undefined) {
       const plan = planContentSkipSteps(page, skipSteps);
       if (!plan.ok) return contentError(plan.message, plan.status);
+    }
+
+    if (keywords !== undefined) {
+      // A main keyword exists once on the website, also when it is entered by hand.
+      const main = cleanKeywordInput(keywords.main, []).main;
+      const clash = main ? mainKeywordTakenBy(await loadContentPageOutline(gate.service, gate.organisationId), page.slug, main) : null;
+      if (clash) return contentError(`„${main}“ ist schon das Hauptkeyword der Seite „${clash.name}“. Jedes Hauptkeyword gibt es nur einmal.`, 409);
     }
 
     if (pageType !== undefined) {
@@ -69,6 +80,11 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
     }
     if (reviewStop !== undefined) {
       const saved = await updateContentReviewStop(gate.service, page, reviewStop);
+      if (!saved.ok) return contentError(saved.error, saved.status);
+    }
+    // Keywords apply from the next step, also while the page runs (like the wishes).
+    if (keywords !== undefined) {
+      const saved = await saveContentPageKeywords(gate.service, page, { ...keywords, source: "manuell" });
       if (!saved.ok) return contentError(saved.error, saved.status);
     }
     // Zielgruppen apply from the next step, also while the page runs (like the wishes).

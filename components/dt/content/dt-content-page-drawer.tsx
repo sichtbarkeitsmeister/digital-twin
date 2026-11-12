@@ -15,6 +15,7 @@ import {
   Lock,
   Maximize2,
   Minimize2,
+  Sparkles,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -59,6 +60,7 @@ import type {
   ContentReview,
   ContentStep,
 } from "@/lib/dt/content/types";
+import { contentKeywordOriginLabel } from "@/lib/dt/content/types";
 
 const textareaClass =
   "min-h-[120px] w-full resize-y rounded-dt border border-sbkm-navy/15 bg-white/80 px-3 py-2.5 text-sm leading-relaxed text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.04)] outline-none transition duration-150 placeholder:text-sbkm-ink-500 focus-visible:border-sbkm-mint/40 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 disabled:opacity-50 dark:border-white/15 dark:bg-white/10 dark:text-white dark:placeholder:text-white/40";
@@ -175,6 +177,8 @@ export function DtContentPageDrawer(props: {
   const [jobId, setJobId] = useState<string | null>(null);
   /** „Zusätzliche Hinweise für diese Seite“ as typed; null while it equals the stored text. */
   const [pageWishes, setPageWishes] = useState<string | null>(null);
+  /** Hauptkeyword and Nebenkeywords (one per line) as typed; null while they equal the stored ones. */
+  const [keywordDraft, setKeywordDraft] = useState<{ main: string; secondary: string } | null>(null);
   /** „Vollbild“: the window over the whole screen instead of the wide panel; remembered in this browser. */
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
@@ -222,6 +226,7 @@ export function DtContentPageDrawer(props: {
     setRevisePreview(null);
     setJobId(null);
     setPageWishes(null);
+    setKeywordDraft(null);
     void loadReview();
   }, [open, page, loadReview]);
 
@@ -650,6 +655,47 @@ export function DtContentPageDrawer(props: {
     setReview(res.data.review);
     setPageWishes(null);
     toast.success("Hinweise für diese Seite gespeichert – gilt ab dem nächsten Schritt.");
+  }
+
+  /** Hauptkeyword and Nebenkeywords entered by hand: saved at once; the next step that runs reads them. */
+  async function saveKeywords() {
+    if (!base || !keywordDraft) return;
+    setBusy("keywords");
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, {
+      method: "PATCH",
+      body: {
+        organisationId,
+        keywords: { main: keywordDraft.main, secondary: keywordDraft.secondary.split(/[\n,;]+/).map((k) => k.trim()).filter(Boolean) },
+      },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message, { duration: 12_000 });
+      return;
+    }
+    setReview(res.data.review);
+    setKeywordDraft(null);
+    onChangedRef.current();
+    toast.success(res.data.review.briefing.main_keyword ? "Keywords gespeichert – gilt ab dem nächsten Schritt." : "Keywords entfernt.");
+  }
+
+  /** „Keywords analysieren“: the Zwilling suggests and stores them; `force` replaces an earlier suggestion or entry. */
+  async function analyseKeywords(force: boolean) {
+    if (!base) return;
+    setBusy("keywords_analyse");
+    const res = await contentApi<{ review: ContentReview; reason: string }>(`${base}/keywords`, {
+      method: "POST",
+      body: { organisationId, force },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message, { duration: 12_000 });
+      return;
+    }
+    setReview(res.data.review);
+    setKeywordDraft(null);
+    onChangedRef.current();
+    toast.success(res.data.reason ? `Keywords eingetragen. ${res.data.reason}` : "Keywords eingetragen.", { duration: 10_000 });
   }
 
   async function runThrough() {
@@ -1179,19 +1225,95 @@ export function DtContentPageDrawer(props: {
                             Speichern
                           </DtPillButton>
                           <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
-                            Zusätzlich zu den Kundenwünschen; gilt ab dem nächsten Schritt.
+                            Zusätzlich zu den Hinweisen zum Texten; gilt ab dem nächsten Schritt.
+                          </span>
+                        </div>
+                      </div>
+                      <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="text-xs font-semibold text-sbkm-navy dark:text-white">Keywords</span>
+                          {review.briefing.keyword_source ? (
+                            <span className="rounded-full border border-sbkm-navy/12 px-2 py-0.5 text-[11px] text-sbkm-ink-600 dark:border-white/15 dark:text-white/60">
+                              {contentKeywordOriginLabel(review.briefing.keyword_source, review.briefing.keyword_sorted)}
+                              {review.briefing.main_keyword_volume != null ? ` · ${review.briefing.main_keyword_volume}/Monat` : ""}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-orange-300/70 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800 dark:border-orange-400/40 dark:bg-orange-400/10 dark:text-orange-200">
+                              <AlertTriangle className="size-3" aria-hidden />
+                              Keine Keywords eingetragen
+                            </span>
+                          )}
+                        </div>
+                        <label htmlFor="content-page-keyword-main" className="text-[11px] text-sbkm-ink-600 dark:text-white/60">
+                          Hauptkeyword
+                        </label>
+                        <input
+                          id="content-page-keyword-main"
+                          type="text"
+                          className={cn(textareaClass, "min-h-0 py-1.5 text-xs")}
+                          value={keywordDraft?.main ?? review.briefing.main_keyword ?? ""}
+                          onChange={(e) =>
+                            setKeywordDraft({ main: e.target.value, secondary: keywordDraft?.secondary ?? review.briefing.secondary_keywords.join("\n") })
+                          }
+                          maxLength={120}
+                          disabled={Boolean(busy)}
+                          placeholder="z. B. „Heilpraktiker Köln“"
+                        />
+                        <label htmlFor="content-page-keyword-secondary" className="text-[11px] text-sbkm-ink-600 dark:text-white/60">
+                          Nebenkeywords, eines pro Zeile
+                        </label>
+                        <textarea
+                          id="content-page-keyword-secondary"
+                          className={cn(textareaClass, "min-h-[64px] text-xs")}
+                          value={keywordDraft?.secondary ?? review.briefing.secondary_keywords.join("\n")}
+                          onChange={(e) => setKeywordDraft({ main: keywordDraft?.main ?? review.briefing.main_keyword ?? "", secondary: e.target.value })}
+                          disabled={Boolean(busy)}
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <DtPillButton
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-3 text-xs"
+                            disabled={
+                              Boolean(busy) ||
+                              !keywordDraft ||
+                              (keywordDraft.main.trim() === (review.briefing.main_keyword ?? "") &&
+                                keywordDraft.secondary.trim() === review.briefing.secondary_keywords.join("\n"))
+                            }
+                            onClick={() => void saveKeywords()}
+                          >
+                            {busy === "keywords" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+                            Speichern
+                          </DtPillButton>
+                          {review.briefing.keyword_source !== "struktur" || review.briefing.secondary_keywords.length > 0 ? (
+                            <DtPillButton
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-3 text-xs"
+                              disabled={Boolean(busy)}
+                              onClick={() => void analyseKeywords(true)}
+                              title="Der Zwilling entscheidet, was Hauptkeyword und was Nebenkeyword ist: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Nennt die Seitenstruktur Keywords, teilt er genau diese ein; sonst legt er welche fest. Kein Hauptkeyword einer anderen Seite. Wenige Cent."
+                            >
+                              {busy === "keywords_analyse" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Sparkles className="size-3" aria-hidden />}
+                              {review.briefing.keyword_source === "struktur"
+                                ? review.briefing.keyword_sorted
+                                  ? "Neu einteilen"
+                                  : "Keywords einteilen"
+                                : review.briefing.keyword_source === "analyse" || review.briefing.keyword_source === "manuell"
+                                  ? "Neu vorschlagen"
+                                  : "Keywords analysieren"}
+                            </DtPillButton>
+                          ) : null}
+                          <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
+                            {review.briefing.keyword_source === "struktur"
+                              ? "Die Keywords stammen aus der Seitenstruktur, der Zwilling teilt sie in Haupt und Neben ein. Von Hand lassen sie sich ändern."
+                              : "Jedes Hauptkeyword gibt es nur einmal; gilt ab dem nächsten Schritt."}
                           </span>
                         </div>
                       </div>
                       <dl className="grid gap-1 text-xs text-sbkm-ink-600 dark:text-white/65">
-                        <div className="flex gap-2">
-                          <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Hauptkeyword</dt>
-                          <dd className="min-w-0 truncate">
-                            {review.briefing.main_keyword
-                              ? `${review.briefing.main_keyword}${review.briefing.main_keyword_volume != null ? ` (${review.briefing.main_keyword_volume}/Monat)` : ""}`
-                              : "kommt aus der Analyse"}
-                          </dd>
-                        </div>
                         <div className="flex gap-2">
                           <dt className="shrink-0 font-semibold text-sbkm-navy dark:text-white">Nutzerfragen</dt>
                           <dd>

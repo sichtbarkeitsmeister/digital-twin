@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eraser, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Eraser, KeyRound, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -120,6 +120,8 @@ export function DtContentWorkspace(props: {
   const [bulkZielgruppen, setBulkZielgruppen] = useState<{ primary: string[]; secondary: string[] } | null>(null);
   /** „Zielgruppen vorschlagen / festlegen“ running over the ticked pages: page n of total. */
   const [zielgruppenRun, setZielgruppenRun] = useState<{ done: number; total: number } | null>(null);
+  /** While „Keywords analysieren und eintragen“ runs: page n of total. */
+  const [keywordsRun, setKeywordsRun] = useState<{ done: number; total: number } | null>(null);
   /** „Schritte“ under the Standard-Zielgruppe: null = untouched, every page keeps its own setting. */
   const [bulkSteps, setBulkSteps] = useState<ContentBulkSteps | null>(null);
   /** The „Schritte“ choice being written to the ticked pages: page n of total. */
@@ -222,6 +224,19 @@ export function DtContentWorkspace(props: {
   }, [visible]);
 
   const selectedCount = selected.size;
+  // Pages the keyword analysis still has work on: no keywords yet („suchen“; a main keyword a text
+  // run found counts as none, the list of Nebenkeywords is not stored), or a list from the
+  // Seitenstruktur whose main and secondary keywords are not assigned yet („einteilen“).
+  // Of the ticked pages when any is ticked, else of the whole table.
+  const keywordWork = useMemo(() => {
+    const open = pages.filter((p) => p.keyword_todo != null);
+    const scoped = selected.size > 0 ? open.filter((p) => selected.has(p.slug)) : open;
+    return {
+      pages: scoped,
+      search: scoped.filter((p) => p.keyword_todo === "suchen").length,
+      sort: scoped.filter((p) => p.keyword_todo === "einteilen").length,
+    };
+  }, [pages, selected]);
 
   /**
    * „Blättern“ in the page window: through every page of the table as it is filtered (search,
@@ -263,6 +278,35 @@ export function DtContentWorkspace(props: {
     const ok = slugs.length - failed.length;
     if (ok > 0) toast.success(kind === "suggest" ? `Zielgruppen für ${ok} ${ok === 1 ? "Seite" : "Seiten"} vorgeschlagen` : `Zielgruppen für ${ok} ${ok === 1 ? "Seite" : "Seiten"} festgelegt`);
     if (failed.length > 0) toast.error(`Nicht geklappt: ${failed.join(" · ")}`, { duration: 15_000 });
+  }
+
+  /**
+   * „Keywords analysieren und eintragen“: every page without keywords gets the Zwilling's
+   * Hauptkeyword and Nebenkeywords; every page whose Seitenstruktur lists several keywords gets
+   * them assigned to main and secondary. One request per page and one after the other, so each
+   * page sees the keywords the pages before it got (a main keyword exists once on the website).
+   */
+  async function runKeywords() {
+    const todo = keywordWork.pages.map((p) => ({ slug: p.slug, name: p.name }));
+    if (todo.length === 0 || keywordsRun) return;
+    setKeywordsRun({ done: 0, total: todo.length });
+    const failed: string[] = [];
+    for (const [i, page] of todo.entries()) {
+      const res = await contentApi(`/api/dt/content/pages/${encodeURIComponent(page.slug)}/keywords`, {
+        method: "POST",
+        body: { organisationId, force: false },
+      });
+      if (!res.ok) failed.push(`${page.name}: ${res.message}`);
+      setKeywordsRun({ done: i + 1, total: todo.length });
+    }
+    setKeywordsRun(null);
+    void loadOverview();
+    const ok = todo.length - failed.length;
+    if (ok > 0) toast.success(`Keywords für ${ok} ${ok === 1 ? "Seite" : "Seiten"} eingetragen und eingeteilt`);
+    if (failed.length > 0) {
+      const shown = failed.slice(0, 6).join(" · ");
+      toast.error(`Nicht geklappt (${failed.length}): ${shown}${failed.length > 6 ? " …" : ""}`, { duration: 20_000 });
+    }
   }
 
   /**
@@ -548,6 +592,46 @@ export function DtContentWorkspace(props: {
             />
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-sbkm-navy/8 pt-4 dark:border-white/8">
+          <span className="text-xs font-semibold text-sbkm-navy dark:text-white">Keywords:</span>
+          {keywordWork.pages.length > 0 ? (
+            <span className="inline-flex flex-wrap items-center gap-x-1.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+              <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+              {[
+                keywordWork.search > 0 ? `${keywordWork.search} ohne Keywords` : "",
+                keywordWork.sort > 0 ? `${keywordWork.sort} mit Keywords aus der Seitenstruktur, noch nicht in Haupt und Neben eingeteilt` : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              {selectedCount > 0 ? " (angehakte Seiten)" : ""}
+            </span>
+          ) : (
+            <span className="text-xs text-sbkm-ink-600 dark:text-white/60">
+              {pages.length === 0 ? "noch keine Seiten" : selectedCount > 0 ? "Alle angehakten Seiten haben eingeteilte Keywords." : "Alle Seiten haben eingeteilte Keywords."}
+            </span>
+          )}
+          <DtPillButton
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={keywordWork.pages.length === 0 || keywordsRun != null}
+            onClick={() => void runKeywords()}
+            title="Der Zwilling entscheidet je Seite, was Hauptkeyword und was Nebenkeyword ist. Nennt die Seitenstruktur Keywords, teilt er genau diese ein; ohne Keywords legt er welche fest: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Kein Hauptkeyword wird doppelt vergeben, von Hand Eingetragenes bleibt. Wenige Cent je Seite."
+          >
+            {keywordsRun ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <KeyRound className="size-3.5" aria-hidden />}
+            Keywords analysieren und eintragen ({keywordWork.pages.length})
+          </DtPillButton>
+          {keywordsRun ? (
+            <span className="inline-flex items-center gap-1 text-xs text-sky-700 dark:text-sky-300">
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+              Seite {Math.min(keywordsRun.done + 1, keywordsRun.total)} von {keywordsRun.total} … bitte das Fenster offen lassen
+            </span>
+          ) : (
+            <span className="text-xs text-sbkm-ink-500 dark:text-white/45">
+              Keywords aus der Seitenstruktur gehen vor, der Zwilling teilt sie nur ein. Ohne Suchvolumen; im Seitenfenster lassen sie sich ändern.
+            </span>
+          )}
+        </div>
         <div className="flex flex-col gap-4 border-t border-sbkm-navy/8 pt-4 dark:border-white/8 lg:flex-row lg:items-center lg:justify-between">
         {zielgruppenOptions.length > 0 ? (
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -788,7 +872,7 @@ export function DtContentWorkspace(props: {
           {confirmBulk === "all" ? (
             <>
               <li>{pages.length} {pages.length === 1 ? "Seite" : "Seiten"} in der Tabelle</li>
-              {settings ? <li>Bestätigte Einstellungen für Texte (mit den Kundenwünschen)</li> : null}
+              {settings ? <li>Bestätigte Einstellungen für Texte (mit den Hinweisen zum Texten)</li> : null}
               {local?.structure ? <li>Seitenstruktur „{local.structure.filename?.trim() || "ohne Dateiname"}“</li> : null}
             </>
           ) : null}

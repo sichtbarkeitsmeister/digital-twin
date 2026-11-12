@@ -159,12 +159,12 @@ export function briefingPatchFor(page: ContentBriefingPage, columns: "briefing" 
     ...(columns === "briefing"
       ? {
           estimated_traffic: page.estimated_traffic,
-          keywords: page.keywords,
           h1_options: page.h1_options,
           user_questions: page.user_questions,
           ki_prompt: page.ki_prompt,
-          // A keyword the Analyse found stays when the Excel has none for the page.
-          ...(page.keywords ? { main_keyword: page.keywords.main.text } : {}),
+          // The Excel's keywords go first. Where it has none for the page, the keywords the
+          // row already carries (suggested by the Zwilling or entered by hand) stay.
+          ...(page.keywords ? { keywords: page.keywords, main_keyword: page.keywords.main.text } : {}),
         }
       : {}),
   };
