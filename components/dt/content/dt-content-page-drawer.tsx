@@ -30,7 +30,7 @@ import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/compo
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
 import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences } from "@/lib/dt/content/finding-target";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
-import { htmlToPlainText, parseBlocksFromHtml } from "@/lib/dt/content/render";
+import { countContentWords, htmlToPlainText, parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
   CONTENT_PAGE_TYPE_LABELS,
   CONTENT_PAGE_TYPE_OPTIONS,
@@ -256,6 +256,8 @@ export function DtContentPageDrawer(props: {
   }, [open, handleClose]);
 
   const blocks = useMemo(() => extractContentBlocks(review?.html ?? ""), [review?.html]);
+  /** Shown in the header next to the status, as soon as the page has a text. */
+  const wordCount = useMemo(() => (review?.html ? countContentWords(review.html) : 0), [review?.html]);
   const findings = useMemo(() => (review ? openFindings(review) : []), [review]);
   /** The Abschnitt each open point is about, when the text shows it („Vorschlag übernehmen“ needs one). */
   const findingTargets = useMemo(() => {
@@ -698,6 +700,15 @@ export function DtContentPageDrawer(props: {
                         {review.public.detail}
                       </span>
                     ) : null}
+                    {wordCount > 0 ? (
+                      <span
+                        className="inline-flex items-baseline gap-1 rounded-pill border border-sbkm-navy/10 bg-sbkm-navy/[0.04] px-2.5 py-0.5 text-sbkm-navy dark:border-white/10 dark:bg-white/[0.06] dark:text-white"
+                        title="Wörter im aktuellen Text: Überschriften und Fließtext, ohne Platzhalter in eckigen Klammern"
+                      >
+                        <span className="text-xs font-bold tabular-nums">{wordCount.toLocaleString("de-DE")}</span>
+                        <span className="text-[11px] opacity-75">{wordCount === 1 ? "Wort" : "Wörter"}</span>
+                      </span>
+                    ) : null}
                     {jobId ? (
                       <span className="inline-flex items-center gap-1 text-xs text-sky-700 dark:text-sky-300">
                         <Loader2 className="size-3 animate-spin" aria-hidden />
@@ -729,7 +740,8 @@ export function DtContentPageDrawer(props: {
               </div>
             </header>
 
-            <div className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle">
+            {/* From lg up the text and the right column scroll on their own; below, the whole window scrolls. */}
+            <div className={cn("min-h-0 flex-1 overflow-y-auto scrollbar-subtle", review && !error && "lg:overflow-hidden")}>
               {loading && !review ? (
                 <div className="flex items-center gap-2 px-6 py-10 text-sm text-sbkm-ink-600 dark:text-white/60">
                   <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -740,8 +752,8 @@ export function DtContentPageDrawer(props: {
                   {error}
                 </div>
               ) : review ? (
-                <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start 2xl:grid-cols-[minmax(0,1fr)_420px]">
-                  <div className="grid min-w-0 gap-4">
+                <div className="grid gap-5 p-4 sm:p-6 lg:h-full lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+                  <div className="grid min-w-0 gap-4 scrollbar-subtle lg:min-h-0 lg:content-start lg:overflow-y-auto lg:overflow-x-hidden lg:pr-2">
                     {review.legacy_steps && !review.public.released ? (
                       <div className="flex gap-2 rounded-dt border border-orange-300/70 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-900 dark:border-orange-400/30 dark:bg-orange-500/10 dark:text-orange-100">
                         <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -914,7 +926,7 @@ export function DtContentPageDrawer(props: {
                     </details>
                   </div>
 
-                  <aside className="grid min-w-0 gap-4 lg:sticky lg:top-0">
+                  <aside className="grid min-w-0 gap-4 scrollbar-subtle lg:min-h-0 lg:content-start lg:overflow-y-auto lg:overflow-x-hidden lg:pr-2">
                     <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <h3 className={sectionTitleClass}>
                         Briefing

@@ -329,6 +329,15 @@ export function htmlToPlainText(html: string, options: { levelLabels?: boolean }
     .trim()}\n`;
 }
 
+/**
+ * How many words the page text has, as the editor reads it: headings and body text count,
+ * placeholders in square brackets („[FOTO: …]“, „[BITTE PRÜFEN: …]“) do not.
+ */
+export function countContentWords(html: string): number {
+  const text = htmlToPlainText(html.replace(/<\/?a\b[^>]*>/gi, "")).replace(/\[[^\]\n]*\]/g, " ");
+  return text.split(/\s+/).filter((token) => /[\p{L}\p{N}]/u.test(token)).length;
+}
+
 export function fullHtmlDocument(title: string, bodyHtml: string): string {
   return `<!DOCTYPE html>\n<html lang="de">\n<head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`;
 }
