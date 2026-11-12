@@ -27,7 +27,15 @@ export const REPHRASE_SYSTEM = `Du überarbeitest den fertigen Seitentext sprach
 Formuliere Sätze um, die nach typischen KI-Mustern klingen (gleichförmiger Rhythmus, Floskeln, Dreierlisten als Reflex, Nominalstil). Sätze, die bereits natürlich klingen, darfst du stehen lassen.
 Behalte unverändert: HTML-Blöcke und ids, H1, alle Überschriften (auch Fragen-Überschriften), alle Fakten, Namen, Zahlen, die Keywords aus dem Block ‚Keywords‘, [LINK: …], [BITTE PRÜFEN: …], [FOTO: …], [QUELLE …], [DATUM], Handlungsaufforderungen mit Kontaktweg. Unverändert bleiben außerdem: Fachbegriffe und ihre Erklärungen, wörtliche Zitate und Leitsätze, Hinweise wie ‚Einzelfall‘ oder ‚keine Zusage‘ und Formulierungen, die typische Kundenfragen wiedergeben.
 Natürliches Deutsch: Satzlängen mischen, keine Werbe-Floskeln (Endlich, wirklich, nicht nur eine Floskel, sprechen eine klare Sprache, Machen Sie noch heute den ersten Schritt).
-Achte auf fehlerfreie Rechtschreibung, Grammatik und Zeichensetzung nach der amtlichen deutschen Rechtschreibung. Du führst keine neuen Fehler ein; bestehende Fehler korrigierst du.
+Achte auf fehlerfreie Rechtschreibung, Grammatik und Zeichensetzung nach der amtlichen deutschen Rechtschreibung. Wenn du einen Satz umformulierst oder kürzt, prüfe danach den ganzen Satz:
+- Verb, Artikel und Endungen passen zum neuen Subjekt („Möglich ist die Abgabe …“, nicht „Möglich sind die Abgabe …“).
+- Jeder Satz ist vollständig; trennbare Verben stehen mit ihrem Teil („steht … fest“, nicht nur „steht“).
+- Jede Aussage steht nur einmal: Gib den neuen Satz statt des alten aus, nie beide.
+- „der/die/das“ nur für etwas, das im Abschnitt vorher genannt ist; sonst „ein/eine“ oder den Bezug ausschreiben.
+- Keine Satzglieder mit Komma ans Satzende hängen („…, als Aufpreis“); bau sie in den Satz ein („gegen Aufpreis“).
+- Adjektive bleiben beim richtigen Wort („Entsorgung einzelner Möbel“, nicht „einzelne Möbelentsorgung“).
+- Bedingungen und Einschränkungen bleiben wörtlich erhalten („in Notfällen auch am selben Tag“).
+Bist du bei einem Satz unsicher, lass ihn wie er ist. Weniger umformulieren ist besser als ein fehlerhafter Satz.
 Erfinde nichts. Keine neuen Leistungen, Zahlen oder Bewertungen.
 Was im Block „Gesperrt“ steht, darf nicht im Text auftauchen, auch nicht sinngemäß.
 Anrede, Tonalität und verbotene Wörter aus den Vorgaben gelten weiter.
