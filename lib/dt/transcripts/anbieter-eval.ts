@@ -8,6 +8,8 @@
  *    show in the result. What does not, is reported. Nothing is dropped silently.
  */
 
+import { createHash } from "node:crypto";
+
 import type Anthropic from "@anthropic-ai/sdk";
 
 import { reviveStringifiedToolInput } from "@/lib/ai/tolerant-json";
@@ -42,11 +44,8 @@ import {
   type AnbieterReview,
   type AnbieterSync,
   type WorkshopSource,
-  anbieterPointGroups,
   formatRevisionBlock,
   mergeRevisedAnbieterItems,
-  normalizeAnbieterItems,
-  openPointsWithSource,
   orderWorkshopSources,
   pointsNamedInInstruction,
   sourceLabel,
@@ -225,112 +224,166 @@ export async function extractPendingStatements(input: ExtractStatementsInput): P
 // Stage 2: assignment
 // ---------------------------------------------------------------------------
 
-const ASSIGNMENT_RULES = `Du erhältst ALLE Aussagen aus allen Gesprächen, nummeriert, nach Quelle sortiert von alt nach neu.
-Die Aussagen sind deine einzige Quelle. Nichts erfinden.
+/** What belongs into which point; the sorting step reads this. */
+const POINT_HINTS: Record<AnbieterPointKey, string> = {
+  unternehmen: "wer der Anbieter ist: Name, Rechtsform, Standorte, Größe, Region, Kerngeschäft, Zugehörigkeit",
+  gruendung: "Werdegang und Geschichte: Ausbildung, frühere Stationen, Gründung, Übernahmen, Entwicklung bis heute",
+  leistungen: "Angebot: Sparten, Produkte, Tarife, Schwerpunkte, Zielbranchen des Angebots, was ausdrücklich nicht angeboten wird",
+  ablauf: "Weg vom ersten Kontakt bis zum Ergebnis: Schritte, Dauern, Unterlagen, was der Kunde tun muss, Betreuung danach",
+  alleinstellung: "was den Anbieter von anderen unterscheidet: Stärken, Besonderheiten, Versprechen",
+  wettbewerb: "Wettbewerber, Marktumfeld, Abgrenzung zu anderen Anbietern und Vertriebswegen",
+  team: "Personen, Rollen, Qualifikationen, Partner, Netzwerk, Kooperationen",
+  werte: "Haltung, Überzeugungen, Grundsätze der Beratung, was dem Anbieter wichtig ist",
+  beweise: "Belege: Zahlen, Fälle, Praxisbeispiele, Referenzen, Bewertungen, Siegel, Mitgliedschaften, Auszeichnungen",
+  sprache: "Vorgaben für Texte: Anrede, Ton, Begriffe, Formulierungen, No-Gos, Kundensprache, Autorenschaft",
+  preis: "Preise, Beiträge, Vergütung, Kostenlogik, Preispositionierung",
+  kanaele: "Kontaktwege, Terminbuchung, Erreichbarkeit, woher Anfragen kommen, Website und ihre Seiten als Weg zur Anfrage",
+  ziele: "Ziele, Pläne, Wachstum, geplante Angebote, was die Website erreichen soll, offene Punkte für später",
+};
 
-Für jedes deiner Felder lieferst du:
-- text: der Punkttext. Er enthält den Inhalt JEDER zugeordneten Aussage: jede Zahl, jeden Betrag, jedes Datum, jeden Namen, jede Ausnahme, jedes Zitat. Nichts kürzen, nichts weglassen, weil es nebensächlich wirkt.
-- ids: die ID jeder Aussage, deren Inhalt im text steht. Jede ID einzeln, keine Bereiche.
-- widersprueche: nur wenn sich Aussagen zum selben Sachverhalt widersprechen.
+const CLASSIFY_BATCH = 250;
+const CUSTOMER_KEY = "kunden";
+const NONE_KEY = "keiner";
+const BLOCKED_KEY = "gesperrt";
 
-Zuordnen und zusammenführen:
-- Die Quellen sind oft Rohtranskripte. Du ordnest jede Aussage dem Punkt zu, zu dem sie inhaltlich gehört, egal wo sie stand.
-- Inhaltlich identische Aussagen führst du zu einer Formulierung zusammen und nennst alle ihre IDs.
-- Eine Aussage darf in mehreren Punkten stehen.
-- Eine Aussage über den Anbieter, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.
-- Sagt niemand etwas zu einem Feld, ist text ein leerer String und ids leer.
-
-Widersprüche:
-- Nennen zwei Aussagen zum selben Sachverhalt Verschiedenes (andere Zahl, anderer Preis, anderer Name, anderer Ablauf, ja gegen nein), wählst du NICHT aus. Auch nicht die neuere.
-- Beide Angaben kommen nach widersprueche, jede mit ihrem text und ihren ids. Sie stehen nicht im text des Punkts.
-- Eine spätere Aussage, die eine frühere nur genauer macht oder ergänzt, ist kein Widerspruch.`;
-
-const POINT_SCHEMA = (label: string, hint: string) => ({
-  type: "object",
-  description: `${label}. ${hint}`,
-  properties: {
-    text: { type: "string", description: "Punkttext mit dem Inhalt aller zugeordneten Aussagen." },
-    ids: { type: "array", items: { type: "string" }, description: "IDs aller Aussagen im text, z. B. 2.14." },
-    widersprueche: {
-      type: "array",
-      description: "Nur bei widersprüchlichen Aussagen zum selben Sachverhalt.",
-      items: {
-        type: "object",
-        properties: {
-          thema: { type: "string", description: "Worum es geht, kurz." },
-          angaben: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                text: { type: "string" },
-                ids: { type: "array", items: { type: "string" } },
-              },
-              required: ["text", "ids"],
-            },
-          },
-        },
-        required: ["thema", "angaben"],
-      },
-    },
-  },
-  required: ["text", "ids"],
-});
-
-function assignmentTool(keys: readonly AnbieterPointKey[], options: { required: boolean; revision: boolean }): Anthropic.Tool {
-  const wanted = new Set(keys);
-  const properties: Record<string, unknown> = Object.fromEntries(
-    ANBIETER_POINTS.filter((point) => wanted.has(point.key)).map((point) => [
-      point.key,
-      POINT_SCHEMA(
-        point.label,
-        point.key === "ablauf"
-          ? "Weg vom ersten Kontakt bis zum spürbaren Ergebnis: Schritte, genannte Dauern, was der Kunde tun muss. Eine zugesagte Nachlieferung bleibt als offener Punkt stehen."
-          : "Alle belegten Fakten dieses Punkts.",
-      ),
-    ]),
-  );
-  const required = options.required ? Object.keys(properties) : [];
-  if (options.revision) {
-    properties.entfernt_ids = {
-      type: "array",
-      items: { type: "string" },
-      description:
-        "IDs der Aussagen, die die Anweisung ausdrücklich streicht. Leer, wenn die Anweisung nichts löscht.",
-    };
-  }
-  return {
-    name: "submit_anbieter",
-    description: "Anbieterstand aus den nummerierten Aussagen. Pro Checklistenpunkt Text, Aussagen-IDs und Widersprüche.",
-    input_schema: { type: "object", properties, required },
-  };
-}
-
-const LEFTOVER_TOOL: Anthropic.Tool = {
+const CLASSIFY_TOOL: Anthropic.Tool = {
   name: "submit_zuordnung",
-  description: "Zuordnung jeder übrigen Aussage zu einem Checklistenpunkt.",
+  description: "Jede Aussage genau den Punkten zugeordnet, zu denen sie gehört.",
   input_schema: {
     type: "object",
-    properties: {
-      zuordnung: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            punkt: { type: "string", enum: [...ALL_KEYS, "keiner"] },
-          },
-          required: ["id", "punkt"],
-        },
-      },
-    },
-    required: ["zuordnung"],
+    properties: Object.fromEntries(
+      [
+        ...ANBIETER_POINTS.map((point) => [point.key, `${point.label}: ${POINT_HINTS[point.key]}`] as const),
+        [CUSTOMER_KEY, "Aussagen nur über Kunden, Zielgruppen oder Wunschkunden, ohne Aussage über den Anbieter"] as const,
+        [NONE_KEY, "Aussagen, die weder den Anbieter noch seine Kunden betreffen"] as const,
+        [BLOCKED_KEY, "Seltene Ausnahme: Aussagen, die genau den Inhalt offenlegen, den eine Leitplanke verbietet"] as const,
+      ].map(([key, description]) => [key, { type: "array", items: { type: "string" }, description: `IDs. ${description}` }]),
+    ),
+    required: [],
   },
 };
 
+const CLASSIFY_SYSTEM = `Du sortierst nummerierte Aussagen aus Kundengesprächen in die Punkte einer Anbieter-Checkliste. Du schreibst keinen Text, du nennst nur IDs.
+
+Punkte:
+${ANBIETER_POINTS.map((point) => `- ${point.key} (${point.label}): ${POINT_HINTS[point.key]}`).join("\n")}
+- ${CUSTOMER_KEY}: die Aussage beschreibt nur Kunden, Zielgruppen oder Wunschkunden (ihre Lage, Fragen, Einwände, Profile, Seitenzuordnung von Personas) und sagt nichts über den Anbieter selbst.
+- ${NONE_KEY}: die Aussage betrifft weder den Anbieter noch seine Kunden, etwa Projektorganisation der Agentur.
+
+Regeln:
+- JEDE ID steht in mindestens einer Liste. Keine ID fehlt.
+- Eine Aussage über den Anbieter, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt, nicht nach ${NONE_KEY}.
+- Eine Aussage darf in mehreren Punkten stehen, wenn sie zu mehreren gehört.
+- Sagt eine Aussage etwas über den Anbieter UND über Kunden, gehört sie in den Anbieter-Punkt.
+- Jede ID einzeln, keine Bereiche.`;
+
+/** With guard rails in hand the sorting also pulls out what they forbid, wherever a source says it unmarked. */
+function classifySystem(rules: string[]): string {
+  if (rules.length === 0) return CLASSIFY_SYSTEM;
+  return `${CLASSIFY_SYSTEM}
+
+Leitplanken (Inhalte, die nicht in Website-Texte dürfen):
+${rules.map((rule) => `- ${rule}`).join("\n")}
+
+- ${BLOCKED_KEY} ist die seltene Ausnahme. Dorthin kommt eine Aussage nur, wenn sie sonst in einen Anbieter-Punkt käme UND genau den Inhalt offenlegt, den eine Leitplanke verbietet: die konkrete gesperrte Zahl, den konkreten gesperrten Namen, den konkreten gesperrten Vorgang. Sie steht dann NUR in ${BLOCKED_KEY}, auch wenn diese Quelle sie nicht als intern markiert.
+- Nicht gesperrt ist eine Aussage, die nur zum selben Themenfeld gehört, ohne den gesperrten Inhalt selbst zu nennen. Ein Thema ist nicht gesperrt, nur weil es dazu eine Leitplanke gibt.
+- Nicht gesperrt ist eine Aussage, die selbst ein Verbot oder eine Vorgabe ausspricht („X nicht nennen“, „erst nach Freigabe verwenden“); sie gehört in ihren Punkt.
+- Aussagen über Kunden, Zielgruppen und Avatare bleiben in ${CUSTOMER_KEY}, Aussagen über Aufbau und Stand der Dokumente in ${NONE_KEY}. Sie werden nie nach ${BLOCKED_KEY} sortiert.
+- Im Zweifel ist eine Aussage nicht gesperrt.`;
+}
+
+const CONFLICT_SCHEMA = {
+  type: "array",
+  description: "Nur bei widersprüchlichen Aussagen zum selben Sachverhalt.",
+  items: {
+    type: "object",
+    properties: {
+      thema: { type: "string", description: "Worum es geht, kurz und ohne die strittigen Angaben selbst." },
+      angaben: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { text: { type: "string" }, ids: { type: "array", items: { type: "string" } } },
+          required: ["text", "ids"],
+        },
+      },
+    },
+    required: ["thema", "angaben"],
+  },
+};
+
+const CONFLICT_RULES = `Widersprüche:
+- Nennen zwei Aussagen zum selben Sachverhalt Verschiedenes (andere Zahl, anderer Preis, anderer Name, anderes Werkzeug, anderer Ablauf, ja gegen nein, „wird angeboten“ gegen „wird nicht angeboten“), wählst du NICHT aus. Auch nicht die neuere.
+- Beide Angaben kommen nach widersprueche, jede mit ihrem text und ihren ids. Sie stehen nicht im text des Punkts.
+- Auch eine Aussage, die selbst einen offenen Abgleich nennt („Formulierung A vs. B“, „noch zu klären“), ist ein Widerspruch zwischen A und B.
+- Eine spätere Aussage, die eine frühere nur genauer macht oder ergänzt, ist kein Widerspruch.`;
+
+const WRITE_RULES = `Du schreibst EINEN Punkt einer Anbieter-Checkliste aus den nummerierten Aussagen, die diesem Punkt zugeordnet wurden. Die Aussagen sind nach Quelle sortiert, von alt nach neu. Sie sind deine einzige Quelle. Nichts erfinden.
+
+text:
+- Der Punkttext enthält den Inhalt JEDER Aussage: jede Zahl, jeden Betrag, jedes Datum, jeden Namen, jede URL, jede Ausnahme, jedes Zitat. Nichts kürzen, nichts weglassen, weil es nebensächlich wirkt.
+- Inhaltlich identische Aussagen führst du zu einer Formulierung zusammen.
+- Die Quellen sind oft Rohtranskripte. Du ordnest und gliederst, du deutest nicht.
+- Gehört eine Aussage erkennbar nicht in diesen Punkt, nimmst du sie trotzdem auf, kurz am Ende.
+- Im text stehen keine Aussagen-IDs und keine Quellenverweise in Klammern. Die IDs gehören nur in widersprueche.
+
+${CONFLICT_RULES}`;
+
+function writeTool(options: { revision: boolean; pool: boolean }): Anthropic.Tool {
+  const ids = { type: "array", items: { type: "string" } };
+  return {
+    name: "submit_punkt",
+    description: "Der Text eines Checklistenpunkts und seine Widersprüche.",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Punkttext mit dem Inhalt aller Aussagen." },
+        widersprueche: CONFLICT_SCHEMA,
+        ...(options.pool
+          ? { neu_ids: { ...ids, description: "IDs der Aussagen aus „Noch nicht zugeordnet“, die du in den text aufgenommen hast." } }
+          : {}),
+        ...(options.revision
+          ? { entfernt_ids: { ...ids, description: "IDs der Aussagen, die die Anweisung ausdrücklich streicht. Leer, wenn sie nichts löscht." } }
+          : {}),
+      },
+      required: ["text"],
+    },
+  };
+}
+
+/** A revision that names no point: the model returns only the points it changes. */
+function changeTool(): Anthropic.Tool {
+  const ids = { type: "array", items: { type: "string" } };
+  return {
+    name: "submit_aenderung",
+    description: "Nur die Punkte, die die Anweisung verändert, jeweils vollständig.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...Object.fromEntries(
+          ANBIETER_POINTS.map((point) => [
+            point.key,
+            {
+              type: "object",
+              description: point.label,
+              properties: {
+                text: { type: "string", description: "Der vollständige neue Text des Punkts." },
+                neu_ids: { ...ids, description: "IDs der Aussagen aus „Noch nicht zugeordnet“, die jetzt im text stehen." },
+              },
+              required: ["text"],
+            },
+          ]),
+        ),
+        entfernt_ids: { ...ids, description: "IDs der Aussagen, die die Anweisung ausdrücklich streicht." },
+      },
+      required: [],
+    },
+  };
+}
+
 const GUARDRAIL_TOOL: Anthropic.Tool = {
   name: "submit_leitplanken",
-  description: "Verbote für Website-Texte, abgeleitet aus internen Hinweisen.",
+  description: "Verbote für Website-Texte, abgeleitet aus internen Hinweisen, und Widersprüche unter den Hinweisen.",
   input_schema: {
     type: "object",
     properties: {
@@ -345,6 +398,7 @@ const GUARDRAIL_TOOL: Anthropic.Tool = {
           required: ["regel", "ids"],
         },
       },
+      widersprueche: CONFLICT_SCHEMA,
     },
     required: ["leitplanken"],
   },
@@ -359,97 +413,71 @@ Regeln:
 - Namen von Personen, Wettbewerbern, Kunden und Werkzeugen stehen nicht in der Leitplanke; nenne die Gattung („Wettbewerber“, „Buchungssoftware“). Ausnahme: Ein Name, ohne den das Verbot nicht befolgt werden kann, etwa eine Institution, deren Ergebnisse nicht zitiert werden dürfen.
 - Mehrere Hinweise zum selben Thema ergeben eine Leitplanke mit allen ihren IDs.
 - Jede ID steht in mindestens einer Leitplanke.
-- Nichts erfinden: kein Verbot ohne Hinweis.`;
+- Nichts erfinden: kein Verbot ohne Hinweis.
 
-const LEFTOVER_SYSTEM = `Diese Aussagen aus Kundengesprächen hat noch kein Punkt der Anbieter-Checkliste aufgenommen. Ordne JEDE einem Punkt zu.
-Punkte: ${ANBIETER_POINTS.map((point) => `${point.key} (${point.label})`).join(", ")}.
-Eine Aussage über den Anbieter, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.
-„keiner“ nur, wenn die Aussage nichts über den Anbieter, sein Angebot, seine Arbeitsweise, seinen Markt oder seine Pläne sagt.`;
+Zusätzlich meldest du Widersprüche unter den Hinweisen (widersprueche), zum Beispiel wenn zwei Hinweise verschiedene Werkzeuge für dieselbe Aufgabe nennen:
+${CONFLICT_RULES.split("\n").slice(1).join("\n").replace("Sie stehen nicht im text des Punkts.", "")}`;
 
-/** Statements placed afterwards go into their point word for word; the text is not rewritten for them. */
-function appendLate(items: AnbieterItem[], zuordnung: unknown, byId: ReadonlyMap<string, Statement>): AnbieterItem[] {
-  const record = zuordnung && typeof zuordnung === "object" ? (zuordnung as Record<string, unknown>) : null;
-  const rows = Array.isArray(record?.zuordnung) ? record.zuordnung : [];
-  const known = new Set(byId.keys());
-  const late = new Map<AnbieterPointKey, Statement[]>();
-  const taken = new Set(items.flatMap((item) => item.statementIds ?? []));
-  for (const row of rows) {
-    const entry = row && typeof row === "object" ? (row as Record<string, unknown>) : null;
-    const statement = byId.get(parseStatementIds(entry?.id, known)[0] ?? "");
-    const key = ALL_KEYS.find((candidate) => candidate === entry?.punkt);
-    if (!statement || !key || taken.has(statement.id)) continue;
-    taken.add(statement.id);
-    late.set(key, [...(late.get(key) ?? []), statement]);
-  }
-  return items.map((item) => {
-    const extra = late.get(item.key);
-    if (!extra) return item;
-    return {
-      ...item,
-      current: [item.current.trim(), ...extra.map((statement) => statement.text)].filter(Boolean).join("\n"),
-      statementIds: [...(item.statementIds ?? []), ...extra.map((statement) => statement.id)],
-    };
-  });
-}
-
-const MERGE_RULES = `Es gibt einen bestehenden Anbieterstand. Eine neue Quelle ist dazugekommen. Du arbeitest NUR ihre Aussagen ein.
+const MERGE_RULES = `Es gibt einen bestehenden Punkt eines Anbieterstands. Eine neue Quelle ist dazugekommen. Du arbeitest NUR ihre Aussagen ein, die diesem Punkt zugeordnet wurden.
 Der bestehende Text bleibt Wort für Wort, wie er ist. Du schreibst ihn nicht um, kürzt ihn nicht und wiederholst ihn nicht.
 
-Für jedes deiner Felder, zu dem neue Aussagen gehören, lieferst du:
-- ergaenzung: nur der neue Inhalt, als Text, der unter den bestehenden gesetzt wird. Er enthält den Inhalt jeder Aussage aus ids: jede Zahl, jeden Betrag, jedes Datum, jeden Namen, jede Ausnahme. Was der bestehende Text inhaltlich schon sagt, steht NICHT noch einmal darin.
-- ids: die ID jeder neuen Aussage, deren Inhalt in ergaenzung steht. Jede ID einzeln.
-- enthalten_ids: die ID jeder neuen Aussage, deren Inhalt der bestehende Text dieses Felds schon vollständig enthält. Sie wird nicht doppelt eingefügt.
+Du lieferst:
+- ergaenzung: nur der neue Inhalt, als Text, der unter den bestehenden gesetzt wird. Er enthält jede Zahl, jeden Betrag, jedes Datum, jeden Namen und jede Ausnahme der neuen Aussagen. Was der bestehende Text inhaltlich schon sagt, steht NICHT noch einmal darin. Leer, wenn nichts Neues dazukommt.
+- enthalten_ids: die ID jeder neuen Aussage, deren Inhalt der bestehende Text schon vollständig enthält. Sie wird nicht doppelt eingefügt.
 - widersprueche: wenn eine neue Aussage zum selben Sachverhalt etwas anderes sagt als der bestehende Text (andere Zahl, anderer Preis, anderer Name, anderer Ablauf, ja gegen nein). Dann kommt sie NICHT in ergaenzung. Du nennst thema, bestehend (die Stelle aus dem bestehenden Text, wörtlich), neu (die neue Angabe) und ids. Du entscheidest nicht, wer recht hat, auch nicht zugunsten der neueren Quelle.
 
-Eine neue Aussage, die den bestehenden Text nur genauer macht oder ergänzt, ist kein Widerspruch; sie kommt in ergaenzung.
-Felder ohne neue Aussagen lässt du ganz weg. Eine Aussage darf in mehreren Feldern stehen. Nichts erfinden.`;
+Jede neue Aussage landet in genau einem der drei: ergaenzung, enthalten_ids oder widersprueche.
+Eine neue Aussage, die den bestehenden Text nur genauer macht oder ergänzt, ist kein Widerspruch; sie kommt in ergaenzung. Nichts erfinden.`;
 
-function mergeTool(keys: readonly AnbieterPointKey[]): Anthropic.Tool {
-  const wanted = new Set(keys);
-  const ids = { type: "array", items: { type: "string" } };
-  return {
-    name: "submit_einarbeitung",
-    description: "Ergänzungen aus den neuen Aussagen, pro Checklistenpunkt. Der bestehende Text wird nicht zurückgegeben.",
-    input_schema: {
-      type: "object",
-      properties: Object.fromEntries(
-        ANBIETER_POINTS.filter((point) => wanted.has(point.key)).map((point) => [
-          point.key,
-          {
-            type: "object",
-            description: point.label,
-            properties: {
-              ergaenzung: { type: "string", description: "Nur der neue Inhalt. Leer, wenn nichts Neues dazukommt." },
-              ids: { ...ids, description: "IDs der Aussagen in ergaenzung." },
-              enthalten_ids: { ...ids, description: "IDs neuer Aussagen, die der bestehende Text schon enthält." },
-              widersprueche: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    thema: { type: "string" },
-                    bestehend: { type: "string", description: "Die Stelle aus dem bestehenden Text, wörtlich." },
-                    neu: { type: "string", description: "Die neue Angabe." },
-                    ids,
-                  },
-                  required: ["thema", "bestehend", "neu", "ids"],
-                },
-              },
-            },
-            required: ["ergaenzung", "ids"],
+const MERGE_TOOL: Anthropic.Tool = {
+  name: "submit_einarbeitung",
+  description: "Ergänzung aus den neuen Aussagen für einen Checklistenpunkt. Der bestehende Text wird nicht zurückgegeben.",
+  input_schema: {
+    type: "object",
+    properties: {
+      ergaenzung: { type: "string", description: "Nur der neue Inhalt. Leer, wenn nichts Neues dazukommt." },
+      enthalten_ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "IDs neuer Aussagen, die der bestehende Text schon enthält.",
+      },
+      widersprueche: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            thema: { type: "string" },
+            bestehend: { type: "string", description: "Die Stelle aus dem bestehenden Text, wörtlich." },
+            neu: { type: "string", description: "Die neue Angabe." },
+            ids: { type: "array", items: { type: "string" } },
           },
-        ]),
-      ),
-      required: [],
+          required: ["thema", "bestehend", "neu", "ids"],
+        },
+      },
     },
-  };
+    required: ["ergaenzung"],
+  },
+};
+
+/** Statement IDs the model put into a text as references: „… verwenden [5.712].“ They are no content. */
+function stripIdRefs(text: string): string {
+  return text
+    .replace(/[ \t]*[\[(](?:Aussagen?\s+)?\d{1,3}\.\d{1,4}(?:\s*[,;–-]\s*\d{1,3}\.\d{1,4})*[\])]/g, "")
+    .replace(/[ \t]+([.,;:])/g, "$1")
+    .trim();
 }
 
-function pointLabels(keys: readonly AnbieterPointKey[]): string {
-  const wanted = new Set(keys);
-  return ANBIETER_POINTS.filter((point) => wanted.has(point.key))
-    .map((point) => `${point.key} (${point.label})`)
-    .join(", ");
+/** The rules of one answer. A rule that carries a number is dropped: it would leak the note it stands for. */
+function readGuardrails(raw: unknown, ids: ReadonlySet<string>): AnbieterReview["guardrails"] {
+  const rules = new Map<string, Set<string>>();
+  for (const row of Array.isArray(raw) ? raw : []) {
+    const record = row && typeof row === "object" ? (row as Record<string, unknown>) : null;
+    const rule = typeof record?.regel === "string" ? record.regel.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+    const covered = parseStatementIds(record?.ids, ids);
+    if (!rule || covered.length === 0 || extractFacts(rule).length > 0) continue;
+    rules.set(rule, new Set([...(rules.get(rule) ?? []), ...covered]));
+  }
+  return [...rules].map(([rule, covered]) => ({ rule, ids: [...covered] }));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -467,7 +495,7 @@ function readConflicts(raw: unknown, byId: ReadonlyMap<string, Statement>): Anbi
     const claims: Array<AnbieterClaim & { order: number }> = [];
     for (const row of rows) {
       const claim = asRecord(row);
-      const text = typeof claim?.text === "string" ? claim.text.trim() : "";
+      const text = typeof claim?.text === "string" ? stripIdRefs(claim.text) : "";
       const ids = parseStatementIds(claim?.ids, known);
       if (!text || ids.length === 0) continue;
       const statements = ids.map((id) => byId.get(id)).filter((s): s is Statement => s != null);
@@ -491,48 +519,6 @@ function readConflicts(raw: unknown, byId: ReadonlyMap<string, Statement>): Anbi
     });
   }
   return conflicts;
-}
-
-/** The points one tool answer returned, each with text, statement IDs and contradictions. */
-function readPoints(
-  json: unknown,
-  keys: readonly AnbieterPointKey[],
-  byId: ReadonlyMap<string, Statement>,
-): AnbieterItem[] {
-  const record = asRecord(json) ?? {};
-  const known = new Set(byId.keys());
-  const texts = new Map(normalizeAnbieterItems(json).map((item) => [item.key, item]));
-  const out: AnbieterItem[] = [];
-  for (const key of keys) {
-    if (!(key in record)) continue;
-    const value = asRecord(record[key]);
-    const base = texts.get(key);
-    if (!base) continue;
-    const conflicts = readConflicts(value?.widersprueche, byId);
-    const ids = new Set([
-      ...parseStatementIds(value?.ids, known),
-      ...conflicts.flatMap((conflict) => conflict.claims.flatMap((claim) => claim.ids)),
-    ]);
-    // A text field that only holds the nested object's largest string must stay the text itself.
-    const text = typeof value?.text === "string" ? value.text.trim() : typeof record[key] === "string" ? base.current : "";
-    out.push({ ...base, current: text, earlier: null, statementIds: [...ids], conflicts });
-  }
-  return out;
-}
-
-function describePoints(items: AnbieterItem[], keys: readonly AnbieterPointKey[]): string {
-  return items
-    .filter((item) => keys.includes(item.key) && (item.current.trim() || (item.statementIds ?? []).length > 0))
-    .map((item) =>
-      [
-        `## ${item.label}`,
-        item.current.trim() || "(leer)",
-        (item.statementIds ?? []).length > 0 ? `Bisher zugeordnete Aussagen: ${(item.statementIds ?? []).join(", ")}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    )
-    .join("\n\n");
 }
 
 function resultText(items: AnbieterItem[], unassigned: Statement[]): string {
@@ -559,6 +545,11 @@ export function buildAnbieterReview(input: {
   /** Source numbers of the statement IDs; without them the sources count from old to new. */
   numbers?: Record<string, number>;
   nextSourceNo?: number;
+  /** Statements that only describe customers; they belong to the avatars, not to the Anbieter. */
+  customerIds?: Iterable<string>;
+  internalConflicts?: AnbieterConflict[];
+  /** Public statements a guard rail forbids; they are shown with the internal notes. */
+  blockedIds?: Iterable<string>;
 }): AnbieterReview {
   const dismissed = input.dismissedIds ?? [];
   const live = new Set(input.sources.map((source) => source.id));
@@ -567,13 +558,18 @@ export function buildAnbieterReview(input: {
       ([id]) => live.has(id),
     ),
   );
-  const internal = input.statements.filter((statement) => statement.internal);
+  const assigned = assignedIds(input.items);
+  const blocked = new Set([...(input.blockedIds ?? [])].filter((id) => !assigned.has(id)));
+  const internal = input.statements.filter((statement) => statement.internal || blocked.has(statement.id));
   // Internal statements are accounted for in their own area; they are never „unassigned“.
-  const unassigned = unassignedStatements(
-    input.statements.filter((statement) => !statement.internal),
-    assignedIds(input.items),
+  const leftover = unassignedStatements(
+    input.statements.filter((statement) => !statement.internal && !blocked.has(statement.id)),
+    assigned,
     dismissed,
   );
+  const customers = new Set(input.customerIds ?? []);
+  const unassigned = leftover.filter((statement) => !customers.has(statement.id));
+  const customerIds = leftover.filter((statement) => customers.has(statement.id)).map((statement) => statement.id);
   return {
     statementCount: input.statements.length,
     sourceCount: input.sources.length,
@@ -584,12 +580,20 @@ export function buildAnbieterReview(input: {
     missingFacts: missingFacts({
       sources: input.sources,
       store: input.store,
-      resultText: resultText(input.items, [...unassigned, ...internal]),
+      resultText: resultText(input.items, [...leftover, ...internal]),
     }),
     internal: internal
       .slice(0, REVIEW_UNASSIGNED_MAX)
-      .map((statement) => ({ id: statement.id, text: statement.text, source: statement.source })),
+      .map((statement) => ({
+        id: statement.id,
+        text: statement.text,
+        source: statement.source,
+        ...(statement.internal ? {} : { blocked: true }),
+      })),
+    blockedIds: [...blocked].filter((id) => input.statements.some((statement) => statement.id === id)),
     guardrails: input.guardrails ?? [],
+    internalConflicts: input.internalConflicts ?? [],
+    customerIds,
     dismissedIds: dismissed,
     lostInRevision: input.lostInRevision ?? [],
     sourceNumbers,
@@ -632,10 +636,53 @@ export function forgetRemovedSources(review: AnbieterReview, sources: WorkshopSo
     sourceCount: Object.keys(keep(review.sourceNumbers)).length,
     unassigned: review.unassigned.filter((statement) => stays(statement.id)),
     internal: review.internal.filter((statement) => stays(statement.id)),
+    customerIds: review.customerIds.filter(stays),
+    blockedIds: review.blockedIds.filter(stays),
   };
 }
 
 export type AnbieterRunMode = "full" | "merge" | "remove";
+
+/** The guard rails out of the internal notes, prepared before the run so the sorting can use them. */
+export type AnbieterGuard = {
+  /** Fits exactly one set of internal statements. */
+  key: string;
+  guardrails: AnbieterReview["guardrails"];
+  conflicts: AnbieterConflict[];
+};
+
+function guardKey(internal: Statement[]): string {
+  return createHash("sha256")
+    .update(internal.map((statement) => `${statement.id}|${statement.text}`).join("\n"))
+    .digest("hex")
+    .slice(0, 24);
+}
+
+/** The source numbers a run uses: a saved stand keeps its numbers, a full run counts from old to new. */
+function planNumbers(
+  sources: StatementSource[],
+  savedReview: AnbieterReview | null,
+  incremental: boolean,
+): { numbers: Record<string, number>; nextSourceNo: number; fresh: StatementSource[] } {
+  let nextSourceNo = savedReview?.nextSourceNo ?? 1;
+  const numbers: Record<string, number> = {};
+  const fresh: StatementSource[] = [];
+  sources.forEach((source, index) => {
+    const known = incremental ? savedReview?.sourceNumbers[source.id] : undefined;
+    if (known != null) numbers[source.id] = known;
+    else if (incremental) {
+      numbers[source.id] = nextSourceNo;
+      nextSourceNo += 1;
+      fresh.push(source);
+    } else numbers[source.id] = index + 1;
+  });
+  return { numbers, nextSourceNo: incremental ? nextSourceNo : sources.length + 1, fresh };
+}
+
+function isIncremental(input: Pick<EvaluateAnbieterInput, "mode" | "instruction" | "current">): boolean {
+  if (input.mode === "full" || !input.current?.review) return false;
+  return input.mode === "merge" || input.mode === "remove" || Boolean(input.instruction?.trim());
+}
 
 export type EvaluateAnbieterInput = {
   organisationName: string;
@@ -653,6 +700,8 @@ export type EvaluateAnbieterInput = {
    * deleted sources out of it. Both need a saved stand with its check. Default: a full run.
    */
   mode?: AnbieterRunMode;
+  /** Guard rails prepared ahead by `prepareAnbieterGuard`; used when they fit the statements of this run. */
+  guard?: AnbieterGuard | null;
   /** Epoch ms after which no further call starts; calls in flight are cut off there. */
   deadline?: number;
   call: WorkshopToolCall;
@@ -668,9 +717,12 @@ export type EvaluateAnbieterResult = {
 };
 
 /**
- * Stage 2 and the check. The points are filled in small groups, one call per group, so the
- * length of one field never costs another field its text. Statements no group took are
- * assigned once more; what still fits nowhere stays visible as „Nicht zugeordnet“.
+ * Stage 2 and the check.
+ *
+ * A full run sorts the statements into the points first (IDs only, in small batches), then
+ * writes each point from its own statements, one call per point. So no call reads the whole
+ * Bestand, no long field costs another field its text, and which statement sits in which
+ * point is known from the sorting, not from a list the model has to repeat.
  */
 export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): Promise<EvaluateAnbieterResult> {
   const now = input.now ?? Date.now;
@@ -680,21 +732,8 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
     throw new Error("Die Aussagen sind noch nicht aus allen Quellen gezogen. Bitte die Auswertung neu starten.");
   }
   // A saved stand keeps its source numbers, so the statement IDs in its points stay valid.
-  const savedReview = input.mode === "full" ? null : (input.current?.review ?? null);
-  const incremental = Boolean(savedReview && (input.mode === "merge" || input.mode === "remove" || instruction));
-  let nextSourceNo = savedReview?.nextSourceNo ?? 1;
-  const numbers: Record<string, number> = {};
-  const fresh: StatementSource[] = [];
-  sources.forEach((source, index) => {
-    const known = incremental ? savedReview?.sourceNumbers[source.id] : undefined;
-    if (known != null) numbers[source.id] = known;
-    else if (incremental) {
-      numbers[source.id] = nextSourceNo;
-      nextSourceNo += 1;
-      fresh.push(source);
-    } else numbers[source.id] = index + 1;
-  });
-  if (!incremental) nextSourceNo = sources.length + 1;
+  const saved = input.current;
+  const { numbers, nextSourceNo, fresh } = planNumbers(sources, saved?.review ?? null, isIncremental(input));
   const statements = numberStatements(sources, input.store, numbers);
   if (statements.length === 0) throw new Error("Aus dem Bestand kam keine einzige Aussage. Bitte erneut auswerten.");
   // Internal statements never reach the assignment: no point can take them as a fact.
@@ -703,7 +742,7 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
   if (open.length === 0) throw new Error("Der Bestand enthält nur interne Hinweise. Daraus entsteht kein Anbieterstand.");
   const byId = new Map(open.map((statement) => [statement.id, statement]));
   const known = new Set(byId.keys());
-  const corpus = [`Organisation: ${input.organisationName}`, "", "# Aussagen", formatStatements(open)].join("\n");
+  const internalById = new Map(internal.map((statement) => [statement.id, statement]));
   const usage: Usage = { inputTokens: 0, outputTokens: 0 };
   let model: string | null = null;
   let calls = 0;
@@ -719,65 +758,153 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
     usage.inputTokens += result.usage.inputTokens;
     usage.outputTokens += result.usage.outputTokens;
     model = result.model ?? model;
-    return reviveStringifiedToolInput(result.json, call.tool.input_schema as SchemaArg);
+    return asRecord(reviveStringifiedToolInput(result.json, call.tool.input_schema as SchemaArg)) ?? {};
+  };
+  const label = (key: AnbieterPointKey) => ANBIETER_POINTS.find((point) => point.key === key)?.label ?? key;
+  const emptyItem = (key: AnbieterPointKey): AnbieterItem => ({ key, label: label(key), current: "", earlier: null, sources: "" });
+  /** IDs that still belong to a public statement of the Bestand. */
+  const liveIds = (ids: string[] | undefined) => (ids ?? []).filter((id) => known.has(id));
+  const pick = (ids: Iterable<string>) => [...new Set(ids)].map((id) => byId.get(id)).filter((s): s is Statement => s != null);
+
+  /** Sorting: every statement into its points. A batch that leaves IDs out is asked once more for them. */
+  const classify = async (
+    list: Statement[],
+    rules: string[],
+  ): Promise<{ byKey: Map<AnbieterPointKey, Set<string>>; customers: Set<string>; blocked: Set<string> }> => {
+    const byKey = new Map<AnbieterPointKey, Set<string>>(ALL_KEYS.map((key) => [key, new Set<string>()]));
+    const customers = new Set<string>();
+    const blocked = new Set<string>();
+    const sortBatch = async (batch: Statement[]): Promise<Set<string>> => {
+      const ids = new Set(batch.map((statement) => statement.id));
+      const json = await run({
+        system: classifySystem(rules),
+        user: [`Organisation: ${input.organisationName}`, "", formatStatements(batch)].join("\n"),
+        tool: CLASSIFY_TOOL,
+        maxTokens: 16_000,
+      });
+      const seen = new Set<string>();
+      // Customers and document notes never reach a point, so a guard rail has nothing to keep them out of.
+      const aside = new Set([...parseStatementIds(json[CUSTOMER_KEY], ids), ...parseStatementIds(json[NONE_KEY], ids)]);
+      const inPoint = new Set(ALL_KEYS.flatMap((key) => parseStatementIds(json[key], ids)));
+      // What a guard rail forbids goes into no point, whatever other list names it too.
+      for (const id of parseStatementIds(json[BLOCKED_KEY], ids)) {
+        if (aside.has(id) && !inPoint.has(id)) continue;
+        blocked.add(id);
+        seen.add(id);
+      }
+      for (const key of ALL_KEYS) {
+        for (const id of parseStatementIds(json[key], ids)) {
+          if (!blocked.has(id)) byKey.get(key)!.add(id);
+          seen.add(id);
+        }
+      }
+      for (const id of parseStatementIds(json[CUSTOMER_KEY], ids)) {
+        if (!seen.has(id)) customers.add(id);
+        seen.add(id);
+      }
+      for (const id of aside) seen.add(id);
+      return seen;
+    };
+    const batches: Statement[][] = [];
+    for (let i = 0; i < list.length; i += CLASSIFY_BATCH) batches.push(list.slice(i, i + CLASSIFY_BATCH));
+    const missed = (
+      await Promise.all(
+        batches.map(async (batch) => {
+          const seen = await sortBatch(batch);
+          return batch.filter((statement) => !seen.has(statement.id));
+        }),
+      )
+    ).flat();
+    if (missed.length > 0 && hasTime()) {
+      const again: Statement[][] = [];
+      for (let i = 0; i < missed.length; i += CLASSIFY_BATCH) again.push(missed.slice(i, i + CLASSIFY_BATCH));
+      await Promise.all(again.map((batch) => sortBatch(batch).catch(() => new Set<string>())));
+    }
+    for (const id of blocked) {
+      customers.delete(id);
+      for (const ids of byKey.values()) ids.delete(id);
+    }
+    return { byKey, customers, blocked };
   };
 
-  const fill = async (
-    keys: readonly AnbieterPointKey[],
-    options: { required: boolean; revision?: AnbieterItem[]; extraSystem?: string; extraUser?: string },
-  ): Promise<{ items: AnbieterItem[]; removed: string[] }> => {
-    const others = ALL_KEYS.filter((key) => !keys.includes(key));
-    const note = formatRevisionBlock(instruction, options.revision ? describePoints(options.revision, keys) : "");
-    const system = [
-      ASSIGNMENT_RULES,
-      "",
-      `Du füllst von der Anbieter-Checkliste NUR diese Felder: ${pointLabels(keys)}.`,
-      others.length > 0
-        ? `Die übrigen Punkte füllt ein anderer Lauf: ${pointLabels(others)}. Aussagen, die nur dorthin gehören, lässt du liegen.`
-        : "",
-      note ? "Liegt eine Anweisung bei, setzt du sie an den genannten Punkten um. Eine Aussage verliert gegen diese Anweisung." : "",
-      options.extraSystem ?? "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+  /** One point, written from its own statements. Its IDs are the statements it was given. */
+  const write = async (
+    key: AnbieterPointKey,
+    own: Statement[],
+    options: { revision?: AnbieterItem; pool?: Statement[] } = {},
+  ): Promise<{ item: AnbieterItem; removed: string[] }> => {
+    const pool = options.pool ?? [];
+    if (own.length === 0 && pool.length === 0 && !options.revision) return { item: emptyItem(key), removed: [] };
+    const note = options.revision
+      ? formatRevisionBlock(instruction, `## ${label(key)}\n${options.revision.current.trim() || "(leer)"}`)
+      : "";
     const json = await run({
-      system,
-      user: [corpus, note ? `\n${note}` : "", options.extraUser ? `\n${options.extraUser}` : ""].join("\n"),
-      tool: assignmentTool(keys, { required: options.required, revision: Boolean(options.revision) }),
+      system: [
+        WRITE_RULES,
+        "",
+        `Der Punkt: ${key} (${label(key)}). Hierhin gehört: ${POINT_HINTS[key]}.`,
+        options.revision
+          ? "Das ist eine Änderung, keine neue Auswertung. Du setzt die Anweisung um. Was bisher im Punkt stand und nicht ausdrücklich gestrichen wird, bleibt drin. Eine Aussage verliert gegen die Anweisung."
+          : "",
+        pool.length > 0
+          ? "Unter „Noch nicht zugeordnet“ stehen Aussagen, die bisher in keinem Punkt sind. Du nimmst davon nur auf, was die Anweisung verlangt oder was eindeutig in diesen Punkt gehört, und nennst ihre IDs in neu_ids."
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      user: [
+        `Organisation: ${input.organisationName}`,
+        "",
+        `# Aussagen des Punkts „${label(key)}“`,
+        own.length > 0 ? formatStatements(own) : "(keine)",
+        pool.length > 0 ? `\n# Noch nicht zugeordnet\n${formatStatements(pool)}` : "",
+        note ? `\n${note}` : "",
+      ].join("\n"),
+      tool: writeTool({ revision: Boolean(options.revision), pool: pool.length > 0 }),
       maxTokens: 32_000,
     });
+    const ownIds = new Set(own.map((statement) => statement.id));
+    const poolIds = new Set(pool.map((statement) => statement.id));
+    const removed = options.revision ? parseStatementIds(json.entfernt_ids, new Set([...ownIds, ...poolIds])) : [];
+    const ids = new Set([...ownIds, ...parseStatementIds(json.neu_ids, poolIds)]);
+    for (const id of removed) ids.delete(id);
     return {
-      items: readPoints(json, keys, byId),
-      removed: options.revision ? parseStatementIds(asRecord(json)?.entfernt_ids, known) : [],
+      item: {
+        ...emptyItem(key),
+        current: typeof json.text === "string" ? stripIdRefs(json.text) : "",
+        statementIds: [...ids],
+        conflicts: readConflicts(json.widersprueche, byId),
+      },
+      removed,
     };
   };
 
-  /** The internal notes as prohibitions. A rule that carries a number is dropped: it would leak the note. */
-  const guard = async (notes: Statement[] = internal): Promise<AnbieterReview["guardrails"]> => {
-    if (notes.length === 0) return [];
-    const internalIds = new Set(notes.map((statement) => statement.id));
+  /** The internal notes as prohibitions, and what they contradict each other on. A rule that carries a number is dropped: it would leak the note. */
+  const guard = async (
+    notes: Statement[] = internal,
+  ): Promise<{ guardrails: AnbieterReview["guardrails"]; conflicts: AnbieterConflict[] }> => {
+    if (notes.length === 0) return { guardrails: [], conflicts: [] };
+    const noteIds = new Set(notes.map((statement) => statement.id));
     const json = await run({
       system: GUARDRAIL_SYSTEM,
       user: formatStatements(notes),
       tool: GUARDRAIL_TOOL,
       maxTokens: 16_000,
     });
-    const rows = Array.isArray(asRecord(json)?.leitplanken) ? (asRecord(json)?.leitplanken as unknown[]) : [];
-    const rules = new Map<string, Set<string>>();
-    for (const row of rows) {
-      const record = asRecord(row);
-      const rule = typeof record?.regel === "string" ? record.regel.replace(/\s+/g, " ").trim().slice(0, 300) : "";
-      const ids = parseStatementIds(record?.ids, internalIds);
-      if (!rule || ids.length === 0 || extractFacts(rule).length > 0) continue;
-      rules.set(rule, new Set([...(rules.get(rule) ?? []), ...ids]));
-    }
-    return [...rules].map(([rule, ids]) => ({ rule, ids: [...ids] }));
+    return {
+      guardrails: readGuardrails(json.leitplanken, noteIds),
+      conflicts: readConflicts(json.widersprueche, internalById),
+    };
   };
+  const noGuard = { guardrails: [] as AnbieterReview["guardrails"], conflicts: [] as AnbieterConflict[] };
 
   const done = (
     items: AnbieterItem[],
     extra: {
       guardrails?: AnbieterReview["guardrails"];
+      internalConflicts?: AnbieterConflict[];
+      customerIds?: Iterable<string>;
+      blockedIds?: Iterable<string>;
       dismissedIds?: string[];
       lostInRevision?: AnbieterReview["lostInRevision"];
     } = {},
@@ -789,35 +916,51 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
     calls,
   });
 
-  const saved = input.current;
-  const internalIds = new Set(internal.map((statement) => statement.id));
   const keptGuardrails = (review: AnbieterReview) =>
     review.guardrails
-      .map((guardrail) => ({ ...guardrail, ids: guardrail.ids.filter((id) => internalIds.has(id)) }))
+      .map((guardrail) => ({ ...guardrail, ids: guardrail.ids.filter((id) => internalById.has(id)) }))
       .filter((guardrail) => guardrail.ids.length > 0);
-  /** IDs that still belong to a statement of the Bestand. */
-  const liveIds = (ids: string[] | undefined) => (ids ?? []).filter((id) => known.has(id));
+  const keptInternalConflicts = (review: AnbieterReview) =>
+    review.internalConflicts
+      .map((conflict) => ({ ...conflict, claims: conflict.claims.filter((claim) => claim.ids.some((id) => internalById.has(id))) }))
+      .filter((conflict) => conflict.claims.length >= 2);
+  const carried = (review: AnbieterReview) => ({
+    guardrails: keptGuardrails(review),
+    internalConflicts: keptInternalConflicts(review),
+    customerIds: liveIds(review.customerIds),
+    blockedIds: liveIds(review.blockedIds),
+    dismissedIds: liveIds(review.dismissedIds),
+  });
+  /** Guard rails prepared ahead count only for exactly these internal statements. */
+  const prepared = input.guard && input.guard.key === guardKey(internal) ? input.guard : null;
 
   // --- Remove: the content of deleted sources leaves the stand ------------------
   if (input.mode === "remove") {
     if (!saved?.review) {
       throw new Error("Dieser Stand hat noch keine Aussagen-Zuordnung. Bitte komplett neu auswerten.");
     }
-    // The points that held a statement of a deleted source are written anew from what is left.
-    const affected = saved.items.filter((item) => (item.statementIds ?? []).some((id) => !known.has(id))).map((item) => item.key);
-    const answers = await Promise.all(anbieterPointGroups(affected).map((keys) => fill(keys, { required: true })));
-    const rewritten = new Map(answers.flatMap((answer) => answer.items).map((item) => [item.key, item]));
-    const items = saved.items.map((item) => rewritten.get(item.key) ?? { ...item, statementIds: liveIds(item.statementIds) });
-    return done(items, { guardrails: keptGuardrails(saved.review), dismissedIds: liveIds(saved.review.dismissedIds) });
+    // Only the points that held a statement of a deleted source are written anew, from what is left of them.
+    const affected = saved.items.filter((item) => (item.statementIds ?? []).some((id) => !known.has(id)));
+    const rewritten = new Map(
+      (await Promise.all(affected.map((item) => write(item.key, pick(liveIds(item.statementIds)))))).map((answer) => [
+        answer.item.key,
+        answer.item,
+      ]),
+    );
+    return done(
+      saved.items.map((item) => rewritten.get(item.key) ?? item),
+      carried(saved.review),
+    );
   }
 
   // --- Merge: only the new sources are worked into the stand --------------------
   if (input.mode === "merge") {
-    if (!saved?.review || !saved.items.some((item) => item.current.trim())) {
+    const review = saved?.review;
+    if (!saved || !review || !saved.items.some((item) => item.current.trim())) {
       throw new Error("Es gibt noch keinen geprüften Anbieterstand zum Einarbeiten. Bitte komplett neu auswerten.");
     }
     const changedSources = sources.filter(
-      (source) => source.id in saved.review!.sourceNumbers && saved.review!.sourceHashes[source.id] !== sourceTextHash(source),
+      (source) => source.id in review.sourceNumbers && review.sourceHashes[source.id] !== sourceTextHash(source),
     );
     if (changedSources.length > 0) {
       throw new Error(
@@ -830,137 +973,136 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
     if (added.length === 0 && addedInternal.length === 0) {
       throw new Error("Es ist keine neue Quelle dazugekommen. Es gibt nichts einzuarbeiten.");
     }
-    const addedById = new Map(added.map((statement) => [statement.id, statement]));
-    const addedIds = new Set(addedById.keys());
     const newestOrder = Math.max(...statements.map((statement) => statement.order));
-    const before = new Map(saved.items.map((item) => [item.key, item]));
+    const kept = carried(review);
+    // The sorting needs the guard rails, so they come first: prepared ahead, or the saved ones plus the new notes.
+    const guarded = prepared
+      ? { guardrails: prepared.guardrails, conflicts: prepared.conflicts }
+      : await (addedInternal.length > 0 ? guard(addedInternal) : Promise.resolve(noGuard))
+          .catch(() => noGuard)
+          .then((extra) => ({
+            guardrails: [...kept.guardrails, ...extra.guardrails],
+            conflicts: [...kept.internalConflicts, ...extra.conflicts],
+          }));
+    const sorted = await classify(
+      added,
+      guarded.guardrails.map((guardrail) => guardrail.rule),
+    );
 
-    const mergeGroup = async (keys: readonly AnbieterPointKey[]): Promise<AnbieterItem[]> => {
-      const json = asRecord(
-        await run({
-          system: [
-            MERGE_RULES,
-            "",
-            `Du bearbeitest NUR diese Felder: ${pointLabels(keys)}.`,
-            `Die übrigen Punkte bearbeitet ein anderer Lauf: ${pointLabels(ALL_KEYS.filter((key) => !keys.includes(key)))}. Aussagen, die nur dorthin gehören, lässt du liegen.`,
-          ].join("\n"),
-          user: [
-            `Organisation: ${input.organisationName}`,
-            "",
-            "# Bestehender Anbieterstand (bleibt wörtlich)",
-            ...ANBIETER_POINTS.filter((point) => keys.includes(point.key)).map(
-              (point) => `## ${point.key} (${point.label})\n${before.get(point.key)?.current.trim() || "(leer)"}`,
-            ),
-            "",
-            "# Neue Aussagen",
-            formatStatements(added),
-          ].join("\n"),
-          tool: mergeTool(keys),
-          maxTokens: 32_000,
-        }),
-      );
-      const out: AnbieterItem[] = [];
-      for (const key of keys) {
-        const prev = before.get(key);
-        const value = asRecord(json?.[key]);
-        if (!prev || !value) continue;
-        const addition = typeof value.ergaenzung === "string" ? value.ergaenzung.trim() : "";
-        const ids = parseStatementIds(value.ids, addedIds);
-        const contained = parseStatementIds(value.enthalten_ids, addedIds);
-        const conflicts: AnbieterConflict[] = [];
-        for (const row of Array.isArray(value.widersprueche) ? value.widersprueche : []) {
-          const record = asRecord(row);
-          const claimIds = parseStatementIds(record?.ids, addedIds);
-          const existing = typeof record?.bestehend === "string" ? record.bestehend.trim() : "";
-          const claimed = typeof record?.neu === "string" ? record.neu.trim() : "";
-          if (!existing || !claimed || claimIds.length === 0) continue;
-          const from = claimIds.map((id) => addedById.get(id)!).reduce((a, b) => (b.order > a.order ? b : a));
-          conflicts.push({
-            topic: typeof record?.thema === "string" ? record.thema.trim() : "",
-            claims: [
-              { text: existing, source: "Bisheriger Anbieterstand", date: null, newest: false, ids: [] },
-              {
-                text: claimed,
-                source: from.source,
-                date: from.date,
-                dateOrigin: from.dateOrigin,
-                newest: from.order === newestOrder,
-                ids: claimIds,
-              },
-            ],
-          });
-        }
-        const conflictIds = conflicts.flatMap((conflict) => conflict.claims.flatMap((claim) => claim.ids));
-        // Text only counts with the statements it came from; the existing text is never touched.
-        const text = addition && ids.length > 0 ? addition : "";
-        if (!text && contained.length === 0 && conflicts.length === 0) continue;
-        out.push({
-          ...prev,
-          current: [prev.current.trim(), text].filter(Boolean).join("\n\n"),
-          statementIds: [...new Set([...(prev.statementIds ?? []), ...(text ? ids : []), ...contained, ...conflictIds])],
-          conflicts: [...(prev.conflicts ?? []), ...conflicts],
+    const mergeOne = async (prev: AnbieterItem): Promise<AnbieterItem> => {
+      const own = pick(sorted.byKey.get(prev.key) ?? []);
+      if (own.length === 0) return prev;
+      const ownIds = new Set(own.map((statement) => statement.id));
+      const json = await run({
+        system: [MERGE_RULES, "", `Der Punkt: ${prev.key} (${prev.label}). Hierhin gehört: ${POINT_HINTS[prev.key]}.`].join("\n"),
+        user: [
+          `Organisation: ${input.organisationName}`,
+          "",
+          `# Bestehender Text des Punkts „${prev.label}“ (bleibt wörtlich)`,
+          prev.current.trim() || "(leer)",
+          "",
+          "# Neue Aussagen",
+          formatStatements(own),
+        ].join("\n"),
+        tool: MERGE_TOOL,
+        maxTokens: 32_000,
+      });
+      const contained = new Set(parseStatementIds(json.enthalten_ids, ownIds));
+      const conflicts: AnbieterConflict[] = [];
+      for (const row of Array.isArray(json.widersprueche) ? json.widersprueche : []) {
+        const record = asRecord(row);
+        const claimIds = parseStatementIds(record?.ids, ownIds);
+        const existing = typeof record?.bestehend === "string" ? record.bestehend.trim() : "";
+        const claimed = typeof record?.neu === "string" ? record.neu.trim() : "";
+        if (!existing || !claimed || claimIds.length === 0) continue;
+        const from = pick(claimIds).reduce((a, b) => (b.order > a.order ? b : a));
+        conflicts.push({
+          topic: typeof record?.thema === "string" ? record.thema.trim() : "",
+          claims: [
+            { text: existing, source: "Bisheriger Anbieterstand", date: null, newest: false, ids: [] },
+            { text: claimed, source: from.source, date: from.date, dateOrigin: from.dateOrigin, newest: from.order === newestOrder, ids: claimIds },
+          ],
         });
       }
-      return out;
+      const conflicting = new Set(conflicts.flatMap((conflict) => conflict.claims.flatMap((claim) => claim.ids)));
+      const addition = typeof json.ergaenzung === "string" ? stripIdRefs(json.ergaenzung) : "";
+      const rest = own.filter((statement) => !contained.has(statement.id) && !conflicting.has(statement.id));
+      // No text although statements are left over: they go in word for word. Nothing is lost here.
+      const text = addition || rest.map((statement) => statement.text).join("\n");
+      return {
+        ...prev,
+        current: [prev.current.trim(), rest.length > 0 ? text : ""].filter(Boolean).join("\n\n"),
+        statementIds: [...new Set([...(prev.statementIds ?? []), ...ownIds])],
+        conflicts: [...(prev.conflicts ?? []), ...conflicts],
+      };
     };
-
-    const guardrailsRun = (addedInternal.length > 0 ? guard(addedInternal) : Promise.resolve([])).catch(
-      () => [] as AnbieterReview["guardrails"],
-    );
-    const merged = new Map(
-      (added.length > 0 ? await Promise.all(anbieterPointGroups().map((keys) => mergeGroup(keys))) : [])
-        .flat()
-        .map((item) => [item.key, item]),
-    );
-    let items = saved.items.map((item) => merged.get(item.key) ?? item);
-
-    // New statements no point took: placed once more, word for word.
-    const leftover = unassignedStatements(added, assignedIds(items));
-    if (leftover.length > 0 && hasTime()) {
-      const zuordnung = await run({
-        system: LEFTOVER_SYSTEM,
-        user: formatStatements(leftover),
-        tool: LEFTOVER_TOOL,
-        maxTokens: 32_000,
-      }).catch(() => null);
-      items = appendLate(items, zuordnung, addedById);
-    }
+    const items = await Promise.all(saved.items.map((item) => mergeOne(item)));
     return done(items, {
-      guardrails: [...keptGuardrails(saved.review), ...(await guardrailsRun)],
-      dismissedIds: liveIds(saved.review.dismissedIds),
+      ...kept,
+      guardrails: guarded.guardrails,
+      internalConflicts: guarded.conflicts,
+      customerIds: [...kept.customerIds, ...sorted.customers],
+      blockedIds: [...kept.blockedIds, ...sorted.blocked],
     });
   }
 
   // --- Revision: only the points the instruction touches -------------------
   if (instruction && saved?.review && saved.items.some((item) => item.current.trim())) {
+    const review = saved.review;
     const named = pointsNamedInInstruction(instruction);
-    const revision = "Das ist eine Änderung, keine neue Auswertung.";
-    const answers =
-      named.length > 0
-        ? await Promise.all(
-            anbieterPointGroups(named).map((keys) =>
-              fill(keys, {
-                required: true,
-                revision: saved.items,
-                extraSystem: `${revision} Die Anweisung nennt genau diese Felder. Du schreibst sie vollständig neu aus den Aussagen und dem bisherigen Stand. Was bisher im Feld stand und nicht ausdrücklich gestrichen wird, bleibt mit seiner ID drin.`,
-              }),
-            ),
-          )
-        : [
-            await fill(ALL_KEYS, {
-              required: false,
-              revision: saved.items,
-              extraSystem: `${revision} Du gibst NUR die Felder zurück, die die Anweisung verändert, jeweils vollständig mit allen bisherigen und neuen IDs. Jedes andere Feld lässt du ganz weg; es bleibt gespeichert, wie es ist.`,
-            }),
-          ];
-    const revised = answers.flatMap((answer) => answer.items);
+    const before = new Map(saved.items.map((item) => [item.key, item]));
+    // Statements that sit in no point yet; an instruction may ask for them.
+    const taken = new Set([...assignedIds(saved.items), ...review.customerIds, ...review.dismissedIds, ...review.blockedIds]);
+    const pool = open.filter((statement) => !taken.has(statement.id));
+    let revised: AnbieterItem[];
+    let removedIds: string[];
+    if (named.length > 0) {
+      const answers = await Promise.all(
+        named.map((key) => {
+          const prev = before.get(key) ?? emptyItem(key);
+          return write(key, pick(liveIds(prev.statementIds)), { revision: prev, pool });
+        }),
+      );
+      revised = answers.map((answer) => answer.item);
+      removedIds = answers.flatMap((answer) => answer.removed);
+    } else {
+      const poolIds = new Set(pool.map((statement) => statement.id));
+      const json = await run({
+        system: `Es gibt einen Anbieterstand mit 13 Punkten und eine Anweisung der prüfenden Person. Das ist eine Änderung, keine neue Auswertung.
+Du gibst NUR die Punkte zurück, die die Anweisung verändert, jeweils mit ihrem vollständigen neuen Text. Jeden anderen Punkt lässt du ganz weg; er bleibt gespeichert, wie er ist.
+Im geänderten Punkt bleibt alles stehen, was die Anweisung nicht betrifft, Wort für Wort.
+Unter „Noch nicht zugeordnet“ stehen Aussagen, die bisher in keinem Punkt sind. Nimmst du eine auf, nennst du ihre ID in neu_ids.
+Streicht die Anweisung ausdrücklich etwas, nennst du die IDs der betroffenen Aussagen in entfernt_ids. Nichts erfinden.`,
+        user: [
+          `Organisation: ${input.organisationName}`,
+          "",
+          "# Anbieterstand",
+          ...saved.items.map((item) => `## ${item.key} (${item.label})\n${item.current.trim() || "(leer)"}`),
+          pool.length > 0 ? `\n# Noch nicht zugeordnet\n${formatStatements(pool)}` : "",
+          `\n${formatRevisionBlock(instruction, "")}`,
+        ].join("\n"),
+        tool: changeTool(),
+        maxTokens: 32_000,
+      });
+      revised = [];
+      for (const key of ALL_KEYS) {
+        const value = asRecord(json[key]);
+        const prev = before.get(key) ?? emptyItem(key);
+        if (!value || typeof value.text !== "string") continue;
+        revised.push({
+          ...prev,
+          current: stripIdRefs(value.text),
+          statementIds: [...new Set([...liveIds(prev.statementIds), ...parseStatementIds(value.neu_ids, poolIds)])],
+        });
+      }
+      removedIds = parseStatementIds(json.entfernt_ids, known);
+    }
     const returned = named.length > 0 ? named : revised.filter((item) => item.current.trim()).map((item) => item.key);
-    const items = mergeRevisedAnbieterItems({ current: saved.items, revised, returned, named });
+    let items = mergeRevisedAnbieterItems({ current: saved.items, revised, returned, named });
 
     const deletes = instructionDeletes(instruction);
-    const before = new Map(saved.items.map((item) => [item.key, item]));
     const changed = items.filter((item) => item !== before.get(item.key));
-    const removed = new Set(deletes ? answers.flatMap((answer) => answer.removed) : []);
+    const removed = new Set(deletes ? removedIds : []);
     // A named point the instruction empties takes its statements with it.
     if (deletes) {
       for (const item of changed) {
@@ -969,68 +1111,88 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
         }
       }
     }
+    // A statement the instruction did not strike stays with its point, whatever the model returned.
+    items = items.map((item) => {
+      const prev = before.get(item.key);
+      if (item === prev) return item;
+      const ids = new Set([...(item.statementIds ?? []), ...liveIds(prev?.statementIds)]);
+      for (const id of removed) ids.delete(id);
+      return { ...item, statementIds: [...ids] };
+    });
     const stillAssigned = assignedIds(items);
-    for (const id of [...removed]) if (stillAssigned.has(id)) removed.delete(id);
-    const dismissedIds = [...new Set([...(saved.review.dismissedIds ?? []), ...removed])].filter(
-      (id) => known.has(id) && !stillAssigned.has(id),
-    );
+    const dismissedIds = [...new Set([...liveIds(review.dismissedIds), ...removed])].filter((id) => !stillAssigned.has(id));
 
-    // The same coverage check, against the stand before: what was in and is gone now.
+    // The check against the stand before: every fact that was in a changed point and is gone now.
     const lost: AnbieterReview["lostInRevision"] = [];
-    const dismissed = new Set(dismissedIds);
+    const after = resultText(items, []);
+    const spared = [instruction, ...dismissedIds.map((id) => byId.get(id)?.text ?? "")].join("\n");
     for (const item of changed) {
       const prev = before.get(item.key);
-      for (const id of prev?.statementIds ?? []) {
-        if (stillAssigned.has(id) || dismissed.has(id)) continue;
+      // Struck without the instruction asking for it: reported, statement by statement.
+      for (const id of deletes ? [] : removedIds) {
         const statement = byId.get(id);
-        if (statement) lost.push({ id, text: statement.text, source: statement.source, point: item.label });
+        if (statement && (prev?.statementIds ?? []).includes(id)) {
+          lost.push({ id, text: statement.text, source: statement.source, point: item.label });
+        }
       }
-    }
-    const after = resultText(items, []);
-    const spared = [instruction, ...[...dismissed].map((id) => byId.get(id)?.text ?? "")].join("\n");
-    for (const item of changed) {
-      for (const fact of droppedFacts(before.get(item.key)?.current ?? "", after, spared)) {
+      for (const fact of droppedFacts(prev?.current ?? "", after, spared)) {
         lost.push({ id: null, text: `${FACT_KIND_LABEL[fact.kind]} ${fact.value}`, source: "", point: item.label });
       }
     }
-    return done(items, { guardrails: keptGuardrails(saved.review), dismissedIds, lostInRevision: lost });
+    return done(items, { ...carried(review), dismissedIds, lostInRevision: lost });
   }
 
   // --- Full run -------------------------------------------------------------
-  const guardrailsRun = guard().catch(() => [] as AnbieterReview["guardrails"]);
-  const groups = await Promise.all(anbieterPointGroups().map((keys) => fill(keys, { required: true })));
-  let items = normalizeAnbieterItems([]).map((empty) => groups.flatMap((g) => g.items).find((item) => item.key === empty.key) ?? empty);
-
-  // A point that came back empty although a source has a section with its name: once more, alone.
-  const lostPoints = openPointsWithSource(items, input.sources);
-  const leftover = unassignedStatements(open, assignedIds(items));
-  const [again, zuordnung] = await Promise.all([
-    hasTime()
-      ? Promise.all(
-          lostPoints.map((point) =>
-            fill([point.key], {
-              required: true,
-              extraUser: `Das Feld ${point.key} kam leer zurück. In ${point.sources.map((source) => `„${source}“`).join(", ")} steht aber ein Abschnitt mit der Überschrift „${point.label}“. Ordne die Aussagen daraus und alles Passende aus den anderen Quellen zu.`,
-            }).catch(() => ({ items: [] as AnbieterItem[], removed: [] })),
-          ),
-        )
-      : Promise.resolve([]),
-    leftover.length > 0 && hasTime()
-      ? run({
-          system: LEFTOVER_SYSTEM,
-          user: formatStatements(leftover),
-          tool: LEFTOVER_TOOL,
-          maxTokens: 32_000,
-        }).catch(() => null)
-      : Promise.resolve(null),
-  ]);
-  const refilled = new Map(again.flatMap((answer) => answer.items).filter((item) => item.current.trim()).map((item) => [item.key, item]));
-  items = items.map((item) => refilled.get(item.key) ?? item);
-
-  items = appendLate(items, zuordnung, byId);
-
+  const guarded = prepared ? { guardrails: prepared.guardrails, conflicts: prepared.conflicts } : await guard().catch(() => noGuard);
+  const sorted = await classify(
+    open,
+    guarded.guardrails.map((guardrail) => guardrail.rule),
+  );
+  const written = await Promise.all(ALL_KEYS.map((key) => write(key, pick(sorted.byKey.get(key) ?? []))));
+  const items = written.map((answer) => answer.item);
   if (!items.some((item) => item.current.trim())) {
     throw new Error("Die KI-Antwort enthielt keine auswertbaren Anbieter-Punkte. Bitte erneut auswerten.");
   }
-  return done(items, { guardrails: await guardrailsRun });
+  return done(items, {
+    guardrails: guarded.guardrails,
+    internalConflicts: guarded.conflicts,
+    customerIds: sorted.customers,
+    blockedIds: sorted.blocked,
+  });
+}
+
+/**
+ * The guard rails for a run, made ahead of it: the last round of stage 1 calls this, so the
+ * run itself can sort with them and stays inside the time limit of a request.
+ */
+export async function prepareAnbieterGuard(
+  input: Pick<EvaluateAnbieterInput, "sources" | "store" | "mode" | "instruction" | "current" | "call" | "deadline" | "now"> & {
+    cached?: AnbieterGuard | null;
+  },
+): Promise<{ guard: AnbieterGuard | null; usage: Usage; model: string | null; calls: number }> {
+  const sources = statementSources(input.sources);
+  const none = { guard: null, usage: { inputTokens: 0, outputTokens: 0 }, model: null, calls: 0 };
+  if (pendingChunks(sources, input.store).length > 0) return none;
+  const { numbers } = planNumbers(sources, input.current?.review ?? null, isIncremental(input));
+  const internal = numberStatements(sources, input.store, numbers).filter((statement) => statement.internal);
+  const key = guardKey(internal);
+  if (input.cached?.key === key) return { ...none, guard: input.cached };
+  if (internal.length === 0) return { ...none, guard: { key, guardrails: [], conflicts: [] } };
+  const byId = new Map(internal.map((statement) => [statement.id, statement]));
+  const ids = new Set(byId.keys());
+  const now = input.now ?? Date.now;
+  const result = await input.call({
+    system: GUARDRAIL_SYSTEM,
+    user: formatStatements(internal),
+    tool: GUARDRAIL_TOOL,
+    maxTokens: 16_000,
+    timeoutMs: input.deadline == null ? undefined : input.deadline - now(),
+  });
+  const json = asRecord(reviveStringifiedToolInput(result.json, GUARDRAIL_TOOL.input_schema as SchemaArg)) ?? {};
+  return {
+    guard: { key, guardrails: readGuardrails(json.leitplanken, ids), conflicts: readConflicts(json.widersprueche, byId) },
+    usage: result.usage,
+    model: result.model,
+    calls: 1,
+  };
 }

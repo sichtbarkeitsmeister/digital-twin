@@ -93,10 +93,19 @@ export type AnbieterReview = {
   unassignedCount: number;
   /** Facts and names of the Bestand that the result does not show. */
   missingFacts: MissingFact[];
-  /** Statements marked as not for publication. They are in no point. */
-  internal: Array<{ id: string; text: string; source: string }>;
+  /**
+   * Statements marked as not for publication. They are in no point. `blocked`: the source did
+   * not mark it, but a guard rail forbids its content.
+   */
+  internal: Array<{ id: string; text: string; source: string; blocked?: boolean }>;
+  /** Public statements a guard rail forbids; kept out of every point. */
+  blockedIds: string[];
   /** What the internal notes mean for texts: prohibitions only, never the internal fact itself. */
   guardrails: Array<{ rule: string; ids: string[] }>;
+  /** Contradictions among the internal notes. Shown with them, never handed on. */
+  internalConflicts: AnbieterConflict[];
+  /** Statements that only describe customers. They belong to the avatars and count as accounted for. */
+  customerIds: string[];
   /** Statements an instruction removed on purpose; they are not reported again. */
   dismissedIds: string[];
   /** What the last „Änderung anwenden“ dropped although nobody asked for it. */
@@ -213,6 +222,8 @@ export type AnbieterState = {
   review: AnbieterReview | null;
   /** Derived on every load; never trusted from the saved row. */
   sync: AnbieterSync;
+  /** Guard rails prepared for the next run. Server only; never sent to the browser. */
+  guard: { key: string; guardrails: AnbieterReview["guardrails"]; conflicts: AnbieterConflict[] } | null;
 };
 
 /** An empty point and the sources that carry a section with its name. */
@@ -828,9 +839,10 @@ export function anbieterOpenIssues(state: Pick<AnbieterState, "items" | "review"
 }
 
 /** The state as the browser gets it: without the stored statements of stage 1. */
-export function anbieterForClient(state: AnbieterState): Omit<AnbieterState, "extraction"> {
-  const { extraction: _extraction, ...rest } = state;
+export function anbieterForClient(state: AnbieterState): Omit<AnbieterState, "extraction" | "guard"> {
+  const { extraction: _extraction, guard: _guard, ...rest } = state;
   void _extraction;
+  void _guard;
   return rest;
 }
 
@@ -846,6 +858,7 @@ export function emptyAnbieterState(): AnbieterState {
     extraction: {},
     review: null,
     sync: { added: [], changed: [], removed: 0 },
+    guard: null,
   };
 }
 
@@ -1027,6 +1040,19 @@ function readExtraction(raw: unknown): ExtractionStore {
   return store;
 }
 
+function readGuard(raw: unknown): AnbieterState["guard"] {
+  const record = asRecord(raw);
+  const key = asString(record?.key, 40);
+  if (!record || !key) return null;
+  return {
+    key,
+    guardrails: (Array.isArray(record.guardrails) ? record.guardrails : [])
+      .map((row) => ({ rule: asString(asRecord(row)?.rule, 400), ids: idList(asRecord(row)?.ids, 400) }))
+      .filter((row) => row.rule),
+    conflicts: readConflicts(record.conflicts),
+  };
+}
+
 function readReview(raw: unknown): AnbieterReview | null {
   const record = asRecord(raw);
   if (!record) return null;
@@ -1036,7 +1062,12 @@ function readReview(raw: unknown): AnbieterReview | null {
     .filter((row) => row.id && row.text)
     .slice(0, REVIEW_UNASSIGNED_MAX);
   const internal = rows(record.internal)
-    .map((row) => ({ id: asString(row.id, 12), text: asString(row.text, 2_000), source: asString(row.source, 400) }))
+    .map((row) => ({
+      id: asString(row.id, 12),
+      text: asString(row.text, 2_000),
+      source: asString(row.source, 400),
+      ...(row.blocked === true ? { blocked: true } : {}),
+    }))
     .filter((row) => row.id && row.text)
     .slice(0, REVIEW_UNASSIGNED_MAX);
   const guardrails = rows(record.guardrails)
@@ -1076,6 +1107,9 @@ function readReview(raw: unknown): AnbieterReview | null {
     missingFacts,
     internal,
     guardrails,
+    internalConflicts: readConflicts(record.internalConflicts),
+    customerIds: idList(record.customerIds, 20_000),
+    blockedIds: idList(record.blockedIds, 5_000),
     dismissedIds: idList(record.dismissedIds, 5_000),
     lostInRevision,
     sourceNumbers: numbers,
@@ -1109,6 +1143,7 @@ export function readAnbieterState(
     extraction: readExtraction(record?.extraction),
     review: hasContent ? readReview(record?.review) : null,
     sync: { added: [], changed: [], removed: 0 },
+    guard: readGuard(record?.guard),
     status: sectionStatus({
       fingerprint,
       sourceFingerprint,

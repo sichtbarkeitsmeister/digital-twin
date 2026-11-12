@@ -81,7 +81,9 @@ type AnbieterReview = {
   unassigned: { id: string; text: string; source: string }[];
   unassignedCount: number;
   missingFacts: { kind: string; value: string; sources: string[]; context: string }[];
-  internal?: { id: string; text: string; source: string }[];
+  internal?: { id: string; text: string; source: string; blocked?: boolean }[];
+  internalConflicts?: NonNullable<AnbieterItem["conflicts"]>;
+  customerIds?: string[];
   guardrails?: { rule: string; ids: string[] }[];
   lostInRevision: { id: string | null; text: string; source: string; point: string }[];
 };
@@ -324,7 +326,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     { ok: true; json: T } | { ok: false; message: string; json: Record<string, unknown> | null }
   > {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 280_000);
+    const timer = setTimeout(() => controller.abort(), 295_000);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -381,9 +383,14 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
         let stalled = 0;
         for (;;) {
           setAnbieterStep((step) => step ?? "Schritt 1 von 2: Aussagen aus den Quellen ziehen…");
-          const round = await postJson<{ pending?: number; total?: number; read?: number }>(
+          const round = await postJson<{ pending?: number; total?: number; read?: number; done?: boolean }>(
             "/api/dt/workshop/anbieter",
-            { organisationId: props.organisationId, action: "extract" },
+            {
+              organisationId: props.organisationId,
+              action: "extract",
+              ...(mode !== "full" ? { mode } : {}),
+              ...(instruction?.trim() ? { instruction: instruction.trim() } : {}),
+            },
           );
           if (!round.ok) {
             setAnbieterError(round.message);
@@ -391,7 +398,14 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
             return;
           }
           const pending = round.json.pending ?? 0;
-          if (pending === 0) break;
+          if (round.json.done) break;
+          if (pending === 0) {
+            // All sources are read; the next request turns the internal notes into guard rails.
+            setAnbieterStep("Schritt 1 von 2: Interne Hinweise in Leitplanken fassen…");
+            stalled += 1;
+            if (stalled >= 4) break;
+            continue;
+          }
           stalled = pending < lastPending ? 0 : stalled + 1;
           lastPending = pending;
           if (stalled >= 2) {
@@ -638,7 +652,9 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const anbieterInternal = anbieterReview?.internal ?? [];
   const anbieterGuardrails = anbieterReview?.guardrails ?? [];
   const anbieterGuardedIds = new Set(anbieterGuardrails.flatMap((guardrail) => guardrail.ids));
-  const anbieterInternalUncovered = anbieterInternal.filter((s) => !anbieterGuardedIds.has(s.id)).length;
+  const anbieterInternalUncovered = anbieterInternal.filter((s) => !s.blocked && !anbieterGuardedIds.has(s.id)).length;
+  const anbieterInternalConflicts = anbieterReview?.internalConflicts ?? [];
+  const anbieterCustomerCount = anbieterReview?.customerIds?.length ?? 0;
   const anbieterMissingCount = anbieterReview?.missingFacts.length ?? 0;
   const anbieterNeedsConfirm = anbieterMissingCount > 0 || anbieterConflictCount > 0;
   const anbieterLost = new Map((anbieter?.openWithSource ?? []).map((point) => [point.key, point]));
@@ -1066,6 +1082,28 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                       Bitte neu auswerten.
                     </p>
                   ) : null}
+                  {anbieterInternalConflicts.length > 0 ? (
+                    <>
+                      <p className="mt-2 text-xs font-semibold text-destructive">
+                        Widersprüche unter den internen Hinweisen ({anbieterInternalConflicts.length})
+                      </p>
+                      <ul className="mt-1 grid gap-1.5 text-sm text-primary">
+                        {anbieterInternalConflicts.map((conflict, index) => (
+                          <li key={index}>
+                            <span className="font-semibold">{conflict.topic || "Widerspruch"}</span>
+                            <ul className="list-disc pl-5">
+                              {conflict.claims.map((claim, claimIndex) => (
+                                <li key={claimIndex}>
+                                  {claim.text}
+                                  <span className="text-secondary"> · {claim.source}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
                   <p className="mt-2 text-xs font-semibold text-primary">Hinweise im Wortlaut (bleiben intern)</p>
                   <ul className="mt-1 grid gap-1.5 text-sm text-primary">
                     {anbieterInternal.map((statement) => (
@@ -1074,12 +1112,22 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
                         <span className="text-secondary">
                           {" "}
                           · {statement.source} · Aussage {statement.id}
-                          {anbieterGuardedIds.has(statement.id) ? "" : " · ohne Leitplanke"}
+                          {statement.blocked
+                            ? " · in der Quelle nicht markiert, über eine Leitplanke gesperrt"
+                            : anbieterGuardedIds.has(statement.id)
+                              ? ""
+                              : " · ohne Leitplanke"}
                         </span>
                       </li>
                     ))}
                   </ul>
                 </details>
+              ) : null}
+              {anbieterCustomerCount > 0 ? (
+                <p className="text-sm text-secondary">
+                  {anbieterCustomerCount} Aussagen beschreiben nur Kunden und Zielgruppen. Sie gehören in
+                  die Avatare, nicht in den Anbieterstand, und zählen nicht als „nicht zugeordnet“.
+                </p>
               ) : null}
               {anbieterReview.unassignedCount > 0 ? (
                 <details className="rounded-lg border border-sbkm-navy/10 px-3 py-2 dark:border-white/10">

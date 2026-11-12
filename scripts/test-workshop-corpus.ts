@@ -752,10 +752,13 @@ void (async () => {
 
   // --- Statements, coverage and fact check: plain code -------------------------------
   const st = await import("../lib/dt/transcripts/anbieter-statements");
-  const { extractPendingStatements, statementSources, buildAnbieterReview } = await import(
-    "../lib/dt/transcripts/anbieter-eval"
+  const { extractPendingStatements, statementSources, anbieterSyncPlan, forgetRemovedSources, prepareAnbieterGuard } =
+    await import("../lib/dt/transcripts/anbieter-eval");
+  const { buildCurrentAnbieterMarkdown: markdown, anbieterLeitplankenSection } = await import(
+    "../lib/dt/transcripts/anbieter-markdown"
   );
-  const { buildCurrentAnbieterMarkdown: markdown } = await import("../lib/dt/transcripts/anbieter-markdown");
+  const { anbieterForClient } = await import("../lib/dt/transcripts/workshop-model");
+  const { extractBlockedStatements } = await import("../lib/dt/content/pipeline/blocked");
 
   const long = Array.from({ length: 50 }, (_, i) => `Zeile ${i} ${"x".repeat(90)}`).join("\n");
   const pieces = st.chunkSourceText(long, 1_000);
@@ -773,6 +776,8 @@ void (async () => {
     "telefon:02841123456",
   ]);
   assert.deepEqual(facts("## 11. Preis\n[00:12:45] Gründung 1998 um 14:30 Uhr\n2. Punkt"), ["jahr:1998"]);
+  assert.deepEqual(facts("Es gibt 2 Standorte und zwei Büros, Punkt 3 gilt.\n3 Gründe\n12 Kunden"), ["zahl:2", "zahl:2"]);
+  assert.deepEqual(st.droppedFacts("3 Büros", "drei Büros"), []);
   assert.deepEqual(st.droppedFacts("90 Euro und 12 %", "Kostet 90 €."), [{ kind: "prozent", value: "12 %" }]);
   assert.deepEqual(st.droppedFacts("90 Euro und 12 %", "Kostet 90 €.", "12 Prozent streichen"), []);
   assert.equal(st.instructionDeletes("Bitte den Rabatt streichen"), true);
@@ -781,158 +786,6 @@ void (async () => {
   const knownIds = new Set(["1.1", "1.2", "1.3", "2.1"]);
   assert.deepEqual(st.parseStatementIds(["1.1", "[2.1]", "9.9"], knownIds), ["1.1", "2.1"]);
   assert.deepEqual(st.parseStatementIds("1.1-1.3", knownIds), ["1.1", "1.2", "1.3"]);
-
-  type Call = Parameters<typeof evaluateAnbieterCorpusWith>[0]["call"];
-  const usage = { inputTokens: 1, outputTokens: 1 };
-  const older = { ...source("alt", "Die Beratung kostet 80 Euro. Büro in Moers. Kunden fragen oft nach Fahrrädern."), spokenOn: "2025-01-01" };
-  const newer = {
-    ...source("neu", "## Preis & Positionierung\nDie Beratung kostet 90 Euro.\nThorsten Fischer ist im BVMW seit März 2024. Erreichbar unter info@fischer.de."),
-    spokenOn: "2026-01-01",
-  };
-  const bestand = [newer, older];
-  const lines: Record<string, string[]> = {
-    alt: ["Die Beratung kostet 80 Euro.", "Das Büro ist in Moers.", "Kunden fragen oft nach Fahrrädern."],
-    neu: [
-      "Die Beratung kostet 90 Euro.",
-      "Thorsten Fischer ist im BVMW seit März 2024.",
-      "Erreichbar unter info@fischer.de.",
-    ],
-  };
-  let extractCalls = 0;
-  const extractCall: Call = async ({ user }) => {
-    extractCalls += 1;
-    const id = user.includes("Quelle neu") ? "neu" : "alt";
-    return { json: { aussagen: lines[id], eigennamen: ["Thorsten Fischer", "BVMW", "Erfunden GmbH"] }, usage, model: "m" };
-  };
-  const first = await extractPendingStatements({ sources: bestand, store: {}, call: extractCall, concurrency: 1 });
-  assert.equal(first.pending, 1, "one piece per round with concurrency 1");
-  const second = await extractPendingStatements({ sources: bestand, store: first.store, call: extractCall });
-  assert.equal(second.pending, 0);
-  const third = await extractPendingStatements({ sources: bestand, store: second.store, call: extractCall });
-  assert.equal(extractCalls, 2, "an unchanged source is never read twice");
-  assert.equal(third.total, 2);
-  const store = second.store;
-  const numbered = st.numberStatements(statementSources(bestand), store);
-  assert.deepEqual(numbered.map((s) => s.id), ["1.1", "1.2", "1.3", "2.1", "2.2", "2.3"], "old source first");
-  assert.ok(Object.values(store).every((chunk) => !chunk.names.includes("Erfunden GmbH")), "a name must be in the text");
-
-  // Full run: groups; contradiction 80 vs 90 Euro; 1.3 taken by nobody, 2.3 placed afterwards.
-  const point = (text: string, ids: string[], widersprueche?: unknown) => ({ text, ids, ...(widersprueche ? { widersprueche } : {}) });
-  const seen: string[][] = [];
-  const fullCall: Call = async ({ tool }) => {
-    if (tool.name === "submit_zuordnung") {
-      return { json: { zuordnung: [{ id: "2.3", punkt: "kanaele" }, { id: "1.3", punkt: "keiner" }] }, usage, model: "m" };
-    }
-    const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
-    seen.push(keys);
-    const json: Record<string, unknown> = Object.fromEntries(keys.map((key) => [key, point("", [])]));
-    if ("unternehmen" in json) json.unternehmen = point("Büro in Moers. Thorsten Fischer ist im BVMW.", ["1.2", "2.2"]);
-    if ("preis" in json) {
-      json.preis = point("", [], [
-        { thema: "Preis der Beratung", angaben: [{ text: "80 Euro", ids: ["1.1"] }, { text: "90 Euro", ids: ["2.1"] }] },
-      ]);
-    }
-    return { json, usage, model: "m" };
-  };
-  const full = await evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: bestand, store, call: fullCall });
-  assert.deepEqual(seen.slice(0, 4).map((keys) => keys.length).sort(), [3, 3, 3, 4]);
-  assert.ok(seen.slice(4).some((keys) => keys.length === 1 && keys[0] === "preis"), "a lost section is asked for once more");
-  const item = (items: typeof full.items, key: string) => items.find((entry) => entry.key === key)!;
-  assert.equal(item(full.items, "kanaele").current, "Erreichbar unter info@fischer.de.", "a late statement goes in word for word");
-  const conflict = item(full.items, "preis").conflicts?.[0];
-  assert.deepEqual(conflict?.claims.map((claim) => [claim.text, claim.newest, claim.date]), [
-    ["80 Euro", false, "2025-01-01"],
-    ["90 Euro", true, "2026-01-01"],
-  ]);
-  assert.equal(conflict?.claims[0]?.dateOrigin, "gespraech");
-  assert.deepEqual(full.review.unassigned.map((s) => s.id), ["1.3"], "an unassigned statement is shown, not dropped");
-  assert.match(full.review.unassigned[0]?.source ?? "", /Quelle alt/);
-  assert.equal(full.review.statementCount, 6);
-  assert.deepEqual(
-    full.review.missingFacts.map((fact) => `${fact.kind}:${fact.value}`),
-    ["datum:März 2024"],
-    "the amounts show in the contradiction, the mail in its point; only the date is gone",
-  );
-  assert.match(full.review.missingFacts[0]?.sources[0] ?? "", /Quelle neu/);
-  const md = markdown({ organisationName: "Fischer", items: full.items });
-  assert.match(md, /## Nicht verwenden, bis geklärt\n[^\n]+\n- Preis & Positionierung: Preis der Beratung/);
-  assert.equal(/80 Euro|90 Euro/.test(md), false, "neither side of a contradiction reaches the SEO-Berater");
-  assert.equal(/- Preis & Positionierung$/m.test(md), false, "a point with a contradiction is not „Noch offen“");
-
-  // The review survives the round trip through the saved row; the browser never gets the statements.
-  const restored = readAnbieterState(
-    { items: full.items, review: full.review, extraction: store, sourceFingerprint: "f" },
-    "f",
-    bestand,
-  );
-  assert.deepEqual(restored.review, full.review);
-  assert.deepEqual(item(restored.items, "unternehmen").statementIds, ["1.2", "2.2"]);
-  assert.equal(Object.keys(restored.extraction).length, 2);
-  const { anbieterForClient } = await import("../lib/dt/transcripts/workshop-model");
-  assert.equal("extraction" in anbieterForClient(restored), false);
-
-  // Revision with a named point: only it is asked for; what it loses is reported.
-  const revisedKeys: string[][] = [];
-  const revision = await evaluateAnbieterCorpusWith({
-    organisationName: "Fischer",
-    sources: bestand,
-    store,
-    instruction: "Unternehmen & Kern kürzer fassen.",
-    current: { items: full.items, review: full.review },
-    call: async ({ tool }) => {
-      const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
-      revisedKeys.push(keys);
-      return { json: { unternehmen: point("Büro in Moers.", ["1.2"]) }, usage, model: "m" };
-    },
-  });
-  assert.deepEqual(revisedKeys, [["unternehmen", "entfernt_ids"]]);
-  assert.equal(item(revision.items, "unternehmen").current, "Büro in Moers.");
-  assert.equal(item(revision.items, "kanaele"), item(full.items, "kanaele"), "an untouched point stays the same object");
-  assert.deepEqual(
-    revision.review.lostInRevision.map((lost) => [lost.id, lost.point]),
-    [["2.2", "Unternehmen & Kern"]],
-    "a statement that was in and is gone is shown",
-  );
-
-  // The same loss, but the instruction deletes it: nothing is reported, and it does not come back as unassigned.
-  const deletion = await evaluateAnbieterCorpusWith({
-    organisationName: "Fischer",
-    sources: bestand,
-    store,
-    instruction: "In Unternehmen & Kern die BVMW-Mitgliedschaft streichen.",
-    current: { items: full.items, review: full.review },
-    call: async () => ({ json: { unternehmen: point("Büro in Moers.", ["1.2"]), entfernt_ids: ["2.2"] }, usage, model: "m" }),
-  });
-  assert.deepEqual(deletion.review.lostInRevision, []);
-  assert.deepEqual(deletion.review.dismissedIds, ["2.2"]);
-  assert.deepEqual(deletion.review.unassigned.map((s) => s.id), ["1.3"]);
-
-  // Revision without a named point: the model returns what it changes; an empty answer changes nothing.
-  const loose = await evaluateAnbieterCorpusWith({
-    organisationName: "Fischer",
-    sources: bestand,
-    store,
-    instruction: "Das Büro ist in Straelen.",
-    current: { items: full.items, review: full.review },
-    call: async ({ tool }) => {
-      assert.deepEqual((tool.input_schema as { required?: string[] }).required, []);
-      return { json: { unternehmen: point("Büro in Straelen. Thorsten Fischer ist im BVMW.", ["1.2", "2.2"]), kanaele: point("", []) }, usage, model: "m" };
-    },
-  });
-  assert.match(item(loose.items, "unternehmen").current, /Straelen/);
-  assert.equal(item(loose.items, "kanaele").current, "Erreichbar unter info@fischer.de.");
-  assert.deepEqual(loose.review.lostInRevision, []);
-
-  // A stand from before the check has no review: an instruction then runs the full evaluation.
-  await assert.rejects(
-    evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: bestand, store: {}, call: fullCall }),
-    /noch nicht aus allen Quellen/,
-  );
-  assert.equal(buildAnbieterReview({ sources: statementSources(bestand), store, statements: numbered, items: full.items }).unassignedCount, 1);
-
-  // --- Internal notes ---------------------------------------------------------------
-  assert.deepEqual(facts("Es gibt 2 Standorte und zwei Büros, Punkt 3 gilt.\n3 Gründe\n12 Kunden"), ["zahl:2", "zahl:2"]);
-  assert.deepEqual(st.droppedFacts("3 Büros", "drei Büros"), []);
 
   const regions = st.splitInternalRegions(
     ["# Profil", "Makler in Moers.", "## Kundenbestand (nur intern)", "1.200 Kunden.", "### Details", "Davon 300 Gewerbe.", "## Leistungen", "PKV und bAV."].join("\n"),
@@ -955,7 +808,6 @@ void (async () => {
   assert.deepEqual(dated({ filename: "20260115-notiz.md" }), { date: "2026-01-15", origin: "dateiname" });
   assert.deepEqual(dated({}), { date: "2026-05-05", origin: "upload" });
   assert.deepEqual(dated({ spokenOn: "2025-12-24", text: "Stand: 01.04.2026" }), { date: "2025-12-24", origin: "gespraech" });
-
   // The document date decides „newer“, not the upload order.
   const lateUpload = { ...source("spaet", "Stand: 01.01.2024\nAlte Angabe."), spokenOn: null, createdAt: "2026-06-01T00:00:00Z" };
   const earlyUpload = { ...source("frueh", "Stand: 01.01.2026\nNeue Angabe."), spokenOn: null, createdAt: "2026-01-01T00:00:00Z" };
@@ -964,67 +816,257 @@ void (async () => {
     ["frueh", "dokument"],
   ]);
 
+  // --- A model made of tables: what each source says, where each statement goes, what each point reads
+  type Call = Parameters<typeof evaluateAnbieterCorpusWith>[0]["call"];
+  type Script = {
+    /** Statements per source id, as the extraction returns them. */
+    lines?: Record<string, Array<string | { text: string; intern: boolean }>>;
+    names?: string[];
+    /** Where the sorting puts a statement ID. */
+    sort?: Record<string, string[]>;
+    /** The answer of the writing call per point key. */
+    points?: Record<string, Record<string, unknown>>;
+    /** The answer of the merge call per point key. */
+    merge?: Record<string, Record<string, unknown>>;
+    change?: Record<string, unknown>;
+    rules?: Array<{ regel: string; ids: string[] }>;
+    ruleConflicts?: unknown[];
+  };
+  const usage = { inputTokens: 1, outputTokens: 1 };
+  const log: Array<{ tool: string; key: string; user: string; system: string }> = [];
+  const model = (script: Script): Call =>
+    async ({ tool, user, system }) => {
+      const key = /Der Punkt: (\w+) \(/.exec(system)?.[1] ?? "";
+      log.push({ tool: tool.name, key, user, system });
+      const idsIn = [...user.matchAll(/^\[(\d+\.\d+)\]/gm)].map((match) => match[1]!);
+      let json: unknown = {};
+      if (tool.name === "submit_aussagen") {
+        const id = Object.keys(script.lines ?? {}).find((name) => user.includes(`Quelle ${name}`)) ?? "";
+        json = { aussagen: script.lines?.[id] ?? [], eigennamen: script.names ?? [] };
+      } else if (tool.name === "submit_zuordnung") {
+        const out: Record<string, string[]> = {};
+        for (const id of idsIn) for (const target of script.sort?.[id] ?? []) (out[target] ??= []).push(id);
+        json = out;
+      } else if (tool.name === "submit_punkt") json = script.points?.[key] ?? { text: "" };
+      else if (tool.name === "submit_einarbeitung") json = script.merge?.[key] ?? { ergaenzung: "" };
+      else if (tool.name === "submit_aenderung") json = script.change ?? {};
+      else if (tool.name === "submit_leitplanken") json = { leitplanken: script.rules ?? [], widersprueche: script.ruleConflicts ?? [] };
+      return { json, usage, model: "m" };
+    };
+  const calls = (tool: string) => log.filter((entry) => entry.tool === tool);
+
+  const older = { ...source("alt", "Die Beratung kostet 80 Euro. Büro in Moers. Kunden fragen oft nach Fahrrädern."), spokenOn: "2025-01-01" };
+  const newer = {
+    ...source("neu", "Die Beratung kostet 90 Euro.\nThorsten Fischer ist im BVMW seit März 2024. Erreichbar unter info@fischer.de. Projektplan steht."),
+    spokenOn: "2026-01-01",
+  };
+  const bestand = [newer, older];
+  const base: Script = {
+    lines: {
+      alt: ["Die Beratung kostet 80 Euro.", "Das Büro ist in Moers.", "Kunden fragen oft nach Fahrrädern."],
+      neu: ["Die Beratung kostet 90 Euro.", "Thorsten Fischer ist im BVMW seit März 2024.", "Erreichbar unter info@fischer.de.", "Der Projektplan steht."],
+    },
+    names: ["Thorsten Fischer", "BVMW", "Erfunden GmbH"],
+    // 2.4 is left out by the sorting: it stays visible as unassigned.
+    sort: { "1.1": ["preis"], "1.2": ["unternehmen"], "1.3": ["kunden"], "2.1": ["preis"], "2.2": ["unternehmen", "team"], "2.3": ["kanaele"] },
+    points: {
+      unternehmen: { text: "Büro in Moers. Thorsten Fischer ist im BVMW [2.2]." },
+      team: { text: "Thorsten Fischer ist im BVMW." },
+      kanaele: { text: "Erreichbar unter info@fischer.de." },
+      preis: {
+        text: "",
+        widersprueche: [{ thema: "Preis der Beratung", angaben: [{ text: "80 Euro", ids: ["1.1"] }, { text: "90 Euro", ids: ["2.1"] }] }],
+      },
+    },
+  };
+
+  const first = await extractPendingStatements({ sources: bestand, store: {}, call: model(base), concurrency: 1 });
+  assert.equal(first.pending, 1, "one piece per round with concurrency 1");
+  const store = (await extractPendingStatements({ sources: bestand, store: first.store, call: model(base) })).store;
+  await extractPendingStatements({ sources: bestand, store, call: model(base) });
+  assert.equal(calls("submit_aussagen").length, 2, "an unchanged source is never read twice");
+  const numbered = st.numberStatements(statementSources(bestand), store);
+  assert.deepEqual(numbered.map((s) => s.id), ["1.1", "1.2", "1.3", "2.1", "2.2", "2.3", "2.4"], "old source first");
+  assert.ok(Object.values(store).every((chunk) => !chunk.names.includes("Erfunden GmbH")), "a name must be in the text");
+
+  // Full run: sort first, then one writing call per point that has statements.
+  log.length = 0;
+  const full = await evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: bestand, store, call: model(base) });
+  assert.equal(calls("submit_zuordnung").length, 2, "the sorting, and once more for the ID it left out");
+  assert.deepEqual(calls("submit_punkt").map((entry) => entry.key).sort(), ["kanaele", "preis", "team", "unternehmen"]);
+  assert.equal(calls("submit_punkt").find((entry) => entry.key === "kanaele")!.user.includes("[1.1]"), false, "a point reads only its own statements");
+  const item = (items: typeof full.items, key: string) => items.find((entry) => entry.key === key)!;
+  assert.equal(item(full.items, "unternehmen").current, "Büro in Moers. Thorsten Fischer ist im BVMW.", "ID references are no content");
+  assert.deepEqual(item(full.items, "unternehmen").statementIds, ["1.2", "2.2"], "the IDs of a point come from the sorting");
+  assert.deepEqual(item(full.items, "team").statementIds, ["2.2"], "a statement may sit in two points");
+  const conflict = item(full.items, "preis").conflicts?.[0];
+  assert.deepEqual(conflict?.claims.map((claim) => [claim.text, claim.newest, claim.date, claim.dateOrigin]), [
+    ["80 Euro", false, "2025-01-01", "gespraech"],
+    ["90 Euro", true, "2026-01-01", "gespraech"],
+  ]);
+  assert.deepEqual(full.review.unassigned.map((s) => s.id), ["2.4"], "an unassigned statement is shown, not dropped");
+  assert.deepEqual(full.review.customerIds, ["1.3"], "customer statements belong to the avatars");
+  assert.equal(full.review.statementCount, 7);
+  assert.deepEqual(
+    full.review.missingFacts.map((fact) => `${fact.kind}:${fact.value}`),
+    ["datum:März 2024"],
+    "the amounts show in the contradiction, the mail in its point; only the date is gone",
+  );
+  assert.match(full.review.missingFacts[0]?.sources[0] ?? "", /Quelle neu/);
+  const md = markdown({ organisationName: "Fischer", items: full.items });
+  assert.match(md, /## Nicht verwenden, bis geklärt\n[^\n]+\n- Preis & Positionierung: Preis der Beratung/);
+  assert.equal(/80 Euro|90 Euro/.test(md), false, "neither side of a contradiction reaches the SEO-Berater");
+  assert.equal(/- Preis & Positionierung$/m.test(md), false, "a point with a contradiction is not „Noch offen“");
+
+  // The review survives the round trip through the saved row; the browser never gets the statements.
+  const restored = readAnbieterState(
+    { items: full.items, review: full.review, extraction: store, guard: { key: "k", guardrails: [], conflicts: [] }, sourceFingerprint: "f" },
+    "f",
+    bestand,
+  );
+  assert.deepEqual(restored.review, full.review);
+  assert.deepEqual(item(restored.items, "unternehmen").statementIds, ["1.2", "2.2"]);
+  assert.equal(Object.keys(restored.extraction).length, 2);
+  assert.equal("extraction" in anbieterForClient(restored) || "guard" in anbieterForClient(restored), false);
+
+  // Revision with a named point: only it is written anew; a fact it loses is reported.
+  log.length = 0;
+  const revision = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: bestand,
+    store,
+    instruction: "Unternehmen & Kern kürzer fassen.",
+    current: { items: full.items, review: full.review },
+    call: model({ points: { unternehmen: { text: "Büro in Moers.", neu_ids: ["2.4"] } } }),
+  });
+  assert.deepEqual(log.map((entry) => `${entry.tool}:${entry.key}`), ["submit_punkt:unternehmen"]);
+  assert.match(log[0]!.user, /# Noch nicht zugeordnet\n[\s\S]*\[2\.4\]/, "unassigned statements are on offer");
+  assert.equal(item(revision.items, "unternehmen").current, "Büro in Moers.");
+  assert.deepEqual(item(revision.items, "unternehmen").statementIds?.sort(), ["1.2", "2.2", "2.4"]);
+  assert.equal(item(revision.items, "kanaele"), item(full.items, "kanaele"), "an untouched point stays the same object");
+  assert.deepEqual(revision.review.lostInRevision, [], "no checkable fact was lost");
+  const pricey = full.items.map((entry) => (entry.key === "kanaele" ? { ...entry, current: "Erreichbar unter info@fischer.de, Tel. 02841 123456." } : entry));
+  const lossy = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: bestand,
+    store,
+    instruction: "Anfragen & Kanäle kürzer fassen.",
+    current: { items: pricey, review: full.review },
+    call: model({ points: { kanaele: { text: "Erreichbar per Mail." } } }),
+  });
+  assert.deepEqual(
+    lossy.review.lostInRevision.map((lost) => [lost.text, lost.point]),
+    [["E-Mail-Adresse info@fischer.de", "Anfragen & Kanäle"], ["Telefonnummer 02841 123456", "Anfragen & Kanäle"]],
+    "what was in a changed point and is gone is shown",
+  );
+
+  // The instruction deletes: nothing is reported, and the statement does not come back as unassigned.
+  const deletion = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: bestand,
+    store,
+    instruction: "In Anfragen & Kanäle die Telefonnummer 02841 123456 und die Mail-Aussage streichen.",
+    current: { items: pricey, review: full.review },
+    call: model({ points: { kanaele: { text: "", entfernt_ids: ["2.3"] } } }),
+  });
+  assert.deepEqual(deletion.review.lostInRevision.filter((lost) => /Telefon/.test(lost.text)), []);
+  assert.deepEqual(deletion.review.dismissedIds, ["2.3"]);
+  assert.deepEqual(deletion.review.unassigned.map((s) => s.id), ["2.4"]);
+
+  // Revision without a named point: the model returns what it changes; an empty answer changes nothing.
+  log.length = 0;
+  const loose = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: bestand,
+    store,
+    instruction: "Das Büro ist in Straelen.",
+    current: { items: full.items, review: full.review },
+    call: model({ change: { unternehmen: { text: "Büro in Straelen. Thorsten Fischer ist im BVMW." }, kanaele: { text: "" } } }),
+  });
+  assert.deepEqual(log.map((entry) => entry.tool), ["submit_aenderung"]);
+  assert.match(item(loose.items, "unternehmen").current, /Straelen/);
+  assert.deepEqual(item(loose.items, "unternehmen").statementIds, ["1.2", "2.2"]);
+  assert.equal(item(loose.items, "kanaele").current, "Erreichbar unter info@fischer.de.");
+
+  await assert.rejects(
+    evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: bestand, store: {}, call: model(base) }),
+    /noch nicht aus allen Quellen/,
+  );
+
+  // --- Internal notes ---------------------------------------------------------------
   const mixed = {
     ...source(
       "mix",
-      ["## Leistungen", "PKV und bAV.", "Wir buchen über Calendly.", "## Nur intern", "Der Bestand umfasst 1.200 Kunden.", "Stiftung Warentest hat uns schlecht bewertet."].join("\n"),
+      ["## Leistungen", "PKV und bAV.", "Wir buchen über Calendly.", "Die Stornoquote liegt bei 3 Prozent.", "## Nur intern", "Der Bestand umfasst 1.200 Kunden.", "Stiftung Warentest hat uns schlecht bewertet."].join("\n"),
     ),
     spokenOn: "2026-02-02",
   };
-  const mixCall: Call = async ({ user, tool }) => {
-    if (tool.name === "submit_aussagen") {
-      const internalPart = user.includes("als intern gekennzeichnet");
-      return {
-        json: internalPart
-          ? { aussagen: [{ text: "Der Bestand umfasst 1.200 Kunden.", intern: false }, { text: "Stiftung Warentest hat uns schlecht bewertet.", intern: false }], eigennamen: ["Stiftung Warentest"] }
-          : { aussagen: [{ text: "PKV und bAV.", intern: false }, { text: "Wir buchen über Calendly.", intern: true }], eigennamen: ["Calendly"] },
-        usage,
-        model: "m",
-      };
-    }
-    if (tool.name === "submit_leitplanken") {
-      assert.equal(user.includes("PKV und bAV"), false);
-      return {
-        json: {
-          leitplanken: [
-            { regel: "Kundenbestand nicht nennen.", ids: ["1.3"] },
-            { regel: "1.200 Kunden nicht nennen.", ids: ["1.3"] },
-            { regel: "Keine Stiftung-Warentest-Ergebnisse verwenden.", ids: ["1.4"] },
-          ],
-        },
-        usage,
-        model: "m",
-      };
-    }
-    assert.equal(/1\.200|Warentest|Calendly/.test(user), false, "no internal statement reaches the assignment");
-    const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
-    const json: Record<string, unknown> = Object.fromEntries(keys.map((key) => [key, point("", [])]));
-    if ("leistungen" in json) json.leistungen = point("PKV und bAV.", ["1.1"]);
-    return { json, usage, model: "m" };
+  const mixScript: Script = {
+    lines: {
+      // The second piece of this source is the part under „Nur intern“.
+      mix: [],
+    },
+    names: ["Calendly", "Stiftung Warentest"],
+    sort: { "1.1": ["leistungen"], "1.3": ["leistungen", "gesperrt"] },
+    points: { leistungen: { text: "PKV und bAV." } },
+    rules: [
+      { regel: "Kundenbestand nicht nennen.", ids: ["1.4"] },
+      { regel: "1.200 Kunden nicht nennen.", ids: ["1.4"] },
+      { regel: "Keine Stiftung-Warentest-Ergebnisse verwenden.", ids: ["1.5"] },
+      { regel: "Stornoquote nicht nennen.", ids: ["1.2"] },
+    ],
   };
-  let mixStore: Awaited<ReturnType<typeof extractPendingStatements>>["store"] = {};
-  mixStore = (await extractPendingStatements({ sources: [mixed], store: mixStore, call: mixCall })).store;
-  const mix = await evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: [mixed], store: mixStore, call: mixCall });
-  assert.deepEqual(mix.review.internal.map((s) => s.id), ["1.2", "1.3", "1.4"], "marked by the model, and by the heading in code");
-  assert.deepEqual(mix.review.guardrails, [
-    { rule: "Kundenbestand nicht nennen.", ids: ["1.3"] },
-    { rule: "Keine Stiftung-Warentest-Ergebnisse verwenden.", ids: ["1.4"] },
+  const mixModel: Call = async (input) => {
+    if (input.tool.name === "submit_aussagen") {
+      return {
+        json: input.user.includes("als intern gekennzeichnet")
+          ? { aussagen: [{ text: "Der Bestand umfasst 1.200 Kunden.", intern: false }, { text: "Stiftung Warentest hat uns schlecht bewertet.", intern: false }], eigennamen: ["Stiftung Warentest"] }
+          : {
+              aussagen: JSON.stringify([
+                { text: "PKV und bAV.", intern: false },
+                { text: "Wir buchen über Calendly.", intern: true },
+                { text: "Die Stornoquote liegt bei 3 Prozent.", intern: false },
+              ]),
+              eigennamen: ["Calendly"],
+            },
+        usage,
+        model: "m",
+      };
+    }
+    return model(mixScript)(input);
+  };
+  const mixStore = (await extractPendingStatements({ sources: [mixed], store: {}, call: mixModel })).store;
+  assert.equal(st.numberStatements(statementSources([mixed]), mixStore).length, 5, "a list that arrives as JSON text is still read");
+  const guard = (await prepareAnbieterGuard({ sources: [mixed], store: mixStore, call: mixModel })).guard;
+  assert.deepEqual(guard?.guardrails.map((guardrail) => guardrail.rule), [
+    "Kundenbestand nicht nennen.",
+    "Keine Stiftung-Warentest-Ergebnisse verwenden.",
+    "Stornoquote nicht nennen.",
   ], "a rule with a number would leak the note and is dropped");
+  log.length = 0;
+  const mix = await evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: [mixed], store: mixStore, guard, call: mixModel });
+  assert.equal(calls("submit_leitplanken").length, 0, "guard rails prepared ahead are not made again");
+  assert.match(calls("submit_zuordnung")[0]!.system, /Kundenbestand nicht nennen\./, "the sorting knows the guard rails");
+  assert.equal(log.some((entry) => entry.tool !== "submit_leitplanken" && /1\.200|Warentest hat|Calendly/.test(entry.user)), false, "no internal statement reaches sorting or writing");
+  assert.equal(calls("submit_punkt")[0]!.user.includes("Stornoquote"), false, "what a guard rail forbids reaches no point");
+  assert.deepEqual(
+    mix.review.internal.map((s) => [s.id, s.blocked === true]),
+    [["1.2", false], ["1.3", true], ["1.4", false], ["1.5", false]],
+    "marked by the model, by the heading in code, and blocked by a guard rail",
+  );
   assert.deepEqual(mix.review.unassigned, [], "internal statements are not „unassigned“");
   assert.deepEqual(mix.review.missingFacts, [], "what the internal area shows is not missing");
-  assert.equal(mix.items.some((entry) => /1\.200|Warentest|Calendly/.test(entry.current)), false);
+  assert.equal(mix.items.some((entry) => /1\.200|Warentest|Calendly|Storno/.test(entry.current)), false);
   const mixMd = markdown({
     organisationName: "Fischer",
     items: mix.items,
     guardrails: mix.review.guardrails.map((guardrail) => guardrail.rule),
   });
   assert.match(mixMd, /## Leitplanken \(verbindlich\)[\s\S]*- Kundenbestand nicht nennen\./);
-  assert.equal(/1\.200|schlecht bewertet|Calendly/.test(mixMd), false, "the SEO-Berater gets the prohibition, not the note");
-  const { anbieterLeitplankenSection } = await import("../lib/dt/transcripts/anbieter-markdown");
-  const { extractBlockedStatements } = await import("../lib/dt/content/pipeline/blocked");
+  assert.equal(/1\.200|schlecht bewertet|Calendly|3 Prozent/.test(mixMd), false, "the SEO-Berater gets the prohibition, not the note");
   const section = anbieterLeitplankenSection({
     items: full.items,
-    guardrails: mix.review.guardrails.map((guardrail) => guardrail.rule),
+    guardrails: ["Kundenbestand nicht nennen.", "Keine Stiftung-Warentest-Ergebnisse verwenden."],
   });
   assert.deepEqual(
     extractBlockedStatements([section!]).map((blocked) => blocked.text.replace(/^Nicht verwenden, auch nicht sinngemäß:\s*/, "")),
@@ -1037,73 +1079,57 @@ void (async () => {
   );
 
   // --- A new source is worked in; a deleted one is taken out or kept ------------------
-  const { anbieterSyncPlan, forgetRemovedSources } = await import("../lib/dt/transcripts/anbieter-eval");
   assert.deepEqual(anbieterSyncPlan(full.review, bestand), { added: [], changed: [], removed: 0 });
   // Older than both by its date: a full run would number it 1 and shift every ID.
-  const added = { ...source("dazu", "Zweites Büro in Straelen. Die Beratung kostet 95 Euro. Das Büro ist in Moers."), spokenOn: "2024-06-01" };
+  const added = { ...source("dazu", "Zweites Büro in Straelen. Die Beratung kostet 95 Euro. Das Büro ist in Moers. Seit 2019 dabei."), spokenOn: "2024-06-01" };
   const grown = [...bestand, added];
   assert.match(anbieterSyncPlan(full.review, grown).added[0] ?? "", /Quelle dazu/);
-  assert.deepEqual(
-    anbieterSyncPlan(full.review, [{ ...older, summary: "Anders.", rawText: "Anders." }, newer]).changed.length,
-    1,
-  );
+  assert.equal(anbieterSyncPlan(full.review, [{ ...older, summary: "Anders.", rawText: "Anders." }, newer]).changed.length, 1);
 
-  let grownStore = store;
-  let extractedSources = 0;
-  grownStore = (
-    await extractPendingStatements({
-      sources: grown,
-      store: grownStore,
-      call: async () => {
-        extractedSources += 1;
-        return { json: { aussagen: ["Zweites Büro in Straelen.", "Die Beratung kostet 95 Euro.", "Das Büro ist in Moers."], eigennamen: [] }, usage, model: "m" };
-      },
-    })
-  ).store;
-  assert.equal(extractedSources, 1, "only the new source is read");
-
-  const mergeCall: Call = async ({ tool, user }) => {
-    if (tool.name === "submit_zuordnung") return { json: { zuordnung: [] }, usage, model: "m" };
-    assert.equal(tool.name, "submit_einarbeitung");
-    assert.equal(user.includes("[1.1]"), false, "the old statements are not sent again");
-    const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
-    const json: Record<string, unknown> = {};
-    if (keys.includes("unternehmen")) {
-      json.unternehmen = { ergaenzung: "Zweites Büro in Straelen.", ids: ["3.1"], enthalten_ids: ["3.3"] };
-    }
-    if (keys.includes("preis")) {
-      json.preis = {
-        ergaenzung: "",
-        ids: [],
-        widersprueche: [{ thema: "Preis der Beratung", bestehend: "90 Euro", neu: "95 Euro", ids: ["3.2"] }],
-      };
-    }
-    return { json, usage, model: "m" };
+  const mergeScript: Script = {
+    lines: { dazu: ["Zweites Büro in Straelen.", "Die Beratung kostet 95 Euro.", "Das Büro ist in Moers.", "Seit 2019 dabei."] },
+    sort: { "3.1": ["unternehmen"], "3.2": ["preis"], "3.3": ["unternehmen"], "3.4": ["gruendung"] },
+    merge: {
+      unternehmen: { ergaenzung: "Zweites Büro in Straelen.", enthalten_ids: ["3.3"] },
+      preis: { ergaenzung: "", widersprueche: [{ thema: "Preis der Beratung", bestehend: "90 Euro", neu: "95 Euro", ids: ["3.2"] }] },
+      // No text for a statement that is neither contained nor contradicting: it goes in word for word.
+      gruendung: { ergaenzung: "" },
+    },
   };
+  log.length = 0;
+  const grownStore = (await extractPendingStatements({ sources: grown, store, call: model(mergeScript) })).store;
+  assert.equal(calls("submit_aussagen").length, 1, "only the new source is read");
+  log.length = 0;
   const mergedRun = await evaluateAnbieterCorpusWith({
     organisationName: "Fischer",
     sources: grown,
     store: grownStore,
     mode: "merge",
     current: { items: full.items, review: full.review },
-    call: mergeCall,
+    call: model(mergeScript),
   });
+  assert.equal(log.some((entry) => entry.user.includes("[1.1]")), false, "the old statements are not sent again");
+  assert.deepEqual(calls("submit_einarbeitung").map((entry) => entry.key).sort(), ["gruendung", "preis", "unternehmen"]);
   assert.equal(
     item(mergedRun.items, "unternehmen").current,
     `${item(full.items, "unternehmen").current}\n\nZweites Büro in Straelen.`,
     "the existing text stays word for word; only the new content is added",
   );
   assert.deepEqual(item(mergedRun.items, "unternehmen").statementIds, ["1.2", "2.2", "3.1", "3.3"], "the new source gets the next number");
+  assert.equal(item(mergedRun.items, "gruendung").current, "Seit 2019 dabei.", "nothing is lost when the model writes no text");
   assert.equal(item(mergedRun.items, "kanaele"), item(full.items, "kanaele"), "a point without new statements stays the same object");
-  const mergedConflict = item(mergedRun.items, "preis").conflicts?.at(-1);
-  assert.deepEqual(mergedConflict?.claims.map((claim) => [claim.text, claim.source === "Bisheriger Anbieterstand", claim.newest]), [
-    ["90 Euro", true, false],
-    ["95 Euro", false, false],
-  ]);
+  assert.deepEqual(
+    item(mergedRun.items, "preis").conflicts?.at(-1)?.claims.map((claim) => [claim.text, claim.source === "Bisheriger Anbieterstand", claim.newest]),
+    [["90 Euro", true, false], ["95 Euro", false, false]],
+  );
   assert.equal(item(mergedRun.items, "preis").conflicts?.length, 2, "the earlier contradiction stays");
-  assert.deepEqual(mergedRun.review.unassigned.map((s) => s.id), ["1.3"], "every new statement is accounted for");
+  assert.deepEqual(mergedRun.review.unassigned.map((s) => s.id), ["2.4"], "every new statement is accounted for");
   assert.equal(mergedRun.review.sourceNumbers[added.id], 3);
   assert.deepEqual(anbieterSyncPlan(mergedRun.review, grown), { added: [], changed: [], removed: 0 });
+  await assert.rejects(
+    evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: bestand, store, mode: "merge", current: { items: full.items, review: full.review }, call: model(base) }),
+    /keine neue Quelle/,
+  );
 
   // Deleted, content stays: nothing changes but the review forgets the source.
   assert.equal(anbieterSyncPlan(mergedRun.review, bestand).removed, 1);
@@ -1112,33 +1138,23 @@ void (async () => {
   assert.equal(kept.nextSourceNo, 4, "the number of a deleted source is never reused");
   assert.equal(anbieterSyncPlan(kept, bestand).removed, 0);
 
-  // Deleted, content goes: only the points that held its statements are written anew.
-  const removedKeys: string[][] = [];
+  // Deleted, content goes: only the points that held its statements are written anew, from what is left of them.
+  log.length = 0;
   const removal = await evaluateAnbieterCorpusWith({
     organisationName: "Fischer",
     sources: bestand,
     store: grownStore,
     mode: "remove",
     current: { items: mergedRun.items, review: mergedRun.review },
-    call: async ({ tool, user }) => {
-      assert.equal(user.includes("Straelen"), false, "the deleted source is no longer part of the statements");
-      const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
-      removedKeys.push(keys);
-      const json: Record<string, unknown> = Object.fromEntries(keys.map((key) => [key, point("", [])]));
-      if ("unternehmen" in json) json.unternehmen = point("Büro in Moers. Thorsten Fischer ist im BVMW.", ["1.2", "2.2"]);
-      if ("preis" in json) json.preis = point("", [], [{ thema: "Preis der Beratung", angaben: [{ text: "80 Euro", ids: ["1.1"] }, { text: "90 Euro", ids: ["2.1"] }] }]);
-      return { json, usage, model: "m" };
-    },
+    call: model({ points: { ...base.points, gruendung: { text: "" } } }),
   });
-  assert.deepEqual(removedKeys.flat().sort(), ["preis", "unternehmen"], "only the affected points are asked for");
-  assert.equal(/Straelen/.test(item(removal.items, "unternehmen").current), false);
+  assert.deepEqual(calls("submit_punkt").map((entry) => entry.key).sort(), ["preis", "unternehmen"], "only the affected points that still have statements");
+  assert.equal(log.some((entry) => /Straelen|95 Euro|2019/.test(entry.user)), false, "the deleted source is no longer part of the statements");
+  assert.equal(item(removal.items, "unternehmen").current, "Büro in Moers. Thorsten Fischer ist im BVMW.");
+  assert.equal(item(removal.items, "gruendung").current, "");
   assert.equal(item(removal.items, "preis").conflicts?.length, 1);
   assert.equal(item(removal.items, "kanaele").current, item(full.items, "kanaele").current);
   assert.equal(added.id in removal.review.sourceNumbers, false);
-  await assert.rejects(
-    evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: bestand, store, mode: "merge", current: { items: full.items, review: full.review }, call: mergeCall }),
-    /keine neue Quelle/,
-  );
   console.log("anbieter statements, coverage, facts, contradictions, revision ok");
 })().catch((err) => {
   console.error(err);

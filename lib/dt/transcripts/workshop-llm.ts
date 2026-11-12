@@ -19,6 +19,7 @@ import {
 import {
   evaluateAnbieterCorpusWith,
   extractPendingStatements,
+  prepareAnbieterGuard,
   type EvaluateAnbieterInput,
   type EvaluateAnbieterResult,
   type ExtractStatementsInput,
@@ -105,6 +106,13 @@ export function evaluateAnbieterCorpus(input: Omit<EvaluateAnbieterInput, "call"
 /** One round of stage 1 of the Anbieter evaluation; see `extractPendingStatements`. */
 export function extractAnbieterStatements(input: Omit<ExtractStatementsInput, "call">): Promise<ExtractStatementsResult> {
   return extractPendingStatements({ ...input, call: callTool });
+}
+
+/** The guard rails for the coming run; see `prepareAnbieterGuard`. */
+export function prepareAnbieterGuardrails(
+  input: Omit<Parameters<typeof prepareAnbieterGuard>[0], "call">,
+): ReturnType<typeof prepareAnbieterGuard> {
+  return prepareAnbieterGuard({ ...input, call: callTool });
 }
 
 export function proposeAvatarPlan(input: Omit<ProposeAvatarPlanInput, "call">): Promise<ProposeAvatarPlanResult> {
