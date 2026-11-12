@@ -20,7 +20,6 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { ContactPromptData } from "@/lib/dt/contact-data";
 import type { ContentKnowledge } from "@/lib/dt/content/pipeline/questions";
 import {
-  CLIENT_WISHES_MAX,
   CLIENT_WISHES_TEXT_MAX,
   CLIENT_WISH_MAX_CHARS,
   hasClientWishes,
@@ -739,7 +738,7 @@ export function notesBlock(context: RephrasePromptContext): string {
 
 // --- client data: Kontaktdaten and Kundenwünsche --------------------------------------------------
 
-export { CLIENT_WISHES_MAX, CLIENT_WISHES_TEXT_MAX, CLIENT_WISH_MAX_CHARS, hasClientWishes, parseClientWishes, type ContentClientWishes };
+export { CLIENT_WISHES_TEXT_MAX, CLIENT_WISH_MAX_CHARS, hasClientWishes, parseClientWishes, type ContentClientWishes };
 
 /** The wishes as one numbered list, the organisation's first; the steps cite them by wording. */
 export function clientWishesBlock(context: { wishes?: ContentClientWishes | null }): string {

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { DtTextarea } from "@/components/dt/dt-field";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { contentApi } from "@/components/dt/content/content-api";
-import { CLIENT_WISHES_MAX, CLIENT_WISHES_TEXT_MAX, parseClientWishes } from "@/lib/dt/content/client-wishes";
+import { CLIENT_WISHES_TEXT_MAX, parseClientWishes } from "@/lib/dt/content/client-wishes";
 import type { ContentWishesResult } from "@/lib/dt/content/types";
 
 const cardClass =
@@ -77,9 +77,6 @@ export function DtContentWishesCard(props: { organisationId: string; initial: st
           className="min-h-[96px]"
           aria-label="Hinweise zum Texten, ein Hinweis pro Zeile"
         />
-        {count >= CLIENT_WISHES_MAX ? (
-          <p className="text-[11px] text-orange-700 dark:text-orange-300">Höchstens {CLIENT_WISHES_MAX} Hinweise; weitere Zeilen werden nicht gelesen.</p>
-        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <DtPillButton type="button" size="sm" disabled={!dirty || busy || !props.settingsConfirmed} onClick={() => void save()}>
             {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Save className="size-3.5" aria-hidden />}

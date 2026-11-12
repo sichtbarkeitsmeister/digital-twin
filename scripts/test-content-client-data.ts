@@ -713,7 +713,7 @@ function testChecksOfFaktencheckAndEndabnahme() {
 function testPageWishesPatch() {
   const ok = parseContentPagePatch({ organisationId: ORG, client_wishes: "Notdienst nicht erwähnen" });
   assert.ok(ok.ok && ok.data.client_wishes === "Notdienst nicht erwähnen");
-  const tooLong = parseContentPagePatch({ organisationId: ORG, client_wishes: "x".repeat(7_000) });
+  const tooLong = parseContentPagePatch({ organisationId: ORG, client_wishes: "x".repeat(31_000) });
   assert.ok(!tooLong.ok && /höchstens/.test(tooLong.message));
   assert.equal(EMPTY_CONTENT_FRESHNESS.sendbacks, 0);
   const actions = readFileSync("lib/dt/content/pipeline/actions.ts", "utf8");
