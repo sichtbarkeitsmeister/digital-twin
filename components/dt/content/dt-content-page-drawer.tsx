@@ -6,6 +6,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Download,
   ExternalLink,
   FileText,
@@ -67,6 +69,10 @@ const sectionTitleClass =
 const JOB_POLL_MS = 4_000;
 
 const FULLSCREEN_KEY = "dt-content-drawer-fullscreen";
+
+/** The two arrows in the header that page through the texts. */
+const pagerButtonClass =
+  "flex size-9 items-center justify-center rounded-full bg-sbkm-navy text-white shadow-sm transition-colors hover:bg-sbkm-mint hover:text-sbkm-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/60 disabled:cursor-not-allowed disabled:bg-sbkm-navy/10 disabled:text-sbkm-navy/30 disabled:shadow-none dark:bg-white dark:text-sbkm-navy dark:hover:bg-sbkm-mint dark:disabled:bg-white/10 dark:disabled:text-white/30";
 
 const findingButtonClass =
   "rounded-pill border border-sbkm-navy/15 bg-white px-2.5 py-1 text-[11px] font-semibold text-sbkm-navy transition-colors hover:border-sbkm-navy/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sbkm-mint/45 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-white/[0.06] dark:text-white";
@@ -134,6 +140,11 @@ export function DtContentPageDrawer(props: {
   onChanged: () => void;
   /** The organisation's Zielgruppen avatars (without the Mix), for „Zielgruppen“. */
   zielgruppenOptions?: readonly ContentZielgruppeOption[];
+  /**
+   * „Blättern“: where this page stands among the texts of the table (1-based) and how to get to
+   * the one before and after; a missing handler disables its arrow. Also on the arrow keys.
+   */
+  pager?: { position: number; total: number; onPrev?: () => void; onNext?: () => void };
 }) {
   const { organisationId, page, open, onClose } = props;
   const onChangedRef = useRef(props.onChanged);
@@ -254,6 +265,26 @@ export function DtContentPageDrawer(props: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, handleClose]);
+
+  const { pager } = props;
+  const goPrev = !busy ? pager?.onPrev : undefined;
+  const goNext = !busy ? pager?.onNext : undefined;
+  // Arrow keys page through the texts, unless the person is typing or choosing in a field.
+  useEffect(() => {
+    if (!open || (!goPrev && !goNext)) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('[role="menu"],[role="listbox"],[role="radiogroup"]'))) return;
+      const go = e.key === "ArrowLeft" ? goPrev : goNext;
+      if (!go) return;
+      e.preventDefault();
+      go();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, goPrev, goNext]);
 
   const blocks = useMemo(() => extractContentBlocks(review?.html ?? ""), [review?.html]);
   /** Shown in the header next to the status, as soon as the page has a text. */
@@ -708,9 +739,38 @@ export function DtContentPageDrawer(props: {
           >
             <header className="flex shrink-0 items-start justify-between gap-3 border-b border-sbkm-navy/10 bg-white px-4 py-4 dark:border-white/10 dark:bg-sbkm-navy sm:px-6">
               <div className="grid min-w-0 gap-1.5">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-500 dark:text-white/45">
-                  Seite
-                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-sbkm-ink-500 dark:text-white/45">
+                    Seite
+                  </p>
+                  {pager && pager.total > 1 ? (
+                    <div className="flex items-center gap-1.5" role="group" aria-label="Durch die Texte blättern">
+                      <button
+                        type="button"
+                        className={pagerButtonClass}
+                        disabled={!goPrev}
+                        onClick={goPrev}
+                        aria-label="Vorheriger Text"
+                        title="Vorheriger Text (Pfeiltaste links)"
+                      >
+                        <ChevronLeft className="size-5" aria-hidden />
+                      </button>
+                      <span className="min-w-[4.5rem] text-center text-xs font-semibold tabular-nums text-sbkm-navy dark:text-white">
+                        {pager.position} von {pager.total}
+                      </span>
+                      <button
+                        type="button"
+                        className={pagerButtonClass}
+                        disabled={!goNext}
+                        onClick={goNext}
+                        aria-label="Nächster Text"
+                        title="Nächster Text (Pfeiltaste rechts)"
+                      >
+                        <ChevronRight className="size-5" aria-hidden />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 <h2
                   id="content-page-title"
                   className="truncate text-lg font-bold tracking-tight text-sbkm-navy dark:text-white"
