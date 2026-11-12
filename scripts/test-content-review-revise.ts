@@ -14,7 +14,7 @@ import type { callContentTool } from "../lib/dt/content/pipeline/llm";
 import { keptFindingsBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
 import { heroStructureFinding, stepPatchFor } from "../lib/dt/content/pipeline/step-patch";
 import { buildContentKnowledge } from "../lib/dt/content/pipeline/questions";
-import { kundePrueftPlaceholder } from "../lib/dt/content/pipeline/kunde-prueft";
+import { KUNDE_PRUEFT_ANSWER, kundePrueftPlaceholder } from "../lib/dt/content/pipeline/kunde-prueft";
 import { isKeptFinding, questionStopKeep, readQuestionStop, reviewStopDue } from "../lib/dt/content/pipeline/question-stop";
 import { emptyRephraseProgress } from "../lib/dt/content/pipeline/rephrase";
 import type { runRephraseOnBlocks } from "../lib/dt/content/pipeline/rephrase-runner";
@@ -356,6 +356,46 @@ async function actionTests() {
       models: ["m"],
     });
     assert.ok(!gone.ok && gone.status === 409);
+  }
+  // „Kunde prüft“ on an open point: „KUNDE PRÜFT“ as the editor's own answer, taken over at once.
+  // The placeholder comes in, the point goes, the note makes it a pending check, and the
+  // Endabnahme lists it as „Kunde prüft: …“.
+  {
+    const page = pageRow({ unresolved: [finding] });
+    const store = db(page, doneUpTo(8));
+    let user = "";
+    const placeholder = kundePrueftPlaceholder(finding.title);
+    const call: Call = async (input) => {
+      user = input.user;
+      return answer({ id: "ablauf", heading: "So läuft der Ankauf", level: 2, html: `<p>Fotos schicken, Termin, Angebot. ${placeholder}</p>` })(input);
+    };
+    const result = await applyProposals(store.service, page, doneUpTo(8) as unknown as ContentStepRow[], { block_id: "ablauf", finding_keys: [findingKey(finding)], info: KUNDE_PRUEFT_ANSWER }, null, {
+      callTool: call,
+      context: { context: ctx, avatarId: null },
+      models: ["m"],
+    });
+    assert.ok(result.ok, JSON.stringify(result));
+    assert.ok(user.includes(`Angabe der Redaktion: KUNDE PRÜFT. Setze an der passenden Stelle den Platzhalter ${placeholder}`), "same order as under „Eigene Angabe“");
+    const saved = store.rows("dt_content_pages")[0] as unknown as ContentPageRow;
+    assert.deepEqual(saved.unresolved, [], "the point goes");
+    assert.ok(saved.html.includes(placeholder), "the placeholder is in the text");
+    assert.equal(saved.notes.at(-1), `Zu „${finding.title}“: KUNDE PRÜFT – Platzhalter bleibt.`);
+    const knowledge = buildContentKnowledge({ notes: saved.notes });
+    const end = stepPatchFor(contentStepDefinition(CONTENT_STEP_ENDABNAHME)!, { unresolved: [], summary: "s" }, { html: saved.html, knowledge });
+    assert.ok(
+      (end.pagePatch.unresolved as ContentFinding[]).some((f) => f.title === `Kunde prüft: ${finding.title}` && f.severity === "low"),
+      "the Endabnahme lists it as „Kunde prüft“",
+    );
+    // With several points the answer is not used (it belongs to one point).
+    const two = await applyProposals(db(pageRow({ unresolved: [finding, { ...finding, title: "Zweiter" }] }), doneUpTo(8)).service, pageRow({ unresolved: [finding, { ...finding, title: "Zweiter" }] }), doneUpTo(8) as unknown as ContentStepRow[], { block_id: "ablauf", finding_keys: [findingKey(finding), findingKey({ ...finding, title: "Zweiter" })], info: KUNDE_PRUEFT_ANSWER }, null, {
+      callTool: async (input) => {
+        assert.doesNotMatch(input.user, /KUNDE PRÜFT/, "no answer for several points");
+        return answer({ id: "ablauf", heading: "So läuft der Ankauf", level: 2, html: "<p>Fotos schicken, Termin und dann ein Angebot.</p>" })(input);
+      },
+      context: { context: ctx, avatarId: null },
+      models: ["m"],
+    });
+    assert.ok(two.ok, JSON.stringify(two));
   }
   // A point about two Abschnitte: the first call keeps it (done_keys empty), the last one removes it.
   {

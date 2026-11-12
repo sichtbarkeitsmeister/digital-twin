@@ -28,6 +28,7 @@ import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
+import { KUNDE_PRUEFT_ANSWER } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences } from "@/lib/dt/content/finding-target";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
 import { htmlToPlainText, parseBlocksFromHtml } from "@/lib/dt/content/render";
@@ -398,6 +399,36 @@ export function DtContentPageDrawer(props: {
     if (changed) onChangedRef.current();
     if (failed.length === 0) toast.success(order.length === 1 ? "Vorschläge umgesetzt" : `Vorschläge in ${order.length} Abschnitten umgesetzt`);
     else toast.error(`Nicht umgesetzt (Punkte bleiben offen): ${failed.join(" · ")}`, { duration: 15_000 });
+  }
+
+  /**
+   * „Kunde prüft“: „KUNDE PRÜFT“ as the editor's own answer to the open point, exactly as typed under
+   * „Eigene Angabe“, taken over at once. Without a recognisable Abschnitt the „Eigene Angabe“ form
+   * opens with the answer filled in, to choose the Abschnitt.
+   */
+  async function markKundePrueft(finding: ContentFinding) {
+    if (!base) return;
+    const key = findingKey(finding);
+    const target = findingTargets.get(key)?.[0];
+    if (!target) {
+      startRevise(finding, "info");
+      setReviseText(KUNDE_PRUEFT_ANSWER);
+      return;
+    }
+    setBusy("kunde_prueft");
+    const res = await contentApi<{ review: ContentReview }>(`${base}/revise/auto`, {
+      method: "POST",
+      body: { organisationId, block_id: target, finding_keys: [key], info: KUNDE_PRUEFT_ANSWER },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    setChosen((prev) => prev.filter((k) => k !== key));
+    toast.success("„Kunde prüft“ eingetragen – Platzhalter steht im Text");
+    onChangedRef.current();
   }
 
   /** „So lassen“: the open point goes, the text stays, and later runs do not report it again. */
@@ -1180,6 +1211,15 @@ export function DtContentPageDrawer(props: {
                                     title="Der Text bleibt, wie er ist. Der Punkt verschwindet und wird bei einem erneuten Lauf nicht wieder gemeldet."
                                   >
                                     So lassen
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={findingButtonClass}
+                                    disabled={Boolean(busy) || Boolean(jobId)}
+                                    onClick={() => void markKundePrueft(f)}
+                                    title="Trägt „KUNDE PRÜFT“ als Angabe ein (wie unter „Eigene Angabe“): an der Stelle steht danach ein Platzhalter [BITTE PRÜFEN: …], die Endabnahme meldet ihn als „Kunde prüft“."
+                                  >
+                                    {busy === "kunde_prueft" ? "Wird eingetragen …" : "Kunde prüft"}
                                   </button>
                                 </div>
                               ) : null}

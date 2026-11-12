@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
+import { KUNDE_PRUEFT_ANSWER, isKundePrueft } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { contentApi } from "@/components/dt/content/content-api";
 import type { ContentOrgQuestionsResult, ContentQuestion, ContentReview } from "@/lib/dt/content/types";
 
@@ -52,6 +53,9 @@ function QuestionHead(props: { q: Pick<ContentQuestion, "question" | "section" |
  *   - Pages that stopped under the old rules: the list as before; „Freigeben“ and „Abschnitt
  *     ändern“ stay where they were.
  */
+const kundePrueftButton =
+  "rounded-pill border border-sbkm-navy/15 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-sbkm-navy transition-colors hover:border-sbkm-navy/40 aria-pressed:border-sky-500 aria-pressed:bg-sky-50 aria-pressed:text-sky-800 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-white/[0.06] dark:text-white";
+
 export function DtContentQuestionsPanel(props: {
   organisationId: string;
   pageBase: string;
@@ -103,11 +107,11 @@ export function DtContentQuestionsPanel(props: {
     props.onReview(res.data.review, res.data.job_id);
   }
 
-  async function answerCompany(id: string, action: "answer" | "no_answer") {
+  async function answerCompany(id: string, action: "answer" | "no_answer", fixed?: string) {
     setBusy(id);
     const res = await contentApi<ContentOrgQuestionsResult>("/api/dt/content/org-questions", {
       method: "PUT",
-      body: { organisationId: props.organisationId, id, action, answer: action === "answer" ? companyAnswers[id] ?? "" : null },
+      body: { organisationId: props.organisationId, id, action, answer: action === "answer" ? fixed ?? companyAnswers[id] ?? "" : null },
     });
     setBusy(null);
     if (!res.ok) {
@@ -154,18 +158,30 @@ export function DtContentQuestionsPanel(props: {
                     onChange={(e) => setDecisions((prev) => ({ ...prev, [id]: { action: "answer", answer: e.target.value } }))}
                     aria-label={`Antwort: ${q.question}`}
                   />
-                  <label className="ml-6 flex w-fit items-center gap-2 text-xs text-sbkm-navy dark:text-white/80">
-                    <input
-                      type="checkbox"
-                      className="size-3.5 accent-sbkm-navy"
-                      checked={d?.action === "drop"}
+                  <div className="ml-6 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                    <label className="flex w-fit items-center gap-2 text-xs text-sbkm-navy dark:text-white/80">
+                      <input
+                        type="checkbox"
+                        className="size-3.5 accent-sbkm-navy"
+                        checked={d?.action === "drop"}
+                        disabled={props.disabled || busy != null}
+                        onChange={(e) =>
+                          setDecisions((prev) => ({ ...prev, [id]: e.target.checked ? { action: "drop", answer: "" } : { action: "answer", answer: "" } }))
+                        }
+                      />
+                      Ohne Angabe weiter
+                    </label>
+                    <button
+                      type="button"
+                      className={kundePrueftButton}
+                      aria-pressed={d?.action === "answer" && isKundePrueft(d.answer)}
                       disabled={props.disabled || busy != null}
-                      onChange={(e) =>
-                        setDecisions((prev) => ({ ...prev, [id]: e.target.checked ? { action: "drop", answer: "" } : { action: "answer", answer: "" } }))
-                      }
-                    />
-                    Ohne Angabe weiter
-                  </label>
+                      onClick={() => setDecisions((prev) => ({ ...prev, [id]: { action: "answer", answer: KUNDE_PRUEFT_ANSWER } }))}
+                      title="Trägt „KUNDE PRÜFT“ als Antwort ein: an der Stelle bleibt ein Platzhalter [BITTE PRÜFEN: …], die Frage wird nicht erneut gestellt."
+                    >
+                      Kunde prüft
+                    </button>
+                  </div>
                 </li>
               );
             })}
@@ -204,6 +220,17 @@ export function DtContentQuestionsPanel(props: {
                     onClick={() => void answerCompany(q.id, "no_answer")}
                   >
                     Keine Angabe
+                  </DtPillButton>
+                  <DtPillButton
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-3 text-xs"
+                    disabled={props.disabled || busy != null}
+                    onClick={() => void answerCompany(q.id, "answer", KUNDE_PRUEFT_ANSWER)}
+                    title="Speichert „KUNDE PRÜFT“ als Antwort für alle Seiten: der Platzhalter bleibt, die Frage wird nicht erneut gestellt."
+                  >
+                    Kunde prüft
                   </DtPillButton>
                 </div>
               </li>

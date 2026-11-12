@@ -72,7 +72,9 @@ function requestOf(page: ContentPageRow, input: RevisionInput): ContentRevisionR
     const found = input.finding_keys.map((key) => findingOf(page, key));
     if (found.some((f) => !f)) return { ok: false, status: 409, message: "Einen dieser offenen Punkte gibt es nicht mehr. Bitte die Seite neu laden." };
     const findings = found as ContentFinding[];
-    return { instruction: input.instruction?.trim() || null, info: null, finding: findings.length === 1 ? findings[0]! : null, findings };
+    // An own answer („Kunde prüft“) belongs to exactly one open point.
+    const info = findings.length === 1 ? input.info?.trim() || null : null;
+    return { instruction: input.instruction?.trim() || null, info, finding: findings.length === 1 ? findings[0]! : null, findings };
   }
   const finding = findingOf(page, input.finding_key);
   if (input.finding_key && !finding) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
@@ -230,7 +232,7 @@ export async function applyProposals(
   service: SupabaseClient,
   page: ContentPageRow,
   steps: ContentStepRow[],
-  input: { block_id: string; finding_keys: string[]; done_keys?: string[] | null },
+  input: { block_id: string; finding_keys: string[]; done_keys?: string[] | null; info?: string | null },
   userId: string | null,
   deps: Parameters<typeof previewRevision>[5] = {},
 ): Promise<{ ok: true; cost_eur: number } | Failure> {
@@ -242,6 +244,7 @@ export async function applyProposals(
     after: { heading: preview.after.heading, html: preview.after.html },
     finding_keys: input.finding_keys,
     done_keys: input.done_keys ?? null,
+    info: input.info ?? null,
   });
   return applied.ok ? { ok: true, cost_eur: preview.cost_eur } : { ...applied, cost_eur: preview.cost_eur };
 }
