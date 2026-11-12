@@ -11,6 +11,7 @@ import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentContactCard } from "@/components/dt/content/dt-content-contact-card";
 import { DtContentOrgQuestionsCard } from "@/components/dt/content/dt-content-org-questions-card";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
+import { ZielgruppenBudgetWarning } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { DtContentPagesSourceCard } from "@/components/dt/content/dt-content-pages-source-card";
 import { DtContentPagesToolbar } from "@/components/dt/content/dt-content-pages-toolbar";
 import {
@@ -192,7 +193,7 @@ export function DtContentWorkspace(props: {
 
   /** The Zielgruppen avatars (everything in the dropdown but the Mix), for „Zielgruppen je Seite“. */
   const zielgruppenOptions = useMemo(
-    () => props.avatars.filter((a) => !a.isMix).map((a) => ({ id: a.id, name: a.name, role: a.role })),
+    () => props.avatars.filter((a) => !a.isMix).map((a) => ({ id: a.id, name: a.name, role: a.role, chars: a.profileChars })),
     [props.avatars],
   );
   const zielgruppenNames = useMemo(() => new Map(zielgruppenOptions.map((o) => [o.id, o.name])), [zielgruppenOptions]);
@@ -792,6 +793,11 @@ export function DtContentWorkspace(props: {
             );
           })}
         </ul>
+        {bulkZielgruppen ? (
+          <div className="mt-3">
+            <ZielgruppenBudgetWarning primary={bulkZielgruppen.primary} secondary={bulkZielgruppen.secondary} options={zielgruppenOptions} />
+          </div>
+        ) : null}
       </CenteredModal>
 
       <DtContentPageDrawer

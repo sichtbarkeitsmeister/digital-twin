@@ -12,6 +12,7 @@
 
 import { pendingChecksBlock, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { BLOCKED_HEADING, blockedBlock, extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
+import { audienceBlockText } from "@/lib/dt/content/zielgruppen";
 import { rephraseChunkKeywords } from "@/lib/dt/content/pipeline/rephrase-guard";
 import { pageFactsBlock, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -574,90 +575,13 @@ export function analyseAudienceRule(context: Partial<Pick<ContentPipelineContext
 }
 
 /**
- * The whole „Zielgruppen dieser Seite“ block (several profiles, headings included). Twice the single
- * avatar's 20,000: about 12,500 input tokens per call, about 0.20 € per text over all steps
- * (Sonnet 5.5), so a Startseite with eight Zielgruppen still gets about 3,800 characters per profile.
+ * The Zielgruppen of the page, each profile complete (never shortened). The block's size is
+ * checked against CONTENT_AUDIENCE_MAX_CHARS before any call (`audienceBudget`): over it, the
+ * step fails with the explanation instead of cutting a profile.
  */
-export const MAX_AUDIENCE_CHARS = 40_000;
-
-/** A secondary Zielgruppe's profile is cut to at most this many characters: it is served along, not written for. */
-export const MAX_SECONDARY_AVATAR_CHARS = 3_000;
-/** The secondary profiles together take at most this share of the budget; the rest is the primary ones'. */
-const SECONDARY_BUDGET_SHARE = 0.3;
-
-/**
- * Fair shares of `budget` characters for texts of the given lengths, each at most `cap`: a text
- * shorter than its share keeps its full length and leaves the rest to the longer ones (water filling).
- */
-export function shareCharBudget(lengths: readonly number[], budget: number, cap = Number.POSITIVE_INFINITY): number[] {
-  const out = lengths.map(() => 0);
-  let left = Math.max(0, budget);
-  let open = lengths.map((len, i) => ({ i, want: Math.min(len, cap) })).filter((x) => x.want > 0);
-  while (open.length > 0 && left > 0) {
-    const share = Math.floor(left / open.length);
-    if (share <= 0) break;
-    const small = open.filter((x) => x.want - out[x.i]! <= share);
-    if (small.length === 0) {
-      for (const x of open) out[x.i] = out[x.i]! + share;
-      left -= share * open.length;
-      break;
-    }
-    for (const x of small) {
-      left -= x.want - out[x.i]!;
-      out[x.i] = x.want;
-    }
-    open = open.filter((x) => out[x.i]! < x.want);
-  }
-  return out;
-}
-
-/**
- * The characters each profile may have in the Zielgruppen block, all together within
- * MAX_AUDIENCE_CHARS: the secondary ones first (each at most 3,000, together at most 30 % of the
- * budget), the rest shared fairly among the primary ones. Short profiles stay whole.
- */
-export function audienceCharShares(
-  primary: readonly number[],
-  secondary: readonly number[],
-  budget: number = MAX_AUDIENCE_CHARS,
-): { primary: number[]; secondary: number[] } {
-  const secondaryShares = shareCharBudget(secondary, Math.floor(budget * SECONDARY_BUDGET_SHARE), MAX_SECONDARY_AVATAR_CHARS);
-  const used = secondaryShares.reduce((a, b) => a + b, 0);
-  return { primary: shareCharBudget(primary, budget - used), secondary: secondaryShares };
-}
-
-/** What `clip` adds to a shortened text („\n… (gekürzt)“). */
-const CLIP_MARK_CHARS = "\n… (gekürzt)".length;
-
 export function avatarBlock(context: Pick<ContentPipelineContext, "avatar"> & Partial<Pick<ContentPipelineContext, "audience">>): string {
   const audience = context.audience;
-  if (audience && audience.primary.length > 0) {
-    const head = (m: { name: string; role: string }) => `### ${m.name}${m.role ? ` – ${m.role}` : ""}`;
-    const member = (m: { name: string; role: string; beschreibung: string }, max: number) =>
-      [head(m), clip(m.beschreibung, max)].filter(Boolean).join("\n");
-    const intro = [
-      "## Zielgruppen dieser Seite",
-      "Primär (für sie ist der Text geschrieben; sie bestimmt Ansprache, Beispiele und Reihenfolge):",
-      ...(audience.secondary.length > 0
-        ? ["Sekundär (mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen):"]
-        : []),
-    ];
-    // The whole block stays within MAX_AUDIENCE_CHARS: headings, line breaks and the „gekürzt“ marks
-    // come off the budget first, the rest is shared among the profiles.
-    const all = [...audience.primary, ...audience.secondary];
-    const frame = intro.join("\n").length + all.reduce((sum, m) => sum + head(m).length + 2 + CLIP_MARK_CHARS, 0);
-    const shares = audienceCharShares(
-      audience.primary.map((m) => m.beschreibung.trim().length),
-      audience.secondary.map((m) => m.beschreibung.trim().length),
-      Math.max(0, MAX_AUDIENCE_CHARS - frame),
-    );
-    return [
-      intro[0]!,
-      intro[1]!,
-      ...audience.primary.map((m, i) => member(m, shares.primary[i]!)),
-      ...(audience.secondary.length > 0 ? [intro[2]!, ...audience.secondary.map((m, i) => member(m, shares.secondary[i]!))] : []),
-    ].join("\n");
-  }
+  if (audience && audience.primary.length > 0) return audienceBlockText(audience);
   if (!context.avatar) return "## Avatar (Wunschkunde)\n(kein Avatar hinterlegt)";
   return [
     "## Avatar (Wunschkunde, für den der Text geschrieben wird)",

@@ -15,6 +15,8 @@ import { contentApi } from "@/components/dt/content/content-api";
 import type { ContentPagePatchResult, ContentReview } from "@/lib/dt/content/types";
 import {
   CONTENT_ZIELGRUPPEN_MIGRATION_FILE,
+  audienceBudgetOf,
+  normalizeZielgruppenLists,
   contentPrimaryMax,
   contentZielgruppenRule,
   hasContentZielgruppen,
@@ -23,7 +25,50 @@ import {
   type ContentZielgruppeLevel,
 } from "@/lib/dt/content/zielgruppen";
 
-export type ContentZielgruppeOption = { id: string; name: string; role: string | null };
+export type ContentZielgruppeOption = {
+  id: string;
+  name: string;
+  role: string | null;
+  /** Characters of the profile text the steps get; the block is never shortened. */
+  chars: number;
+};
+
+/**
+ * The warning when the chosen Zielgruppen do not fit into the prompt (profiles are never cut):
+ * each with its characters, sum and limit, what to do. Null when they fit.
+ */
+export function ZielgruppenBudgetWarning(props: {
+  primary: readonly string[];
+  secondary: readonly string[];
+  options: readonly ContentZielgruppeOption[];
+}) {
+  const byId = new Map(props.options.map((o) => [o.id, o]));
+  const size = (id: string) => {
+    const o = byId.get(id);
+    return o ? { name: o.name, role: o.role ?? "", chars: o.chars } : null;
+  };
+  const budget = audienceBudgetOf(
+    props.primary.map(size).filter((x): x is NonNullable<typeof x> => x !== null),
+    props.secondary.map(size).filter((x): x is NonNullable<typeof x> => x !== null),
+  );
+  if (!budget.over) return null;
+  const fmt = (n: number) => n.toLocaleString("de-DE");
+  return (
+    <div className="grid gap-1 rounded-lg border border-red-300 bg-red-50 px-2.5 py-2 text-[11px] leading-snug text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100" role="alert">
+      <p className="font-semibold">
+        Zu viel für den Prompt: {fmt(budget.total)} von {fmt(budget.limit)} Zeichen. Avatar-Texte werden nicht gekürzt – so startet Schritt 1 nicht.
+      </p>
+      <ul className="grid gap-0.5">
+        {budget.entries.map((e) => (
+          <li key={`${e.level}-${e.name}`}>
+            {e.name} ({e.level === "primary" ? "primär" : "sekundär"}): {fmt(e.chars)} Zeichen
+          </li>
+        ))}
+      </ul>
+      <p>Was tun: Zielgruppen auf „Aus“ setzen oder Avatar-Texte unter Agenten kürzen. „Sekundär“ spart keine Zeichen, auch sekundäre Profile gehen vollständig in den Prompt.</p>
+    </div>
+  );
+}
 
 const LEVELS: Array<{ level: ContentZielgruppeLevel; label: string }> = [
   { level: "primary", label: "Primär" },
@@ -94,6 +139,8 @@ export function DtContentZielgruppenPanel(props: {
   const primaryMax = contentPrimaryMax(pageType);
   // Stored before a change of Seitentyp: more primary ones than the type allows.
   const overLimit = primaryMax != null && z.primary.length > primaryMax;
+  // What the run will use: the type's limit applied (primary ones over it count as secondary).
+  const effective = normalizeZielgruppenLists(z.primary, z.secondary, undefined, primaryMax);
   const off = Boolean(busy) || disabled;
   return (
     <div className="grid min-w-0 gap-1.5">
@@ -176,6 +223,7 @@ export function DtContentZielgruppenPanel(props: {
           {own ? "Neu vorschlagen" : "Vorschlagen lassen"}
         </button>
       </div>
+      <ZielgruppenBudgetWarning primary={effective.primary} secondary={effective.secondary} options={options} />
       {overLimit ? (
         <p className="text-[11px] leading-snug text-orange-700 dark:text-orange-300">
           Dieser Seitentyp erlaubt höchstens zwei primäre Zielgruppen: Es gelten die ersten zwei, die übrigen zählen als sekundär.

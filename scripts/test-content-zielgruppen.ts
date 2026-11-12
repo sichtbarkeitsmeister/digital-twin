@@ -8,16 +8,13 @@ import assert from "node:assert/strict";
 
 import type { ContentAvatarRow } from "../lib/dt/content/load-sources";
 import type { callContentTool } from "../lib/dt/content/pipeline/llm";
-import {
-  analyseAudienceRule,
-  audienceCharShares,
-  avatarBlock,
-  MAX_SECONDARY_AVATAR_CHARS,
-  shareCharBudget,
-  type ContentPipelineContext,
-} from "../lib/dt/content/pipeline/prompts";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-const MAX_AUDIENCE_CHARS_FOR_TEST = 40_000;
+import { ZielgruppenBudgetWarning } from "../components/dt/content/dt-content-zielgruppen-panel";
+import { analyseAudienceRule, avatarBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
+import { previewRevision } from "../lib/dt/content/pipeline/revise-actions";
+import { audienceBudgetError } from "../lib/dt/content/pipeline/run-step";
 import {
   ZIELGRUPPEN_SUGGEST_SYSTEM,
   zielgruppenSuggestSystem,
@@ -28,7 +25,13 @@ import {
 } from "../lib/dt/content/pipeline/zielgruppen-suggest";
 import { loadContentPage, type ContentPageRow } from "../lib/dt/content/store";
 import {
+  CONTENT_AUDIENCE_MAX_CHARS,
   EMPTY_CONTENT_ZIELGRUPPEN,
+  audienceBlockLength,
+  audienceBlockText,
+  audienceBudget,
+  audienceBudgetMessage,
+  audienceBudgetOf,
   contentPrimaryMax,
   contentZielgruppenRule,
   normalizeZielgruppenLists,
@@ -72,14 +75,13 @@ function testModel() {
 
 function testPromptBlock() {
   const isabelle = { name: "Isabelle Hartmann", role: "Verkäuferin hochwertiger Luxusuhren", beschreibung: "Profil Isabelle." };
-  const birgit = { name: "Birgit Lehmann", role: "Erbengemeinschaft", beschreibung: "B".repeat(MAX_SECONDARY_AVATAR_CHARS + 500) };
+  const birgit = { name: "Birgit Lehmann", role: "Erbengemeinschaft", beschreibung: "B".repeat(5_000) };
   const block = avatarBlock({ avatar: { name: "Mix", role: "", beschreibung: "Mix-Profil" }, audience: { primary: [isabelle], secondary: [birgit] } });
-  assert.match(
+  assert.equal(
     block,
-    /^## Zielgruppen dieser Seite\nPrimär \(für sie ist der Text geschrieben; sie bestimmt Ansprache, Beispiele und Reihenfolge\):\n### Isabelle Hartmann – Verkäuferin hochwertiger Luxusuhren\nProfil Isabelle\.\nSekundär \(mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen\):\n### Birgit Lehmann – Erbengemeinschaft\nB+/,
+    `## Zielgruppen dieser Seite\nPrimär (für sie ist der Text geschrieben; sie bestimmt Ansprache, Beispiele und Reihenfolge):\n### Isabelle Hartmann – Verkäuferin hochwertiger Luxusuhren\nProfil Isabelle.\nSekundär (mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen):\n### Birgit Lehmann – Erbengemeinschaft\n${"B".repeat(5_000)}`,
+    "a secondary profile goes complete too (no 3,000 limit)",
   );
-  assert.doesNotMatch(block, /Mix-Profil/, "the page's Zielgruppen replace the Standard-Zielgruppe");
-  assert.ok(block.length < MAX_SECONDARY_AVATAR_CHARS + 1_000, "a secondary profile is shortened (at most 3,000)");
   assert.match(avatarBlock({ avatar: { name: "Mix", role: "", beschreibung: "Mix-Profil" }, audience: null }), /^## Avatar \(Wunschkunde, für den der Text geschrieben wird\)\nName: Mix/, "without own Zielgruppen: as before");
   assert.doesNotMatch(avatarBlock({ avatar: null, audience: { primary: [isabelle], secondary: [] } }), /Sekundär/, "no secondary line without one");
   assert.equal(analyseAudienceRule({ audience: { primary: [isabelle], secondary: [] } }), "", "one Zielgruppe: no rule");
@@ -87,26 +89,72 @@ function testPromptBlock() {
     analyseAudienceRule({ audience: { primary: [isabelle], secondary: [birgit] } }),
     "Bei mehreren Zielgruppen: traumziel, hauptschmerz, groesste_huerde und einwaende kommen aus der primären Zielgruppe. Einen wichtigen Einwand einer sekundären Zielgruppe darfst du in einwaende ergänzen, mit ihrem Namen in Klammern.\n",
   );
-
-  // Many Zielgruppen: all profile texts together stay within 40,000 characters, short ones whole.
-  const long = (name: string, n: number) => ({ name, role: "", beschreibung: `${name} `.repeat(Math.ceil(n / (name.length + 1))).slice(0, n) });
-  const many = { primary: Array.from({ length: 8 }, (_, i) => long(`P${i}`, 9_000)), secondary: Array.from({ length: 3 }, (_, i) => long(`S${i}`, 6_000)) };
-  const shares = audienceCharShares(many.primary.map((m) => m.beschreibung.length), many.secondary.map((m) => m.beschreibung.length));
-  const total = [...shares.primary, ...shares.secondary].reduce((a, b) => a + b, 0);
-  assert.ok(total <= MAX_AUDIENCE_CHARS_FOR_TEST, `profiles together ${total} ≤ 40,000`);
-  assert.deepEqual(shares.secondary, [3_000, 3_000, 3_000], "secondary at most 3,000 each");
-  assert.deepEqual(shares.primary, Array(8).fill(3_875), "the rest shared fairly among the primary ones");
-  assert.deepEqual(shareCharBudget([500, 9_000, 9_000], 10_000), [500, 4_750, 4_750], "a short profile stays whole, its rest goes to the others");
-  assert.deepEqual(audienceCharShares([1_000, 2_000], [800]), { primary: [1_000, 2_000], secondary: [800] }, "nothing cut when it fits");
-  // The whole block (headings and „gekürzt“ marks included) stays within 40,000 characters.
-  for (const [p, sec] of [[4, 0], [8, 3], [12, 0], [30, 3]] as const) {
-    const audience = { primary: Array.from({ length: p }, (_, i) => long(`P${i}`, 9_000)), secondary: Array.from({ length: sec }, (_, i) => long(`S${i}`, 6_000)) };
-    const length = avatarBlock({ avatar: null, audience }).length;
-    assert.ok(length <= MAX_AUDIENCE_CHARS_FOR_TEST, `${p} primary + ${sec} secondary: ${length} ≤ 40,000`);
-  }
-  const shortOnes = { primary: [isabelle, { ...isabelle, name: "Zweite" }], secondary: [] };
-  assert.match(avatarBlock({ avatar: null, audience: shortOnes }), /Profil Isabelle\.$/, "short profiles stay whole");
   console.log("prompt block: ok");
+}
+
+/** A profile of exactly `n` characters with its own words, so a cut would show. */
+function profile(name: string, n: number) {
+  const text = `${name} sagt: ${"Satz über die Lage dieses Menschen und seine Fragen. ".repeat(Math.ceil(n / 50))}`.slice(0, n - 4) + " END";
+  return { name, role: `Rolle ${name}`, beschreibung: text };
+}
+
+/** Never cut: three avatars of 15,000 run complete; nine of 15,000 are refused with the explanation. */
+function testBudget() {
+  assert.equal(CONTENT_AUDIENCE_MAX_CHARS, 120_000);
+  const three = { primary: [profile("Isabelle", 15_000), profile("Birgit", 15_000)], secondary: [profile("Andreas", 15_000)] };
+  const block = avatarBlock({ avatar: null, audience: three });
+  for (const m of [...three.primary, ...three.secondary]) assert.ok(block.includes(m.beschreibung), `${m.name}: complete`);
+  assert.doesNotMatch(block, /gekürzt/, "nothing shortened");
+  const fits = audienceBudget(three);
+  assert.deepEqual([fits.over, fits.total], [false, block.length], "3 × 15,000 fit");
+
+  const nine = { primary: Array.from({ length: 9 }, (_, i) => profile(`Zielgruppe ${i + 1}`, 15_000)), secondary: [] };
+  const over = audienceBudget(nine);
+  assert.equal(over.over, true, "9 × 15,000 do not fit");
+  assert.equal(over.total, avatarBlock({ avatar: null, audience: nine }).length, "the sum is the real block length");
+  const nineBlock = avatarBlock({ avatar: null, audience: nine });
+  for (const m of nine.primary) assert.ok(nineBlock.includes(m.beschreibung), "even over the limit nothing is cut (the step refuses instead)");
+  const message = audienceBudgetMessage(over);
+  assert.match(message, /^Die Zielgruppen dieser Seite passen nicht in den Prompt: zusammen 135\.\d{3} Zeichen, erlaubt sind 120\.000\. /);
+  assert.match(message, /Zielgruppe 1 \(primär\): 15\.000 Zeichen; Zielgruppe 2 \(primär\): 15\.000 Zeichen/);
+  assert.match(message, /Avatar-Texte werden nicht gekürzt\. Was tun: Zielgruppen auf „Aus“ setzen oder Avatar-Texte unter Agenten kürzen\./);
+
+  // The page window computes the same sum from the sizes alone.
+  const sized = (m: { name: string; role: string; beschreibung: string }) => ({ name: m.name, role: m.role, chars: m.beschreibung.length });
+  assert.equal(audienceBudgetOf(nine.primary.map(sized), []).total, over.total);
+  assert.equal(audienceBudgetOf(three.primary.map(sized), three.secondary.map(sized)).total, fits.total);
+  assert.equal(audienceBlockLength([{ name: "Leer", role: "", chars: 0 }], []), audienceBlockText({ primary: [{ name: "Leer", role: "", beschreibung: "" }], secondary: [] }).length);
+
+  // The warning in the page window: each Zielgruppe with its characters, sum, limit and what to do.
+  const options = nine.primary.map((m, i) => ({ id: `z${i}`, name: m.name, role: m.role, chars: 15_000 }));
+  const warning = renderToStaticMarkup(createElement(ZielgruppenBudgetWarning, { primary: options.map((o) => o.id), secondary: [], options }));
+  assert.match(warning, /Zu viel für den Prompt: 135\.\d{3} von 120\.000 Zeichen\. Avatar-Texte werden nicht gekürzt – so startet Schritt 1 nicht\./);
+  assert.match(warning, /Zielgruppe 9 \(primär\): 15\.000 Zeichen/);
+  assert.match(warning, /Was tun: Zielgruppen auf „Aus“ setzen oder Avatar-Texte unter Agenten kürzen\./);
+  assert.equal(renderToStaticMarkup(createElement(ZielgruppenBudgetWarning, { primary: ["z0", "z1"], secondary: ["z2"], options })), "", "3 × 15,000: no warning");
+  console.log("budget, never cut: ok");
+  return { nine };
+}
+
+/** Over the limit nothing calls a model: a revision is refused; the step's check is the same function. */
+async function testRefusedBeforeCalls(nine: { primary: Array<{ name: string; role: string; beschreibung: string }>; secondary: Array<{ name: string; role: string; beschreibung: string }> }) {
+  const html = '<section data-block-id="ablauf"><h2>Ablauf</h2><p>Fotos schicken, Termin, Angebot.</p></section>';
+  const row = page({ html, state: "fertig", notes: [], findings: [], final_findings: [], unresolved: [] } as Partial<ContentPageRow>);
+  const db = new FakeDb({ dt_content_pages: [row as unknown as Record<string, unknown>], dt_llm_usage_events: [] });
+  const context = { audience: nine, avatar: null } as unknown as ContentPipelineContext;
+  const preview = await previewRevision(db.service as never, row, [], { block_id: "ablauf", instruction: "kürzer" }, null, {
+    callTool: async () => assert.fail("no model call over the limit"),
+    context: { context, avatarId: null },
+    models: ["m"],
+  });
+  assert.ok(!preview.ok && preview.status === 422 && /passen nicht in den Prompt/.test(preview.message));
+  assert.equal(db.rows("dt_llm_usage_events").length, 0, "nothing billed");
+  // Step 1 (every step): a final error with the same explanation, raised before any model call.
+  const error = audienceBudgetError({ audience: nine });
+  assert.ok(error && error.retryable === false && /^Die Zielgruppen dieser Seite passen nicht in den Prompt/.test(error.message), "fails visibly, no retry");
+  assert.equal(audienceBudgetError({ audience: { primary: nine.primary.slice(0, 3), secondary: [] } }), null, "3 × 15,000 run");
+  assert.equal(audienceBudgetError({ audience: null }), null);
+  console.log("refused before any call: ok");
 }
 
 const ORG = "11111111-1111-1111-1111-111111111111";
@@ -260,6 +308,8 @@ async function main() {
   testModel();
   await testWithoutColumn();
   testPromptBlock();
+  const { nine } = testBudget();
+  await testRefusedBeforeCalls(nine);
   await testSuggest();
   await testSave();
   console.log("OK: content zielgruppen tests passed");

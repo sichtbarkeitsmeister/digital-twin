@@ -9,6 +9,7 @@ import { ContentLlmError, callContentTool } from "@/lib/dt/content/pipeline/llm"
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { emptyRephraseProgress } from "@/lib/dt/content/pipeline/rephrase";
 import { rephraseProtectedTerms } from "@/lib/dt/content/pipeline/rephrase-guard";
+import { audienceBudget, audienceBudgetMessage } from "@/lib/dt/content/zielgruppen";
 import { runRephraseOnBlocks } from "@/lib/dt/content/pipeline/rephrase-runner";
 import {
   REVISE_MAX_TOKENS,
@@ -104,6 +105,10 @@ export async function previewRevision(
   if ("ok" in request) return request;
 
   const { context, avatarId } = deps.context ?? (await loadContext(service, page, steps));
+  if (context.audience) {
+    const budget = audienceBudget(context.audience);
+    if (budget.over) return { ok: false, status: 422, message: audienceBudgetMessage(budget) };
+  }
   const prompt = revisionPrompt(context, before, request);
   const models = deps.models ?? (await loadContentModelConfig(service)).write;
   const call = await (deps.callTool ?? callContentTool)({

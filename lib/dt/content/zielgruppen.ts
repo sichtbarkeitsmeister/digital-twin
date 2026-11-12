@@ -137,3 +137,90 @@ export function withZielgruppeLevel(
   }
   return normalizeZielgruppenLists(primary, secondary.slice(-CONTENT_SECONDARY_MAX), undefined, primaryMax);
 }
+
+// --- the Zielgruppen block in the prompts: never cut, checked against a budget ------------------
+
+/**
+ * The whole „Zielgruppen dieser Seite“ block may have this many characters. Profiles are never
+ * shortened: a block over it is refused (warning in the page window, step 1 fails before any call).
+ */
+export const CONTENT_AUDIENCE_MAX_CHARS = 120_000;
+
+export const AUDIENCE_BLOCK_TITLE = "## Zielgruppen dieser Seite";
+export const AUDIENCE_PRIMARY_LINE = "Primär (für sie ist der Text geschrieben; sie bestimmt Ansprache, Beispiele und Reihenfolge):";
+export const AUDIENCE_SECONDARY_LINE =
+  "Sekundär (mitbedienen: ihre wichtigsten Fragen und Einwände kurz aufgreifen, die Ansprache nicht auf sie umstellen):";
+
+export type AudienceMember = { name: string; role: string; beschreibung: string };
+
+function audienceMemberText(m: AudienceMember): string {
+  const head = `### ${m.name.trim()}${m.role.trim() ? ` – ${m.role.trim()}` : ""}`;
+  const text = m.beschreibung.trim();
+  return text ? `${head}\n${text}` : head;
+}
+
+/** The block exactly as every step gets it: each profile complete. */
+export function audienceBlockText(audience: { primary: readonly AudienceMember[]; secondary: readonly AudienceMember[] }): string {
+  return [
+    AUDIENCE_BLOCK_TITLE,
+    AUDIENCE_PRIMARY_LINE,
+    ...audience.primary.map(audienceMemberText),
+    ...(audience.secondary.length > 0 ? [AUDIENCE_SECONDARY_LINE, ...audience.secondary.map(audienceMemberText)] : []),
+  ].join("\n");
+}
+
+export type AudienceBudgetEntry = { name: string; level: "primary" | "secondary"; chars: number };
+
+export type AudienceBudget = {
+  /** Characters of the whole block (headings included). */
+  total: number;
+  limit: number;
+  over: boolean;
+  /** Each selected Zielgruppe with the characters of its profile, largest first. */
+  entries: AudienceBudgetEntry[];
+};
+
+/** A Zielgruppe by size: name, role and the length of its (trimmed) profile text. */
+export type AudienceSize = { name: string; role: string; chars: number };
+
+/** The length of `audienceBlockText` from the sizes alone (the page window has no profile texts). */
+export function audienceBlockLength(primary: readonly AudienceSize[], secondary: readonly AudienceSize[]): number {
+  const member = (m: AudienceSize) => `### ${m.name.trim()}${m.role.trim() ? ` – ${m.role.trim()}` : ""}`.length + (m.chars > 0 ? 1 + m.chars : 0);
+  const lines = [AUDIENCE_BLOCK_TITLE.length, AUDIENCE_PRIMARY_LINE.length, ...primary.map(member), ...(secondary.length > 0 ? [AUDIENCE_SECONDARY_LINE.length, ...secondary.map(member)] : [])];
+  return lines.reduce((a, b) => a + b, 0) + lines.length - 1;
+}
+
+/** The block's size for Zielgruppen given by size, against CONTENT_AUDIENCE_MAX_CHARS. */
+export function audienceBudgetOf(primary: readonly AudienceSize[], secondary: readonly AudienceSize[]): AudienceBudget {
+  const total = audienceBlockLength(primary, secondary);
+  const entries: AudienceBudgetEntry[] = [
+    ...primary.map((m) => ({ name: m.name.trim(), level: "primary" as const, chars: m.chars })),
+    ...secondary.map((m) => ({ name: m.name.trim(), level: "secondary" as const, chars: m.chars })),
+  ].sort((a, b) => b.chars - a.chars);
+  return { total, limit: CONTENT_AUDIENCE_MAX_CHARS, over: total > CONTENT_AUDIENCE_MAX_CHARS, entries };
+}
+
+/** The block's size for these Zielgruppen (the run's check). */
+export function audienceBudget(audience: { primary: readonly AudienceMember[]; secondary: readonly AudienceMember[] }): AudienceBudget {
+  const size = (m: AudienceMember): AudienceSize => ({ name: m.name, role: m.role, chars: m.beschreibung.trim().length });
+  return audienceBudgetOf(audience.primary.map(size), audience.secondary.map(size));
+}
+
+function formatChars(n: number): string {
+  return n.toLocaleString("de-DE");
+}
+
+/**
+ * The explanation for a block over the limit, the same in the page window and when step 1 fails:
+ * which Zielgruppen, how many characters each, sum and limit, and what to do.
+ */
+export function audienceBudgetMessage(budget: AudienceBudget): string {
+  const list = budget.entries
+    .map((e) => `${e.name} (${e.level === "primary" ? "primär" : "sekundär"}): ${formatChars(e.chars)} Zeichen`)
+    .join("; ");
+  return (
+    `Die Zielgruppen dieser Seite passen nicht in den Prompt: zusammen ${formatChars(budget.total)} Zeichen, erlaubt sind ${formatChars(budget.limit)}. ` +
+    `Ausgewählt: ${list}. Avatar-Texte werden nicht gekürzt. ` +
+    "Was tun: Zielgruppen auf „Aus“ setzen oder Avatar-Texte unter Agenten kürzen. „Sekundär“ spart keine Zeichen, auch sekundäre Profile gehen vollständig in den Prompt."
+  );
+}
