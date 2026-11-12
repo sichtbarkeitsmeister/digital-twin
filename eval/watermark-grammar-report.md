@@ -15,9 +15,9 @@ Projekt: Einfach Entrümpelung - Gasanov · Prüfdatum: 12.11.2026 · Anrede lau
 
 | Seite | Seitentyp | Wörter | Fehler gesamt | davon kritisch | mittel | gering | Fehler / 1.000 Wörter | nur mittel / 1.000 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| Hauptthema (Startseite) | Startseite | 1.609 | 4 | 0 | 1 | 3 | 2,5 | 0,6 |
-| Entsorgung | Hauptsilo-Seite | 1.406 | 11 | 0 | 4 | 7 | 7,8 | 2,8 |
-| Wohnungsauflösung | Unterseite | 2.048 | 13 | 0 | 5 | 8 | 6,3 | 2,4 |
+| Hauptthema (Startseite) | Startseite | 1.609 | 3 | 0 | 1 | 2 | 1,9 | 0,6 |
+| Entsorgung | Hauptsilo-Seite | 1.406 | 8 | 0 | 4 | 4 | 5,7 | 2,8 |
+| Wohnungsauflösung | Unterseite | 2.048 | 8 | 0 | 5 | 3 | 3,9 | 2,4 |
 
 „Abschnitte umformuliert / gesamt“ und „Fehler vorher / nachher / INTRODUCED“ lassen sich ohne Vorher-Snapshot nicht bestimmen.
 
@@ -25,10 +25,10 @@ Projekt: Einfach Entrümpelung - Gasanov · Prüfdatum: 12.11.2026 · Anrede lau
 
 | Wörter | Fehler | kritisch | mittel | gering | Fehler / 1.000 Wörter |
 |---:|---:|---:|---:|---:|---:|
-| 5.063 | **28** | 0 | 10 | 18 | **5,5** |
+| 5.063 | **19** | 0 | 10 | 9 | **3,8** |
 
-Nach Kategorie: Grammatik 12 · Rechtschreibung (Getrennt-/Zusammenschreibung) 9 · Satzbruch 3 · Sinnänderung / Widerspruch 4 · Zeichensetzung 0 · Anrede 0.
-Ohne die 9 Fälle „weg muss“ / „weg sollen“ / „raus soll“: 19 Fehler = 3,8 je 1.000 Wörter.
+Nach Kategorie: Grammatik 12 · Satzbruch 3 · Sinnänderung / Widerspruch 4 · Rechtschreibung 0 · Zeichensetzung 0 · Anrede 0.
+Korrektur nach Rückfrage: „was weg muss“, „die weg sollen“, „falls sie raus soll“ (9×) wurden zunächst als Fehler gezählt. Die Getrenntschreibung ist üblich und vertretbar, deshalb stehen sie jetzt unter Zweifelsfälle.
 
 ## 3. Die 10 schwersten Fehler
 
@@ -49,21 +49,20 @@ Die vollständige Liste mit Erklärung und Korrekturvorschlag steht in `eval/wat
 
 ## 4. Muster
 
-1. **Zusammenschreibung von Verbpartikeln** (9×): „was weg muss“, „die weg sollen“, „falls sie raus soll“. Das ist ein Stereotyp, das auf allen 3 Seiten vorkommt. Es ist harmlos, aber LanguageTool findet es zuverlässig und kann es automatisch korrigieren.
-2. **Kürzungen, bei denen der Rest nicht angepasst wurde.** Aus „die Weitergabe … und die Zusammenarbeit …“ (Entsorgung L38, korrekt im Plural) wird im FAQ „die Abgabe …“, das Verb bleibt aber „sind“. Andere Fälle: „Erst danach steht der Festpreis“ ohne „fest“, „Der Möbellift“ nach einem abgetrennten Satz, „Ob privat oder gewerblich, ändert …“. Das ist das typische Bild eines Satzes, der umformuliert und dabei verkürzt wurde.
-3. **Doppelte Aussagen.** „Am häufigsten sind … Diese Lagen kommen am häufigsten vor.“ Ursprungs- und Umformulierungssatz stehen offenbar beide im Text.
-4. **Angehängte Satzglieder ohne Bezug:** „…, als Aufpreis“ (2×), „auch am selben Tag oder im Notfall“ (2×). Kurze Nachträge werden hinten an Sätze geklebt, der Bezug geht dabei verloren.
-5. **Kompakte Nominalisierungen mit falschem Bezug:** „die einzelne Möbelentsorgung“, „ein Angebot nur nach Telefon“.
+1. **Kürzungen, bei denen der Rest nicht angepasst wurde.** Aus „die Weitergabe … und die Zusammenarbeit …“ (Entsorgung L38, korrekt im Plural) wird im FAQ „die Abgabe …“, das Verb bleibt aber „sind“. Andere Fälle: „Erst danach steht der Festpreis“ ohne „fest“, „Der Möbellift“ nach einem abgetrennten Satz, „Ob privat oder gewerblich, ändert …“. Das ist das typische Bild eines Satzes, der umformuliert und dabei verkürzt wurde.
+2. **Doppelte Aussagen.** „Am häufigsten sind … Diese Lagen kommen am häufigsten vor.“ Ursprungs- und Umformulierungssatz stehen offenbar beide im Text.
+3. **Angehängte Satzglieder ohne Bezug:** „…, als Aufpreis“ (2×), „auch am selben Tag oder im Notfall“ (2×). Kurze Nachträge werden hinten an Sätze geklebt, der Bezug geht dabei verloren.
+4. **Kompakte Nominalisierungen mit falschem Bezug:** „die einzelne Möbelentsorgung“, „ein Angebot nur nach Telefon“.
 
 Betroffen sind vor allem **FAQ-Antworten und kurze H3-Abschnitte**. Dort wird kurz geschrieben und stark verdichtet. Lange Fließtext-Abschnitte (Preis, Ablauf) sind weitgehend sauber.
 
-**Zur Herkunft (nicht belegt, nur Einschätzung):** Kongruenzfehler, fehlende Verbpartikel, doppelte Sätze und Artikel ohne Bezug korrigiert ein Claude-Lektorat normalerweise. Dass sie im Endtext stehen, passt zu der Annahme, dass sie **nach** dem Lektorat entstanden sind, also bei der Watermark Entfernung. „weg muss“ und der Widerspruch „Inhaber führt aus“ / „Team führt aus“ können auch älter sein. Belegen lässt sich das nur mit Vorher-Snapshots an der Durchsicht-Stelle.
+**Zur Herkunft (nicht belegt, nur Einschätzung):** Kongruenzfehler, fehlende Verbpartikel, doppelte Sätze und Artikel ohne Bezug korrigiert ein Claude-Lektorat normalerweise. Dass sie im Endtext stehen, passt zu der Annahme, dass sie **nach** dem Lektorat entstanden sind, also bei der Watermark Entfernung. Der Widerspruch „Inhaber führt aus“ / „Team führt aus“ können auch älter sein. Belegen lässt sich das nur mit Vorher-Snapshots an der Durchsicht-Stelle.
 
 ## 5. Urteil
 
 Die Schwellen waren für **eingeführte** Fehler gedacht, und die kann ich nicht isolieren. Angewendet auf alle Fehler im Endtext:
 
-- 5,5 Fehler je 1.000 Wörter, auch ohne die Zusammenschreibung noch 3,8, und nur die mittleren gezählt 2,0.
+- 3,8 Fehler je 1.000 Wörter, nur die mittleren gezählt 2,0.
 - 0 kritische Fehler.
 
 → **Erheblich (significant)**, wenn man alle Fehler zählt, an der Grenze „merklich / erheblich“, wenn man nur die mittleren zählt. Auch wenn nur ein Teil davon von Grok stammt: Fast jede Seite hat 2–5 Sätze, die ein Kunde als falsch erkennt (Nr. 1–7 oben). Ohne einen Korrekturschritt nach der Watermark gehen sie so raus.
@@ -77,13 +76,13 @@ Claude bekommt den Auftrag, nur Fehler zu korrigieren und keine Formulierung zu 
 - Dateien: `lib/dt/content/pipeline/steps.ts` (Schritt anlegen), `prompts.ts` (Spezifikation), `step-prompts.ts` (Standard-Anweisung), `run-step.ts` (Ausführung und Prüfung), neue Prüffunktion neben `rephrase-guard.ts`.
 
 **B. LanguageTool-Prüfung pro Abschnitt als Schutz in der Watermark Entfernung** (empfohlen als erster Schritt)
-Jeder Abschnitt wird vor und nach der Grok-Umformulierung mit LanguageTool geprüft. Bringt die Umformulierung **neue** Fehler aus Grammatik oder Rechtschreibung, wird sie für diesen Abschnitt verworfen (bestehender Weg „Umformulierung verworfen …“) oder Grok bekommt den Abschnitt einmal mit der Fehlerliste zurück. Eindeutige Regeln wie die Zusammenschreibung lassen sich auch direkt automatisch korrigieren.
-- Vorteil: Läuft fest im Code, kostet kein LLM-Geld und kann keine KI-Muster zurückbringen. Fängt Nr. 4, 7, 9, 10 und die Zusammenschreibung.
+Jeder Abschnitt wird vor und nach der Grok-Umformulierung mit LanguageTool geprüft. Bringt die Umformulierung **neue** Fehler aus Grammatik oder Rechtschreibung, wird sie für diesen Abschnitt verworfen (bestehender Weg „Umformulierung verworfen …“) oder Grok bekommt den Abschnitt einmal mit der Fehlerliste zurück. Eindeutige Regeln lassen sich auch direkt automatisch korrigieren.
+- Vorteil: Läuft fest im Code, kostet kein LLM-Geld und kann keine KI-Muster zurückbringen. Fängt voraussichtlich Nr. 4, 7, 9, 10.
 - Nachteil: Übersieht doppelte Sätze, Bezugsfehler und Widersprüche (Nr. 1–3). Braucht einen LanguageTool-Server, entweder selbst betrieben (Docker) oder Premium-API, weil die öffentliche API auf 20 Anfragen pro Minute begrenzt ist. Wird mehr verworfen, bleiben mehr Abschnitte im Lektorat-Wortlaut.
 - Dateien: `lib/dt/content/pipeline/rephrase-guard.ts` (zusätzliche Prüfung), `rephrase-runner.ts` (Prüfung pro Abschnitt / erneuter Versuch), neues Modul `lib/dt/content/pipeline/languagetool.ts`, Konfiguration (URL / Schlüssel).
 
 **C. Watermark-Anweisung verschärfen**
-Grok bekommt in `rephrase.ts` ausdrücklich die Regeln mit: Satz nach dem Umformulieren auf Vollständigkeit und Kongruenz prüfen, keine Aussage doppelt stehen lassen, keine Satzglieder hinten anhängen, kein bestimmter Artikel ohne vorherige Erwähnung, Verbpartikel zusammenschreiben.
+Grok bekommt in `rephrase.ts` ausdrücklich die Regeln mit: Satz nach dem Umformulieren auf Vollständigkeit und Kongruenz prüfen, keine Aussage doppelt stehen lassen, keine Satzglieder hinten anhängen, kein bestimmter Artikel ohne vorherige Erwähnung.
 - Vorteil: Billig, nur eine Änderung an der Anweisung.
 - Nachteil: Kein Beweis, dass es wirkt. Grok hält sich nicht verlässlich an solche Listen. Allein genügt das nicht.
 - Dateien: `lib/dt/content/pipeline/rephrase.ts`.
@@ -102,6 +101,7 @@ Empfehlung: **B + C** zuerst. A nur, wenn danach noch Satzbrüche wie Nr. 1–3 
   - „Vor und nach der Entrümpelung dokumentieren wir mit Fotos“ (Objekt fehlt).
   - „Wohnungsauflösung besichtigen lassen“ (man besichtigt die Wohnung, nicht die Auflösung).
   - „Eine 50-m²-Wohnung beginnt / startet bei …“ (umgangssprachlich).
+  - „was weg muss“ / „die weg sollen“ / „falls sie raus soll“ (9×): Duden kennt „wegmüssen“, „raussollen“, die Getrenntschreibung ist aber üblich und vertretbar.
   - Bindestrich statt Halbgeviertstrich im Firmennamen (Typografie).
 
 ## Abschluss
