@@ -5,9 +5,13 @@
 
 import { createHash } from "node:crypto";
 
-export const STATEMENT_CHUNK_CHARS = 20_000;
+/**
+ * Small pieces on purpose: a piece of this size yields roughly 60 to 90 statements, which a
+ * call writes in about a minute. Larger pieces ran into the time limit of a request.
+ */
+export const STATEMENT_CHUNK_CHARS = 6_000;
 /** Raised when the extraction rules change, so stored extractions are not reused. */
-const EXTRACTION_VERSION = "v2";
+const EXTRACTION_VERSION = "v3";
 
 export type ExtractionChunk = {
   statements: string[];
@@ -32,10 +36,12 @@ export type StatementSource = {
 };
 
 export type Statement = {
-  /** „3.17“: source 3 (old to new), statement 17. */
+  /** „3.17“: source 3, statement 17. A source keeps its number for as long as the stand lives. */
   id: string;
   text: string;
   sourceNo: number;
+  /** Position of the source from old to new; decides which claim is the newer one. */
+  order: number;
   source: string;
   date: string | null;
   dateOrigin: DateOrigin;
@@ -172,6 +178,11 @@ function chunksOf(source: Pick<StatementSource, "text" | "label">): PendingChunk
   }));
 }
 
+/** What a source said when it was last evaluated; a different hash means its text changed. */
+export function sourceTextHash(source: Pick<StatementSource, "text">): string {
+  return createHash("sha256").update(source.text.replace(/\r\n?/g, "\n").trim()).digest("hex").slice(0, 24);
+}
+
 /** Every chunk of every source. */
 export function sourceChunks(sources: StatementSource[]): PendingChunk[] {
   return sources.flatMap((source) => chunksOf(source));
@@ -231,9 +242,15 @@ export function normalizeExtractionChunk(raw: unknown, chunkText: string): Extra
  * that order. A statement is internal when its part of the source is marked so, when the
  * extraction marked it, or when it says so itself.
  */
-export function numberStatements(sources: StatementSource[], store: ExtractionStore): Statement[] {
+export function numberStatements(
+  sources: StatementSource[],
+  store: ExtractionStore,
+  /** Fixed source numbers by source id; without them the sources count from old to new. */
+  numbers?: Readonly<Record<string, number>>,
+): Statement[] {
   const out: Statement[] = [];
   sources.forEach((source, index) => {
+    const sourceNo = numbers?.[source.id] ?? index + 1;
     let n = 0;
     const seen = new Map<string, Statement>();
     for (const chunk of chunksOf(source)) {
@@ -247,9 +264,10 @@ export function numberStatements(sources: StatementSource[], store: ExtractionSt
         }
         n += 1;
         const statement: Statement = {
-          id: `${index + 1}.${n}`,
+          id: `${sourceNo}.${n}`,
           text,
-          sourceNo: index + 1,
+          sourceNo,
+          order: index,
           source: source.label,
           date: source.date,
           dateOrigin: source.dateOrigin,

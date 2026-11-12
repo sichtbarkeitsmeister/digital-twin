@@ -248,7 +248,7 @@ export function TranscriptsPanel(props: {
       return;
     }
     setItems((prev) => prev.filter((row) => row.id !== id));
-    toast.success("Gespräch gelöscht. Freigegebene Stände bleiben, bis du neu auswertest.");
+    toast.success("Gespräch gelöscht. Was mit seinen Inhalten im Anbieterwissen geschieht, entscheidest du im Workshop.");
     notifyWorkshop();
   }
 

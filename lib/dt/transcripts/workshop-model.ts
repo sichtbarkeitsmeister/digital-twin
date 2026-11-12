@@ -101,6 +101,21 @@ export type AnbieterReview = {
   dismissedIds: string[];
   /** What the last „Änderung anwenden“ dropped although nobody asked for it. */
   lostInRevision: Array<{ id: string | null; text: string; source: string; point: string }>;
+  /** The number each source carries in the statement IDs, by source id. It never changes or gets reused. */
+  sourceNumbers: Record<string, number>;
+  /** Hash of each source's text at the last run; tells a changed source from a new one. */
+  sourceHashes: Record<string, string>;
+  nextSourceNo: number;
+};
+
+/** What changed in the Bestand since the stand was written. */
+export type AnbieterSync = {
+  /** New sources, by label. Only these can be worked in without a full run. */
+  added: string[];
+  /** Sources whose text changed; they need a full run. */
+  changed: string[];
+  /** Sources that are gone and whose content is still in the stand. */
+  removed: number;
 };
 
 export const REVIEW_UNASSIGNED_MAX = 1_000;
@@ -196,6 +211,8 @@ export type AnbieterState = {
   extraction: ExtractionStore;
   /** Result of the coverage and fact check of the last run. Null for stands from before the check. */
   review: AnbieterReview | null;
+  /** Derived on every load; never trusted from the saved row. */
+  sync: AnbieterSync;
 };
 
 /** An empty point and the sources that carry a section with its name. */
@@ -828,6 +845,7 @@ export function emptyAnbieterState(): AnbieterState {
     openWithSource: [],
     extraction: {},
     review: null,
+    sync: { added: [], changed: [], removed: 0 },
   };
 }
 
@@ -1045,6 +1063,11 @@ function readReview(raw: unknown): AnbieterReview | null {
     .slice(0, 400);
   const count = (value: unknown, fallback: number) =>
     typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
+  const numbers = Object.fromEntries(
+    Object.entries(asRecord(record.sourceNumbers) ?? {}).filter(
+      (entry): entry is [string, number] => Number.isInteger(entry[1]) && (entry[1] as number) > 0,
+    ),
+  );
   return {
     statementCount: count(record.statementCount, 0),
     sourceCount: count(record.sourceCount, 0),
@@ -1055,6 +1078,13 @@ function readReview(raw: unknown): AnbieterReview | null {
     guardrails,
     dismissedIds: idList(record.dismissedIds, 5_000),
     lostInRevision,
+    sourceNumbers: numbers,
+    sourceHashes: Object.fromEntries(
+      Object.entries(asRecord(record.sourceHashes) ?? {}).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string" && entry[0] in numbers,
+      ),
+    ),
+    nextSourceNo: Math.max(count(record.nextSourceNo, 1), ...Object.values(numbers).map((n) => n + 1), 1),
   };
 }
 
@@ -1078,6 +1108,7 @@ export function readAnbieterState(
     openWithSource: hasContent ? openPointsWithSource(items, sources) : [],
     extraction: readExtraction(record?.extraction),
     review: hasContent ? readReview(record?.review) : null,
+    sync: { added: [], changed: [], removed: 0 },
     status: sectionStatus({
       fingerprint,
       sourceFingerprint,

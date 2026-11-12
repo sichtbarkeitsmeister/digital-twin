@@ -1035,6 +1035,110 @@ void (async () => {
     ],
     "the content pipeline reads every guard rail as blocked",
   );
+
+  // --- A new source is worked in; a deleted one is taken out or kept ------------------
+  const { anbieterSyncPlan, forgetRemovedSources } = await import("../lib/dt/transcripts/anbieter-eval");
+  assert.deepEqual(anbieterSyncPlan(full.review, bestand), { added: [], changed: [], removed: 0 });
+  // Older than both by its date: a full run would number it 1 and shift every ID.
+  const added = { ...source("dazu", "Zweites Büro in Straelen. Die Beratung kostet 95 Euro. Das Büro ist in Moers."), spokenOn: "2024-06-01" };
+  const grown = [...bestand, added];
+  assert.match(anbieterSyncPlan(full.review, grown).added[0] ?? "", /Quelle dazu/);
+  assert.deepEqual(
+    anbieterSyncPlan(full.review, [{ ...older, summary: "Anders.", rawText: "Anders." }, newer]).changed.length,
+    1,
+  );
+
+  let grownStore = store;
+  let extractedSources = 0;
+  grownStore = (
+    await extractPendingStatements({
+      sources: grown,
+      store: grownStore,
+      call: async () => {
+        extractedSources += 1;
+        return { json: { aussagen: ["Zweites Büro in Straelen.", "Die Beratung kostet 95 Euro.", "Das Büro ist in Moers."], eigennamen: [] }, usage, model: "m" };
+      },
+    })
+  ).store;
+  assert.equal(extractedSources, 1, "only the new source is read");
+
+  const mergeCall: Call = async ({ tool, user }) => {
+    if (tool.name === "submit_zuordnung") return { json: { zuordnung: [] }, usage, model: "m" };
+    assert.equal(tool.name, "submit_einarbeitung");
+    assert.equal(user.includes("[1.1]"), false, "the old statements are not sent again");
+    const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
+    const json: Record<string, unknown> = {};
+    if (keys.includes("unternehmen")) {
+      json.unternehmen = { ergaenzung: "Zweites Büro in Straelen.", ids: ["3.1"], enthalten_ids: ["3.3"] };
+    }
+    if (keys.includes("preis")) {
+      json.preis = {
+        ergaenzung: "",
+        ids: [],
+        widersprueche: [{ thema: "Preis der Beratung", bestehend: "90 Euro", neu: "95 Euro", ids: ["3.2"] }],
+      };
+    }
+    return { json, usage, model: "m" };
+  };
+  const mergedRun = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: grown,
+    store: grownStore,
+    mode: "merge",
+    current: { items: full.items, review: full.review },
+    call: mergeCall,
+  });
+  assert.equal(
+    item(mergedRun.items, "unternehmen").current,
+    `${item(full.items, "unternehmen").current}\n\nZweites Büro in Straelen.`,
+    "the existing text stays word for word; only the new content is added",
+  );
+  assert.deepEqual(item(mergedRun.items, "unternehmen").statementIds, ["1.2", "2.2", "3.1", "3.3"], "the new source gets the next number");
+  assert.equal(item(mergedRun.items, "kanaele"), item(full.items, "kanaele"), "a point without new statements stays the same object");
+  const mergedConflict = item(mergedRun.items, "preis").conflicts?.at(-1);
+  assert.deepEqual(mergedConflict?.claims.map((claim) => [claim.text, claim.source === "Bisheriger Anbieterstand", claim.newest]), [
+    ["90 Euro", true, false],
+    ["95 Euro", false, false],
+  ]);
+  assert.equal(item(mergedRun.items, "preis").conflicts?.length, 2, "the earlier contradiction stays");
+  assert.deepEqual(mergedRun.review.unassigned.map((s) => s.id), ["1.3"], "every new statement is accounted for");
+  assert.equal(mergedRun.review.sourceNumbers[added.id], 3);
+  assert.deepEqual(anbieterSyncPlan(mergedRun.review, grown), { added: [], changed: [], removed: 0 });
+
+  // Deleted, content stays: nothing changes but the review forgets the source.
+  assert.equal(anbieterSyncPlan(mergedRun.review, bestand).removed, 1);
+  const kept = forgetRemovedSources(mergedRun.review, bestand);
+  assert.equal(added.id in kept.sourceNumbers, false);
+  assert.equal(kept.nextSourceNo, 4, "the number of a deleted source is never reused");
+  assert.equal(anbieterSyncPlan(kept, bestand).removed, 0);
+
+  // Deleted, content goes: only the points that held its statements are written anew.
+  const removedKeys: string[][] = [];
+  const removal = await evaluateAnbieterCorpusWith({
+    organisationName: "Fischer",
+    sources: bestand,
+    store: grownStore,
+    mode: "remove",
+    current: { items: mergedRun.items, review: mergedRun.review },
+    call: async ({ tool, user }) => {
+      assert.equal(user.includes("Straelen"), false, "the deleted source is no longer part of the statements");
+      const keys = Object.keys((tool.input_schema as { properties: Record<string, unknown> }).properties);
+      removedKeys.push(keys);
+      const json: Record<string, unknown> = Object.fromEntries(keys.map((key) => [key, point("", [])]));
+      if ("unternehmen" in json) json.unternehmen = point("Büro in Moers. Thorsten Fischer ist im BVMW.", ["1.2", "2.2"]);
+      if ("preis" in json) json.preis = point("", [], [{ thema: "Preis der Beratung", angaben: [{ text: "80 Euro", ids: ["1.1"] }, { text: "90 Euro", ids: ["2.1"] }] }]);
+      return { json, usage, model: "m" };
+    },
+  });
+  assert.deepEqual(removedKeys.flat().sort(), ["preis", "unternehmen"], "only the affected points are asked for");
+  assert.equal(/Straelen/.test(item(removal.items, "unternehmen").current), false);
+  assert.equal(item(removal.items, "preis").conflicts?.length, 1);
+  assert.equal(item(removal.items, "kanaele").current, item(full.items, "kanaele").current);
+  assert.equal(added.id in removal.review.sourceNumbers, false);
+  await assert.rejects(
+    evaluateAnbieterCorpusWith({ organisationName: "Fischer", sources: bestand, store, mode: "merge", current: { items: full.items, review: full.review }, call: mergeCall }),
+    /keine neue Quelle/,
+  );
   console.log("anbieter statements, coverage, facts, contradictions, revision ok");
 })().catch((err) => {
   console.error(err);

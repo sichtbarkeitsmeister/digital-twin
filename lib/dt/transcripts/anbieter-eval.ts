@@ -10,6 +10,7 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 
+import { reviveStringifiedToolInput } from "@/lib/ai/tolerant-json";
 import {
   type ExtractionStore,
   type Statement,
@@ -27,6 +28,7 @@ import {
   pruneExtraction,
   resolveSourceDate,
   sourceChunks,
+  sourceTextHash,
   unassignedStatements,
 } from "@/lib/dt/transcripts/anbieter-statements";
 import type { WorkshopToolCall } from "@/lib/dt/transcripts/avatar-plan-llm";
@@ -38,6 +40,7 @@ import {
   type AnbieterItem,
   type AnbieterPointKey,
   type AnbieterReview,
+  type AnbieterSync,
   type WorkshopSource,
   anbieterPointGroups,
   formatRevisionBlock,
@@ -50,6 +53,7 @@ import {
 } from "@/lib/dt/transcripts/workshop-model";
 
 type Usage = { inputTokens: number; outputTokens: number };
+type SchemaArg = Parameters<typeof reviveStringifiedToolInput>[1];
 
 /** Below this remaining time a further call is not worth starting. */
 const MIN_CALL_MS = 30_000;
@@ -176,7 +180,7 @@ export async function extractPendingStatements(input: ExtractStatementsInput): P
   let calls = 0;
   let error: string | null = null;
   const left = input.deadline == null ? undefined : input.deadline - now();
-  const batch = left != null && left < MIN_CALL_MS ? [] : pending.slice(0, input.concurrency ?? 6);
+  const batch = left != null && left < MIN_CALL_MS ? [] : pending.slice(0, input.concurrency ?? 8);
   await Promise.all(
     batch.map(async (chunk) => {
       try {
@@ -200,7 +204,11 @@ export async function extractPendingStatements(input: ExtractStatementsInput): P
         usage.inputTokens += result.usage.inputTokens;
         usage.outputTokens += result.usage.outputTokens;
         model = result.model ?? model;
-        const extracted = normalizeExtractionChunk(result.json, chunk.text);
+        // Long lists sometimes arrive as one JSON string instead of an array.
+        const extracted = normalizeExtractionChunk(
+          reviveStringifiedToolInput(result.json, EXTRACTION_TOOL.input_schema as SchemaArg),
+          chunk.text,
+        );
         if (extracted.statements.length === 0) {
           throw new Error(`Aus „${chunk.source}“ kam keine einzige Aussage zurück.`);
         }
@@ -353,6 +361,90 @@ Regeln:
 - Jede ID steht in mindestens einer Leitplanke.
 - Nichts erfinden: kein Verbot ohne Hinweis.`;
 
+const LEFTOVER_SYSTEM = `Diese Aussagen aus Kundengesprächen hat noch kein Punkt der Anbieter-Checkliste aufgenommen. Ordne JEDE einem Punkt zu.
+Punkte: ${ANBIETER_POINTS.map((point) => `${point.key} (${point.label})`).join(", ")}.
+Eine Aussage über den Anbieter, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.
+„keiner“ nur, wenn die Aussage nichts über den Anbieter, sein Angebot, seine Arbeitsweise, seinen Markt oder seine Pläne sagt.`;
+
+/** Statements placed afterwards go into their point word for word; the text is not rewritten for them. */
+function appendLate(items: AnbieterItem[], zuordnung: unknown, byId: ReadonlyMap<string, Statement>): AnbieterItem[] {
+  const record = zuordnung && typeof zuordnung === "object" ? (zuordnung as Record<string, unknown>) : null;
+  const rows = Array.isArray(record?.zuordnung) ? record.zuordnung : [];
+  const known = new Set(byId.keys());
+  const late = new Map<AnbieterPointKey, Statement[]>();
+  const taken = new Set(items.flatMap((item) => item.statementIds ?? []));
+  for (const row of rows) {
+    const entry = row && typeof row === "object" ? (row as Record<string, unknown>) : null;
+    const statement = byId.get(parseStatementIds(entry?.id, known)[0] ?? "");
+    const key = ALL_KEYS.find((candidate) => candidate === entry?.punkt);
+    if (!statement || !key || taken.has(statement.id)) continue;
+    taken.add(statement.id);
+    late.set(key, [...(late.get(key) ?? []), statement]);
+  }
+  return items.map((item) => {
+    const extra = late.get(item.key);
+    if (!extra) return item;
+    return {
+      ...item,
+      current: [item.current.trim(), ...extra.map((statement) => statement.text)].filter(Boolean).join("\n"),
+      statementIds: [...(item.statementIds ?? []), ...extra.map((statement) => statement.id)],
+    };
+  });
+}
+
+const MERGE_RULES = `Es gibt einen bestehenden Anbieterstand. Eine neue Quelle ist dazugekommen. Du arbeitest NUR ihre Aussagen ein.
+Der bestehende Text bleibt Wort für Wort, wie er ist. Du schreibst ihn nicht um, kürzt ihn nicht und wiederholst ihn nicht.
+
+Für jedes deiner Felder, zu dem neue Aussagen gehören, lieferst du:
+- ergaenzung: nur der neue Inhalt, als Text, der unter den bestehenden gesetzt wird. Er enthält den Inhalt jeder Aussage aus ids: jede Zahl, jeden Betrag, jedes Datum, jeden Namen, jede Ausnahme. Was der bestehende Text inhaltlich schon sagt, steht NICHT noch einmal darin.
+- ids: die ID jeder neuen Aussage, deren Inhalt in ergaenzung steht. Jede ID einzeln.
+- enthalten_ids: die ID jeder neuen Aussage, deren Inhalt der bestehende Text dieses Felds schon vollständig enthält. Sie wird nicht doppelt eingefügt.
+- widersprueche: wenn eine neue Aussage zum selben Sachverhalt etwas anderes sagt als der bestehende Text (andere Zahl, anderer Preis, anderer Name, anderer Ablauf, ja gegen nein). Dann kommt sie NICHT in ergaenzung. Du nennst thema, bestehend (die Stelle aus dem bestehenden Text, wörtlich), neu (die neue Angabe) und ids. Du entscheidest nicht, wer recht hat, auch nicht zugunsten der neueren Quelle.
+
+Eine neue Aussage, die den bestehenden Text nur genauer macht oder ergänzt, ist kein Widerspruch; sie kommt in ergaenzung.
+Felder ohne neue Aussagen lässt du ganz weg. Eine Aussage darf in mehreren Feldern stehen. Nichts erfinden.`;
+
+function mergeTool(keys: readonly AnbieterPointKey[]): Anthropic.Tool {
+  const wanted = new Set(keys);
+  const ids = { type: "array", items: { type: "string" } };
+  return {
+    name: "submit_einarbeitung",
+    description: "Ergänzungen aus den neuen Aussagen, pro Checklistenpunkt. Der bestehende Text wird nicht zurückgegeben.",
+    input_schema: {
+      type: "object",
+      properties: Object.fromEntries(
+        ANBIETER_POINTS.filter((point) => wanted.has(point.key)).map((point) => [
+          point.key,
+          {
+            type: "object",
+            description: point.label,
+            properties: {
+              ergaenzung: { type: "string", description: "Nur der neue Inhalt. Leer, wenn nichts Neues dazukommt." },
+              ids: { ...ids, description: "IDs der Aussagen in ergaenzung." },
+              enthalten_ids: { ...ids, description: "IDs neuer Aussagen, die der bestehende Text schon enthält." },
+              widersprueche: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    thema: { type: "string" },
+                    bestehend: { type: "string", description: "Die Stelle aus dem bestehenden Text, wörtlich." },
+                    neu: { type: "string", description: "Die neue Angabe." },
+                    ids,
+                  },
+                  required: ["thema", "bestehend", "neu", "ids"],
+                },
+              },
+            },
+            required: ["ergaenzung", "ids"],
+          },
+        ]),
+      ),
+      required: [],
+    },
+  };
+}
+
 function pointLabels(keys: readonly AnbieterPointKey[]): string {
   const wanted = new Set(keys);
   return ANBIETER_POINTS.filter((point) => wanted.has(point.key))
@@ -379,7 +471,7 @@ function readConflicts(raw: unknown, byId: ReadonlyMap<string, Statement>): Anbi
       const ids = parseStatementIds(claim?.ids, known);
       if (!text || ids.length === 0) continue;
       const statements = ids.map((id) => byId.get(id)).filter((s): s is Statement => s != null);
-      const latest = statements.reduce((a, b) => (b.sourceNo > a.sourceNo ? b : a));
+      const latest = statements.reduce((a, b) => (b.order > a.order ? b : a));
       claims.push({
         text,
         ids,
@@ -387,7 +479,7 @@ function readConflicts(raw: unknown, byId: ReadonlyMap<string, Statement>): Anbi
         date: latest.date,
         dateOrigin: latest.dateOrigin,
         newest: false,
-        order: latest.sourceNo,
+        order: latest.order,
       });
     }
     if (claims.length < 2) continue;
@@ -464,8 +556,17 @@ export function buildAnbieterReview(input: {
   guardrails?: AnbieterReview["guardrails"];
   dismissedIds?: string[];
   lostInRevision?: AnbieterReview["lostInRevision"];
+  /** Source numbers of the statement IDs; without them the sources count from old to new. */
+  numbers?: Record<string, number>;
+  nextSourceNo?: number;
 }): AnbieterReview {
   const dismissed = input.dismissedIds ?? [];
+  const live = new Set(input.sources.map((source) => source.id));
+  const sourceNumbers = Object.fromEntries(
+    Object.entries(input.numbers ?? Object.fromEntries(input.sources.map((source, index) => [source.id, index + 1]))).filter(
+      ([id]) => live.has(id),
+    ),
+  );
   const internal = input.statements.filter((statement) => statement.internal);
   // Internal statements are accounted for in their own area; they are never „unassigned“.
   const unassigned = unassignedStatements(
@@ -491,8 +592,50 @@ export function buildAnbieterReview(input: {
     guardrails: input.guardrails ?? [],
     dismissedIds: dismissed,
     lostInRevision: input.lostInRevision ?? [],
+    sourceNumbers,
+    sourceHashes: Object.fromEntries(input.sources.map((source) => [source.id, sourceTextHash(source)])),
+    nextSourceNo: Math.max(input.nextSourceNo ?? 1, ...Object.values(sourceNumbers).map((n) => n + 1), 1),
   };
 }
+
+/** What changed in the Bestand since the stand was written: new, changed and removed sources. */
+export function anbieterSyncPlan(review: AnbieterReview | null, sources: WorkshopSource[]): AnbieterSync {
+  if (!review || Object.keys(review.sourceNumbers).length === 0) return { added: [], changed: [], removed: 0 };
+  const current = statementSources(sources);
+  const live = new Set(current.map((source) => source.id));
+  return {
+    added: current.filter((source) => !(source.id in review.sourceNumbers)).map((source) => source.label),
+    changed: current
+      .filter((source) => source.id in review.sourceNumbers && review.sourceHashes[source.id] !== sourceTextHash(source))
+      .map((source) => source.label),
+    removed: Object.keys(review.sourceNumbers).filter((id) => !live.has(id)).length,
+  };
+}
+
+/**
+ * A source was deleted and its content shall stay in the stand: the review forgets the
+ * source, the texts stay word for word. Its number is never given to another source.
+ */
+export function forgetRemovedSources(review: AnbieterReview, sources: WorkshopSource[]): AnbieterReview {
+  const live = new Set(sources.map((source) => source.id));
+  const keep = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => live.has(id)));
+  const gone = new Set(
+    Object.entries(review.sourceNumbers)
+      .filter(([id]) => !live.has(id))
+      .map(([, n]) => `${n}.`),
+  );
+  const stays = (id: string) => ![...gone].some((prefix) => id.startsWith(prefix));
+  return {
+    ...review,
+    sourceNumbers: keep(review.sourceNumbers),
+    sourceHashes: keep(review.sourceHashes),
+    sourceCount: Object.keys(keep(review.sourceNumbers)).length,
+    unassigned: review.unassigned.filter((statement) => stays(statement.id)),
+    internal: review.internal.filter((statement) => stays(statement.id)),
+  };
+}
+
+export type AnbieterRunMode = "full" | "merge" | "remove";
 
 export type EvaluateAnbieterInput = {
   organisationName: string;
@@ -505,6 +648,11 @@ export type EvaluateAnbieterInput = {
    * points are written anew, and the result is checked against this stand.
    */
   current?: { items: AnbieterItem[]; review: AnbieterReview | null };
+  /**
+   * „merge“ works only the new sources into the saved stand, „remove“ takes the content of
+   * deleted sources out of it. Both need a saved stand with its check. Default: a full run.
+   */
+  mode?: AnbieterRunMode;
   /** Epoch ms after which no further call starts; calls in flight are cut off there. */
   deadline?: number;
   call: WorkshopToolCall;
@@ -531,7 +679,23 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
   if (pendingChunks(sources, input.store).length > 0) {
     throw new Error("Die Aussagen sind noch nicht aus allen Quellen gezogen. Bitte die Auswertung neu starten.");
   }
-  const statements = numberStatements(sources, input.store);
+  // A saved stand keeps its source numbers, so the statement IDs in its points stay valid.
+  const savedReview = input.mode === "full" ? null : (input.current?.review ?? null);
+  const incremental = Boolean(savedReview && (input.mode === "merge" || input.mode === "remove" || instruction));
+  let nextSourceNo = savedReview?.nextSourceNo ?? 1;
+  const numbers: Record<string, number> = {};
+  const fresh: StatementSource[] = [];
+  sources.forEach((source, index) => {
+    const known = incremental ? savedReview?.sourceNumbers[source.id] : undefined;
+    if (known != null) numbers[source.id] = known;
+    else if (incremental) {
+      numbers[source.id] = nextSourceNo;
+      nextSourceNo += 1;
+      fresh.push(source);
+    } else numbers[source.id] = index + 1;
+  });
+  if (!incremental) nextSourceNo = sources.length + 1;
+  const statements = numberStatements(sources, input.store, numbers);
   if (statements.length === 0) throw new Error("Aus dem Bestand kam keine einzige Aussage. Bitte erneut auswerten.");
   // Internal statements never reach the assignment: no point can take them as a fact.
   const open = statements.filter((statement) => !statement.internal);
@@ -555,7 +719,7 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
     usage.inputTokens += result.usage.inputTokens;
     usage.outputTokens += result.usage.outputTokens;
     model = result.model ?? model;
-    return result.json;
+    return reviveStringifiedToolInput(result.json, call.tool.input_schema as SchemaArg);
   };
 
   const fill = async (
@@ -589,12 +753,12 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
   };
 
   /** The internal notes as prohibitions. A rule that carries a number is dropped: it would leak the note. */
-  const guard = async (): Promise<AnbieterReview["guardrails"]> => {
-    if (internal.length === 0) return [];
-    const internalIds = new Set(internal.map((statement) => statement.id));
+  const guard = async (notes: Statement[] = internal): Promise<AnbieterReview["guardrails"]> => {
+    if (notes.length === 0) return [];
+    const internalIds = new Set(notes.map((statement) => statement.id));
     const json = await run({
       system: GUARDRAIL_SYSTEM,
-      user: formatStatements(internal),
+      user: formatStatements(notes),
       tool: GUARDRAIL_TOOL,
       maxTokens: 16_000,
     });
@@ -619,14 +783,155 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
     } = {},
   ) => ({
     items,
-    review: buildAnbieterReview({ sources, store: input.store, statements, items, ...extra }),
+    review: buildAnbieterReview({ sources, store: input.store, statements, items, numbers, nextSourceNo, ...extra }),
     usage,
     model,
     calls,
   });
 
-  // --- Revision: only the points the instruction touches -------------------
   const saved = input.current;
+  const internalIds = new Set(internal.map((statement) => statement.id));
+  const keptGuardrails = (review: AnbieterReview) =>
+    review.guardrails
+      .map((guardrail) => ({ ...guardrail, ids: guardrail.ids.filter((id) => internalIds.has(id)) }))
+      .filter((guardrail) => guardrail.ids.length > 0);
+  /** IDs that still belong to a statement of the Bestand. */
+  const liveIds = (ids: string[] | undefined) => (ids ?? []).filter((id) => known.has(id));
+
+  // --- Remove: the content of deleted sources leaves the stand ------------------
+  if (input.mode === "remove") {
+    if (!saved?.review) {
+      throw new Error("Dieser Stand hat noch keine Aussagen-Zuordnung. Bitte komplett neu auswerten.");
+    }
+    // The points that held a statement of a deleted source are written anew from what is left.
+    const affected = saved.items.filter((item) => (item.statementIds ?? []).some((id) => !known.has(id))).map((item) => item.key);
+    const answers = await Promise.all(anbieterPointGroups(affected).map((keys) => fill(keys, { required: true })));
+    const rewritten = new Map(answers.flatMap((answer) => answer.items).map((item) => [item.key, item]));
+    const items = saved.items.map((item) => rewritten.get(item.key) ?? { ...item, statementIds: liveIds(item.statementIds) });
+    return done(items, { guardrails: keptGuardrails(saved.review), dismissedIds: liveIds(saved.review.dismissedIds) });
+  }
+
+  // --- Merge: only the new sources are worked into the stand --------------------
+  if (input.mode === "merge") {
+    if (!saved?.review || !saved.items.some((item) => item.current.trim())) {
+      throw new Error("Es gibt noch keinen geprüften Anbieterstand zum Einarbeiten. Bitte komplett neu auswerten.");
+    }
+    const changedSources = sources.filter(
+      (source) => source.id in saved.review!.sourceNumbers && saved.review!.sourceHashes[source.id] !== sourceTextHash(source),
+    );
+    if (changedSources.length > 0) {
+      throw new Error(
+        `Eine bestehende Quelle wurde geändert (${changedSources.map((source) => source.label).join(", ")}). Das lässt sich nicht einarbeiten. Bitte komplett neu auswerten.`,
+      );
+    }
+    const freshNumbers = new Set(fresh.map((source) => numbers[source.id]));
+    const added = open.filter((statement) => freshNumbers.has(statement.sourceNo));
+    const addedInternal = internal.filter((statement) => freshNumbers.has(statement.sourceNo));
+    if (added.length === 0 && addedInternal.length === 0) {
+      throw new Error("Es ist keine neue Quelle dazugekommen. Es gibt nichts einzuarbeiten.");
+    }
+    const addedById = new Map(added.map((statement) => [statement.id, statement]));
+    const addedIds = new Set(addedById.keys());
+    const newestOrder = Math.max(...statements.map((statement) => statement.order));
+    const before = new Map(saved.items.map((item) => [item.key, item]));
+
+    const mergeGroup = async (keys: readonly AnbieterPointKey[]): Promise<AnbieterItem[]> => {
+      const json = asRecord(
+        await run({
+          system: [
+            MERGE_RULES,
+            "",
+            `Du bearbeitest NUR diese Felder: ${pointLabels(keys)}.`,
+            `Die übrigen Punkte bearbeitet ein anderer Lauf: ${pointLabels(ALL_KEYS.filter((key) => !keys.includes(key)))}. Aussagen, die nur dorthin gehören, lässt du liegen.`,
+          ].join("\n"),
+          user: [
+            `Organisation: ${input.organisationName}`,
+            "",
+            "# Bestehender Anbieterstand (bleibt wörtlich)",
+            ...ANBIETER_POINTS.filter((point) => keys.includes(point.key)).map(
+              (point) => `## ${point.key} (${point.label})\n${before.get(point.key)?.current.trim() || "(leer)"}`,
+            ),
+            "",
+            "# Neue Aussagen",
+            formatStatements(added),
+          ].join("\n"),
+          tool: mergeTool(keys),
+          maxTokens: 32_000,
+        }),
+      );
+      const out: AnbieterItem[] = [];
+      for (const key of keys) {
+        const prev = before.get(key);
+        const value = asRecord(json?.[key]);
+        if (!prev || !value) continue;
+        const addition = typeof value.ergaenzung === "string" ? value.ergaenzung.trim() : "";
+        const ids = parseStatementIds(value.ids, addedIds);
+        const contained = parseStatementIds(value.enthalten_ids, addedIds);
+        const conflicts: AnbieterConflict[] = [];
+        for (const row of Array.isArray(value.widersprueche) ? value.widersprueche : []) {
+          const record = asRecord(row);
+          const claimIds = parseStatementIds(record?.ids, addedIds);
+          const existing = typeof record?.bestehend === "string" ? record.bestehend.trim() : "";
+          const claimed = typeof record?.neu === "string" ? record.neu.trim() : "";
+          if (!existing || !claimed || claimIds.length === 0) continue;
+          const from = claimIds.map((id) => addedById.get(id)!).reduce((a, b) => (b.order > a.order ? b : a));
+          conflicts.push({
+            topic: typeof record?.thema === "string" ? record.thema.trim() : "",
+            claims: [
+              { text: existing, source: "Bisheriger Anbieterstand", date: null, newest: false, ids: [] },
+              {
+                text: claimed,
+                source: from.source,
+                date: from.date,
+                dateOrigin: from.dateOrigin,
+                newest: from.order === newestOrder,
+                ids: claimIds,
+              },
+            ],
+          });
+        }
+        const conflictIds = conflicts.flatMap((conflict) => conflict.claims.flatMap((claim) => claim.ids));
+        // Text only counts with the statements it came from; the existing text is never touched.
+        const text = addition && ids.length > 0 ? addition : "";
+        if (!text && contained.length === 0 && conflicts.length === 0) continue;
+        out.push({
+          ...prev,
+          current: [prev.current.trim(), text].filter(Boolean).join("\n\n"),
+          statementIds: [...new Set([...(prev.statementIds ?? []), ...(text ? ids : []), ...contained, ...conflictIds])],
+          conflicts: [...(prev.conflicts ?? []), ...conflicts],
+        });
+      }
+      return out;
+    };
+
+    const guardrailsRun = (addedInternal.length > 0 ? guard(addedInternal) : Promise.resolve([])).catch(
+      () => [] as AnbieterReview["guardrails"],
+    );
+    const merged = new Map(
+      (added.length > 0 ? await Promise.all(anbieterPointGroups().map((keys) => mergeGroup(keys))) : [])
+        .flat()
+        .map((item) => [item.key, item]),
+    );
+    let items = saved.items.map((item) => merged.get(item.key) ?? item);
+
+    // New statements no point took: placed once more, word for word.
+    const leftover = unassignedStatements(added, assignedIds(items));
+    if (leftover.length > 0 && hasTime()) {
+      const zuordnung = await run({
+        system: LEFTOVER_SYSTEM,
+        user: formatStatements(leftover),
+        tool: LEFTOVER_TOOL,
+        maxTokens: 32_000,
+      }).catch(() => null);
+      items = appendLate(items, zuordnung, addedById);
+    }
+    return done(items, {
+      guardrails: [...keptGuardrails(saved.review), ...(await guardrailsRun)],
+      dismissedIds: liveIds(saved.review.dismissedIds),
+    });
+  }
+
+  // --- Revision: only the points the instruction touches -------------------
   if (instruction && saved?.review && saved.items.some((item) => item.current.trim())) {
     const named = pointsNamedInInstruction(instruction);
     const revision = "Das ist eine Änderung, keine neue Auswertung.";
@@ -688,11 +993,7 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
         lost.push({ id: null, text: `${FACT_KIND_LABEL[fact.kind]} ${fact.value}`, source: "", point: item.label });
       }
     }
-    const internalIds = new Set(internal.map((statement) => statement.id));
-    const guardrails = (saved.review.guardrails ?? [])
-      .map((guardrail) => ({ ...guardrail, ids: guardrail.ids.filter((id) => internalIds.has(id)) }))
-      .filter((guardrail) => guardrail.ids.length > 0);
-    return done(items, { guardrails, dismissedIds, lostInRevision: lost });
+    return done(items, { guardrails: keptGuardrails(saved.review), dismissedIds, lostInRevision: lost });
   }
 
   // --- Full run -------------------------------------------------------------
@@ -716,10 +1017,7 @@ export async function evaluateAnbieterCorpusWith(input: EvaluateAnbieterInput): 
       : Promise.resolve([]),
     leftover.length > 0 && hasTime()
       ? run({
-          system: `Diese Aussagen aus Kundengesprächen hat noch kein Punkt der Anbieter-Checkliste aufgenommen. Ordne JEDE einem Punkt zu.
-Punkte: ${pointLabels(ALL_KEYS)}.
-Eine Aussage über den Anbieter, die zu keinem Punkt perfekt passt, kommt in den nächsten passenden Punkt.
-„keiner“ nur, wenn die Aussage nichts über den Anbieter, sein Angebot, seine Arbeitsweise, seinen Markt oder seine Pläne sagt.`,
+          system: LEFTOVER_SYSTEM,
           user: formatStatements(leftover),
           tool: LEFTOVER_TOOL,
           maxTokens: 32_000,
@@ -729,27 +1027,7 @@ Eine Aussage über den Anbieter, die zu keinem Punkt perfekt passt, kommt in den
   const refilled = new Map(again.flatMap((answer) => answer.items).filter((item) => item.current.trim()).map((item) => [item.key, item]));
   items = items.map((item) => refilled.get(item.key) ?? item);
 
-  // Statements placed afterwards go into their point word for word; the text is not rewritten for them.
-  const rows = Array.isArray(asRecord(zuordnung)?.zuordnung) ? (asRecord(zuordnung)?.zuordnung as unknown[]) : [];
-  const late = new Map<AnbieterPointKey, Statement[]>();
-  const taken = assignedIds(items);
-  for (const row of rows) {
-    const record = asRecord(row);
-    const statement = byId.get(parseStatementIds(record?.id, known)[0] ?? "");
-    const key = ALL_KEYS.find((candidate) => candidate === record?.punkt);
-    if (!statement || !key || taken.has(statement.id)) continue;
-    taken.add(statement.id);
-    late.set(key, [...(late.get(key) ?? []), statement]);
-  }
-  items = items.map((item) => {
-    const extra = late.get(item.key);
-    if (!extra) return item;
-    return {
-      ...item,
-      current: [item.current.trim(), ...extra.map((statement) => statement.text)].filter(Boolean).join("\n"),
-      statementIds: [...(item.statementIds ?? []), ...extra.map((statement) => statement.id)],
-    };
-  });
+  items = appendLate(items, zuordnung, byId);
 
   if (!items.some((item) => item.current.trim())) {
     throw new Error("Die KI-Antwort enthielt keine auswertbaren Anbieter-Punkte. Bitte erneut auswerten.");

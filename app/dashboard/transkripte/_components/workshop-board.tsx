@@ -70,7 +70,10 @@ type AnbieterState = {
   savedAt: string | null;
   openWithSource?: { key: string; label: string; sources: string[] }[];
   review?: AnbieterReview | null;
+  sync?: { added: string[]; changed: string[]; removed: number };
 };
+
+type AnbieterMode = "full" | "merge" | "remove";
 
 type AnbieterReview = {
   statementCount: number;
@@ -243,6 +246,8 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
   const [anbieterStep, setAnbieterStep] = useState<string | null>(null);
   /** Open missing facts or contradictions: approving asks once more. */
   const [confirmApprove, setConfirmApprove] = useState(false);
+  /** A source was deleted: ask what happens to its content in the stand. */
+  const [askRemoved, setAskRemoved] = useState(false);
   const [avatarNote, setAvatarNote] = useState("");
   /** Empty = KI wählt die Anzahl; eine Zahl ist Override. */
   const [countText, setCountText] = useState("");
@@ -282,6 +287,7 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
       }
       setSources(json.sources ?? []);
       setAnbieter(json.anbieter);
+      setAskRemoved((json.anbieter.sync?.removed ?? 0) > 0);
       applyPlan(json.avatarPlan);
       setAnbieterNote(json.anbieter.revisionNote ?? "");
       setAvatarNote(json.avatarPlan.revisionNote ?? "");
@@ -349,9 +355,23 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     }
   }
 
-  async function postAnbieter(action: "evaluate" | "approve", instruction?: string) {
+  async function postAnbieter(
+    action: "evaluate" | "approve" | "keep-removed",
+    instruction?: string,
+    mode: AnbieterMode = "full",
+  ) {
     const revising = action === "evaluate" && Boolean(instruction?.trim());
-    setBusy(action === "approve" ? "anbieter-approve" : revising ? "anbieter-revise" : "anbieter-evaluate");
+    setBusy(
+      action === "approve"
+        ? "anbieter-approve"
+        : action === "keep-removed"
+          ? "anbieter-keep"
+          : revising
+            ? "anbieter-revise"
+            : mode === "full"
+              ? "anbieter-evaluate"
+              : `anbieter-${mode}`,
+    );
     setAnbieterError(null);
     setAnbieterStep(null);
     try {
@@ -387,12 +407,17 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
         setAnbieterStep(
           revising
             ? "Schritt 2 von 2: Änderung einarbeiten und gegen den vorherigen Stand prüfen…"
-            : "Schritt 2 von 2: Aussagen den Punkten zuordnen und Abdeckung prüfen…",
+            : mode === "merge"
+              ? "Schritt 2 von 2: Neue Aussagen in die bestehenden Punkte einarbeiten…"
+              : mode === "remove"
+                ? "Schritt 2 von 2: Inhalte der gelöschten Quelle aus den Punkten nehmen…"
+                : "Schritt 2 von 2: Aussagen den Punkten zuordnen und Abdeckung prüfen…",
         );
       }
       const result = await postJson<{ anbieter?: AnbieterState }>("/api/dt/workshop/anbieter", {
         organisationId: props.organisationId,
         action,
+        ...(action === "evaluate" && mode !== "full" ? { mode } : {}),
         ...(instruction?.trim() ? { instruction: instruction.trim() } : {}),
       });
       if (!result.ok) {
@@ -415,8 +440,15 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
       }
       setAnbieter(result.json.anbieter);
       if (revising) setAnbieterNote(result.json.anbieter.revisionNote ?? "");
+      setAskRemoved(false);
       toast.success(
-        revising
+        action === "keep-removed"
+          ? "Die Inhalte bleiben im Anbieterwissen stehen."
+          : mode === "merge"
+            ? "Die neue Quelle ist eingearbeitet. Bitte prüfen und freigeben."
+            : mode === "remove"
+              ? "Die Inhalte der gelöschten Quelle sind entfernt. Bitte prüfen und freigeben."
+              : revising
           ? "Die Änderung ist eingearbeitet. Bitte prüfen und freigeben."
           : action === "evaluate"
             ? "Anbieterstand liegt vor. Bitte prüfen und freigeben."
@@ -596,6 +628,13 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
     (sum, item) => sum + (item.conflicts?.length ?? 0),
     0,
   );
+  const anbieterSync = anbieter?.sync ?? { added: [], changed: [], removed: 0 };
+  // Working in a new source needs a checked stand, and no source may have changed meanwhile.
+  const anbieterCanMerge =
+    anbieter?.status === "stale" &&
+    Boolean(anbieterReview) &&
+    anbieterSync.added.length > 0 &&
+    anbieterSync.changed.length === 0;
   const anbieterInternal = anbieterReview?.internal ?? [];
   const anbieterGuardrails = anbieterReview?.guardrails ?? [];
   const anbieterGuardedIds = new Set(anbieterGuardrails.flatMap((guardrail) => guardrail.ids));
@@ -620,6 +659,51 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
 
   return (
     <div className="grid gap-6">
+      <CenteredModal
+        open={askRemoved && busy == null && anbieterSync.removed > 0}
+        onClose={() => setAskRemoved(false)}
+        title="Quelle gelöscht"
+        description="Inhalte dieser Quelle aus dem Anbieterwissen entfernen oder stehen lassen?"
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setAskRemoved(false)}>
+              Später entscheiden
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setAskRemoved(false);
+                void postAnbieter("keep-removed");
+              }}
+            >
+              Stehen lassen
+            </Button>
+            <Button
+              type="button"
+              className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+              onClick={() => {
+                setAskRemoved(false);
+                void postAnbieter("evaluate", undefined, "remove");
+              }}
+            >
+              Inhalte entfernen
+            </Button>
+          </div>
+        }
+      >
+        <ul className="list-disc pl-5 text-sm text-primary">
+          <li>
+            <strong>Inhalte entfernen:</strong> Die Punkte, in denen Aussagen dieser Quelle stehen,
+            werden aus den übrigen Quellen neu geschrieben. Alle anderen Punkte bleiben wörtlich. Danach
+            ist eine neue Freigabe nötig.
+          </li>
+          <li>
+            <strong>Stehen lassen:</strong> Das Anbieterwissen bleibt Wort für Wort, wie es ist, und
+            behält seine Freigabe.
+          </li>
+        </ul>
+      </CenteredModal>
       <CenteredModal
         open={confirmApprove}
         onClose={() => setConfirmApprove(false)}
@@ -719,6 +803,17 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="flex flex-wrap gap-2">
+            {anbieterCanMerge ? (
+              <Button
+                type="button"
+                className="bg-sbkm-navy text-white hover:bg-sbkm-ink-700"
+                disabled={loading || busy != null}
+                onClick={() => void postAnbieter("evaluate", undefined, "merge")}
+              >
+                {busy === "anbieter-merge" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                {busy === "anbieter-merge" ? "Arbeitet ein…" : "Nur einarbeiten"}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
@@ -730,9 +825,11 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               ) : null}
               {busy === "anbieter-evaluate"
                 ? "Wertet aus…"
-                : anbieter && anbieter.status !== "empty"
-                  ? "Bestand neu auswerten"
-                  : "Bestand auswerten"}
+                : anbieterCanMerge
+                  ? "Komplett neu auswerten"
+                  : anbieter && anbieter.status !== "empty"
+                    ? "Bestand neu auswerten"
+                    : "Bestand auswerten"}
             </Button>
             <Button
               type="button"
@@ -763,7 +860,38 @@ export function WorkshopBoard(props: { organisationId: string; organisationName:
               </Button>
             ) : null}
           </div>
-          {busy === "anbieter-evaluate" || busy === "anbieter-revise" ? (
+          {anbieterCanMerge && busy == null ? (
+            <p className="text-sm text-primary">
+              Neu im Bestand: {anbieterSync.added.join(", ")}. „Nur einarbeiten“ liest nur diese{" "}
+              {anbieterSync.added.length === 1 ? "Quelle" : "Quellen"} und ergänzt die bestehenden Punkte;
+              der vorhandene Text bleibt wörtlich. „Komplett neu auswerten“ schreibt alle Punkte aus allen
+              Quellen neu.
+            </p>
+          ) : null}
+          {anbieterSync.changed.length > 0 && anbieter?.status === "stale" && busy == null ? (
+            <p className="text-sm text-primary">
+              Geändert wurde: {anbieterSync.changed.join(", ")}. Eine geänderte Quelle lässt sich nicht
+              einarbeiten, nur komplett neu auswerten.
+            </p>
+          ) : null}
+          {anbieterSync.removed > 0 && busy == null ? (
+            <div className="grid gap-2 rounded-xl border border-sbkm-navy/10 px-3 py-3 dark:border-white/10">
+              <p className="text-sm text-primary">
+                {anbieterSync.removed === 1
+                  ? "Eine Quelle wurde gelöscht. Ihre Inhalte stehen noch im Anbieterwissen."
+                  : `${anbieterSync.removed} Quellen wurden gelöscht. Ihre Inhalte stehen noch im Anbieterwissen.`}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => void postAnbieter("evaluate", undefined, "remove")}>
+                  Inhalte entfernen
+                </Button>
+                <Button type="button" variant="outline" onClick={() => void postAnbieter("keep-removed")}>
+                  Stehen lassen
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {busy === "anbieter-evaluate" || busy === "anbieter-revise" || busy === "anbieter-merge" || busy === "anbieter-remove" ? (
             <p className="flex items-center gap-2 text-sm text-primary">
               <Loader2 className="size-4 animate-spin" aria-hidden />
               {anbieterStep ??

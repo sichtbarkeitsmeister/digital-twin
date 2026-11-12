@@ -9,6 +9,7 @@ import {
   extractAnbieterStatements,
   workshopFailureMessage,
 } from "@/lib/dt/transcripts/workshop-llm";
+import { forgetRemovedSources } from "@/lib/dt/transcripts/anbieter-eval";
 import { anbieterForClient } from "@/lib/dt/transcripts/workshop-model";
 import { loadWorkshopState, saveAnbieterState, syncAnbieterToSeoAdvisor } from "@/lib/dt/transcripts/workshop-store";
 
@@ -16,7 +17,9 @@ export const maxDuration = 300;
 
 const bodySchema = z.object({
   organisationId: z.string().uuid(),
-  action: z.enum(["extract", "evaluate", "approve"]),
+  action: z.enum(["extract", "evaluate", "approve", "keep-removed"]),
+  /** „merge“: only new sources are worked in. „remove“: the content of deleted sources leaves the stand. */
+  mode: z.enum(["full", "merge", "remove"]).optional(),
   instruction: z.string().trim().max(4_000).optional(),
 });
 
@@ -48,6 +51,31 @@ export async function POST(req: Request) {
   const deadline = Date.now() + 255_000;
   try {
     const state = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
+    // A source was deleted and its content shall stay: the texts stay, the stand stays valid.
+    if (parsed.data.action === "keep-removed") {
+      if (!state.anbieter.review || state.anbieter.sync.removed === 0) {
+        return NextResponse.json({ ok: true, anbieter: anbieterForClient(state.anbieter) });
+      }
+      const review = forgetRemovedSources(state.anbieter.review, state.sources);
+      // Only the deletion stood between the stand and the Bestand: then it is up to date again.
+      const onlyDeletion = state.anbieter.sync.added.length === 0 && state.anbieter.sync.changed.length === 0;
+      const wasApproved =
+        state.anbieter.approvedFingerprint != null &&
+        state.anbieter.approvedFingerprint === state.anbieter.sourceFingerprint;
+      await saveAnbieterState(auth.supabase, parsed.data.organisationId, {
+        ...state.anbieter,
+        review,
+        ...(onlyDeletion
+          ? {
+              sourceFingerprint: state.fingerprint,
+              approvedFingerprint: wasApproved ? state.fingerprint : state.anbieter.approvedFingerprint,
+            }
+          : {}),
+      });
+      const fresh = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
+      return NextResponse.json({ ok: true, anbieter: anbieterForClient(fresh.anbieter) });
+    }
+
     if (state.sources.length === 0) {
       return NextResponse.json({ ok: false, message: "Noch keine Transkripte." }, { status: 400 });
     }
@@ -86,14 +114,18 @@ export async function POST(req: Request) {
 
     if (parsed.data.action === "evaluate") {
       const instruction = parsed.data.instruction?.trim() ?? "";
+      const mode = parsed.data.mode ?? "full";
+      const incremental = mode === "merge" || mode === "remove";
       const result = await evaluateAnbieterCorpus({
         organisationName: name,
         sources: state.sources,
         store: state.anbieter.extraction,
-        instruction,
-        // A changed Bestand is read anew as a whole; only an up-to-date, checked stand is revised point by point.
+        instruction: incremental ? "" : instruction,
+        mode,
+        // A changed Bestand is read anew as a whole unless only new sources are worked in or deleted
+        // ones taken out; only an up-to-date, checked stand is revised point by point.
         current:
-          instruction && state.anbieter.status !== "stale"
+          incremental || (instruction && state.anbieter.status !== "stale")
             ? { items: state.anbieter.items, review: state.anbieter.review }
             : undefined,
         deadline,
@@ -111,12 +143,13 @@ export async function POST(req: Request) {
         status: "proposed" as const,
         sourceFingerprint: state.fingerprint,
         approvedFingerprint: null,
-        revisionNote: instruction || state.anbieter.revisionNote,
+        revisionNote: (incremental ? "" : instruction) || state.anbieter.revisionNote,
         items: result.items,
         savedAt: new Date().toISOString(),
         openWithSource: [],
         extraction: state.anbieter.extraction,
         review: result.review,
+        sync: { added: [], changed: [], removed: 0 },
       };
       await saveAnbieterState(auth.supabase, parsed.data.organisationId, anbieter);
       const fresh = await loadWorkshopState(auth.supabase, parsed.data.organisationId);
