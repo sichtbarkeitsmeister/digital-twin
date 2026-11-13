@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Download, KeyRound, Loader2, Pencil, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ChevronDown, Download, KeyRound, Link2, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -37,11 +37,11 @@ const STATUS_LABELS: Record<KeywordStatus, string> = {
   kein_text: "Bekommt keinen Text",
 };
 
-type OverviewFilter = "alle" | KeywordStatus | "doppelt";
+type OverviewFilter = "alle" | KeywordStatus | "doppelt" | "verlinkung";
 
 const FILTERS: Array<{ key: OverviewFilter; label: string; warn?: boolean }> = [
   { key: "alle", label: "Alle" },
-  { key: "doppelt", label: "Doppelt oder ähnlich", warn: true },
+  { key: "doppelt", label: "Gleiches Hauptkeyword", warn: true },
   { key: "fehlt", label: STATUS_LABELS.fehlt, warn: true },
   { key: "auffaellig", label: "Auffällig", warn: true },
   { key: "einteilen", label: STATUS_LABELS.einteilen, warn: true },
@@ -51,15 +51,33 @@ const FILTERS: Array<{ key: OverviewFilter; label: string; warn?: boolean }> = [
   { key: "manuell", label: STATUS_LABELS.manuell },
   { key: "ohne", label: STATUS_LABELS.ohne },
   { key: "kein_text", label: "Ohne Text" },
+  { key: "verlinkung", label: "Verlinkung möglich" },
 ];
+
+/** The Nebenkeywords as typed (one per line, commas and semicolons also separate) → clean lines. */
+export function normalizeKeywordLines(text: string): string[] {
+  return text.split(/[\n,;]+/).map((k) => k.trim()).filter(Boolean);
+}
+
+type Draft = { main: string; secondary: string };
+
+function withoutKey(drafts: Record<string, Draft>, key: string): Record<string, Draft> {
+  const next = { ...drafts };
+  delete next[key];
+  return next;
+}
 
 function csvCell(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
 /** The table as CSV (semicolon and BOM, so German Excel opens it right). */
-export function keywordsCsv(pages: readonly ContentPageSummary[], conflicts: ReadonlyMap<string, readonly KeywordConflict[]> = new Map()): string {
-  const rows = [["Seite", "Pfad", "Hauptkeyword", "Nebenkeywords", "Status", "Herkunft", "Hinweis", "Konflikt"]];
+export function keywordsCsv(
+  pages: readonly ContentPageSummary[],
+  conflicts: ReadonlyMap<string, readonly KeywordConflict[]> = new Map(),
+): string {
+  // Konflikt: the same main keyword on two pages. Verlinkung: a main keyword that another page carries as a Nebenkeyword (fine, they link).
+  const rows = [["Seite", "Pfad", "Hauptkeyword", "Nebenkeywords", "Status", "Herkunft", "Hinweis", "Konflikt", "Verlinkung möglich"]];
   for (const p of pages) {
     const status = keywordStatus(p);
     rows.push([
@@ -70,7 +88,8 @@ export function keywordsCsv(pages: readonly ContentPageSummary[], conflicts: Rea
       STATUS_LABELS[status],
       p.keyword_source ? contentKeywordOriginLabel(p.keyword_source, p.keyword_sorted) : "",
       p.keyword_note ?? "",
-      (conflicts.get(p.slug) ?? []).map(describeKeywordConflict).join(" | "),
+      (conflicts.get(p.slug) ?? []).filter((c) => c.kind === "haupt_haupt").map(describeKeywordConflict).join(" | "),
+      (conflicts.get(p.slug) ?? []).filter((c) => c.kind !== "haupt_haupt").map(describeKeywordConflict).join(" | "),
     ]);
   }
   return `﻿${rows.map((r) => r.map(csvCell).join(";")).join("\r\n")}`;
@@ -80,7 +99,14 @@ export function keywordsCsv(pages: readonly ContentPageSummary[], conflicts: Rea
  * „Keywords-Übersicht“: every page with its Hauptkeyword, Nebenkeywords and where they come from
  * (Seitenstruktur, Vorschlag des Zwillings, von Hand), and which pages still have none or a list
  * without main/secondary assignment. Pages without a search goal (Kontakt, Impressum …) say why.
- * Reads the overview the workspace already has: no request of its own.
+ *
+ * Only the same main keyword on two pages is a conflict (red; orange when only very similar): they
+ * compete and lead to duplicate content. A main keyword that another page carries as a Nebenkeyword
+ * is fine, the pages link to each other with it; it is marked in blue as a hint, not as a problem.
+ *
+ * Main and Nebenkeywords are fields in the table: click in, type, leave the field (or Enter,
+ * Ctrl+Enter in the Nebenkeywords) and it is saved; Escape takes the change back.
+ * Reads the overview the workspace already has: no request of its own besides saving.
  */
 export function DtContentKeywordsOverview(props: {
   organisationId: string;
@@ -92,54 +118,112 @@ export function DtContentKeywordsOverview(props: {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<OverviewFilter>("alle");
   const [query, setQuery] = useState("");
-  const [editing, setEditing] = useState<{ slug: string; main: string; secondary: string } | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
+  const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
+  // What was saved last, until the reloaded overview shows it: a field typed right after a save must not
+  // start from the old values still in `props.pages` (that would send the old main keyword along).
+  const [saved, setSaved] = useState<Record<string, Draft>>({});
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
 
   const counts = useMemo(() => {
     const out = new Map<KeywordStatus, number>();
     for (const p of props.pages) out.set(keywordStatus(p), (out.get(keywordStatus(p)) ?? 0) + 1);
     return out;
   }, [props.pages]);
-  // Pages that compete with another page for a keyword: the same or a very similar main keyword,
-  // or a main keyword that another page carries as a Nebenkeyword (duplicate content, cannibalisation).
-  const conflicts = useMemo(
-    () => findKeywordConflicts(props.pages.map((p) => ({ slug: p.slug, name: p.name, main: p.main_keyword, secondary: p.secondary_keywords }))),
-    [props.pages],
-  );
-  const mainClashes = useMemo(() => [...conflicts.values()].filter((list) => list.some((c) => c.kind === "haupt_haupt")).length, [conflicts]);
+  const { clashes, overlaps } = useMemo(() => {
+    const all = findKeywordConflicts(props.pages.map((p) => ({ slug: p.slug, name: p.name, main: p.main_keyword, secondary: p.secondary_keywords })));
+    const clash = new Map<string, KeywordConflict[]>();
+    const overlap = new Map<string, KeywordConflict[]>();
+    for (const [slug, list] of all) {
+      const c = list.filter((x) => x.kind === "haupt_haupt");
+      const o = list.filter((x) => x.kind !== "haupt_haupt");
+      if (c.length > 0) clash.set(slug, c);
+      if (o.length > 0) overlap.set(slug, o);
+    }
+    return { clashes: clash, overlaps: overlap };
+  }, [props.pages]);
+  const allConflicts = useMemo(() => {
+    const out = new Map<string, readonly KeywordConflict[]>();
+    for (const p of props.pages) {
+      const list = [...(clashes.get(p.slug) ?? []), ...(overlaps.get(p.slug) ?? [])];
+      if (list.length > 0) out.set(p.slug, list);
+    }
+    return out;
+  }, [props.pages, clashes, overlaps]);
   const open_ = (counts.get("fehlt") ?? 0) + (counts.get("auffaellig") ?? 0) + (counts.get("einteilen") ?? 0) + (counts.get("lauf") ?? 0);
 
-  async function save() {
-    if (!editing) return;
-    setSaving(true);
-    const res = await contentApi(`/api/dt/content/pages/${encodeURIComponent(editing.slug)}`, {
-      method: "PATCH",
-      body: {
-        organisationId: props.organisationId,
-        keywords: { main: editing.main, secondary: editing.secondary.split(/[\n,;]+/).map((k) => k.trim()).filter(Boolean) },
-      },
+  const stored = (p: ContentPageSummary): Draft => saved[p.slug] ?? { main: p.main_keyword ?? "", secondary: p.secondary_keywords.join("\n") };
+  const valueOf = (p: ContentPageSummary): Draft => drafts[p.slug] ?? stored(p);
+  const isDirty = (p: ContentPageSummary, d: Draft) => {
+    const base = stored(p);
+    return d.main.trim() !== base.main.trim() || normalizeKeywordLines(d.secondary).join("\n") !== normalizeKeywordLines(base.secondary).join("\n");
+  };
+
+  // The reloaded overview shows what was saved: the remembered values are no longer needed.
+  useEffect(() => {
+    setSaved((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const next: Record<string, Draft> = {};
+      for (const slug of keys) {
+        const p = props.pages.find((x) => x.slug === slug);
+        const d = prev[slug]!;
+        const shown = p ? { main: p.main_keyword ?? "", secondary: p.secondary_keywords.join("\n") } : null;
+        if (!shown || shown.main.trim() !== d.main.trim() || normalizeKeywordLines(shown.secondary).join("\n") !== normalizeKeywordLines(d.secondary).join("\n")) next[slug] = d;
+      }
+      return Object.keys(next).length === keys.length ? prev : next;
     });
-    setSaving(false);
+  }, [props.pages]);
+
+  function revert(slug: string) {
+    // The ref first: the blur that follows Escape reads it before React has rendered the new state.
+    draftsRef.current = withoutKey(draftsRef.current, slug);
+    setDrafts((d) => withoutKey(d, slug));
+    setFailed((f) => new Set([...f].filter((x) => x !== slug)));
+  }
+
+  /** Leaving a field: saves the page's keywords when they changed. A change typed during a save is saved right after it. */
+  async function commit(p: ContentPageSummary) {
+    const snapshot = draftsRef.current[p.slug];
+    if (!snapshot || !isDirty(p, snapshot) || saving.has(p.slug)) return;
+    setSaving((s) => new Set(s).add(p.slug));
+    const res = await contentApi(`/api/dt/content/pages/${encodeURIComponent(p.slug)}`, {
+      method: "PATCH",
+      body: { organisationId: props.organisationId, keywords: { main: snapshot.main, secondary: normalizeKeywordLines(snapshot.secondary) } },
+    });
+    setSaving((s) => new Set([...s].filter((x) => x !== p.slug)));
     if (!res.ok) {
+      setFailed((f) => new Set(f).add(p.slug));
       toast.error(res.message, { duration: 12_000 });
       return;
     }
-    toast.success(editing.main.trim() ? "Keywords gespeichert – gilt ab dem nächsten Schritt." : "Keywords entfernt.");
-    setEditing(null);
+    setFailed((f) => new Set([...f].filter((x) => x !== p.slug)));
+    setSaved((s) => ({ ...s, [p.slug]: snapshot }));
+    window.setTimeout(() => setSaved((s) => withoutKey(s, p.slug)), 20_000);
+    // Only what was saved leaves the drafts; text typed meanwhile stays.
+    setDrafts((d) => {
+      const now = d[p.slug];
+      return now && now.main === snapshot.main && now.secondary === snapshot.secondary ? withoutKey(d, p.slug) : d;
+    });
     props.onChanged();
+    // Typed while this save ran (its blur found the save busy): save that now.
+    const rest = draftsRef.current[p.slug];
+    if (rest && (rest.main !== snapshot.main || rest.secondary !== snapshot.secondary)) window.setTimeout(() => void commit(p), 0);
   }
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return props.pages.filter((p) => {
-      if (filter === "doppelt" ? !conflicts.has(p.slug) : filter !== "alle" && keywordStatus(p) !== filter) return false;
+      if (filter === "doppelt" ? !clashes.has(p.slug) : filter === "verlinkung" ? !overlaps.has(p.slug) : filter !== "alle" && keywordStatus(p) !== filter) return false;
       if (!q) return true;
       return [p.name, p.path ?? "", p.main_keyword ?? "", ...p.secondary_keywords].some((t) => t.toLowerCase().includes(q));
     });
-  }, [props.pages, filter, query, conflicts]);
+  }, [props.pages, filter, query, clashes, overlaps]);
 
   function download() {
-    const blob = new Blob([keywordsCsv(visible, conflicts)], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([keywordsCsv(visible, allConflicts)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -147,6 +231,9 @@ export function DtContentKeywordsOverview(props: {
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  const fieldClass =
+    "w-full rounded-dt border bg-transparent px-1.5 py-1 text-xs text-sbkm-navy outline-none transition placeholder:text-sbkm-ink-500/70 hover:border-sbkm-navy/20 focus-visible:border-sbkm-mint/50 focus-visible:bg-white/80 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 disabled:opacity-60 dark:text-white dark:focus-visible:bg-white/10";
 
   return (
     <section className={cardClass} aria-label="Keywords-Übersicht">
@@ -160,9 +247,7 @@ export function DtContentKeywordsOverview(props: {
           <KeyRound className="size-4 shrink-0 text-sbkm-mint" aria-hidden />
           <span className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Keywords-Übersicht</span>
           <span className="text-xs text-sbkm-ink-600 dark:text-white/60">
-            {props.pages.length === 0
-              ? "noch keine Seiten"
-              : `${props.pages.length - open_} von ${props.pages.length} Seiten fertig`}
+            {props.pages.length === 0 ? "noch keine Seiten" : `${props.pages.length - open_} von ${props.pages.length} Seiten fertig`}
           </span>
           {open_ > 0 ? (
             <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-700 dark:text-orange-300">
@@ -170,10 +255,10 @@ export function DtContentKeywordsOverview(props: {
               {open_} offen
             </span>
           ) : null}
-          {conflicts.size > 0 ? (
+          {clashes.size > 0 ? (
             <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 dark:text-red-300">
               <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-              {conflicts.size} {conflicts.size === 1 ? "Seite" : "Seiten"} mit doppelten oder ähnlichen Keywords
+              {clashes.size} {clashes.size === 1 ? "Seite" : "Seiten"} mit gleichem Hauptkeyword
             </span>
           ) : null}
         </span>
@@ -181,15 +266,17 @@ export function DtContentKeywordsOverview(props: {
       </button>
       {open ? (
         <div className="grid gap-3 border-t border-sbkm-navy/8 px-4 py-4 dark:border-white/8 sm:px-5">
-          {conflicts.size > 0 ? (
+          {clashes.size > 0 ? (
             <p className="rounded-dt border border-red-300/60 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-900 dark:border-red-400/30 dark:bg-red-400/10 dark:text-red-200">
-              {mainClashes > 0 ? `${mainClashes} ${mainClashes === 1 ? "Seite hat" : "Seiten haben"} dasselbe oder ein sehr ähnliches Hauptkeyword wie eine andere Seite. ` : ""}
-              Seiten, die auf dasselbe Keyword zielen, konkurrieren miteinander und führen leicht zu doppeltem Inhalt. Bitte pro Keyword eine Seite festlegen: Filter „Doppelt oder ähnlich“, dann bei einer der Seiten mit „Ändern“ ein spezifischeres Hauptkeyword eintragen. Verglichen wird unabhängig von Schreibweise, Wortstellung und Getrennt-/Zusammenschreibung.
+              {clashes.size} {clashes.size === 1 ? "Seite hat" : "Seiten haben"} dasselbe oder ein sehr ähnliches Hauptkeyword wie eine andere Seite. Seiten, die auf dasselbe Hauptkeyword zielen, konkurrieren und führen leicht zu doppeltem Inhalt: Bitte pro Hauptkeyword nur eine Seite festlegen. Filter „Gleiches Hauptkeyword“, dann direkt in der Tabelle ein spezifischeres Hauptkeyword eintragen.
             </p>
           ) : null}
+          <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
+            Felder anklicken und tippen: Gespeichert wird beim Verlassen des Feldes (Enter oder Strg+Enter, Esc nimmt zurück). Steht ein Hauptkeyword bei einer anderen Seite als Nebenkeyword, ist das in Ordnung (die Seiten verlinken sich), es ist blau markiert.
+          </p>
           <div className="flex flex-wrap items-center gap-2">
-            {FILTERS.filter((f) => f.key === "alle" || (f.key === "doppelt" ? conflicts.size > 0 : (counts.get(f.key) ?? 0) > 0)).map((f) => {
-              const n = f.key === "alle" ? props.pages.length : f.key === "doppelt" ? conflicts.size : (counts.get(f.key) ?? 0);
+            {FILTERS.filter((f) => f.key === "alle" || (f.key === "doppelt" ? clashes.size > 0 : f.key === "verlinkung" ? overlaps.size > 0 : (counts.get(f.key) ?? 0) > 0)).map((f) => {
+              const n = f.key === "alle" ? props.pages.length : f.key === "doppelt" ? clashes.size : f.key === "verlinkung" ? overlaps.size : (counts.get(f.key) ?? 0);
               const active = filter === f.key;
               return (
                 <button
@@ -201,9 +288,13 @@ export function DtContentKeywordsOverview(props: {
                     "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
                     active
                       ? "border-sbkm-navy bg-sbkm-navy text-white dark:border-white dark:bg-white dark:text-sbkm-navy"
-                      : f.warn
-                        ? "border-orange-300/70 bg-orange-50 text-orange-800 dark:border-orange-400/40 dark:bg-orange-400/10 dark:text-orange-200"
-                        : "border-sbkm-navy/12 text-sbkm-ink-600 hover:border-sbkm-navy/30 dark:border-white/15 dark:text-white/65",
+                      : f.key === "doppelt"
+                        ? "border-red-300/70 bg-red-50 text-red-800 dark:border-red-400/40 dark:bg-red-400/10 dark:text-red-200"
+                        : f.key === "verlinkung"
+                          ? "border-sky-300/70 bg-sky-50 text-sky-800 dark:border-sky-400/40 dark:bg-sky-400/10 dark:text-sky-200"
+                          : f.warn
+                            ? "border-orange-300/70 bg-orange-50 text-orange-800 dark:border-orange-400/40 dark:bg-orange-400/10 dark:text-orange-200"
+                            : "border-sbkm-navy/12 text-sbkm-ink-600 hover:border-sbkm-navy/30 dark:border-white/15 dark:text-white/65",
                   )}
                 >
                   {f.label} ({n})
@@ -233,8 +324,8 @@ export function DtContentKeywordsOverview(props: {
               <thead>
                 <tr className="text-[11px] uppercase tracking-wide text-sbkm-ink-500 dark:text-white/45">
                   <th className="px-3 py-2 font-semibold">Seite</th>
-                  <th className="px-3 py-2 font-semibold">Hauptkeyword</th>
-                  <th className="px-3 py-2 font-semibold">Nebenkeywords</th>
+                  <th className="w-[20%] px-3 py-2 font-semibold">Hauptkeyword</th>
+                  <th className="w-[32%] px-3 py-2 font-semibold">Nebenkeywords</th>
                   <th className="px-3 py-2 font-semibold">Herkunft</th>
                 </tr>
               </thead>
@@ -249,8 +340,15 @@ export function DtContentKeywordsOverview(props: {
                   visible.map((p) => {
                     const status = keywordStatus(p);
                     const warn = status === "fehlt" || status === "auffaellig" || status === "einteilen" || status === "lauf";
-                    const pageConflicts = conflicts.get(p.slug) ?? [];
-                    const isEditing = editing?.slug === p.slug;
+                    const pageClashes = clashes.get(p.slug) ?? [];
+                    const pageOverlaps = overlaps.get(p.slug) ?? [];
+                    const exact = pageClashes.some((c) => c.level === "gleich");
+                    const draft = valueOf(p);
+                    const dirty = isDirty(p, draft);
+                    const busy = saving.has(p.slug);
+                    const bad = failed.has(p.slug);
+                    const border = bad ? "border-red-400" : dirty ? "border-amber-400/80" : pageClashes.length > 0 ? (exact ? "border-red-300/80 bg-red-50/60 dark:bg-red-400/10" : "border-orange-300/80 bg-orange-50/60 dark:bg-orange-400/10") : "border-transparent";
+                    const lines = Math.max(2, draft.secondary.split("\n").length);
                     return (
                       <tr key={p.slug} className="border-t border-sbkm-navy/8 align-top dark:border-white/8">
                         <td className="px-3 py-2.5">
@@ -258,62 +356,55 @@ export function DtContentKeywordsOverview(props: {
                             {p.name}
                           </button>
                           {p.path ? <div className="truncate font-mono text-[11px] text-sbkm-ink-500 dark:text-white/40">{p.path}</div> : null}
-                          {!isEditing ? (
-                            <button
-                              type="button"
-                              className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-sbkm-ink-600 hover:text-sbkm-navy dark:text-white/60 dark:hover:text-white"
-                              onClick={() => setEditing({ slug: p.slug, main: p.main_keyword ?? "", secondary: p.secondary_keywords.join("\n") })}
-                            >
-                              <Pencil className="size-3" aria-hidden />
-                              Ändern
-                            </button>
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="text"
+                            value={draft.main}
+                            maxLength={120}
+                            disabled={busy}
+                            placeholder="Hauptkeyword eintragen …"
+                            aria-label={`Hauptkeyword von ${p.name}`}
+                            title={pageClashes.length > 0 ? pageClashes.map(describeKeywordConflict).join("\n") : undefined}
+                            onChange={(e) => setDrafts((d) => ({ ...d, [p.slug]: { ...valueOf(p), main: e.target.value } }))}
+                            onBlur={() => void commit(p)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur();
+                              if (e.key === "Escape") {
+                                revert(p.slug);
+                                e.currentTarget.blur();
+                              }
+                            }}
+                            className={cn(fieldClass, border, "h-7", pageClashes.length > 0 && "font-semibold")}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <textarea
+                            value={draft.secondary}
+                            rows={lines}
+                            disabled={busy}
+                            placeholder="Nebenkeywords, eines pro Zeile …"
+                            aria-label={`Nebenkeywords von ${p.name}`}
+                            onChange={(e) => setDrafts((d) => ({ ...d, [p.slug]: { ...valueOf(p), secondary: e.target.value } }))}
+                            onBlur={() => void commit(p)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) e.currentTarget.blur();
+                              if (e.key === "Escape") {
+                                revert(p.slug);
+                                e.currentTarget.blur();
+                              }
+                            }}
+                            className={cn(fieldClass, dirty ? "border-amber-400/80" : bad ? "border-red-400" : "border-transparent", "resize-y leading-snug [field-sizing:content]")}
+                          />
+                          {busy ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 text-[11px] text-sky-700 dark:text-sky-300">
+                              <Loader2 className="size-3 animate-spin" aria-hidden />
+                              Speichert …
+                            </span>
+                          ) : dirty ? (
+                            <span className="px-1.5 text-[11px] text-amber-700 dark:text-amber-300">{bad ? "Nicht gespeichert – bitte prüfen" : "Noch nicht gespeichert (Feld verlassen)"}</span>
                           ) : null}
                         </td>
-                        {isEditing && editing ? (
-                          <td colSpan={2} className="px-3 py-2.5">
-                            <div className="grid gap-1.5">
-                              <label className="text-[11px] text-sbkm-ink-600 dark:text-white/60" htmlFor={`kw-main-${p.slug}`}>
-                                Hauptkeyword (leer lassen = Keywords entfernen)
-                              </label>
-                              <input
-                                id={`kw-main-${p.slug}`}
-                                type="text"
-                                value={editing.main}
-                                maxLength={120}
-                                disabled={saving}
-                                onChange={(e) => setEditing({ ...editing, main: e.target.value })}
-                                className="h-8 w-full rounded-dt border border-sbkm-navy/15 bg-white/80 px-2.5 text-xs text-sbkm-navy outline-none focus-visible:border-sbkm-mint/40 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 dark:border-white/15 dark:bg-white/10 dark:text-white"
-                              />
-                              <label className="text-[11px] text-sbkm-ink-600 dark:text-white/60" htmlFor={`kw-secondary-${p.slug}`}>
-                                Nebenkeywords, eines pro Zeile
-                              </label>
-                              <textarea
-                                id={`kw-secondary-${p.slug}`}
-                                value={editing.secondary}
-                                disabled={saving}
-                                onChange={(e) => setEditing({ ...editing, secondary: e.target.value })}
-                                className="min-h-[72px] w-full resize-y rounded-dt border border-sbkm-navy/15 bg-white/80 px-2.5 py-1.5 text-xs text-sbkm-navy outline-none focus-visible:border-sbkm-mint/40 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 dark:border-white/15 dark:bg-white/10 dark:text-white"
-                              />
-                              <div className="flex flex-wrap items-center gap-2">
-                                <DtPillButton type="button" size="sm" className="h-7 px-3 text-xs" disabled={saving} onClick={() => void save()}>
-                                  {saving ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
-                                  Speichern
-                                </DtPillButton>
-                                <DtPillButton type="button" size="sm" variant="ghost" className="h-7 px-3 text-xs" disabled={saving} onClick={() => setEditing(null)}>
-                                  Abbrechen
-                                </DtPillButton>
-                                <span className="text-[11px] text-sbkm-ink-500 dark:text-white/45">Gilt ab dem nächsten Schritt. Ein Hauptkeyword gibt es nur einmal.</span>
-                              </div>
-                            </div>
-                          </td>
-                        ) : (
-                          <>
-                            <td className="px-3 py-2.5 text-sbkm-navy dark:text-white">{p.main_keyword ?? <span className="text-sbkm-ink-500 dark:text-white/40">–</span>}</td>
-                            <td className="max-w-[22rem] px-3 py-2.5 text-sbkm-ink-600 dark:text-white/65" title={p.secondary_keywords.join(", ")}>
-                              {p.secondary_keywords.length > 0 ? p.secondary_keywords.join(", ") : <span className="text-sbkm-ink-500 dark:text-white/40">–</span>}
-                            </td>
-                          </>
-                        )}
                         <td className="px-3 py-2.5">
                           <span
                             className={cn(
@@ -329,13 +420,25 @@ export function DtContentKeywordsOverview(props: {
                                 : STATUS_LABELS[status]}
                           </span>
                           {p.keyword_note ? <div className="mt-0.5 max-w-[20rem] text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">{p.keyword_note}</div> : null}
-                          {pageConflicts.slice(0, 4).map((c, i) => (
-                            <div key={i} className="mt-0.5 flex max-w-[20rem] items-start gap-1 text-[11px] font-medium leading-snug text-red-700 dark:text-red-300">
+                          {pageClashes.slice(0, 4).map((c, i) => (
+                            <div
+                              key={`c${i}`}
+                              className={cn(
+                                "mt-0.5 flex max-w-[20rem] items-start gap-1 text-[11px] font-medium leading-snug",
+                                c.level === "gleich" ? "text-red-700 dark:text-red-300" : "text-orange-700 dark:text-orange-300",
+                              )}
+                            >
                               <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
                               {describeKeywordConflict(c)}
                             </div>
                           ))}
-                          {pageConflicts.length > 4 ? <div className="mt-0.5 text-[11px] text-red-700 dark:text-red-300">… und {pageConflicts.length - 4} weitere</div> : null}
+                          {pageOverlaps.slice(0, 3).map((c, i) => (
+                            <div key={`o${i}`} className="mt-0.5 flex max-w-[20rem] items-start gap-1 text-[11px] leading-snug text-sky-700 dark:text-sky-300">
+                              <Link2 className="mt-px size-3 shrink-0" aria-hidden />
+                              {describeKeywordConflict(c)}
+                            </div>
+                          ))}
+                          {pageOverlaps.length > 3 ? <div className="mt-0.5 text-[11px] text-sky-700 dark:text-sky-300">… und {pageOverlaps.length - 3} weitere</div> : null}
                         </td>
                       </tr>
                     );

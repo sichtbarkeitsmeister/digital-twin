@@ -76,7 +76,11 @@ export function keywordTaken(text: string, others: readonly string[], similar: b
 export type KeywordPageInput = { slug: string; name: string; main: string | null; secondary: readonly string[] };
 
 export type KeywordConflict = {
-  /** `haupt_haupt`: both pages have it as main keyword. `haupt_neben`: this page's main keyword is a Nebenkeyword of the other. `neben_haupt`: the other page's main keyword is a Nebenkeyword of this one. */
+  /**
+   * `haupt_haupt`: both pages have it as main keyword: the only real conflict (competition, duplicate content).
+   * `haupt_neben`: this page's main keyword is a Nebenkeyword of the other; `neben_haupt`: the other page's
+   * main keyword is a Nebenkeyword of this one. Both are fine: the pages link to each other with it.
+   */
   kind: "haupt_haupt" | "haupt_neben" | "neben_haupt";
   level: KeywordMatchLevel;
   keyword: string;
@@ -147,8 +151,9 @@ export function describeKeywordConflict(c: KeywordConflict): string {
   const how = c.level === "gleich" ? "dasselbe" : "ein sehr ähnliches";
   const same = keywordKey(c.keyword) === keywordKey(c.otherKeyword) ? "" : ` („${c.otherKeyword}“)`;
   if (c.kind === "haupt_haupt") return `Hauptkeyword wie „${c.otherName}“: ${how} Hauptkeyword${same}`;
-  if (c.kind === "haupt_neben") return `Das Hauptkeyword steht bei „${c.otherName}“ als Nebenkeyword${same}`;
-  return `Das Nebenkeyword ist das Hauptkeyword von „${c.otherName}“${same}`;
+  // Not a conflict: the pages can link to each other with it.
+  if (c.kind === "haupt_neben") return `Nebenkeyword bei „${c.otherName}“${same}: Verlinkung möglich`;
+  return `Nebenkeyword ist Hauptkeyword von „${c.otherName}“${same}: Verlinkung möglich`;
 }
 
 /**

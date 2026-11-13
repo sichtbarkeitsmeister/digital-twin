@@ -52,7 +52,7 @@ function testConflicts() {
   assert.equal(findKeywordConflicts([{ slug: "a", name: "A", main: "Ankauf", secondary: ["Ankauf"] }]).size, 0, "a page does not clash with itself");
   const line = describeKeywordConflict(conflicts.get("start")![0]!);
   assert.equal(line, "Hauptkeyword wie „Antiquitäten Ankauf“: dasselbe Hauptkeyword („Ankauf Antiquitäten Düsseldorf“)");
-  assert.equal(describeKeywordConflict(conflicts.get("silber2")![0]!), "Das Hauptkeyword steht bei „Silber Ankauf“ als Nebenkeyword");
+  assert.equal(describeKeywordConflict(conflicts.get("silber2")![0]!), "Nebenkeyword bei „Silber Ankauf“: Verlinkung möglich");
   // Hundreds of pages: no pairwise comparison, still quick.
   const many = Array.from({ length: 800 }, (_, i) => ({ slug: `p${i}`, name: `P${i}`, main: `Leistung ${i} Düsseldorf`, secondary: [`Variante ${i}`, `Begriff ${i} Köln`] }));
   const started = Date.now();
