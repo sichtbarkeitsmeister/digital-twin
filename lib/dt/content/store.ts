@@ -22,6 +22,7 @@ import { CONTACT_DATA_MIGRATION_FILE } from "@/lib/dt/contact-data";
 import { readContentFreshness, reviewFreshness } from "@/lib/dt/content/freshness";
 import { CONTENT_ORG_QUESTIONS_MIGRATION_FILE, isMissingOrgQuestionsError } from "@/lib/dt/content/org-questions";
 import { readContentZielgruppen, type ContentZielgruppen } from "@/lib/dt/content/zielgruppen";
+import { keywordJunkReason, keywordKey, keywordTaken } from "@/lib/dt/content/keyword-compare";
 import { readQuestionStop, type ContentQuestionStop } from "@/lib/dt/content/pipeline/question-stop";
 import { describeRunningPage, type ContentJobVerdict } from "@/lib/dt/content/job-state";
 import type { ContentAnrede, ContentTextSettings } from "@/lib/dt/content/mapping";
@@ -402,8 +403,26 @@ export function contentKeywordTodo(
   if (page.name !== undefined && (page.page_type ?? effectiveContentPageType({ ...page, name: page.name, page_type: page.page_type ?? null, level: page.level ?? 1 })) === "nicht_bearbeiten") return null;
   const origin = contentKeywordOrigin(page);
   if (origin === null || origin === "lauf") return "suchen";
-  if (origin === "struktur" && page.keywords && page.keywords.secondary.length > 0 && !page.keywords.sorted) return "einteilen";
+  if (origin === "struktur" && page.keywords) {
+    const all = [page.keywords.main, ...page.keywords.secondary];
+    const usable = all.filter((k) => !keywordJunkReason(k.text));
+    if (usable.length === 0) return "suchen";
+    if (usable.length < all.length) return "einteilen";
+    if (page.keywords.secondary.length > 0 && !page.keywords.sorted) return "einteilen";
+  }
   return null;
+}
+
+/**
+ * A sentence when the Seitenstruktur's main keyword is obviously no keyword (a column header the
+ * Excel put into the cell, a number …); null otherwise. The page then counts as having none.
+ */
+export function contentKeywordJunkNote(page: Pick<ContentPageRow, "keywords" | "main_keyword">): string | null {
+  if (!page.keywords || page.keywords.source) return null;
+  const all = [page.keywords.main, ...page.keywords.secondary];
+  const bad = all.filter((k) => keywordJunkReason(k.text));
+  if (bad.length === 0) return null;
+  return `Der Eintrag der Seitenstruktur „${bad[0]!.text}“ sieht nach ${keywordJunkReason(bad[0]!.text)} aus, nicht nach einem Suchbegriff.`;
 }
 
 /**
@@ -420,10 +439,7 @@ export function contentKeywordOrigin(page: Pick<ContentPageRow, "keywords" | "ma
 export const CONTENT_KEYWORDS_SECONDARY_MAX = 15;
 export const CONTENT_KEYWORD_MAX_CHARS = 120;
 
-/** Keywords compared across pages: case, spacing and punctuation do not make two keywords different. */
-export function keywordKey(text: string): string {
-  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-}
+export { keywordKey };
 
 /** Cleaned keyword texts: trimmed, shortened, each once, the main keyword not among the secondary ones. */
 export function cleanKeywordInput(main: string, secondary: readonly string[]): { main: string; secondary: string[] } {
@@ -464,10 +480,10 @@ export function mainKeywordTakenBy(
   pages: readonly Pick<ContentPageRow, "slug" | "name" | "keywords" | "main_keyword">[],
   slug: string,
   main: string,
+  options: { similar?: boolean } = {},
 ): { slug: string; name: string } | null {
-  const key = keywordKey(main);
-  if (!key) return null;
-  const hit = pages.find((p) => p.slug !== slug && keywordKey(p.keywords?.main.text ?? p.main_keyword ?? "") === key);
+  if (!keywordKey(main)) return null;
+  const hit = pages.find((p) => p.slug !== slug && keywordTaken(main, [p.keywords?.main.text ?? p.main_keyword ?? ""].filter(Boolean), options.similar === true));
   return hit ? { slug: hit.slug, name: hit.name } : null;
 }
 
@@ -1434,7 +1450,7 @@ export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}):
     keyword_sorted: page.keywords?.sorted === true,
     keyword_todo: contentKeywordTodo(page),
     secondary_keywords: page.keywords?.secondary.map((k) => k.text) ?? [],
-    keyword_note: page.keywords?.reason ?? page.keywords_exempt?.reason ?? null,
+    keyword_note: contentKeywordJunkNote(page) ?? page.keywords?.reason ?? page.keywords_exempt?.reason ?? null,
     page_type: page.page_type,
     page_role: page.page_role,
     type_editable: canEditContentPageType(page),
@@ -1614,7 +1630,7 @@ export function pageBriefing(page: ContentPageRow): ContentPageBriefing {
     keyword_source: contentKeywordOrigin(page),
     keyword_sorted: page.keywords?.sorted === true,
     keyword_todo: contentKeywordTodo(page),
-    keyword_note: page.keywords?.reason ?? page.keywords_exempt?.reason ?? null,
+    keyword_note: contentKeywordJunkNote(page) ?? page.keywords?.reason ?? page.keywords_exempt?.reason ?? null,
     secondary_keywords: page.keywords?.secondary.map((k) => k.text) ?? [],
     h1_options: page.h1_options,
     user_questions: page.user_questions,

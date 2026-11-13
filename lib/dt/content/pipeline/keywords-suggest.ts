@@ -15,6 +15,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { keywordJunkReason, keywordTaken } from "@/lib/dt/content/keyword-compare";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { callContentTool } from "@/lib/dt/content/pipeline/llm";
@@ -59,7 +60,8 @@ Eine Seite ohne Suchziel (Impressum, Datenschutz, AGB, Widerruf, Danke-Seite, re
 reason: ein Satz, warum dieses Hauptkeyword zu dieser Seite passt und wie es sich von den Nachbarseiten abgrenzt.`;
 
 export const KEYWORDS_CLASSIFY_SYSTEM = `Die Seitenstruktur nennt für eine Seite mehrere Keywords, ohne zu sagen, welches davon das Hauptkeyword ist. Du teilst sie ein. Du schreibst nichts für die Seite.
-Du erfindest kein Keyword und lässt keines weg: Jedes Keyword der Liste ist entweder das Hauptkeyword oder ein Nebenkeyword. Die Reihenfolge in der Liste ist keine Vorgabe.
+Du erfindest kein Keyword und lässt keines weg: Jedes brauchbare Keyword der Liste ist entweder das Hauptkeyword oder ein Nebenkeyword. Die Reihenfolge in der Liste ist keine Vorgabe.
+Denke dabei mit: Prüfe, ob jeder Eintrag überhaupt ein Suchbegriff ist, den Menschen eintippen, und ob er zu dieser Seite passt. Unbrauchbar sind Spaltenüberschriften und Beschreibungen aus der Tabelle, Zahlen, Seiten- oder Firmennamen ohne Suchbezug und Begriffe, die zu einer ganz anderen Leistung gehören als die Seite behandelt. Melde sie in unusable_keywords; sie sind dann weder Haupt- noch Nebenkeyword. Sind alle unbrauchbar, lässt du main_keyword leer.
 Hauptkeyword: genau eines, das, was die Seite am besten trägt. Grundlage, in dieser Reihenfolge:
 1. Worauf die Seite heute ausgerichtet ist (Title, H1, Meta-Description, Pfad, bisheriger Text).
 2. Die Ausrichtung des Unternehmens laut Anbieterfakten.
@@ -78,11 +80,12 @@ export function keywordsClassifyTool(list: readonly string[]): Anthropic.Tool {
     input_schema: {
       type: "object",
       properties: {
-        main_keyword: { type: "string", enum: [...list], description: "Das eine Hauptkeyword, genau wie in der Liste geschrieben." },
-        secondary_keywords: { type: "array", items: { type: "string", enum: [...list] }, description: "Alle übrigen Keywords der Liste, wichtigste zuerst." },
-        reason: { type: "string", description: "Ein Satz Begründung für das Hauptkeyword." },
+        main_keyword: { type: "string", enum: [...list, ""], description: "Das eine Hauptkeyword, genau wie in der Liste geschrieben. Leer nur, wenn alle Einträge unbrauchbar sind." },
+        secondary_keywords: { type: "array", items: { type: "string", enum: [...list] }, description: "Alle übrigen brauchbaren Keywords der Liste, wichtigste zuerst." },
+        unusable_keywords: { type: "array", items: { type: "string", enum: [...list] }, description: "Einträge, die kein Suchbegriff sind oder nicht zur Seite passen." },
+        reason: { type: "string", description: "Ein Satz Begründung für das Hauptkeyword (bei unbrauchbaren Einträgen: warum)." },
       },
-      required: ["main_keyword", "secondary_keywords", "reason"],
+      required: ["main_keyword", "secondary_keywords", "unusable_keywords", "reason"],
     },
   };
 }
@@ -174,21 +177,32 @@ export function applyKeywordRoles(
   list: ReadonlyArray<{ text: string; volume?: number }>,
   json: unknown,
   taken: ReadonlyArray<{ keyword: string; page: string }>,
-): { main: string; secondary: string[]; reason: string } | null {
+): { main: string; secondary: string[]; reason: string; removed: string[] } | null {
   const r = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
   const byKey = new Map(list.map((k) => [keywordKey(k.text), k.text]));
   const known = (value: unknown): string | null => (typeof value === "string" ? byKey.get(keywordKey(value)) ?? null : null);
+  const reason = typeof r.reason === "string" ? r.reason.trim().slice(0, 400) : "";
+  // What the model found unusable (no search term, not about this page) leaves the list.
+  const removed: string[] = [];
+  if (Array.isArray(r.unusable_keywords)) for (const k of r.unusable_keywords) {
+    const text = known(k);
+    if (text && !removed.includes(text)) removed.push(text);
+  }
+  const usable = list.filter((k) => !removed.includes(k.text));
+  // Nothing usable left: main stays empty and the page gets a suggestion instead.
+  if (usable.length === 0) return { main: "", secondary: [], reason, removed };
   const order: string[] = [];
   const add = (text: string | null) => {
-    if (text && !order.includes(text)) order.push(text);
+    if (text && !removed.includes(text) && !order.includes(text)) order.push(text);
   };
   add(known(r.main_keyword));
   if (Array.isArray(r.secondary_keywords)) for (const k of r.secondary_keywords) add(known(k));
-  for (const k of list) add(k.text);
-  const takenKeys = new Set(taken.map((t) => keywordKey(t.keyword)));
-  const main = order.find((text) => !takenKeys.has(keywordKey(text)));
+  for (const k of usable) add(k.text);
+  const takenTexts = taken.map((t) => t.keyword);
+  // A main keyword another page has (or a close variant of it) is not available.
+  const main = order.find((text) => !keywordTaken(text, takenTexts, true));
   if (!main) return null;
-  return { main, secondary: order.filter((text) => text !== main), reason: typeof r.reason === "string" ? r.reason.trim().slice(0, 400) : "" };
+  return { main, secondary: order.filter((text) => text !== main), reason, removed };
 }
 
 export type KeywordsAnswer = { no_keyword: boolean; main: string; secondary: string[]; reason: string };
@@ -249,8 +263,11 @@ export async function suggestContentKeywords(
 ): Promise<KeywordsSuggestResult> {
   const origin = contentKeywordOrigin(page);
   // Keywords of the Seitenstruktur always stay; only their roles are open while a list is unsorted.
-  const classify = origin === "struktur" && page.keywords != null && page.keywords.secondary.length > 0 && (contentKeywordTodo(page) === "einteilen" || options.force === true);
-  if (origin === "struktur" && !classify) return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
+  // A list is assigned, a single entry is checked for plausibility (on „Prüfen“); entries that are no
+  // keywords at all (a column header the Excel left behind) leave nothing usable: then the page gets a suggestion.
+  const todo = contentKeywordTodo(page);
+  const classify = origin === "struktur" && page.keywords != null && todo !== "suchen" && (todo === "einteilen" || options.force === true);
+  if (origin === "struktur" && !classify && todo !== "suchen") return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
   if ((origin === "manuell" || origin === "analyse") && !options.force) {
     return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
   }
@@ -276,46 +293,64 @@ export async function suggestContentKeywords(
   ]);
   const taken = takenMainKeywords(outline, page.slug);
 
-  if (classify && page.keywords) {
-    const list = [page.keywords.main, ...page.keywords.secondary];
-    let costEur = 0;
-    let json: unknown;
-    try {
-      const models = options.models ?? (await loadContentModelConfig(service)).check;
-      const call = await (options.callTool ?? callContentTool)({
-        models,
-        system: KEYWORDS_CLASSIFY_SYSTEM,
-        user: keywordsClassifyPrompt(context, list, live, taken),
-        tool: keywordsClassifyTool(list.map((k) => k.text)),
-        maxTokens: SUGGEST_MAX_TOKENS,
-        timeoutMs: SUGGEST_TIMEOUT_MS,
-      });
-      json = call.json;
-      costEur = roundEur(estimateCostEur(call.model, call.usage));
-      await recordLlmUsageEvent(service, {
-        organisationId: page.organisation_id,
-        userId,
-        agentId: avatarId,
-        mode: KEYWORDS_USAGE_MODE,
-        via: "direct",
-        model: call.model,
-        inputTokens: call.usage.inputTokens,
-        outputTokens: call.usage.outputTokens,
-      });
-    } catch (error) {
-      return { ok: false, status: 502, cost_eur: costEur, message: error instanceof Error ? error.message : "Die Einteilung der Keywords ist fehlgeschlagen." };
+  let carried = 0;
+  let precursor = "";
+  if ((classify || (origin === "struktur" && todo === "suchen")) && page.keywords) {
+    const all = [page.keywords.main, ...page.keywords.secondary];
+    const junk = all.filter((k) => keywordJunkReason(k.text));
+    const list = all.filter((k) => !keywordJunkReason(k.text));
+    const junkNote = junk.length > 0 ? `Entfernt, weil kein Suchbegriff: ${junk.map((k) => `„${k.text}“`).join(", ")}.` : "";
+    precursor = junkNote;
+    if (list.length === 0) {
+      // Only junk: nothing to assign, the suggestion below replaces it.
+    } else {
+      let costEur = 0;
+      let json: unknown;
+      try {
+        const models = options.models ?? (await loadContentModelConfig(service)).check;
+        const call = await (options.callTool ?? callContentTool)({
+          models,
+          system: KEYWORDS_CLASSIFY_SYSTEM,
+          user: keywordsClassifyPrompt(context, list, live, taken),
+          tool: keywordsClassifyTool(list.map((k) => k.text)),
+          maxTokens: SUGGEST_MAX_TOKENS,
+          timeoutMs: SUGGEST_TIMEOUT_MS,
+        });
+        json = call.json;
+        costEur = roundEur(estimateCostEur(call.model, call.usage));
+        await recordLlmUsageEvent(service, {
+          organisationId: page.organisation_id,
+          userId,
+          agentId: avatarId,
+          mode: KEYWORDS_USAGE_MODE,
+          via: "direct",
+          model: call.model,
+          inputTokens: call.usage.inputTokens,
+          outputTokens: call.usage.outputTokens,
+        });
+      } catch (error) {
+        return { ok: false, status: 502, cost_eur: costEur, message: error instanceof Error ? error.message : "Die Einteilung der Keywords ist fehlgeschlagen." };
+      }
+      const roles = applyKeywordRoles(list, json, taken);
+      if (roles && roles.main === "") {
+        // The model found every entry unusable: carry its cost into the suggestion that replaces them.
+        carried = costEur;
+        precursor = [junkNote, roles.removed.length > 0 ? `Entfernt, weil kein passender Suchbegriff: ${roles.removed.map((k) => `„${k}“`).join(", ")}.` : ""].filter(Boolean).join(" ");
+      } else {
+        await addCost(service, page, costEur);
+        if (!roles) {
+          return { ok: false, status: 422, cost_eur: costEur, message: "Alle Keywords dieser Seite sind schon Hauptkeyword einer anderen Seite oder einem sehr ähnlich. Bitte in der Seitenstruktur oder von Hand klären." };
+        }
+        const removedNote = roles.removed.length > 0 ? `Entfernt, weil kein passender Suchbegriff: ${roles.removed.map((k) => `„${k}“`).join(", ")}.` : "";
+        const reason = [roles.reason, junkNote, removedNote].filter(Boolean).join(" ");
+        const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: roles.main, secondary: roles.secondary, source: "struktur", reason });
+        if (!saved.ok) return { ok: false, status: saved.status, cost_eur: costEur, message: saved.error };
+        return { ok: true, keywords: saved.keywords, cost_eur: costEur, reason };
+      }
     }
-    const roles = applyKeywordRoles(list, json, taken);
-    await addCost(service, page, costEur);
-    if (!roles) {
-      return { ok: false, status: 422, cost_eur: costEur, message: "Alle Keywords dieser Seite sind schon Hauptkeyword einer anderen Seite. Bitte in der Seitenstruktur oder von Hand klären." };
-    }
-    const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: roles.main, secondary: roles.secondary, source: "struktur", reason: roles.reason });
-    if (!saved.ok) return { ok: false, status: saved.status, cost_eur: costEur, message: saved.error };
-    return { ok: true, keywords: saved.keywords, cost_eur: costEur, reason: roles.reason };
   }
 
-  let costEur = 0;
+  let costEur = carried;
   let answer: KeywordsAnswer | null = null;
   let rejected: string | null = null;
   try {
@@ -341,7 +376,7 @@ export async function suggestContentKeywords(
         outputTokens: call.usage.outputTokens,
       });
       answer = normalizeKeywordsAnswer(call.json);
-      if (answer.no_keyword || !mainKeywordTakenBy(outline, page.slug, answer.main)) break;
+      if (answer.no_keyword || !mainKeywordTakenBy(outline, page.slug, answer.main, { similar: true })) break;
       rejected = answer.main;
     }
   } catch (error) {
@@ -360,7 +395,7 @@ export async function suggestContentKeywords(
     await addCost(service, page, costEur);
     return { ok: false, status: 422, cost_eur: costEur, message: "Der Zwilling hat kein verwertbares Keyword geliefert. Bitte erneut versuchen oder von Hand eintragen." };
   }
-  const clash = mainKeywordTakenBy(outline, page.slug, answer.main);
+  const clash = mainKeywordTakenBy(outline, page.slug, answer.main, { similar: true });
   if (clash) {
     await addCost(service, page, costEur);
     return {
@@ -371,12 +406,13 @@ export async function suggestContentKeywords(
     };
   }
   // A Nebenkeyword that is another page's main keyword would send two pages after the same search.
-  const takenKeys = new Set(taken.map((t) => keywordKey(t.keyword)));
-  const secondary = answer.secondary.filter((k) => !takenKeys.has(keywordKey(k)));
-  const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: answer.main, secondary, source: "analyse", reason: answer.reason });
+  const takenTexts = taken.map((t) => t.keyword);
+  const secondary = answer.secondary.filter((k) => !keywordTaken(k, takenTexts, true));
+  const reason = [answer.reason, precursor].filter(Boolean).join(" ");
+  const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: answer.main, secondary, source: "analyse", reason });
   await addCost(service, page, costEur);
   if (!saved.ok) return { ok: false, status: saved.status, cost_eur: costEur, message: saved.error };
-  return { ok: true, keywords: saved.keywords, cost_eur: costEur, reason: answer.reason };
+  return { ok: true, keywords: saved.keywords, cost_eur: costEur, reason };
 }
 
 async function addCost(service: SupabaseClient, page: ContentPageRow, costEur: number): Promise<void> {

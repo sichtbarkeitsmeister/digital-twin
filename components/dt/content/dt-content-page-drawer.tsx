@@ -1293,31 +1293,31 @@ export function DtContentPageDrawer(props: {
                             {busy === "keywords" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
                             Speichern
                           </DtPillButton>
-                          {review.briefing.keyword_source !== "struktur" || review.briefing.secondary_keywords.length > 0 ? (
-                            <DtPillButton
+                          <DtPillButton
                               type="button"
                               size="sm"
                               variant="outline"
                               className="h-7 px-3 text-xs"
                               disabled={Boolean(busy)}
                               onClick={() => void analyseKeywords(true)}
-                              title="Der Zwilling entscheidet, was Hauptkeyword und was Nebenkeyword ist: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Nennt die Seitenstruktur Keywords, teilt er genau diese ein; sonst legt er welche fest. Kein Hauptkeyword einer anderen Seite. Wenige Cent."
+                              title="Der Zwilling entscheidet, was Hauptkeyword und was Nebenkeyword ist, und prüft, ob die Einträge wirklich Suchbegriffe sind und zur Seite passen: aus der heutigen Ausrichtung der Seite, den Anbieterfakten und der Zielgruppe. Nennt die Seitenstruktur Keywords, teilt er genau diese ein; sonst legt er welche fest. Kein Hauptkeyword einer anderen Seite, auch kein sehr ähnliches. Wenige Cent."
                             >
                               {busy === "keywords_analyse" ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Sparkles className="size-3" aria-hidden />}
                               {review.briefing.keyword_source === "struktur"
                                 ? review.briefing.keyword_sorted
                                   ? "Neu einteilen"
-                                  : "Keywords einteilen"
+                                  : review.briefing.secondary_keywords.length > 0
+                                    ? "Keywords einteilen"
+                                    : "Keyword prüfen"
                                 : review.briefing.keyword_source === "analyse" || review.briefing.keyword_source === "manuell"
                                   ? "Neu vorschlagen"
                                   : review.briefing.keyword_source === "ohne"
                                     ? "Trotzdem ein Keyword vorschlagen"
                                     : "Keywords analysieren"}
-                            </DtPillButton>
-                          ) : null}
+                          </DtPillButton>
                           <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
                             {review.briefing.keyword_source === "struktur"
-                              ? "Die Keywords stammen aus der Seitenstruktur, der Zwilling teilt sie in Haupt und Neben ein. Von Hand lassen sie sich ändern."
+                              ? "Die Keywords stammen aus der Seitenstruktur; der Zwilling teilt sie in Haupt und Neben ein und prüft, ob sie passen. Von Hand lassen sie sich ändern."
                               : "Jedes Hauptkeyword gibt es nur einmal; gilt ab dem nächsten Schritt."}
                           </span>
                         </div>
