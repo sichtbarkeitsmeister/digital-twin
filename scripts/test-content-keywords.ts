@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ContentBriefingPage } from "../lib/dt/content/excel-structure";
-import { keywordStatus, keywordsCsv } from "../components/dt/content/dt-content-keywords-overview";
+import { keywordStatus, keywordsCsv, normalizeKeywordLines } from "../components/dt/content/dt-content-keywords-overview";
+import { describeKeywordConflict, findKeywordConflicts } from "../lib/dt/content/keyword-compare";
 import { parseContentPagePatch } from "../lib/dt/content/page-patch";
 import type { ContentPageSummary } from "../lib/dt/content/types";
 import {
@@ -256,7 +257,11 @@ async function testSuggest() {
   const good = stubTool([{ main_keyword: "Akupunktur Köln", secondary_keywords: ["TCM Köln", "Osteopathie Köln", "Akupunktur Behandlung"], reason: "Passt zur Seite." }]);
   const ok = await suggestContentKeywords(service(), pageRow(), null, { ...base, callTool: good.callTool });
   assert.ok(ok.ok && !ok.skipped && ok.keywords?.source === "analyse" && ok.cost_eur > 0);
-  assert.deepEqual(saved.at(-1), { main: "Akupunktur Köln", secondary: ["TCM Köln", "Akupunktur Behandlung"], source: "analyse", reason: "Passt zur Seite." });
+  assert.deepEqual(
+    saved.at(-1),
+    { main: "Akupunktur Köln", secondary: ["TCM Köln", "Osteopathie Köln", "Akupunktur Behandlung"], source: "analyse", reason: "Passt zur Seite." },
+    "another page's main keyword may be a Nebenkeyword here: the pages link to each other",
+  );
 
   // A main keyword another page has: one retry that names it, then the second answer is taken.
   const retry = stubTool([
@@ -362,11 +367,26 @@ function testOverview() {
   ]);
   const lines = csv.replace("\uFEFF", "").split("\r\n");
   assert.ok(csv.startsWith("\uFEFF"), "BOM for German Excel");
-  assert.equal(lines[0], '"Seite";"Pfad";"Hauptkeyword";"Nebenkeywords";"Status";"Herkunft";"Hinweis";"Konflikt"');
-  assert.equal(lines[1], '"Akupunktur";"/akupunktur";"Akupunktur Köln";"TCM Köln, Nadeltherapie";"Vorschlag des Zwillings";"Vorschlag des Zwillings";"Passt ""genau""."' + ';""');
-  assert.equal(lines[2], '"Kontakt";"/kontakt";"";"";"Kein Suchziel";"kein Suchziel, kein Keyword nötig";"Reine Kontaktseite.";""');
+  assert.equal(lines[0], '"Seite";"Pfad";"Hauptkeyword";"Nebenkeywords";"Status";"Herkunft";"Hinweis";"Konflikt";"Verlinkung möglich"');
+  assert.equal(lines[1], '"Akupunktur";"/akupunktur";"Akupunktur Köln";"TCM Köln, Nadeltherapie";"Vorschlag des Zwillings";"Vorschlag des Zwillings";"Passt ""genau""."' + ';"";""');
+  assert.equal(lines[2], '"Kontakt";"/kontakt";"";"";"Kein Suchziel";"kein Suchziel, kein Keyword nötig";"Reine Kontaktseite.";"";""');
   assert.equal(keywordStatus(summary({ keyword_source: "struktur", keyword_todo: "suchen", main_keyword: "geschätzter Traffic bei Google / Monat" })), "auffaellig", "an Excel entry that is no keyword is flagged");
   console.log("overview: status per page, CSV: ok");
+}
+
+function testCsvConflicts() {
+  const pages = [
+    summary({ name: "Silber", slug: "silber", main_keyword: "Silber Ankauf", secondary_keywords: ["Silberankauf Düsseldorf"], keyword_source: "analyse", keyword_todo: null }),
+    summary({ name: "Silberankauf", slug: "silber2", main_keyword: "Silberankauf Düsseldorf", keyword_source: "analyse", keyword_todo: null }),
+    summary({ name: "Silber Ankauf 2", slug: "silber3", main_keyword: "Ankauf Silber", keyword_source: "analyse", keyword_todo: null }),
+  ];
+  const all = findKeywordConflicts(pages.map((p) => ({ slug: p.slug, name: p.name, main: p.main_keyword, secondary: p.secondary_keywords })));
+  const lines = keywordsCsv(pages, all).replace("\uFEFF", "").split("\r\n");
+  assert.match(lines[1]!, /"Hauptkeyword wie „Silber Ankauf 2“: dasselbe Hauptkeyword \(„Ankauf Silber“\)";"Nebenkeyword ist Hauptkeyword von „Silberankauf“: Verlinkung möglich"$/, "same main keyword is the conflict; a main keyword as Nebenkeyword elsewhere is only a linking hint");
+  assert.match(lines[2]!, /";"Nebenkeyword bei „Silber“: Verlinkung möglich"$/, "no conflict, only the hint");
+  assert.equal(describeKeywordConflict(all.get("silber2")![0]!).includes("Verlinkung möglich"), true);
+  assert.deepEqual(normalizeKeywordLines("TCM Köln,\n Nadeltherapie; \n\nTCM Köln  "), ["TCM Köln", "Nadeltherapie", "TCM Köln"], "typed lines: separators, blanks");
+  console.log("overview: conflict only for the same main keyword, link hint otherwise: ok");
 }
 
 function testPatch() {
@@ -386,6 +406,7 @@ async function main() {
   testPrompts();
   testRoles();
   testOverview();
+  testCsvConflicts();
   await testSuggest();
   testPatch();
   console.log("OK: content keywords tests passed");

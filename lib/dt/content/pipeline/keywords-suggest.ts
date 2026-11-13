@@ -54,7 +54,7 @@ Grundlage, in dieser Reihenfolge:
 4. Die Rolle der Seite in der Website: Seitentyp, Hauptsilo und die übrigen Seiten.
 Hauptkeyword: genau eines, 1–5 Wörter, so wie Menschen es in die Suche tippen. Ein Ort gehört nur hinein, wenn der Anbieter regional arbeitet und der Ort in den Anbieterfakten oder Kontaktdaten steht. Der Firmenname ist kein Hauptkeyword, außer auf einer Seite über das Unternehmen selbst.
 Jedes Hauptkeyword gibt es auf der Website nur einmal. Die Liste „Bereits vergebene Hauptkeywords“ ist gesperrt, auch in anderer Schreibweise oder Wortstellung. Liegt das naheliegende Keyword schon bei einer anderen Seite, bekommt diese Seite das spezifischere: Leistung plus Merkmal, Leistung plus Anlass oder Beschwerde, Leistung plus Ort, oder die Frage, die sie beantwortet. Die Startseite und eine Hauptsilo-Seite tragen den breiten Begriff, ihre Unterseiten die engeren.
-Nebenkeywords: 3–8 Synonyme, Varianten und eng verwandte Suchbegriffe derselben Suchabsicht. Kein Hauptkeyword einer anderen Seite, keine Wiederholung des Hauptkeywords.
+Nebenkeywords: 3–8 Synonyme, Varianten und eng verwandte Suchbegriffe derselben Suchabsicht. Das Hauptkeyword einer anderen Seite darf als Nebenkeyword vorkommen, wenn sich die Seiten damit sinnvoll verlinken lassen; keine Wiederholung des eigenen Hauptkeywords.
 Kein Suchvolumen nennen oder schätzen.
 Eine Seite ohne Suchziel (Impressum, Datenschutz, AGB, Widerruf, Danke-Seite, reine Kontaktseite) bekommt kein Keyword: no_keyword = true, und reason sagt in einem Satz, warum.
 reason: ein Satz, warum dieses Hauptkeyword zu dieser Seite passt und wie es sich von den Nachbarseiten abgrenzt.`;
@@ -405,9 +405,7 @@ export async function suggestContentKeywords(
       message: `„${answer.main}“ ist schon das Hauptkeyword der Seite „${clash.name}“. Bitte von Hand festlegen.`,
     };
   }
-  // A Nebenkeyword that is another page's main keyword would send two pages after the same search.
-  const takenTexts = taken.map((t) => t.keyword);
-  const secondary = answer.secondary.filter((k) => !keywordTaken(k, takenTexts, true));
+  const secondary = answer.secondary;
   const reason = [answer.reason, precursor].filter(Boolean).join(" ");
   const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: answer.main, secondary, source: "analyse", reason });
   await addCost(service, page, costEur);
