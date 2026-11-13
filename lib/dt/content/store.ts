@@ -99,6 +99,12 @@ export type ContentPageRow = {
   pillar_name: string | null;
   estimated_traffic: number | null;
   keywords: ContentPageKeywords | null;
+  /**
+   * The keyword analysis found no search goal for the page (Kontakt, Impressum, Datenschutz …):
+   * it needs no keyword and is not offered to the analysis again. Stored as
+   * `keywords: { none: true, reason }`; keywords of the Seitenstruktur or an entry replace it.
+   */
+  keywords_exempt?: { reason: string } | null;
   h1_options: string[];
   user_questions: string[];
   ki_prompt: string | null;
@@ -357,7 +363,7 @@ function nullableText(value: unknown): string | null {
 /** `keywords` as stored: `{ main: { text, volume? }, secondary: [...], source? }`; anything else counts as none. */
 export function normalizeKeywords(value: unknown): ContentPageKeywords | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const raw = value as { main?: unknown; secondary?: unknown; source?: unknown; sorted?: unknown };
+  const raw = value as { main?: unknown; secondary?: unknown; source?: unknown; sorted?: unknown; reason?: unknown };
   const keyword = (k: unknown) => {
     if (!k || typeof k !== "object") return null;
     const r = k as { text?: unknown; volume?: unknown };
@@ -372,7 +378,16 @@ export function normalizeKeywords(value: unknown): ContentPageKeywords | null {
   const result: ContentPageKeywords = { main, secondary };
   if (raw.source === "analyse" || raw.source === "manuell") result.source = raw.source;
   if (raw.sorted === true) result.sorted = true;
+  if (typeof raw.reason === "string" && raw.reason.trim()) result.reason = raw.reason.trim().slice(0, 400);
   return result;
+}
+
+/** `keywords: { none: true, reason }` as stored by „kein Suchziel“; anything else is no exemption. */
+export function readKeywordExempt(value: unknown): { reason: string } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as { none?: unknown; reason?: unknown };
+  if (raw.none !== true) return null;
+  return { reason: typeof raw.reason === "string" ? raw.reason.trim().slice(0, 400) : "" };
 }
 
 /**
@@ -380,7 +395,11 @@ export function normalizeKeywords(value: unknown): ContentPageKeywords | null {
  * them) or „einteilen“ (the Seitenstruktur named several keywords without saying which one is
  * the main keyword: the Zwilling assigns the roles). Null: nothing to do.
  */
-export function contentKeywordTodo(page: Pick<ContentPageRow, "keywords" | "main_keyword">): ContentKeywordTodo | null {
+export function contentKeywordTodo(
+  page: Pick<ContentPageRow, "keywords" | "main_keyword"> & Partial<Pick<ContentPageRow, "keywords_exempt" | "page_type" | "page_role" | "level" | "name" | "path">>,
+): ContentKeywordTodo | null {
+  // A page that gets no text needs no keyword.
+  if (page.name !== undefined && (page.page_type ?? effectiveContentPageType({ ...page, name: page.name, page_type: page.page_type ?? null, level: page.level ?? 1 })) === "nicht_bearbeiten") return null;
   const origin = contentKeywordOrigin(page);
   if (origin === null || origin === "lauf") return "suchen";
   if (origin === "struktur" && page.keywords && page.keywords.secondary.length > 0 && !page.keywords.sorted) return "einteilen";
@@ -392,8 +411,9 @@ export function contentKeywordTodo(page: Pick<ContentPageRow, "keywords" | "main
  * Seitenstruktur (Excel), the Zwilling's suggestion, the editor's entry, the Analyse of a text
  * run (only a main keyword, no stored list), or null: the page has none yet.
  */
-export function contentKeywordOrigin(page: Pick<ContentPageRow, "keywords" | "main_keyword">): ContentKeywordOrigin | null {
+export function contentKeywordOrigin(page: Pick<ContentPageRow, "keywords" | "main_keyword"> & Partial<Pick<ContentPageRow, "keywords_exempt">>): ContentKeywordOrigin | null {
   if (page.keywords) return page.keywords.source ?? "struktur";
+  if (page.keywords_exempt) return "ohne";
   return page.main_keyword?.trim() ? "lauf" : null;
 }
 
@@ -422,6 +442,23 @@ export function cleanKeywordInput(main: string, secondary: readonly string[]): {
   return { main: mainText, secondary: out };
 }
 
+/**
+ * „Kein Suchziel“: the keyword analysis found nothing to rank for (Kontakt, Impressum,
+ * Datenschutz …). The page keeps no keyword, says why, and is not offered to the analysis again
+ * until the editor asks for it („Neu vorschlagen“) or the Seitenstruktur brings keywords.
+ */
+export async function markContentPageNoKeyword(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  reason: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({ keywords: { none: true, reason: reason.trim().slice(0, 400) }, main_keyword: null })
+    .eq("id", page.id);
+  return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Keywords konnten nicht gespeichert werden") } : { ok: true };
+}
+
 /** The other page that already has this main keyword, or null. */
 export function mainKeywordTakenBy(
   pages: readonly Pick<ContentPageRow, "slug" | "name" | "keywords" | "main_keyword">[],
@@ -442,7 +479,7 @@ export function mainKeywordTakenBy(
 export async function saveContentPageKeywords(
   service: SupabaseClient,
   page: ContentPageRow,
-  input: { main: string; secondary: readonly string[]; source: NonNullable<ContentPageKeywords["source"]> | "struktur" },
+  input: { main: string; secondary: readonly string[]; source: NonNullable<ContentPageKeywords["source"]> | "struktur"; reason?: string },
 ): Promise<{ ok: true; keywords: ContentPageKeywords | null } | { ok: false; status: number; error: string }> {
   const cleaned = cleanKeywordInput(input.main, input.secondary);
   if (!cleaned.main) {
@@ -463,6 +500,7 @@ export async function saveContentPageKeywords(
     secondary: cleaned.secondary.map(withVolume),
     // Keywords of the Seitenstruktur keep that origin; the Zwilling only assigned their roles.
     ...(input.source === "struktur" ? { sorted: true as const } : { source: input.source }),
+    ...(input.reason?.trim() ? { reason: input.reason.trim().slice(0, 400) } : {}),
   };
   const { error } = await service.from("dt_content_pages").update({ keywords, main_keyword: cleaned.main }).eq("id", page.id);
   return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Keywords konnten nicht gespeichert werden") } : { ok: true, keywords };
@@ -484,6 +522,7 @@ function normalizePageRow(raw: Record<string, unknown>): ContentPageRow {
     pillar_name: nullableText(raw.pillar_name),
     estimated_traffic: typeof raw.estimated_traffic === "number" && Number.isFinite(raw.estimated_traffic) ? raw.estimated_traffic : null,
     keywords: normalizeKeywords(raw.keywords),
+    keywords_exempt: readKeywordExempt(raw.keywords),
     h1_options: stringList(raw.h1_options),
     user_questions: stringList(raw.user_questions),
     ki_prompt: nullableText(raw.ki_prompt),
@@ -1394,6 +1433,8 @@ export function pageSummary(page: ContentPageRow, extra: ContentPageExtra = {}):
     keyword_source: contentKeywordOrigin(page),
     keyword_sorted: page.keywords?.sorted === true,
     keyword_todo: contentKeywordTodo(page),
+    secondary_keywords: page.keywords?.secondary.map((k) => k.text) ?? [],
+    keyword_note: page.keywords?.reason ?? page.keywords_exempt?.reason ?? null,
     page_type: page.page_type,
     page_role: page.page_role,
     type_editable: canEditContentPageType(page),
@@ -1573,6 +1614,7 @@ export function pageBriefing(page: ContentPageRow): ContentPageBriefing {
     keyword_source: contentKeywordOrigin(page),
     keyword_sorted: page.keywords?.sorted === true,
     keyword_todo: contentKeywordTodo(page),
+    keyword_note: page.keywords?.reason ?? page.keywords_exempt?.reason ?? null,
     secondary_keywords: page.keywords?.secondary.map((k) => k.text) ?? [],
     h1_options: page.h1_options,
     user_questions: page.user_questions,

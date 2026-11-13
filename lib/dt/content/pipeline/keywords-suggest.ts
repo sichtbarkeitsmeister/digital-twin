@@ -15,6 +15,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { callContentTool } from "@/lib/dt/content/pipeline/llm";
 import { anbieterBlock, avatarBlock, notesBlock, pageBlock, type ContentPipelineContext } from "@/lib/dt/content/pipeline/prompts";
@@ -28,6 +29,7 @@ import {
   keywordKey,
   loadContentPageOutline,
   mainKeywordTakenBy,
+  markContentPageNoKeyword,
   num,
   saveContentPageKeywords,
   type ContentOutlinePage,
@@ -53,7 +55,7 @@ Hauptkeyword: genau eines, 1–5 Wörter, so wie Menschen es in die Suche tippen
 Jedes Hauptkeyword gibt es auf der Website nur einmal. Die Liste „Bereits vergebene Hauptkeywords“ ist gesperrt, auch in anderer Schreibweise oder Wortstellung. Liegt das naheliegende Keyword schon bei einer anderen Seite, bekommt diese Seite das spezifischere: Leistung plus Merkmal, Leistung plus Anlass oder Beschwerde, Leistung plus Ort, oder die Frage, die sie beantwortet. Die Startseite und eine Hauptsilo-Seite tragen den breiten Begriff, ihre Unterseiten die engeren.
 Nebenkeywords: 3–8 Synonyme, Varianten und eng verwandte Suchbegriffe derselben Suchabsicht. Kein Hauptkeyword einer anderen Seite, keine Wiederholung des Hauptkeywords.
 Kein Suchvolumen nennen oder schätzen.
-Eine Seite ohne Suchziel (Impressum, Datenschutz, AGB, Widerruf, Danke-Seite, reine Kontaktseite) bekommt kein Keyword: no_keyword = true.
+Eine Seite ohne Suchziel (Impressum, Datenschutz, AGB, Widerruf, Danke-Seite, reine Kontaktseite) bekommt kein Keyword: no_keyword = true, und reason sagt in einem Satz, warum.
 reason: ein Satz, warum dieses Hauptkeyword zu dieser Seite passt und wie es sich von den Nachbarseiten abgrenzt.`;
 
 export const KEYWORDS_CLASSIFY_SYSTEM = `Die Seitenstruktur nennt für eine Seite mehrere Keywords, ohne zu sagen, welches davon das Hauptkeyword ist. Du teilst sie ein. Du schreibst nichts für die Seite.
@@ -191,13 +193,17 @@ export function applyKeywordRoles(
 
 export type KeywordsAnswer = { no_keyword: boolean; main: string; secondary: string[]; reason: string };
 
+/** Why a page was passed over without a call: no text is written for it, or it was found to have no search goal. */
+export type KeywordsSkipped = "vorhanden" | "kein_text" | "kein_suchziel";
+
 /** The model's answer, cleaned like an entry by hand. */
 export function normalizeKeywordsAnswer(json: unknown): KeywordsAnswer {
   const r = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
   const list = Array.isArray(r.secondary_keywords) ? r.secondary_keywords.filter((k): k is string => typeof k === "string") : [];
   const cleaned = cleanKeywordInput(typeof r.main_keyword === "string" ? r.main_keyword : "", list);
   return {
-    no_keyword: r.no_keyword === true || !cleaned.main,
+    // Only an explicit „kein Suchziel“ exempts a page; an empty answer is a failure, not a verdict.
+    no_keyword: r.no_keyword === true,
     main: cleaned.main,
     secondary: cleaned.secondary,
     reason: typeof r.reason === "string" ? r.reason.trim().slice(0, 400) : "",
@@ -205,7 +211,7 @@ export function normalizeKeywordsAnswer(json: unknown): KeywordsAnswer {
 }
 
 export type KeywordsSuggestResult =
-  | { ok: true; keywords: ContentPageKeywords | null; cost_eur: number; reason: string; skipped?: "vorhanden" }
+  | { ok: true; keywords: ContentPageKeywords | null; cost_eur: number; reason: string; skipped?: KeywordsSkipped; no_keyword?: true }
   | { ok: false; status: number; message: string; cost_eur: number };
 
 async function loadLiveSignals(service: SupabaseClient, page: ContentPageRow): Promise<LivePageSignals | null> {
@@ -238,6 +244,7 @@ export async function suggestContentKeywords(
     outline?: ContentOutlinePage[];
     live?: LivePageSignals | null;
     save?: typeof saveContentPageKeywords;
+    markNone?: typeof markContentPageNoKeyword;
   } = {},
 ): Promise<KeywordsSuggestResult> {
   const origin = contentKeywordOrigin(page);
@@ -246,6 +253,13 @@ export async function suggestContentKeywords(
   if (origin === "struktur" && !classify) return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
   if ((origin === "manuell" || origin === "analyse") && !options.force) {
     return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "vorhanden" };
+  }
+  // A page that gets no text needs no keyword, and one found to have no search goal is not asked again.
+  if (!options.force && origin !== "struktur" && (page.page_type ?? effectiveContentPageType({ ...page, page_type: page.page_type ?? null })) === "nicht_bearbeiten") {
+    return { ok: true, keywords: page.keywords, cost_eur: 0, reason: "", skipped: "kein_text" };
+  }
+  if (origin === "ohne" && !options.force) {
+    return { ok: true, keywords: null, cost_eur: 0, reason: page.keywords_exempt?.reason ?? "", skipped: "kein_suchziel", no_keyword: true };
   }
 
   let context: ContentPipelineContext;
@@ -296,7 +310,7 @@ export async function suggestContentKeywords(
     if (!roles) {
       return { ok: false, status: 422, cost_eur: costEur, message: "Alle Keywords dieser Seite sind schon Hauptkeyword einer anderen Seite. Bitte in der Seitenstruktur oder von Hand klären." };
     }
-    const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: roles.main, secondary: roles.secondary, source: "struktur" });
+    const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: roles.main, secondary: roles.secondary, source: "struktur", reason: roles.reason });
     if (!saved.ok) return { ok: false, status: saved.status, cost_eur: costEur, message: saved.error };
     return { ok: true, keywords: saved.keywords, cost_eur: costEur, reason: roles.reason };
   }
@@ -334,14 +348,17 @@ export async function suggestContentKeywords(
     await addCost(service, page, costEur);
     return { ok: false, status: 502, cost_eur: costEur, message: error instanceof Error ? error.message : "Die Keyword-Analyse ist fehlgeschlagen." };
   }
-  if (!answer || answer.no_keyword) {
+  if (answer?.no_keyword) {
+    // No search goal (Kontakt, Impressum, Datenschutz …): a finding, not a failure. Remembered, so the
+    // page is not paid for again with every click; the Keywords-Übersicht shows it with the reason.
+    const marked = await (options.markNone ?? markContentPageNoKeyword)(service, page, answer.reason || "Die Seite hat kein Suchziel.");
     await addCost(service, page, costEur);
-    return {
-      ok: false,
-      status: 422,
-      cost_eur: costEur,
-      message: `Kein Keyword vorgeschlagen${answer?.reason ? `: ${answer.reason}` : " (Seite ohne Suchziel)"}`,
-    };
+    if (!marked.ok) return { ok: false, status: marked.status, cost_eur: costEur, message: marked.error };
+    return { ok: true, keywords: null, cost_eur: costEur, reason: answer.reason, no_keyword: true };
+  }
+  if (!answer || !answer.main) {
+    await addCost(service, page, costEur);
+    return { ok: false, status: 422, cost_eur: costEur, message: "Der Zwilling hat kein verwertbares Keyword geliefert. Bitte erneut versuchen oder von Hand eintragen." };
   }
   const clash = mainKeywordTakenBy(outline, page.slug, answer.main);
   if (clash) {
@@ -356,7 +373,7 @@ export async function suggestContentKeywords(
   // A Nebenkeyword that is another page's main keyword would send two pages after the same search.
   const takenKeys = new Set(taken.map((t) => keywordKey(t.keyword)));
   const secondary = answer.secondary.filter((k) => !takenKeys.has(keywordKey(k)));
-  const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: answer.main, secondary, source: "analyse" });
+  const saved = await (options.save ?? saveContentPageKeywords)(service, page, { main: answer.main, secondary, source: "analyse", reason: answer.reason });
   await addCost(service, page, costEur);
   if (!saved.ok) return { ok: false, status: saved.status, cost_eur: costEur, message: saved.error };
   return { ok: true, keywords: saved.keywords, cost_eur: costEur, reason: answer.reason };

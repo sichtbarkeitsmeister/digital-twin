@@ -10,6 +10,7 @@ import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentBulkStepsPanel } from "@/components/dt/content/dt-content-bulk-steps-panel";
 import { DtContentContactCard } from "@/components/dt/content/dt-content-contact-card";
+import { DtContentKeywordsOverview } from "@/components/dt/content/dt-content-keywords-overview";
 import { DtContentOrgQuestionsCard } from "@/components/dt/content/dt-content-org-questions-card";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
 import { ZielgruppenBudgetWarning } from "@/components/dt/content/dt-content-zielgruppen-panel";
@@ -291,18 +292,30 @@ export function DtContentWorkspace(props: {
     if (todo.length === 0 || keywordsRun) return;
     setKeywordsRun({ done: 0, total: todo.length });
     const failed: string[] = [];
+    let noGoal = 0;
     for (const [i, page] of todo.entries()) {
-      const res = await contentApi(`/api/dt/content/pages/${encodeURIComponent(page.slug)}/keywords`, {
+      const res = await contentApi<{ no_keyword?: boolean }>(`/api/dt/content/pages/${encodeURIComponent(page.slug)}/keywords`, {
         method: "POST",
         body: { organisationId, force: false },
       });
       if (!res.ok) failed.push(`${page.name}: ${res.message}`);
+      else if (res.data.no_keyword) noGoal += 1;
       setKeywordsRun({ done: i + 1, total: todo.length });
     }
     setKeywordsRun(null);
     void loadOverview();
-    const ok = todo.length - failed.length;
-    if (ok > 0) toast.success(`Keywords für ${ok} ${ok === 1 ? "Seite" : "Seiten"} eingetragen und eingeteilt`);
+    const ok = todo.length - failed.length - noGoal;
+    if (ok > 0 || noGoal > 0) {
+      toast.success(
+        [
+          ok > 0 ? `Keywords für ${ok} ${ok === 1 ? "Seite" : "Seiten"} eingetragen und eingeteilt` : "",
+          noGoal > 0 ? `${noGoal} ${noGoal === 1 ? "Seite" : "Seiten"} ohne Suchziel (kein Keyword nötig, siehe Keywords-Übersicht)` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        { duration: 10_000 },
+      );
+    }
     if (failed.length > 0) {
       const shown = failed.slice(0, 6).join(" · ");
       toast.error(`Nicht geklappt (${failed.length}): ${shown}${failed.length > 6 ? " …" : ""}`, { duration: 20_000 });
@@ -692,6 +705,8 @@ export function DtContentWorkspace(props: {
           </ul>
         ) : null}
       </section>
+
+      <DtContentKeywordsOverview pages={pages} onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })} />
 
       <section className={cardClass} aria-label="Seiten">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">

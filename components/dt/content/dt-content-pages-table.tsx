@@ -226,6 +226,11 @@ export function DtContentPagesTable(props: {
                           .join(" · ")}
                       </span>
                     ) : null}
+                    {page.keyword_source === "ohne" ? (
+                      <span className="truncate text-xs text-sbkm-ink-500 dark:text-white/45" title={page.keyword_note ?? undefined}>
+                        Kein Keyword nötig (kein Suchziel)
+                      </span>
+                    ) : null}
                     {page.keyword_todo ? (
                       <span className="inline-flex w-fit items-center gap-1 text-xs font-medium text-orange-700 dark:text-orange-300">
                         <AlertTriangle className="size-3 shrink-0" aria-hidden />

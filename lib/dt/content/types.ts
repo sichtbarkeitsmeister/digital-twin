@@ -57,6 +57,10 @@ export type ContentPageSummary = {
   keyword_sorted: boolean;
   /** What the keyword analysis still has to do; null: nothing. */
   keyword_todo: ContentKeywordTodo | null;
+  /** All Nebenkeywords of the page (Keywords-Übersicht). */
+  secondary_keywords: string[];
+  /** The Zwilling's reason for the main keyword, or why the page needs none. */
+  keyword_note: string | null;
   /** Which writing variant the SEO step uses; null for rows from before the briefing migration. */
   page_type: ContentPageType | null;
   page_role: ContentPageRole | null;
@@ -270,7 +274,7 @@ export type ContentAction = {
  * suggestion („Keywords analysieren“), the editor's entry, or the Analyse of a text run (only
  * the main keyword is stored then).
  */
-export type ContentKeywordOrigin = "struktur" | "analyse" | "manuell" | "lauf";
+export type ContentKeywordOrigin = "struktur" | "analyse" | "manuell" | "lauf" | "ohne";
 
 /** What the keyword analysis still does for a page: suggest keywords, or assign the roles of a list from the Seitenstruktur. */
 export type ContentKeywordTodo = "suchen" | "einteilen";
@@ -280,6 +284,7 @@ export const CONTENT_KEYWORD_ORIGIN_LABELS: Record<ContentKeywordOrigin, string>
   analyse: "Vorschlag des Zwillings",
   manuell: "von Hand eingetragen",
   lauf: "aus der Analyse des Textlaufs",
+  ohne: "kein Suchziel, kein Keyword nötig",
 };
 
 /** The origin as shown to the editor; a list of the Seitenstruktur says whether its roles are assigned. */
@@ -307,6 +312,7 @@ export type ContentPageBriefing = {
   keyword_source: ContentKeywordOrigin | null;
   keyword_sorted: boolean;
   keyword_todo: ContentKeywordTodo | null;
+  keyword_note: string | null;
   secondary_keywords: string[];
   h1_options: string[];
   user_questions: string[];
