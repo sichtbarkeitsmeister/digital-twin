@@ -102,6 +102,7 @@
     "test:content-skip-steps": "tsx scripts/test-content-skip-steps.ts",
     "test:content-client-data": "tsx scripts/test-content-client-data.ts",
     "test:content-keywords": "tsx scripts/test-content-keywords.ts",
+    "test:content-keyword-compare": "tsx scripts/test-content-keyword-compare.ts",
     "test:content-fewer-questions": "tsx scripts/test-content-fewer-questions.ts",
     "test:content-text-uploads": "tsx scripts/test-content-text-uploads.ts",
     "test:content-job-ownership": "tsx scripts/test-content-job-ownership.ts",

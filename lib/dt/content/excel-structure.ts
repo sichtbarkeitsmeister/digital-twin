@@ -21,6 +21,7 @@
  * indented tree so that parser can store an outline that matches the Texte table.
  */
 
+import { keywordJunkReason } from "@/lib/dt/content/keyword-compare";
 import {
   derivePageType,
   type ContentPageRole,
@@ -150,7 +151,8 @@ export function parseKeywordsCell(text: string): ContentPageKeywords | null {
   for (const part of parts) {
     const m = part.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
     const raw = (m ? m[1] : part).replace(/^[-•*\d.)\s]+/, "").trim();
-    if (!raw) continue;
+    // A header or description the Excel left in the cell („geschätzter Traffic bei Google / Monat“) is no keyword.
+    if (!raw || keywordJunkReason(raw)) continue;
     const key = raw.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);

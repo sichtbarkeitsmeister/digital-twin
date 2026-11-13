@@ -706,7 +706,12 @@ export function DtContentWorkspace(props: {
         ) : null}
       </section>
 
-      <DtContentKeywordsOverview pages={pages} onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })} />
+      <DtContentKeywordsOverview
+        organisationId={organisationId}
+        pages={pages}
+        onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })}
+        onChanged={() => void loadOverview()}
+      />
 
       <section className={cardClass} aria-label="Seiten">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">

@@ -236,7 +236,9 @@ export function DtContentPagesTable(props: {
                         <AlertTriangle className="size-3 shrink-0" aria-hidden />
                         {page.keyword_todo === "einteilen"
                           ? "Haupt-/Nebenkeywords noch nicht eingeteilt"
-                          : page.keyword_source === "lauf"
+                          : page.keyword_source === "struktur"
+                            ? "Keyword aus der Seitenstruktur auffällig"
+                            : page.keyword_source === "lauf"
                             ? "Nebenkeywords fehlen"
                             : "Keine Keywords"}
                       </span>
