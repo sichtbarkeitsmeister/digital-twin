@@ -559,7 +559,11 @@ export type ContentTypePromptsResult = {
 };
 
 /** `PATCH /api/dt/content/pages/[slug]`: the editor changed the page type or the steps switched off. */
-export type ContentPagePatchResult = { review: ContentReview; overview: ContentOverview };
+export type ContentPagePatchResult = {
+  review: ContentReview;
+  /** The whole table; null when the request said `overview: false`. */
+  overview: ContentOverview | null;
+};
 
 /** `POST /api/dt/content/crawl/import` */
 export type ContentCrawlImportResult = {
