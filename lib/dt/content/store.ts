@@ -1042,6 +1042,24 @@ export function contentStructureOutline(pages: readonly ContentOutlinePage[], cu
   return ordered.map(line).join("\n");
 }
 
+/**
+ * The finished texts of the organisation (slug, name, HTML) for the duplicate check: every page that
+ * has a text, whatever its state. Pages without a text are left out.
+ */
+export async function loadContentTexts(service: SupabaseClient, organisationId: string): Promise<Array<{ slug: string; name: string; html: string }>> {
+  const { data, error } = await service
+    .from("dt_content_pages")
+    .select("slug, name, html")
+    .eq("organisation_id", organisationId)
+    .neq("html", "")
+    .order("position", { ascending: true })
+    .limit(MAX_PAGES);
+  if (error) throw new Error(contentDbErrorMessage(error, "Texte konnten nicht geladen werden"));
+  return ((data ?? []) as unknown as Array<Record<string, unknown>>)
+    .map((raw) => ({ slug: String(raw.slug ?? ""), name: String(raw.name ?? ""), html: typeof raw.html === "string" ? raw.html : "" }))
+    .filter((p) => p.slug && p.html.trim());
+}
+
 export async function loadContentPageOutline(service: SupabaseClient, organisationId: string): Promise<ContentOutlinePage[]> {
   const { data, error } = await service
     .from("dt_content_pages")
