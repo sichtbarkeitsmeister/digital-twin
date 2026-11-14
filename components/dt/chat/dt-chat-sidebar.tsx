@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  ChevronsLeft,
   LayoutDashboard,
   Pencil,
   Plus,
@@ -96,6 +97,8 @@ export function DtChatSidebar(props: {
   flush?: boolean;
   /** Mobile drawer close handler (shown only on small screens). */
   onClose?: () => void;
+  /** Large screens: the arrow that hides the whole list (the chat header brings it back). */
+  onCollapse?: () => void;
   wunschkundenPanel?: React.ReactNode;
   hideFooter?: boolean;
   /** SEO workspace: org is chosen in the dashboard header. */
@@ -116,6 +119,19 @@ export function DtChatSidebar(props: {
   }, [editingChatId]);
 
   const showSearchResults = props.searchQuery.trim().length >= 2;
+
+  // Large screens only (the drawer below lg has its own close button): hides the list to give the chat the room.
+  const collapseButton = props.onCollapse ? (
+    <button
+      type="button"
+      onClick={props.onCollapse}
+      title="Chat-Verlauf ausblenden"
+      aria-label="Chat-Verlauf ausblenden"
+      className="hidden h-8 w-8 shrink-0 place-items-center rounded-pill border border-sbkm-navy/15 bg-white/70 text-sbkm-ink-600 transition hover:bg-sbkm-mint/15 dark:border-white/15 dark:bg-white/5 dark:text-white/70 lg:inline-grid"
+    >
+      <ChevronsLeft className="h-4 w-4" strokeWidth={2} aria-hidden />
+    </button>
+  ) : null;
 
   async function commitRename(chatId: string) {
     const next = editTitle.trim();
@@ -208,16 +224,20 @@ export function DtChatSidebar(props: {
               >
                 <Search className="h-3.5 w-3.5" />
               </button>
+              {collapseButton}
             </div>
           ) : (
+          <div className="mt-4 flex items-center gap-2">
           <button
             type="button"
             onClick={props.onNewChat}
-            className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/70 text-sm font-bold text-sbkm-navy transition hover:bg-sbkm-mint/20 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-pill border border-sbkm-navy/15 bg-white/70 text-sm font-bold text-sbkm-navy transition hover:bg-sbkm-mint/20 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white"
           >
             <Plus className="h-4 w-4 text-sbkm-mint" aria-hidden />
             Neuer Chat
           </button>
+          {collapseButton}
+          </div>
           )
         ) : null}
         {!props.hideOrgSelector ? (
