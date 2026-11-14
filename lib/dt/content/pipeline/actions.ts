@@ -18,7 +18,7 @@ import {
   CONTENT_STEP_LEKTORAT,
   contentStepSkippedByUser,
 } from "@/lib/dt/content/pipeline/steps";
-import { htmlToMarkdown, replaceBlockText } from "@/lib/dt/content/render";
+import { CONTENT_MAX_BLOCK_HTML, ContentBlockSizeError, htmlToMarkdown, replaceBlockContent, replaceBlockText } from "@/lib/dt/content/render";
 import {
   CONTENT_SKIPPED_RERUN_MESSAGE,
   rerunStepFor,
@@ -214,6 +214,48 @@ export async function editContentBlock(
       questions: drop(page.questions),
     })
     .eq("id", page.id);
+  if (error) return { ok: false, status: 500, message: error.message };
+  return { ok: true, jobId: null };
+}
+
+/**
+ * Direct editing in the page window: the person clicked into an Abschnitt of the text and changed
+ * it. Body (HTML, cleaned like model output) and heading text replace the stored ones; findings and
+ * questions of that Abschnitt count as handled, like with „Abschnitt ändern“. An empty body is
+ * refused (an Abschnitt is removed by having it revised, not by a stray delete).
+ */
+export async function editContentBlockHtml(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  blockId: string,
+  content: { heading?: string | null; bodyHtml: string },
+): Promise<ActionResult> {
+  if (!canEdit(page)) {
+    return { ok: false, status: 409, message: "Der Text kann in diesem Zustand nicht geändert werden." };
+  }
+  const replaced = replaceBlockContent(page.html, blockId, content);
+  if (!replaced) return { ok: false, status: 404, message: "Abschnitt nicht gefunden." };
+  if (!replaced.block.html.trim()) {
+    return { ok: false, status: 400, message: "Der Abschnitt darf nicht leer sein. Zum Entfernen den Abschnitt überarbeiten lassen." };
+  }
+  if (replaced.block.html.length > CONTENT_MAX_BLOCK_HTML) {
+    return { ok: false, status: 400, message: new ContentBlockSizeError(replaced.block).message };
+  }
+
+  const drop = <T extends { block_id?: string | null }>(list: T[]) => list.filter((f) => f.block_id !== blockId);
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({
+      html: replaced.html,
+      markdown: htmlToMarkdown(replaced.html),
+      findings: drop(page.findings),
+      final_findings: drop(page.final_findings),
+      unresolved: drop(page.unresolved),
+      questions: drop(page.questions),
+    })
+    .eq("id", page.id)
+    // The page started running meanwhile: its job owns the text now.
+    .neq("state", "laeuft");
   if (error) return { ok: false, status: 500, message: error.message };
   return { ok: true, jobId: null };
 }
