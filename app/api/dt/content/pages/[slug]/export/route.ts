@@ -33,8 +33,8 @@ export async function GET(req: Request, context: { params: Promise<{ slug: strin
     // `levels=1`: the Markdown export with „[H2]“ marks; the text export always has them.
     contentExportFile(
       format,
-      { slug, title: page.title || page.name, html, markdown: marked ? null : page.markdown },
-      { levelLabels: format === "txt" || (format === "md" && url.searchParams.get("levels") === "1") },
+      { slug, title: page.title || page.name, metaDescription: page.meta_description, html, markdown: marked ? null : page.markdown },
+      { levelLabels: format === "txt" || (format === "md" && url.searchParams.get("levels") === "1"), metaHeader: true },
     ),
   );
 }

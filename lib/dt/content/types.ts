@@ -364,6 +364,9 @@ export type ContentReview = {
     released?: boolean;
   };
   text_step: number | null;
+  /** Title-Tag and Meta-Description of the page: written by the SEO step, not part of the text below. */
+  title: string | null;
+  meta_description: string | null;
   markdown: string;
   html: string;
   findings: ContentFinding[];
