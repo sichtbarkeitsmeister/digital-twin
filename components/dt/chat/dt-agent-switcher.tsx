@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { FileSearch, Plus } from "lucide-react";
 
@@ -62,6 +63,8 @@ export function DtAgentSwitcher(props: {
   disabled?: boolean;
   manageAgentsHref?: string | null;
   contextHref?: string | null;
+  /** After the buttons of the row (the „Agenten ausblenden“ arrow), inside the same wrapping row. */
+  trailing?: ReactNode;
 }) {
   const manageLink = props.manageAgentsHref ? (
     <Link
@@ -89,6 +92,7 @@ export function DtAgentSwitcher(props: {
     <>
       {contextLink}
       {manageLink}
+      {props.trailing}
     </>
   );
 
@@ -104,6 +108,7 @@ export function DtAgentSwitcher(props: {
         </p>
         {manageLink}
         {contextLink}
+        {props.trailing}
       </div>
     );
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Menu, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsRight, Menu, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import {
@@ -12,6 +12,7 @@ import {
 import { personaTestingAvailableToUser, personaTestingModeTitle } from "@/lib/dt/persona-testing";
 import { DtWunschkundenPanel } from "@/components/dt/chat/dt-wunschkunden-panel";
 import { DtChatComposer } from "@/components/dt/chat/dt-chat-composer";
+import { usePersistedFlag } from "@/components/dt/chat/use-persisted-flag";
 import { DtChatFilePreview, type DtChatPreviewFile } from "@/components/dt/chat/dt-chat-file-preview";
 import { DtGhostBanner } from "@/components/dt/chat/dt-ghost-banner";
 import { DtGroundingBanner } from "@/components/dt/chat/dt-grounding-banner";
@@ -1176,6 +1177,9 @@ export function DtChatShell(props: {
     ],
   );
 
+  // Small screens: the chat list on the left and the row of agents above can be folded away; remembered per browser.
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistedFlag("dt-chat-sidebar-collapsed");
+  const [agentBarCollapsed, setAgentBarCollapsed] = usePersistedFlag("dt-chat-agentbar-collapsed");
   const chatGptLayout = Boolean(props.embedded);
   const showMarketingHeader = chatGptLayout && !props.chromeless;
   const chromelessLayout = chatGptLayout && Boolean(props.chromeless);
@@ -1185,6 +1189,7 @@ export function DtChatShell(props: {
     <DtChatSidebar
       flush={chatGptLayout}
       onClose={chatGptLayout ? () => setMobileSidebarOpen(false) : undefined}
+      onCollapse={() => setSidebarCollapsed(true)}
       compact={props.fillHeight || props.seoMode || props.adminOversight}
       organisations={props.organisations}
       selectedOrgId={selectedOrgId}
@@ -1257,6 +1262,20 @@ export function DtChatShell(props: {
     />
   );
 
+  // Brings the folded chat list back (large screens; below lg the menu button opens the drawer).
+  const expandSidebarButton = sidebarCollapsed ? (
+    <button
+      type="button"
+      onClick={() => setSidebarCollapsed(false)}
+      title="Chat-Verlauf einblenden"
+      aria-label="Chat-Verlauf einblenden"
+      className="hidden h-9 shrink-0 items-center gap-1 rounded-pill border border-sbkm-navy/15 bg-white/60 px-2.5 text-xs font-bold text-sbkm-navy transition hover:bg-sbkm-mint/20 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white lg:inline-flex"
+    >
+      <ChevronsRight className="h-4 w-4" strokeWidth={2} aria-hidden />
+      Chats
+    </button>
+  ) : null;
+
   if (props.organisations.length === 0) {
     return (
       <p className="text-sm text-sbkm-ink-600 dark:text-white/70">
@@ -1288,6 +1307,7 @@ export function DtChatShell(props: {
               >
                 <Menu className="h-[18px] w-[18px]" strokeWidth={2} />
               </button>
+              {expandSidebarButton}
               <DtLogo size="sidebar" className="shrink-0" />
             </div>
 
@@ -1326,7 +1346,10 @@ export function DtChatShell(props: {
               ? "relative min-h-0 flex-1 overflow-hidden"
               : props.fillHeight
                 ? "h-full flex-1 flex-col gap-4 overflow-hidden lg:flex-row lg:items-stretch"
-                : "grid min-h-0 gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)] lg:items-stretch",
+                : cn(
+                    "grid min-h-0 gap-4 lg:items-stretch",
+                    sidebarCollapsed ? "lg:grid-cols-[minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]",
+                  ),
           )}
         >
           {chatGptLayout ? (
@@ -1348,7 +1371,9 @@ export function DtChatShell(props: {
                   "fixed bottom-0 left-0 w-[86%] max-w-[320px] transition-transform duration-300 ease-dt",
                   sidebarTopClass,
                   mobileSidebarOpen ? "translate-x-0" : "-translate-x-full",
-                  "lg:static lg:top-auto lg:z-auto lg:w-[300px] lg:max-w-none lg:translate-x-0 lg:shrink-0",
+                  "lg:static lg:top-auto lg:z-auto lg:max-w-none lg:translate-x-0 lg:shrink-0",
+                  // Folded away on large screens (the drawer below lg is unaffected).
+                  sidebarCollapsed ? "lg:invisible lg:w-0 lg:overflow-hidden" : "lg:w-[300px]",
                 )}
               >
                 {sidebarNode}
@@ -1359,8 +1384,8 @@ export function DtChatShell(props: {
               className={cn(
                 "flex min-h-0 min-w-0 flex-col overflow-hidden",
                 props.fillHeight
-                  ? "h-full max-h-full w-full shrink-0 lg:h-full lg:max-h-full lg:w-[300px]"
-                  : "h-full max-h-full lg:min-h-0",
+                  ? cn("h-full max-h-full w-full shrink-0 lg:h-full lg:max-h-full", sidebarCollapsed ? "lg:hidden" : "lg:w-[300px]")
+                  : cn("h-full max-h-full lg:min-h-0", sidebarCollapsed && "lg:hidden"),
               )}
             >
               {sidebarNode}
@@ -1389,16 +1414,46 @@ export function DtChatShell(props: {
                   <Menu className="h-[18px] w-[18px]" strokeWidth={2} />
                 </button>
               ) : null}
-              <DtAgentSwitcher
-                agents={agents}
-                selectedAgentId={selectedAgentId}
-                onSelect={(id) => void handleSelectAgent(id)}
-                disabled={isBusy}
-                manageAgentsHref={
-                  canManageAgents ? "/dashboard/verwaltung/agents" : null
-                }
-                contextHref={contextHref}
-              />
+              {expandSidebarButton}
+              {agentBarCollapsed && agents.length > 1 ? (
+                // Folded: only the chosen agent stays, one slim row; the arrow shows all agents again.
+                <button
+                  type="button"
+                  onClick={() => setAgentBarCollapsed(false)}
+                  aria-expanded={false}
+                  title="Alle Agenten einblenden"
+                  className="inline-flex h-9 max-w-[16rem] shrink-0 items-center gap-1.5 rounded-pill border border-sbkm-mint bg-sbkm-mint px-3 text-xs font-bold text-sbkm-navy shadow-dt transition active:scale-[0.98]"
+                >
+                  {displayAgentEmoji ? <span aria-hidden>{displayAgentEmoji}</span> : null}
+                  <span className="truncate">{selectedAgent?.name ?? "Agent"}</span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} aria-hidden />
+                </button>
+              ) : (
+                <DtAgentSwitcher
+                  agents={agents}
+                  selectedAgentId={selectedAgentId}
+                  onSelect={(id) => void handleSelectAgent(id)}
+                  disabled={isBusy}
+                  manageAgentsHref={
+                    canManageAgents ? "/dashboard/verwaltung/agents" : null
+                  }
+                  contextHref={contextHref}
+                  trailing={
+                    agents.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => setAgentBarCollapsed(true)}
+                        aria-expanded
+                        title="Agenten ausblenden"
+                        aria-label="Agenten ausblenden"
+                        className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-pill border border-sbkm-navy/15 bg-white/60 text-sbkm-ink-600 transition hover:bg-sbkm-mint/20 active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white/70"
+                      >
+                        <ChevronUp className="h-4 w-4" strokeWidth={2.2} aria-hidden />
+                      </button>
+                    ) : null
+                  }
+                />
+              )}
               {groundingAvailable ? (
                 <button
                   type="button"
