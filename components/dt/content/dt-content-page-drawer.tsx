@@ -31,6 +31,7 @@ import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-
 import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
 import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
+import { createLatestWinsQueue } from "@/lib/dt/content/latest-wins-queue";
 import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences } from "@/lib/dt/content/finding-target";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
 import { countContentWords, htmlToPlainText, parseBlocksFromHtml } from "@/lib/dt/content/render";
@@ -203,6 +204,12 @@ export function DtContentPageDrawer(props: {
   const base = page
     ? `/api/dt/content/pages/${encodeURIComponent(page.slug)}`
     : null;
+  const baseRef = useRef(base);
+  baseRef.current = base;
+  /** The „Schritte“ switches save through one queue per page: one request at a time, newest list wins. */
+  const skipQueues = useRef(new Map<string, ReturnType<typeof createLatestWinsQueue<string[], Awaited<ReturnType<typeof contentApi<ContentPagePatchResult>>>>>>());
+  /** How many switch changes are still on their way to the server (for the small „Speichert …“). */
+  const [skipSaving, setSkipSaving] = useState(0);
 
   const loadReview = useCallback(async () => {
     if (!base) return;
@@ -507,7 +514,7 @@ export function DtContentPageDrawer(props: {
   async function toggleReviewStop(enabled: boolean) {
     if (!base) return;
     setBusy("review_stop");
-    const res = await contentApi<ContentPagePatchResult>(`${base}`, { method: "PATCH", body: { organisationId, review_stop: enabled } });
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, { method: "PATCH", body: { organisationId, review_stop: enabled, overview: false } });
     setBusy(null);
     if (!res.ok) {
       toast.error(res.message);
@@ -528,6 +535,7 @@ export function DtContentPageDrawer(props: {
       return;
     }
     setBusy(action.kind);
+    await settleSkipSteps();
     const res = await contentApi<{ job_id?: string | null }>(`${base}/steps/${action.step}/${path}`, {
       method: "POST",
       body: { organisationId, ...body },
@@ -603,7 +611,7 @@ export function DtContentPageDrawer(props: {
     setBusy("page_type");
     const res = await contentApi<ContentPagePatchResult>(`${base}`, {
       method: "PATCH",
-      body: { organisationId, page_type: next },
+      body: { organisationId, page_type: next, overview: false },
     });
     setBusy(null);
     if (!res.ok) {
@@ -624,19 +632,35 @@ export function DtContentPageDrawer(props: {
     const next = run
       ? review.skip_steps.filter((key) => key !== step.key)
       : [...review.skip_steps.filter((key) => key !== step.key), step.key];
-    setBusy("skip_steps");
-    const res = await contentApi<ContentPagePatchResult>(`${base}`, {
-      method: "PATCH",
-      body: { organisationId, skip_steps: next },
-    });
-    setBusy(null);
+    // The switch moves at once; the server catches up in the background (no waiting for a round trip).
+    setReview((r) =>
+      r ? { ...r, skip_steps: next as ContentReview["skip_steps"], steps: r.steps.map((s) => (s.key === step.key ? { ...s, skipped_by_user: !run } : s)) } : r,
+    );
+    let queue = skipQueues.current.get(base);
+    if (!queue) {
+      // `overview: false`: the table is reloaded once afterwards, the answer need not carry it.
+      queue = createLatestWinsQueue((skip_steps: string[]) =>
+        contentApi<ContentPagePatchResult>(base, { method: "PATCH", body: { organisationId, skip_steps, overview: false } }),
+      );
+      skipQueues.current.set(base, queue);
+    }
+    setSkipSaving((n) => n + 1);
+    const res = await queue.enqueue(next);
+    setSkipSaving((n) => n - 1);
+    // Another page is open now, or a newer switch took over: its answer decides.
+    if (baseRef.current !== base || res === null) return;
     if (!res.ok) {
       toast.error(res.message);
+      void loadReview(); // the server's truth: the switch goes back
       return;
     }
     setReview(res.data.review);
-    toast.success(run ? `${step.name} läuft wieder` : `${step.name} wird übersprungen`);
     onChangedRef.current();
+  }
+
+  /** Before something starts that reads the switches (a run): wait until every switch change has reached the server. */
+  async function settleSkipSteps() {
+    if (base) await skipQueues.current.get(base)?.idle();
   }
 
   /** „Zusätzliche Hinweise für diese Seite“: saved at once; the next step that runs reads them. */
@@ -645,7 +669,7 @@ export function DtContentPageDrawer(props: {
     setBusy("client_wishes");
     const res = await contentApi<ContentPagePatchResult>(`${base}`, {
       method: "PATCH",
-      body: { organisationId, client_wishes: pageWishes },
+      body: { organisationId, client_wishes: pageWishes, overview: false },
     });
     setBusy(null);
     if (!res.ok) {
@@ -666,6 +690,7 @@ export function DtContentPageDrawer(props: {
       body: {
         organisationId,
         keywords: { main: keywordDraft.main, secondary: keywordDraft.secondary.split(/[\n,;]+/).map((k) => k.trim()).filter(Boolean) },
+        overview: false,
       },
     });
     setBusy(null);
@@ -705,6 +730,7 @@ export function DtContentPageDrawer(props: {
   async function runThrough() {
     if (!base) return;
     setBusy("run_through");
+    await settleSkipSteps();
     const res = await contentApi<ContentPageRunThroughResult>(`${base}/run-through`, {
       method: "POST",
       body: { organisationId },
@@ -1129,7 +1155,15 @@ export function DtContentPageDrawer(props: {
                         />
                       </div>
                       <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
-                        <p className="text-xs font-semibold text-sbkm-navy dark:text-white">Schritte</p>
+                        <p className="flex items-center gap-2 text-xs font-semibold text-sbkm-navy dark:text-white">
+                          Schritte
+                          {skipSaving > 0 ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-normal text-sky-700 dark:text-sky-300" role="status">
+                              <Loader2 className="size-3 animate-spin" aria-hidden />
+                              Speichert …
+                            </span>
+                          ) : null}
+                        </p>
                         <ul className="grid gap-1">
                           {review.steps.map((s) => {
                             const alwaysRuns = s.key === "analyse" || s.key === "endabnahme";

@@ -33,6 +33,12 @@ const patchSchema = z
       .optional(),
     /** „Vor der Watermark zur Durchsicht anhalten“ (default on). */
     review_stop: z.boolean().optional(),
+    /**
+     * `false`: the answer carries no overview of the whole table. The overview is the costly part
+     * of the answer (every page, the readiness of the sources); callers that reload it anyway, or
+     * only need the review, ask for none. Not counted as a change.
+     */
+    overview: z.boolean().optional(),
     /** Zielgruppen of the page, confirmed by the editor; an empty primary list = Standard-Zielgruppe again. */
     zielgruppen: z
       .object({

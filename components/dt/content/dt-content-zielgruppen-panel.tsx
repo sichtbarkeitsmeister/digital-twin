@@ -105,7 +105,7 @@ export function DtContentZielgruppenPanel(props: {
 
   async function save(primary: string[], secondary: string[], message: string) {
     setBusy("save");
-    const res = await contentApi<ContentPagePatchResult>(pageBase, { method: "PATCH", body: { organisationId, zielgruppen: { primary, secondary } } });
+    const res = await contentApi<ContentPagePatchResult>(pageBase, { method: "PATCH", body: { organisationId, zielgruppen: { primary, secondary }, overview: false } });
     setBusy(null);
     if (!res.ok) {
       toast.error(res.message);

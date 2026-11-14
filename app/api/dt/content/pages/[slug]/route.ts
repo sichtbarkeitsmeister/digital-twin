@@ -93,10 +93,11 @@ export async function PATCH(req: Request, context: { params: Promise<{ slug: str
       if (!saved.ok) return contentError(saved.message, saved.status);
     }
 
+    // The whole table is the costly part of the answer: only built when the caller wants it.
     const [fresh, steps, overview, orgQuestions] = await Promise.all([
       loadContentPage(gate.service, gate.organisationId, slug),
       loadContentSteps(gate.service, page.id),
-      loadContentOverview(gate.service, gate.organisationId),
+      parsed.data.overview === false ? Promise.resolve(null) : loadContentOverview(gate.service, gate.organisationId),
       loadOrgQuestions(gate.service, gate.organisationId),
     ]);
     const data: ContentPagePatchResult = { review: buildReview(fresh ?? page, steps, null, { orgQuestions }), overview };

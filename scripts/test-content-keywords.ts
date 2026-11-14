@@ -394,6 +394,9 @@ function testPatch() {
   assert.ok(ok.ok && ok.data.keywords?.main === "Akupunktur Köln");
   const clear = parseContentPagePatch({ organisationId: ORG, keywords: { main: "", secondary: [] } });
   assert.ok(clear.ok, "an empty main keyword clears the keywords");
+  const light = parseContentPagePatch({ organisationId: ORG, skip_steps: ["geo"], overview: false });
+  assert.ok(light.ok && light.data.overview === false, "a caller that reloads the table itself can ask for no overview");
+  assert.ok(!parseContentPagePatch({ organisationId: ORG, overview: false }).ok, "the flag alone is no change");
   const bad = parseContentPagePatch({ organisationId: ORG, keywords: { main: "x".repeat(300), secondary: [] } });
   assert.ok(!bad.ok && /Ungültige Keywords/.test(bad.message));
   console.log("page patch: keywords by hand: ok");

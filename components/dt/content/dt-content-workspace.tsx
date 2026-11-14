@@ -444,7 +444,8 @@ export function DtContentWorkspace(props: {
         toast.error(res.message);
         return;
       }
-      applyOverview(res.data.overview);
+      if (res.data.overview) applyOverview(res.data.overview);
+      else void loadOverview();
       toast.success(`Seitentyp: ${CONTENT_PAGE_TYPE_LABELS[pageType]}`, { description: page.name });
     } finally {
       setChangingType(null);
