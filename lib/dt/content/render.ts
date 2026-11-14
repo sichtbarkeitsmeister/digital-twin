@@ -206,6 +206,32 @@ export function renderBlocksHtml(blocks: readonly ContentTextBlock[], options: {
     .join("\n");
 }
 
+/**
+ * Direct editing in the page window: the Abschnitt's body becomes the given HTML (cleaned like model
+ * output: paragraphs, lists and emphasis only), and its heading the given text. The heading's level
+ * and the Abschnitt's id stay. An empty heading or none given keeps the old one. Null: no such
+ * Abschnitt. The result can be over `CONTENT_MAX_BLOCK_HTML`; the caller checks.
+ */
+export function replaceBlockContent(
+  html: string,
+  blockId: string,
+  content: { heading?: string | null; bodyHtml: string },
+): { html: string; block: ContentTextBlock } | null {
+  const blocks = parseBlocksFromHtml(html);
+  const index = blocks.findIndex((b) => b.id === blockId);
+  if (index < 0) return null;
+  const block = blocks[index]!;
+  const heading = content.heading?.replace(/\s+/g, " ").trim();
+  const next: ContentTextBlock = {
+    ...block,
+    heading: block.heading && heading ? heading : block.heading,
+    // Empty paragraphs (a stray Enter in the editor) are no content.
+    html: sanitizeBlockHtml(content.bodyHtml).replace(/<p>(?:\s|<br>)*<\/p>/gi, "").replace(/\n{3,}/g, "\n\n").trim(),
+  };
+  blocks[index] = next;
+  return { html: renderBlocksHtml(blocks), block: next };
+}
+
 const SECTION_RE =
   /<section\b[^>]*\bdata-block-id\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/section>/gi;
 

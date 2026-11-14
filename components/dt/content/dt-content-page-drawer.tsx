@@ -28,7 +28,7 @@ import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { downloadContentExport } from "@/components/dt/content/download";
 import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-questions-panel";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
-import { DtContentTextFrame } from "@/components/dt/content/dt-content-text-frame";
+import { DtContentTextFrame, type TextFrameEdit } from "@/components/dt/content/dt-content-text-frame";
 import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
 import { createLatestWinsQueue } from "@/lib/dt/content/latest-wins-queue";
@@ -302,6 +302,12 @@ export function DtContentPageDrawer(props: {
   }, [open, goPrev, goNext]);
 
   const blocks = useMemo(() => extractContentBlocks(review?.html ?? ""), [review?.html]);
+  /** The text can be changed by clicking into it: it exists, no job is writing it, the page is not released. */
+  const reviewState = review?.public.state;
+  const textEditable =
+    Boolean(review?.html) &&
+    !jobId &&
+    (reviewState === "braucht_sie" || reviewState === "in_arbeit" || (reviewState === "fertig" && !review?.public.released));
   /** Shown in the header next to the status, as soon as the page has a text. */
   const wordCount = useMemo(() => (review?.html ? countContentWords(review.html) : 0), [review?.html]);
   const findings = useMemo(() => (review ? openFindings(review) : []), [review]);
@@ -681,6 +687,26 @@ export function DtContentPageDrawer(props: {
     toast.success("Hinweise für diese Seite gespeichert – gilt ab dem nächsten Schritt.");
   }
 
+  /**
+   * „Text direkt ändern“: the person clicked into the text and left an Abschnitt. It is saved as it
+   * stands; the server cleans it and the answer is the fresh review. A refusal puts the Abschnitt back.
+   */
+  async function saveTextEdit(edit: TextFrameEdit): Promise<{ ok: boolean }> {
+    if (!base) return { ok: false };
+    const res = await contentApi<{ review: ContentReview }>(`${base}/text`, {
+      method: "PUT",
+      body: { organisationId, block_id: edit.blockId, heading: edit.heading, html: edit.html },
+    });
+    if (!res.ok) {
+      toast.error(res.message, { duration: 10_000 });
+      return { ok: false };
+    }
+    if (baseRef.current === base) setReview(res.data.review);
+    onChangedRef.current();
+    toast.success("Abschnitt gespeichert");
+    return { ok: true };
+  }
+
   /** Hauptkeyword and Nebenkeywords entered by hand: saved at once; the next step that runs reads them. */
   async function saveKeywords() {
     if (!base || !keywordDraft) return;
@@ -963,13 +989,22 @@ export function DtContentPageDrawer(props: {
                       </div>
                     ) : null}
                     {review.html ? (
-                      <DtContentTextFrame
-                        html={review.html}
-                        title={`Text: ${review.name}`}
-                        highlightBlockIds={highlightIds}
-                        showHeadingLevels
-                        kundePrueft={review.kunde_prueft}
-                      />
+                      <>
+                        {textEditable ? (
+                          <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
+                            Den Text direkt anklicken und ändern: gespeichert wird, wenn Sie den Abschnitt verlassen (Strg+Enter), Esc nimmt die Änderung zurück.
+                          </p>
+                        ) : null}
+                        <DtContentTextFrame
+                          html={review.html}
+                          title={`Text: ${review.name}`}
+                          highlightBlockIds={highlightIds}
+                          showHeadingLevels
+                          kundePrueft={review.kunde_prueft}
+                          editable={textEditable}
+                          onEditBlock={saveTextEdit}
+                        />
+                      </>
                     ) : (
                       <div className="grid gap-1 rounded-dt border border-dashed border-sbkm-navy/15 bg-white/60 px-4 py-12 text-center dark:border-white/15 dark:bg-white/[0.04]">
                         <p className="text-sm font-semibold text-sbkm-navy dark:text-white">
