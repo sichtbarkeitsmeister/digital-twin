@@ -41,6 +41,7 @@ import {
   normalizeZielgruppenLists,
 } from "@/lib/dt/content/zielgruppen";
 import { suggestContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-suggest";
+import { deriveInternalLinkTargets } from "@/lib/dt/content/link-targets";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import {
@@ -247,6 +248,19 @@ export async function loadContext(
   // Made before the Analyse and kept in its row whatever the row's status is.
   const pageFacts = readPageFacts(steps.find((row) => row.step === CONTENT_STEP_ANALYSE)?.output);
 
+  // A page whose Seitenstruktur named no link targets (crawl pages, an Excel row without Hauptsilo) would get
+  // no internal link at all: its targets are the best fitting other pages of the table.
+  const derivedLinkTargets =
+    page.internal_link_targets.length === 0
+      ? (() => {
+          const derived = deriveInternalLinkTargets(
+            { slug: page.slug, name: page.name, path: page.path, level: page.level, pillar_name: page.pillar_name, page_role: page.page_role, page_type: page.page_type, main_keyword: page.main_keyword, keywords: page.keywords },
+            outlinePages,
+          );
+          return derived.length > 0 ? derived : null;
+        })()
+      : null;
+
   const built: { context: ContentPipelineContext; avatarId: string | null } = {
     avatarId: avatarRow?.id ?? null,
     context: {
@@ -265,7 +279,9 @@ export async function loadContext(
         h1_options: page.h1_options,
         user_questions: page.user_questions,
         ki_prompt: page.ki_prompt,
-        internal_link_targets: page.internal_link_targets,
+        // The Seitenstruktur's targets; without them (crawl pages) the best fitting other pages of the table.
+        internal_link_targets: derivedLinkTargets ?? page.internal_link_targets,
+        internal_link_targets_derived: derivedLinkTargets != null,
       },
       structureOutline: contentStructureOutline(outlinePages, page),
       existingText,
