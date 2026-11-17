@@ -92,6 +92,8 @@ export type ContentPipelinePage = {
   user_questions: string[];
   ki_prompt: string | null;
   internal_link_targets: string[];
+  /** The targets were derived from the table of pages (the Seitenstruktur named none). */
+  internal_link_targets_derived?: boolean;
 };
 
 export type ContentPipelineContext = {
@@ -663,7 +665,9 @@ export function pageBlock(context: ContentPipelineContext): string {
       : "",
     page.ki_prompt ? `KI-Prompt der Redaktion für diese Seite (stehende Anweisung):\n${clip(page.ki_prompt, 2_000)}` : "",
     page.internal_link_targets.length > 0
-      ? `Erlaubte interne Linkziele (nur diese, als Marker [LINK: Seitenname]): ${page.internal_link_targets.join(" · ")}`
+      ? page.internal_link_targets_derived
+        ? `Erlaubte interne Linkziele (aus der Seitenliste der Website abgeleitet, das Beste zuerst; nur diese, als Marker [LINK: Seitenname]; setze nur Links, die inhaltlich passen, und keine zu Seiten, die dasselbe Thema behandeln wie diese): ${page.internal_link_targets.join(" · ")}`
+        : `Erlaubte interne Linkziele (nur diese, als Marker [LINK: Seitenname]): ${page.internal_link_targets.join(" · ")}`
       : "Erlaubte interne Linkziele: keine bekannt – keine internen Links setzen",
     context.structureOutline
       ? `\n## Weitere Seiten der Website (zur Abgrenzung: welche Fragen gehören auf eine andere Seite; keine Fakten)\n${clip(context.structureOutline, MAX_OUTLINE_CHARS)}`
