@@ -29,6 +29,7 @@ import { downloadContentExport } from "@/components/dt/content/download";
 import { DtContentDictationField } from "@/components/dt/content/dt-content-dictation-field";
 import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-questions-panel";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
+import { DtContentMetaFields } from "@/components/dt/content/dt-content-meta-fields";
 import { DtContentTextFrame, type TextFrameEdit } from "@/components/dt/content/dt-content-text-frame";
 import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
@@ -708,6 +709,21 @@ export function DtContentPageDrawer(props: {
     return { ok: true };
   }
 
+  /** Title-Tag or Meta-Description changed by hand above the text; the answer is the fresh review. */
+  async function saveMeta(field: "title" | "meta_description", value: string): Promise<boolean> {
+    if (!base) return false;
+    const res = await contentApi<{ review: ContentReview }>(`${base}/meta`, {
+      method: "PUT",
+      body: { organisationId, [field]: value },
+    });
+    if (!res.ok) {
+      toast.error(res.message, { duration: 10_000 });
+      return false;
+    }
+    if (baseRef.current === base) setReview(res.data.review);
+    return true;
+  }
+
   /** Hauptkeyword and Nebenkeywords entered by hand: saved at once; the next step that runs reads them. */
   async function saveKeywords() {
     if (!base || !keywordDraft) return;
@@ -991,6 +1007,13 @@ export function DtContentPageDrawer(props: {
                     ) : null}
                     {review.html ? (
                       <>
+                        <DtContentMetaFields
+                          key={review.name}
+                          title={review.title}
+                          metaDescription={review.meta_description}
+                          editable={textEditable}
+                          onSave={saveMeta}
+                        />
                         {textEditable ? (
                           <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
                             Den Text direkt anklicken und ändern: gespeichert wird, wenn Sie den Abschnitt verlassen (Strg+Enter), Esc nimmt die Änderung zurück.

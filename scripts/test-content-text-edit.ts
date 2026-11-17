@@ -9,7 +9,8 @@ import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { restoreKundePrueft } from "../components/dt/content/dt-content-text-frame";
-import { editContentBlockHtml } from "../lib/dt/content/pipeline/actions";
+import { contentExportFile } from "../lib/dt/content/export";
+import { editContentBlockHtml, editContentMeta } from "../lib/dt/content/pipeline/actions";
 import { parseBlocksFromHtml, replaceBlockContent } from "../lib/dt/content/render";
 import type { ContentPageRow } from "../lib/dt/content/store";
 
@@ -116,10 +117,50 @@ async function testAction() {
   console.log("action: states, handled points, empty/long/missing, no write into a running page: ok");
 }
 
+async function testMeta() {
+  const updates: Update[] = [];
+  const ok = await editContentMeta(service(updates), page(), { title: "  Heilpraktiker   Köln | Praxis Weber ", metaDescription: "Beschreibung\nin zwei Zeilen." });
+  assert.deepEqual(ok, { ok: true, jobId: null });
+  assert.deepEqual(updates[0]!.patch, { title: "Heilpraktiker Köln | Praxis Weber", meta_description: "Beschreibung in zwei Zeilen." }, "whitespace tidied");
+  assert.ok(updates[0]!.filters.includes("neq state laeuft"), "never writes into a page that started running meanwhile");
+
+  const only = [] as Update[];
+  await editContentMeta(service(only), page(), { metaDescription: "Nur die Beschreibung." });
+  assert.deepEqual(only[0]!.patch, { meta_description: "Nur die Beschreibung." }, "only the field sent changes");
+  const cleared = [] as Update[];
+  await editContentMeta(service(cleared), page(), { title: "   " });
+  assert.deepEqual(cleared[0]!.patch, { title: null }, "an empty field is cleared");
+
+  assert.ok(!(await editContentMeta(service([]), page(), {})).ok, "nothing to change");
+  for (const state of ["laeuft", "nicht_begonnen"] as const) {
+    const refused = await editContentMeta(service([]), page({ state }), { title: "x" });
+    assert.ok(!refused.ok && refused.status === 409, `no editing while ${state}`);
+  }
+  assert.ok(!(await editContentMeta(service([]), page({ state: "fertig", released: true }), { title: "x" })).ok, "a released page keeps its meta");
+  const long = await editContentMeta(service([]), page(), { metaDescription: "x".repeat(500) });
+  assert.ok(!long.ok && long.status === 400);
+  console.log("meta: only the given fields, tidied, cleared when empty, same states as the text: ok");
+}
+
+function testExport() {
+  const source = { slug: "immun", title: "Immunsystem in Köln", metaDescription: 'Stärken Sie Ihr Immunsystem – "ohne" Heilversprechen & mit Plan.', html: HTML };
+  const html = contentExportFile("html", source).body;
+  assert.match(html, /<title>Immunsystem in Köln<\/title><meta name="description" content="Stärken Sie Ihr Immunsystem – &quot;ohne&quot; Heilversprechen &amp; mit Plan\.">/, "the full HTML carries the meta description, escaped");
+  assert.doesNotMatch(contentExportFile("html", { slug: "x", title: "T", html: HTML }).body, /name="description"/, "none when the page has none (the standalone tools)");
+  assert.doesNotMatch(contentExportFile("fragment", source).body, /Meta-Description|name="description"/, "the fragment is only the text");
+  const txt = contentExportFile("txt", source, { levelLabels: true, metaHeader: true }).body;
+  assert.ok(txt.startsWith("Title: Immunsystem in Köln\nMeta-Description: Stärken Sie Ihr Immunsystem"), "the .txt of the Texte page leads with both");
+  assert.ok(contentExportFile("md", source, { metaHeader: true }).body.startsWith("Title: Immunsystem in Köln\nMeta-Description:"));
+  assert.ok(!contentExportFile("txt", source, { levelLabels: true }).body.startsWith("Title:"), "the standalone tools export as before");
+  console.log("export: meta description in the HTML, header in .txt/.md of the Texte page: ok");
+}
+
 async function main() {
   testReplace();
   testRestore();
   await testAction();
+  await testMeta();
+  testExport();
   console.log("OK: content text edit tests passed");
 }
 
