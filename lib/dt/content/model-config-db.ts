@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  CONTENT_MATCH_MODEL_SETTING_KEY,
   CONTENT_MODEL_SETTING_KEYS,
+  resolveContentMatchModels,
   resolveContentModels,
   type ContentModelConfig,
 } from "@/lib/dt/content/model-config";
@@ -23,4 +25,21 @@ export async function loadContentModelConfig(service: SupabaseClient): Promise<C
     write: byKey.get(CONTENT_MODEL_SETTING_KEYS.write) ?? null,
     check: byKey.get(CONTENT_MODEL_SETTING_KEYS.check) ?? null,
   });
+}
+
+/**
+ * The models of the AI matching in „Texte hochladen“: `content_match_model` from `app_settings`
+ * (else env, else the default), then the writing models as fallbacks. A failing read falls back
+ * to env/default like `loadContentModelConfig`.
+ */
+export async function loadContentMatchModels(service: SupabaseClient): Promise<string[]> {
+  const keys = [CONTENT_MATCH_MODEL_SETTING_KEY, CONTENT_MODEL_SETTING_KEYS.write];
+  const { data, error } = await service.from("app_settings").select("key, value").in("key", keys);
+  if (error) {
+    console.warn("[content] app_settings not readable, using env/default match model:", error.message);
+    return resolveContentMatchModels(null, resolveContentModels().write).models;
+  }
+  const byKey = new Map((data ?? []).map((row) => [row.key as string, row.value as string]));
+  const write = resolveContentModels({ write: byKey.get(CONTENT_MODEL_SETTING_KEYS.write) ?? null }).write;
+  return resolveContentMatchModels(byKey.get(CONTENT_MATCH_MODEL_SETTING_KEY) ?? null, write).models;
 }

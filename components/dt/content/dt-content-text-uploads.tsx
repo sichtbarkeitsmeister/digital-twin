@@ -2,7 +2,7 @@
 
 import { CONTENT_MAX_BLOCKS } from "@/lib/dt/content/render";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Loader2, Upload } from "lucide-react";
+import { FileText, Loader2, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/components/dt/cn";
@@ -42,6 +42,7 @@ const linkButtonClass =
 
 const STATUS_TONE: Record<TextUploadStatus, string> = {
   auto: "bg-sbkm-mint/30 text-sbkm-navy dark:bg-sbkm-mint/20 dark:text-white",
+  ai: "bg-violet-100 text-violet-900 dark:bg-violet-400/15 dark:text-violet-200",
   manual: "bg-sbkm-mint/30 text-sbkm-navy dark:bg-sbkm-mint/20 dark:text-white",
   unassigned: "bg-sbkm-navy/[0.06] text-sbkm-ink-600 dark:bg-white/10 dark:text-white/70",
   waiting: "bg-sbkm-navy/[0.06] text-sbkm-ink-600 dark:bg-white/10 dark:text-white/70",
@@ -82,16 +83,16 @@ async function postUpload(
   }
 }
 
-function StatusCell(props: { status: TextUploadStatus; note: string | null }) {
+function StatusCell(props: { status: TextUploadStatus; note: string | null; aiReason?: string | null }) {
   const label = props.status === "error" ? `Fehler: ${props.note ?? "Datei nicht lesbar"}` : TEXT_UPLOAD_STATUS_LABELS[props.status];
+  // „KI-zugeordnet“ shows why the AI chose the page, so the editor can check it at a glance.
+  const second = props.status === "ai" ? (props.aiReason ? `KI: ${props.aiReason}` : null) : props.status !== "error" ? props.note : null;
   return (
     <span className="grid gap-1">
       <span className={cn("w-fit rounded-pill px-2 py-0.5 text-[11px] font-bold", STATUS_TONE[props.status], props.status === "error" && "rounded-lg")}>
         {label}
       </span>
-      {props.status !== "error" && props.note ? (
-        <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/50">{props.note}</span>
-      ) : null}
+      {second ? <span className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/50">{second}</span> : null}
     </span>
   );
 }
@@ -99,8 +100,9 @@ function StatusCell(props: { status: TextUploadStatus; note: string | null }) {
 /**
  * „Verbesserung → Texte hochladen“: Word files (file name = page name) for a client whose
  * website is not live yet. Upload (one request per file, three at a time), the table
- * „Hochgeladene Texte“ with the name match and the manual assignment, the summary line and
- * „Zugeordnete Seiten übernehmen“.
+ * „Hochgeladene Texte“ with the three steps of the matching (by name in code, by the AI, by
+ * hand), the summary line and „Zugeordnete Seiten übernehmen“. The AI step runs by itself after
+ * a batch of files and after a new Seitenstruktur when files wait for it, and on „Mit KI zuordnen“.
  */
 export function DtContentTextUploads(props: {
   organisationId: string;
@@ -118,6 +120,14 @@ export function DtContentTextUploads(props: {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [taking, setTaking] = useState(false);
+  /** The assigned row whose page is being changed by hand („Seite ändern“). */
+  const [changeId, setChangeId] = useState<string | null>(null);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  /** One AI call at a time, also across re-renders. */
+  const aiBusy = useRef(false);
+  /** After a failed automatic run the AI is not called by itself again; the button still works. */
+  const aiAutoOff = useRef(false);
   const [takeoverNote, setTakeoverNote] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const filesRef = useRef<HTMLInputElement>(null);
@@ -134,18 +144,69 @@ export function DtContentTextUploads(props: {
     [onLoaded],
   );
 
+  /**
+   * The AI step. `force` is „Mit KI zuordnen“: also the files it looked at before. Without it
+   * (the automatic run) only files it has not seen since the Seitenstruktur was uploaded.
+   */
+  const runAi = useCallback(
+    async (force: boolean) => {
+      if (aiBusy.current) return;
+      aiBusy.current = true;
+      setAiRunning(true);
+      setAiError(null);
+      try {
+        const res = await contentApi<ContentTextUploadsResult>("/api/dt/content/uploads/ai-match", {
+          method: "POST",
+          body: { organisationId, force },
+        });
+        if (!res.ok) {
+          if (!force) aiAutoOff.current = true;
+          setAiError(res.message);
+          toast.error("KI-Zuordnung fehlgeschlagen", { description: res.message });
+          return;
+        }
+        aiAutoOff.current = false;
+        apply(res.data);
+        const run = res.data.ai_run;
+        if (!run || run.tried === 0) {
+          if (force) toast.message("Keine Datei für die KI: nichts zuzuordnen.");
+          return;
+        }
+        const left = run.tried - run.assigned;
+        const parts = [
+          `${run.assigned} von ${filesWord(run.tried)} zugeordnet`,
+          left > 0 ? `${left} bitte von Hand zuordnen` : "",
+          run.conflicts > 0 ? `${run.conflicts} davon: mehrere Dateien für dieselbe Seite` : "",
+        ].filter(Boolean);
+        if (run.assigned > 0) toast.success("KI-Zuordnung", { description: parts.join(" · ") });
+        else toast.message("KI-Zuordnung", { description: parts.join(" · ") });
+      } finally {
+        aiBusy.current = false;
+        setAiRunning(false);
+      }
+    },
+    [organisationId, apply],
+  );
+
+  /** Loads the table; when files wait for the AI (new files, new Seitenstruktur), it runs once. */
   const load = useCallback(async () => {
     const res = await contentApi<ContentTextUploadsResult>(`/api/dt/content/uploads?${contentQuery(organisationId)}`);
-    if (res.ok) apply(res.data);
-    else setLoadError(res.message);
-  }, [organisationId, apply]);
+    if (!res.ok) {
+      setLoadError(res.message);
+      return;
+    }
+    apply(res.data);
+    const { ai } = res.data;
+    // Not awaited: the table and the upload's own message show at once, the AI's result follows.
+    if (ai.supported && ai.configured && ai.candidates > 0 && !aiAutoOff.current) void runAi(false);
+  }, [organisationId, apply, runAi]);
 
   useEffect(() => {
     void load();
   }, [load, props.refreshKey]);
 
   const uploading = progress != null;
-  const busy = uploading || busyId != null || taking;
+  const busy = uploading || busyId != null || taking || aiRunning;
 
   function addLocal(file_name: string, kind: LocalRow["kind"], note: string, file: File | null = null) {
     localSeq.current += 1;
@@ -267,11 +328,15 @@ export function DtContentTextUploads(props: {
     }
   }
 
+  /** By hand, on any row: a page for an open file, another page for an assigned one, or „Zuordnung lösen“ (null). */
   async function assign(upload: ContentTextUploadView, structureSlug: string | null) {
     if (busy) return;
-    if (!structureSlug && upload.page && !window.confirm(`„${upload.file_name}“ wird von der Seite „${upload.page.name}“ gelöst. Die Seite bleibt in der Tabelle und wird beim nächsten Lauf neu geschrieben. Fortfahren?`)) {
+    if (structureSlug === (upload.structure?.slug ?? null)) return;
+    const leavesRow = upload.page && upload.structure;
+    if (leavesRow && !window.confirm(`„${upload.file_name}“ wird von der Seite „${upload.page!.name}“ gelöst. Die Seite bleibt in der Tabelle und wird beim nächsten Lauf neu geschrieben. Fortfahren?`)) {
       return;
     }
+    setChangeId(null);
     setBusyId(upload.id);
     try {
       const res = await contentApi<ContentTextUploadsResult>("/api/dt/content/uploads/assign", {
@@ -491,6 +556,20 @@ export function DtContentTextUploads(props: {
                             <span className="text-[11px] text-sbkm-ink-500 dark:text-white/50">
                               {upload.page ? "in der Tabelle" : "noch nicht übernommen"}
                             </span>
+                            {changeId === upload.id ? (
+                              <span className="mt-1">
+                                <DtSelect
+                                  size="sm"
+                                  searchable
+                                  value=""
+                                  placeholder={freeOptions.length > 0 ? "Andere Seite wählen …" : "Keine freie Seite"}
+                                  srLabel={`Andere Seite für ${upload.file_name} wählen`}
+                                  disabled={busy || freeOptions.length === 0}
+                                  options={freeOptions}
+                                  onValueChange={(slug) => void assign(upload, slug)}
+                                />
+                              </span>
+                            ) : null}
                           </span>
                         ) : assignable ? (
                           <DtSelect
@@ -513,7 +592,7 @@ export function DtContentTextUploads(props: {
                         ) : null}
                       </td>
                       <td className="px-3 py-2">
-                        <StatusCell status={upload.status} note={upload.note} />
+                        <StatusCell status={upload.status} note={upload.note} aiReason={upload.ai_reason} />
                       </td>
                       <td className="px-3 py-2 tabular-nums text-sbkm-ink-600 dark:text-white/65">
                         {upload.status === "error" ? "—" : `${upload.sections} / ${upload.chars.toLocaleString("de-DE")}`}
@@ -522,9 +601,20 @@ export function DtContentTextUploads(props: {
                         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           {rowBusy ? <Loader2 className="size-3.5 animate-spin text-sbkm-ink-500" aria-hidden /> : null}
                           {upload.structure ? (
-                            <button type="button" className={linkButtonClass} disabled={busy} onClick={() => void assign(upload, null)}>
-                              Zuordnung lösen
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className={linkButtonClass}
+                                disabled={busy}
+                                aria-expanded={changeId === upload.id}
+                                onClick={() => setChangeId((id) => (id === upload.id ? null : upload.id))}
+                              >
+                                {changeId === upload.id ? "Abbrechen" : "Seite ändern"}
+                              </button>
+                              <button type="button" className={linkButtonClass} disabled={busy} onClick={() => void assign(upload, null)}>
+                                Zuordnung lösen
+                              </button>
+                            </>
                           ) : null}
                           <button
                             type="button"
@@ -585,11 +675,26 @@ export function DtContentTextUploads(props: {
       ) : null}
 
       {data ? (
-        <p className="text-xs font-semibold text-sbkm-navy dark:text-white" data-testid="content-text-uploads-summary">
-          {data.summary.assigned} zugeordnet · {data.summary.unassigned} ohne Zuordnung · {pagesWord(data.summary.pages_without_text)} der
-          Seitenstruktur ohne Text
-        </p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <p className="text-xs font-semibold text-sbkm-navy dark:text-white" data-testid="content-text-uploads-summary">
+            {data.summary.auto} automatisch · {data.summary.ai} KI · {data.summary.manual} manuell · {data.summary.unassigned} nicht
+            zugeordnet · {pagesWord(data.summary.pages_without_text)} der Seitenstruktur ohne Text
+          </p>
+          {aiRunning ? (
+            <span className="flex items-center gap-1.5 text-xs text-sbkm-ink-600 dark:text-white/65" role="status">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              KI ordnet zu …
+            </span>
+          ) : data.ai.supported && data.ai.candidates_all > 0 ? (
+            <DtPillButton type="button" size="sm" disabled={busy} onClick={() => void runAi(true)} data-testid="content-text-uploads-ai">
+              <Sparkles className="size-4" aria-hidden />
+              Mit KI zuordnen
+            </DtPillButton>
+          ) : null}
+        </div>
       ) : null}
+      {data && !data.ai.supported && data.ai.hint ? <p className="text-xs text-amber-800 dark:text-amber-200">{data.ai.hint}</p> : null}
+      {aiError ? <p className="text-xs text-red-700 dark:text-red-300">KI-Zuordnung: {aiError}</p> : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <DtPillButton type="button" size="sm" disabled={busy || pending === 0} onClick={() => void takeOver()}>
@@ -602,9 +707,11 @@ export function DtContentTextUploads(props: {
       </div>
       {takeoverNote ? <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">{takeoverNote}</p> : null}
       <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-        Zugeordnet wird nur über den Namen, ohne KI: Groß- und Kleinschreibung, Umlaute (ä = ae, ß = ss), Unterstrich, Bindestrich und
-        Zeichen, die in Dateinamen nicht erlaubt sind (/ \ : * ? &quot; &lt; &gt; |), zählen nicht. Alles andere ordnen Sie von Hand zu;
-        eine Zuordnung von Hand bleibt, auch wenn die Seitenstruktur neu hochgeladen wird. „Übernehmen“ legt je zugeordneter Datei eine
+        Zugeordnet wird in drei Schritten. 1. Automatisch über den Namen: Groß- und Kleinschreibung, Umlaute (ä = ae, ß = ss), Unterstrich,
+        Bindestrich und Zeichen, die in Dateinamen nicht erlaubt sind (/ \ : * ? &quot; &lt; &gt; |), zählen nicht. 2. Was übrig bleibt,
+        ordnet die KI nach der Bedeutung des Namens zu (Tippfehler, andere Schreibweise, Zusätze wie „final“ oder „Kopie“); ist sie nicht
+        sicher, lässt sie die Datei offen. 3. Den Rest ordnen Sie von Hand zu. Jede Zuordnung lässt sich von Hand ändern oder lösen; eine
+        Zuordnung von Hand geht immer vor und bleibt, auch wenn die Seitenstruktur neu hochgeladen wird. „Übernehmen“ legt je zugeordneter Datei eine
         Zeile an oder hängt die Datei an die vorhandene Zeile (höchstens 300 Zeilen); die Seiten werden dann wie gecrawlte Seiten
         verbessert. Gespeichert wird nur der ausgelesene Text, nicht die Word-Datei.
       </p>

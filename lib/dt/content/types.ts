@@ -656,6 +656,8 @@ export type ContentTextUploadView = {
   status: TextUploadStatus;
   /** „Fehler: …“, the pages of „mehrdeutig“, the other file of „doppelt“, „Seite nicht mehr in der Seitenstruktur“. */
   note: string | null;
+  /** „KI-zugeordnet“: the AI's one-line reason. */
+  ai_reason: string | null;
   /** The assigned page of the Seitenstruktur. */
   structure: { slug: string; name: string; path: string | null } | null;
   sections: number;
@@ -677,12 +679,39 @@ export type ContentTextUploadsResult = {
   free_pages: Array<{ slug: string; name: string; path: string | null }>;
   summary: {
     assigned: number;
+    /** Of the assigned files: by the name rule, by the AI, by hand. */
+    auto: number;
+    ai: number;
+    manual: number;
     unassigned: number;
     /** Pages of the Seitenstruktur with a text to write („Nicht bearbeiten“ excluded) and no file. */
     pages_without_text: number;
     /** Assigned files that „Zugeordnete Seiten übernehmen“ would still bring into the table. */
     pending: number;
   };
+  /** The AI step between the name match and the manual assignment (`POST …/uploads/ai-match`). */
+  ai: {
+    /** False while its migration is missing; `hint` names the file. */
+    supported: boolean;
+    hint: string | null;
+    /** Whether the Texte key is set (without it the UI does not call the AI by itself). */
+    configured: boolean;
+    /** Files the AI has not looked at since the Seitenstruktur was uploaded: the UI then calls it by itself. */
+    candidates: number;
+    /** Files „Mit KI zuordnen“ would send: also the ones it tried before. */
+    candidates_all: number;
+  };
+  /** Only in the answer of `POST …/uploads/ai-match`: what that run did. */
+  ai_run?: ContentTextUploadAiRun;
+};
+
+export type ContentTextUploadAiRun = {
+  /** Files the AI looked at. */
+  tried: number;
+  assigned: number;
+  /** Files of a page the AI named for several files. */
+  conflicts: number;
+  model: string | null;
 };
 
 /** `POST /api/dt/content/uploads`: one Word file read and stored (also when it could not be read: `error`). */

@@ -19,6 +19,7 @@ import {
   loadContentStructureWithBriefing,
   type BriefingUpsertMode,
 } from "@/lib/dt/content/store";
+import { resolveContentApiKey } from "@/lib/dt/content/model-config";
 import { briefingPatchFor } from "@/lib/dt/content/structure-plan";
 import type {
   ContentPageState,
@@ -30,6 +31,7 @@ import type {
 import {
   TEXT_UPLOAD_MAX_FILE_BYTES,
   UPLOAD_UNASSIGNED_BY_HAND_NOTE,
+  aiMatchCandidateIds,
   matchTextUploads,
   pageNameKey,
   planUploadTakeover,
@@ -61,8 +63,24 @@ export function isMissingTextUploadsError(error: DbError | null | undefined): bo
 
 export const TEXT_UPLOADS_MIGRATION_MESSAGE = `Die Datenbank kennt hochgeladene Word-Texte noch nicht: Bitte ${CONTENT_TEXT_UPLOADS_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin steht „Texte hochladen“ nicht zur Verfügung; alles andere in Texte läuft weiter.`;
 
+export const CONTENT_UPLOAD_AI_MATCH_MIGRATION_FILE = "database/migrations/20261117_dt_content_upload_ai_match.sql";
+
+/** The columns `ai_tried_at` / `ai_reason` or the match value „ai“ are unknown: the AI-matching migration never ran. */
+export function isMissingUploadAiMatchError(error: DbError | null | undefined): boolean {
+  if (!error) return false;
+  const message = error.message ?? "";
+  if (error.code === "23514" && /match_check/i.test(message)) return true;
+  if (!/ai_tried_at|ai_reason/i.test(message)) return false;
+  return error.code === "PGRST204" || error.code === "42703" || /does not exist|schema cache|could not find/i.test(message);
+}
+
+export const UPLOAD_AI_MATCH_MIGRATION_MESSAGE = `Die Datenbank kennt die KI-Zuordnung noch nicht: Bitte ${CONTENT_UPLOAD_AI_MATCH_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen. Bis dahin wird nur über den Namen und von Hand zugeordnet; alles andere läuft weiter.`;
+
 export function textUploadsDbErrorMessage(error: DbError, fallback: string): string {
-  return isMissingTextUploadsError(error) ? TEXT_UPLOADS_MIGRATION_MESSAGE : contentDbErrorMessage(error, fallback);
+  // The AI columns first: their error names the table too and would read as the older migration.
+  if (isMissingUploadAiMatchError(error)) return UPLOAD_AI_MATCH_MIGRATION_MESSAGE;
+  if (isMissingTextUploadsError(error)) return TEXT_UPLOADS_MIGRATION_MESSAGE;
+  return contentDbErrorMessage(error, fallback);
 }
 
 /** A row of `dt_content_text_uploads` without the text (the list never needs the sections). */
@@ -79,10 +97,15 @@ export type ContentTextUploadRow = {
   page_id: string | null;
   error: string | null;
   uploaded_at: string | null;
+  /** Null while the AI-matching migration is missing. */
+  ai_tried_at: string | null;
+  ai_reason: string | null;
 };
 
 const LIST_COLUMNS =
   "id, organisation_id, file_name, name_key, chars, block_count, structure_slug, match, match_note, page_id, error, uploaded_at";
+/** With the columns of the AI matching (`20261117_dt_content_upload_ai_match.sql`). */
+const LIST_COLUMNS_AI = `${LIST_COLUMNS}, ai_tried_at, ai_reason`;
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
@@ -97,25 +120,41 @@ function rowFrom(raw: Record<string, unknown>): ContentTextUploadRow {
     chars: Number(raw.chars ?? 0) || 0,
     block_count: Number(raw.block_count ?? 0) || 0,
     structure_slug: text(raw.structure_slug),
-    match: raw.match === "auto" || raw.match === "manual" ? raw.match : null,
+    match: raw.match === "auto" || raw.match === "ai" || raw.match === "manual" ? raw.match : null,
     match_note: text(raw.match_note),
     page_id: text(raw.page_id),
     error: text(raw.error),
     uploaded_at: text(raw.uploaded_at),
+    ai_tried_at: text(raw.ai_tried_at),
+    ai_reason: text(raw.ai_reason),
   };
 }
 
-/** Every stored file of the organisation in upload order (the order „the first file“ of the matching means). */
-export async function loadTextUploads(service: SupabaseClient, organisationId: string): Promise<ContentTextUploadRow[]> {
-  const { data, error } = await service
-    .from("dt_content_text_uploads")
-    .select(LIST_COLUMNS)
-    .eq("organisation_id", organisationId)
-    .limit(1_000);
+/**
+ * Every stored file of the organisation in upload order (the order „the first file“ of the
+ * matching means). `aiSupported` is false while the AI-matching migration is missing: the rows
+ * are then read without its columns, and nothing of the AI step is read or written.
+ */
+export async function loadTextUploadsWithSupport(
+  service: SupabaseClient,
+  organisationId: string,
+): Promise<{ uploads: ContentTextUploadRow[]; aiSupported: boolean }> {
+  const read = (columns: string) => service.from("dt_content_text_uploads").select(columns).eq("organisation_id", organisationId).limit(1_000);
+  let aiSupported = true;
+  let { data, error } = await read(LIST_COLUMNS_AI);
+  if (error && isMissingUploadAiMatchError(error)) {
+    aiSupported = false;
+    ({ data, error } = await read(LIST_COLUMNS));
+  }
   if (error) throw new Error(textUploadsDbErrorMessage(error, "Hochgeladene Texte konnten nicht geladen werden"));
-  return ((data ?? []) as unknown as Record<string, unknown>[])
+  const uploads = ((data ?? []) as unknown as Record<string, unknown>[])
     .map(rowFrom)
     .sort((a, b) => (a.uploaded_at ?? "").localeCompare(b.uploaded_at ?? "") || a.file_name.localeCompare(b.file_name, "de") || a.id.localeCompare(b.id));
+  return { uploads, aiSupported };
+}
+
+export async function loadTextUploads(service: SupabaseClient, organisationId: string): Promise<ContentTextUploadRow[]> {
+  return (await loadTextUploadsWithSupport(service, organisationId)).uploads;
 }
 
 type StructurePages = { pages: ContentBriefingPage[] | null; columns: BriefingUpsertMode; uploadedAt: string | null };
@@ -139,39 +178,43 @@ async function loadStructurePages(service: SupabaseClient, organisationId: strin
 export type TextUploadMatchState = StructurePages & {
   uploads: ContentTextUploadRow[];
   results: Map<string, UploadMatchResult>;
+  /** False while the AI-matching migration is missing. */
+  aiSupported: boolean;
 };
 
 /**
  * Runs the matching over the stored files and writes what changed. Called by every read and
  * before every write, so a new Seitenstruktur or new files are matched without a hook in the
- * structure upload. Manual decisions are never re-matched (`matchTextUploads`).
+ * structure upload. Manual decisions are never re-matched (`matchTextUploads`). No model runs
+ * here: stored AI assignments are only kept or released (`upload-ai-match.ts` makes them).
  */
 export async function syncTextUploadMatches(service: SupabaseClient, organisationId: string): Promise<TextUploadMatchState> {
-  const [uploads, structure] = await Promise.all([loadTextUploads(service, organisationId), loadStructurePages(service, organisationId)]);
+  const [{ uploads, aiSupported }, structure] = await Promise.all([
+    loadTextUploadsWithSupport(service, organisationId),
+    loadStructurePages(service, organisationId),
+  ]);
   const matched = matchTextUploads(uploads, structure.pages);
   const results = new Map(matched.map((r) => [r.id, r]));
+  const patchOf = (r: UploadMatchResult) => ({
+    structure_slug: r.structure_slug,
+    match: r.match,
+    match_note: r.match_note,
+    ...(aiSupported ? { ai_tried_at: r.ai_tried_at, ai_reason: r.ai_reason } : {}),
+  });
   const changed = uploads.filter((u) => {
     const r = results.get(u.id)!;
-    return u.structure_slug !== r.structure_slug || u.match !== r.match || u.match_note !== r.match_note;
+    if (u.structure_slug !== r.structure_slug || u.match !== r.match || u.match_note !== r.match_note) return true;
+    return aiSupported && (u.ai_tried_at !== r.ai_tried_at || u.ai_reason !== r.ai_reason);
   });
   for (let i = 0; i < changed.length; i += 10) {
     const writes = await Promise.all(
-      changed.slice(i, i + 10).map((u) => {
-        const r = results.get(u.id)!;
-        return service
-          .from("dt_content_text_uploads")
-          .update({ structure_slug: r.structure_slug, match: r.match, match_note: r.match_note })
-          .eq("id", u.id);
-      }),
+      changed.slice(i, i + 10).map((u) => service.from("dt_content_text_uploads").update(patchOf(results.get(u.id)!)).eq("id", u.id)),
     );
     const failed = writes.find((w) => w.error)?.error;
     if (failed) throw new Error(textUploadsDbErrorMessage(failed, "Zuordnung konnte nicht gespeichert werden"));
   }
-  for (const u of changed) {
-    const r = results.get(u.id)!;
-    Object.assign(u, { structure_slug: r.structure_slug, match: r.match, match_note: r.match_note });
-  }
-  return { ...structure, uploads, results };
+  for (const u of changed) Object.assign(u, patchOf(results.get(u.id)!));
+  return { ...structure, uploads, results, aiSupported };
 }
 
 type LinkedPage = { id: string; slug: string; name: string; state: ContentPageState; source_url: string | null; skip_steps: unknown };
@@ -198,6 +241,7 @@ function uploadsResult(state: TextUploadMatchState, linked: ReadonlyMap<string, 
       file_name: u.file_name,
       status: r.status,
       note: r.status === "error" ? u.error : r.match_note,
+      ai_reason: r.status === "ai" ? r.ai_reason : null,
       structure: structure ? { slug: structure.slug, name: structure.name, path: structure.path } : null,
       sections: u.block_count,
       chars: u.chars,
@@ -208,6 +252,11 @@ function uploadsResult(state: TextUploadMatchState, linked: ReadonlyMap<string, 
   const taken = new Set(uploads.map((u) => u.structure?.slug).filter((s): s is string => Boolean(s)));
   const free = (state.pages ?? []).filter((p) => !taken.has(p.slug));
   const assigned = uploads.filter((u) => u.structure).length;
+  const count = (status: ContentTextUploadView["status"]) => uploads.filter((u) => u.status === status).length;
+  const matched = [...state.results.values()];
+  // Without a free page the AI has nothing to offer; then no file counts as waiting for it.
+  const candidates = (force: boolean) =>
+    state.aiSupported && state.pages != null && free.length > 0 ? aiMatchCandidateIds(state.uploads, matched, state.uploadedAt, force).length : 0;
   return {
     supported: true,
     hint: null,
@@ -216,9 +265,19 @@ function uploadsResult(state: TextUploadMatchState, linked: ReadonlyMap<string, 
     free_pages: free.map((p) => ({ slug: p.slug, name: p.name, path: p.path })),
     summary: {
       assigned,
+      auto: count("auto"),
+      ai: count("ai"),
+      manual: count("manual"),
       unassigned: uploads.length - assigned,
       pages_without_text: free.filter((p) => p.page_type !== "nicht_bearbeiten").length,
       pending: uploads.filter((u) => u.structure && !u.page).length,
+    },
+    ai: {
+      supported: state.aiSupported,
+      hint: state.aiSupported ? null : UPLOAD_AI_MATCH_MIGRATION_MESSAGE,
+      configured: resolveContentApiKey() != null,
+      candidates: candidates(false),
+      candidates_all: candidates(true),
     },
   };
 }
@@ -229,7 +288,8 @@ const UNSUPPORTED_RESULT: ContentTextUploadsResult = {
   has_structure: false,
   uploads: [],
   free_pages: [],
-  summary: { assigned: 0, unassigned: 0, pages_without_text: 0, pending: 0 },
+  summary: { assigned: 0, auto: 0, ai: 0, manual: 0, unassigned: 0, pages_without_text: 0, pending: 0 },
+  ai: { supported: false, hint: null, configured: false, candidates: 0, candidates_all: 0 },
 };
 
 /** The table „Hochgeladene Texte“ with the summary line; `supported: false` names the migration. */
@@ -399,8 +459,9 @@ export async function storeTextUpload(
 }
 
 /**
- * The manual assignment (`structureSlug`) or „Zuordnung lösen“ (null). Both are decisions by
- * hand and survive every later automatic match. A page takes one file only. When the file is
+ * The manual assignment (`structureSlug`) or „Zuordnung lösen“ (null), on any file: one the
+ * name rule or the AI assigned too. Both are decisions by hand and survive every later
+ * automatic or AI match. A page takes one file only. When the file is
  * already used by a row of the Texte table and its page changes, that row lets go of it first
  * (`detachUploadFromPage`); „Zugeordnete Seiten übernehmen“ brings it to the new page.
  */
