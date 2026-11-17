@@ -37,9 +37,9 @@ import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
 export const UPLOAD_AI_MATCH_USAGE_MODE = "content.upload_match";
 /**
- * Files per call; more candidates are sent as several calls at the same time. Measured with the
- * Texte default model (Claude Sonnet 4.6): about 1.5 s and 100 output tokens per file, so 25
- * files stay well inside the time limit of one call.
+ * Files per call; more candidates are sent as several calls at the same time. Sized for the
+ * slower fallback model (Claude Sonnet 4.6, measured: about 1.5 s and 100 output tokens per
+ * file), so 25 files stay well inside the time limit of one call; Sonnet 5.5 is about twice as fast.
  */
 export const UPLOAD_AI_MATCH_CHUNK = 25;
 export const UPLOAD_AI_MATCH_TIMEOUT_MS = 60_000;

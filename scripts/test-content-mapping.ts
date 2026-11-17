@@ -1127,6 +1127,7 @@ async function runResetTool() {
 // --- model config and pricing -----------------------------------------------------------------
 const defaults = resolveContentModels({}, {});
 assert.equal(defaults.write[0], DEFAULT_CONTENT_MODEL);
+assert.deepEqual(defaults.write, ["claude-sonnet-5-5", "claude-sonnet-4-6", "claude-sonnet-4-20250514"], "Sonnet 5.5 by default, the older models only as fallbacks");
 assert.deepEqual(defaults.check, defaults.write, "check tier follows write tier unless set");
 assert.deepEqual(defaults.source, { write: "default", check: "default" });
 const fromEnv = resolveContentModels({}, { [CONTENT_MODEL_ENV.write]: " claude-opus-4-6 ", [CONTENT_MODEL_ENV.check]: "claude-haiku-4-5" });
@@ -1139,6 +1140,7 @@ assert.equal(fromDb.write[0], "claude-sonnet-4-6", "app_settings beats env");
 assert.equal(fromDb.check[0], "claude-sonnet-4-6");
 assert.deepEqual(fromDb.source, { write: "app_settings", check: "app_settings" });
 assert.equal(new Set(fromDb.write).size, fromDb.write.length, "no duplicate candidates");
+assert.deepEqual(fromDb.write, ["claude-sonnet-4-6", "claude-sonnet-5-5", "claude-sonnet-4-20250514"], "a chosen model goes first, the default follows as fallback");
 
 assert.deepEqual([priceForModel("claude-sonnet-4-6").inputUsd, priceForModel("claude-haiku-4-5-20251001").inputUsd, priceForModel("claude-opus-4-1").inputUsd, priceForModel("claude-opus-4-6").inputUsd, priceForModel(null).inputUsd], [3, 1, 15, 5, 3]);
 assert.equal(estimateCostEur("claude-sonnet-4-6", { inputTokens: 1_000_000, outputTokens: 0 }, 1), 3);
