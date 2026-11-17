@@ -60,7 +60,7 @@ function testModel() {
   assert.equal(zielgruppeLevel(z, "x"), "off");
 
   // Limits by page type: Startseite, Hauptsilo-Seite, Ratgeber none; all others two.
-  for (const type of ["startseite", "hauptsilo", "ratgeber"]) assert.equal(contentPrimaryMax(type), null, type);
+  for (const type of ["startseite", "hauptsilo", "hauptsilo_standort", "ratgeber"]) assert.equal(contentPrimaryMax(type), null, type);
   for (const type of ["unterseite", "hauptseite", "standort", "ueber_uns", null]) assert.equal(contentPrimaryMax(type), 2, String(type));
   assert.match(contentZielgruppenRule("startseite"), /^Primär: keine Obergrenze bei diesem Seitentyp/);
   assert.match(contentZielgruppenRule("unterseite"), /^Primär: höchstens zwei bei diesem Seitentyp/);
@@ -185,6 +185,7 @@ async function testSuggest() {
   assert.match(zielgruppenSuggestSystem("startseite"), /\nPrimär: Das ist die Startseite – in der Regel alle Hauptzielgruppen des Anbieters\. Nur eine Zielgruppe, die für das Angebot eine Nebenrolle spielt, ist sekundär oder nicht zugeordnet\. Keine Obergrenze\.\nSekundär:/);
   assert.match(zielgruppenSuggestSystem("ratgeber"), /\nPrimär: Das ist ein Ratgeberartikel – alle Zielgruppen, für deren Frage der Artikel relevant ist\. Keine Obergrenze\.\n/);
   assert.match(zielgruppenSuggestSystem("hauptsilo"), /\nPrimär: Das ist eine Hauptsilo-Seite – alle Zielgruppen, für die das Thema dieses Silos ein Hauptanliegen ist\. Keine Obergrenze\.\n/);
+  assert.match(zielgruppenSuggestSystem("hauptsilo_standort"), /\nPrimär: Das ist die Übersicht aller Standorte – alle Zielgruppen, die einen Standort des Anbieters in ihrer Nähe suchen, in der Regel alle Hauptzielgruppen\. Keine Obergrenze\.\n/);
   assert.equal(zielgruppenSuggestSystem("unterseite"), ZIELGRUPPEN_SUGGEST_SYSTEM, "other types: the text as before");
   assert.equal(((zielgruppenTool(["a"], null).input_schema as { properties: { primary: { description: string } } }).properties.primary.description), "Mindestens eine primäre Zielgruppe, keine Obergrenze.");
   const fourPrimary = { primary: ["a", "b", "c", "d"].map((agent_id) => ({ agent_id, reason: "r" })), secondary: [] };

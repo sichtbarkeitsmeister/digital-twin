@@ -21,6 +21,8 @@ export const CONTENT_TYPE_PROMPTS_MIGRATION_FILE = "database/migrations/20261010
 export const CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE = "database/migrations/20261015_dt_content_startseite_ueber_uns.sql";
 /** Adds the Hauptseite column, and allows that page type on `dt_content_pages`. */
 export const CONTENT_TYPE_PROMPTS_HAUPTSEITE_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
+/** Adds the column of the Hauptsilo Standort-Übersicht, and allows that page type on `dt_content_pages`. */
+export const CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE = "database/migrations/20261117_dt_content_hauptsilo_standort.sql";
 /** Allows the second row (`seo_tool`) and seeds it with a copy of the Texte recipes. */
 export const SEO_TOOL_TYPE_PROMPTS_MIGRATION_FILE = "database/migrations/20261019_dt_seo_tool_type_prompts.sql";
 
@@ -28,7 +30,9 @@ export const SEO_TOOL_TYPE_PROMPTS_MIGRATION_FILE = "database/migrations/2026101
 export type ContentTypePromptsScope = "texte" | "seo_tool";
 
 const ROW_IDS: Record<ContentTypePromptsScope, string> = { texte: "agency", seo_tool: "seo_tool" };
-const COLUMNS = "hauptsilo, hauptseite, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
+const COLUMNS = "hauptsilo, hauptsilo_standort, hauptseite, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
+/** Before 20261117: everything but the Hauptsilo Standort-Übersicht. */
+const WITHOUT_HAUPTSILO_STANDORT_COLUMNS = "hauptsilo, hauptseite, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
 /** Before 20261017: everything but the Hauptseite. */
 const WITHOUT_HAUPTSEITE_COLUMNS = "hauptsilo, unterseite, ratgeber, standort, startseite, ueber_uns, updated_at, updated_by_email";
 const LEGACY_COLUMNS = "hauptsilo, unterseite, ratgeber, standort, updated_at, updated_by_email";
@@ -37,9 +41,10 @@ export type ContentTypePromptsState = {
   prompts: ContentTypePrompts;
   /**
    * Where the recipes come from: the saved row, the defaults (no row yet), or the defaults
-   * because the table or some columns are missing (`missing_hauptseite`: only 20261017).
+   * because the table or some columns are missing (`missing_hauptseite`: only 20261017;
+   * `missing_hauptsilo_standort`: only 20261117, every other saved recipe is kept).
    */
-  storage: "db" | "defaults" | "missing_table" | "missing_columns" | "missing_hauptseite";
+  storage: "db" | "defaults" | "missing_table" | "missing_columns" | "missing_hauptseite" | "missing_hauptsilo_standort";
   updated_at: string | null;
   updated_by_email: string | null;
 };
@@ -70,6 +75,9 @@ export async function loadContentTypePrompts(
       return { prompts: { ...DEFAULT_CONTENT_TYPE_PROMPTS }, storage: "missing_table", updated_at: null, updated_by_email: null };
     }
     if (isMissingContentColumnError(error)) {
+      // Only the newest column missing: every saved recipe is kept, the Standort-Übersicht writes with its default.
+      const latest = await service.from("dt_content_type_prompts").select(WITHOUT_HAUPTSILO_STANDORT_COLUMNS).eq("id", ROW_ID).maybeSingle();
+      if (!latest.error) return stateFromRow((latest.data as Record<string, unknown> | null) ?? null, "missing_hauptsilo_standort");
       // Only the Hauptseite column missing: keep the saved Startseite and Über-uns recipes.
       const recent = await service.from("dt_content_type_prompts").select(WITHOUT_HAUPTSEITE_COLUMNS).eq("id", ROW_ID).maybeSingle();
       if (!recent.error) return stateFromRow((recent.data as Record<string, unknown> | null) ?? null, "missing_hauptseite");
@@ -127,9 +135,11 @@ export async function saveContentTypePrompts(
   if (isMissingContentColumnError(error)) {
     return {
       ok: false,
-      error: /hauptseite/i.test(error.message ?? "")
-        ? `Die Datenbank kennt den Seitentyp Hauptseite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_HAUPTSEITE_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`
-        : `Die Datenbank kennt Startseite und Über-uns-Seite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
+      error: /hauptsilo_standort/i.test(error.message ?? "")
+        ? `Die Datenbank kennt den Seitentyp Hauptsilo Standort-Übersicht noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`
+        : /hauptseite/i.test(error.message ?? "")
+          ? `Die Datenbank kennt den Seitentyp Hauptseite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_HAUPTSEITE_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`
+          : `Die Datenbank kennt Startseite und Über-uns-Seite noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_EXTRA_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
     };
   }
   if (isMissingContentTableError(error)) {

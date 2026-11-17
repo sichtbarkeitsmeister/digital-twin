@@ -71,8 +71,11 @@ function testRequestSchemaAndOptions() {
   assert.equal(seoToolRequestSchema.safeParse({ ...base, avatarId: "kein-uuid" }).success, false);
   assert.deepEqual(
     SEO_TOOL_PAGE_TYPE_OPTIONS.map((o) => o.value),
-    ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"],
+    ["hauptsilo", "hauptsilo_standort", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"],
   );
+  // „Hauptsilo Standort-Übersicht“ in the briefing form: selectable, with its label, and accepted by the run.
+  assert.deepEqual(SEO_TOOL_PAGE_TYPE_OPTIONS.find((o) => o.value === "hauptsilo_standort"), { value: "hauptsilo_standort", label: "Hauptsilo Standort-Übersicht" });
+  assert.ok(seoToolRequestSchema.safeParse({ ...base, pageType: "hauptsilo_standort" }).success);
   console.log("request schema and options: ok");
 }
 

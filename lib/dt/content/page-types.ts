@@ -7,7 +7,9 @@
  *   Ebene 2 = supporting). Crawl pages have no role.
  * - type: which writing variant the SEO step uses. Derived from role, pillar and name;
  *   the editor may override it in the table and in the drawer. „Hauptseite“ (one offer
- *   without Unterseiten) is never derived or guessed: it is only ever chosen by hand.
+ *   without Unterseiten) and „Hauptsilo Standort-Übersicht“ (the overview of all locations,
+ *   which links the Standortseiten) are never derived or guessed: they are only ever chosen
+ *   by hand.
  */
 
 export const CONTENT_PAGE_ROLES = ["startseite", "pillar", "supporting"] as const;
@@ -15,6 +17,7 @@ export type ContentPageRole = (typeof CONTENT_PAGE_ROLES)[number];
 
 export const CONTENT_PAGE_TYPES = [
   "hauptsilo",
+  "hauptsilo_standort",
   "hauptseite",
   "unterseite",
   "ratgeber",
@@ -27,6 +30,7 @@ export type ContentPageType = (typeof CONTENT_PAGE_TYPES)[number];
 
 export const CONTENT_PAGE_TYPE_LABELS: Record<ContentPageType, string> = {
   hauptsilo: "Hauptsilo-Seite",
+  hauptsilo_standort: "Hauptsilo Standort-Übersicht",
   hauptseite: "Hauptseite",
   unterseite: "Unterseite",
   ratgeber: "Ratgeberartikel",
@@ -39,6 +43,7 @@ export const CONTENT_PAGE_TYPE_LABELS: Record<ContentPageType, string> = {
 /** One line per type in the Seitentyp select (drawer and table). */
 export const CONTENT_PAGE_TYPE_HINTS: Record<ContentPageType, string> = {
   hauptsilo: "Breit, verlinkt auf Unterseiten",
+  hauptsilo_standort: "Übersicht aller Standorte, verlinkt die Standortseiten",
   hauptseite: "Eine Leistung ohne Unterseiten",
   unterseite: "Ein Unterthema, verlinkt aufs Hauptsilo",
   ratgeber: "Informationell, kein harter Verkauf",

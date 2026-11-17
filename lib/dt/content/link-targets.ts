@@ -60,3 +60,26 @@ export function deriveInternalLinkTargets(page: LinkPage, outline: readonly Link
   const ranked = candidates.map((o) => ({ name: o.name, score: score(page, o) })).sort((x, y) => y.score - x.score || x.name.localeCompare(y.name, "de"));
   return [...new Set(ranked.map((r) => r.name))].filter((n) => n !== page.name).slice(0, max);
 }
+
+/** More Standortseiten than this are not listed as link targets of one overview. */
+export const STANDORT_LINK_TARGETS_MAX = 60;
+
+/**
+ * The link targets of a „Hauptsilo Standort-Übersicht“: its recipe links every Standortseite, so
+ * every page of the table with the type Standortseite is an allowed target, also one the
+ * Seitenstruktur did not put under this page. The Standortseiten go first (table order), then
+ * `targets` as they were. Any other page type gets `targets` back unchanged.
+ */
+export function withStandortLinkTargets(
+  page: Pick<LinkPage, "slug" | "name"> & { page_type: LinkPage["page_type"] },
+  targets: readonly string[],
+  outline: readonly LinkPage[],
+): string[] {
+  if (page.page_type !== "hauptsilo_standort") return [...targets];
+  const standorte = outline
+    .filter((o) => o.slug !== page.slug && o.name.trim() && o.name !== page.name)
+    .filter((o) => effectiveContentPageType({ page_type: o.page_type, page_role: o.page_role, level: o.level, name: o.name, path: o.path }) === "standort")
+    .map((o) => o.name)
+    .slice(0, STANDORT_LINK_TARGETS_MAX);
+  return [...new Set([...standorte, ...targets])];
+}

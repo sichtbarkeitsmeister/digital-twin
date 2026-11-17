@@ -18,9 +18,10 @@ export const CONTENT_ZIELGRUPPEN_LIST_MAX = 30;
 /**
  * Page types that speak to many Zielgruppen at once: every Zielgruppe of the organisation may be
  * primary. The Startseite (usually all main Zielgruppen), a Hauptsilo-Seite (all for whom the
- * silo's topic is a main concern), a Ratgeberartikel (all whose question it answers).
+ * silo's topic is a main concern), the Hauptsilo Standort-Übersicht (everyone looking for their
+ * location), a Ratgeberartikel (all whose question it answers).
  */
-export const CONTENT_UNLIMITED_PRIMARY_TYPES = ["startseite", "hauptsilo", "ratgeber"] as const;
+export const CONTENT_UNLIMITED_PRIMARY_TYPES = ["startseite", "hauptsilo", "hauptsilo_standort", "ratgeber"] as const;
 
 /** How many primary Zielgruppen the page type allows; null = no limit. */
 export function contentPrimaryMax(pageType: string | null | undefined): number | null {

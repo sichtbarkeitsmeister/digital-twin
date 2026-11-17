@@ -31,13 +31,15 @@ const SUGGEST_MAX_TOKENS = 1_500;
 const PROFILE_CHARS = 2_500;
 const ANBIETER_CHARS = 12_000;
 
-/** The „Primär“ line of the suggestion, by page type (Startseite, Hauptsilo-Seite, Ratgeber: no limit). */
+/** The „Primär“ line of the suggestion, by page type (Startseite, Hauptsilo-Seite, Hauptsilo Standort-Übersicht, Ratgeber: no limit). */
 export function zielgruppenPrimaryLine(pageType: string | null | undefined): string {
   switch (pageType) {
     case "startseite":
       return "Primär: Das ist die Startseite – in der Regel alle Hauptzielgruppen des Anbieters. Nur eine Zielgruppe, die für das Angebot eine Nebenrolle spielt, ist sekundär oder nicht zugeordnet. Keine Obergrenze.";
     case "hauptsilo":
       return "Primär: Das ist eine Hauptsilo-Seite – alle Zielgruppen, für die das Thema dieses Silos ein Hauptanliegen ist. Keine Obergrenze.";
+    case "hauptsilo_standort":
+      return "Primär: Das ist die Übersicht aller Standorte – alle Zielgruppen, die einen Standort des Anbieters in ihrer Nähe suchen, in der Regel alle Hauptzielgruppen. Keine Obergrenze.";
     case "ratgeber":
       return "Primär: Das ist ein Ratgeberartikel – alle Zielgruppen, für deren Frage der Artikel relevant ist. Keine Obergrenze.";
     default:
