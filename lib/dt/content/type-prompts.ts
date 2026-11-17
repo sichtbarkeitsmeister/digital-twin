@@ -1,7 +1,7 @@
 /**
  * Writing recipes per page type („Textvorlagen“): what the SEO step (step 2) is told about
- * a Hauptsilo-Seite, Hauptseite, Unterseite, Ratgeberartikel, Standortseite, Startseite or
- * Über-uns-Seite.
+ * a Hauptsilo-Seite, Hauptsilo Standort-Übersicht, Hauptseite, Unterseite, Ratgeberartikel,
+ * Standortseite, Startseite or Über-uns-Seite.
  * The general rules for every type live in the Texter prompt (Globale Prompts). These recipes
  * only say what is different for that type. One set for the whole
  * agency, stored in `dt_content_type_prompts`; the defaults below are what „Auf Standard zurücksetzen“ restores.
@@ -14,7 +14,7 @@
 import type { ContentPageType } from "@/lib/dt/content/page-types";
 import { CONTENT_STEP_HORMOZI } from "@/lib/dt/content/pipeline/steps";
 
-export const CONTENT_TYPE_PROMPT_KEYS = ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const;
+export const CONTENT_TYPE_PROMPT_KEYS = ["hauptsilo", "hauptsilo_standort", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const;
 export type ContentTypePromptKey = (typeof CONTENT_TYPE_PROMPT_KEYS)[number];
 export type ContentTypePrompts = Record<ContentTypePromptKey, string>;
 
@@ -61,6 +61,23 @@ Struktur:
 11. Abschluss-CTA, der auch Unentschlossene abholt.
 
 Besondere Regeln: Jede Unterseite des Silos wird verlinkt, Ankertext ist der Leistungsname. Zugehörige Ratgeber verlinken, nicht ausschreiben. Keine Links in fremde Silos außer zur Startseite, Kontakt und thematisch zwingend verwandten Seiten. Die Seite muss auch ohne Klick auf Unterseiten eine vollständige Orientierung geben. Fehlende Unterthemen nicht ausfüllen, sondern nur verlinken, wenn es die Seite schon gibt.`,
+  hauptsilo_standort: `Seitentyp Hauptsilo Standort-Übersicht. Die Seite ist die Übersicht aller Standorte beziehungsweise des Einzugsgebiets. Sie zeigt, wo das Unternehmen tätig ist, verlinkt jede vorhandene Standortseite, erklärt, was an allen Standorten gleich ist und was sich je Standort unterscheidet, und hilft dem Besucher, den für ihn richtigen Standort zu wählen. Sie ist keine einzelne Standortseite und kein Leistungs-Silo: Sie erklärt weder einen Ort noch eine Leistung in der Tiefe.
+
+Pflicht-Inputs: Liste der Standorte und des Einzugsgebiets aus den Anbieterfakten; je Standort, ob es eine echte Niederlassung mit Adresse ist oder ein Gebiet, das vom Hauptsitz aus bedient wird; die vorhandenen Standortseiten (erlaubte Linkziele); Leistungen, die es überall gibt, und Unterschiede je Standort (Leistungsumfang, Erreichbarkeit, Ansprechpartner, Anfahrt), soweit in den Fakten; Hauptsitz und zentraler Kontaktweg; Conversion-Ziel. Fehlt etwas, Platzhalter.
+
+Struktur:
+1. H1, Subheadline, Kurzzusammenfassung und Einleitung nach der allgemeinen Regel. Die H1 nennt die Hauptleistung und die Region oder „Standorte“. Die Kurzzusammenfassung sagt, in welchem Gebiet das Unternehmen tätig ist und wie der Besucher seinen Standort findet.
+2. Einzugsgebiet im Überblick: wo das Unternehmen tätig ist. Nur Orte und Gebiete aus den Fakten.
+3. Entscheidungshilfe „Welcher Standort ist für Sie zuständig?“: vom Wohnort, der Region oder dem Anliegen zum passenden Standort, jeweils mit Link.
+4. Die Standorte im Einzelnen. Pro vorhandener Standortseite 40–100 Wörter: Ort, für welches Gebiet zuständig, was dort besonders ist (nur aus den Fakten), Link mit dem Ortsnamen als Ankertext. Keine Volltiefe, keine Wiederholung der Standortseite.
+5. Was an allen Standorten gleich ist: Leistungen, Ablauf, Qualität und Garantien, soweit belegt.
+6. Was sich je Standort unterscheidet: Leistungsumfang, Erreichbarkeit, Ansprechpartner, Anfahrt. Nur belegte Unterschiede. Nennen die Fakten keine, das in einem Satz sagen, statt Unterschiede zu erfinden.
+7. Orte, die laut Fakten bedient werden, aber keine eigene Standortseite haben: nennen, ohne Link, mit dem zuständigen Standort, wenn er in den Fakten steht.
+8. Beweise mit regionalem Bezug: Referenzen, Kundenstimmen, Jahre vor Ort. Nur echte.
+9. Mindestens 4 Fragen im Fließtext: welcher Standort zuständig ist, Einsatzgebiet und Anfahrt, Unterschiede zwischen den Standorten, Erreichbarkeit.
+10. Abschluss-CTA zum nächstgelegenen Standort: Der Besucher wählt seinen Standort (Link) oder nutzt den zentralen Kontaktweg aus den Fakten.
+
+Besondere Regeln: Standorte ausschließlich aus den Anbieterfakten, keine Web-Recherche. Keine Standorte, Adressen, Telefonnummern, Öffnungszeiten oder Ansprechpartner erfinden; fehlt eine Angabe, Platzhalter. Jede vorhandene Standortseite wird verlinkt, nur über die erlaubten Linkziele (Marker [LINK: Seitenname]); keine Links auf Standortseiten, die es nicht gibt, und keine erfundenen Unterseiten. Keine gefälschte lokale Präsenz: Ein Gebiet ohne Niederlassung heißt Einsatzgebiet, nicht Standort. Adressen und Telefonnummern exakt wie in den Fakten. Keine Textbausteine, bei denen nur der Ortsname wechselt, und den Ortsnamen nicht stapeln. Leistungen nur nennen und auf ihre Seite verlinken, wenn es sie gibt, nicht ausschreiben. Zur Startseite und zur Kontaktseite verlinken, soweit sie erlaubte Linkziele sind.`,
   hauptseite: `Seitentyp Hauptseite. Die Seite ist die zentrale Seite für genau ein Angebot, zu dem es keine Unterseiten gibt. Der Besucher bekommt hier das ganze Angebot auf einer Seite: welches Problem es löst, für wen es gedacht ist, was enthalten ist, wie es abläuft, was es kostet und was er als Nächstes tun kann. Sie ist keine Startseite und keine Silo-Übersicht.
 
 Pflicht-Inputs: Angebot, Haupt- und Nebenkeywords; Zielgruppe und typischer Anlass; Leistungsumfang (was enthalten ist und was nicht); Ablauf aus Kundensicht; Preisinformationen, soweit in den Fakten; Beweise, Garantien und Zertifikate zu diesem Angebot; Conversion-Ziel und Kontaktweg; verwandte Seiten, die es bereits gibt. Fehlt etwas, Platzhalter.
@@ -138,6 +155,7 @@ Besondere Regeln: Fakten müssen zu den übrigen Anbieterfakten passen. Keine Fl
 
 export const CONTENT_TYPE_PROMPT_LABELS: Record<ContentTypePromptKey, string> = {
   hauptsilo: "Hauptsilo-Seite",
+  hauptsilo_standort: "Hauptsilo Standort-Übersicht",
   hauptseite: "Hauptseite",
   unterseite: "Unterseite",
   ratgeber: "Ratgeberartikel",
@@ -149,6 +167,7 @@ export const CONTENT_TYPE_PROMPT_LABELS: Record<ContentTypePromptKey, string> = 
 /** One line under each textarea of the „Textvorlagen“ card. */
 export const CONTENT_TYPE_PROMPT_HELP: Record<ContentTypePromptKey, string> = {
   hauptsilo: "Übersicht zum großen Thema, Unterthemen nur anreißen und verlinken.",
+  hauptsilo_standort: "Übersicht aller Standorte: jede Standortseite verlinken, Gemeinsamkeiten und Unterschiede zeigen.",
   hauptseite: "Eine Leistung als eigene Hauptseite, ohne Unterseiten.",
   unterseite: "Ein Unterthema in der Tiefe, immer zurück zum Hauptsilo verlinken.",
   ratgeber: "Hilfe-Artikel, Fragen beantworten, nicht hart verkaufen.",

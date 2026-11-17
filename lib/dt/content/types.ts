@@ -554,7 +554,7 @@ export type ContentToolResetResult = {
 export type ContentTypePromptsResult = {
   prompts: ContentTypePrompts;
   defaults: ContentTypePrompts;
-  storage: "db" | "defaults" | "missing_table" | "missing_columns" | "missing_hauptseite";
+  storage: "db" | "defaults" | "missing_table" | "missing_columns" | "missing_hauptseite" | "missing_hauptsilo_standort";
   updated_at: string | null;
   updated_by_email: string | null;
   /** Set when the table is missing: which migration to run. */

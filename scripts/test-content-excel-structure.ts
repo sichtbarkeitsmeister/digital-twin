@@ -3,6 +3,7 @@
  * Run: npm run test:content-excel-structure
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { planCrawlContentPages, type CrawledSitePage } from "../lib/dt/content/crawl-pages";
 import {
@@ -82,7 +83,9 @@ import { estimateCostEur, priceForModel } from "../lib/dt/content/pricing";
 import { approveNeedsConfirm } from "../lib/dt/content/presentation";
 import { parseBlocksFromHtml, renderBlocksHtml } from "../lib/dt/content/render";
 import {
+  CONTENT_PAGE_TYPES_MIGRATION_FILE,
   canEditContentPageType,
+  contentDbErrorMessage,
   contentPageTypeChangeBlocker,
   contentStructureOutline,
   pageActions,
@@ -115,7 +118,12 @@ import {
   normalizeContentTypePrompts,
   renderContentTypePrompt,
 } from "../lib/dt/content/type-prompts";
-import { loadContentTypePrompts, saveContentTypePrompts } from "../lib/dt/content/type-prompts-db";
+import {
+  CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE,
+  loadContentTypePrompts,
+  loadContentTypePromptsForRun,
+  saveContentTypePrompts,
+} from "../lib/dt/content/type-prompts-db";
 import { parseWebsiteStructure } from "../lib/dt/seo/website-structure";
 import type { ContentQuestion } from "../lib/dt/content/types";
 
@@ -454,6 +462,41 @@ assert.deepEqual(
 );
 assert.ok(CONTENT_PAGE_TYPES.includes("nicht_bearbeiten") && CONTENT_PAGE_TYPES.includes("startseite") && CONTENT_PAGE_TYPES.includes("hauptsilo"), "Startseite and Hauptsilo-Seite stay");
 assert.equal(isHomeContentName("Hauptseite"), true, "the name check is unchanged");
+
+// „Hauptsilo Standort-Übersicht“: its own type next to the Hauptsilo-Seite, chosen by hand only.
+assert.ok(isContentPageType("hauptsilo_standort"));
+assert.equal(CONTENT_PAGE_TYPE_LABELS.hauptsilo_standort, "Hauptsilo Standort-Übersicht");
+assert.equal(contentPageTypeLabel("hauptsilo_standort"), "Hauptsilo Standort-Übersicht");
+assert.deepEqual(
+  CONTENT_PAGE_TYPE_OPTIONS.find((o) => o.value === "hauptsilo_standort"),
+  { value: "hauptsilo_standort", label: "Hauptsilo Standort-Übersicht", description: "Übersicht aller Standorte, verlinkt die Standortseiten" },
+  "the Seitentyp select of table and page window offers it",
+);
+assert.deepEqual(CONTENT_PAGE_TYPES.slice(0, 3), ["hauptsilo", "hauptsilo_standort", "hauptseite"], "listed right after the Hauptsilo-Seite");
+for (const name of ["Standorte", "Unsere Standorte", "Regionen", "Einzugsgebiet", "Standort-Übersicht", "Umzug Bonn", "Leistungen"]) {
+  for (const path of [null, "/standorte", "/regionen", "/standorte/bonn"]) {
+    for (const role of [...CONTENT_PAGE_ROLES, null]) {
+      for (const pillarName of [null, "Standorte", "Regionen"]) {
+        assert.notEqual(derivePageType({ name, role, path, pillarName, cities: ["Bonn"] }), "hauptsilo_standort", `derivePageType(${name}, ${role}, ${path}) never returns hauptsilo_standort`);
+      }
+    }
+    for (const level of [0, 1, 2]) {
+      assert.notEqual(guessCrawlPageType({ name, path, level, cities: ["Bonn"] }), "hauptsilo_standort", `guessCrawlPageType(${name}, ${path}, ${level}) never returns hauptsilo_standort`);
+    }
+  }
+}
+assert.equal(derivePageType({ name: "Standorte", role: "pillar" }), "hauptsilo", "a silo named „Standorte“ is derived as before; the overview type is the editor's choice");
+// The Standortseiten under such a silo keep it as their Hauptsilo, whatever type the silo page gets by hand.
+const standortSilo = parseContentStructureSheet([
+  ["URL", "Startseite", "Ebene 1", "Ebene 2"],
+  ["/", "Startseite", "", ""],
+  ["/standorte", "", "Standorte", ""],
+  ["/standorte/bonn", "", "", "Umzug Bonn"],
+  ["/standorte/koeln", "", "", "Umzug Köln"],
+]).pages;
+assert.deepEqual(standortSilo.slice(2).map((p) => [p.page_type, p.pillar_name]), [["standort", "Standorte"], ["standort", "Standorte"]]);
+assert.deepEqual(standortSilo[1]!.internal_link_targets, ["Umzug Bonn", "Umzug Köln"], "the silo's link targets are its Standortseiten");
+assert.equal(effectiveContentPageType({ ...standortSilo[1]!, page_type: "hauptsilo_standort" }), "hauptsilo_standort", "a type chosen by hand is kept");
 assert.equal(guessCrawlPageType({ name: "Hauptseite", path: "/hauptseite", level: 1 }), "startseite", "a page titled „Hauptseite“ is still guessed as Startseite");
 const names = ["Hauptseite", "Startseite", "Home", "Privatumzug", "Hauptseite Dachsanierung", "Leistungen", "Umzug Bonn", "Ratgeber", "Über uns", "Impressum", "Fassadenreinigung"];
 const paths = [null, "/", "/hauptseite", "/leistungen", "/leistungen/fassade", "/regionen/bonn"];
@@ -675,7 +718,8 @@ assert.equal(saved.standort.length, CONTENT_TYPE_PROMPT_MAX_CHARS, "capped at th
 assert.equal(saved.unterseite, DEFAULT_CONTENT_TYPE_PROMPTS.unterseite, "untouched recipes keep the default");
 assert.equal(hasCustomContentTypePrompts(DEFAULT_CONTENT_TYPE_PROMPTS), false);
 assert.equal(hasCustomContentTypePrompts(saved), true);
-assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"], "nicht_bearbeiten has no recipe");
+assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS], ["hauptsilo", "hauptsilo_standort", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"], "nicht_bearbeiten has no recipe");
+assert.deepEqual([...CONTENT_TYPE_PROMPT_KEYS].sort(), CONTENT_PAGE_TYPES.filter((t) => t !== "nicht_bearbeiten").sort(), "every page type that gets a text has its recipe");
 assert.match(DEFAULT_CONTENT_TYPE_PROMPTS.startseite, /Seitentyp Startseite/);
 assert.match(DEFAULT_CONTENT_TYPE_PROMPTS.ueber_uns, /Seitentyp Über-uns-Seite/);
 assert.match(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "startseite", null), /Visitenkarte/);
@@ -715,6 +759,45 @@ assert.match(hauptseiteSeo.user, /Seitentyp: Hauptseite/);
 const ownHauptseite = contentStepSpec(2, context({ page_type: "hauptseite" }, { typePrompts: normalizeContentTypePrompts({ hauptseite: "Hauptseite nach Hausrezept." }) }));
 assert.match(ownHauptseite.system, /Hauptseite nach Hausrezept\./, "a saved Hauptseite recipe reaches the SEO step");
 assert.doesNotMatch(contentStepSpec(2, context({ page_type: "startseite" })).system, /Seitentyp Hauptseite\./, "the Startseite keeps its own recipe");
+
+// Hauptsilo Standort-Übersicht: its own recipe, used by the SEO step for that type (and by nothing else).
+assert.equal(CONTENT_TYPE_PROMPT_LABELS.hauptsilo_standort, "Hauptsilo Standort-Übersicht");
+assert.equal(CONTENT_TYPE_PROMPT_HELP.hauptsilo_standort, "Übersicht aller Standorte: jede Standortseite verlinken, Gemeinsamkeiten und Unterschiede zeigen.");
+assert.equal(contentTypePromptKeyFor("hauptsilo_standort"), "hauptsilo_standort");
+const standortSiloRecipe = DEFAULT_CONTENT_TYPE_PROMPTS.hauptsilo_standort;
+for (const part of [
+  /^Seitentyp Hauptsilo Standort-Übersicht\./,
+  /Pflicht-Inputs:/,
+  /Struktur:\n1\. /,
+  /Besondere Regeln:/,
+  /Standorte ausschließlich aus den Anbieterfakten/,
+  /Jede vorhandene Standortseite wird verlinkt, nur über die erlaubten Linkziele \(Marker \[LINK: Seitenname\]\)/,
+  /Keine Standorte, Adressen, Telefonnummern, Öffnungszeiten oder Ansprechpartner erfinden; fehlt eine Angabe, Platzhalter/,
+  /was an allen Standorten gleich ist und was sich je Standort unterscheidet/,
+  /Abschluss-CTA zum nächstgelegenen Standort/,
+  /keine einzelne Standortseite und kein Leistungs-Silo/,
+]) {
+  assert.match(standortSiloRecipe, part, `the default Standort-Übersicht recipe has ${part}`);
+}
+assert.ok(standortSiloRecipe.length <= CONTENT_TYPE_PROMPT_MAX_CHARS);
+assert.ok(!standortSiloRecipe.includes("[Hauptsilo]"), "a Hauptsilo page has no Hauptsilo above it to name");
+assert.equal(normalizeContentTypePrompts({}).hauptsilo_standort, standortSiloRecipe, "an empty column means the default");
+assert.equal(renderContentTypePrompt(DEFAULT_CONTENT_TYPE_PROMPTS, "hauptsilo_standort", null), standortSiloRecipe);
+const standortSiloSeo = contentStepSpec(2, context({ page_type: "hauptsilo_standort", page_role: "pillar", pillar_name: null, internal_link_targets: ["Umzug Bonn", "Umzug Köln"] }));
+assert.ok(standortSiloSeo.system.includes(standortSiloRecipe), "a Standort-Übersicht writes with its own recipe");
+assert.doesNotMatch(standortSiloSeo.system, /Seitentyp Hauptsilo-Seite\.|Seitentyp Standortseite\./, "not with the Hauptsilo or the Standortseite recipe");
+assert.match(standortSiloSeo.user, /Seitentyp: Hauptsilo Standort-Übersicht/);
+assert.match(standortSiloSeo.user, /Erlaubte interne Linkziele \(nur diese, als Marker \[LINK: Seitenname\]\): Umzug Bonn · Umzug Köln/);
+const ownStandortSiloContext = context({ page_type: "hauptsilo_standort" }, { typePrompts: normalizeContentTypePrompts({ hauptsilo_standort: "Standort-Übersicht nach Hausrezept." }) });
+const ownStandortSilo = contentStepSpec(2, ownStandortSiloContext);
+assert.match(ownStandortSilo.system, /Standort-Übersicht nach Hausrezept\./, "a saved recipe reaches the SEO step");
+assert.doesNotMatch(ownStandortSilo.system, /Einzugsgebiet im Überblick/, "and replaces the default");
+assert.doesNotMatch(contentStepSpec(2, context({ page_type: "hauptsilo" })).system, /Seitentyp Hauptsilo Standort-Übersicht\./, "the Hauptsilo-Seite keeps its own recipe");
+assert.doesNotMatch(contentStepSpec(2, context({ page_type: "standort", pillar_name: "Standorte" })).system, /Seitentyp Hauptsilo Standort-Übersicht\./, "the Standortseite keeps its own recipe");
+assert.match(contentStepSpec(2, context({ page_type: "standort", pillar_name: "Standorte" })).system, /Marker \[LINK: Standorte\]/, "a Standortseite still links to the overview as its Hauptsilo");
+for (const step of [CONTENT_STEP_ANALYSE, CONTENT_STEP_FAKTENCHECK, CONTENT_STEP_GEO, CONTENT_STEP_HORMOZI, CONTENT_STEP_VERMENSCHLICHUNG, CONTENT_STEP_LEKTORAT, CONTENT_STEP_ENDABNAHME]) {
+  assert.doesNotMatch(contentStepSpec(step, ownStandortSiloContext).system, /Hausrezept/, `step ${step} does not read the recipe`);
+}
 console.log("textvorlagen: ok");
 
 // --- editable step prompts (Globale Prompts) ------------------------------------------------------
@@ -1326,7 +1409,63 @@ async function runTypePromptsWithoutHauptseite() {
   console.log("textvorlagen without hauptseite column: ok");
 }
 
+/** `dt_content_type_prompts` before migration 20261117: every column but `hauptsilo_standort`. */
+async function runTypePromptsWithoutHauptsiloStandort() {
+  const row = { hauptsilo: "Silo eigen", hauptseite: "Hauptseite eigen", unterseite: "", ratgeber: "", standort: "Standort eigen", startseite: "", ueber_uns: "", updated_at: null, updated_by_email: null };
+  const selects: string[] = [];
+  let upserted: Record<string, unknown> | null = null;
+  const client = {
+    from: () => ({
+      select: (columns: string) => ({
+        eq: () => ({
+          maybeSingle: async () => {
+            selects.push(columns);
+            return /\bhauptsilo_standort\b/.test(columns)
+              ? { data: null, error: { code: "42703", message: "column dt_content_type_prompts.hauptsilo_standort does not exist" } }
+              : { data: row, error: null };
+          },
+        }),
+      }),
+      upsert: async (value: Record<string, unknown>) => {
+        upserted = value;
+        return { error: { code: "PGRST204", message: "Could not find the 'hauptsilo_standort' column of 'dt_content_type_prompts' in the schema cache" } };
+      },
+    }),
+  } as unknown as Parameters<typeof loadContentTypePrompts>[0];
+
+  for (const scope of ["texte", "seo_tool"] as const) {
+    const state = await loadContentTypePrompts(client, scope);
+    assert.equal(state.storage, "missing_hauptsilo_standort", scope);
+    assert.deepEqual([state.prompts.hauptsilo, state.prompts.hauptseite, state.prompts.standort], ["Silo eigen", "Hauptseite eigen", "Standort eigen"], "every saved recipe is kept while the column is missing");
+    assert.equal(state.prompts.hauptsilo_standort, DEFAULT_CONTENT_TYPE_PROMPTS.hauptsilo_standort, "the Standort-Übersicht writes with the default");
+  }
+  assert.equal(selects.length, 4, "one fallback read per load, the older fallbacks are not needed");
+  assert.equal((await loadContentTypePromptsForRun(client)).hauptsilo_standort, DEFAULT_CONTENT_TYPE_PROMPTS.hauptsilo_standort, "a run never fails because of the missing column");
+  const state = await loadContentTypePrompts(client);
+  const saved = await saveContentTypePrompts(client, { prompts: state.prompts, userId: "u1", userEmail: null });
+  assert.deepEqual(saved, { ok: false, error: `Die Datenbank kennt den Seitentyp Hauptsilo Standort-Übersicht noch nicht: Bitte ${CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.` });
+  assert.ok(upserted && "hauptsilo_standort" in upserted, "the save sends the new recipe");
+
+  // The migration: the column both sets of recipes share, and every page type in the CHECK.
+  assert.equal(CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE, "database/migrations/20261117_dt_content_hauptsilo_standort.sql");
+  assert.equal(CONTENT_PAGE_TYPES_MIGRATION_FILE, CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE);
+  const sql = readFileSync(CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE, "utf8");
+  assert.match(sql, /RUN THIS BEFORE DEPLOYING THE CODE/);
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS hauptsilo_standort text NOT NULL DEFAULT ''/);
+  assert.match(sql, /COMMENT ON COLUMN public\.dt_content_type_prompts\.hauptsilo_standort IS/);
+  assert.match(sql, /DROP CONSTRAINT IF EXISTS dt_content_pages_page_type_check/);
+  const allowed = sql.match(/CHECK \(page_type IS NULL OR page_type IN \(([^)]*)\)\)/)?.[1] ?? "";
+  assert.deepEqual(allowed.split(",").map((v) => v.trim().replace(/'/g, "")), [...CONTENT_PAGE_TYPES], "the CHECK allows exactly the page types of the code");
+  assert.equal(
+    contentDbErrorMessage({ code: "23514", message: 'new row for relation "dt_content_pages" violates check constraint "dt_content_pages_page_type_check"' }, "x"),
+    `Die Datenbank kennt noch nicht alle Seitentypen (Hauptsilo Standort-Übersicht, Hauptseite): Bitte ${CONTENT_TYPE_PROMPTS_HAUPTSILO_STANDORT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`,
+    "choosing the type before the migration names the file",
+  );
+  console.log("textvorlagen without hauptsilo_standort column: ok");
+}
+
 runTypePromptsWithoutHauptseite()
+  .then(() => runTypePromptsWithoutHauptsiloStandort())
   .then(() => runXai())
   .then(() => console.log("OK: content excel structure tests passed"))
   .catch((error) => {

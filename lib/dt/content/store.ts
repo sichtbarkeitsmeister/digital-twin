@@ -247,7 +247,7 @@ export const CONTENT_CLIENT_DATA_MIGRATION_FILE = CONTACT_DATA_MIGRATION_FILE;
 export const CONTENT_FEWER_QUESTIONS_MIGRATION_FILE = CONTENT_ORG_QUESTIONS_MIGRATION_FILE;
 export const CONTENT_BRANCHE_TEXT_MIGRATION_FILE = "database/migrations/20261013_dt_content_branche_text.sql";
 /** The latest migration that lists every page type in the CHECK of `dt_content_pages.page_type`. */
-export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261017_dt_content_hauptseite.sql";
+export const CONTENT_PAGE_TYPES_MIGRATION_FILE = "database/migrations/20261117_dt_content_hauptsilo_standort.sql";
 
 /** 23514 on the skip_steps CHECK: the database does not allow a key the code offers (migration 20261028 outdated). */
 export function isContentSkipStepsCheckError(error: { code?: string; message?: string } | null | undefined): boolean {
@@ -268,7 +268,7 @@ export function isContentBrancheCheckError(error: { code?: string; message?: str
   return error.code === "23514" && /branche_check/i.test(error.message ?? "");
 }
 
-/** 23514 on the page_type CHECK: a page type is not allowed yet (Hauptseite: migration 20261017 never ran). */
+/** 23514 on the page_type CHECK: a page type is not allowed yet (Hauptsilo Standort-Übersicht: migration 20261117 never ran; it allows the Hauptseite of 20261017 too). */
 export function isContentPageTypeCheckError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   return error.code === "23514" && /page_type/i.test(error.message ?? "");
@@ -333,7 +333,7 @@ export function contentDbErrorMessage(error: { code?: string; message?: string }
     return `Die Datenbank erlaubt für die Branche noch nur drei feste Werte: Bitte ${CONTENT_BRANCHE_TEXT_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
   if (isContentPageTypeCheckError(error)) {
-    return `Die Datenbank kennt noch nicht alle Seitentypen (Hauptseite): Bitte ${CONTENT_PAGE_TYPES_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
+    return `Die Datenbank kennt noch nicht alle Seitentypen (Hauptsilo Standort-Übersicht, Hauptseite): Bitte ${CONTENT_PAGE_TYPES_MIGRATION_FILE} einmal im Supabase SQL Editor ausführen.`;
   }
   if (isMissingContentColumnError(error)) {
     return `Die Datenbank ist noch nicht auf dem neuesten Stand: Bitte ${CONTENT_BRIEFING_MIGRATION_FILE} (und, falls noch nicht geschehen, ${CONTENT_SOURCE_MIGRATION_FILE}) einmal im Supabase SQL Editor ausführen.`;

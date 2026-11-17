@@ -42,7 +42,7 @@ import {
 } from "@/lib/dt/content/zielgruppen";
 import { suggestContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-suggest";
 import { loadDuplicateFindings } from "@/lib/dt/content/pipeline/duplicate-findings";
-import { deriveInternalLinkTargets } from "@/lib/dt/content/link-targets";
+import { deriveInternalLinkTargets, withStandortLinkTargets } from "@/lib/dt/content/link-targets";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
 import {
@@ -263,6 +263,11 @@ export async function loadContext(
         })()
       : null;
 
+  const pageType = effectiveContentPageType(page);
+  // The Seitenstruktur's targets; without them (crawl pages) the best fitting other pages of the table.
+  // A Hauptsilo Standort-Übersicht may link every Standortseite of the table on top of that.
+  const linkTargets = withStandortLinkTargets({ slug: page.slug, name: page.name, page_type: pageType }, derivedLinkTargets ?? page.internal_link_targets, outlinePages);
+
   const built: { context: ContentPipelineContext; avatarId: string | null } = {
     avatarId: avatarRow?.id ?? null,
     context: {
@@ -274,15 +279,14 @@ export async function loadContext(
         url: page.source_url,
         source: page.source,
         page_role: page.page_role,
-        page_type: effectiveContentPageType(page),
+        page_type: pageType,
         pillar_name: page.pillar_name,
         estimated_traffic: page.estimated_traffic,
         keywords: page.keywords,
         h1_options: page.h1_options,
         user_questions: page.user_questions,
         ki_prompt: page.ki_prompt,
-        // The Seitenstruktur's targets; without them (crawl pages) the best fitting other pages of the table.
-        internal_link_targets: derivedLinkTargets ?? page.internal_link_targets,
+        internal_link_targets: linkTargets,
         internal_link_targets_derived: derivedLinkTargets != null,
       },
       structureOutline: contentStructureOutline(outlinePages, page),

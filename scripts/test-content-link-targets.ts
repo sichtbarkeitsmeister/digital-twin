@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 
-import { DERIVED_LINK_TARGETS_MAX, deriveInternalLinkTargets } from "../lib/dt/content/link-targets";
+import { DERIVED_LINK_TARGETS_MAX, STANDORT_LINK_TARGETS_MAX, deriveInternalLinkTargets, withStandortLinkTargets } from "../lib/dt/content/link-targets";
 import { pageBlock, type ContentPipelineContext } from "../lib/dt/content/pipeline/prompts";
 import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
 
@@ -81,7 +81,36 @@ function testPrompt() {
   console.log("prompt: derived targets are named as such, the others read as before: ok");
 }
 
+/** A „Hauptsilo Standort-Übersicht“ may link every Standortseite of the table. */
+function testStandortOverview() {
+  const outline: P[] = [
+    page("start", "Home", "/"),
+    page("standorte", "Standorte", "/standorte", { page_role: "pillar", page_type: "hauptsilo_standort" }),
+    page("bonn", "Umzug Bonn", "/standorte/bonn", { level: 2, page_role: "supporting", page_type: "standort", pillar_name: "Standorte" }),
+    page("koeln", "Umzug Köln", "/standorte/koeln", { level: 2, page_role: "supporting", page_type: "standort", pillar_name: "Standorte" }),
+    // A Standortseite the Seitenstruktur put somewhere else (taken over from the crawl).
+    page("neuss", "Entrümpelung Neuss", "/neuss", { page_type: "standort" }),
+    page("privat", "Privatumzug", "/privatumzug", { page_role: "pillar", page_type: "hauptsilo" }),
+    page("kontakt", "Kontakt", "/kontakt", { page_type: "nicht_bearbeiten" }),
+  ];
+  const overview = { slug: "standorte", name: "Standorte", page_type: "hauptsilo_standort" as const };
+  assert.deepEqual(
+    withStandortLinkTargets(overview, ["Umzug Bonn", "Umzug Köln"], outline),
+    ["Umzug Bonn", "Umzug Köln", "Entrümpelung Neuss"],
+    "every Standortseite of the table, also one outside the silo; none twice",
+  );
+  assert.deepEqual(withStandortLinkTargets(overview, ["Home", "Privatumzug"], outline), ["Umzug Bonn", "Umzug Köln", "Entrümpelung Neuss", "Home", "Privatumzug"], "the Standortseiten first, the other targets stay");
+  assert.deepEqual(withStandortLinkTargets(overview, [], []), [], "no Standortseite in the table: nothing is invented");
+  for (const type of ["hauptsilo", "standort", "unterseite", "startseite", null] as const) {
+    assert.deepEqual(withStandortLinkTargets({ slug: "privat", name: "Privatumzug", page_type: type }, ["Home"], outline), ["Home"], `${type}: targets unchanged`);
+  }
+  const many = Array.from({ length: STANDORT_LINK_TARGETS_MAX + 20 }, (_, i) => page(`ort-${i}`, `Ort ${i}`, `/standorte/ort-${i}`, { page_type: "standort" }));
+  assert.equal(withStandortLinkTargets(overview, [], many).length, STANDORT_LINK_TARGETS_MAX, "capped");
+  console.log("standort overview: every Standortseite is a link target: ok");
+}
+
 testRanking();
+testStandortOverview();
 testSilo();
 testLimitsAndEmpty();
 testPrompt();

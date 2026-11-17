@@ -48,7 +48,7 @@ export const SEO_TOOL_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 export const SEO_TOOL_TIMEOUT_MS = 270_000;
 
 /** The page types the dropdown offers („Nicht bearbeiten“ has no Textvorlage and no text). */
-export const SEO_TOOL_PAGE_TYPES = ["hauptsilo", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const satisfies readonly ContentPageType[];
+export const SEO_TOOL_PAGE_TYPES = ["hauptsilo", "hauptsilo_standort", "hauptseite", "unterseite", "ratgeber", "standort", "startseite", "ueber_uns"] as const satisfies readonly ContentPageType[];
 export type SeoToolPageType = (typeof SEO_TOOL_PAGE_TYPES)[number];
 
 /** The uploaded material as plain text; longer uploads are clipped here, not refused. */
