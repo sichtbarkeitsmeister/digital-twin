@@ -1631,6 +1631,10 @@ export function DtContentPageDrawer(props: {
                       value={blockText}
                       onChange={setBlockText}
                       ariaLabel="Neuer Text für den Abschnitt"
+                      onSubmit={() => {
+                        if (!blockId || !blockText.trim() || busy) return;
+                        void runStepAction(mode.action, "edit", { block_id: blockId, text: blockText }, "Abschnitt gespeichert");
+                      }}
                     />
                     <div className="flex flex-wrap gap-2">
                       <DtPillButton
@@ -1691,6 +1695,10 @@ export function DtContentPageDrawer(props: {
                             : "Was soll anders werden? z. B. „Hero-Überschrift kürzer und mehr auf Erben zugeschnitten.“"
                       }
                       ariaLabel={mode.ask === "info" ? "Ihre Angabe" : "Auftrag für den Abschnitt"}
+                      onSubmit={() => {
+                        if (!blockId || busy || (mode.ask !== "proposal" && !reviseText.trim())) return;
+                        void requestRevision();
+                      }}
                     />
                     {revisePreview ? (
                       <div className="grid gap-2 sm:grid-cols-2">
@@ -1780,6 +1788,10 @@ export function DtContentPageDrawer(props: {
                       onChange={setNote}
                       placeholder="Was soll anders werden? z. B. „Kürzer, ohne Zahlen, mehr auf Senioren eingehen.“"
                       ariaLabel="Anmerkung"
+                      onSubmit={() => {
+                        if (!note.trim() || busy) return;
+                        void runStepAction(mode.action, "run", { note }, "Wird mit Anmerkung wiederholt");
+                      }}
                     />
                     <div className="flex flex-wrap gap-2">
                       <DtPillButton
