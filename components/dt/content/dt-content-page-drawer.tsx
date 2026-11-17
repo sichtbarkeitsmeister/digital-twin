@@ -26,8 +26,10 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { downloadContentExport } from "@/components/dt/content/download";
+import { DtContentDictationField } from "@/components/dt/content/dt-content-dictation-field";
 import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-questions-panel";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
+import { DtContentMetaFields } from "@/components/dt/content/dt-content-meta-fields";
 import { DtContentTextFrame, type TextFrameEdit } from "@/components/dt/content/dt-content-text-frame";
 import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
@@ -707,6 +709,21 @@ export function DtContentPageDrawer(props: {
     return { ok: true };
   }
 
+  /** Title-Tag or Meta-Description changed by hand above the text; the answer is the fresh review. */
+  async function saveMeta(field: "title" | "meta_description", value: string): Promise<boolean> {
+    if (!base) return false;
+    const res = await contentApi<{ review: ContentReview }>(`${base}/meta`, {
+      method: "PUT",
+      body: { organisationId, [field]: value },
+    });
+    if (!res.ok) {
+      toast.error(res.message, { duration: 10_000 });
+      return false;
+    }
+    if (baseRef.current === base) setReview(res.data.review);
+    return true;
+  }
+
   /** Hauptkeyword and Nebenkeywords entered by hand: saved at once; the next step that runs reads them. */
   async function saveKeywords() {
     if (!base || !keywordDraft) return;
@@ -990,6 +1007,13 @@ export function DtContentPageDrawer(props: {
                     ) : null}
                     {review.html ? (
                       <>
+                        <DtContentMetaFields
+                          key={review.name}
+                          title={review.title}
+                          metaDescription={review.meta_description}
+                          editable={textEditable}
+                          onSave={saveMeta}
+                        />
                         {textEditable ? (
                           <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
                             Den Text direkt anklicken und ändern: gespeichert wird, wenn Sie den Abschnitt verlassen (Strg+Enter), Esc nimmt die Änderung zurück.
@@ -1625,11 +1649,15 @@ export function DtContentPageDrawer(props: {
                       side="top"
                       fullWidth
                     />
-                    <textarea
+                    <DtContentDictationField
                       className={textareaClass}
                       value={blockText}
-                      onChange={(e) => setBlockText(e.target.value)}
-                      aria-label="Neuer Text für den Abschnitt"
+                      onChange={setBlockText}
+                      ariaLabel="Neuer Text für den Abschnitt"
+                      onSubmit={() => {
+                        if (!blockId || !blockText.trim() || busy) return;
+                        void runStepAction(mode.action, "edit", { block_id: blockId, text: blockText }, "Abschnitt gespeichert");
+                      }}
                     />
                     <div className="flex flex-wrap gap-2">
                       <DtPillButton
@@ -1675,11 +1703,11 @@ export function DtContentPageDrawer(props: {
                       side="top"
                       fullWidth
                     />
-                    <textarea
+                    <DtContentDictationField
                       className={textareaClass}
                       value={reviseText}
-                      onChange={(e) => {
-                        setReviseText(e.target.value);
+                      onChange={(next) => {
+                        setReviseText(next);
                         setRevisePreview(null);
                       }}
                       placeholder={
@@ -1689,7 +1717,11 @@ export function DtContentPageDrawer(props: {
                             ? "Optional: zusätzlicher Hinweis zum Vorschlag"
                             : "Was soll anders werden? z. B. „Hero-Überschrift kürzer und mehr auf Erben zugeschnitten.“"
                       }
-                      aria-label={mode.ask === "info" ? "Ihre Angabe" : "Auftrag für den Abschnitt"}
+                      ariaLabel={mode.ask === "info" ? "Ihre Angabe" : "Auftrag für den Abschnitt"}
+                      onSubmit={() => {
+                        if (!blockId || busy || (mode.ask !== "proposal" && !reviseText.trim())) return;
+                        void requestRevision();
+                      }}
                     />
                     {revisePreview ? (
                       <div className="grid gap-2 sm:grid-cols-2">
@@ -1773,12 +1805,16 @@ export function DtContentPageDrawer(props: {
 
                 {mode?.kind === "rerun" ? (
                   <div className="mb-3 grid gap-2">
-                    <textarea
+                    <DtContentDictationField
                       className={textareaClass}
                       value={note}
-                      onChange={(e) => setNote(e.target.value)}
+                      onChange={setNote}
                       placeholder="Was soll anders werden? z. B. „Kürzer, ohne Zahlen, mehr auf Senioren eingehen.“"
-                      aria-label="Anmerkung"
+                      ariaLabel="Anmerkung"
+                      onSubmit={() => {
+                        if (!note.trim() || busy) return;
+                        void runStepAction(mode.action, "run", { note }, "Wird mit Anmerkung wiederholt");
+                      }}
                     />
                     <div className="flex flex-wrap gap-2">
                       <DtPillButton

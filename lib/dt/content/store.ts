@@ -1683,6 +1683,8 @@ export function buildReview(
       released: page.released,
     },
     text_step: page.html ? (textSteps.length ? Math.max(...textSteps) : null) : null,
+    title: page.title,
+    meta_description: page.meta_description,
     markdown: page.markdown,
     html: page.html,
     findings: page.findings,

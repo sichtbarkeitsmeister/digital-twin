@@ -364,8 +364,9 @@ export function countContentWords(html: string): number {
   return text.split(/\s+/).filter((token) => /[\p{L}\p{N}]/u.test(token)).length;
 }
 
-export function fullHtmlDocument(title: string, bodyHtml: string): string {
-  return `<!DOCTYPE html>\n<html lang="de">\n<head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`;
+export function fullHtmlDocument(title: string, bodyHtml: string, metaDescription?: string | null): string {
+  const meta = metaDescription?.trim() ? `<meta name="description" content="${escapeHtml(metaDescription.trim())}">` : "";
+  return `<!DOCTYPE html>\n<html lang="de">\n<head><meta charset="utf-8"><title>${escapeHtml(title)}</title>${meta}</head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`;
 }
 
 /** Text the LLM reads in later steps: headings as Markdown, body as plain text. */

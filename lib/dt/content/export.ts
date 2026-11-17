@@ -17,6 +17,8 @@ export type ContentExportSource = {
   slug: string;
   /** `<title>` of the full HTML document. */
   title: string;
+  /** `<meta name="description">` of the full HTML document, when the page has one. */
+  metaDescription?: string | null;
   /** Stored page HTML (`<section data-block-id>` blocks). */
   html: string;
   /** Markdown when it is already stored; derived from the HTML otherwise. */
@@ -34,18 +36,25 @@ export type ContentExportFile = { body: string; filename: string; contentType: s
 export function contentExportFile(
   format: ContentExportFormat,
   source: ContentExportSource,
-  options: { levelLabels?: boolean } = {},
+  options: { levelLabels?: boolean; metaHeader?: boolean } = {},
 ): ContentExportFile {
+  // `metaHeader` (the Texte page export): Title and Meta-Description lead the .txt and .md, which have no <head> for them.
+  const header =
+    options.metaHeader && (source.title.trim() || source.metaDescription?.trim())
+      ? `${[source.title.trim() ? `Title: ${source.title.trim()}` : "", source.metaDescription?.trim() ? `Meta-Description: ${source.metaDescription.trim()}` : ""].filter(Boolean).join("\n")}\n\n`
+      : "";
   switch (format) {
     case "txt":
-      return { body: htmlToPlainText(source.html, { levelLabels: options.levelLabels === true }), filename: `${source.slug}.txt`, contentType: "text/plain; charset=utf-8" };
+      return { body: header + htmlToPlainText(source.html, { levelLabels: options.levelLabels === true }), filename: `${source.slug}.txt`, contentType: "text/plain; charset=utf-8" };
     case "md":
       return {
-        body: options.levelLabels
-          ? htmlToMarkdown(source.html, { levelLabels: true })
-          : source.markdown?.trim()
-            ? source.markdown
-            : htmlToMarkdown(source.html),
+        body:
+          header +
+          (options.levelLabels
+            ? htmlToMarkdown(source.html, { levelLabels: true })
+            : source.markdown?.trim()
+              ? source.markdown
+              : htmlToMarkdown(source.html)),
         filename: `${source.slug}.md`,
         contentType: "text/markdown; charset=utf-8",
       };
@@ -53,7 +62,7 @@ export function contentExportFile(
       return { body: source.html, filename: `${source.slug}.fragment.html`, contentType: "text/html; charset=utf-8" };
     default:
       return {
-        body: fullHtmlDocument(source.title, source.html),
+        body: fullHtmlDocument(source.title, source.html, source.metaDescription),
         filename: `${source.slug}.html`,
         contentType: "text/html; charset=utf-8",
       };

@@ -260,6 +260,35 @@ export async function editContentBlockHtml(
   return { ok: true, jobId: null };
 }
 
+/** SEO limits the steps write to; a longer entry is allowed (warned about in the window), not cut. */
+export const CONTENT_TITLE_MAX = 200;
+export const CONTENT_META_MAX = 400;
+
+/**
+ * Title-Tag and Meta-Description changed by hand in the page window. Only the given fields change;
+ * an empty one is cleared. Same states as editing the text (it has a text, does not run, is not released).
+ */
+export async function editContentMeta(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  input: { title?: string | null; metaDescription?: string | null },
+): Promise<ActionResult> {
+  if (!canEdit(page)) {
+    return { ok: false, status: 409, message: "Title und Meta-Description können in diesem Zustand nicht geändert werden." };
+  }
+  const clean = (value: string) => value.replace(/\s+/g, " ").trim();
+  const patch: Record<string, string | null> = {};
+  if (input.title !== undefined) patch.title = clean(input.title ?? "") || null;
+  if (input.metaDescription !== undefined) patch.meta_description = clean(input.metaDescription ?? "") || null;
+  if (Object.keys(patch).length === 0) return { ok: false, status: 400, message: "Nichts zu ändern." };
+  if ((patch.title ?? "").length > CONTENT_TITLE_MAX || (patch.meta_description ?? "").length > CONTENT_META_MAX) {
+    return { ok: false, status: 400, message: "Title oder Meta-Description ist viel zu lang." };
+  }
+  const { error } = await service.from("dt_content_pages").update(patch).eq("id", page.id).neq("state", "laeuft");
+  if (error) return { ok: false, status: 500, message: error.message };
+  return { ok: true, jobId: null };
+}
+
 const STOPPED_BY_USER = "Vom Benutzer gestoppt.";
 
 /**
