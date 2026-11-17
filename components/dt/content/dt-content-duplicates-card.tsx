@@ -84,15 +84,9 @@ export function DtContentDuplicatesCard(props: { organisationId: string; onOpen:
           <ChevronDown className={cn("size-4 shrink-0 text-sbkm-ink-500 transition-transform", open && "rotate-180")} aria-hidden />
         </div>
       </div>
-      {open ? (
+      {open && (error || report) ? (
         <div className="grid gap-3 border-t border-sbkm-navy/8 px-4 py-4 dark:border-white/8 sm:px-5">
-          <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
-            Verglichen werden alle Absätze und Listenpunkte der fertigen Texte (Überschriften nicht). Als doppelt gelten Absätze, bei denen mindestens die Hälfte der Wortfolgen
-            gleich ist, auch mit ein paar geänderten Wörtern. Ohne KI, ohne Kosten. Dieselben Aussagen auf zwei Seiten konkurrieren in der Suche: einen Absatz eigenständig
-            umformulieren oder auf die andere Seite verlinken. Beim Abschluss einer Seite (Endabnahme) steht der Vergleich auch in den offenen Punkten.
-          </p>
           {error ? <p className="text-xs text-red-700 dark:text-red-300">{error}</p> : null}
-          {!report && !error ? <p className="text-xs text-sbkm-ink-600 dark:text-white/60">„Texte vergleichen“ liest die Texte, wie sie jetzt gespeichert sind.</p> : null}
           {report && report.pairs.length === 0 ? (
             <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
               Keine doppelten Absätze gefunden ({report.paragraphs} Absätze aus {report.pages} Texten verglichen).

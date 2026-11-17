@@ -1,6 +1,5 @@
 "use client";
 
-import { CONTENT_MAX_BLOCKS } from "@/lib/dt/content/render";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Loader2, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -426,12 +425,7 @@ export function DtContentTextUploads(props: {
 
   return (
     <div className={boxClass} data-testid="content-text-uploads">
-      <div className="grid gap-1">
-        <h3 className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/60">Word-Dateien hochladen</h3>
-        <p className="text-xs text-sbkm-ink-600 dark:text-white/65">
-          Je Seite eine Word-Datei (.docx): Der Dateiname ist der Seitenname, der Inhalt ist der bisherige Text der Seite.
-        </p>
-      </div>
+      <h3 className="text-xs font-bold uppercase tracking-wide text-sbkm-ink-600 dark:text-white/60">Word-Dateien hochladen</h3>
 
       <input
         ref={filesRef}
@@ -481,10 +475,6 @@ export function DtContentTextUploads(props: {
           {uploading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Upload className="size-4" aria-hidden />}
           Word-Dateien wählen
         </DtPillButton>
-        <span className="text-xs text-sbkm-ink-600 dark:text-white/65">
-          oder Dateien hierher ziehen · eine oder viele · nur .docx · je Datei höchstens{" "}
-          {Math.round(TEXT_UPLOAD_MAX_FILE_BYTES / (1024 * 1024))} MB, 60.000 Zeichen und {CONTENT_MAX_BLOCKS} Abschnitte
-        </span>
       </div>
 
       {progress ? (
@@ -706,15 +696,6 @@ export function DtContentTextUploads(props: {
         ) : null}
       </div>
       {takeoverNote ? <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">{takeoverNote}</p> : null}
-      <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-        Zugeordnet wird in drei Schritten. 1. Automatisch über den Namen: Groß- und Kleinschreibung, Umlaute (ä = ae, ß = ss), Unterstrich,
-        Bindestrich und Zeichen, die in Dateinamen nicht erlaubt sind (/ \ : * ? &quot; &lt; &gt; |), zählen nicht. 2. Was übrig bleibt,
-        ordnet die KI nach der Bedeutung des Namens zu (Tippfehler, andere Schreibweise, Zusätze wie „final“ oder „Kopie“); ist sie nicht
-        sicher, lässt sie die Datei offen. 3. Den Rest ordnen Sie von Hand zu. Jede Zuordnung lässt sich von Hand ändern oder lösen; eine
-        Zuordnung von Hand geht immer vor und bleibt, auch wenn die Seitenstruktur neu hochgeladen wird. „Übernehmen“ legt je zugeordneter Datei eine
-        Zeile an oder hängt die Datei an die vorhandene Zeile (höchstens 300 Zeilen); die Seiten werden dann wie gecrawlte Seiten
-        verbessert. Gespeichert wird nur der ausgelesene Text, nicht die Word-Datei.
-      </p>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { cn } from "@/components/dt/cn";
 import { DtAgentStatusToggle } from "@/components/dt/agents/dt-agent-status-toggle";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { CONTENT_SKIP_LOCKED_REASONS, CONTENT_STEPS, isContentSkippableStepKey } from "@/lib/dt/content/pipeline/steps";
-import { CONTENT_SKIP_NOTE, contentSkipWarnings, type ContentBulkSteps } from "@/lib/dt/content/presentation";
+import { contentSkipWarnings, type ContentBulkSteps } from "@/lib/dt/content/presentation";
 
 /**
  * „Schritte“ in the Texte dashboard, under the Standard-Zielgruppe: the same switches as in the
@@ -96,7 +96,6 @@ export function DtContentBulkStepsPanel(props: {
           SEO wird nur bei Seiten mit vorhandenem Text übersprungen (von der Website oder aus einer Word-Datei); bei allen anderen läuft SEO trotzdem.
         </p>
       ) : null}
-      <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">{CONTENT_SKIP_NOTE}</p>
       {value ? (
         <div className="grid gap-1.5 rounded-lg border border-sbkm-mint/50 bg-sbkm-mint/10 px-2.5 py-2 text-[11px] leading-snug text-sbkm-navy dark:border-sbkm-mint/30 dark:text-white/85">
           <p>
@@ -130,11 +129,7 @@ export function DtContentBulkStepsPanel(props: {
             ) : null}
           </div>
         </div>
-      ) : (
-        <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
-          Nicht verändert: Jede Seite behält ihre eigene Einstellung aus dem Seitenfenster. Sobald hier ein Regler umgelegt wird, gilt die Auswahl für alle angehakten Seiten.
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

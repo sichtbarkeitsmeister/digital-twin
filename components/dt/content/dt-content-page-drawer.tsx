@@ -45,7 +45,6 @@ import {
 import { CONTENT_STEP_AKTUALITAET, CONTENT_STEP_COUNT } from "@/lib/dt/content/pipeline/steps";
 import {
   CONTENT_APPROVE_OPEN_ITEMS_CONFIRM,
-  CONTENT_SKIP_NOTE,
   approveNeedsConfirm,
   contentActionLabel,
   contentSkipWarnings,
@@ -1294,7 +1293,6 @@ export function DtContentPageDrawer(props: {
                             {warning}
                           </p>
                         ))}
-                        <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">{CONTENT_SKIP_NOTE}</p>
                       </div>
                       <div className="grid gap-1.5 border-t border-sbkm-navy/8 pt-2.5 dark:border-white/8">
                         <label htmlFor="content-page-wishes" className="text-xs font-semibold text-sbkm-navy dark:text-white">

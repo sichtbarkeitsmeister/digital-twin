@@ -51,14 +51,9 @@ export function DtContentReadinessCard(props: {
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10" />
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">
-        <div>
-          <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">
-            Bereit für Texte?
-          </h2>
-          <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-            Das braucht die Texterstellung, bevor sie schreiben kann.
-          </p>
-        </div>
+        <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">
+          Bereit für Texte?
+        </h2>
         {props.loading ? (
           <Loader2 className="size-4 animate-spin text-sbkm-ink-500" aria-label="Lädt" />
         ) : props.readiness ? (

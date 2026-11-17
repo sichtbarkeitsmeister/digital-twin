@@ -61,13 +61,6 @@ export function DtContentWishesCard(props: { organisationId: string; initial: st
         </div>
       </header>
       <div className="grid gap-3 px-4 py-4 sm:px-5">
-        <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/60">
-          Worauf beim Texten zu achten ist: Vorgaben der Redaktion und Wünsche des Kunden, ein Hinweis pro Zeile,
-          verbindlich für alle Seiten dieser Organisation. Auch eine Prüffrage („Kostenhinweis vorhanden?“) gilt als
-          Vorgabe. Die Hinweise gehen dem Text-Prompt und den Textvorlagen vor, aber nie den Fakten, der Anrede, den
-          verbotenen Wörtern oder der Branchenregel. Eine Änderung gilt ab dem nächsten Schritt, der läuft; fertige
-          Schritte laufen nicht von selbst neu.
-        </p>
         <DtTextarea
           value={text}
           onChange={(e) => setText(e.target.value)}

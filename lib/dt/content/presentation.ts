@@ -92,10 +92,6 @@ export function contentStepStatusLabel(status: string, options: { liveText?: boo
   }
 }
 
-/** Under „Schritte“ in the page window. */
-export const CONTENT_SKIP_NOTE =
-  "Übersprungene Schritte kosten nichts; der Text geht unverändert an den nächsten Schritt. Änderungen gelten für Schritte, die noch nicht gelaufen sind.";
-
 /** „Schritte“ in the dashboard: the choice written to every ticked page (the page window keeps its own block). */
 export type ContentBulkSteps = { skip_steps: ContentSkippableStepKey[]; review_stop: boolean };
 

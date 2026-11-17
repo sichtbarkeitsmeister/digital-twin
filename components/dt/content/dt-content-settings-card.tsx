@@ -53,11 +53,8 @@ function Hint(props: { reason?: string; field: keyof ContentTextSettings; unclea
       </p>
     );
   }
-  return (
-    <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-      {props.reason ? `Vorschlag: ${props.reason}` : FALLBACK_HINTS[props.field]}
-    </p>
-  );
+  if (props.reason) return null;
+  return <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">{FALLBACK_HINTS[props.field]}</p>;
 }
 
 function SummaryChip(props: { children: React.ReactNode; className?: string }) {
@@ -123,7 +120,6 @@ function SettingsForm(props: {
   /** Name of the uploaded list, so the person sees where the words came from. */
   const [wordFile, setWordFile] = useState<string | null>(null);
   const { reasons } = props.suggestion;
-  const tone = contentTonalitaet(tonalitaet);
 
   // The branch is typed by the SEO specialist unless the client data answered it. An empty
   // field blocks „Bestätigen“ and shows why the suggestion could not fill it.
@@ -162,9 +158,6 @@ function SettingsForm(props: {
         <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">
           Einstellungen für Texte
         </h2>
-        <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-          Bitte kurz prüfen und bestätigen. Die Branche meint das Geschäft des Kunden, nicht den Avatar.
-        </p>
       </header>
 
       <div className="grid gap-5 px-4 py-4 sm:px-5 md:grid-cols-2">
@@ -220,9 +213,6 @@ function SettingsForm(props: {
             menuMaxHeight="max-h-[var(--radix-dropdown-menu-content-available-height)]"
             fullWidth
           />
-          {tone ? (
-            <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/65">{tone.text}</p>
-          ) : null}
           <Hint field="tonalitaet" reason={reasons.tonalitaet} />
         </DtField>
 
@@ -277,7 +267,7 @@ function SettingsForm(props: {
             {wordFile
               ? `${wordsLabel(words.length)} aus „${wordFile}“.`
               : words.length > 0
-                ? `${wordsLabel(words.length)}${reasons.verbotene_woerter ? ` – Vorschlag ${reasons.verbotene_woerter}` : ""}. Eine .txt-Datei ersetzt die Liste.`
+                ? `${wordsLabel(words.length)}. Eine .txt-Datei ersetzt die Liste.`
                 : "Eine .txt-Datei hochladen: ein verbotenes Wort je Zeile."}
           </p>
         </DtField>

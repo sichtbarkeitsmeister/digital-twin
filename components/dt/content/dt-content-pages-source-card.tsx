@@ -12,7 +12,6 @@ import { DtContentTextUploads } from "@/components/dt/content/dt-content-text-up
 import { formatContentDate } from "@/lib/dt/content/presentation";
 import {
   CONTENT_STRUCTURE_FILE_ACCEPT,
-  CONTENT_STRUCTURE_FILE_HINT,
   readContentStructureFile,
 } from "@/lib/dt/content/read-content-structure-file";
 import type {
@@ -416,9 +415,6 @@ export function DtContentPagesSourceCard(props: {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10" />
       <header className="border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">
         <h2 className="text-sm font-semibold tracking-tight text-sbkm-navy dark:text-white">Seitenquelle</h2>
-        <p className="mt-0.5 text-xs text-sbkm-ink-600 dark:text-white/60">
-          Woher die Seiten kommen. Welche davon Texte bekommen, haken Sie unten in der Tabelle an.
-        </p>
       </header>
 
       <div className="grid gap-3 px-4 py-4 sm:px-5">
@@ -509,10 +505,6 @@ export function DtContentPagesSourceCard(props: {
                 <ArrowRight className="size-3" aria-hidden />
               </Link>
             </div>
-            <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-              {CONTENT_STRUCTURE_FILE_HINT} Seiten mit Text bleiben erhalten; Keywords, Fragen und Seitentyp folgen der
-              neuen Datei. Impressum, Datenschutz, Kontakt und Co. werden als „Nicht bearbeiten“ angelegt.
-            </p>
           </div>
         ) : null}
 
@@ -660,21 +652,6 @@ export function DtContentPagesSourceCard(props: {
                 <ArrowRight className="size-3" aria-hidden />
               </Link>
             </div>
-            <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">
-              {uploadShown ? (
-                <>
-                  {CONTENT_STRUCTURE_FILE_HINT} Die Word-Dateien werden den Seiten dieser Datei über den Namen zugeordnet. Seiten, die es
-                  schon in der Tabelle gibt, bekommen Seitentyp, Hauptsilo, Keywords, H1-Optionen, Nutzerfragen, KI-Prompt und Linkziele aus
-                  der Datei; ihr Text bleibt. Neue Seiten entstehen nur über „Zugeordnete Seiten übernehmen“ und „Diese Seiten anlegen“.
-                </>
-              ) : (
-                <>
-                  {CONTENT_STRUCTURE_FILE_HINT} Seiten, die es schon gibt (in der Tabelle oder im Crawl), bekommen Seitentyp, Hauptsilo,
-                  Keywords, H1-Optionen, Nutzerfragen, KI-Prompt und Linkziele aus der Datei; ihr Text und die Live-URL bleiben. Gecrawlte
-                  Seiten, die nicht in der Datei stehen, bleiben in der Tabelle. Neue Seiten entstehen nur über „Diese Seiten anlegen“.
-                </>
-              )}
-            </p>
             {crawlShown && shownPlan ? (
               <StructurePlanList plan={shownPlan} creating={creating} onCreate={() => void createMissingPages()} />
             ) : null}
