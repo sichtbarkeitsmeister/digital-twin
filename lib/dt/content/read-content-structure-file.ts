@@ -9,9 +9,6 @@ import { readWebsiteStructureFile, WEBSITE_STRUCTURE_FILE_ACCEPT } from "@/lib/d
 
 export const CONTENT_STRUCTURE_FILE_ACCEPT = WEBSITE_STRUCTURE_FILE_ACCEPT;
 
-export const CONTENT_STRUCTURE_FILE_HINT =
-  "Excel-Briefing „Webseitenstruktur“ (.xlsx, .xls, .csv) mit URL, Startseite, Ebene 1, Ebene 2, Traffic, Keywords, H1-Optionen und Nutzerfragen; die DT-Vorlage „Ebene 1 … n“ geht ebenfalls, dann ohne Briefing. Auch .txt, .md, .json, Sitemap-.xml oder .docx (nur Seitennamen und Pfade).";
-
 export type ContentStructureFilePayload = {
   filename: string;
   mimeType: string | null;

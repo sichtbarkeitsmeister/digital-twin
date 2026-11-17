@@ -641,11 +641,7 @@ export function DtContentWorkspace(props: {
               <Loader2 className="size-3 animate-spin" aria-hidden />
               Seite {Math.min(keywordsRun.done + 1, keywordsRun.total)} von {keywordsRun.total} … bitte das Fenster offen lassen
             </span>
-          ) : (
-            <span className="text-xs text-sbkm-ink-500 dark:text-white/45">
-              Keywords aus der Seitenstruktur gehen vor, der Zwilling teilt sie nur ein. Ohne Suchvolumen; im Seitenfenster lassen sie sich ändern.
-            </span>
-          )}
+          ) : null}
         </div>
         <div className="flex flex-col gap-4 border-t border-sbkm-navy/8 pt-4 dark:border-white/8 lg:flex-row lg:items-center lg:justify-between">
         {zielgruppenOptions.length > 0 ? (
@@ -678,11 +674,7 @@ export function DtContentWorkspace(props: {
                 <Loader2 className="size-3 animate-spin" aria-hidden />
                 Seite {Math.min(zielgruppenRun.done + 1, zielgruppenRun.total)} von {zielgruppenRun.total} …
               </span>
-            ) : (
-              <span className="text-xs text-sbkm-ink-500 dark:text-white/45">
-                Seiten ohne eigene Zielgruppen bekommen beim Start automatisch den Vorschlag des Zwillings.
-              </span>
-            )}
+            ) : null}
           </div>
         ) : null}
           <div className="flex shrink-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3 lg:ml-auto">
