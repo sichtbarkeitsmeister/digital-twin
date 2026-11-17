@@ -41,6 +41,7 @@ import {
   normalizeZielgruppenLists,
 } from "@/lib/dt/content/zielgruppen";
 import { suggestContentZielgruppen } from "@/lib/dt/content/pipeline/zielgruppen-suggest";
+import { loadDuplicateFindings } from "@/lib/dt/content/pipeline/duplicate-findings";
 import { deriveInternalLinkTargets } from "@/lib/dt/content/link-targets";
 import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { effectiveContentPageType } from "@/lib/dt/content/page-types";
@@ -81,6 +82,7 @@ import {
 import {
   CONTENT_STEP_AKTUALITAET,
   CONTENT_STEP_ANALYSE,
+  CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
   contentStepDefinition,
   contentStepSkippable,
@@ -505,7 +507,9 @@ export async function runContentStep(
     return { step, halted: true, discarded: true, model, costEur };
   }
 
-  const patch = stepPatchFor(def, output, { ...page, knowledge: context.knowledge });
+  // The Endabnahme also lists what this text repeats from the other pages (code only).
+  const duplicateFindings = def.step === CONTENT_STEP_ENDABNAHME ? await loadDuplicateFindings(service, page) : undefined;
+  const patch = stepPatchFor(def, output, { ...page, knowledge: context.knowledge, duplicateFindings });
   const { pagePatch, stepStatus, halted } = patch;
   pagePatch.cost_eur = roundEur(num(page.cost_eur) + costEur);
   const settled = await settleQuestionPlan(service, page, patch, output);

@@ -10,6 +10,7 @@ import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { DtContentBulkStepsPanel } from "@/components/dt/content/dt-content-bulk-steps-panel";
 import { DtContentContactCard } from "@/components/dt/content/dt-content-contact-card";
+import { DtContentDuplicatesCard } from "@/components/dt/content/dt-content-duplicates-card";
 import { DtContentKeywordsOverview } from "@/components/dt/content/dt-content-keywords-overview";
 import { DtContentOrgQuestionsCard } from "@/components/dt/content/dt-content-org-questions-card";
 import { DtContentPageDrawer } from "@/components/dt/content/dt-content-page-drawer";
@@ -713,6 +714,8 @@ export function DtContentWorkspace(props: {
         onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })}
         onChanged={() => void loadOverview()}
       />
+
+      <DtContentDuplicatesCard organisationId={organisationId} onOpen={(page) => setOpenPage({ slug: page.slug, name: page.name })} />
 
       <section className={cardClass} aria-label="Seiten">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sbkm-navy/8 px-4 py-3.5 dark:border-white/8 sm:px-5">

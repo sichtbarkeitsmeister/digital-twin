@@ -342,6 +342,8 @@ export type StepPatchCurrent = {
   questions?: readonly ContentQuestion[];
   /** What is known already: Kontaktdaten, the pool, notes, Anbieterfakten (`buildContentKnowledge`). */
   knowledge?: ContentKnowledge;
+  /** The Endabnahme: paragraphs this text shares with other pages (`duplicateFindingsForPage`), listed for the release. */
+  duplicateFindings?: readonly ContentFinding[];
   /** The page's stop; its `kept` points („So lassen“) are never listed again. */
   question_stop?: Pick<ContentQuestionStop, "kept">;
 };
@@ -425,7 +427,7 @@ export function stepPatchFor(
       const left = placeholderFindings(blocks, listed, current.knowledge);
       const unanswered = overflowFindings((current.questions ?? []).filter((q) => !isTextPlaceholder(q.placeholder)));
       const hero = heroStructureFinding(blocks);
-      pagePatch.unresolved = [...listed, ...left, ...unanswered, ...(hero ? [hero] : [])];
+      pagePatch.unresolved = [...listed, ...left, ...unanswered, ...(hero ? [hero] : []), ...(current.duplicateFindings ?? [])];
       pagePatch.questions = [];
       pagePatch.released = false;
       pagePatch.job_id = null;
