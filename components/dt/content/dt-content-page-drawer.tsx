@@ -26,6 +26,7 @@ import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { DtSelect } from "@/components/dt/dt-select";
 import { contentApi, contentQuery } from "@/components/dt/content/content-api";
 import { downloadContentExport } from "@/components/dt/content/download";
+import { DtContentDictationField } from "@/components/dt/content/dt-content-dictation-field";
 import { DtContentQuestionsPanel } from "@/components/dt/content/dt-content-questions-panel";
 import { DtContentStatusBadge } from "@/components/dt/content/dt-content-status-badge";
 import { DtContentTextFrame, type TextFrameEdit } from "@/components/dt/content/dt-content-text-frame";
@@ -1625,11 +1626,11 @@ export function DtContentPageDrawer(props: {
                       side="top"
                       fullWidth
                     />
-                    <textarea
+                    <DtContentDictationField
                       className={textareaClass}
                       value={blockText}
-                      onChange={(e) => setBlockText(e.target.value)}
-                      aria-label="Neuer Text für den Abschnitt"
+                      onChange={setBlockText}
+                      ariaLabel="Neuer Text für den Abschnitt"
                     />
                     <div className="flex flex-wrap gap-2">
                       <DtPillButton
@@ -1675,11 +1676,11 @@ export function DtContentPageDrawer(props: {
                       side="top"
                       fullWidth
                     />
-                    <textarea
+                    <DtContentDictationField
                       className={textareaClass}
                       value={reviseText}
-                      onChange={(e) => {
-                        setReviseText(e.target.value);
+                      onChange={(next) => {
+                        setReviseText(next);
                         setRevisePreview(null);
                       }}
                       placeholder={
@@ -1689,7 +1690,7 @@ export function DtContentPageDrawer(props: {
                             ? "Optional: zusätzlicher Hinweis zum Vorschlag"
                             : "Was soll anders werden? z. B. „Hero-Überschrift kürzer und mehr auf Erben zugeschnitten.“"
                       }
-                      aria-label={mode.ask === "info" ? "Ihre Angabe" : "Auftrag für den Abschnitt"}
+                      ariaLabel={mode.ask === "info" ? "Ihre Angabe" : "Auftrag für den Abschnitt"}
                     />
                     {revisePreview ? (
                       <div className="grid gap-2 sm:grid-cols-2">
@@ -1773,12 +1774,12 @@ export function DtContentPageDrawer(props: {
 
                 {mode?.kind === "rerun" ? (
                   <div className="mb-3 grid gap-2">
-                    <textarea
+                    <DtContentDictationField
                       className={textareaClass}
                       value={note}
-                      onChange={(e) => setNote(e.target.value)}
+                      onChange={setNote}
                       placeholder="Was soll anders werden? z. B. „Kürzer, ohne Zahlen, mehr auf Senioren eingehen.“"
-                      aria-label="Anmerkung"
+                      ariaLabel="Anmerkung"
                     />
                     <div className="flex flex-wrap gap-2">
                       <DtPillButton
