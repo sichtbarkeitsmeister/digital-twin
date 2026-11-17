@@ -9,8 +9,10 @@
  *   1. The old agency briefing (sheet „Webseitenstruktur“, else the first sheet), columns A–H:
  *      URL | Startseite | Ebene 1 (L1) | Ebene 2 (L2) | Traffic | Keywords | H1-Optionen | Nutzerfragen
  *      The page name sits in the column of its role; a Ebene-2 row belongs to the last
- *      Ebene-1 row above it. Extra columns „KI-Prompt / Prompt / Content-Prompt“ are read
- *      when their header exists. Without a header the columns are taken by position.
+ *      Ebene-1 row above it. Further level columns („Ebene 3“, „Ebene 4“ …) are read too: a
+ *      name in Ebene n is n − 1 deep and belongs to the last Ebene-1 row above it as well.
+ *      Extra columns „KI-Prompt / Prompt / Content-Prompt“ are read when their header exists.
+ *      Without a header the columns are taken by position (`rawPagesByPosition`).
  *   2. The DigitalTwin template „Ebene 1 … n“ (+ optional URL), plus the briefing columns
  *      F/G/H when their headers exist. Depth 0 is a Hauptsilo (or the Startseite), deeper
  *      rows are Unterseiten of the nearest depth-0 row.
@@ -56,7 +58,7 @@ export type ContentBriefingPage = {
   slug: string;
   name: string;
   path: string | null;
-  /** 0 Startseite, 1 Hauptsilo, 2 Unterseite (3 for a third Excel level). */
+  /** 0 Startseite, 1 Hauptsilo, 2 Unterseite, 3 and more for „Ebene 3“ and deeper (both layouts). */
   level: number;
   position: number;
   page_role: ContentPageRole;
@@ -208,6 +210,8 @@ type Header = {
   l2: number;
   /** Template layout: one column per depth. */
   levels: number[];
+  /** Briefing layout: the level columns beyond Ebene 2 („Ebene 3“ is depth 2). */
+  deeper: Array<{ col: number; depth: number }>;
   traffic: number;
   keywords: number;
   h1: number;
@@ -216,15 +220,16 @@ type Header = {
 };
 
 function emptyHeader(rowIndex: number): Header {
-  return { rowIndex, url: -1, startseite: -1, l1: -1, l2: -1, levels: [], traffic: -1, keywords: -1, h1: -1, questions: -1, prompt: -1 };
+  return { rowIndex, url: -1, startseite: -1, l1: -1, l2: -1, levels: [], deeper: [], traffic: -1, keywords: -1, h1: -1, questions: -1, prompt: -1 };
 }
 
 type HeaderLayout = { header: Header; layout: ParsedContentStructure["layout"] };
 
 /**
  * Which row is the header and which layout it announces. A „Startseite“ column makes it the
- * old briefing (its level columns are Ebene 1 and Ebene 2); two or more level columns without
- * one make it the DT template; a single name column next to a URL column is a flat list.
+ * old briefing (its level columns are Ebene 1, Ebene 2 and any further „Ebene n“); two or more
+ * level columns without one make it the DT template; a single name column next to a URL column
+ * is a flat list.
  */
 function findHeader(rows: string[][]): HeaderLayout | null {
   for (let i = 0; i < Math.min(rows.length, HEADER_SCAN_ROWS); i++) {
@@ -248,6 +253,7 @@ function findHeader(rows: string[][]): HeaderLayout | null {
     header.levels = sorted.map((l) => l.col);
     if (header.l1 < 0) header.l1 = sorted.find((l) => l.n === 1)?.col ?? -1;
     if (header.l2 < 0) header.l2 = sorted.find((l) => l.n === 2)?.col ?? -1;
+    header.deeper = sorted.filter((l) => l.n >= 3 && l.col !== header.l1 && l.col !== header.l2).map((l) => ({ col: l.col, depth: l.n - 1 }));
 
     if (header.startseite >= 0 && (header.l1 >= 0 || header.l2 >= 0)) return { header, layout: "briefing" };
     if (header.startseite < 0 && header.levels.length >= 2) return { header, layout: "template" };
@@ -294,13 +300,17 @@ function briefingFields(row: string[], header: Header): Pick<RawPage, "traffic" 
   };
 }
 
-/** Layout 1: the name sits in Startseite, Ebene 1 or Ebene 2. */
+/** What the Startseite column holds instead of the home page's name. */
+const HOME_MARKER_RE = /^(x|ja|yes|✓|✔)$/i;
+
+/** Layout 1: the name sits in Startseite, Ebene 1, Ebene 2 or a further level column. */
 function rawPagesFromBriefingColumns(rows: string[][], header: Header): RawPage[] {
   const out: RawPage[] = [];
   for (const row of rows) {
     const home = at(row, header.startseite);
     const l1 = at(row, header.l1);
     const l2 = at(row, header.l2);
+    const deep = header.deeper.find((d) => Boolean(at(row, d.col)) && !isUrlCell(at(row, d.col)));
     const url = isUrlCell(at(row, header.url)) ? at(row, header.url) : null;
     let name = "";
     let depth = 0;
@@ -308,7 +318,7 @@ function rawPagesFromBriefingColumns(rows: string[][], header: Header): RawPage[
     if (home) {
       // The Startseite column holds the home page's name, a marker („x“, „ja“) or its URL.
       isHome = true;
-      const marker = /^(x|ja|yes|✓|✔)$/i.test(home) || isUrlCell(home);
+      const marker = HOME_MARKER_RE.test(home) || isUrlCell(home);
       name = marker ? (!isUrlCell(l1) && l1) || (!isUrlCell(l2) && l2) || "Startseite" : home;
     } else if (l1 && !isUrlCell(l1)) {
       name = l1;
@@ -316,6 +326,10 @@ function rawPagesFromBriefingColumns(rows: string[][], header: Header): RawPage[
     } else if (l2 && !isUrlCell(l2)) {
       name = l2;
       depth = 1;
+    } else if (deep) {
+      // „Ebene 3“ and deeper: without this the row was skipped and the page never reached Texte.
+      name = at(row, deep.col);
+      depth = deep.depth;
     } else {
       continue;
     }
@@ -343,16 +357,93 @@ function rawPagesFromLevelColumns(rows: string[][], header: Header): RawPage[] {
   return out;
 }
 
+/** How many level columns a sheet without a header may have after the first candidate. */
+const MAX_POSITIONAL_LEVELS = 6;
+
+const isNameCell = (cell: string | undefined): cell is string => Boolean(cell) && !isUrlCell(cell!);
+
+/**
+ * A sheet without a header: which columns from `from` on are level columns. In a level column a
+ * page name stands alone in its row; a briefing column (traffic, keywords …) stands next to the
+ * name of its page. So a column counts while some row has its first name there (a bare number is
+ * no name: that is a traffic cell) and no row has it filled next to a name left of it (from
+ * `first`, a Startseite marker left out). The columns must follow each other.
+ */
+function positionalLevelColumns(rows: string[][], first: number, from: number): number[] {
+  const cols: number[] = [];
+  for (let col = from; col < from + MAX_POSITIONAL_LEVELS; col++) {
+    let alone = false;
+    let beside = false;
+    for (const row of rows) {
+      if (!isNameCell(row[col])) continue;
+      if (row.slice(first, col).some((cell) => isNameCell(cell) && !HOME_MARKER_RE.test(cell))) {
+        beside = true;
+        break;
+      }
+      if (parseVolume(row[col]!) === undefined) alone = true;
+    }
+    if (!alone || beside) break;
+    cols.push(col);
+  }
+  return cols;
+}
+
+/**
+ * The old briefing without its header row and without URLs in column A: column A is the
+ * Startseite column (every cell in it is the home page: its name or a marker) and the page
+ * names stand in the columns right of it. Null when the sheet does not look like that.
+ */
+function positionalBriefingWithoutUrls(rows: string[][]): Header | null {
+  const homeCells = rows.map((row) => row[0] ?? "").filter(Boolean);
+  if (homeCells.length === 0 || !homeCells.every((cell) => HOME_MARKER_RE.test(cell) || looksLikeHome(cell, null))) return null;
+  const levels = positionalLevelColumns(rows, 0, 1);
+  if (levels.length === 0) return null;
+  let next = levels[levels.length - 1]! + 1;
+  const header: Header = {
+    ...emptyHeader(-1),
+    startseite: 0,
+    l1: levels[0]!,
+    l2: levels[1] ?? -1,
+    deeper: levels.slice(2).map((col, i) => ({ col, depth: i + 2 })),
+  };
+  // Right of the levels, in the order of the briefing: Traffic (only when the column holds numbers), Keywords, H1-Optionen, Nutzerfragen.
+  const numbers = rows.map((row) => row[next] ?? "").filter(Boolean);
+  if (numbers.length > 0 && numbers.every((cell) => parseVolume(cell) !== undefined)) header.traffic = next++;
+  header.keywords = next;
+  header.h1 = next + 1;
+  header.questions = next + 2;
+  return header;
+}
+
 /**
  * No header. URLs in column A: the old briefing, columns A–H by position as the importer
- * read them. Otherwise the DT template without its header row: the column is the depth.
+ * read them (URL | Startseite | Ebene 1 | Ebene 2 | Traffic | Keywords | H1-Optionen |
+ * Nutzerfragen); level columns after Ebene 2 („Ebene 3“ …) are recognised by their content
+ * (`positionalLevelColumns`) and move the briefing columns to the right. A Startseite column in
+ * column A without URLs is the same briefing without its URL column. Otherwise the DT template
+ * without its header row: the column is the depth.
  */
 function rawPagesByPosition(rows: string[][]): { raw: RawPage[]; layout: ParsedContentStructure["layout"] } {
   const urlsInFirstColumn = rows.some((row) => isUrlCell(row[0] ?? ""));
   if (urlsInFirstColumn) {
-    const header: Header = { ...emptyHeader(-1), url: 0, startseite: 1, l1: 2, l2: 3, traffic: 4, keywords: 5, h1: 6, questions: 7 };
+    const extra = positionalLevelColumns(rows, 1, 4);
+    const shift = extra.length;
+    const header: Header = {
+      ...emptyHeader(-1),
+      url: 0,
+      startseite: 1,
+      l1: 2,
+      l2: 3,
+      deeper: extra.map((col, i) => ({ col, depth: i + 2 })),
+      traffic: 4 + shift,
+      keywords: 5 + shift,
+      h1: 6 + shift,
+      questions: 7 + shift,
+    };
     return { raw: rawPagesFromBriefingColumns(rows, header), layout: "briefing" };
   }
+  const briefing = positionalBriefingWithoutUrls(rows);
+  if (briefing) return { raw: rawPagesFromBriefingColumns(rows, briefing), layout: "briefing" };
   const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
   const header: Header = { ...emptyHeader(-1), levels: Array.from({ length: Math.min(width, 6) }, (_, i) => i) };
   return { raw: rawPagesFromLevelColumns(rows, header), layout: "template" };
@@ -479,7 +570,7 @@ export function parseContentStructureWorkbook(
     }
   }
   throw new Error(
-    `In der Datei wurde keine Seitenstruktur erkannt${lastError ? ` (${lastError.message})` : ""}. Erwartet: Spalten „URL, Startseite, Ebene 1, Ebene 2, Traffic, Keywords, H1-Optionen, Nutzerfragen“ oder „Ebene 1 … n“.`,
+    `In der Datei wurde keine Seitenstruktur erkannt${lastError ? ` (${lastError.message})` : ""}. Erwartet: Spalten „URL, Startseite, Ebene 1, Ebene 2 (bei Bedarf Ebene 3 …), Traffic, Keywords, H1-Optionen, Nutzerfragen“ oder „Ebene 1 … n“.`,
   );
 }
 
