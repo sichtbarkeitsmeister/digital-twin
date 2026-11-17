@@ -9,10 +9,6 @@
  * The API key is `ANTHROPIC_DT_CONTENT_API_KEY` only. It does not fall back to `ANTHROPIC_API_KEY`,
  * so Texte spend stays its own line in the Anthropic console. Server env, never NEXT_PUBLIC_.
  * Pure helpers here; `loadContentModelConfig` in `model-config-db.ts` reads `app_settings`.
- *
- * „Texte hochladen“ has its own model for matching Word files to pages (`resolveContentMatchModels`):
- * `app_settings` row `content_match_model`, env `ANTHROPIC_DT_CONTENT_MATCH_MODEL`, default Claude
- * Sonnet 5.5; the writing models above follow as fallbacks. Same key.
  */
 
 /** Dedicated Anthropic key for the Texte pipeline. Usage of this key is the tool's spend. */
@@ -88,24 +84,6 @@ export function resolveContentModels(
     check: uniqueModels([check.value, ...CONTENT_MODEL_FALLBACKS]),
     source: { write: write.source, check: check.source },
   };
-}
-
-/** Matching uploaded Word files to pages of the Seitenstruktur: a short, cheap call; Claude Sonnet 5.5. */
-export const DEFAULT_CONTENT_MATCH_MODEL = "claude-sonnet-5-5";
-export const CONTENT_MATCH_MODEL_ENV = "ANTHROPIC_DT_CONTENT_MATCH_MODEL";
-export const CONTENT_MATCH_MODEL_SETTING_KEY = "content_match_model";
-
-/**
- * Candidate list of the AI matching: the match model first (`override` is the `app_settings`
- * value), then the writing models of Texte as fallbacks for a model name Anthropic answers with 404.
- */
-export function resolveContentMatchModels(
-  override: string | null | undefined,
-  contentModels: readonly string[],
-  env: Record<string, string | undefined> = process.env,
-): { models: string[]; source: ContentModelSource } {
-  const match = pick(override, env[CONTENT_MATCH_MODEL_ENV], { value: DEFAULT_CONTENT_MATCH_MODEL, source: "default" });
-  return { models: uniqueModels([match.value, ...contentModels]), source: match.source };
 }
 
 /** Short human-readable summary for the Texte tab ("claude-sonnet-4-6 · aus Umgebung"). */

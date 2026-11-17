@@ -5,7 +5,7 @@ import { loadTextUploadsResult } from "@/lib/dt/content/text-uploads";
 import type { ContentTextUploadsResult } from "@/lib/dt/content/types";
 import { aiMatchTextUploads } from "@/lib/dt/content/upload-ai-match";
 
-/** One model call of at most 60 s (several at the same time for more than 60 files), plus reads and writes. */
+/** One model call of at most 60 s (several at the same time for more than 25 files), plus reads and writes. */
 export const maxDuration = 120;
 
 const bodySchema = z.object({

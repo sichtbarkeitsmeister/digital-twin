@@ -9,6 +9,9 @@
  * `match: "ai"`; the pure matching keeps or releases them afterwards, and every one can be
  * changed or removed by hand (`assignTextUpload`), which then wins.
  *
+ * Same access as the rest of Texte: its key (`ANTHROPIC_DT_CONTENT_API_KEY`) and the model of
+ * its writing steps (`loadContentModelConfig`), through `callContentTool`.
+ *
  * All or nothing: a call that fails or whose answer was cut off assigns nothing, so the files
  * stay „nicht zugeordnet“ for the manual assignment.
  */
@@ -17,7 +20,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ContentBriefingPage } from "@/lib/dt/content/excel-structure";
-import { loadContentMatchModels } from "@/lib/dt/content/model-config-db";
+import { loadContentModelConfig } from "@/lib/dt/content/model-config-db";
 import { contentPageTypeLabel } from "@/lib/dt/content/page-types";
 import { callContentTool } from "@/lib/dt/content/pipeline/llm";
 import { normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
@@ -29,12 +32,16 @@ import {
   type TextUploadMatchState,
 } from "@/lib/dt/content/text-uploads";
 import type { ContentTextUploadAiRun } from "@/lib/dt/content/types";
-import { UPLOAD_AI_CONFLICT_NOTE, UPLOAD_AI_NO_PAGE_NOTE, aiMatchCandidateIds } from "@/lib/dt/content/upload-match";
+import { UPLOAD_AI_CONFLICT_NOTE, UPLOAD_AI_NO_PAGE_NOTE, aiMatchCandidateIds, pageNameKey } from "@/lib/dt/content/upload-match";
 import { recordLlmUsageEvent } from "@/lib/dt/record-llm-usage";
 
 export const UPLOAD_AI_MATCH_USAGE_MODE = "content.upload_match";
-/** Files per call; more candidates are sent as several calls at the same time. */
-export const UPLOAD_AI_MATCH_CHUNK = 60;
+/**
+ * Files per call; more candidates are sent as several calls at the same time. Measured with the
+ * Texte default model (Claude Sonnet 4.6): about 1.5 s and 100 output tokens per file, so 25
+ * files stay well inside the time limit of one call.
+ */
+export const UPLOAD_AI_MATCH_CHUNK = 25;
 export const UPLOAD_AI_MATCH_TIMEOUT_MS = 60_000;
 /** Title and first headings of a file, as extra evidence next to its name. */
 const EVIDENCE_MAX_CHARS = 300;
@@ -92,11 +99,11 @@ Abweichungen, hinter denen dieselbe Seite steht: Umlaute und Sonderzeichen (ä/a
 
 Regeln:
 - Entscheide nach der Bedeutung des Dateinamens. Titel und Überschriften der Datei sind zusätzliche Hinweise, wenn der Name allein nicht reicht.
-- Mehrere Seiten können gleich heißen, zum Beispiel „Kosten“ unter verschiedenen Hauptsilos. Unterscheide sie über Pfad, Ebene und Hauptsilo. Lässt weder der Dateiname noch der Inhalt erkennen, welche gemeint ist, gib null zurück.
+- Mehrere Seiten können gleich heißen, zum Beispiel „Kosten“ unter verschiedenen Hauptsilos. Unterscheide sie über Pfad, Ebene und Hauptsilo. Lässt weder der Dateiname noch der Inhalt erkennen, welche gemeint ist, gib null zurück. Schließe nicht per Ausschluss: Dass eine andere Datei eine der gleichnamigen Seiten bekommt, macht die übrige Seite nicht zum Treffer. Beispiel: Zwei Seiten heißen „Kosten“. „Kosten Firmenumzug.docx“ gehört zur Seite unter Firmenumzug. „Kosten.docx“ ohne Hinweis auf ein Hauptsilo in Name, Titel oder Überschriften bekommt null, auch wenn danach nur noch eine „Kosten“-Seite frei wäre.
 - Gib null zurück, wenn nicht klar ist, dass Datei und Seite dieselbe Seite meinen. Eine fehlende Zuordnung holt ein Mensch in Sekunden nach; eine falsche fällt erst auf, wenn der falsche Text überarbeitet wurde.
 - Nie zwei Dateien auf dieselbe Seite. Passen zwei Dateien zu einer Seite, ordne nur die eindeutig bessere zu und gib für die andere null zurück.
 - Verwende nur Slugs aus der Seitenliste, genau so geschrieben. Erfinde keine Slugs.
-- Melde für jede Datei genau einen Eintrag, mit einer Begründung in einem kurzen deutschen Satz.`;
+- Melde für jede Datei genau einen Eintrag, mit einer Begründung in einem kurzen deutschen Satz (höchstens 15 Wörter).`;
 
 const MATCH_TOOL: Anthropic.Tool = {
   name: TOOL_NAME,
@@ -112,7 +119,7 @@ const MATCH_TOOL: Anthropic.Tool = {
           properties: {
             file_id: { type: "string", description: "Die Kennung der Datei aus der Dateiliste, z. B. f3." },
             page_slug: { type: ["string", "null"], description: "Der Slug der Seite aus der Seitenliste, oder null, wenn keine Seite klar passt." },
-            reason: { type: "string", description: "Begründung in einem kurzen deutschen Satz." },
+            reason: { type: "string", description: "Begründung in einem kurzen deutschen Satz, höchstens 15 Wörter." },
           },
           required: ["file_id", "page_slug", "reason"],
         },
@@ -154,19 +161,42 @@ export function uploadAiMatchPrompt(
     `## Dateien ohne Zuordnung (${files.length})`,
     ...fileLines,
   ].join("\n");
-  // A row of the answer is a short id, a slug and one sentence.
-  return { system: SYSTEM_PROMPT, user, tool: MATCH_TOOL, maxTokens: Math.min(8_000, 500 + files.length * 110) };
+  // A row of the answer is a short id, a slug and one sentence: about 100 tokens, with room to spare.
+  return { system: SYSTEM_PROMPT, user, tool: MATCH_TOOL, maxTokens: Math.min(8_000, 500 + files.length * 160) };
+}
+
+const words = (text: string | null | undefined): string[] => pageNameKey(text ?? "").split(" ").filter((w) => w.length >= 4);
+/** What tells a page from another one of the same name: the words of its Hauptsilo and of its path. */
+const placeWords = (page: Pick<UploadAiMatchPage, "path" | "pillar_name">): string[] => [...words(page.pillar_name), ...(page.path ?? "").split("/").flatMap(words)];
+const speaksFor = (word: string, place: readonly string[]): boolean => place.some((t) => t.includes(word) || word.includes(t));
+
+/**
+ * Several pages of the Seitenstruktur have the name of `page` („Kosten“ under two Hauptsilos):
+ * does the file itself say which one it is? True when its name, title or headings hold a word
+ * that belongs to the Hauptsilo or path of `page` and to none of the same-named `others`
+ * („Kosten Firmen.docx“ → the page under Firmenumzug). The prompt asks for null otherwise, but
+ * a model tends to hand the last free page to the file that is left; that guess is not taken.
+ */
+export function tellsSameNamedPagesApart(
+  file: Pick<UploadAiMatchFile, "file_name" | "title" | "headings">,
+  page: Pick<UploadAiMatchPage, "path" | "pillar_name">,
+  others: ReadonlyArray<Pick<UploadAiMatchPage, "path" | "pillar_name">>,
+): boolean {
+  const own = placeWords(page);
+  const theirs = others.map(placeWords);
+  return [file.file_name, file.title, ...file.headings].flatMap(words).some((w) => speaksFor(w, own) && !theirs.some((place) => speaksFor(w, place)));
 }
 
 /**
  * The model's answers checked in code, over all calls of one run: a slug must be one of the
- * offered pages; a page named for two files goes to neither; null, an unknown slug or a file
- * the answer leaves out is „no page“. Pure.
+ * offered pages (and pass `accept`, when given); a page named for two files goes to neither;
+ * null, an unknown or refused slug, or a file the answer leaves out is „no page“. Pure.
  */
 export function validateUploadAiMatches(
   answers: readonly unknown[],
   refs: readonly string[],
   offeredSlugs: ReadonlySet<string>,
+  accept: (ref: string, slug: string) => boolean = () => true,
 ): Map<string, UploadAiMatchOutcome> {
   const known = new Set(refs);
   const proposed = new Map<string, { slug: string; reason: string | null }>();
@@ -181,7 +211,7 @@ export function validateUploadAiMatches(
       if (!known.has(ref) || seen.has(ref)) continue;
       seen.add(ref);
       const slug = typeof page_slug === "string" ? page_slug.trim() : "";
-      if (!slug || !offeredSlugs.has(slug)) continue;
+      if (!slug || !offeredSlugs.has(slug) || !accept(ref, slug)) continue;
       const why = typeof reason === "string" ? reason.replace(/\s+/g, " ").trim().slice(0, REASON_MAX_CHARS) : "";
       proposed.set(ref, { slug, reason: why || null });
     }
@@ -260,7 +290,8 @@ export async function aiMatchTextUploads(
     return { ref, file_name: uploadById.get(id)!.file_name, ...(evidence.get(id) ?? { title: null, headings: [] }) };
   });
 
-  const models = options.models ?? (await loadContentMatchModels(service));
+  // The model of the Texte tool (its writing steps), with the same fallbacks; no setting of its own.
+  const models = options.models ?? (await loadContentModelConfig(service)).write;
   const call: UploadAiMatchCall = options.call ?? ((input) => callContentTool({ ...input, toolLabel: "Texte" }));
   const chunks: UploadAiMatchFile[][] = [];
   for (let i = 0; i < files.length; i += UPLOAD_AI_MATCH_CHUNK) chunks.push(files.slice(i, i + UPLOAD_AI_MATCH_CHUNK));
@@ -289,10 +320,19 @@ export async function aiMatchTextUploads(
     return fail(502, `Die KI-Zuordnung ist fehlgeschlagen, es wurde nichts zugeordnet: ${reason}`);
   }
 
+  // A page that shares its name with others of the Seitenstruktur is taken only when the file says which one it is.
+  const fileByRef = new Map(files.map((f) => [f.ref, f]));
+  const pageBySlug = new Map(pages.map((p) => [p.slug, p]));
+  const sameNamed = (page: ContentBriefingPage) => (state.pages ?? []).filter((p) => p.slug !== page.slug && pageNameKey(p.name) === pageNameKey(page.name));
   const outcomes = validateUploadAiMatches(
     answers.map((a) => a.json),
     files.map((f) => f.ref),
     new Set(pages.map((p) => p.slug)),
+    (ref, slug) => {
+      const page = pageBySlug.get(slug)!;
+      const others = sameNamed(page);
+      return others.length === 0 || tellsSameNamedPagesApart(fileByRef.get(ref)!, page, others);
+    },
   );
 
   // The call took a while: write only onto files that are still open and pages that are still free.
