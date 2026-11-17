@@ -21,11 +21,16 @@ export function resolveContentApiKey(
   return key ? key : null;
 }
 
-export const DEFAULT_CONTENT_MODEL = "claude-sonnet-4-6";
+/**
+ * Claude Sonnet 5.5: what Texte has run on since 29.10. (set in `app_settings` then). The code
+ * default says the same, so a deleted setting does not send the tool back to an older model.
+ */
+export const DEFAULT_CONTENT_MODEL = "claude-sonnet-5-5";
 
-/** Older models Anthropic still serves, tried only when the preferred one answers 404. */
+/** Tried in this order only when the model before answers 404: the default, then older models Anthropic still serves. */
 const CONTENT_MODEL_FALLBACKS = [
   DEFAULT_CONTENT_MODEL,
+  "claude-sonnet-4-6",
   "claude-sonnet-4-20250514",
 ] as const;
 

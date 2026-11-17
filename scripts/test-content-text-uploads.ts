@@ -1,7 +1,8 @@
 /**
  * Texte → Seitenquelle → „Verbesserung“ → „Texte hochladen“: Word files (file name = page name)
  * as the second source next to the crawl. The name key and the deterministic matching (no AI),
- * manual assignments, the takeover into the Texte table, storage of one file per request, the
+ * the AI step for what the name rule left over (stored assignments kept or released, candidates,
+ * the checked model answer; the model call is a stub), manual assignments, the takeover into the Texte table, storage of one file per request, the
  * existing text and the skipped SEO of an upload page, and the migration message.
  * In-memory database, real .docx bytes built here; no network.
  * Run: npm run test:content-text-uploads
@@ -19,6 +20,7 @@ import { UPLOAD_TEXT_FAILURE_PREFIX } from "../lib/dt/content/pipeline/step-patc
 import { CONTENT_STEP_SEO, contentStepDefinition, contentStepSkippable } from "../lib/dt/content/pipeline/steps";
 import { contentSkipWarnings, contentStepStatusLabel } from "../lib/dt/content/presentation";
 import { parseBlocksFromHtml, type ContentTextBlock } from "../lib/dt/content/render";
+import { resolveContentModels } from "../lib/dt/content/model-config";
 import { describeSeiten } from "../lib/dt/content/route-helpers";
 import {
   buildReview,
@@ -31,9 +33,12 @@ import {
 } from "../lib/dt/content/store";
 import {
   CONTENT_TEXT_UPLOADS_MIGRATION_FILE,
+  CONTENT_UPLOAD_AI_MATCH_MIGRATION_FILE,
   TEXT_UPLOADS_MIGRATION_MESSAGE,
+  UPLOAD_AI_MATCH_MIGRATION_MESSAGE,
   assignTextUpload,
   isMissingTextUploadsError,
+  isMissingUploadAiMatchError,
   loadPageTextUpload,
   loadTextUploadsResult,
   removeTextUpload,
@@ -43,8 +48,22 @@ import {
 } from "../lib/dt/content/text-uploads";
 import { DEFAULT_CONTENT_TYPE_PROMPTS } from "../lib/dt/content/type-prompts";
 import {
+  UPLOAD_AI_MATCH_CHUNK,
+  UPLOAD_AI_MATCH_TIMEOUT_MS,
+  UPLOAD_AI_MATCH_USAGE_MODE,
+  aiMatchTextUploads,
+  tellsSameNamedPagesApart,
+  uploadAiMatchPrompt,
+  uploadEvidence,
+  validateUploadAiMatches,
+  type UploadAiMatchCall,
+} from "../lib/dt/content/upload-ai-match";
+import {
+  UPLOAD_AI_CONFLICT_NOTE,
+  UPLOAD_AI_NO_PAGE_NOTE,
   UPLOAD_PAGE_GONE_NOTE,
   UPLOAD_TAKEOVER_RUNNING_REASON,
+  aiMatchCandidateIds,
   matchTextUploads,
   pageNameKey,
   planUploadTakeover,
@@ -303,7 +322,7 @@ function matchingTests() {
 
   // A manual assignment whose page disappeared.
   const gone = matchTextUploads([file("m", "Wir.docx", { structure_slug: "ueber-uns", match: "manual" })], [briefingPage("Preise", { slug: "preise" })]);
-  assert.deepEqual(gone[0], { id: "m", structure_slug: null, match: "manual", match_note: UPLOAD_PAGE_GONE_NOTE, status: "unassigned" });
+  assert.deepEqual(gone[0], { id: "m", structure_slug: null, match: "manual", match_note: UPLOAD_PAGE_GONE_NOTE, status: "unassigned", ai_tried_at: null, ai_reason: null });
   assert.equal(UPLOAD_PAGE_GONE_NOTE, "Seite nicht mehr in der Seitenstruktur");
   // … stays „nicht zugeordnet“ with the hint, also when a page of its name turns up: by hand only.
   const stays = matchTextUploads([file("m", "Wir.docx", { ...gone[0]! })], [briefingPage("Wir", { slug: "wir" })]);
@@ -324,6 +343,519 @@ function matchingTests() {
   // Deterministic: the same input gives the same output.
   assert.deepEqual(matchTextUploads(manual, pages), matchTextUploads(manual, pages));
   console.log("matching: ok");
+}
+
+// --- 2b. the AI step: stored assignments in the pure matching -------------------------------------
+
+function aiMatchingTests() {
+  const pages = [
+    briefingPage("Über uns", { slug: "ueber-uns" }),
+    briefingPage("Preise", { slug: "preise" }),
+    briefingPage("Kosten", { slug: "kosten", path: "/privatumzug/kosten", pillar_name: "Privatumzug" }),
+    briefingPage("Kosten", { slug: "kosten-2", path: "/firmenumzug/kosten", pillar_name: "Firmenumzug" }),
+    briefingPage("Team", { slug: "team" }),
+  ];
+  const shape = (files: UploadMatchFile[], against: ContentBriefingPage[] | null = pages) =>
+    matchTextUploads(files, against).map((r) => [r.status, r.structure_slug, r.match]);
+  const ai = (id: string, name: string, slug: string, patch: Partial<UploadMatchFile> = {}) =>
+    file(id, name, { structure_slug: slug, match: "ai", ai_reason: "Tippfehler im Namen", ...patch });
+
+  // The order: manual, then the name rule, then the stored AI assignments.
+  const order = [
+    ai("k", "Preisliste final (1).docx", "preise"),
+    file("a", "Über uns.docx"),
+    file("m", "Wir.docx", { structure_slug: "team", match: "manual" }),
+    ai("t", "Tema.docx", "team"),
+    ai("x", "Kosten Privat.docx", "kosten"),
+  ];
+  const ordered = matchTextUploads(order, pages);
+  assert.deepEqual(ordered.map((r) => [r.status, r.structure_slug, r.match]), [
+    ["ai", "preise", "ai"],
+    ["auto", "ueber-uns", "auto"],
+    ["manual", "team", "manual"],
+    ["unassigned", null, null],
+    ["ai", "kosten", "ai"],
+  ]);
+  assert.equal(ordered[0]!.ai_reason, "Tippfehler im Namen", "a kept AI assignment keeps its reason");
+  assert.equal(ordered[1]!.ai_reason, null);
+  // … the AI file whose page a manual file has is released, with a note, and may be tried again.
+  assert.equal(ordered[3]!.match_note, "KI-Zuordnung aufgehoben: Seite hat jetzt die Datei „Wir.docx“");
+  assert.deepEqual([ordered[3]!.ai_tried_at, ordered[3]!.ai_reason], [null, null]);
+
+  // The name rule wins over a stored AI assignment: a later file with the exact name takes the page.
+  const exact = matchTextUploads([ai("k", "Preisliste.docx", "preise"), file("p", "Preise.docx")], pages);
+  assert.deepEqual(exact.map((r) => [r.status, r.structure_slug, r.match]), [["unassigned", null, null], ["auto", "preise", "auto"]]);
+  assert.equal(exact[0]!.match_note, "KI-Zuordnung aufgehoben: Seite hat jetzt die Datei „Preise.docx“");
+  // … and an AI file whose own name now matches a page exactly is „automatisch“ from then on.
+  assert.deepEqual(shape([ai("k", "Team.docx", "preise")]), [["auto", "team", "auto"]]);
+
+  // The page is gone from the Seitenstruktur.
+  const without = pages.filter((p) => p.slug !== "preise");
+  const gone = matchTextUploads([ai("k", "Preisliste.docx", "preise", { ai_tried_at: "2026-10-01T00:00:00.000Z" })], without);
+  assert.deepEqual(gone[0], {
+    id: "k",
+    structure_slug: null,
+    match: null,
+    match_note: `KI-Zuordnung aufgehoben: ${UPLOAD_PAGE_GONE_NOTE}`,
+    status: "unassigned",
+    ai_tried_at: null,
+    ai_reason: null,
+  });
+  // The note survives the next reads (the matching runs on every one), as long as the file is open.
+  const reread = matchTextUploads([file("k", "Preisliste.docx", { ...gone[0]! })], without);
+  assert.deepEqual(reread[0], gone[0]);
+  // … and is gone as soon as the file has a page.
+  assert.equal(matchTextUploads([file("k", "Preise.docx", { ...gone[0]! })], pages)[0]!.match_note, null);
+
+  // Two AI files on one page (never stored like that): the first keeps it.
+  assert.deepEqual(shape([ai("a", "Preisliste.docx", "preise"), ai("b", "Preise neu.docx", "preise")]), [
+    ["ai", "preise", "ai"],
+    ["unassigned", null, null],
+  ]);
+  // An AI assignment settles a „mehrdeutig“ file („Kosten“ exists twice).
+  assert.deepEqual(shape([ai("k", "Kosten.docx", "kosten-2")]), [["ai", "kosten-2", "ai"]]);
+  // No Seitenstruktur: nothing is assigned; a manual decision on a former AI row is manual.
+  assert.deepEqual(shape([ai("k", "Preisliste.docx", "preise")], null), [["waiting", null, null]]);
+  assert.deepEqual(shape([file("k", "Preisliste.docx", { structure_slug: "team", match: "manual", ai_reason: "alt" })]), [["manual", "team", "manual"]]);
+
+  // What the AI wrote onto a file it could not assign stays readable.
+  const tried = file("n", "Sonstiges.docx", { match_note: UPLOAD_AI_NO_PAGE_NOTE, ai_tried_at: "2026-11-03T00:00:00.000Z" });
+  const kept = matchTextUploads([tried], pages)[0]!;
+  assert.deepEqual([kept.status, kept.match_note, kept.ai_tried_at], ["unassigned", UPLOAD_AI_NO_PAGE_NOTE, "2026-11-03T00:00:00.000Z"]);
+  const ambiguous = matchTextUploads([file("k", "Kosten.docx", { match_note: UPLOAD_AI_NO_PAGE_NOTE, ai_tried_at: "2026-11-03T00:00:00.000Z" })], pages)[0]!;
+  assert.equal(ambiguous.status, "ambiguous");
+  assert.match(ambiguous.match_note ?? "", /^Mehrere Seiten der Seitenstruktur heißen so: .* · KI hat keine passende Seite gefunden/);
+  assert.equal(matchTextUploads([file("k", "Kosten.docx", { ...ambiguous })], pages)[0]!.match_note, ambiguous.match_note, "stable over reads");
+  assert.deepEqual(matchTextUploads(order, pages), matchTextUploads(order, pages), "deterministic");
+
+  // Who the AI looks at.
+  const structureAt = "2026-11-05T00:00:00.000Z";
+  const candidates = [
+    file("new", "Preisliste.docx"),
+    file("old", "Sonstiges.docx", { ai_tried_at: "2026-11-04T00:00:00.000Z" }),
+    file("seen", "Anderes.docx", { ai_tried_at: "2026-11-06T00:00:00.000Z" }),
+    file("amb", "Kosten.docx"),
+    file("off", "Abgelöst.docx", { match: "manual", match_note: "Zuordnung von Hand gelöst" }),
+    file("err", "Kaputt.docx", { error: "nicht lesbar" }),
+    file("auto", "Team.docx"),
+    ai("ki", "Über uns Seite.docx", "ueber-uns"),
+  ];
+  const matched = matchTextUploads(candidates, pages);
+  assert.deepEqual(aiMatchCandidateIds(candidates, matched, structureAt), ["new", "old", "amb"], "untried, or tried before the Seitenstruktur was uploaded");
+  assert.deepEqual(aiMatchCandidateIds(candidates, matched, structureAt, true), ["new", "old", "seen", "amb"], "force: also the ones tried since");
+  assert.deepEqual(aiMatchCandidateIds(candidates, matched, null), ["new", "amb"], "no upload date: only the untried");
+  assert.deepEqual(aiMatchCandidateIds(candidates, matchTextUploads(candidates, null), structureAt, true), [], "no Seitenstruktur: nothing to ask");
+  console.log("ai matching (pure): ok");
+}
+
+// --- 2c. the AI step itself, with a stubbed model call ----------------------------------------------
+
+type AiCallLog = Array<Parameters<UploadAiMatchCall>[0]>;
+
+/** A model stub: answers with `matches` built from the files and pages it was sent. */
+function aiStub(log: AiCallLog, answer: (refOf: (fileName: string) => string) => Array<Record<string, unknown>>): UploadAiMatchCall {
+  return async (input) => {
+    log.push(input);
+    const refs = new Map<string, string>();
+    for (const line of input.user.split("\n")) {
+      if (!line.startsWith('{"file_id"')) continue;
+      const row = JSON.parse(line) as { file_id: string; datei: string };
+      refs.set(row.datei, row.file_id);
+    }
+    const matches = answer((name) => refs.get(name) ?? "unbekannt").filter((m) => m.file_id !== "unbekannt");
+    return { json: { matches }, usage: { inputTokens: 1_000, outputTokens: 200 }, model: "claude-sonnet-5-5" };
+  };
+}
+
+async function aiStepTests() {
+  // Pure parts first: evidence, prompt, validation, model list.
+  const blocks: ContentTextBlock[] = [
+    { id: "a", heading: "Privatumzug   Kosten", level: 1, html: "<p>x</p>" },
+    { id: "b", heading: null, level: 2, html: "<p>y</p>" },
+    { id: "c", heading: "Was kostet ein Umzug?", level: 2, html: "" },
+    { id: "d", heading: "Privatumzug Kosten", level: 2, html: "" },
+    { id: "e", heading: "L".repeat(400), level: 2, html: "" },
+    { id: "f", heading: "Nicht mehr", level: 2, html: "" },
+  ];
+  assert.deepEqual(uploadEvidence("  Kosten | Steiner ", blocks), { title: "Kosten | Steiner", headings: ["Privatumzug Kosten", "Was kostet ein Umzug?"] });
+  assert.deepEqual(uploadEvidence(null, []), { title: null, headings: [] });
+
+  const offered = [
+    briefingPage("Kosten", { slug: "kosten", path: "/privatumzug/kosten", level: 2, pillar_name: "Privatumzug" }),
+    briefingPage("Kosten", { slug: "kosten-2", path: "/firmenumzug/kosten", level: 2, pillar_name: "Firmenumzug" }),
+    briefingPage("Impressum", { slug: "impressum", page_role: "pillar", page_type: "nicht_bearbeiten" }),
+  ];
+  const prompt = uploadAiMatchPrompt([{ ref: "f1", file_name: "Kosten Firmen_final (1).docx", title: "Umzugskosten für Firmen", headings: ["Firmenumzug: Kosten"] }], offered);
+  assert.ok(prompt.user.includes('{"slug":"kosten-2","name":"Kosten","pfad":"/firmenumzug/kosten","ebene":2,"rolle":"Unterseite","hauptsilo":"Firmenumzug","typ":"Unterseite"}'), "a page with path, level, role and Hauptsilo");
+  assert.ok(prompt.user.includes('"slug":"impressum"') && prompt.user.includes('"typ":"Nicht bearbeiten"'), "„Nicht bearbeiten“ pages are offered, marked with their type");
+  assert.ok(prompt.user.includes('{"file_id":"f1","datei":"Kosten Firmen_final (1).docx","titel":"Umzugskosten für Firmen","ueberschriften":["Firmenumzug: Kosten"]}'));
+  assert.match(prompt.system, /gib null zurück/);
+  assert.match(prompt.system, /Nie zwei Dateien auf dieselbe Seite/);
+  assert.match(prompt.system, /Schließe nicht per Ausschluss/, "one of two same-named pages is not a match just because the other one is taken");
+  assert.match(prompt.system, /Erfinde keine Slugs/);
+  assert.deepEqual((prompt.tool.input_schema as { required: string[] }).required, ["matches"]);
+  assert.ok(prompt.maxTokens <= 1_000, "a small output budget for one file");
+  assert.ok(uploadAiMatchPrompt(Array.from({ length: 500 }, (_, i) => ({ ref: `f${i}`, file_name: "x.docx", title: null, headings: [] })), offered).maxTokens <= 8_000);
+
+  const slugs = new Set(["preise", "team", "kosten"]);
+  const checked = validateUploadAiMatches(
+    [
+      {
+        matches: [
+          { file_id: "f1", page_slug: "preise", reason: "  Tippfehler:\n Preisliste  " },
+          { file_id: "f2", page_slug: "erfunden", reason: "geraten" },
+          { file_id: "f3", page_slug: null, reason: "nichts passt" },
+          { file_id: "f4", page_slug: "team", reason: "a" },
+          { file_id: "f1", page_slug: "team", reason: "second entry of the same file" },
+          { file_id: "f9", page_slug: "kosten", reason: "unknown file" },
+          "kein Objekt",
+        ],
+      },
+      // A second call of the same run names the same page for another file.
+      { matches: [{ file_id: "f5", page_slug: "team", reason: "b" }, { file_id: "f6", page_slug: "", reason: "" }] },
+      null,
+    ],
+    ["f1", "f2", "f3", "f4", "f5", "f6", "f7"],
+    slugs,
+  );
+  assert.deepEqual([...checked], [
+    ["f1", { kind: "page", slug: "preise", reason: "Tippfehler: Preisliste" }],
+    ["f2", { kind: "none" }],
+    ["f3", { kind: "none" }],
+    ["f4", { kind: "conflict" }],
+    ["f5", { kind: "conflict" }],
+    ["f6", { kind: "none" }],
+    ["f7", { kind: "none" }],
+  ]);
+
+  assert.equal(UPLOAD_AI_MATCH_USAGE_MODE, "content.upload_match");
+  // … and a slug the caller refuses (`accept`) is no match and no clash for the file that may have the page.
+  const refused = validateUploadAiMatches(
+    [{ matches: [{ file_id: "f1", page_slug: "kosten", reason: "übrig geblieben" }, { file_id: "f2", page_slug: "kosten", reason: "klar" }] }],
+    ["f1", "f2"],
+    slugs,
+    (ref) => ref !== "f1",
+  );
+  assert.deepEqual([...refused], [["f1", { kind: "none" }], ["f2", { kind: "page", slug: "kosten", reason: "klar" }]]);
+
+  // Two pages called „Kosten“: only a file that says which one it means gets one of them.
+  const privat = { path: "/privatumzug/kosten", pillar_name: "Privatumzug" };
+  const firmen = { path: "/firmenumzug/kosten", pillar_name: "Firmenumzug" };
+  const apart = (file_name: string, headings: string[] = [], title: string | null = null) => [
+    tellsSameNamedPagesApart({ file_name, title, headings }, privat, [firmen]),
+    tellsSameNamedPagesApart({ file_name, title, headings }, firmen, [privat]),
+  ];
+  assert.deepEqual(apart("Kosten.docx", ["Unsere Preise"]), [false, false], "the bare name says nothing: by hand");
+  assert.deepEqual(apart("Kosten final (1).docx"), [false, false]);
+  assert.deepEqual(apart("Kosten Umzug.docx"), [false, false], "a word both places share tells nothing");
+  assert.deepEqual(apart("Kosten Firmenumzug 2026-10-01.docx"), [false, true]);
+  assert.deepEqual(apart("Kosten Firmen Kopie.docx"), [false, true], "part of the Hauptsilo's name is enough");
+  assert.deepEqual(apart("Kosten.docx", ["Was kostet ein Privatumzug?"]), [true, false], "a heading counts");
+  assert.deepEqual(apart("Kosten.docx", [], "Kosten | Firmenumzug Köln"), [false, true], "the title counts");
+  assert.equal(tellsSameNamedPagesApart({ file_name: "Kosten Privat.docx", title: null, headings: [] }, { path: null, pillar_name: null }, [firmen]), false, "a page without Hauptsilo and path cannot be told apart");
+  assert.equal(tellsSameNamedPagesApart({ file_name: "Kosten Koeln.docx", title: null, headings: [] }, { path: "/koeln/kosten", pillar_name: null }, [{ path: "/bonn/kosten", pillar_name: null }]), true, "the path alone can tell them apart");
+
+  // The run on a database.
+  const pages = [
+    briefingPage("Startseite", { slug: "startseite", path: "/", level: 0, page_role: "startseite", page_type: "startseite" }),
+    briefingPage("Privatumzug", { slug: "privatumzug", path: "/privatumzug", page_role: "pillar", page_type: "hauptsilo" }),
+    briefingPage("Kosten", { slug: "kosten", path: "/privatumzug/kosten", level: 2, pillar_name: "Privatumzug" }),
+    briefingPage("Firmenumzug", { slug: "firmenumzug", path: "/firmenumzug", page_role: "pillar", page_type: "hauptsilo" }),
+    briefingPage("Kosten", { slug: "kosten-2", path: "/firmenumzug/kosten", level: 2, pillar_name: "Firmenumzug" }),
+    briefingPage("Über uns", { slug: "ueber-uns", path: "/ueber-uns", page_role: "pillar", page_type: "ueber_uns" }),
+    briefingPage("Impressum", { slug: "impressum", path: "/impressum", page_role: "pillar", page_type: "nicht_bearbeiten" }),
+  ];
+  const at = (n: number) => `2026-11-02T08:00:${String(n).padStart(2, "0")}.000Z`;
+  const db = new FakeDb({
+    dt_website_structures: [structureRow(pages)],
+    dt_content_text_uploads: [
+      uploadRow("u1", "Startseite.docx", { uploaded_at: at(1) }),
+      uploadRow("u2", "Privatumzg final (1).docx", { uploaded_at: at(2), title: "Privatumzug in Köln" }),
+      uploadRow("u3", "Kosten Firmen Kopie.docx", { uploaded_at: at(3) }),
+      uploadRow("u4", "Wir über uns 2026-10-01.docx", { uploaded_at: at(4) }),
+      uploadRow("u5", "Unser Team.docx", { uploaded_at: at(5) }),
+      uploadRow("u6", "Kosten.docx", { uploaded_at: at(6) }),
+      uploadRow("u7", "Impresum.docx", { uploaded_at: at(7) }),
+      uploadRow("u8", "Notizen.docx", { uploaded_at: at(8) }),
+      uploadRow("u9", "Abgelöst.docx", { uploaded_at: at(9), match: "manual", match_note: "Zuordnung von Hand gelöst" }),
+      uploadRow("ue", "Kaputt.docx", { uploaded_at: at(10), error: "nicht lesbar", blocks: [], block_count: 0 }),
+    ],
+    dt_content_pages: [],
+  });
+  const stored = (id: string) => {
+    const row = db.rows("dt_content_text_uploads").find((r) => r.id === id)!;
+    return [row.structure_slug ?? null, row.match ?? null, row.match_note ?? null];
+  };
+
+  // Before the AI ran: the table says how many files wait for it.
+  const before = await loadTextUploadsResult(db.service, ORG);
+  assert.deepEqual([before.ai.supported, before.ai.hint, before.ai.candidates, before.ai.candidates_all], [true, null, 7, 7]);
+  assert.deepEqual(before.summary, { assigned: 1, auto: 1, ai: 0, manual: 0, unassigned: 9, pages_without_text: 5, pending: 1 });
+
+  const log: AiCallLog = [];
+  const call = aiStub(log, (ref) => [
+    { file_id: ref("Privatumzg final (1).docx"), page_slug: "privatumzug", reason: "Tippfehler und Zusatz „final (1)“" },
+    { file_id: ref("Kosten Firmen Kopie.docx"), page_slug: "kosten-2", reason: "Kosten unter dem Hauptsilo Firmenumzug" },
+    // Two files on one page: neither gets it.
+    { file_id: ref("Wir über uns 2026-10-01.docx"), page_slug: "ueber-uns", reason: "Datum im Namen" },
+    { file_id: ref("Unser Team.docx"), page_slug: "ueber-uns", reason: "Team gehört zu Über uns" },
+    // Not clearly one of the two „Kosten“ pages.
+    { file_id: ref("Kosten.docx"), page_slug: null, reason: "zwei Seiten heißen Kosten" },
+    { file_id: ref("Impresum.docx"), page_slug: "impressum", reason: "Tippfehler" },
+    // A slug that was not offered (the Startseite has a file).
+    { file_id: ref("Notizen.docx"), page_slug: "startseite", reason: "geraten" },
+  ]);
+  const first = await aiMatchTextUploads(db.service, ORG, { call, models: ["claude-sonnet-5-5", "claude-sonnet-4-6"], userId: USER });
+  assert.ok(first.ok);
+  assert.deepEqual(first.data, { tried: 7, assigned: 3, conflicts: 2, model: "claude-sonnet-5-5" });
+  assert.equal(log.length, 1, "one call for all candidates");
+  const sent = log[0]!;
+  assert.deepEqual(sent.models, ["claude-sonnet-5-5", "claude-sonnet-4-6"]);
+  assert.equal(sent.timeoutMs, UPLOAD_AI_MATCH_TIMEOUT_MS);
+  assert.equal(UPLOAD_AI_MATCH_TIMEOUT_MS, 60_000);
+  assert.ok(!sent.user.includes("Startseite.docx") && !sent.user.includes("Abgelöst.docx") && !sent.user.includes("Kaputt.docx"), "assigned, hand-detached and unreadable files are not sent");
+  assert.ok(!sent.user.includes('"slug":"startseite"'), "a page that has a file is not offered");
+  assert.ok(sent.user.includes('"slug":"impressum"'), "a free „Nicht bearbeiten“ page is offered");
+  assert.ok(sent.user.includes('"datei":"Privatumzg final (1).docx","titel":"Privatumzug in Köln","ueberschriften":["Privatumzg final (1)","Ablauf"]'), "title and first headings as evidence");
+  assert.ok(!sent.user.includes("u2"), "row ids are not sent, only short references");
+
+  assert.deepEqual(stored("u2"), ["privatumzug", "ai", null]);
+  assert.deepEqual(stored("u3"), ["kosten-2", "ai", null]);
+  assert.deepEqual(stored("u7"), ["impressum", "ai", null]);
+  assert.deepEqual(stored("u4"), [null, null, UPLOAD_AI_CONFLICT_NOTE]);
+  assert.deepEqual(stored("u5"), [null, null, UPLOAD_AI_CONFLICT_NOTE]);
+  assert.deepEqual(stored("u6"), [null, null, UPLOAD_AI_NO_PAGE_NOTE]);
+  assert.deepEqual(stored("u8"), [null, null, UPLOAD_AI_NO_PAGE_NOTE], "an invented slug is no match");
+  assert.deepEqual(stored("u9"), [null, "manual", "Zuordnung von Hand gelöst"], "a file taken off by hand is never touched");
+  assert.equal(UPLOAD_AI_NO_PAGE_NOTE, "KI hat keine passende Seite gefunden – bitte von Hand zuordnen");
+  assert.match(UPLOAD_AI_CONFLICT_NOTE, /^KI: mehrere Dateien für dieselbe Seite/);
+  const rowOf = (id: string) => db.rows("dt_content_text_uploads").find((r) => r.id === id)!;
+  assert.equal(rowOf("u3").ai_reason, "Kosten unter dem Hauptsilo Firmenumzug");
+  assert.equal(rowOf("u3").ai_tried_at, null);
+  assert.ok(typeof rowOf("u6").ai_tried_at === "string" && typeof rowOf("u4").ai_tried_at === "string", "files without a page are marked as tried");
+  const usage = db.rows("dt_llm_usage_events");
+  assert.deepEqual(usage.map((u) => [u.mode, u.model, u.input_tokens, u.output_tokens, u.user_id, u.organisation_id]), [["content.upload_match", "claude-sonnet-5-5", 1_000, 200, USER, ORG]]);
+
+  // The table after the run.
+  const view = await loadTextUploadsResult(db.service, ORG);
+  const byId = new Map(view.uploads.map((u) => [u.id, u]));
+  assert.deepEqual([byId.get("u3")!.status, byId.get("u3")!.structure, byId.get("u3")!.ai_reason], ["ai", { slug: "kosten-2", name: "Kosten", path: "/firmenumzug/kosten" }, "Kosten unter dem Hauptsilo Firmenumzug"]);
+  assert.equal(byId.get("u6")!.status, "ambiguous");
+  assert.match(byId.get("u6")!.note ?? "", /Mehrere Seiten .* · KI hat keine passende Seite gefunden – bitte von Hand zuordnen$/);
+  assert.deepEqual([byId.get("u8")!.status, byId.get("u8")!.note], ["unassigned", UPLOAD_AI_NO_PAGE_NOTE], "the note survives the read");
+  assert.deepEqual(view.summary, { assigned: 4, auto: 1, ai: 3, manual: 0, unassigned: 6, pages_without_text: 3, pending: 4 });
+  assert.deepEqual([view.ai.candidates, view.ai.candidates_all], [0, 4], "tried files wait for the button, not for the automatic run");
+
+  // Tried files are skipped …
+  const again = await aiMatchTextUploads(db.service, ORG, { call, models: ["m"] });
+  assert.ok(again.ok);
+  assert.deepEqual(again.data, { tried: 0, assigned: 0, conflicts: 0, model: null });
+  assert.equal(log.length, 1, "no model call without candidates");
+  // … until „Mit KI zuordnen“ (force), which sends them again, with the free pages only.
+  const forcedLog: AiCallLog = [];
+  const forced = await aiMatchTextUploads(db.service, ORG, {
+    force: true,
+    models: ["m"],
+    call: aiStub(forcedLog, (ref) => [{ file_id: ref("Wir über uns 2026-10-01.docx"), page_slug: "ueber-uns", reason: "Datum im Namen" }]),
+  });
+  assert.ok(forced.ok);
+  assert.deepEqual(forced.data, { tried: 4, assigned: 1, conflicts: 0, model: "claude-sonnet-5-5" });
+  assert.ok(!forcedLog[0]!.user.includes('"slug":"kosten-2"') && forcedLog[0]!.user.includes('"slug":"kosten"'));
+  assert.deepEqual(stored("u4"), ["ueber-uns", "ai", null]);
+  assert.deepEqual(stored("u5"), [null, null, UPLOAD_AI_NO_PAGE_NOTE], "a file the answer leaves out has no page");
+
+  // … or a new Seitenstruktur: files tried before it are candidates again.
+  db.rows("dt_website_structures")[0]!.uploaded_at = "2099-01-01T00:00:00.000Z";
+  (db.rows("dt_website_structures")[0]!.content_briefing as { uploaded_at: string }).uploaded_at = "2099-01-01T00:00:00.000Z";
+  assert.equal((await loadTextUploadsResult(db.service, ORG)).ai.candidates, 3);
+
+  // By hand on a KI row: another page, then „Zuordnung lösen“. Both are manual and stay.
+  assert.ok((await assignTextUpload(db.service, ORG, "u3", "kosten")).ok);
+  assert.deepEqual(stored("u3"), ["kosten", "manual", null]);
+  const taken = await assignTextUpload(db.service, ORG, "u6", "ueber-uns");
+  assert.ok(!taken.ok && taken.status === 409 && /hat bereits die Datei „Wir über uns 2026-10-01\.docx“/.test(taken.message), "a KI page takes no second file by hand either");
+  assert.ok((await assignTextUpload(db.service, ORG, "u7", null)).ok);
+  assert.deepEqual(stored("u7"), [null, "manual", "Zuordnung von Hand gelöst"]);
+  const afterHand = await loadTextUploadsResult(db.service, ORG);
+  const hand = new Map(afterHand.uploads.map((u) => [u.id, u]));
+  assert.deepEqual([hand.get("u3")!.status, hand.get("u3")!.ai_reason, hand.get("u7")!.status], ["manual", null, "unassigned"]);
+  assert.equal(rowOf("u3").ai_reason, null, "the AI's reason goes with its assignment");
+  const afterHandLog: AiCallLog = [];
+  const afterHandRun = await aiMatchTextUploads(db.service, ORG, {
+    force: true,
+    models: ["m"],
+    call: aiStub(afterHandLog, (ref) => [
+      { file_id: ref("Impresum.docx"), page_slug: "impressum", reason: "nochmal" },
+      // The model hands the last free „Kosten“ page to the file that is left: a guess, not taken.
+      { file_id: ref("Kosten.docx"), page_slug: "kosten-2", reason: "die andere Kosten-Seite ist belegt" },
+      { file_id: ref("Unser Team.docx"), page_slug: "firmenumzug", reason: "Test: eine Seite mit eindeutigem Namen" },
+    ]),
+  });
+  assert.ok(afterHandRun.ok);
+  assert.ok(!afterHandLog[0]!.user.includes("Impresum.docx") && !afterHandLog[0]!.user.includes("Kosten Firmen Kopie.docx"), "manual decisions are not sent to the AI");
+  assert.deepEqual(stored("u7"), [null, "manual", "Zuordnung von Hand gelöst"], "the manual decision wins");
+  assert.deepEqual(stored("u6"), [null, null, UPLOAD_AI_NO_PAGE_NOTE], "„Kosten.docx“ does not say which „Kosten“ page it is");
+  assert.deepEqual(stored("u5"), ["firmenumzug", "ai", null]);
+
+  // „Zugeordnete Seiten übernehmen“ takes KI assignments like the others.
+  const takeover = await takeOverTextUploads(db.service, ORG);
+  assert.ok(takeover.ok);
+  assert.equal(takeover.data.created, 5);
+  const created = db.rows("dt_content_pages");
+  assert.deepEqual(created.map((r) => r.slug).sort(), ["firmenumzug", "kosten", "privatumzug", "startseite", "ueber-uns"], "auto, KI and manual assignments alike");
+  assert.ok(created.some((r) => r.slug === "firmenumzug" && r.text_upload_id === "u5" && r.source === "upload"), "the KI-assigned file is the page's text");
+
+  // The AI assignment is released when its page leaves the Seitenstruktur, and may be tried again.
+  Object.assign(db.rows("dt_website_structures")[0]!, {
+    raw_text: pages.filter((p) => p.slug !== "privatumzug").map((p) => `- ${p.name}`).join("\n"),
+    uploaded_at: "2099-01-02T00:00:00.000Z",
+    content_briefing: { mode: "crawl", uploaded_at: "2099-01-02T00:00:00.000Z", columns: "briefing", pages: pages.filter((p) => p.slug !== "privatumzug") },
+  });
+  const released = await loadTextUploadsResult(db.service, ORG);
+  const gone = released.uploads.find((u) => u.id === "u2")!;
+  assert.deepEqual([gone.status, gone.note, gone.ai_reason], ["unassigned", `KI-Zuordnung aufgehoben: ${UPLOAD_PAGE_GONE_NOTE}`, null]);
+  assert.deepEqual([rowOf("u2").match ?? null, rowOf("u2").ai_tried_at ?? null], [null, null]);
+
+  // A failed call assigns nothing; the reason is passed on.
+  const failDb = new FakeDb({
+    dt_website_structures: [structureRow(pages)],
+    dt_content_text_uploads: [uploadRow("a", "Privatumzg.docx", { uploaded_at: at(1) }), uploadRow("b", "Ueber uns Seite.docx", { uploaded_at: at(2) })],
+  });
+  const snapshot = JSON.stringify(failDb.rows("dt_content_text_uploads"));
+  const failedRun = await aiMatchTextUploads(failDb.service, ORG, {
+    models: ["m"],
+    call: async () => {
+      throw new Error("Ausgabe unvollständig (Zeitlimit erreicht). Der Schritt wird einmal erneut versucht.");
+    },
+  });
+  assert.ok(!failedRun.ok && failedRun.status === 502);
+  assert.match(failedRun.message, /^Die KI-Zuordnung ist fehlgeschlagen, es wurde nichts zugeordnet: Ausgabe unvollständig \(Zeitlimit erreicht\)/);
+  assert.equal(JSON.stringify(failDb.rows("dt_content_text_uploads")), snapshot, "nothing is written, the files stay „nicht zugeordnet“");
+  assert.equal((await loadTextUploadsResult(failDb.service, ORG)).ai.candidates, 2, "and wait for the next try");
+
+  // More files than one call takes: several calls, checked together; one failing call voids the run.
+  const manyPages = Array.from({ length: 130 }, (_, i) => briefingPage(`Leistung ${i}`, { slug: `leistung-${i}`, position: i }));
+  const manyRows = () => manyPages.map((_, i) => uploadRow(`m${String(i).padStart(3, "0")}`, `Leistng ${i} final.docx`, { uploaded_at: `2026-11-02T09:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z` }));
+  const manyDb = new FakeDb({ dt_website_structures: [structureRow(manyPages)], dt_content_text_uploads: manyRows() });
+  const manyLog: AiCallLog = [];
+  const answerAll: UploadAiMatchCall = async (input) => {
+    manyLog.push(input);
+    const matches = input.user
+      .split("\n")
+      .filter((line) => line.startsWith('{"file_id"'))
+      .map((line) => JSON.parse(line) as { file_id: string; datei: string })
+      // Every call also claims „leistung-0“ for its first file: a clash across calls.
+      .map((row, index) => ({ file_id: row.file_id, page_slug: index === 0 ? "leistung-0" : `leistung-${row.datei.match(/\d+/)![0]}`, reason: "Tippfehler" }));
+    return { json: { matches }, usage: { inputTokens: 10, outputTokens: 5 }, model: "m" };
+  };
+  const many = await aiMatchTextUploads(manyDb.service, ORG, { models: ["m"], call: answerAll });
+  assert.ok(many.ok);
+  assert.equal(manyLog.length, Math.ceil(130 / UPLOAD_AI_MATCH_CHUNK));
+  const callCount = Math.ceil(130 / UPLOAD_AI_MATCH_CHUNK);
+  assert.equal(UPLOAD_AI_MATCH_CHUNK, 25);
+  assert.deepEqual(many.data, { tried: 130, assigned: 130 - callCount, conflicts: callCount, model: "m" });
+  assert.equal(manyDb.rows("dt_llm_usage_events").length, callCount, "every call is recorded");
+  const partDb = new FakeDb({ dt_website_structures: [structureRow(manyPages)], dt_content_text_uploads: manyRows() });
+  let calls = 0;
+  const part = await aiMatchTextUploads(partDb.service, ORG, {
+    models: ["m"],
+    call: async (input) => {
+      calls += 1;
+      if (calls === 2) throw new Error("Die KI ist gerade ausgelastet.");
+      return answerAll(input);
+    },
+  });
+  assert.ok(!part.ok && /ausgelastet/.test(part.message));
+  assert.ok(partDb.rows("dt_content_text_uploads").every((r) => (r.match ?? null) === null && (r.structure_slug ?? null) === null), "no partial result");
+  assert.equal(partDb.rows("dt_llm_usage_events").length, callCount - 1, "the calls that answered are still recorded");
+
+  // Without `models` the run takes the model of the Texte tool: `content_model` from app_settings, then the tool's fallbacks.
+  const toolModelDb = new FakeDb({
+    dt_website_structures: [structureRow(pages)],
+    dt_content_text_uploads: [uploadRow("a", "Privatumzg.docx", { uploaded_at: at(1) })],
+    app_settings: [{ key: "content_model", value: "claude-test-tool-model" }, { key: "content_match_model", value: "wird-nicht-gelesen" }],
+  });
+  const toolModelLog: AiCallLog = [];
+  assert.ok((await aiMatchTextUploads(toolModelDb.service, ORG, { call: aiStub(toolModelLog, () => []) })).ok);
+  assert.deepEqual(toolModelLog[0]!.models, resolveContentModels({ write: "claude-test-tool-model" }).write, "the same model list as the writing steps");
+  assert.equal(toolModelLog[0]!.models[0], "claude-test-tool-model");
+
+  // No Seitenstruktur, no free page.
+  const noStructure = await aiMatchTextUploads(new FakeDb({ dt_website_structures: [], dt_content_text_uploads: [uploadRow("a", "X.docx")] }).service, ORG, { call, models: ["m"] });
+  assert.ok(!noStructure.ok && noStructure.status === 400 && /Seitenstruktur/.test(noStructure.message));
+  const fullDb = new FakeDb({ dt_website_structures: [structureRow([pages[0]!])], dt_content_text_uploads: [uploadRow("a", "Startseite.docx", { uploaded_at: at(1) }), uploadRow("b", "Rest.docx", { uploaded_at: at(2) })] });
+  const fullLog: AiCallLog = [];
+  const full = await aiMatchTextUploads(fullDb.service, ORG, { call: aiStub(fullLog, () => []), models: ["m"] });
+  assert.ok(full.ok && full.data.tried === 0 && fullLog.length === 0, "no free page: no call");
+  assert.equal((await loadTextUploadsResult(fullDb.service, ORG)).ai.candidates_all, 0);
+  console.log("ai step: ok");
+}
+
+/** The database before `20261117_dt_content_upload_ai_match.sql`: the AI columns are unknown. */
+class NoAiColumnsDb extends FakeDb {
+  from(table: string): ReturnType<FakeDb["from"]> {
+    const query = super.from(table);
+    if (table !== "dt_content_text_uploads") return query;
+    const select = query.select.bind(query);
+    const update = query.update.bind(query);
+    const broken = (message: string) => {
+      const q: Record<string, unknown> = {};
+      for (const method of ["eq", "in", "limit", "is", "neq", "select"]) q[method] = () => q;
+      q.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: null, error: { code: "42703", message } }).then(resolve);
+      return q as never;
+    };
+    query.select = ((columns?: string) => (/ai_tried_at|ai_reason/.test(columns ?? "") ? broken("column dt_content_text_uploads.ai_tried_at does not exist") : select())) as typeof query.select;
+    query.update = ((payload: FakeRow) =>
+      "ai_tried_at" in payload || "ai_reason" in payload || payload.match === "ai"
+        ? broken("Could not find the 'ai_reason' column of 'dt_content_text_uploads' in the schema cache")
+        : update(payload)) as typeof query.update;
+    return query;
+  }
+}
+
+async function aiMigrationTests() {
+  assert.equal(CONTENT_UPLOAD_AI_MATCH_MIGRATION_FILE, "database/migrations/20261117_dt_content_upload_ai_match.sql");
+  const sql = readFileSync(CONTENT_UPLOAD_AI_MATCH_MIGRATION_FILE, "utf8");
+  assert.match(sql, /RUN THIS BEFORE DEPLOYING THE CODE/);
+  assert.match(sql, /DROP CONSTRAINT IF EXISTS dt_content_text_uploads_match_check/);
+  assert.match(sql, /CHECK \(match IS NULL OR match IN \('auto', 'ai', 'manual'\)\)/);
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS ai_tried_at timestamptz/);
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS ai_reason text/);
+
+  assert.ok(isMissingUploadAiMatchError({ code: "42703", message: "column dt_content_text_uploads.ai_tried_at does not exist" }));
+  assert.ok(isMissingUploadAiMatchError({ code: "PGRST204", message: "Could not find the 'ai_reason' column of 'dt_content_text_uploads' in the schema cache" }));
+  assert.ok(isMissingUploadAiMatchError({ code: "23514", message: 'new row for relation "dt_content_text_uploads" violates check constraint "dt_content_text_uploads_match_check"' }));
+  assert.ok(!isMissingUploadAiMatchError({ code: "42703", message: "column dt_content_text_uploads.foo does not exist" }));
+  assert.ok(!isMissingUploadAiMatchError({ code: "23505", message: "duplicate key" }));
+  assert.ok(UPLOAD_AI_MATCH_MIGRATION_MESSAGE.includes(CONTENT_UPLOAD_AI_MATCH_MIGRATION_FILE));
+  // The message names the AI migration, not the one of „Texte hochladen“ itself (both errors name the table).
+  assert.equal(textUploadsDbErrorMessage({ code: "42703", message: "column dt_content_text_uploads.ai_tried_at does not exist" }, "x"), UPLOAD_AI_MATCH_MIGRATION_MESSAGE);
+  assert.equal(textUploadsDbErrorMessage({ code: "42P01", message: 'relation "public.dt_content_text_uploads" does not exist' }, "x"), TEXT_UPLOADS_MIGRATION_MESSAGE);
+
+  // Without the migration: the name match and the manual assignment work as before, the AI step is skipped.
+  const pages = [briefingPage("Preise", { slug: "preise" }), briefingPage("Team", { slug: "team" })];
+  const db = new NoAiColumnsDb({
+    dt_website_structures: [structureRow(pages)],
+    dt_content_text_uploads: [uploadRow("u1", "Preise.docx", { uploaded_at: "2026-11-02T08:00:01.000Z" }), uploadRow("u2", "Tema.docx", { uploaded_at: "2026-11-02T08:00:02.000Z" })],
+  });
+  const view = await loadTextUploadsResult(db.service, ORG);
+  assert.ok(view.supported, "„Texte hochladen“ itself is there");
+  assert.deepEqual(view.uploads.map((u) => [u.status, u.structure?.slug ?? null]), [["auto", "preise"], ["unassigned", null]]);
+  assert.deepEqual([view.ai.supported, view.ai.hint, view.ai.candidates, view.ai.candidates_all], [false, UPLOAD_AI_MATCH_MIGRATION_MESSAGE, 0, 0]);
+  assert.equal(db.rows("dt_content_text_uploads").find((r) => r.id === "u1")!.match, "auto", "the name match is stored without the new columns");
+  let called = false;
+  const run = await aiMatchTextUploads(db.service, ORG, {
+    models: ["m"],
+    call: async () => {
+      called = true;
+      return { json: { matches: [] }, usage: { inputTokens: 0, outputTokens: 0 }, model: "m" };
+    },
+  });
+  assert.ok(!run.ok && run.status === 409 && run.message === UPLOAD_AI_MATCH_MIGRATION_MESSAGE);
+  assert.equal(called, false, "no model call without the columns");
+  assert.ok((await assignTextUpload(db.service, ORG, "u2", "team")).ok);
+  assert.deepEqual((await loadTextUploadsResult(db.service, ORG)).uploads.map((u) => u.status), ["auto", "manual"]);
+  console.log("ai migration missing: ok");
 }
 
 // --- 3. the takeover plan ----------------------------------------------------------------------------
@@ -425,7 +957,7 @@ async function storageTests() {
   assert.deepEqual([byName.get("Dachsanierung.docx")!.status, byName.get("Dachsanierung.docx")!.structure?.slug], ["auto", "dachsanierung"]);
   assert.deepEqual([byName.get("ueber_uns.docx")!.status, byName.get("ueber_uns.docx")!.structure?.name], ["auto", "Über uns"]);
   assert.deepEqual([byName.get("Preise.doc")!.status, byName.get("Preise.doc")!.note], ["error", errors[1]]);
-  assert.deepEqual(view.summary, { assigned: 2, unassigned: 2, pages_without_text: 0, pending: 2 });
+  assert.deepEqual(view.summary, { assigned: 2, auto: 2, ai: 0, manual: 0, unassigned: 2, pages_without_text: 0, pending: 2 });
   assert.deepEqual(view.free_pages, []);
 
   // The same name again: refused without the confirmation, replaced with it; the assignment stays.
@@ -535,7 +1067,7 @@ async function takeoverTests() {
   assert.deepEqual({ ...second.data }, { created: 0, attached: 1, kept_started: 0, already: 3, over_limit: 0, skipped: [] });
   assert.equal(db.rows("dt_content_pages").length, 4);
   const view = await loadTextUploadsResult(db.service, ORG);
-  assert.deepEqual(view.summary, { assigned: 4, unassigned: 1, pages_without_text: 0, pending: 0 });
+  assert.deepEqual(view.summary, { assigned: 4, auto: 4, ai: 0, manual: 0, unassigned: 1, pages_without_text: 0, pending: 0 });
   assert.deepEqual(view.uploads.find((u) => u.id === "u1")!.page, { slug: "startseite", name: "startseite", state: "fertig" });
 
   // „Entfernen“: refused while the page runs; otherwise the page falls back to a page written from scratch.
@@ -766,12 +1298,15 @@ async function unsupportedTests() {
 async function main() {
   nameKeyTests();
   matchingTests();
+  aiMatchingTests();
   takeoverPlanTests();
   await storageTests();
   await takeoverTests();
   await pipelineTests();
   sourceAndMigrationTests();
   await unsupportedTests();
+  await aiStepTests();
+  await aiMigrationTests();
   console.log("\ncontent text uploads: all tests passed");
 }
 

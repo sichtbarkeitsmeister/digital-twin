@@ -1,8 +1,14 @@
 /**
  * „Verbesserung → Texte hochladen“: Word files (file name = page name) matched to the pages of
- * the Seitenstruktur. Pure and deterministic, no model anywhere: a file belongs to a page only
- * when their names give the same `pageNameKey`. Everything else is assigned by hand, and a
- * manual decision always wins over the automatic match.
+ * the Seitenstruktur, in three steps:
+ *   1. code: a file belongs to a page when their names give the same `pageNameKey` („auto“);
+ *   2. AI: for what the code left over, a model finds the page by the meaning of the name
+ *      (`upload-ai-match.ts`); its assignments are stored („ai“);
+ *   3. by hand: everything else, and every match can be changed or removed by hand at any time.
+ *      A manual decision always wins.
+ * This file is pure and deterministic, no model anywhere: `matchTextUploads` runs on every read
+ * and only keeps or releases the AI assignments that are stored; the AI step itself runs on its
+ * own route.
  *
  * Also the plan of „Zugeordnete Seiten übernehmen“ (`planUploadTakeover`): which assigned file
  * is attached to an existing row of the Texte table and which creates a new one.
@@ -22,7 +28,7 @@ import { matchStructureRows, type StructurePlanRow } from "@/lib/dt/content/stru
  *   5. every character a file name may not contain (/ \ : * ? " < > |) becomes a space
  *   6. _ and - become spaces
  *   7. whitespace collapses; spaces at both ends and trailing dots go
- * Nothing else: no fuzzy comparison, no „(1)“ or „Kopie“ handling.
+ * Nothing else: no fuzzy comparison, no „(1)“ or „Kopie“ handling (that is the AI step's part).
  */
 export function pageNameKey(value: string): string {
   return value
@@ -52,12 +58,14 @@ export const TEXT_UPLOAD_PARALLEL = 3;
 /** .doc is offered so the old format gets the ingest's message instead of being unselectable. */
 export const TEXT_UPLOAD_ACCEPT = ".docx,.doc";
 
-/** How a file got its page: by the name rule, by hand (also: taken off a page by hand), or not yet decided. */
-export type TextUploadMatch = "auto" | "manual" | null;
+/** How a file got its page: by the name rule, by the AI step, by hand (also: taken off a page by hand), or not yet decided. */
+export type TextUploadMatch = "auto" | "ai" | "manual" | null;
 
 export type TextUploadStatus =
   /** „automatisch zugeordnet“ */
   | "auto"
+  /** „KI-zugeordnet“ */
+  | "ai"
   /** „manuell zugeordnet“ */
   | "manual"
   /** „nicht zugeordnet“ */
@@ -73,6 +81,22 @@ export type TextUploadStatus =
 
 export const UPLOAD_PAGE_GONE_NOTE = "Seite nicht mehr in der Seitenstruktur";
 export const UPLOAD_UNASSIGNED_BY_HAND_NOTE = "Zuordnung von Hand gelöst";
+/** The AI looked at the file and found no page that is clearly the same. */
+export const UPLOAD_AI_NO_PAGE_NOTE = "KI hat keine passende Seite gefunden – bitte von Hand zuordnen";
+/** The AI named one page for several files: none of them gets it. */
+export const UPLOAD_AI_CONFLICT_NOTE = "KI: mehrere Dateien für dieselbe Seite – bitte von Hand zuordnen";
+/** An AI assignment that no longer holds; followed by the reason. */
+export const UPLOAD_AI_RELEASED_PREFIX = "KI-Zuordnung aufgehoben: ";
+
+/**
+ * The part of a stored note that the AI step (or the release of its assignment) wrote. Those
+ * notes start with „KI“; behind another note („mehrdeutig“) they follow after „ · “. The
+ * matching keeps them on a file that is still not assigned, so the hint survives every read.
+ */
+export function aiNotePart(note: string | null | undefined): string | null {
+  const part = (note ?? "").split(" · ").pop()!.trim();
+  return part.startsWith("KI") ? part : null;
+}
 
 export type UploadMatchFile = {
   id: string;
@@ -83,6 +107,10 @@ export type UploadMatchFile = {
   match_note: string | null;
   /** Set when the file could not be read: it is never assigned. */
   error?: string | null;
+  /** When the AI step last looked at the file without assigning it. */
+  ai_tried_at?: string | null;
+  /** The AI's one-line reason for its assignment. */
+  ai_reason?: string | null;
 };
 
 export type UploadMatchPage = Pick<ContentBriefingPage, "slug" | "name" | "path">;
@@ -93,6 +121,10 @@ export type UploadMatchResult = {
   match: TextUploadMatch;
   match_note: string | null;
   status: TextUploadStatus;
+  /** As stored; null again once an AI assignment was released, so the AI may try the file again. */
+  ai_tried_at: string | null;
+  /** Only on a file the AI assigned. */
+  ai_reason: string | null;
 };
 
 function pageLabel(page: UploadMatchPage): string {
@@ -113,6 +145,11 @@ function pageLabel(page: UploadMatchPage): string {
  *   - several pages with the key → „mehrdeutig“, not assigned, the note names the pages;
  *   - a second file with the same key → „doppelt“, not assigned (the first one has the page);
  *   - the page already has a file assigned by hand → „doppelt“, not assigned.
+ *
+ * Last the assignments the AI step stored (`match: "ai"`), for files the name rule left „nicht
+ * zugeordnet“ or „mehrdeutig“: one stays as long as its page is in the Seitenstruktur and no
+ * file of the two steps before has it. Otherwise the file is „nicht zugeordnet“ again with a
+ * note, and `ai_tried_at` is cleared so the AI may look at it again. No model runs here.
  */
 export function matchTextUploads(
   files: readonly UploadMatchFile[],
@@ -131,8 +168,9 @@ export function matchTextUploads(
   const taken = new Map<string, UploadMatchFile>();
 
   for (const file of files) {
+    const triedAt = file.ai_tried_at ?? null;
     if (file.error) {
-      results.set(file.id, { id: file.id, structure_slug: null, match: null, match_note: null, status: "error" });
+      results.set(file.id, { id: file.id, structure_slug: null, match: null, match_note: null, status: "error", ai_tried_at: triedAt, ai_reason: null });
       continue;
     }
     if (file.match !== "manual") continue;
@@ -142,6 +180,8 @@ export function matchTextUploads(
       match: "manual",
       match_note: note,
       status: "unassigned",
+      ai_tried_at: triedAt,
+      ai_reason: null,
     });
     if (!file.structure_slug) {
       results.set(file.id, unassigned(file.match_note ?? UPLOAD_UNASSIGNED_BY_HAND_NOTE));
@@ -155,7 +195,7 @@ export function matchTextUploads(
       });
     } else {
       taken.set(file.structure_slug, file);
-      results.set(file.id, { id: file.id, structure_slug: file.structure_slug, match: "manual", match_note: null, status: "manual" });
+      results.set(file.id, { id: file.id, structure_slug: file.structure_slug, match: "manual", match_note: null, status: "manual", ai_tried_at: triedAt, ai_reason: null });
     }
   }
 
@@ -169,6 +209,8 @@ export function matchTextUploads(
       match: null,
       match_note: note,
       status,
+      ai_tried_at: file.ai_tried_at ?? null,
+      ai_reason: null,
     });
     if (!pages) {
       results.set(file.id, open("waiting"));
@@ -193,16 +235,64 @@ export function matchTextUploads(
         results.set(file.id, open("duplicate", `Die Seite ${pageLabel(page)} hat bereits die Datei „${holder.file_name}“`));
       } else {
         taken.set(page.slug, file);
-        results.set(file.id, { id: file.id, structure_slug: page.slug, match: "auto", match_note: null, status: "auto" });
+        results.set(file.id, { id: file.id, structure_slug: page.slug, match: "auto", match_note: null, status: "auto", ai_tried_at: file.ai_tried_at ?? null, ai_reason: null });
       }
+    }
+  }
+
+  // The stored AI assignments, and the AI's notes on files that are still open.
+  for (const file of files) {
+    const result = results.get(file.id)!;
+    if (result.match === "manual" || (result.status !== "unassigned" && result.status !== "ambiguous")) continue;
+    const join = (note: string): string => [result.match_note, note].filter(Boolean).join(" · ");
+    if (file.match !== "ai" || !file.structure_slug) {
+      const kept = aiNotePart(file.match_note);
+      if (kept) results.set(file.id, { ...result, match_note: join(kept) });
+      continue;
+    }
+    const page = bySlug.get(file.structure_slug);
+    const holder = taken.get(file.structure_slug);
+    if (page && !holder) {
+      taken.set(page.slug, file);
+      results.set(file.id, { id: file.id, structure_slug: page.slug, match: "ai", match_note: null, status: "ai", ai_tried_at: null, ai_reason: file.ai_reason ?? null });
+    } else {
+      const why = page ? `Seite hat jetzt die Datei „${holder!.file_name}“` : UPLOAD_PAGE_GONE_NOTE;
+      results.set(file.id, { ...result, match_note: join(`${UPLOAD_AI_RELEASED_PREFIX}${why}`), ai_tried_at: null });
     }
   }
 
   return files.map((file) => results.get(file.id)!);
 }
 
+/**
+ * The files the AI step looks at: readable, „nicht zugeordnet“ or „mehrdeutig“ after the
+ * matching, not taken off a page by hand, and not tried since the Seitenstruktur was uploaded
+ * (`structureUploadedAt`; a file tried before a new upload is tried again). `force`: all of
+ * them, also the ones tried before.
+ */
+export function aiMatchCandidateIds(
+  files: readonly UploadMatchFile[],
+  results: readonly UploadMatchResult[],
+  structureUploadedAt: string | null,
+  force = false,
+): string[] {
+  const byId = new Map(results.map((r) => [r.id, r]));
+  const since = structureUploadedAt ? Date.parse(structureUploadedAt) : Number.NaN;
+  return files
+    .filter((file) => {
+      const result = byId.get(file.id);
+      if (!result || file.error || result.match === "manual") return false;
+      if (result.status !== "unassigned" && result.status !== "ambiguous") return false;
+      if (force || !result.ai_tried_at) return true;
+      const tried = Date.parse(result.ai_tried_at);
+      return Number.isFinite(since) && Number.isFinite(tried) && tried < since;
+    })
+    .map((file) => file.id);
+}
+
 export const TEXT_UPLOAD_STATUS_LABELS: Record<TextUploadStatus, string> = {
   auto: "automatisch zugeordnet",
+  ai: "KI-zugeordnet",
   manual: "manuell zugeordnet",
   unassigned: "nicht zugeordnet",
   ambiguous: "mehrdeutig",

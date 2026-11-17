@@ -298,6 +298,99 @@ assert.deepEqual(
 );
 assert.equal(positional.pages[1]!.keywords?.main.text, "Umzug");
 
+// „Ebene 3“ in the agency briefing (header with „Startseite“): the name of a third-level page stands
+// only in that column. The row used to be skipped, so the page never reached the Seitenstruktur.
+const EBENE3_HEADER = ["Startseite", "Ebene 1", "Ebene 2", "Ebene 3", "Keywords", "H1-Optionen"];
+const EBENE3_ROWS = [
+  ["Startseite", "", "", "", "Dachdecker Köln (720)", "Ihr Dachdecker in Köln"],
+  ["", "Leistungen", "", "", "Dachdeckerei (300)", ""],
+  ["", "", "Dachsanierung", "", "Dachsanierung Köln (390)", "Dachsanierung vom Meister"],
+  ["", "", "", "Flachdachsanierung", "Flachdachsanierung (210), Flachdach sanieren", "Flachdach sanieren lassen"],
+  ["", "", "", "Steildachsanierung", "Steildach sanieren (90)", ""],
+  ["", "Ratgeber", "", "", "", ""],
+  // A third-level page right under a Hauptsilo (no Ebene-2 row between them).
+  ["", "", "", "Dachpflege im Winter", "Dach Winter (50)", ""],
+  ["", "Kontakt", "", "", "", ""],
+];
+const EBENE3_PAGES = [
+  ["startseite", "Startseite", "startseite", "startseite", 0, null],
+  ["leistungen", "Leistungen", "pillar", "hauptsilo", 1, null],
+  ["dachsanierung", "Dachsanierung", "supporting", "unterseite", 2, "Leistungen"],
+  ["flachdachsanierung", "Flachdachsanierung", "supporting", "unterseite", 3, "Leistungen"],
+  ["steildachsanierung", "Steildachsanierung", "supporting", "unterseite", 3, "Leistungen"],
+  ["ratgeber", "Ratgeber", "pillar", "ratgeber", 1, null],
+  ["dachpflege-im-winter", "Dachpflege im Winter", "supporting", "ratgeber", 3, "Ratgeber"],
+  ["kontakt", "Kontakt", "pillar", "nicht_bearbeiten", 1, null],
+];
+const pageShape = (pages: ReturnType<typeof parseContentStructureSheet>["pages"]) =>
+  pages.map((p) => [p.slug, p.name, p.page_role, p.page_type, p.level, p.pillar_name]);
+
+const ebene3 = parseContentStructureSheet([EBENE3_HEADER, ...EBENE3_ROWS]);
+assert.equal(ebene3.layout, "briefing");
+assert.deepEqual(pageShape(ebene3.pages), EBENE3_PAGES, "a name in Ebene 3 is a page of level 3 under the last Hauptsilo above it");
+const flachdach = ebene3.pages[3]!;
+assert.deepEqual(flachdach.keywords, { main: { text: "Flachdachsanierung", volume: 210 }, secondary: [{ text: "Flachdach sanieren" }] });
+assert.deepEqual(flachdach.h1_options, ["Flachdach sanieren lassen"]);
+assert.deepEqual(flachdach.internal_link_targets, ["Leistungen", "Dachsanierung", "Steildachsanierung"], "a third-level page links to its Hauptsilo and the pages under it");
+assert.deepEqual(ebene3.pages[1]!.internal_link_targets, ["Dachsanierung", "Flachdachsanierung", "Steildachsanierung"]);
+assert.equal(summariseBriefing(ebene3.pages).pages, 8);
+
+// The same file without its header row: column A is the Startseite column, the names stand
+// alone in the columns right of it, keywords and H1 options follow by position.
+const ebene3Headerless = parseContentStructureSheet(EBENE3_ROWS);
+assert.equal(ebene3Headerless.layout, "briefing");
+assert.deepEqual(pageShape(ebene3Headerless.pages), EBENE3_PAGES, "without the header row the levels are read by position");
+assert.deepEqual(ebene3Headerless.pages[3]!.keywords, flachdach.keywords);
+assert.deepEqual(ebene3Headerless.pages[3]!.h1_options, flachdach.h1_options);
+assert.deepEqual(ebene3Headerless.pages[0]!.keywords, { main: { text: "Dachdecker Köln", volume: 720 }, secondary: [] });
+
+// The full agency layout (URL first, traffic) with „Ebene 3“ and „Ebene 4“, with and without header.
+const EBENE4_HEADER = ["URL", "Startseite", "Ebene 1", "Ebene 2", "Ebene 3", "Ebene 4", "Traffic", "Keywords", "H1-Optionen", "Nutzerfragen"];
+const EBENE4_ROWS = [
+  ["https://dach.de/", "x", "", "", "", "", "900", "Dachdecker Köln (720)", "", ""],
+  ["https://dach.de/leistungen/", "", "Leistungen", "", "", "", "400", "Dachdeckerei (300)", "", ""],
+  ["https://dach.de/leistungen/dachsanierung/", "", "", "Dachsanierung", "", "", "", "Dachsanierung Köln (390)", "", "Was kostet eine Dachsanierung?"],
+  ["https://dach.de/leistungen/dachsanierung/flachdach/", "", "", "", "Flachdach", "", "120", "Flachdachsanierung (210)", "Flachdach sanieren lassen", "Wie lange hält ein Flachdach?"],
+  ["https://dach.de/leistungen/dachsanierung/flachdach/bitumen/", "", "", "", "", "Bitumenbahnen", "", "Bitumenbahn (70)", "", ""],
+];
+for (const [label, rows] of [["with header", [EBENE4_HEADER, ...EBENE4_ROWS]], ["without header", EBENE4_ROWS]] as const) {
+  const parsed = parseContentStructureSheet(rows);
+  assert.equal(parsed.layout, "briefing", label);
+  assert.deepEqual(
+    parsed.pages.map((p) => [p.slug, p.path, p.page_role, p.level, p.pillar_name]),
+    [
+      ["startseite", "/", "startseite", 0, null],
+      ["leistungen", "/leistungen", "pillar", 1, null],
+      ["dachsanierung", "/leistungen/dachsanierung", "supporting", 2, "Leistungen"],
+      ["flachdach", "/leistungen/dachsanierung/flachdach", "supporting", 3, "Leistungen"],
+      ["bitumen", "/leistungen/dachsanierung/flachdach/bitumen", "supporting", 4, "Leistungen"],
+    ],
+    `Ebene 3 and 4 (${label})`,
+  );
+  const deep = parsed.pages[3]!;
+  assert.equal(deep.estimated_traffic, 120, `traffic right of the level columns (${label})`);
+  assert.equal(deep.keywords?.main.text, "Flachdachsanierung", label);
+  assert.deepEqual(deep.h1_options, ["Flachdach sanieren lassen"], label);
+  assert.deepEqual(deep.user_questions, ["Wie lange hält ein Flachdach?"], label);
+  assert.equal(deep.source_url, "https://dach.de/leistungen/dachsanierung/flachdach/", label);
+  assert.equal(parsed.pages[4]!.keywords?.main.text, "Bitumenbahn", label);
+}
+
+// The outline for SEO → Struktur nests a third level below the page above it, and reading it back
+// gives the same pages.
+const ebene3Text = briefingToStructureText(ebene3.pages);
+assert.ok(ebene3Text.includes("\n      - Flachdachsanierung"), "a level-3 page is indented one step deeper than its Unterseite");
+const ebene3Tree = parseWebsiteStructure(ebene3Text);
+assert.equal(ebene3Tree.nodeCount, 8);
+assert.equal(ebene3Tree.nodes[0]?.children[0]?.children[0]?.children[0]?.label, "Flachdachsanierung");
+assert.deepEqual(
+  briefingFromStructureTree(ebene3Tree.nodes).map((p) => [p.slug, p.page_role, p.page_type, p.pillar_name]),
+  ebene3.pages.map((p) => [p.slug, p.page_role, p.page_type, p.pillar_name]),
+  "tree → pages keeps the third level under its Hauptsilo",
+);
+assert.equal(briefingFromStructureTree(ebene3Tree.nodes)[3]!.level, 3);
+console.log("briefing layout with Ebene 3: ok");
+
 // Flat list: one name column next to a URL column, every page a Hauptsilo.
 const flat = parseContentStructureSheet([
   ["Seite", "L1", "URL"],
@@ -1043,7 +1136,8 @@ assert.match(prompt8.system, /Sätze, die bereits natürlich klingen, darfst du 
 assert.doesNotMatch(prompt8.system, /Schreibe jeden Satz neu|DrFlex/);
 assert.match(prompt8.system, /Handlungsaufforderungen mit Kontaktweg\. Unverändert bleiben außerdem: Fachbegriffe/);
 assert.match(prompt8.system, /\[FOTO: …\], \[QUELLE …\], \[DATUM\]/);
-assert.match(prompt8.system, /nach der amtlichen deutschen Rechtschreibung\. Du führst keine neuen Fehler ein; bestehende Fehler korrigierst du\./);
+// be85d77 replaced the general sentence by concrete grammar rules; the assertion still named the old wording.
+assert.match(prompt8.system, /nach der amtlichen deutschen Rechtschreibung\. Wenn du einen Satz umformulierst oder kürzt, prüfe danach den ganzen Satz:/);
 assert.match(prompt8.system, /Was im Block „Gesperrt“ steht, darf nicht im Text auftauchen, auch nicht sinngemäß\./);
 assert.match(prompt8.system, /\[LINK: …\]/);
 assert.match(prompt8.system, /\[BITTE PRÜFEN: …\]/);
