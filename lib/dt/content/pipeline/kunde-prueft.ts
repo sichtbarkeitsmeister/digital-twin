@@ -15,6 +15,8 @@ const FILLER = new Set([
 const CUSTOMER = /^kund(e|in|en|innen)$/;
 const CHECK = /^(prueft|prueft's|pruefen|geprueft|pruefung|klaert|klaeren|geklaert|klaerung|checkt|checken|gecheckt)$/;
 
+const fold1 = (text: string) => text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+
 function fold(text: string): string {
   return text
     .toLowerCase()
@@ -37,6 +39,26 @@ export function isKundePrueft(text: string | null | undefined): boolean {
   return words.every((w) => CUSTOMER.test(w) || CHECK.test(w) || FILLER.has(w));
 }
 
+/** Parts of a page's build (not statements about the business) an open point can be about. */
+const STRUCTURE_WORD =
+  /\b(?:quellen?(?:-?(?:abschnitt|angaben?|verzeichnis|block|liste|hinweis))?|abschnitt\w*|pflichtabschnitt\w*|ymyl\w*|(?:zwischen)?ueberschrift\w*|h[1-6]|hero\w*|verlinkung\w*|links?|linkziel\w*|meta\w*|title(?:-tag)?|wortzahl|textlaenge|keyword\w*|haupt-?keyword\w*|neben-?keyword\w*|struktur|gliederung|reihenfolge|faq\w*|fragen-?abschnitt|cta\w*|handlungsaufforderung\w*|autoren?(?:box|zeile|angabe)|disclaimer|haftungs\w*|rechtshinweis\w*|hinweisblock|platzhalter|marker|kurzzusammenfassung|zusammenfassung|einleitung|inhaltsverzeichnis)\b/;
+/** What such a point says about the part: it is missing, double, too long, in the wrong place. */
+const STRUCTURE_STATE = /\b(?:fehlt|fehlen|fehlend\w*|ohne|nicht vorhanden|zu lang\w*|zu kurz\w*|doppelt\w*|mehrfach|unvollstaendig\w*|falsch\w* (?:stelle|position|reihenfolge|ebene)|nicht am ende|nicht als eigen\w* abschnitt)\b/;
+
+/**
+ * A „Struktur-Befund“: an open point about how the page is built („Quelle fehlt“,
+ * „Quellen-Abschnitt fehlt (YMYL)“, „H1 fehlt“, „Einleitung zu lang“), not a question about a
+ * statement that only the customer can answer. Such a point never becomes a placeholder in the
+ * text: its title is no question, and a marker like [BITTE PRÜFEN: Quelle fehlt] tells the
+ * customer nothing. A text that is worded as a question („Gibt es eine Quelle für …?“) is one.
+ */
+export function isStructuralPoint(text: string | null | undefined): boolean {
+  const value = (text ?? "").replace(/\s+/g, " ").trim();
+  if (!value || /\?\s*$/.test(value)) return false;
+  const folded = fold(value);
+  return STRUCTURE_WORD.test(folded) && STRUCTURE_STATE.test(folded);
+}
+
 /** The placeholder for a question the customer is checking: the question in one sentence. */
 export function kundePrueftPlaceholder(question: string): string {
   const one = question.replace(/\s+/g, " ").trim().replace(/[\[\]]/g, "");
@@ -51,12 +73,17 @@ export function pendingCheck(question: string): ContentPendingCheck {
   return { question: question.replace(/\s+/g, " ").trim(), placeholder: kundePrueftPlaceholder(question) };
 }
 
+/** The open checks that are questions about the content; a Struktur-Befund is none (`isStructuralPoint`). */
+export function contentPendingChecks(pending: readonly ContentPendingCheck[] | null | undefined): ContentPendingCheck[] {
+  return (pending ?? []).filter((p) => !isStructuralPoint(p.question));
+}
+
 /**
  * The block for the prompts: which questions are with the customer and which placeholder stands
  * for each. Empty when there are none.
  */
 export function pendingChecksBlock(pending: readonly ContentPendingCheck[] | null | undefined): string {
-  const list = pending ?? [];
+  const list = contentPendingChecks(pending);
   if (list.length === 0) return "";
   return [
     "### Offen – der Kunde prüft noch (KUNDE PRÜFT)",
@@ -73,13 +100,15 @@ function plainOf(block: Pick<ContentTextBlock, "heading" | "html">): string {
  * After a step rewrote the text: a „KUNDE PRÜFT“ placeholder that was in an Abschnitt before and
  * is gone now comes back, as its own paragraph at the end of that Abschnitt (or of the text, when
  * the Abschnitt is gone). The steps must leave it as it is; this keeps it when one did not.
+ * Only for a real open question about the content: a placeholder made from a Struktur-Befund
+ * („Quelle fehlt“) is not put back.
  */
 export function keepPendingPlaceholders(
   after: readonly ContentTextBlock[],
   before: readonly ContentTextBlock[],
   pending: readonly ContentPendingCheck[] | null | undefined,
 ): { blocks: ContentTextBlock[]; restored: string[] } {
-  const placeholders = (pending ?? []).map((p) => p.placeholder);
+  const placeholders = contentPendingChecks(pending).map((p) => p.placeholder);
   if (placeholders.length === 0 || after.length === 0) return { blocks: [...after], restored: [] };
   const blocks = after.map((b) => ({ ...b }));
   const restored: string[] = [];
@@ -94,6 +123,24 @@ export function keepPendingPlaceholders(
   return { blocks, restored };
 }
 
+/**
+ * The text without the paragraphs that hold nothing but a placeholder made from a Struktur-Befund
+ * (`<p>[BITTE PRÜFEN: Quelle fehlt]</p>`, as „KUNDE PRÜFT“ used to set them). A placeholder inside a
+ * sentence stays: only the code's own paragraph is taken out.
+ */
+export function dropStructuralPlaceholders(blocks: readonly ContentTextBlock[]): { blocks: ContentTextBlock[]; dropped: string[] } {
+  const dropped: string[] = [];
+  const out = blocks.map((b) => {
+    const html = b.html.replace(/\s*<p>\s*(\[\s*BITTE\s+PR(?:Ü|UE)FEN\s*:?\s*([^\]<]*)\])\s*<\/p>/giu, (match: string, placeholder: string, inner: string) => {
+      if (!isStructuralPoint(fold1(inner ?? ""))) return match;
+      dropped.push(fold1(placeholder));
+      return "";
+    });
+    return html === b.html ? { ...b } : { ...b, html: html.trim() };
+  });
+  return { blocks: out, dropped };
+}
+
 /** The note line that marks a question as „KUNDE PRÜFT“ (`answeredInNotes` reads it back). */
 export function kundePrueftNoteLine(question: string): string {
   return `Zu „${question.replace(/\s+/g, " ").trim().slice(0, 600)}“: KUNDE PRÜFT – Platzhalter bleibt.`;
@@ -105,14 +152,13 @@ export function kundePrueftQuestionsInNotes(notes: readonly string[]): string[] 
   for (const note of notes) {
     for (const line of note.split("\n")) {
       const m = line.match(/^Zu „(.{4,600}?)“: KUNDE PRÜFT – Platzhalter bleibt\.$/);
-      if (m) out.add(m[1]!);
+      if (m && !isStructuralPoint(m[1]!)) out.add(m[1]!);
     }
   }
   return [...out];
 }
 
 const CHECK_PLACEHOLDER_RE = /\[\s*BITTE\s+PR(?:Ü|UE)FEN\s*:?\s*([^\]]*)\]/giu;
-const fold1 = (text: string) => text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
 /** Every [BITTE PRÜFEN: …] placeholder in a text, with the question inside it. */
 export function checkPlaceholdersIn(text: string): Array<{ placeholder: string; question: string }> {

@@ -13,8 +13,13 @@ import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
 import { normalizeAnswersOutput, type AnswersPassResult } from "../lib/dt/content/pipeline/answers";
 import { contentGapQuestions } from "../lib/dt/content/pipeline/gaps";
 import {
+  contentPendingChecks,
+  dropStructuralPlaceholders,
   isKundePrueft,
+  isStructuralPoint,
   keepPendingPlaceholders,
+  kundePrueftNoteLine,
+  kundePrueftQuestionsInNotes,
   kundePrueftPlaceholder,
   pendingCheck,
   pendingChecksBlock,
@@ -205,3 +210,38 @@ const context = (patch: Partial<ContentPipelineContext> = {}): ContentPipelineCo
 }
 
 console.log("OK: KUNDE PRÜFT tests passed");
+
+// --- Struktur-Befunde: no placeholder, nothing put back ---------------------------------------------
+{
+  for (const yes of ["Quelle fehlt", "Quellen-Abschnitt fehlt (YMYL)", "H1 fehlt", "Einleitung zu lang", "Interne Verlinkung auf das Hauptsilo fehlt", "FAQ-Abschnitt doppelt", "Meta-Description fehlt"]) {
+    assert.equal(isStructuralPoint(yes), true, yes);
+  }
+  for (const no of [QUESTION, "Preis fehlt", "Öffnungszeiten am Samstag unbelegt", "Gibt es eine Quelle für die Erfolgsquote?", "Garantie von 5 Jahren nicht belegt", "Wartezeit auf einen Termin fehlt", "", null]) {
+    assert.equal(isStructuralPoint(no), false, String(no));
+  }
+
+  // A „KUNDE PRÜFT“ note of a Struktur-Befund is no open check: not in the prompts, not marked, not put back.
+  const structuralNote = kundePrueftNoteLine("Quelle fehlt");
+  const k = buildContentKnowledge({ notes: [structuralNote, kundePrueftNoteLine(QUESTION)] });
+  assert.deepEqual(k.pending.map((p) => p.question), [QUESTION]);
+  assert.deepEqual(kundePrueftQuestionsInNotes([structuralNote, kundePrueftNoteLine(QUESTION)]), [QUESTION]);
+  const mixed = [pendingCheck("Quelle fehlt"), pendingCheck(QUESTION)];
+  assert.deepEqual(contentPendingChecks(mixed).map((p) => p.question), [QUESTION]);
+  assert.ok(!pendingChecksBlock(mixed).includes("Quelle fehlt"));
+
+  const before: ContentTextBlock[] = [{ id: "a", heading: "A", level: 2, html: `<p>Text.</p>\n<p>[BITTE PRÜFEN: Quelle fehlt]</p>\n<p>${PLACEHOLDER}</p>` }];
+  const after: ContentTextBlock[] = [{ id: "a", heading: "A", level: 2, html: "<p>Text neu.</p>" }];
+  const kept = keepPendingPlaceholders(after, before, mixed);
+  assert.deepEqual(kept.restored, [PLACEHOLDER], "only the real question comes back");
+  assert.ok(!kept.blocks[0]!.html.includes("Quelle fehlt"));
+
+  // The code's own paragraph of a Struktur-Befund goes; a real question and a placeholder inside a sentence stay.
+  const cleaned = dropStructuralPlaceholders([
+    ...before,
+    { id: "b", heading: "B", level: 2, html: "<p>Laut Studie [BITTE PRÜFEN: Quelle fehlt] sinkt das Risiko.</p>\n<p>[BITTE PRÜFEN: Quellen-Abschnitt fehlt (YMYL)]</p>" },
+  ]);
+  assert.deepEqual(cleaned.dropped, ["[BITTE PRÜFEN: Quelle fehlt]", "[BITTE PRÜFEN: Quellen-Abschnitt fehlt (YMYL)]"]);
+  assert.equal(cleaned.blocks[0]!.html, `<p>Text.</p>\n<p>${PLACEHOLDER}</p>`);
+  assert.equal(cleaned.blocks[1]!.html, "<p>Laut Studie [BITTE PRÜFEN: Quelle fehlt] sinkt das Risiko.</p>");
+  console.log("Struktur-Befunde: ok");
+}

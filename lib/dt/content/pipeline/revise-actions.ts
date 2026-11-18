@@ -28,6 +28,8 @@ import type { ContentPipelineContext } from "@/lib/dt/content/pipeline/prompts";
 import {
   checkPlaceholdersIn,
   findingCheckPlaceholders,
+  isKundePrueft,
+  isStructuralPoint,
   kundePrueftNoteLine,
   kundePrueftPlaceholder,
   kundePrueftQuestionsInNotes,
@@ -87,6 +89,9 @@ function requestOf(page: ContentPageRow, input: RevisionInput): ContentRevisionR
   const finding = findingOf(page, input.finding_key);
   if (input.finding_key && !finding) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
   const request: ContentRevisionRequest = { instruction: input.instruction?.trim() || null, info: input.info?.trim() || null, finding };
+  if (request.info && finding && isKundePrueft(request.info) && isStructuralPoint(finding.title)) {
+    return { ok: false, status: 422, message: "Dieser Punkt betrifft den Aufbau der Seite, keine Aussage im Text. Dafür kommt kein Platzhalter in den Text: bitte den Knopf „KUNDE PRÜFT“ am Punkt nutzen oder „So lassen“." };
+  }
   if (!request.instruction && !request.info && !request.finding) return { ok: false, status: 400, message: "Bitte beschreiben, was am Abschnitt anders werden soll." };
   return request;
 }
@@ -311,21 +316,27 @@ export async function keepFinding(
  * already in the text is used as it is; otherwise one with the point's title is set as its own
  * paragraph at the end of the Abschnitt the point is about (`inserted_in`), or at the end of the
  * text when the point names none.
+ *
+ * Only an open question about the content gets a placeholder. A Struktur-Befund („Quelle fehlt“,
+ * „Quellen-Abschnitt fehlt (YMYL)“; `isStructuralPoint`) is noted as with the customer and goes,
+ * and the text stays as it is (`structural`): its title is no question for the text.
  */
 export async function markFindingKundePrueft(
   service: SupabaseClient,
   page: ContentPageRow,
   key: string,
   now: Date = new Date(),
-): Promise<{ ok: true; marked: number; inserted_in: string | null } | Failure> {
+): Promise<{ ok: true; marked: number; inserted_in: string | null; structural: boolean } | Failure> {
   const finding = [...page.findings, ...page.final_findings, ...page.unresolved].find((f) => findingKey(f) === key);
   const next = withoutFinding(page, key);
   if (!finding || !next) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
   const blocks = parseBlocksFromHtml(page.html ?? "");
-  const questions = findingCheckPlaceholders(finding, blocks, findingTargetBlocks(finding, blocks));
+  const structural = isStructuralPoint(finding.title);
+  // Placeholders the point quotes; those made from a Struktur-Befund are no questions and stay unmarked.
+  const questions = findingCheckPlaceholders(finding, blocks, findingTargetBlocks(finding, blocks)).filter((q) => !isStructuralPoint(q));
   const patch: Record<string, unknown> = {};
   let insertedIn: string | null = null;
-  if (questions.length === 0) {
+  if (questions.length === 0 && !structural) {
     const blocker = revisionBlocker(page);
     if (blocker) return { ok: false, status: 409, message: blocker };
     if (blocks.length === 0) return { ok: false, status: 409, message: "Für diese Seite gibt es noch keinen Text." };
@@ -357,7 +368,7 @@ export async function markFindingKundePrueft(
     .update({ ...patch, ...next, notes, question_stop: { ...stop, kept } })
     .eq("id", page.id);
   if (error) return { ok: false, status: 500, message: contentDbErrorMessage(error, "Offener Punkt konnte nicht gespeichert werden") };
-  return { ok: true, marked: questions.length, inserted_in: insertedIn };
+  return { ok: true, marked: questions.length, inserted_in: insertedIn, structural: structural && questions.length === 0 };
 }
 
 export { ContentLlmError };

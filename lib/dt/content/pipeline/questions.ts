@@ -16,7 +16,7 @@
  *     in doubt); that one stops the page right after the Faktencheck.
  */
 
-import { isKundePrueft, pendingCheck, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
+import { isKundePrueft, isStructuralPoint, pendingCheck, type ContentPendingCheck } from "@/lib/dt/content/pipeline/kunde-prueft";
 import type { OrgContactData } from "@/lib/dt/contact-data";
 import { extractContactTextFacts } from "@/lib/dt/contact-data-crawl";
 import { CONTENT_STEP_FAKTENCHECK } from "@/lib/dt/content/pipeline/steps";
@@ -250,6 +250,8 @@ export function buildContentKnowledge(input: {
   const answered: ContentKnowledge["answered"] = [];
   const pending: ContentPendingCheck[] = [];
   const addPending = (question: string) => {
+    // A Struktur-Befund („Quelle fehlt“) is no open question about the content: no placeholder for it.
+    if (isStructuralPoint(question)) return;
     if (!pending.some((p) => similarQuestionText(p.question, question))) pending.push(pendingCheck(question));
   };
   for (const row of input.pool ?? []) {

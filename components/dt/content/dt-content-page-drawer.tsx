@@ -493,7 +493,7 @@ export function DtContentPageDrawer(props: {
   async function markKundePrueft(finding: ContentFinding) {
     if (!base) return;
     setBusy("kunde_prueft");
-    const res = await contentApi<{ review: ContentReview; marked: number; inserted_in: string | null }>(`${base}/findings/kunde-prueft`, {
+    const res = await contentApi<{ review: ContentReview; marked: number; inserted_in: string | null; structural?: boolean }>(`${base}/findings/kunde-prueft`, {
       method: "POST",
       body: { organisationId, finding_key: findingKey(finding) },
     });
@@ -505,6 +505,14 @@ export function DtContentPageDrawer(props: {
     setReview(res.data.review);
     setMode(null);
     setRevisePreview(null);
+    if (res.data.structural) {
+      // A point about the page's build („Quelle fehlt“) is no question for the text: no placeholder.
+      toast.success("Als KUNDE PRÜFT vermerkt", {
+        description: "Der Punkt betrifft den Aufbau der Seite, nicht eine Aussage im Text. Im Text steht dafür kein Platzhalter; der Punkt wird nicht erneut gemeldet.",
+      });
+      onChangedRef.current();
+      return;
+    }
     toast.success("Als KUNDE PRÜFT markiert", {
       description: res.data.inserted_in
         ? `Der Hinweis steht jetzt fett und gelb markiert im Text: ${res.data.inserted_in === "Ende des Textes" ? "am Ende des Textes" : `am Ende von „${res.data.inserted_in}“`}.`
@@ -1553,7 +1561,7 @@ export function DtContentPageDrawer(props: {
                                     className={cn(findingButtonClass, "border-yellow-400 bg-yellow-300 font-bold tracking-wide text-sbkm-navy hover:border-yellow-500 dark:border-yellow-400 dark:bg-yellow-300 dark:text-sbkm-navy")}
                                     disabled={Boolean(busy) || Boolean(jobId)}
                                     onClick={() => void markKundePrueft(f)}
-                                    title="Der Kunde prüft diesen Punkt: Die Stelle bleibt im Text und wird fett als „KUNDE PRÜFT“ markiert, auch im Export."
+                                    title="Der Kunde prüft diesen Punkt: Die Stelle bleibt im Text und wird fett als „KUNDE PRÜFT“ markiert, auch im Export. Bei Punkten zum Aufbau der Seite (z. B. „Quelle fehlt“) kommt kein Platzhalter in den Text."
                                   >
                                     KUNDE PRÜFT
                                   </button>
