@@ -102,6 +102,7 @@ import {
   type ContentPageRow,
   type ContentStepRow,
 } from "@/lib/dt/content/store";
+import { loadContentCoreRules } from "@/lib/dt/content/core-rules";
 import { loadContentStepPrompts } from "@/lib/dt/content/step-prompts";
 import { loadTexterPrompt } from "@/lib/dt/content/texter-prompt";
 import { loadContentTypePromptsForRun } from "@/lib/dt/content/type-prompts-db";
@@ -188,7 +189,7 @@ export async function loadContext(
   // The editable texts (Texter prompt, Textvorlagen, step instructions) are read for every
   // step, so a save under Globale Prompts reaches the next step without a deploy. So are the
   // client data: the Kontaktdaten and the Kundenwünsche (settings row and page row).
-  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts, contactData, pool] = await Promise.all([
+  const [{ data: organisation }, settingsRow, anbieter, outlinePages, existingText, typePrompts, texterPrompt, stepPrompts, contactData, pool, coreRules] = await Promise.all([
     service.from("organisations").select("name").eq("id", page.organisation_id).maybeSingle(),
     loadContentSettings(service, page.organisation_id),
     loadContentAnbieterSources(service, page.organisation_id),
@@ -199,6 +200,7 @@ export async function loadContext(
     loadContentStepPrompts(service),
     loadOrgContactData(service, page.organisation_id),
     loadOrgQuestions(service, page.organisation_id),
+    loadContentCoreRules(service),
   ]);
   const contact = contactPromptData(contactData.data, { ansprechpartnerRole: contactData.columns.firstContact?.role ?? null });
   if (!settingsRow) {
@@ -297,6 +299,7 @@ export async function loadContext(
       audience,
       typePrompts,
       texterPrompt,
+      coreRules,
       stepPrompts,
       notes: page.notes,
       contact,

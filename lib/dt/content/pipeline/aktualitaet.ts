@@ -127,7 +127,7 @@ export function aktualitaetSystemPrompt(context: ContentPipelineContext): string
     AKTUALITAET_RULES,
     DT_WEB_RESEARCH_INSTRUCTIONS,
     ...clientWishesRules(context),
-  ]);
+  ], context.coreRules);
 }
 
 /** Fingerprint of the text the research looks at; another text means the research is stale. */

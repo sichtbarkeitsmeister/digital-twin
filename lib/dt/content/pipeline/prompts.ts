@@ -92,6 +92,7 @@ import {
   type ContentBeleg,
   type ContentHeroKandidat,
 } from "@/lib/dt/content/pipeline/step-evidence";
+import { contentCoreRulesBlock } from "@/lib/dt/content/core-rules";
 import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentFreshness, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
@@ -152,6 +153,8 @@ export type ContentPipelineContext = {
    * them; a missing value means the code default.
    */
   texterPrompt?: string;
+  /** „Kernregeln“ of the agency (`core-rules.ts`): added to every step's system prompt. Empty or missing: none. */
+  coreRules?: string;
   /**
    * The editable step instructions (Globale Prompts → SEO … Lektorat). A missing or empty
    * one means the built-in default; the locked rules and the tool schema are added in code.
@@ -738,6 +741,8 @@ export function editorNotesBlock(notes: readonly string[]): string {
  * settings and no notes, and the prompt then keeps the text's own form of address and tone.
  */
 export type RephrasePromptContext = {
+  /** „Kernregeln“ of the agency; the Texte step passes them, the standalone tool has none. */
+  coreRules?: string;
   settings?: ContentTextSettings | null;
   notes: readonly string[];
   /** The page; in Texte also its keywords (Excel/briefing and the stored main keyword). */
@@ -1063,8 +1068,14 @@ export function stepInstruction(context: ContentPipelineContext, key: ContentSte
  * after it — the locked rules, step-specific blocks (SEO: Texter prompt and Textvorlage) and
  * the Branchenregel. The user message and the tool schema stay with the spec.
  */
-export function stepSystem(instruction: string, settings: ContentTextSettings, extra: readonly string[] = []): string {
-  return join([instruction, BASE_RULES, ...extra, brancheRules(settings)]);
+export function stepSystem(instruction: string, settings: ContentTextSettings, extra: readonly string[] = [], coreRules?: string | null): string {
+  return join([instruction, contentCoreRulesBlock(coreRules), BASE_RULES, ...extra, brancheRules(settings)]);
+}
+
+/** The Kernregeln as their own paragraph of a system prompt built by hand (Analyse, Endabnahme); empty without any. */
+function coreRulesPart(context: Pick<ContentPipelineContext, "coreRules">): string {
+  const block = contentCoreRulesBlock(context.coreRules);
+  return block ? `\n\n${block}` : "";
 }
 
 // --- Seitenkonzept und Themenplan (page-plan.ts) -------------------------------------------------
@@ -1090,7 +1101,7 @@ function analyse(context: ContentPipelineContext): ContentStepSpec {
     maxTokens: 7_500,
     system: `${BASE_RULES}
 
-${QUESTION_RULES}
+${QUESTION_RULES}${coreRulesPart(context)}
 
 Schritt ${CONTENT_STEP_ANALYSE} Analyse: Du legst fest, wonach Menschen suchen, wenn sie diese Seite brauchen, welche Fragen sie dabei haben, was die Seite leisten muss und welche Fakten dafür belegt sind. Du schreibst die Seite NICHT.
 
@@ -1317,7 +1328,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
       ...konzeptRules(context, PAGE_PLAN_RULES_SEO),
       HERO_KANDIDATEN_RULES,
       ...clientWishesRules(context),
-    ]),
+    ], context.coreRules),
     user: join([
       pageBlock(context),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE})`),
@@ -1362,7 +1373,7 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
       ...konzeptRules(context, PAGE_PLAN_RULES_CHECK),
       ...faktencheckClientRules(context),
       ...clientWishesRules(context),
-    ]),
+    ], context.coreRules),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1428,8 +1439,9 @@ export function geoSystemPrompt(
   settings: ContentTextSettings,
   instruction: string = DEFAULT_GEO_INSTRUCTION,
   extra: readonly string[] = [],
+  coreRules?: string | null,
 ): string {
-  return stepSystem(instruction, settings, extra);
+  return stepSystem(instruction, settings, extra, coreRules);
 }
 
 export const GEO_TOOL: Anthropic.Tool = {
@@ -1473,7 +1485,7 @@ export function freshnessSendBackBlock(context: Pick<ContentPipelineContext, "fr
 function geo(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: GEO_MAX_TOKENS,
-    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
+    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)], context.coreRules),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1500,7 +1512,7 @@ export const HORMOZI_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: HORMOZI_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "hormozi"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
+    system: stepSystem(stepInstruction(context, "hormozi"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)], context.coreRules),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1547,7 +1559,7 @@ function normalizeSelfScore(raw: unknown): SelfScore | null {
 function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: TEXT_STEP_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
+    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)], context.coreRules),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1600,7 +1612,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
 function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: TEXT_STEP_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
+    system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)], context.coreRules),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
@@ -1667,7 +1679,7 @@ function endabnahme(context: ContentPipelineContext): ContentStepSpec {
     maxTokens: ENDABNAHME_MAX_TOKENS,
     system: `${BASE_RULES}
 
-${QUESTION_RULES}
+${QUESTION_RULES}${coreRulesPart(context)}
 
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
 unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite, ein offener Punkt der Aktualitätsprüfung. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team), der Marker [DATUM] (das Datum setzt das Web-Team beim Veröffentlichen), z. B. „Zuletzt aktualisiert: [DATUM]“ oder „Stand: [DATUM]“, und Platzhalter aus „Offen – der Kunde prüft noch“ (die meldet das System selbst).
@@ -1723,6 +1735,8 @@ export function rephraseChunkPrompt(context: RephrasePromptContext, chunk: reado
       rephraseKeywordsBlock(context, chunk),
       rephraseBlockedBlock(context),
       rephraseWishesBlock(context),
+      // The system prompt is shared with the standalone Watermark tool, so the Kernregeln come here.
+      contentCoreRulesBlock(context.coreRules),
       notesBlock(context),
     ]),
   };
