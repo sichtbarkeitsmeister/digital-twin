@@ -12,7 +12,8 @@ import {
 } from "@/lib/dt/content/texter-prompt";
 
 const patchSchema = z.object({
-  prompt: z.string().max(TEXTER_PROMPT_MAX_CHARS),
+  // Checked again after trimming below; this bound only keeps absurd bodies out.
+  prompt: z.string().max(TEXTER_PROMPT_MAX_CHARS * 4, "Der Text-Prompt ist zu lang."),
 });
 
 function missingColumn(message: string): boolean {
@@ -78,7 +79,18 @@ export async function PATCH(req: Request) {
   }
 
   const trimmed = parsed.data.prompt.replace(/\r\n?/g, "\n").trim();
-  const nextStored = !trimmed || trimmed === DEFAULT_TEXTER_PROMPT ? null : trimmed.slice(0, TEXTER_PROMPT_MAX_CHARS);
+  // Never cut a prompt to fit: the end of it would be missing without anyone noticing.
+  if (trimmed.length > TEXTER_PROMPT_MAX_CHARS) {
+    const n = (value: number) => value.toLocaleString("de-DE");
+    return NextResponse.json(
+      {
+        ok: false,
+        message: `Der Text-Prompt hat ${n(trimmed.length)} Zeichen, erlaubt sind ${n(TEXTER_PROMPT_MAX_CHARS)}. Er wurde nicht gespeichert; es gilt weiter die zuletzt gespeicherte Fassung. Bitte um ${n(trimmed.length - TEXTER_PROMPT_MAX_CHARS)} Zeichen kürzen.`,
+      },
+      { status: 400 },
+    );
+  }
+  const nextStored = !trimmed || trimmed === DEFAULT_TEXTER_PROMPT ? null : trimmed;
 
   const { data, error } = await auth.supabase
     .from("dt_platform_settings")

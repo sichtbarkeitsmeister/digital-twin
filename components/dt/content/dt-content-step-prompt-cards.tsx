@@ -5,6 +5,7 @@ import { ListOrdered, Loader2, RotateCcw, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
+import { DtPromptLimitNotice } from "@/components/dt/content/dt-prompt-limit-notice";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -115,6 +116,7 @@ function StepPromptCard(props: {
           ))}
         </ul>
       ) : null}
+      <DtPromptLimitNotice label={`Der ${meta.label}-Prompt`} length={draft.length} max={CONTENT_STEP_PROMPT_MAX_CHARS} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p
           className={
@@ -125,6 +127,7 @@ function StepPromptCard(props: {
         >
           {!props.custom && !dirty ? "Standard · " : ""}
           {draft.length.toLocaleString("de-DE")} / {CONTENT_STEP_PROMPT_MAX_CHARS.toLocaleString("de-DE")} Zeichen
+          {dirty ? " · nicht gespeichert" : ""}
         </p>
         <div className="flex flex-wrap gap-2">
           <DtPillButton

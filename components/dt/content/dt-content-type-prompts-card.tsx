@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { cn } from "@/components/dt/cn";
 import { contentApi } from "@/components/dt/content/content-api";
 import { DtTextarea } from "@/components/dt/dt-field";
+import { DtPromptLimitNotice } from "@/components/dt/content/dt-prompt-limit-notice";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { formatContentDate } from "@/lib/dt/content/presentation";
 import { CONTENT_STEP_PROMPTS_HREF } from "@/lib/dt/content/step-prompts";
@@ -81,9 +82,11 @@ export function DtContentTypePromptsCard(props: { variant?: ContentTypePromptsCa
 
   const dirty = useMemo(() => Boolean(state && draft && !samePrompts(state.prompts, draft)), [state, draft]);
   const custom = state ? hasCustomContentTypePrompts(state.prompts) : false;
+  // A field's maxLength used to cut a pasted Vorlage without a word; now the card says so and does not save.
+  const tooLong = CONTENT_TYPE_PROMPT_KEYS.some((key) => (draft?.[key] ?? "").length > CONTENT_TYPE_PROMPT_MAX_CHARS);
 
   async function save() {
-    if (!draft || !dirty || busy) return;
+    if (!draft || !dirty || busy || tooLong) return;
     setBusy("save");
     try {
       const res = await contentApi<ContentTypePromptsResult>(ENDPOINT, { method: "PUT", body: { prompts: draft } });
@@ -209,29 +212,35 @@ export function DtContentTypePromptsCard(props: { variant?: ContentTypePromptsCa
                     <label htmlFor={`type-prompt-${variant}-${key}`} className="text-sm font-semibold text-sbkm-navy dark:text-white">
                       {CONTENT_TYPE_PROMPT_LABELS[key]}
                     </label>
-                    <span className="text-[11px] tabular-nums text-sbkm-ink-500 dark:text-white/45">
+                    <span
+                      className={
+                        value.length > CONTENT_TYPE_PROMPT_MAX_CHARS
+                          ? "text-[11px] font-semibold tabular-nums text-red-700 dark:text-red-300"
+                          : "text-[11px] tabular-nums text-sbkm-ink-500 dark:text-white/45"
+                      }
+                    >
                       {isDefault ? "Standard · " : ""}
-                      {value.length}/{CONTENT_TYPE_PROMPT_MAX_CHARS}
+                      {value.length.toLocaleString("de-DE")} / {CONTENT_TYPE_PROMPT_MAX_CHARS.toLocaleString("de-DE")}
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed text-sbkm-ink-500 dark:text-white/45">{CONTENT_TYPE_PROMPT_HELP[key]}</p>
                   <DtTextarea
                     id={`type-prompt-${variant}-${key}`}
                     value={value}
-                    maxLength={CONTENT_TYPE_PROMPT_MAX_CHARS}
                     rows={7}
                     disabled={!draft || Boolean(busy)}
                     placeholder={DEFAULT_CONTENT_TYPE_PROMPTS[key] ? undefined : "Noch keine Vorlage. Hier eintragen, wie dieser Seitentyp geschrieben wird."}
                     onChange={(event) => setDraft((prev) => (prev ? { ...prev, [key]: event.target.value } : prev))}
                     className="min-h-[160px] resize-y text-xs leading-relaxed"
                   />
+                  <DtPromptLimitNotice label={`Die Vorlage „${CONTENT_TYPE_PROMPT_LABELS[key]}“`} length={value.length} max={CONTENT_TYPE_PROMPT_MAX_CHARS} />
                 </div>
               );
             })}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <DtPillButton type="button" size="sm" disabled={!dirty || Boolean(busy)} onClick={() => void save()}>
+            <DtPillButton type="button" size="sm" disabled={!dirty || Boolean(busy) || tooLong} onClick={() => void save()}>
               {busy === "save" ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Save className="size-3.5" aria-hidden />}
               Speichern
             </DtPillButton>
