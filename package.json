@@ -16,6 +16,7 @@
     "test:anbieter-to-seo": "tsx scripts/test-anbieter-to-seo.ts",
     "test:content-mapping": "tsx scripts/test-content-mapping.ts",
     "test:content-blocks": "tsx scripts/test-content-blocks.ts",
+    "test:content-finding-terms": "tsx scripts/test-content-finding-terms.ts",
     "test:content-page-health": "tsx scripts/test-content-page-health.ts",
     "test:content-step-truncation": "tsx scripts/test-content-step-truncation.ts",
     "test:content-page-facts": "tsx scripts/test-content-page-facts.ts",

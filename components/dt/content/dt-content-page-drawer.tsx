@@ -179,6 +179,8 @@ export function DtContentPageDrawer(props: {
   const [revisePreview, setRevisePreview] = useState<RevisionPreviewData | null>(null);
   /** „Vorschlag übernehmen“: the open points (by key) whose proposals „Jetzt umsetzen“ works in together. */
   const [chosen, setChosen] = useState<string[]>([]);
+  /** Open points the person chose to apply to every Abschnitt (they name no Abschnitt and no word to follow). */
+  const [wholeTextKeys, setWholeTextKeys] = useState<string[]>([]);
   /** While „Jetzt umsetzen“ runs: Abschnitt n of total. */
   const [applying, setApplying] = useState<{ done: number; total: number } | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -320,8 +322,13 @@ export function DtContentPageDrawer(props: {
   /** The Abschnitt each open point is about, when the text shows it („Vorschlag übernehmen“ needs one). */
   const findingTargets = useMemo(() => {
     const parsed = parseBlocksFromHtml(review?.html ?? "");
-    return new Map(findings.map((f) => [findingKey(f), findingTargetBlocks(f, parsed)] as const));
-  }, [findings, review?.html]);
+    return new Map(
+      findings.map((f) => {
+        const key = findingKey(f);
+        return [key, wholeTextKeys.includes(key) ? parsed.map((b) => b.id) : findingTargetBlocks(f, parsed)] as const;
+      }),
+    );
+  }, [findings, review?.html, wholeTextKeys]);
   // Chosen points that are gone (done, or the page changed) drop out of the choice.
   const chosenNow = chosen.filter((key) => findingTargets.has(key));
   const questions = useMemo(() => review?.questions ?? [], [review]);
@@ -467,6 +474,12 @@ export function DtContentPageDrawer(props: {
     }
     const parsed = parseBlocksFromHtml(review?.html ?? "");
     const order = parsed.map((b) => b.id).filter((id) => groups.has(id));
+    if (
+      order.length > 4 &&
+      !window.confirm(`Die Vorschläge werden in ${order.length} Abschnitten umgesetzt, einzeln und der Reihe nach (ein KI-Aufruf je Abschnitt, einige Cent). Fortfahren?`)
+    ) {
+      return;
+    }
     const lastOf = new Map<string, string>();
     for (const id of order) for (const key of groups.get(id)!) lastOf.set(key, id);
     // A point whose earlier Abschnitt failed stays open, even when its last one works.
@@ -1551,17 +1564,33 @@ export function DtContentPageDrawer(props: {
                                       title="Vormerken. Alle vorgemerkten Vorschläge werden mit „Jetzt umsetzen“ gemeinsam umgesetzt."
                                     >
                                       {chosenNow.includes(findingKey(f)) ? "✓ Vorschlag übernommen" : "Vorschlag übernehmen"}
+                                      {wholeTextKeys.includes(findingKey(f)) ? " (ganzer Text)" : ""}
                                     </button>
                                   ) : f.proposal ? (
-                                    <button
-                                      type="button"
-                                      className={findingButtonClass}
-                                      disabled={Boolean(busy) || Boolean(jobId)}
-                                      onClick={() => startRevise(f, "proposal")}
-                                      title="Der Abschnitt ist nicht eindeutig: hier einzeln mit Abschnittswahl umsetzen."
-                                    >
-                                      Vorschlag umsetzen
-                                    </button>
+                                    <>
+                                      <button
+                                        type="button"
+                                        className={findingButtonClass}
+                                        disabled={Boolean(busy) || Boolean(jobId)}
+                                        onClick={() => startRevise(f, "proposal")}
+                                        title="Der Abschnitt ist nicht eindeutig: hier einzeln mit Abschnittswahl umsetzen."
+                                      >
+                                        Vorschlag umsetzen
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={findingButtonClass}
+                                        disabled={Boolean(busy) || Boolean(jobId)}
+                                        onClick={() => {
+                                          const key = findingKey(f);
+                                          setWholeTextKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
+                                          setChosen((prev) => (prev.includes(key) ? prev : [...prev, key]));
+                                        }}
+                                        title="Der Punkt betrifft keinen einzelnen Abschnitt: der Vorschlag wird in allen Abschnitten des Textes umgesetzt, einzeln und der Reihe nach (ein KI-Aufruf je Abschnitt)."
+                                      >
+                                        Im ganzen Text umsetzen
+                                      </button>
+                                    </>
                                   ) : null}
                                   <button
                                     type="button"
