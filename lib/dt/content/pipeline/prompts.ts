@@ -81,6 +81,17 @@ import {
   type ContentSeitenkonzept,
   type ContentThema,
 } from "@/lib/dt/content/pipeline/page-plan";
+import {
+  BELEGLISTE_RULES,
+  BELEGLISTE_SCHEMA,
+  HERO_KANDIDATEN_RULES,
+  HERO_KANDIDATEN_SCHEMA,
+  heroKandidatenBlock,
+  normalizeBelegliste,
+  normalizeHeroKandidaten,
+  type ContentBeleg,
+  type ContentHeroKandidat,
+} from "@/lib/dt/content/pipeline/step-evidence";
 import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentFreshness, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
@@ -279,7 +290,9 @@ export type TextOutput = {
 
 export type SelfScore = { direktheit: number; rhythmus: number; vertrauen: number; natuerlichkeit: number; dichte: number };
 export type VermenschlichungOutput = TextOutput & { self_score: SelfScore | null };
-export type FaktencheckOutput = { findings: ContentFinding[]; questions: ContentQuestion[] };
+/** The SEO step's answer: the text and the candidates it compared for the Hero-Überschrift (`step-evidence.ts`). */
+export type SeoOutput = TextOutput & { hero_kandidaten: ContentHeroKandidat[] };
+export type FaktencheckOutput = { findings: ContentFinding[]; questions: ContentQuestion[]; belegliste?: ContentBeleg[] };
 export type LektoratOutput = TextOutput & { final_findings: ContentFinding[] };
 export type EndabnahmeOutput = { unresolved: ContentFinding[]; summary: string };
 
@@ -1001,8 +1014,9 @@ export const SEO_BLOCKS_DESCRIPTION =
 
 export const SEO_TEXT_TOOL_SCHEMA: Anthropic.Tool["input_schema"] = {
   type: "object",
-  properties: { ...TEXT_PROPERTIES, blocks: { ...BLOCKS_SCHEMA, description: SEO_BLOCKS_DESCRIPTION } },
-  required: ["title", "meta_description", "blocks"],
+  // The candidates come first: the model compares six Hero-Überschriften before it writes the text.
+  properties: { hero_kandidaten: HERO_KANDIDATEN_SCHEMA, ...TEXT_PROPERTIES, blocks: { ...BLOCKS_SCHEMA, description: SEO_BLOCKS_DESCRIPTION } },
+  required: ["hero_kandidaten", "title", "meta_description", "blocks"],
 };
 
 // --- page type variants of the SEO step --------------------------------------------------------
@@ -1301,6 +1315,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
       `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
       QUESTION_RULES,
       ...konzeptRules(context, PAGE_PLAN_RULES_SEO),
+      HERO_KANDIDATEN_RULES,
       ...clientWishesRules(context),
     ]),
     user: join([
@@ -1318,9 +1333,12 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
       description: "Der vollständige Seitentext in Abschnitten, mit Title und Meta-Description.",
       input_schema: SEO_TEXT_TOOL_SCHEMA,
     },
-    normalize: (json, ctx): TextOutput => {
+    normalize: (json, ctx): SeoOutput => {
       const out = normalizeTextOutput(json, ctx);
-      return { ...out, blocks: ensureHeroPlaceholder(out.blocks) };
+      const blocks = ensureHeroPlaceholder(out.blocks);
+      // The chosen candidate is the one that stands in the text, whatever the model marked.
+      const heroHeading = blocks.find((b) => b.id === "zusammenfassung")?.heading ?? null;
+      return { ...out, blocks, hero_kandidaten: normalizeHeroKandidaten(rec(json).hero_kandidaten, heroHeading) };
     },
   };
 }
@@ -1340,6 +1358,7 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
     system: stepSystem(stepInstruction(context, "faktencheck"), context.settings, [
       QUESTION_RULES,
       FAKTENCHECK_QUESTION_RULES,
+      BELEGLISTE_RULES,
       ...konzeptRules(context, PAGE_PLAN_RULES_CHECK),
       ...faktencheckClientRules(context),
       ...clientWishesRules(context),
@@ -1361,6 +1380,7 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
       input_schema: {
         type: "object",
         properties: {
+          belegliste: BELEGLISTE_SCHEMA,
           findings: { ...FINDINGS_SCHEMA, maxItems: CONTENT_MAX_FINDINGS },
           questions: {
             type: "array",
@@ -1383,13 +1403,13 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
             },
           },
         },
-        required: ["findings", "questions"],
+        required: ["belegliste", "findings", "questions"],
       },
     },
     normalize: (json, ctx): FaktencheckOutput => {
       const r = rec(json);
       const ids = blockIds(ctx.blocks);
-      return { findings: normalizeFindings(r.findings, ids), questions: normalizeQuestions(r.questions, ids) };
+      return { findings: normalizeFindings(r.findings, ids), questions: normalizeQuestions(r.questions, ids), belegliste: normalizeBelegliste(r.belegliste, ids) };
     },
   };
 }
@@ -1458,6 +1478,7 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
       pageBlock(context),
       currentTextBlock(context),
       konzeptBlock(context),
+      heroKandidatenBlock(context.outputs[CONTENT_STEP_SEO]),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – Fragen, die der Text abdecken muss`),
       outputBlock(context, CONTENT_STEP_FAKTENCHECK, `Faktencheck (Schritt ${CONTENT_STEP_FAKTENCHECK}) – umsetzen`),
       freshnessSendBackBlock(context),
@@ -1484,6 +1505,7 @@ function hormozi(context: ContentPipelineContext): ContentStepSpec {
       pageBlock(context),
       currentTextBlock(context),
       konzeptBlock(context),
+      heroKandidatenBlock(context.outputs[CONTENT_STEP_SEO]),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – hormozi, conversion_goal und usable_facts`),
       anbieterBlock(context),
       kontaktBlock(context),
