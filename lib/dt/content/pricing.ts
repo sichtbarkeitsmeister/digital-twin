@@ -35,14 +35,38 @@ export function priceForModel(model: string | null | undefined): Price {
   return PRICES_USD_PER_MTOK.find((p) => p.match.test(model)) ?? DEFAULT_PRICE;
 }
 
+/**
+ * Prompt caching (Anthropic): a cached part of the input is billed at another rate than the rest.
+ * Writing an entry costs 1.25× the input price (5-minute entries, the only kind Texte writes);
+ * reading one costs 0.05× on Sonnet 5.5 and Opus 5.5 and 0.1× on the other models.
+ */
+export const CACHE_WRITE_FACTOR = 1.25;
+
+export function cacheReadFactor(model: string | null | undefined): number {
+  return model && /(?:sonnet|opus)-5-5/i.test(model) ? 0.05 : 0.1;
+}
+
+/** Tokens of one call. `inputTokens` is everything that went in, the cached parts included. */
+export type ContentTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  /** Of `inputTokens`: written to the prompt cache by this call. */
+  cacheWriteTokens?: number;
+  /** Of `inputTokens`: read from the prompt cache. */
+  cacheReadTokens?: number;
+};
+
 export function estimateCostEur(
   model: string | null | undefined,
-  usage: { inputTokens: number; outputTokens: number },
+  usage: ContentTokenUsage,
   rate = usdEurRate(),
 ): number {
   const price = priceForModel(model);
+  const write = Math.max(0, usage.cacheWriteTokens ?? 0);
+  const read = Math.max(0, usage.cacheReadTokens ?? 0);
+  const plain = Math.max(0, usage.inputTokens - write - read);
   const usd =
-    (Math.max(0, usage.inputTokens) / 1_000_000) * price.inputUsd +
+    ((plain + write * CACHE_WRITE_FACTOR + read * cacheReadFactor(model)) / 1_000_000) * price.inputUsd +
     (Math.max(0, usage.outputTokens) / 1_000_000) * price.outputUsd;
   return Math.round(usd * rate * 10_000) / 10_000;
 }

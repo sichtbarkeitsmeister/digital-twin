@@ -56,13 +56,15 @@ import {
   unchangedAktualitaetOutput,
   type AktualitaetOutput,
 } from "@/lib/dt/content/pipeline/aktualitaet";
-import { ContentLlmError, callContentResearch, callContentTool } from "@/lib/dt/content/pipeline/llm";
+import { ContentLlmError, callContentResearch, callContentTool, contentPromptCacheEnabled, type ContentPromptCache } from "@/lib/dt/content/pipeline/llm";
 import { extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
 import { keepPendingPlaceholders } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { PAGE_FACTS_USAGE_MODE, emptyPageFacts, evaluationSkipReason, pageFactsFromCall, pageFactsPrompt } from "@/lib/dt/content/pipeline/page-facts";
 import { readPageFacts, withoutPageFacts, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import {
   contentStepSpec,
+  contentStepTools,
+  sharedContextBlocks,
   type ContentPipelineContext,
   type ContentStepSpec,
   type FaktencheckOutput,
@@ -88,7 +90,7 @@ import {
   contentStepSkippable,
   type ContentStepDefinition,
 } from "@/lib/dt/content/pipeline/steps";
-import { estimateCostEur, estimateWebSearchCostEur, roundEur } from "@/lib/dt/content/pricing";
+import { estimateCostEur, estimateWebSearchCostEur, roundEur, type ContentTokenUsage } from "@/lib/dt/content/pricing";
 import { ContentTextLimitError, htmlToMarkdown, parseBlocksFromHtml, renderBlocksHtml, type ContentTextBlock } from "@/lib/dt/content/render";
 import {
   contentDbErrorMessage,
@@ -344,7 +346,23 @@ async function upsertStep(
   if (error) throw new Error(contentDbErrorMessage(error, "Schritt konnte nicht gespeichert werden"));
 }
 
-type ModelCall = { json: unknown; usage: { inputTokens: number; outputTokens: number }; model: string; stopReason?: string | null };
+type ModelCall = { json: unknown; usage: ContentTokenUsage; model: string; stopReason?: string | null };
+
+/**
+ * How much of a step's input came from the prompt cache, for the step row (`token_usage`): a
+ * `cache_read` of 0 on the second step of a page means the shared beginning did not match.
+ */
+export function stepTokenUsage(calls: readonly { usage: ContentTokenUsage }[]): { input: number; output: number; cache_write: number; cache_read: number } {
+  return calls.reduce(
+    (sum, call) => ({
+      input: sum.input + call.usage.inputTokens,
+      output: sum.output + call.usage.outputTokens,
+      cache_write: sum.cache_write + (call.usage.cacheWriteTokens ?? 0),
+      cache_read: sum.cache_read + (call.usage.cacheReadTokens ?? 0),
+    }),
+    { input: 0, output: 0, cache_write: 0, cache_read: 0 },
+  );
+}
 
 /** `stop_reason` of the step's last call, for the step row. */
 function lastStopReason(calls: readonly ModelCall[]): string | null {
@@ -375,6 +393,12 @@ function keepPending(output: unknown, context: ContentPipelineContext): unknown 
   return { ...(output as Record<string, unknown>), blocks: kept.blocks };
 }
 
+/** The shared beginning of every step's request for this page: all step tools, then the organisation's context. */
+export function stepPromptCache(context: ContentPipelineContext): ContentPromptCache {
+  const shared = sharedContextBlocks(context);
+  return { tools: contentStepTools(context), prefix: [shared.org, shared.audience] };
+}
+
 /**
  * One tool call on Claude, plus the step's own second attempt when its `retryHint` asks for
  * one and enough of the budget is left. Both calls are billed; the better-scored output is
@@ -389,9 +413,14 @@ async function callStep(
 ): Promise<{ output: unknown; calls: ModelCall[] }> {
   const budget = timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const started = Date.now();
+  // Prompt caching: the organisation's context opens the request, the same for every step, and the
+  // user message holds only what belongs to this page and step. Without `userRest` (a step that
+  // builds its own message) or with caching switched off, the request is sent as before.
+  const cache = spec.userRest != null && contentPromptCacheEnabled() ? stepPromptCache(context) : null;
+  const baseUser = cache ? spec.userRest! : spec.user;
   const invoke = (user: string, timeout: number | undefined): Promise<ModelCall> =>
-    callContentTool({ models, system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout });
-  const first = await invoke(spec.user, timeoutMs);
+    callContentTool({ models, system: spec.system, user, tool: spec.tool, maxTokens: spec.maxTokens, timeoutMs: timeout, cache });
+  const first = await invoke(baseUser, timeoutMs);
   let output: unknown;
   try {
     output = spec.normalize(first.json, context);
@@ -410,7 +439,7 @@ async function callStep(
   const remaining = budget - (Date.now() - started);
   if (hint && remaining >= MIN_RETRY_MS) {
     try {
-      const second = await invoke(`${spec.user}\n\n${hint}`, remaining);
+      const second = await invoke(`${baseUser}\n\n${hint}`, remaining);
       calls.push(second);
       const retried = keepPending(spec.normalize(second.json, context), context);
       const better = spec.score ? spec.score(retried) >= spec.score(output) : true;
@@ -486,10 +515,8 @@ export async function runContentStep(
   const spec = contentStepSpec(step, context);
   const { output, calls } = await callStep(spec, context, models[def.tier], timeoutMs);
   const model = calls[calls.length - 1]!.model;
-  const usage = calls.reduce(
-    (sum, call) => ({ inputTokens: sum.inputTokens + call.usage.inputTokens, outputTokens: sum.outputTokens + call.usage.outputTokens }),
-    { inputTokens: 0, outputTokens: 0 },
-  );
+  const tokens = stepTokenUsage(calls);
+  const usage = { inputTokens: tokens.input, outputTokens: tokens.output };
   const costEur = calls.reduce((sum, call) => sum + estimateCostEur(call.model, call.usage), 0);
 
   for (const call of calls) {
@@ -519,7 +546,7 @@ export async function runContentStep(
   const settled = await settleQuestionPlan(service, page, patch, output);
   // The Analyse's row keeps the Faktenauszug made before it, and its tokens and cost.
   const facts = def.step === CONTENT_STEP_ANALYSE ? context.pageFacts ?? null : null;
-  const storedOutput = facts ? { ...settled, page_facts: facts } : settled;
+  const storedOutput = { ...(facts ? { ...settled, page_facts: facts } : settled), token_usage: tokens };
 
   await upsertStep(service, page, step, {
     status: stepStatus,
