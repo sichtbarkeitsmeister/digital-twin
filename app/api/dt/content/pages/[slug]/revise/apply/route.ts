@@ -14,6 +14,7 @@ const bodySchema = z.object({
   after: blockSchema,
   instruction: z.string().max(REVISE_INSTRUCTION_MAX).optional().nullable(),
   info: z.string().max(REVISE_INSTRUCTION_MAX).optional().nullable(),
+  info_kind: z.enum(["fakt", "anweisung"]).optional().nullable(),
   finding_key: z.string().max(4_000).optional().nullable(),
 });
 

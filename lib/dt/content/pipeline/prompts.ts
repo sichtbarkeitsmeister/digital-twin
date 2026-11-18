@@ -686,7 +686,7 @@ export function pageBlock(context: ContentPipelineContext): string {
 function formatNotes(notes: readonly string[]): string {
   if (notes.length === 0) return "";
   return [
-    "## Anmerkungen der Redaktion (gelten vor allem anderen; Antworten darin sind bestätigte Fakten)",
+    "## Anmerkungen der Redaktion (gelten vor allem anderen; Antworten und Angaben darin sind bestätigte Fakten; eine „Anweisung der Redaktion“ wird befolgt und nie als Text in die Seite geschrieben)",
     ...notes.map((n, i) => `${i + 1}. ${n}`),
   ].join("\n");
 }

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
-import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences, withoutFinding } from "../lib/dt/content/finding-target";
+import { findingKey, findingTargetBlock, findingTargetBlocks, looksLikeInstruction, markNewSentences, withoutFinding } from "../lib/dt/content/finding-target";
 import { parseContentPagePatch } from "../lib/dt/content/page-patch";
 import { approvalPatch, rerunPagePatch } from "../lib/dt/content/pipeline/actions";
 import type { callContentTool } from "../lib/dt/content/pipeline/llm";
@@ -153,6 +153,21 @@ function checkTests() {
   assert.equal(REVISE_TOOL.name, "submit_abschnitt");
   assert.match(revisionOrder({ finding, info: "Ja, pro Uhr gibt es eine schriftliche Aufstellung." }), /Angabe der Redaktion \(bestätigter Fakt, genau so übernehmen\): Ja, pro Uhr/);
   assert.match(revisionOrder({ finding, info: "KUNDE PRÜFT" }), /Platzhalter \[BITTE PRÜFEN: Offene Frage \(nicht gestellt\)\]/);
+  // „Eigene Angabe“ as an instruction: carried out, never a fact, never quoted in the text.
+  const directive: ContentRevisionRequest = { finding, directive: "platzhalte drin lassen" };
+  const order = revisionOrder(directive);
+  assert.match(order, /Anweisung der Redaktion \(ausführen; ihr Wortlaut kommt nie in den Text\): platzhalte drin lassen/);
+  assert.ok(!/bestätigter Fakt/.test(order) && !/Vorschlag \(umsetzen\)/.test(order), "no fact, and the proposal is context only");
+  assert.match(REVISE_RULES, /Eine „Anweisung der Redaktion“ ist kein Fakt und kein Text für die Seite/);
+  assert.match(revisionNote(blocks[1]!, directive), /^Anweisung der Redaktion zu „.+“ \(Abschnitt .+; ausgeführt, kein Text für die Seite\): platzhalte drin lassen$/);
+  const quoted = checkRevision({ block: { id: blocks[1]!.id, level: blocks[1]!.level, heading: blocks[1]!.heading, html: `${blocks[1]!.html}<p>Platzhalte drin lassen.</p>` } }, blocks[1]!, directive, "");
+  assert.ok(!quoted.ok && quoted.reasons.includes("Wortlaut der Anweisung steht im Text"), "the wording of an instruction in the text is refused");
+  for (const yes of ["platzhalte drin lassen", "Platzhalter stehen lassen.", "bitte kürzen", "Den zweiten Satz streichen", "so lassen", "Preis nicht nennen"]) {
+    assert.equal(looksLikeInstruction(yes), true, yes);
+  }
+  for (const no of ["Ja, pro Uhr gibt es eine schriftliche Aufstellung.", "Wir streichen auch Fassaden", "Die Erstberatung kostet 120 €", "Mo–Fr 9–17 Uhr", ""]) {
+    assert.equal(looksLikeInstruction(no), false, no);
+  }
 
   const allowed = ctx.sections.map((s) => s.current).join("\n");
   const json = (heading: string | null, h: string) => ({ block: { id: "anders", heading: heading ?? "", level: 3, html: h } });

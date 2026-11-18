@@ -49,6 +49,11 @@ export type RevisionInput = {
   block_id: string;
   instruction?: string | null;
   info?: string | null;
+  /**
+   * What `info` („Eigene Angabe“) is: a fact that is worked into the text (the default), or an
+   * instruction that is carried out and never written into the text.
+   */
+  info_kind?: "fakt" | "anweisung" | null;
   finding_key?: string | null;
   /** „Jetzt umsetzen“: several open points on this Abschnitt, all proposals at once. */
   finding_keys?: string[] | null;
@@ -86,8 +91,10 @@ function requestOf(page: ContentPageRow, input: RevisionInput): ContentRevisionR
   }
   const finding = findingOf(page, input.finding_key);
   if (input.finding_key && !finding) return { ok: false, status: 409, message: "Diesen offenen Punkt gibt es nicht mehr. Bitte die Seite neu laden." };
-  const request: ContentRevisionRequest = { instruction: input.instruction?.trim() || null, info: input.info?.trim() || null, finding };
-  if (!request.instruction && !request.info && !request.finding) return { ok: false, status: 400, message: "Bitte beschreiben, was am Abschnitt anders werden soll." };
+  const own = input.info?.trim() || null;
+  const directive = input.info_kind === "anweisung" ? own : null;
+  const request: ContentRevisionRequest = { instruction: input.instruction?.trim() || null, info: directive ? null : own, directive, finding };
+  if (!request.instruction && !request.info && !request.directive && !request.finding) return { ok: false, status: 400, message: "Bitte beschreiben, was am Abschnitt anders werden soll." };
   return request;
 }
 

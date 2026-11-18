@@ -18,8 +18,6 @@ import { approvalPatch, rerunPagePatch, resetContentPage, stopContentRun, submit
 import {
   answerTargets,
   applyDrops,
-  fillPlaceholder,
-  isLiteralAnswer,
   noNewNumbers,
   normalizeAnswersOutput,
   removeSentenceWith,
@@ -581,20 +579,21 @@ function testPassChecks() {
   assert.deepEqual([ok.changed, ok.fallback], [["kosten"], []]);
   const invented = normalizeAnswersOutput({ blocks: [{ id: "kosten", heading: "Was kostet die Beratung?", level: 2, html: "<p>Die Stunde kostet 120 €, Firmen zahlen 150 €.</p>" }] }, { blocks, targets });
   assert.deepEqual([invented.changed, invented.fallback, invented.rejected[0]?.reason], [[], ["kosten"], "Zahl, die weder im Abschnitt noch in einer Antwort steht"]);
-  assert.match(invented.blocks.find((b) => b.id === "kosten")!.html, /Danach kostet die Stunde 120 €\./, "fallback: the placeholder swapped for the answer");
+  assert.match(invented.blocks.find((b) => b.id === "kosten")!.html, /\[BITTE PRÜFEN: Preis pro Stunde\]/, "no answer pasted in by code: the placeholder stays open");
+  assert.ok(invented.rejected.some((r) => /Antwort nicht eingearbeitet, Platzhalter bleibt/.test(r.reason)));
   const heading = normalizeAnswersOutput({ blocks: [{ id: "kosten", heading: "Preise", level: 3, html: "<p>Die Erstberatung ist kostenlos. Danach kostet die Stunde 120 €. Sie zahlen erst nach dem Termin.</p>" }] }, { blocks, targets });
   const repaired = heading.blocks.find((b) => b.id === "kosten")!;
   assert.deepEqual([repaired.heading, repaired.level, heading.changed], ["Was kostet die Beratung?", 2, ["kosten"]], "heading and level are repaired, the answer kept");
-  // A confirmation is no value: the code does not paste „Ja, das stimmt so.“ into the sentence.
+  // Free text of the editors never goes into the sentence without the model: not a confirmation, not an instruction.
+  const order = normalizeAnswersOutput({ blocks: [] }, { blocks, targets: answerTargets(blocks, [{ ...answer, answer: "platzhalte drin lassen" }]) });
+  assert.ok(!order.blocks.some((b) => b.html.includes("platzhalte drin lassen")), "an instruction is never pasted into the text");
   const yes: ContentHandledQuestion = { ...answer, answer: "Ja, das stimmt so." };
   const confirmed = normalizeAnswersOutput({ blocks: [] }, { blocks, targets: answerTargets(blocks, [yes]) });
   assert.match(confirmed.blocks.find((b) => b.id === "kosten")!.html, /\[BITTE PRÜFEN: Preis pro Stunde\]/, "the placeholder stays open");
-  assert.ok(confirmed.rejected.some((r) => /nicht als Wert einsetzbar/.test(r.reason)));
-  assert.ok(isLiteralAnswer("120 €") && isLiteralAnswer("Mo–Fr 9–17 Uhr") && !isLiteralAnswer("Ja.") && !isLiteralAnswer("Nein, das machen wir nicht. Aber anders."));
+  assert.ok(confirmed.rejected.some((r) => /Antwort nicht eingearbeitet/.test(r.reason)));
   const marker = normalizeAnswersOutput({ blocks: [{ id: "kosten", heading: "Was kostet die Beratung?", level: 2, html: "<p>Die Stunde kostet [BITTE PRÜFEN: Preis pro Stunde] bzw. 120 €.</p>" }] }, { blocks, targets });
   assert.equal(marker.rejected[0]?.reason, "Platzhalter oder Marker verändert", "the answered placeholder must be gone");
   assert.equal(noNewNumbers("Wir prüfen in 5 Tagen.", "Wir prüfen in 5 Tagen, ab 120 €.", ["120 €"]), true);
-  assert.equal(fillPlaceholder(blocks[2]!, "[BITTE PRÜFEN: Preis pro Stunde]", "120 € <netto>").html.includes("120 € &lt;netto&gt;"), true, "answers are escaped");
   console.log("A: the answers pass changes only the affected Abschnitte, checked in code: ok");
 }
 
