@@ -21,9 +21,12 @@ import {
   contentBriefingToStore,
   contentStructurePlanResult,
   isMissingContentColumnError,
+  loadContentSettings,
   loadContentStructurePlan,
+  saveContentClientWishes,
   upsertContentPagesFromBriefing,
 } from "@/lib/dt/content/store";
+import { mergeLegendIntoWishes } from "@/lib/dt/content/client-wishes";
 import type { ContentStructurePlanResult, ContentStructureUploadResult } from "@/lib/dt/content/types";
 import {
   clipWebsiteStructureRaw,
@@ -67,8 +70,9 @@ export async function GET(req: Request) {
 
 /**
  * „Seitenstruktur hochladen“ in Texte. The Excel is a briefing: besides name and path every
- * row's keywords, H1 options, real user questions, traffic and KI-Prompt land on
- * `dt_content_pages`. The same pages go to SEO → Struktur as an outline, through the
+ * row's keywords, H1 options, real user questions, traffic and the notes for the writer
+ * („KI-Prompt“, „Themen und Hinweise für den Texter“) land on `dt_content_pages`; the rules of
+ * a legend sheet join the organisation's „Hinweise zum Texten“. The same pages go to SEO → Struktur as an outline, through the
  * unchanged SEO parser, with the same timestamp, so both tabs show one structure and the
  * overview's structure sync has nothing left to do. Existing pages keep their text.
  *
@@ -91,6 +95,7 @@ export async function POST(req: Request) {
   let pages: ContentBriefingPage[];
   let layout: ContentStructureUploadResult["layout"];
   let sheet: string | null = null;
+  let legendRules: string[] = [];
   let structureText: string;
   try {
     if (body.sheets) {
@@ -98,6 +103,7 @@ export async function POST(req: Request) {
       pages = workbook.pages;
       layout = workbook.layout;
       sheet = workbook.sheet;
+      legendRules = workbook.legend;
       structureText = briefingToStructureText(pages);
     } else {
       const text = sanitizeWebsiteStructureText(body.text ?? "");
@@ -171,6 +177,27 @@ export async function POST(req: Request) {
     } else {
       await upsertContentPagesFromBriefing(gate.service, gate.organisationId, pages, uploadedAt, body.sheets ? "briefing" : "structure");
     }
+    // The legend sheet holds rules for every page: they join the organisation's „Hinweise zum Texten“,
+    // which every step reads. A failure here never fails the upload; the result says why.
+    let legend: ContentStructureUploadResult["legend"] = null;
+    if (legendRules.length > 0) {
+      legend = { rules: legendRules.length, added: 0, problem: null };
+      try {
+        const settings = await loadContentSettings(gate.service, gate.organisationId);
+        if (!settings) {
+          legend.problem = "Die Regeln der Legende wurden nicht übernommen: Bitte zuerst die Einstellungen für Texte bestätigen und die Datei dann noch einmal hochladen.";
+        } else {
+          const merged = mergeLegendIntoWishes(settings.client_wishes, legendRules);
+          if (merged.added.length > 0) {
+            const saved = await saveContentClientWishes(gate.service, gate.organisationId, merged.text);
+            if (saved.ok) legend.added = merged.added.length;
+            else legend.problem = `Die Regeln der Legende wurden nicht übernommen: ${saved.error}`;
+          }
+        }
+      } catch (error) {
+        legend.problem = `Die Regeln der Legende wurden nicht übernommen: ${error instanceof Error ? error.message : "unbekannter Fehler"}`;
+      }
+    }
     const overview = await loadContentOverview(gate.service, gate.organisationId);
     const data: ContentStructureUploadResult = {
       mode,
@@ -180,6 +207,8 @@ export async function POST(req: Request) {
       layout,
       sheet,
       ...summariseBriefing(pages),
+      notes: pages.filter((p) => p.ki_prompt).length,
+      legend,
       seo_synced: seoSynced,
       overview,
     };

@@ -663,7 +663,7 @@ export function pageBlock(context: ContentPipelineContext): string {
     page.user_questions.length > 0
       ? `Nutzerfragen ${standalone ? "aus dem Briefing (zählen wie Spalte H: echte Google-Fragen" : "aus Spalte H (echte Google-Fragen"}, haben Vorrang vor erfundenen Fragen):\n${list(page.user_questions)}`
       : "",
-    page.ki_prompt ? `KI-Prompt der Redaktion für diese Seite (stehende Anweisung):\n${clip(page.ki_prompt, 2_000)}` : "",
+    page.ki_prompt ? `KI-Prompt der Redaktion für diese Seite (Themen und Hinweise für den Texter aus der Seitenstruktur; stehende Anweisung):\n${clip(page.ki_prompt, 2_000)}` : "",
     page.internal_link_targets.length > 0
       ? page.internal_link_targets_derived
         ? `Erlaubte interne Linkziele (aus der Seitenliste der Website abgeleitet, das Beste zuerst; nur diese, als Marker [LINK: Seitenname]; setze nur Links, die inhaltlich passen, und keine zu Seiten, die dasselbe Thema behandeln wie diese): ${page.internal_link_targets.join(" · ")}`

@@ -530,6 +530,14 @@ export type ContentStructureUploadResult = {
   questions: number;
   h1_options: number;
   skipped: number;
+  /** How many pages carry notes for the writer („Themen und Hinweise für den Texter“, „KI-Prompt“). */
+  notes: number;
+  /**
+   * The workbook's legend sheet: how many rules it holds, how many of them were new and went into
+   * the organisation's „Hinweise zum Texten“, and why none did (`problem`, German) when that failed.
+   * Null without a legend sheet.
+   */
+  legend: { rules: number; added: number; problem: string | null } | null;
   /** Whether SEO → Struktur received the same pages as an outline. */
   seo_synced: boolean;
   overview: ContentOverview;
