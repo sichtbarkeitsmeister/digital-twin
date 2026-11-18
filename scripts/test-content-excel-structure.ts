@@ -16,7 +16,10 @@ import {
   parseLinesCell,
   parseVolume,
   summariseBriefing,
+  parseContentLegend,
+  parseLegendRows,
 } from "../lib/dt/content/excel-structure";
+import { mergeLegendIntoWishes } from "../lib/dt/content/client-wishes";
 import {
   CONTENT_PAGE_ROLES,
   CONTENT_PAGE_TYPE_LABELS,
@@ -231,6 +234,65 @@ assert.ok(!steiner.pages[5]!.internal_link_targets.includes("Kontakt"), "pages t
 
 assert.deepEqual(summariseBriefing(steiner.pages), { pages: 9, keywords: 5, questions: 4, h1_options: 2, skipped: 2 });
 console.log("briefing layout: ok");
+
+// --- notes for the writer and the legend sheet ------------------------------------------------
+{
+  const header = ["URL", "Startseite", "Ebene 1", "Ebene 2", "Keywords", "Themen und Hinweise für den Texter", "KI-Prompt"];
+  const workbook = parseContentStructureWorkbook([
+    {
+      name: "Legende",
+      rows: [
+        ["Legende"],
+        ["Regel", "Bedeutung"],
+        ["Preise", "keine Preise nennen"],
+        ["Immer „Sie“, nie „Du“"],
+        [],
+        ["Preise", "keine Preise nennen"],
+      ],
+    },
+    {
+      name: "Webseitenstruktur",
+      rows: [
+        header,
+        ["https://praxis.de/", "Startseite", "", "", "Heilpraktiker Köln (320)", "", ""],
+        ["https://praxis.de/erschoepfung/", "", "Erschöpfung", "", "Erschöpfung behandeln", "Themen: Ursachen, Diagnostik, Ablauf\nKeine Heilversprechen", "Fallbeispiel nennen"],
+        ["https://praxis.de/erschoepfung/blutwerte/", "", "", "Blutwerte", "", "Nur Laborwerte erklären", ""],
+      ],
+    },
+  ]);
+  assert.equal(workbook.sheet, "Webseitenstruktur");
+  assert.deepEqual(
+    workbook.pages.map((p) => p.ki_prompt),
+    [null, "Themen: Ursachen, Diagnostik, Ablauf\nKeine Heilversprechen\nFallbeispiel nennen", "Nur Laborwerte erklären"],
+    "„Themen und Hinweise für den Texter“ is read, together with a KI-Prompt column",
+  );
+  assert.deepEqual(workbook.legend, ["Preise: keine Preise nennen", "Immer „Sie“, nie „Du“"], "the legend's rules, title rows and repeats left out");
+  assert.deepEqual(parseLegendRows([["Farbe", "Bedeutung"], ["grün", "fertig"], ["x"]]), ["grün: fertig"]);
+  assert.deepEqual(parseContentLegend([{ name: "Tabelle2", rows: [["keine Preise"]] }], null), [], "only a sheet named as a legend");
+
+  // A legend sheet in front never becomes the structure, also without the preferred sheet name.
+  const second = parseContentStructureWorkbook([
+    { name: "Hinweise", rows: [["Startseite", "Ebene 1"], ["keine Preise nennen"]] },
+    { name: "Seiten 2026", rows: [header, ["https://praxis.de/", "Startseite", "", "", "", "", ""]] },
+  ]);
+  assert.equal(second.sheet, "Seiten 2026");
+  assert.deepEqual(steiner.legend, [], "no legend sheet, no rules");
+
+  // Other spellings of the notes column; the keyword column stays the keyword column.
+  for (const name of ["Hinweise für Texter", "Themen", "Texter-Hinweise", "Anmerkungen Redaktion"]) {
+    const parsed = parseContentStructureSheet([["URL", "Startseite", "Ebene 1", "Keywords (Hinweis)", name], ["https://a.de/x/", "", "Leistung", "Umzug Köln (10)", "Bitte kurz."]]);
+    assert.equal(parsed.pages[0]!.ki_prompt, "Bitte kurz.", name);
+    assert.equal(parsed.pages[0]!.keywords?.main.text, "Umzug Köln", name);
+  }
+
+  // The legend joins the organisation's „Hinweise zum Texten“ once; what is there stays.
+  const merged = mergeLegendIntoWishes("- Immer mit Ortsbezug\nPreise: keine Preise nennen", workbook.legend);
+  assert.deepEqual(merged.added, ["Immer „Sie“, nie „Du“"]);
+  assert.equal(merged.text, "- Immer mit Ortsbezug\nPreise: keine Preise nennen\nImmer „Sie“, nie „Du“");
+  assert.deepEqual(mergeLegendIntoWishes(merged.text, workbook.legend).added, [], "a second upload adds nothing");
+  assert.deepEqual(mergeLegendIntoWishes("", ["keine Preise"]).text, "keine Preise");
+  console.log("notes column and legend: ok");
+}
 
 // The same pages as the SEO parser's tree: SEO → Struktur shows what Texte works with, and
 // a later sync from that outline lands on the same slugs.

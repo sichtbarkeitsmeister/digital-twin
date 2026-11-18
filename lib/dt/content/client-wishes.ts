@@ -30,3 +30,24 @@ export function hasClientWishes(wishes: ContentClientWishes | null | undefined):
   return Boolean(wishes && (wishes.organisation.length > 0 || wishes.page.length > 0));
 }
 
+
+/**
+ * The organisation's wishes with the rules of an uploaded legend added: every rule that is not
+ * there yet (compared like `parseClientWishes`, so a second upload adds nothing) goes to the end,
+ * as long as the text stays within `CLIENT_WISHES_TEXT_MAX`. What the editors wrote stays as it is.
+ */
+export function mergeLegendIntoWishes(current: string | null | undefined, legend: readonly string[]): { text: string; added: string[] } {
+  const base = (current ?? "").replace(/\r\n?/g, "\n").trim();
+  const known = new Set(parseClientWishes(base).map((w) => w.toLowerCase()));
+  const added: string[] = [];
+  let text = base;
+  for (const rule of parseClientWishes(legend.join("\n"))) {
+    if (known.has(rule.toLowerCase())) continue;
+    const next = text ? `${text}\n${rule}` : rule;
+    if (next.length > CLIENT_WISHES_TEXT_MAX) break;
+    text = next;
+    known.add(rule.toLowerCase());
+    added.push(rule);
+  }
+  return { text, added };
+}

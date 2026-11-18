@@ -11,11 +11,16 @@
  *      The page name sits in the column of its role; a Ebene-2 row belongs to the last
  *      Ebene-1 row above it. Further level columns („Ebene 3“, „Ebene 4“ …) are read too: a
  *      name in Ebene n is n − 1 deep and belongs to the last Ebene-1 row above it as well.
- *      Extra columns „KI-Prompt / Prompt / Content-Prompt“ are read when their header exists.
+ *      Extra columns „KI-Prompt / Prompt / Content-Prompt“ and the writer's notes („Themen und
+ *      Hinweise für den Texter“, any header with „Themen“ or „Hinweis“) are read when their
+ *      header exists; together they are the page's briefing text (`ki_prompt`).
  *      Without a header the columns are taken by position (`rawPagesByPosition`).
  *   2. The DigitalTwin template „Ebene 1 … n“ (+ optional URL), plus the briefing columns
  *      F/G/H when their headers exist. Depth 0 is a Hauptsilo (or the Startseite), deeper
  *      rows are Unterseiten of the nearest depth-0 row.
+ *
+ * A sheet named „Legende“ (or „Regeln“, „Hinweise“ …) holds rules for every page: its rows are
+ * returned as `legend` and go into the organisation's „Hinweise zum Texten“.
  *
  * Nothing is invented: a missing cell stays empty, a keyword without volume has none.
  * The SEO parser (`lib/dt/seo/website-structure*.ts`) is not used here; SEO → Struktur keeps
@@ -83,6 +88,11 @@ export type ParsedContentStructure = {
   layout: "briefing" | "template";
   /** Whether the sheet had any of the briefing columns (keywords, H1 options, questions). */
   briefing: boolean;
+  /**
+   * The rules of the workbook's legend sheet („Legende“: „keine Preise“, „immer Sie“ …), one per
+   * entry. They hold for every page and go into the organisation's „Hinweise zum Texten“.
+   */
+  legend: string[];
 };
 
 export const CONTENT_STRUCTURE_MAX_PAGES = 300;
@@ -201,6 +211,12 @@ const H_KEYWORDS = /^(keywords?|suchbegriffe?|hauptkeyword|keyword\s*\(.*\)|keyw
 const H_H1 = /^(h1|h1-?optionen|h1 optionen|h1-?vorschl[äa]ge|[üu]berschrift(en)?|ueberschrift(en)?|titel-?optionen)$/i;
 const H_QUESTIONS = /^(nutzerfragen|fragen|user questions|w-?fragen|google-?fragen|suchfragen|faq)$/i;
 const H_PROMPT = /^(ki-?prompt|prompt|content-?prompt|ki-?anweisung|anweisung|briefing|hinweise?)$/i;
+/**
+ * The editors' notes for the writer in their own words: any header with „Themen“ or „Hinweis“
+ * in it („Themen und Hinweise für den Texter“, „Hinweise Texter“, „Themen“, „Texter-Hinweise“).
+ * Checked after every other column, so „Keywords (Hinweis)“ stays the keyword column.
+ */
+const H_TEXTER_NOTES = /\b(themen|thema|hinweis\w*|anmerkung\w*|texter\w*|redaktion\w*)\b/i;
 
 type Header = {
   rowIndex: number;
@@ -216,11 +232,12 @@ type Header = {
   keywords: number;
   h1: number;
   questions: number;
-  prompt: number;
+  /** Every column for the writer („KI-Prompt“, „Themen und Hinweise für den Texter“ …), left to right. */
+  prompts: number[];
 };
 
 function emptyHeader(rowIndex: number): Header {
-  return { rowIndex, url: -1, startseite: -1, l1: -1, l2: -1, levels: [], deeper: [], traffic: -1, keywords: -1, h1: -1, questions: -1, prompt: -1 };
+  return { rowIndex, url: -1, startseite: -1, l1: -1, l2: -1, levels: [], deeper: [], traffic: -1, keywords: -1, h1: -1, questions: -1, prompts: [] };
 }
 
 type HeaderLayout = { header: Header; layout: ParsedContentStructure["layout"] };
@@ -247,7 +264,7 @@ function findHeader(rows: string[][]): HeaderLayout | null {
       else if (H_KEYWORDS.test(c) && header.keywords < 0) header.keywords = col;
       else if (H_H1.test(c) && header.h1 < 0) header.h1 = col;
       else if (H_QUESTIONS.test(c) && header.questions < 0) header.questions = col;
-      else if (H_PROMPT.test(c) && header.prompt < 0) header.prompt = col;
+      else if (H_PROMPT.test(c) || H_TEXTER_NOTES.test(c)) header.prompts.push(col);
     });
     const sorted = levelCols.sort((a, b) => a.n - b.n);
     header.levels = sorted.map((l) => l.col);
@@ -296,7 +313,13 @@ function briefingFields(row: string[], header: Header): Pick<RawPage, "traffic" 
     keywords: header.keywords >= 0 ? parseKeywordsCell(at(row, header.keywords)) : null,
     h1_options: header.h1 >= 0 ? parseLinesCell(at(row, header.h1)) : [],
     user_questions: header.questions >= 0 ? parseLinesCell(at(row, header.questions)) : [],
-    ki_prompt: header.prompt >= 0 ? at(row, header.prompt).trim() || null : null,
+    // Several such columns („KI-Prompt“ next to „Themen und Hinweise für den Texter“) are one briefing text.
+    ki_prompt:
+      header.prompts
+        .map((col) => at(row, col).trim())
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, MAX_CELL_CHARS) || null,
   };
 }
 
@@ -532,7 +555,7 @@ function buildPages(raw: readonly RawPage[], options: BriefingOptions): ContentB
 export function parseContentStructureSheet(
   rows: SheetRows,
   options: BriefingOptions = {},
-): Omit<ParsedContentStructure, "sheet"> {
+): Omit<ParsedContentStructure, "sheet" | "legend"> {
   const clean = normaliseRows(rows);
   if (clean.length === 0) throw new Error("Die Tabelle ist leer.");
   const found = findHeader(clean);
@@ -555,16 +578,54 @@ export function parseContentStructureSheet(
 
 const PREFERRED_SHEET_RE = /^(webseitenstruktur|seitenstruktur|struktur|website-?struktur|seiten)$/i;
 
-/** The sheet „Webseitenstruktur“ first, else the first sheet that yields pages. */
+const LEGEND_SHEET_RE = /legende|regeln|vorgaben|hinweise|erl(?:ä|ae)uterung|anleitung|lies ?mich|read ?me/i;
+/** A legend holds a handful of rules, not a text: more rows than this are cut. */
+export const CONTENT_LEGEND_MAX_RULES = 60;
+const LEGEND_RULE_MAX_CHARS = 400;
+/** A row that only names the sheet or its columns („Legende“, „Regel | Bedeutung“) is no rule. */
+const LEGEND_TITLE_RE = /^(legende|regeln?|vorgaben?|hinweise?|erl(?:ä|ae)uterung(?:en)?|bedeutung|beschreibung|spalte|farbe|k(?:ü|ue)rzel|abk(?:ü|ue)rzung)$/i;
+
+/**
+ * The rules of a legend sheet, one per row: the filled cells of the row, the first as the
+ * rule's name when a second explains it („Preise | keine Preise nennen“ → „Preise: keine Preise
+ * nennen“). Title rows and repeats are left out.
+ */
+export function parseLegendRows(rows: SheetRows): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of rows) {
+    const cells = row.map((cell) => cellText(cell).replace(/\s+/g, " ").trim()).filter(Boolean);
+    if (cells.length === 0 || cells.every((c) => LEGEND_TITLE_RE.test(c))) continue;
+    const rule = (cells.length === 1 ? cells[0]! : `${cells[0]!.replace(/[:：]\s*$/, "")}: ${cells.slice(1).join(" – ")}`).slice(0, LEGEND_RULE_MAX_CHARS).trim();
+    const key = rule.toLowerCase();
+    if (rule.length < 3 || seen.has(key)) continue;
+    seen.add(key);
+    out.push(rule);
+    if (out.length >= CONTENT_LEGEND_MAX_RULES) break;
+  }
+  return out;
+}
+
+/** The rules of every legend sheet of the workbook (by sheet name), without the sheet the pages came from. */
+export function parseContentLegend(sheets: readonly SheetInput[], pagesSheet: string | null): string[] {
+  const rules = sheets
+    .filter((sheet) => sheet.name !== pagesSheet && LEGEND_SHEET_RE.test(sheet.name))
+    .flatMap((sheet) => parseLegendRows(sheet.rows));
+  return [...new Set(rules)].slice(0, CONTENT_LEGEND_MAX_RULES);
+}
+
+/** The sheet „Webseitenstruktur“ first, else the first sheet that yields pages. The legend sheet is read on top. */
 export function parseContentStructureWorkbook(
   sheets: readonly SheetInput[],
   options: BriefingOptions = {},
 ): ParsedContentStructure {
-  const ordered = [...sheets].sort((a, b) => Number(PREFERRED_SHEET_RE.test(b.name.trim())) - Number(PREFERRED_SHEET_RE.test(a.name.trim())));
+  // The preferred name first; a legend sheet last, so its rules are never read as page names.
+  const rank = (name: string) => (PREFERRED_SHEET_RE.test(name.trim()) ? 0 : LEGEND_SHEET_RE.test(name) ? 2 : 1);
+  const ordered = [...sheets].sort((a, b) => rank(a.name) - rank(b.name));
   let lastError: Error | null = null;
   for (const sheet of ordered) {
     try {
-      return { ...parseContentStructureSheet(sheet.rows, options), sheet: sheet.name };
+      return { ...parseContentStructureSheet(sheet.rows, options), sheet: sheet.name, legend: parseContentLegend(sheets, sheet.name) };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
     }

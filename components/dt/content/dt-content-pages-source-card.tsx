@@ -113,6 +113,18 @@ export function inferContentImprovementSource(
   return local.pages.upload > 0 || (local.textUploads ?? 0) > 0 ? "upload" : "crawl";
 }
 
+/** What the upload read besides keywords and questions: notes for the writer and the legend's rules. */
+function briefingExtras(d: Pick<ContentStructureUploadResult, "notes" | "legend">): string[] {
+  return [
+    d.notes > 0 ? `${d.notes} mit Themen und Hinweisen für den Texter` : "",
+    d.legend && !d.legend.problem
+      ? d.legend.added > 0
+        ? `${d.legend.added} ${d.legend.added === 1 ? "Regel" : "Regeln"} der Legende in „Hinweise zum Texten“ übernommen`
+        : `Legende gelesen (${d.legend.rules} ${d.legend.rules === 1 ? "Regel" : "Regeln"}, schon in „Hinweise zum Texten“)`
+      : "",
+  ];
+}
+
 function pagesWord(n: number): string {
   return `${n} ${n === 1 ? "Seite" : "Seiten"}`;
 }
@@ -307,8 +319,10 @@ export function DtContentPagesSourceCard(props: {
           d.updated > 0 ? `${d.updated} vorhandene mit Briefing aktualisiert` : "keine vorhandene Seite getroffen",
           uploadShown ? "Word-Dateien werden neu zugeordnet" : missing > 0 ? `${missing} noch nicht auf der Website` : "",
           !uploadShown && d.plan && d.plan.on_site > 0 ? `${d.plan.on_site} im Crawl, noch nicht übernommen` : "",
+          ...briefingExtras(d),
         ].filter(Boolean);
         toast.success(`Seitenstruktur „${payload.filename}“ gespeichert`, { description: parts.join(" · ") });
+      if (d.legend?.problem) toast.warning("Legende nicht übernommen", { description: d.legend.problem, duration: 15_000 });
         props.onChanged(d.overview);
         return;
       }
@@ -317,12 +331,14 @@ export function DtContentPagesSourceCard(props: {
         d.keywords > 0 ? `${d.keywords} mit Keywords` : "",
         d.questions > 0 ? `${d.questions} mit Nutzerfragen` : "",
         d.h1_options > 0 ? `${d.h1_options} mit H1-Optionen` : "",
+        ...briefingExtras(d),
         d.skipped > 0 ? `${d.skipped} nicht zu bearbeiten (Impressum, Kontakt …)` : "",
         d.layout === "text" || (d.layout === "template" && d.keywords === 0 && d.questions === 0)
           ? "ohne Briefing-Spalten – Keywords und Fragen erarbeitet die Analyse"
           : "",
       ].filter(Boolean);
       toast.success(`Seitenstruktur „${payload.filename}“ gespeichert`, { description: parts.join(" · ") });
+      if (d.legend?.problem) toast.warning("Legende nicht übernommen", { description: d.legend.problem, duration: 15_000 });
       props.onChanged(d.overview);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Datei konnte nicht gelesen werden.");
