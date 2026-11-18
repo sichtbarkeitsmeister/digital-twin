@@ -240,8 +240,12 @@ export type ContentStep = {
   live_text: boolean;
   /** Skipped SEO on an upload page: the text of the Word file became the starting text. */
   upload_text: boolean;
+  /** Input tokens of the step's last run (all its calls: the prompts and the context); 0 when it has not run. */
+  input_tokens: number;
   /** Output tokens of the step's last run (all its calls); 0 when it has not run. */
   output_tokens: number;
+  /** The step's row holds the text as it was after this step („Text ansehen“ in the page window). */
+  has_text: boolean;
   /** Why the model stopped in the step's last call: `tool_use`, `end_turn`, `max_tokens`, `timeout` …; null when unknown. */
   stop_reason: string | null;
   model: string | null;

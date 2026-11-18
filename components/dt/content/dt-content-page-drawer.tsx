@@ -62,6 +62,7 @@ import type {
   ContentReview,
   ContentStep,
 } from "@/lib/dt/content/types";
+import type { ContentStepText } from "@/lib/dt/content/step-text";
 import { contentKeywordOriginLabel } from "@/lib/dt/content/types";
 
 const textareaClass =
@@ -170,6 +171,9 @@ export function DtContentPageDrawer(props: {
   const [blockId, setBlockId] = useState("");
   const [blockText, setBlockText] = useState("");
   const [note, setNote] = useState("");
+  /** „Text nach diesem Schritt“: the Zwischenstand shown under the step list, loaded on demand. */
+  const [stepText, setStepText] = useState<ContentStepText | null>(null);
+  const [stepTextBusy, setStepTextBusy] = useState<number | null>(null);
   const [reviseText, setReviseText] = useState("");
   const [revisePreview, setRevisePreview] = useState<RevisionPreviewData | null>(null);
   /** „Vorschlag übernehmen“: the open points (by key) whose proposals „Jetzt umsetzen“ works in together. */
@@ -228,6 +232,7 @@ export function DtContentPageDrawer(props: {
   useEffect(() => {
     if (!open || !page) return;
     setReview(null);
+    setStepText(null);
     setMode(null);
     setNote("");
     setReviseText("");
@@ -311,6 +316,15 @@ export function DtContentPageDrawer(props: {
     (reviewState === "braucht_sie" || reviewState === "in_arbeit" || (reviewState === "fertig" && !review?.public.released));
   /** Shown in the header next to the status, as soon as the page has a text. */
   const wordCount = useMemo(() => (review?.html ? countContentWords(review.html) : 0), [review?.html]);
+  /** Tokens and cost of the ten steps (what „Details“ lists; revisions and „Antworten einarbeiten“ are on the page total). */
+  const stepTotals = useMemo(
+    () =>
+      (review?.steps ?? []).reduce(
+        (sum, s) => ({ input: sum.input + s.input_tokens, output: sum.output + s.output_tokens, cost: sum.cost + s.cost_eur }),
+        { input: 0, output: 0, cost: 0 },
+      ),
+    [review?.steps],
+  );
   const findings = useMemo(() => (review ? openFindings(review) : []), [review]);
   /** The Abschnitt each open point is about, when the text shows it („Vorschlag übernehmen“ needs one). */
   const findingTargets = useMemo(() => {
@@ -339,6 +353,23 @@ export function DtContentPageDrawer(props: {
     setBlockId(first);
     setBlockText(blocks.find((b) => b.id === first)?.text ?? "");
     setMode({ kind: "edit", action });
+  }
+
+  /** Loads the text as it was after a step, or hides it again. */
+  async function toggleStepText(step: number) {
+    if (!base) return;
+    if (stepText?.step === step) {
+      setStepText(null);
+      return;
+    }
+    setStepTextBusy(step);
+    const res = await contentApi<ContentStepText>(`${base}/steps/${step}/text?${contentQuery(organisationId)}`);
+    setStepTextBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setStepText(res.data);
   }
 
   /** „Abschnitt überarbeiten lassen“; from an open point with its Abschnitt chosen when the point names one. */
@@ -1129,7 +1160,20 @@ export function DtContentPageDrawer(props: {
                                 {s.step}
                               </span>
                               <span className="grid min-w-0 gap-0.5">
-                                <span className="truncate text-sbkm-navy dark:text-white">{s.name}</span>
+                                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                                  <span className="truncate text-sbkm-navy dark:text-white">{s.name}</span>
+                                  {s.has_text ? (
+                                    <button
+                                      type="button"
+                                      className="text-xs font-semibold text-sbkm-navy underline-offset-2 hover:underline disabled:opacity-50 dark:text-sbkm-mint"
+                                      disabled={stepTextBusy === s.step}
+                                      onClick={() => void toggleStepText(s.step)}
+                                      aria-expanded={stepText?.step === s.step}
+                                    >
+                                      {stepTextBusy === s.step ? "Lädt …" : stepText?.step === s.step ? "Text ausblenden" : "Text nach diesem Schritt"}
+                                    </button>
+                                  ) : null}
+                                </span>
                                 {contentStepLogLine(s) ? (
                                   <span className="text-xs tabular-nums text-sbkm-ink-600 dark:text-white/60">{contentStepLogLine(s)}</span>
                                 ) : null}
@@ -1169,7 +1213,51 @@ export function DtContentPageDrawer(props: {
                             </span>
                           </li>
                         ))}
+                        <li className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs tabular-nums text-sbkm-ink-600 dark:text-white/60">
+                          <span className="pl-8">
+                            Summe der Schritte: {stepTotals.input.toLocaleString("de-DE")} Eingabe-Tokens ·{" "}
+                            {stepTotals.output.toLocaleString("de-DE")} Ausgabe-Tokens
+                          </span>
+                          <span className="font-semibold text-sbkm-navy dark:text-white">{stepTotals.cost > 0 ? formatEur(stepTotals.cost) : "—"}</span>
+                        </li>
                       </ol>
+                      {stepText ? (
+                        <div className="grid gap-2 border-t border-sbkm-navy/8 px-4 py-3 dark:border-white/8">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <p className="text-xs leading-relaxed text-sbkm-ink-600 dark:text-white/65">
+                              <span className="font-semibold text-sbkm-navy dark:text-white">
+                                Text nach Schritt {stepText.step} ({stepText.name})
+                              </span>
+                              {" · "}
+                              {stepText.words.toLocaleString("de-DE")} Wörter in {stepText.sections} Abschnitten
+                              {stepText.compared_to ? (
+                                <>
+                                  {" · gegenüber "}
+                                  {stepText.compared_to}: {stepText.changed_block_ids.length} von {stepText.sections} Abschnitten geändert (gelb)
+                                  {stepText.words_delta ? `, ${stepText.words_delta > 0 ? "+" : "−"}${Math.abs(stepText.words_delta).toLocaleString("de-DE")} Wörter` : ""}
+                                  {stepText.removed_sections.length > 0 ? `, entfallen: ${stepText.removed_sections.join(", ")}` : ""}
+                                </>
+                              ) : null}
+                            </p>
+                            <DtPillButton size="sm" variant="ghost" onClick={() => setStepText(null)}>
+                              Schließen
+                            </DtPillButton>
+                          </div>
+                          {stepText.title || stepText.meta_description ? (
+                            <p className="text-xs text-sbkm-ink-600 dark:text-white/60">
+                              {stepText.title ? `Title: ${stepText.title}` : ""}
+                              {stepText.title && stepText.meta_description ? " · " : ""}
+                              {stepText.meta_description ? `Meta: ${stepText.meta_description}` : ""}
+                            </p>
+                          ) : null}
+                          <DtContentTextFrame
+                            html={stepText.html}
+                            title={`Text nach Schritt ${stepText.step}`}
+                            highlightBlockIds={stepText.changed_block_ids}
+                            showHeadingLevels
+                          />
+                        </div>
+                      ) : null}
                     </details>
                   </div>
 
