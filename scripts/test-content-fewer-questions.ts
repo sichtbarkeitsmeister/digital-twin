@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 
 import { EMPTY_ORG_CONTACT_DATA, contactFieldText, contactPromptData, phoneDigits, type OrgContactData } from "../lib/dt/contact-data";
 import { EMPTY_CONTENT_FRESHNESS } from "../lib/dt/content/freshness";
-import { contentGapQuestions } from "../lib/dt/content/pipeline/gaps";
+import { contentGapQuestions, findContentGaps } from "../lib/dt/content/pipeline/gaps";
 import { addOrgQuestions, contactFieldsForAnswer, customerAnswersFromPool, loadOrgQuestions } from "../lib/dt/content/org-questions";
 import { approvalPatch, rerunPagePatch, resetContentPage, stopContentRun, submitContentAnswers } from "../lib/dt/content/pipeline/actions";
 import {
@@ -25,6 +25,7 @@ import {
   removeSentenceWith,
 } from "../lib/dt/content/pipeline/answers";
 import {
+  EXTRA_PLACEHOLDER_RULES,
   FAKTENCHECK_QUESTION_RULES,
   QUESTION_RULES,
   anbieterBlock,
@@ -650,6 +651,19 @@ function testPromptRules() {
     assert.ok(contentStepSpec(step, ctx).system.includes(QUESTION_RULES), `step ${step}: the rule is in the fixed part, also with a saved prompt`);
   }
   assert.match(QUESTION_RULES, /Sonst lässt du die Aussage weg und schreibst keinen Platzhalter/);
+  // Four placeholders are allowed on top: a missing Praxisbeispiel, a spelling, a Werdegang, contradicting company data.
+  assert.ok(QUESTION_RULES.includes(EXTRA_PLACEHOLDER_RULES));
+  for (const marker of ["[BITTE PRÜFEN: Praxisbeispiel zu <Thema> fehlt]", "[BITTE PRÜFEN: Schreibweise von <Name>]", "[BITTE PRÜFEN: Werdegang von <Person>: <was fehlt>]", "[BITTE PRÜFEN: Widerspruch bei <Angabe>: <Fassung A> oder <Fassung B>]"]) {
+    assert.ok(EXTRA_PLACEHOLDER_RULES.includes(marker), marker);
+  }
+  assert.match(EXTRA_PLACEHOLDER_RULES, /nie ein Beispiel erfinden/);
+  assert.match(EXTRA_PLACEHOLDER_RULES, /einander widersprechen \(nicht: wenn sie fehlen\)/);
+  // They are ordinary placeholders for the code: found as gaps and asked once at the stop.
+  assert.deepEqual(
+    findContentGaps([{ id: "a", heading: "A", level: 2, html: "<p>Text. [BITTE PRÜFEN: Praxisbeispiel zu Ferritin fehlt]</p><p>[BITTE PRÜFEN: Schreibweise von Dr. Maier]</p>" }]).map((g) => g.placeholder),
+    ["[BITTE PRÜFEN: Praxisbeispiel zu Ferritin fehlt]", "[BITTE PRÜFEN: Schreibweise von Dr. Maier]"],
+  );
+
   assert.match(QUESTION_RULES, /Nie fragen .* Anbieterfakten, Antworten des Kunden, Kontaktdaten, Hinweise zum Texten, Anmerkungen der Redaktion/);
   const fakten = contentStepSpec(CONTENT_STEP_FAKTENCHECK, ctx);
   assert.ok(fakten.system.includes(FAKTENCHECK_QUESTION_RULES));
