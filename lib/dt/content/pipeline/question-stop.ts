@@ -84,6 +84,12 @@ export type ContentQuestionStop = {
   /** The page's switch „Vor der Watermark zur Durchsicht anhalten“ is off (default: on). Kept by „Zurücksetzen“. */
   review_off?: boolean;
   /**
+   * The page's switch „Nach der Analyse zur Durchsicht anhalten“ is on (default: off): the page
+   * waits after step 1 so the editors can read and change Seitenkonzept and Themenplan before
+   * anything is written. Kept by „Zurücksetzen“.
+   */
+  analyse_stop?: boolean;
+  /**
    * Open points the editor chose „So lassen“ for: the text stays as it is and no later run
    * reports them again (the Endabnahme is told, and an identical point is dropped in code).
    * Kept by „Mit Anmerkung wiederholen“, emptied by „Zurücksetzen“ (the text is written anew).
@@ -156,6 +162,7 @@ export function readQuestionStop(raw: unknown): ContentQuestionStop {
   return {
     ...(review ? { review } : {}),
     ...(r.review_off === true ? { review_off: true } : {}),
+    ...(r.analyse_stop === true ? { analyse_stop: true } : {}),
     ...(kept.length > 0 ? { kept: kept.slice(-CONTENT_KEPT_FINDINGS_MAX) } : {}),
     ...(status ? { status } : {}),
     ...(text(r.at) ? { at: text(r.at)! } : {}),
@@ -203,11 +210,12 @@ export function reviewStopDue(
  * text anew, so its kept points go.
  */
 export function questionStopKeep(
-  stop: Pick<ContentQuestionStop, "review_off" | "kept">,
+  stop: Pick<ContentQuestionStop, "review_off" | "kept"> & Partial<Pick<ContentQuestionStop, "analyse_stop">>,
   options: { keepKept?: boolean } = {},
 ): Record<string, unknown> {
   return {
     ...(stop.review_off ? { review_off: true } : {}),
+    ...(stop.analyse_stop ? { analyse_stop: true } : {}),
     ...(options.keepKept && stop.kept && stop.kept.length > 0 ? { kept: stop.kept } : {}),
   };
 }

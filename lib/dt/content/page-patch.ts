@@ -33,6 +33,15 @@ const patchSchema = z
       .optional(),
     /** „Vor der Watermark zur Durchsicht anhalten“ (default on). */
     review_stop: z.boolean().optional(),
+    /** „Nach der Analyse zur Durchsicht anhalten“ (default off). */
+    analyse_stop: z.boolean().optional(),
+    /** Seitenkonzept and Themenplan changed in the page window; each part replaces the Analyse's. */
+    page_plan: z
+      .object({
+        seitenkonzept: z.record(z.string(), z.string().max(2_000)).optional(),
+        themenplan: z.array(z.object({ thema: z.string().max(300), inhalt: z.string().max(1_000).optional(), quelle: z.string().max(20).optional() })).max(12).optional(),
+      })
+      .optional(),
     /**
      * `false`: the answer carries no overview of the whole table. The overview is the costly part
      * of the answer (every page, the readiness of the sources); callers that reload it anyway, or
@@ -54,6 +63,8 @@ const patchSchema = z
       body.skip_steps !== undefined ||
       body.client_wishes !== undefined ||
       body.review_stop !== undefined ||
+      body.analyse_stop !== undefined ||
+      body.page_plan !== undefined ||
       body.keywords !== undefined ||
       body.zielgruppen !== undefined,
   );

@@ -65,6 +65,22 @@ import {
   type ContentStepPromptKey,
   type ContentStepPrompts,
 } from "@/lib/dt/content/step-prompts";
+import {
+  ANALYSE_HORMOZI_PAGE_RULE,
+  ANALYSE_PLAN_INSTRUCTION,
+  PAGE_PLAN_RULES_CHECK,
+  PAGE_PLAN_RULES_REWRITE,
+  PAGE_PLAN_RULES_SEO,
+  SEITENKONZEPT_SCHEMA,
+  THEMENPLAN_SCHEMA,
+  hasPagePlan,
+  normalizeSeitenkonzept,
+  normalizeThemenplan,
+  pagePlanBlock,
+  readPagePlan,
+  type ContentSeitenkonzept,
+  type ContentThema,
+} from "@/lib/dt/content/pipeline/page-plan";
 import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentFreshness, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
@@ -217,6 +233,12 @@ export type AnalyseOutput = {
   main_keyword: string;
   secondary_keywords: string[];
   main_question: string;
+  /** The page's own concept (since 18.11.; older outputs have none). See `page-plan.ts`. */
+  seitenkonzept?: ContentSeitenkonzept | null;
+  /** The 4–6 topics of the page, the ones from the Seitenstruktur first. */
+  themenplan?: ContentThema[];
+  /** The editors changed seitenkonzept or themenplan in the page window. */
+  plan_edited?: boolean;
   fanout_questions: Array<{ question: string; source: string; theme: string }>;
   deferred_questions: Array<{ question: string; link_to: string; short_answer_hint: string }>;
   dropped_questions: Array<{ question: string; reason: string }>;
@@ -1031,6 +1053,18 @@ export function stepSystem(instruction: string, settings: ContentTextSettings, e
   return join([instruction, BASE_RULES, ...extra, brancheRules(settings)]);
 }
 
+// --- Seitenkonzept und Themenplan (page-plan.ts) -------------------------------------------------
+
+/** The Analyse's plan for this page as a block; empty when the Analyse made none. */
+export function konzeptBlock(context: Pick<ContentPipelineContext, "outputs">): string {
+  return pagePlanBlock(context.outputs[CONTENT_STEP_ANALYSE]);
+}
+
+/** The fixed plan rule of a step, only when there is a plan (prompts of older pages stay as they were). */
+function konzeptRules(context: Pick<ContentPipelineContext, "outputs">, rule: string): string[] {
+  return hasPagePlan(readPagePlan(context.outputs[CONTENT_STEP_ANALYSE])) ? [rule] : [];
+}
+
 // --- the steps ---------------------------------------------------------------------------------
 
 function analyse(context: ContentPipelineContext): ContentStepSpec {
@@ -1039,7 +1073,7 @@ function analyse(context: ContentPipelineContext): ContentStepSpec {
   const upload = page.source === "upload";
   const standalone = page.source === "standalone";
   return {
-    maxTokens: 6_000,
+    maxTokens: 7_500,
     system: `${BASE_RULES}
 
 ${QUESTION_RULES}
@@ -1066,7 +1100,8 @@ fanout_questions: mindestens 8 Fragen, die eine vollständige Antwort auf main_q
     } theme: das Unterthema in 1–3 Wörtern. Markiere mit theme, welche Fragen in den Fragen-Abschnitt gehören (theme beginnt mit ‚FAQ:‘) und welche im Fließtext beantwortet werden sollen. Höchstens ${CONTENT_FAQ_MAX} Fragen für den Fragen-Abschnitt.
 deferred_questions: Fragen, die eine andere Seite der Website besser beantwortet (keine Kannibalisierung) – link_to ist der Name dieser Seite (nur erlaubte Linkziele oder Seiten aus der Website-Liste), short_answer_hint sagt, wie diese Seite in einem Satz darauf verweist.
 dropped_questions: Fragen, die hier nicht hingehören, mit reason.
-hormozi: traumziel (was der Avatar wirklich will), hauptschmerz, groesste_huerde (was ihn vom Auftrag abhält), einwaende (die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar), moeglicher_beweis (nur belegte Beweise aus den Anbieterfakten; sonst „kein belegter Beweis“), gewuenschter_cta (passend zu conversion_goal und den Kontaktwegen aus den Fakten). Nur aus Avatar und Anbieterfakten, nichts erfinden.
+${ANALYSE_PLAN_INSTRUCTION}
+hormozi: traumziel (was die Person mit dieser Leistung wirklich erreichen will), hauptschmerz, groesste_huerde (was sie vom Auftrag abhält), einwaende (die 2–4 wichtigsten Einwände gegen diese Leistung, in der Reihenfolge und Sprache des Avatars), moeglicher_beweis (nur belegte Beweise aus den Anbieterfakten; sonst „kein belegter Beweis“), gewuenschter_cta (passend zu conversion_goal und den Kontaktwegen aus den Fakten). ${ANALYSE_HORMOZI_PAGE_RULE} Nur aus Avatar und Anbieterfakten, nichts erfinden.
 ${analyseAudienceRule(context)}usable_facts: belegte Fakten für diese Seite, je ein Satz. missing_facts: was der Text bräuchte, aber nirgends belegt ist – lieber benennen als später erfinden. assumptions: was du ohne Beleg annimmst.`,
     user: join([pageBlock(context), anbieterBlock(context), settingsBlock(context.settings), avatarBlock(context), notesBlock(context)]),
     tool: {
@@ -1089,6 +1124,8 @@ ${analyseAudienceRule(context)}usable_facts: belegte Fakten für diese Seite, je
           main_keyword: { type: "string", description: "Hauptsuchbegriff, 2–5 Wörter; aus der Excel, wenn dort vorgegeben." },
           secondary_keywords: { type: "array", items: { type: "string" }, description: "3–10 Nebenbegriffe und Synonyme." },
           main_question: { type: "string", description: "Die Frage des Suchenden, ohne Firmenname." },
+          seitenkonzept: SEITENKONZEPT_SCHEMA,
+          themenplan: THEMENPLAN_SCHEMA,
           fanout_questions: {
             type: "array",
             items: {
@@ -1130,7 +1167,7 @@ ${analyseAudienceRule(context)}usable_facts: belegte Fakten für diese Seite, je
               einwaende: {
                 type: "array",
                 items: { type: "string" },
-                description: "Die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar.",
+                description: "Die 2–4 wichtigsten Einwände gegen genau diese Leistung, in der Reihenfolge und Sprache des Avatars.",
               },
               moeglicher_beweis: { type: "string" },
               gewuenschter_cta: { type: "string" },
@@ -1149,6 +1186,8 @@ ${analyseAudienceRule(context)}usable_facts: belegte Fakten für diese Seite, je
           "main_keyword",
           "secondary_keywords",
           "main_question",
+          "seitenkonzept",
+          "themenplan",
           "fanout_questions",
           "deferred_questions",
           "dropped_questions",
@@ -1227,6 +1266,8 @@ export function normalizeAnalyse(json: unknown, context: ContentPipelineContext)
       (k) => k.toLowerCase() !== (excelMain || str(r.main_keyword, 120)).toLowerCase(),
     ),
     main_question: str(r.main_question, 300),
+    seitenkonzept: normalizeSeitenkonzept(r.seitenkonzept),
+    themenplan: normalizeThemenplan(r.themenplan),
     fanout_questions: limitFaqThemes(fanout),
     deferred_questions: deferred,
     dropped_questions: dropped,
@@ -1259,6 +1300,7 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
       `Allgemeine Regeln (jeder Seitentyp):\n${general}`,
       `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
       QUESTION_RULES,
+      ...konzeptRules(context, PAGE_PLAN_RULES_SEO),
       ...clientWishesRules(context),
     ]),
     user: join([
@@ -1298,12 +1340,14 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
     system: stepSystem(stepInstruction(context, "faktencheck"), context.settings, [
       QUESTION_RULES,
       FAKTENCHECK_QUESTION_RULES,
+      ...konzeptRules(context, PAGE_PLAN_RULES_CHECK),
       ...faktencheckClientRules(context),
       ...clientWishesRules(context),
     ]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
+      konzeptBlock(context),
       anbieterBlock(context),
       kontaktBlock(context),
       settingsBlock(context.settings),
@@ -1409,10 +1453,11 @@ export function freshnessSendBackBlock(context: Pick<ContentPipelineContext, "fr
 function geo(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: GEO_MAX_TOKENS,
-    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), [QUESTION_RULES, ...clientWishesRules(context)]),
+    system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
+      konzeptBlock(context),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – Fragen, die der Text abdecken muss`),
       outputBlock(context, CONTENT_STEP_FAKTENCHECK, `Faktencheck (Schritt ${CONTENT_STEP_FAKTENCHECK}) – umsetzen`),
       freshnessSendBackBlock(context),
@@ -1434,10 +1479,11 @@ export const HORMOZI_MAX_TOKENS = TEXT_STEP_MAX_TOKENS;
 function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: HORMOZI_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "hormozi"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
+    system: stepSystem(stepInstruction(context, "hormozi"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
+      konzeptBlock(context),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – hormozi, conversion_goal und usable_facts`),
       anbieterBlock(context),
       kontaktBlock(context),
@@ -1479,10 +1525,11 @@ function normalizeSelfScore(raw: unknown): SelfScore | null {
 function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: TEXT_STEP_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
+    system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
+      konzeptBlock(context),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
@@ -1531,10 +1578,11 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
 function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: TEXT_STEP_MAX_TOKENS,
-    system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
+    system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...konzeptRules(context, PAGE_PLAN_RULES_REWRITE), ...clientWishesRules(context)]),
     user: join([
       pageBlock(context),
       currentTextBlock(context),
+      konzeptBlock(context),
       anbieterBlock(context),
       settingsBlock(context.settings),
       avatarBlock(context),
@@ -1601,10 +1649,11 @@ ${QUESTION_RULES}
 
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
 unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite, ein offener Punkt der Aktualitätsprüfung. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team), der Marker [DATUM] (das Datum setzt das Web-Team beim Veröffentlichen), z. B. „Zuletzt aktualisiert: [DATUM]“ oder „Stand: [DATUM]“, und Platzhalter aus „Offen – der Kunde prüft noch“ (die meldet das System selbst).
-summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.${endabnahmeClientRules(context) ? `\n${endabnahmeClientRules(context)}` : ""}`,
+summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.${endabnahmeClientRules(context) ? `\n${endabnahmeClientRules(context)}` : ""}${konzeptRules(context, PAGE_PLAN_RULES_CHECK).map((rule) => `\n${rule}`).join("")}`,
     user: join([
       pageBlock(context),
       currentTextBlock(context),
+      konzeptBlock(context),
       outputBlock(context, CONTENT_STEP_LEKTORAT, `Lektorat (Schritt ${CONTENT_STEP_LEKTORAT}) – gemeldete Befunde`),
       openFindingsBlock(context),
       keptFindingsBlock(context),
