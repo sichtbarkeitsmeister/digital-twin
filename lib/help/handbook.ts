@@ -76,7 +76,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Onboarding: /dashboard/onboarding — Unterlagen, Zugänge (Hoster, SMTP, CMS), Mitbewerber, IT-Kontakt und Medien einer Firma. Es gibt einen Upload-Link, den der Kunde ohne Login öffnen kann (/onboarding/upload/[token]).",
       "Ansprechpartner: /dashboard/ansprechpartner — Kontakte von Sichtbarkeitsmeister.",
       "Firmenprofil: /dashboard/firmenprofil — Stammdaten, Ansprechpartner des Kunden, USPs, Leistungen, Ziele und weitere Workshop-Punkte. Inhaber/Admins speichern direkt; Sichtbarkeitsmeister sieht die Änderungen.",
-      "Organisation: /dashboard/organisations — Firma, Mitglieder, Einladungen. Eine Firma öffnen: /dashboard/organisations/[id].",
+      "Organisation: /dashboard/organisations — Firma, Mitglieder, Einladungen. Eine Firma öffnen: /dashboard/organisations?org=<id>. Den Inhaber ändert dort der bisherige Inhaber oder ein Plattform-Admin über „Inhaber ändern“. „Bisherige Adresse entfernen“ nimmt die alte E-Mail aus der Firma. Ein Plattform-Admin kann den Inhaber auch ohne Ersatz entfernen. Dieselbe Aktion liegt unter Admin → Organisationen.",
       "Persönliche Einstellungen: /settings — unter anderem Regeln für diesen Hilfe-Assistenten.",
       "Viele Seiten tragen die Firma in der Adresse als ?org=<id>. Fehlt die Firma, erscheint oben eine Auswahl oder die Seite bleibt leer.",
     ],

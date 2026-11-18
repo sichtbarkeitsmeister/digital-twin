@@ -23,6 +23,7 @@ import {
   OrgOverviewPanel,
   orgDetailCardClass,
 } from "@/app/dashboard/_components/organisations/org-overview-panel";
+import { ChangeOwnerControls } from "@/app/dashboard/_components/organisations/change-owner-controls";
 import { TeamActions } from "@/app/dashboard/_components/organisations/team-actions";
 import { DeleteOrganisationButton } from "@/app/dashboard/_components/organisations/delete-organisation-button";
 import { OrganisationEditNameForm } from "@/app/dashboard/_components/organisations/organisation-edit-name-form";
@@ -162,6 +163,17 @@ export async function OrganisationDetailView({
     created_at: string;
   }>;
 
+  const memberOwner = members.find((member) => member.org_role === "owner") ?? null;
+  const memberOwnerProfile = memberOwner
+    ? Array.isArray(memberOwner.profiles)
+      ? (memberOwner.profiles[0] ?? null)
+      : (memberOwner.profiles ?? null)
+    : null;
+  const pendingOwnerInvite = invites.find((invite) => invite.org_role === "owner") ?? null;
+  const shownOwnerEmail =
+    ownerEmail ?? memberOwnerProfile?.email ?? pendingOwnerInvite?.email ?? null;
+  const ownerIsPending = !ownerEmail && !memberOwnerProfile?.email && Boolean(pendingOwnerInvite);
+
   const displayTitle = overview.config.displayName?.trim() || organisation.name;
   const showInternalName =
     overview.config.displayName?.trim() &&
@@ -188,15 +200,28 @@ export async function OrganisationDetailView({
                   <Calendar className="size-3.5" aria-hidden />
                   {formatOrgDate(organisation.created_at)}
                 </span>
-                {ownerEmail ? (
+                {shownOwnerEmail ? (
                   <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
                     <Crown className="size-3.5 shrink-0" aria-hidden />
-                    {ownerEmail}
+                    {shownOwnerEmail}
+                    {ownerIsPending ? " · Einladung offen" : ""}
                   </span>
-                ) : null}
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                    <Crown className="size-3.5 shrink-0" aria-hidden />
+                    Kein Inhaber
+                  </span>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {canTransferOwnership ? (
+                <ChangeOwnerControls
+                  organisationId={organisationId}
+                  currentOwnerEmail={shownOwnerEmail}
+                  canRemove={platformAdmin}
+                />
+              ) : null}
               {platformAdmin && !membership ? (
                 <Badge variant="outline">Plattform-Admin</Badge>
               ) : (
@@ -357,10 +382,7 @@ export async function OrganisationDetailView({
                 </div>
               </div>
               {canManage ? (
-                <TeamActions
-                  organisationId={organisationId}
-                  canTransferOwnership={canTransferOwnership}
-                />
+                <TeamActions organisationId={organisationId} />
               ) : null}
             </div>
             <div className="p-2 sm:p-3">
