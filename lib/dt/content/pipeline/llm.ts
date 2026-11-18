@@ -10,6 +10,7 @@ import {
 import { anthropicModelParams, SONNET_5_5_BUDGET_FACTOR } from "@/lib/ai/anthropic-model-params";
 import { reviveStringifiedToolInput } from "@/lib/ai/tolerant-json";
 import { CONTENT_API_KEY_ENV, resolveContentApiKey } from "@/lib/dt/content/model-config";
+import type { ContentTokenUsage } from "@/lib/dt/content/pricing";
 import { sumAnthropicUsage } from "@/lib/dt/record-llm-usage";
 import { DT_WEB_RESEARCH_TOOLS, sumServerToolUsage, type DtWebResearchUsage } from "@/lib/dt/seo/web-research";
 
@@ -115,6 +116,50 @@ export function llmErrorMessage(error: unknown): string {
   return "KI-Aufruf fehlgeschlagen.";
 }
 
+/** `ANTHROPIC_DT_CONTENT_PROMPT_CACHE=off` sends the steps as before, without the shared beginning. */
+export const CONTENT_PROMPT_CACHE_ENV = "ANTHROPIC_DT_CONTENT_PROMPT_CACHE";
+
+export function contentPromptCacheEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return !/^(off|0|false|no|aus)$/i.test(env[CONTENT_PROMPT_CACHE_ENV]?.trim() ?? "");
+}
+
+/**
+ * The shared beginning of a request for the prompt cache. The cache matches a request from its
+ * first byte: tools, then system, then messages. So what all steps of a page have in common must
+ * come first and be byte-identical: the same tool list (`tools`, the step's own tool among them)
+ * and the same first system blocks (`prefix`, e.g. Anbieterfakten, then Avatar). The step's own
+ * system prompt follows as the last system block, the page's text and briefing as the user message.
+ */
+export type ContentPromptCache = { tools: Anthropic.Tool[]; prefix: string[] };
+
+const EPHEMERAL = { type: "ephemeral" } as const;
+
+/**
+ * The request's tools and system blocks. Each prefix block and the step's own system prompt end
+ * in a cache breakpoint (three of the four a request may have): a later step of the same page
+ * reads the prefix, the same step of another page of the organisation reads all of it.
+ */
+export function cachedRequestParts(
+  cache: ContentPromptCache,
+  system: string,
+  tool: Anthropic.Tool,
+): { tools: Anthropic.Tool[]; system: Anthropic.Messages.TextBlockParam[] } {
+  const tools = cache.tools.some((t) => t.name === tool.name) ? cache.tools : [...cache.tools, tool];
+  const prefix = cache.prefix.map((text) => text.trim()).filter(Boolean);
+  return {
+    tools,
+    system: [...prefix, system].map((text) => ({ type: "text", text, cache_control: EPHEMERAL })),
+  };
+}
+
+/** Input, output and cache tokens of a response; the input is the whole prompt, cached parts included. */
+export function contentUsage(usage: Anthropic.Messages.Usage | null | undefined): Required<ContentTokenUsage> {
+  const base = sumAnthropicUsage(usage);
+  const cacheWriteTokens = Math.max(0, usage?.cache_creation_input_tokens ?? 0);
+  const cacheReadTokens = Math.max(0, usage?.cache_read_input_tokens ?? 0);
+  return { inputTokens: base.inputTokens + cacheWriteTokens + cacheReadTokens, outputTokens: base.outputTokens, cacheWriteTokens, cacheReadTokens };
+}
+
 /**
  * One tool-forced call. The first model in `models` that exists answers; the rest are
  * fallbacks for retired model names. Streaming so long texts are not cut by the
@@ -131,11 +176,13 @@ export async function callContentTool(input: {
   apiKey?: string | null;
   /** Name of the tool in error messages („Texte“, „Grounding“). */
   toolLabel?: string;
+  /** Prompt caching: the shared tool list and the shared first system blocks (see `ContentPromptCache`). */
+  cache?: ContentPromptCache | null;
   /** Tests hand in a stub client; no network. */
   anthropic?: Anthropic;
 }): Promise<{
   json: unknown;
-  usage: { inputTokens: number; outputTokens: number };
+  usage: ContentTokenUsage;
   model: string;
   /** Why the model stopped (`tool_use`, `end_turn` …); optional so test stubs need not set it. */
   stopReason?: string | null;
@@ -153,21 +200,27 @@ export async function callContentTool(input: {
   }
 
   const client = anthropic;
-  const call = (forced: boolean) =>
-    callAnthropicFirstAvailable({
+  // With the shared tool list the step always names its tool: a model that takes no forced
+  // tool_choice (Sonnet 5.5) has nothing else to tell it which of the tools to call.
+  const systemFor = (forced: boolean) =>
+    forced && !input.cache
+      ? input.system
+      : `${input.system}\n\nAntworte ausschließlich, indem du das Werkzeug „${input.tool.name}“ genau einmal aufrufst${input.cache ? " – kein anderes Werkzeug" : ""}.`;
+  const call = (forced: boolean) => {
+    const cached = input.cache ? cachedRequestParts(input.cache, systemFor(forced), input.tool) : null;
+    return callAnthropicFirstAvailable({
       anthropic: client,
       models: input.models,
       maxTokens: input.maxTokens,
       modelParams: (model) => cappedModelParams(model, input.maxTokens),
       timeoutMs: input.timeoutMs ?? STEP_TIMEOUT_MS,
       stream: true,
-      system: forced
-        ? input.system
-        : `${input.system}\n\nAntworte ausschließlich, indem du das Werkzeug „${input.tool.name}“ genau einmal aufrufst.`,
-      tools: [input.tool],
+      system: cached ? cached.system : systemFor(forced),
+      tools: cached ? cached.tools : [input.tool],
       toolChoice: forced ? { type: "tool", name: input.tool.name } : { type: "auto" },
       messages: [{ role: "user", content: input.user }],
     });
+  };
   let result: Awaited<ReturnType<typeof callAnthropicFirstAvailable>>;
   try {
     try {
@@ -199,8 +252,13 @@ export async function callContentTool(input: {
     extractToolUseInput(result.response, input.tool.name),
     input.tool.input_schema as Parameters<typeof reviveStringifiedToolInput>[1],
   );
-  if (!json) throw new ContentLlmError("Die KI-Antwort enthielt kein Ergebnis.", true, { stopReason: result.response.stop_reason });
-  return { json, usage: sumAnthropicUsage(result.response.usage), model: result.model, stopReason: result.response.stop_reason };
+  if (!json) {
+    // With several tools in the request the model may have called another one.
+    const called = result.response.content.find((block) => block.type === "tool_use");
+    const detail = called && called.type === "tool_use" ? ` (statt „${input.tool.name}“ wurde „${called.name}“ aufgerufen)` : "";
+    throw new ContentLlmError(`Die KI-Antwort enthielt kein Ergebnis${detail}.`, true, { stopReason: result.response.stop_reason });
+  }
+  return { json, usage: contentUsage(result.response.usage), model: result.model, stopReason: result.response.stop_reason };
 }
 
 // --- web research (Aktualitätsprüfung) ------------------------------------------------------------

@@ -264,6 +264,12 @@ export type EndabnahmeOutput = { unresolved: ContentFinding[]; summary: string }
 export type ContentStepSpec = {
   system: string;
   user: string;
+  /**
+   * With prompt caching: the user message without the blocks that stand in the shared beginning of
+   * the request instead (`sharedContextBlocks`: Anbieterfakten, Kontaktdaten, Vorgaben, Avatar).
+   * `user` stays the whole message, for a run without caching.
+   */
+  userRest?: string;
   tool: Anthropic.Tool;
   maxTokens: number;
   normalize: (json: unknown, context: ContentPipelineContext) => unknown;
@@ -522,25 +528,52 @@ export function settleHeroSentence(blocks: readonly ContentTextBlock[]): Content
 
 export function anbieterBlock(context: Pick<ContentPipelineContext, "sections"> & Partial<Pick<ContentPipelineContext, "customerAnswers" | "pageFacts" | "pendingChecks">>): string {
   const filled = context.sections.filter((s) => s.current.trim());
+  const extras = anbieterExtraParts(context);
+  // Statements the evaluation marks as blocked, pulled out so no step can overlook the note.
+  const blocked = blockedBlock(extractBlockedStatements(filled));
+  const blockedPart = blocked ? [blocked] : [];
+  if (filled.length === 0 && extras.length === 0) return "## Anbieterfakten\n(keine)";
+  return [
+    ANBIETER_HEADING,
+    ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`),
+    ...extras,
+    ...blockedPart,
+  ].join("\n\n");
+}
+
+const ANBIETER_HEADING = "## Anbieterfakten aus Fragebogen und Kundengesprächen (einzige Quelle für Tatsachen)";
+
+/** What changes while a page runs or belongs to one page: the customer's answers, the open checks, the Faktenauszug. */
+function anbieterExtraParts(context: Partial<Pick<ContentPipelineContext, "customerAnswers" | "pageFacts" | "pendingChecks">>): string[] {
   const answers = (context.customerAnswers ?? []).filter((a) => a.question.trim() && a.answer.trim());
   const answersPart = answers.length
     ? [`### Antworten des Kunden (bestätigt)\n${answers.map((a) => `- ${clip(a.question, 400)} → ${clip(a.answer, MAX_CUSTOMER_ANSWER_CHARS)}`).join("\n")}`]
     : [];
   const pendingPart = pendingChecksBlock(context.pendingChecks) ? [pendingChecksBlock(context.pendingChecks)] : [];
   const excerpt = pageFactsBlock(context.pageFacts);
-  const excerptPart = excerpt ? [excerpt] : [];
-  // Statements the evaluation marks as blocked, pulled out so no step can overlook the note.
+  return [...answersPart, ...pendingPart, ...(excerpt ? [excerpt] : [])];
+}
+
+/**
+ * The Anbieterfakten that are the same for every page and every step of an organisation: the
+ * sections of the evaluation and what it marks as blocked. With prompt caching this part stands in
+ * the shared beginning of every request (`sharedContextBlocks`), the rest in `anbieterPageBlock`.
+ */
+export function anbieterStableBlock(context: Pick<ContentPipelineContext, "sections">): string {
+  const filled = context.sections.filter((s) => s.current.trim());
+  if (filled.length === 0) return "## Anbieterfakten\n(keine)";
   const blocked = blockedBlock(extractBlockedStatements(filled));
-  const blockedPart = blocked ? [blocked] : [];
-  if (filled.length === 0 && answersPart.length === 0 && excerptPart.length === 0 && pendingPart.length === 0) return "## Anbieterfakten\n(keine)";
-  return [
-    "## Anbieterfakten aus Fragebogen und Kundengesprächen (einzige Quelle für Tatsachen)",
-    ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`),
-    ...answersPart,
-    ...pendingPart,
-    ...excerptPart,
-    ...blockedPart,
-  ].join("\n\n");
+  return [ANBIETER_HEADING, ...filled.map((s) => `### ${s.label}\n${clip(s.current, MAX_SECTION_CHARS)}`), ...(blocked ? [blocked] : [])].join("\n\n");
+}
+
+/**
+ * The part of the Anbieterfakten that is not in the shared beginning: answers of the customer,
+ * open checks and this page's Faktenauszug. They count exactly like the Anbieterfakten. Empty without any.
+ */
+export function anbieterPageBlock(context: Partial<Pick<ContentPipelineContext, "customerAnswers" | "pageFacts" | "pendingChecks">>): string {
+  const extras = anbieterExtraParts(context);
+  if (extras.length === 0) return "";
+  return ["## Ergänzung der Anbieterfakten (gilt wie die Anbieterfakten: Antworten des Kunden, offene Prüfungen, Faktenauszug dieser Seite)", ...extras].join("\n\n");
 }
 
 export function settingsBlock(settings: ContentTextSettings): string {
@@ -1031,6 +1064,62 @@ export function stepSystem(instruction: string, settings: ContentTextSettings, e
   return join([instruction, BASE_RULES, ...extra, brancheRules(settings)]);
 }
 
+// --- prompt caching: the shared beginning of every request ---------------------------------------
+
+/**
+ * What every step of every page of one organisation sends unchanged, in this order: the
+ * Anbieterfakten with the Kontaktdaten and the Vorgaben (`org`), then the Avatar or the page's
+ * Zielgruppen (`audience`). With prompt caching these two blocks open the system prompt of every
+ * step (`run-step.ts`), so the second step of a page already reads them from the cache instead
+ * of paying for them again; the audience comes last because a page may have its own.
+ */
+export type ContentSharedContext = { org: string; audience: string };
+
+export function sharedContextBlocks(
+  context: Pick<ContentPipelineContext, "sections" | "settings" | "avatar"> & Partial<Pick<ContentPipelineContext, "contact" | "audience">>,
+): ContentSharedContext {
+  return {
+    org: join([anbieterStableBlock(context), kontaktBlock(context), settingsBlock(context.settings)]),
+    audience: avatarBlock(context),
+  };
+}
+
+/**
+ * The user message of a step: what belongs to the page and the step (`before`), the organisation's
+ * context, then wishes and notes (`after`). `userRest` is the same message without the blocks of
+ * `sharedContextBlocks`; the changing part of the Anbieterfakten stays in it (`anbieterPageBlock`).
+ */
+function stepUser(
+  context: ContentPipelineContext,
+  before: readonly string[],
+  after: readonly string[],
+  options: { kontakt?: boolean } = {},
+): { user: string; userRest: string } {
+  return {
+    user: join([
+      ...before,
+      anbieterBlock(context),
+      ...(options.kontakt === false ? [] : [kontaktBlock(context)]),
+      settingsBlock(context.settings),
+      avatarBlock(context),
+      ...after,
+    ]),
+    userRest: join([...before, anbieterPageBlock(context), ...after]),
+  };
+}
+
+/**
+ * The tools of all steps, in step order. With prompt caching every step sends this same list
+ * (tools are the first thing of a request, so a different tool per step would end the shared
+ * beginning at once) and is told which one to call.
+ */
+export function contentStepTools(context: ContentPipelineContext): Anthropic.Tool[] {
+  return Object.keys(SPECS)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((step) => SPECS[step]!(context).tool);
+}
+
 // --- the steps ---------------------------------------------------------------------------------
 
 function analyse(context: ContentPipelineContext): ContentStepSpec {
@@ -1068,7 +1157,7 @@ deferred_questions: Fragen, die eine andere Seite der Website besser beantwortet
 dropped_questions: Fragen, die hier nicht hingehören, mit reason.
 hormozi: traumziel (was der Avatar wirklich will), hauptschmerz, groesste_huerde (was ihn vom Auftrag abhält), einwaende (die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar), moeglicher_beweis (nur belegte Beweise aus den Anbieterfakten; sonst „kein belegter Beweis“), gewuenschter_cta (passend zu conversion_goal und den Kontaktwegen aus den Fakten). Nur aus Avatar und Anbieterfakten, nichts erfinden.
 ${analyseAudienceRule(context)}usable_facts: belegte Fakten für diese Seite, je ein Satz. missing_facts: was der Text bräuchte, aber nirgends belegt ist – lieber benennen als später erfinden. assumptions: was du ohne Beleg annimmst.`,
-    user: join([pageBlock(context), anbieterBlock(context), settingsBlock(context.settings), avatarBlock(context), notesBlock(context)]),
+    ...stepUser(context, [pageBlock(context)], [notesBlock(context)], { kontakt: false }),
     tool: {
       name: "submit_analyse",
       description: "Suchintention, Keywords, Fragen, Hormozi-Bausteine und Faktenlage für diese Seite.",
@@ -1261,16 +1350,11 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
       QUESTION_RULES,
       ...clientWishesRules(context),
     ]),
-    user: join([
-      pageBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE})`),
-      anbieterBlock(context),
-      kontaktBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      clientWishesBlock(context),
-      notesBlock(context),
-    ]),
+    ...stepUser(
+      context,
+      [pageBlock(context), outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE})`)],
+      [clientWishesBlock(context), notesBlock(context)],
+    ),
     tool: {
       name: "submit_seo_text",
       description: "Der vollständige Seitentext in Abschnitten, mit Title und Meta-Description.",
@@ -1301,16 +1385,7 @@ function faktencheck(context: ContentPipelineContext): ContentStepSpec {
       ...faktencheckClientRules(context),
       ...clientWishesRules(context),
     ]),
-    user: join([
-      pageBlock(context),
-      currentTextBlock(context),
-      anbieterBlock(context),
-      kontaktBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      clientWishesBlock(context),
-      notesBlock(context),
-    ]),
+    ...stepUser(context, [pageBlock(context), currentTextBlock(context)], [clientWishesBlock(context), notesBlock(context)]),
     tool: {
       name: "submit_faktencheck",
       description: `Befunde und Fragen an den Kunden: höchstens ${CONTENT_MAX_FINDINGS} Befunde und ${CONTENT_MAX_QUESTIONS} Fragen, die wichtigsten zuerst.`,
@@ -1410,19 +1485,17 @@ function geo(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: GEO_MAX_TOKENS,
     system: geoSystemPrompt(context.settings, stepInstruction(context, "geo"), [QUESTION_RULES, ...clientWishesRules(context)]),
-    user: join([
-      pageBlock(context),
-      currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – Fragen, die der Text abdecken muss`),
-      outputBlock(context, CONTENT_STEP_FAKTENCHECK, `Faktencheck (Schritt ${CONTENT_STEP_FAKTENCHECK}) – umsetzen`),
-      freshnessSendBackBlock(context),
-      anbieterBlock(context),
-      kontaktBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      clientWishesBlock(context),
-      notesBlock(context),
-    ]),
+    ...stepUser(
+      context,
+      [
+        pageBlock(context),
+        currentTextBlock(context),
+        outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – Fragen, die der Text abdecken muss`),
+        outputBlock(context, CONTENT_STEP_FAKTENCHECK, `Faktencheck (Schritt ${CONTENT_STEP_FAKTENCHECK}) – umsetzen`),
+        freshnessSendBackBlock(context),
+      ],
+      [clientWishesBlock(context), notesBlock(context)],
+    ),
     tool: GEO_TOOL,
     normalize: normalizeGeoOutput,
   };
@@ -1435,17 +1508,15 @@ function hormozi(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: HORMOZI_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "hormozi"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
-    user: join([
-      pageBlock(context),
-      currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – hormozi, conversion_goal und usable_facts`),
-      anbieterBlock(context),
-      kontaktBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      clientWishesBlock(context),
-      notesBlock(context),
-    ]),
+    ...stepUser(
+      context,
+      [
+        pageBlock(context),
+        currentTextBlock(context),
+        outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE}) – hormozi, conversion_goal und usable_facts`),
+      ],
+      [clientWishesBlock(context), notesBlock(context)],
+    ),
     tool: {
       name: "submit_hormozi_text",
       description: "Der Seitentext mit Hero-Satz, Value Equation und geschärften Handlungsaufforderungen.",
@@ -1480,15 +1551,7 @@ function vermenschlichung(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "vermenschlichung"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
-    user: join([
-      pageBlock(context),
-      currentTextBlock(context),
-      anbieterBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      clientWishesBlock(context),
-      notesBlock(context),
-    ]),
+    ...stepUser(context, [pageBlock(context), currentTextBlock(context)], [clientWishesBlock(context), notesBlock(context)], { kontakt: false }),
     tool: {
       name: "submit_vermenschlichung_text",
       description: "Der sprachlich überarbeitete Seitentext in Abschnitten mit Selbstbewertung.",
@@ -1532,15 +1595,7 @@ function lektorat(context: ContentPipelineContext): ContentStepSpec {
   return {
     maxTokens: TEXT_STEP_MAX_TOKENS,
     system: stepSystem(stepInstruction(context, "lektorat"), context.settings, [QUESTION_RULES, ...clientWishesRules(context)]),
-    user: join([
-      pageBlock(context),
-      currentTextBlock(context),
-      anbieterBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      clientWishesBlock(context),
-      notesBlock(context),
-    ]),
+    ...stepUser(context, [pageBlock(context), currentTextBlock(context)], [clientWishesBlock(context), notesBlock(context)], { kontakt: false }),
     tool: {
       name: "submit_lektorat",
       description: "Korrigierter Text und verbleibende Befunde.",
@@ -1602,19 +1657,17 @@ ${QUESTION_RULES}
 Schritt ${CONTENT_STEP_ENDABNAHME} Endabnahme: Du bist die letzte Kontrolle vor der Freigabe durch einen Menschen. Du änderst nichts mehr.
 unresolved: alles, was die Freigabe noch verhindern könnte – unbelegte Zahl, rechtliches Risiko, fehlender Kontaktweg, verbotenes Wort, Anredebruch, ein stehengebliebener Platzhalter [BITTE PRÜFEN: …] oder [QUELLE BITTE ERGÄNZEN], eine fehlende Verlinkung auf das Hauptsilo bei einer Unterseite, ein offener Punkt der Aktualitätsprüfung. Leer, wenn der Text freigegeben werden kann. Gewollt und kein Befund: [LINK: …]-Marker (setzt das Web-Team), der Marker [DATUM] (das Datum setzt das Web-Team beim Veröffentlichen), z. B. „Zuletzt aktualisiert: [DATUM]“ oder „Stand: [DATUM]“, und Platzhalter aus „Offen – der Kunde prüft noch“ (die meldet das System selbst).
 summary: 2–3 Sätze für die Redaktion: Was die Seite leistet, worauf beim Freigeben zu achten ist.${endabnahmeClientRules(context) ? `\n${endabnahmeClientRules(context)}` : ""}`,
-    user: join([
-      pageBlock(context),
-      currentTextBlock(context),
-      outputBlock(context, CONTENT_STEP_LEKTORAT, `Lektorat (Schritt ${CONTENT_STEP_LEKTORAT}) – gemeldete Befunde`),
-      openFindingsBlock(context),
-      keptFindingsBlock(context),
-      anbieterBlock(context),
-      kontaktBlock(context),
-      settingsBlock(context.settings),
-      avatarBlock(context),
-      clientWishesBlock(context),
-      notesBlock(context),
-    ]),
+    ...stepUser(
+      context,
+      [
+        pageBlock(context),
+        currentTextBlock(context),
+        outputBlock(context, CONTENT_STEP_LEKTORAT, `Lektorat (Schritt ${CONTENT_STEP_LEKTORAT}) – gemeldete Befunde`),
+        openFindingsBlock(context),
+        keptFindingsBlock(context),
+      ],
+      [clientWishesBlock(context), notesBlock(context)],
+    ),
     tool: {
       name: "submit_endabnahme",
       description: "Offene Punkte und Zusammenfassung für die Freigabe.",

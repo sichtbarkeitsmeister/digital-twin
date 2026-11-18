@@ -102,8 +102,10 @@ export function readPageFacts(stepOutput: unknown): ContentPageFacts | null {
 /** The Analyse's stored output without the excerpt, as the later steps' prompts quote it. */
 export function withoutPageFacts(stepOutput: unknown): unknown {
   if (!stepOutput || typeof stepOutput !== "object" || Array.isArray(stepOutput)) return stepOutput;
-  const { page_facts: _excerpt, ...rest } = stepOutput as Record<string, unknown>;
+  // `token_usage` is the step's bookkeeping (run-step.ts), no part of what the step said.
+  const { page_facts: _excerpt, token_usage: _usage, ...rest } = stepOutput as Record<string, unknown>;
   void _excerpt;
+  void _usage;
   return rest;
 }
 
