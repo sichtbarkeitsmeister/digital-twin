@@ -6,6 +6,7 @@
 import type { ContentZielgruppen } from "@/lib/dt/content/zielgruppen";
 import type { ContentPageFact } from "@/lib/dt/content/pipeline/page-facts-model";
 import type { ContentSeitenkonzept, ContentThema } from "@/lib/dt/content/pipeline/page-plan";
+import type { ContentBeleg, ContentHeroKandidat } from "@/lib/dt/content/pipeline/step-evidence";
 import type { ContactFieldKey, ContactSource, OrgContactData } from "@/lib/dt/contact-data";
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
@@ -406,6 +407,11 @@ export type ContentReview = {
     seitenkonzept: ContentSeitenkonzept | null;
     themenplan: ContentThema[];
   };
+  /**
+   * What the steps wrote down besides the text (`step-evidence.ts`), for the release: the six
+   * candidates of the SEO step for the Hero-Überschrift and the Faktencheck's evidence list.
+   */
+  evidence: { hero_kandidaten: ContentHeroKandidat[]; belegliste: ContentBeleg[] };
   review_stop: {
     enabled: boolean;
     status: "none" | "waiting" | "done";

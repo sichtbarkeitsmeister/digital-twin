@@ -57,6 +57,7 @@ import { CONTENT_ACTION_LABELS, formatEur } from "@/lib/dt/content/presentation"
 import { slugify } from "@/lib/dt/content/render";
 import type { ContentOrgQuestionRow } from "@/lib/dt/content/org-questions";
 import { hasPagePlan, readPagePlan, withEditedPagePlan } from "@/lib/dt/content/pipeline/page-plan";
+import { readBelegliste, readHeroKandidaten } from "@/lib/dt/content/pipeline/step-evidence";
 import {
   briefingPatchFor,
   planImprovementStructure,
@@ -1065,6 +1066,15 @@ export async function updateContentPagePlan(
   return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Seitenkonzept konnte nicht gespeichert werden") } : { ok: true };
 }
 
+/** Hero-Kandidaten (SEO) and Belegliste (Faktencheck) as their step rows hold them; empty before those steps ran. */
+export function reviewEvidence(steps: readonly ContentStepRow[]): ContentReview["evidence"] {
+  const output = (step: number) => {
+    const row = steps.find((s) => s.step === step);
+    return row && (row.status === "done" || row.status === "waiting") ? row.output : null;
+  };
+  return { hero_kandidaten: readHeroKandidaten(output(CONTENT_STEP_SEO)), belegliste: readBelegliste(output(CONTENT_STEP_FAKTENCHECK)) };
+}
+
 /** What the page window shows of the Analyse's plan, and whether it can be changed now. */
 export function reviewPagePlan(page: Pick<ContentPageRow, "state" | "step" | "question_stop">, steps: readonly ContentStepRow[]): ContentReview["page_plan"] {
   const row = steps.find((s) => s.step === CONTENT_STEP_ANALYSE);
@@ -1784,6 +1794,7 @@ export function buildReview(
     freshness: reviewFreshness(page.freshness),
     skip_steps: page.skip_steps,
     page_plan: reviewPagePlan(page, steps),
+    evidence: reviewEvidence(steps),
     steps: stepList(steps, page),
     page_facts: reviewPageFacts(steps),
     actions: pageActions(page),

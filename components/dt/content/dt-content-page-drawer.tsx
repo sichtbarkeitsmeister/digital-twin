@@ -63,6 +63,7 @@ import type {
   ContentStep,
 } from "@/lib/dt/content/types";
 import { contentKeywordOriginLabel } from "@/lib/dt/content/types";
+import { DtContentEvidence } from "@/components/dt/content/dt-content-evidence";
 import { DtContentPagePlan } from "@/components/dt/content/dt-content-page-plan";
 import type { ContentSeitenkonzept, ContentThema } from "@/lib/dt/content/pipeline/page-plan";
 
@@ -313,6 +314,8 @@ export function DtContentPageDrawer(props: {
     (reviewState === "braucht_sie" || reviewState === "in_arbeit" || (reviewState === "fertig" && !review?.public.released));
   /** Shown in the header next to the status, as soon as the page has a text. */
   const wordCount = useMemo(() => (review?.html ? countContentWords(review.html) : 0), [review?.html]);
+  /** Heading of each Abschnitt by id (the Belegliste names Abschnitte by id). */
+  const sectionNames = useMemo(() => Object.fromEntries(parseBlocksFromHtml(review?.html ?? "").map((b) => [b.id, b.heading?.trim() || b.id])), [review?.html]);
   const findings = useMemo(() => (review ? openFindings(review) : []), [review]);
   /** The Abschnitt each open point is about, when the text shows it („Vorschlag übernehmen“ needs one). */
   const findingTargets = useMemo(() => {
@@ -1491,6 +1494,7 @@ export function DtContentPageDrawer(props: {
                     </section>
 
                     <DtContentPagePlan plan={review.page_plan} busy={busy === "page_plan" || Boolean(jobId)} onSave={savePagePlan} />
+                    <DtContentEvidence evidence={review.evidence} sectionNames={sectionNames} />
 
                     <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <h3 className={sectionTitleClass}>

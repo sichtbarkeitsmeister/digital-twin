@@ -19,6 +19,7 @@
     "test:content-step-truncation": "tsx scripts/test-content-step-truncation.ts",
     "test:content-page-facts": "tsx scripts/test-content-page-facts.ts",
     "test:content-kunde-prueft": "tsx scripts/test-content-kunde-prueft.ts",
+    "test:content-step-evidence": "tsx scripts/test-content-step-evidence.ts",
     "test:content-page-plan": "tsx scripts/test-content-page-plan.ts",
     "test:content-format-limits": "tsx scripts/test-content-format-limits.ts",
     "test:content-heading-levels": "tsx scripts/test-content-heading-levels.ts",
