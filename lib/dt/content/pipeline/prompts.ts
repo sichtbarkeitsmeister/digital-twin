@@ -93,6 +93,7 @@ import {
   type ContentHeroKandidat,
 } from "@/lib/dt/content/pipeline/step-evidence";
 import { contentCoreRulesBlock } from "@/lib/dt/content/core-rules";
+import { USED_ELSEWHERE_RULES, usedElsewhereBlock, type ContentPageUsage } from "@/lib/dt/content/pipeline/used-elsewhere";
 import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { renderContentTypePrompt, type ContentTypePrompts } from "@/lib/dt/content/type-prompts";
 import type { ContentFinding, ContentFreshness, ContentPageSource, ContentQuestion } from "@/lib/dt/content/types";
@@ -155,6 +156,11 @@ export type ContentPipelineContext = {
   texterPrompt?: string;
   /** „Kernregeln“ of the agency (`core-rules.ts`): added to every step's system prompt. Empty or missing: none. */
   coreRules?: string;
+  /**
+   * What the other pages of the organisation already use (`used-elsewhere.ts`): Hero-Überschrift,
+   * Einstieg, H2/H3 and Fallbeispiele per page. Loaded for the SEO step only.
+   */
+  usedElsewhere?: ContentPageUsage[];
   /**
    * The editable step instructions (Globale Prompts → SEO … Lektorat). A missing or empty
    * one means the built-in default; the locked rules and the tool schema are added in code.
@@ -1327,11 +1333,13 @@ function seo(context: ContentPipelineContext): ContentStepSpec {
       QUESTION_RULES,
       ...konzeptRules(context, PAGE_PLAN_RULES_SEO),
       HERO_KANDIDATEN_RULES,
+      ...(usedElsewhereBlock(context.usedElsewhere) ? [USED_ELSEWHERE_RULES] : []),
       ...clientWishesRules(context),
     ], context.coreRules),
     user: join([
       pageBlock(context),
       outputBlock(context, CONTENT_STEP_ANALYSE, `Analyse (Schritt ${CONTENT_STEP_ANALYSE})`),
+      usedElsewhereBlock(context.usedElsewhere),
       anbieterBlock(context),
       kontaktBlock(context),
       settingsBlock(context.settings),
