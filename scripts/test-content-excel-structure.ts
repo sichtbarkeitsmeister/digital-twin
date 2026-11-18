@@ -992,10 +992,10 @@ assert.deepEqual(
 assert.deepEqual(faq.hormozi.einwaende, ["Zu teuer", "Kein Vertrauen", "Keine Zeit", "Später"], "at most four");
 const analyseSpec = contentStepSpec(CONTENT_STEP_ANALYSE, context());
 assert.match(analyseSpec.system, /theme: das Unterthema in 1–3 Wörtern\. Markiere mit theme, welche Fragen in den Fragen-Abschnitt gehören \(theme beginnt mit ‚FAQ:‘\) und welche im Fließtext beantwortet werden sollen\. Höchstens 6 Fragen für den Fragen-Abschnitt\./);
-assert.match(analyseSpec.system, /groesste_huerde \(was ihn vom Auftrag abhält\), einwaende \(die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar\), moeglicher_beweis/);
+assert.match(analyseSpec.system, /groesste_huerde \(was sie vom Auftrag abhält\), einwaende \(die 2–4 wichtigsten Einwände gegen diese Leistung, in der Reihenfolge und Sprache des Avatars\), moeglicher_beweis/);
 const analyseSchema = analyseSpec.tool!.input_schema as { properties: Record<string, { properties?: Record<string, unknown>; items?: { properties: Record<string, unknown> }; required?: string[] }> };
 assert.ok(analyseSchema.properties.hormozi!.required!.includes("einwaende"));
-assert.deepEqual(analyseSchema.properties.hormozi!.properties!.einwaende, { type: "array", items: { type: "string" }, description: "Die 2–4 wichtigsten Einwände des Avatars in seiner Reihenfolge, nur aus dem Avatar." });
+assert.deepEqual(analyseSchema.properties.hormozi!.properties!.einwaende, { type: "array", items: { type: "string" }, description: "Die 2–4 wichtigsten Einwände gegen genau diese Leistung, in der Reihenfolge und Sprache des Avatars." });
 assert.deepEqual(analyseSchema.properties.fanout_questions!.items!.properties.theme, { type: "string", description: "Unterthema in 1–3 Wörtern; beginnt mit „FAQ:“, wenn die Frage in den Fragen-Abschnitt gehört." });
 console.log("analyse normalisation: ok");
 

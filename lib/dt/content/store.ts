@@ -42,6 +42,7 @@ import {
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
   CONTENT_STEP_LEKTORAT,
+  CONTENT_STEP_SEO,
   CONTENT_STEPS,
   contentStepByKey,
   contentStepName,
@@ -55,6 +56,7 @@ import {
 import { CONTENT_ACTION_LABELS, formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
 import type { ContentOrgQuestionRow } from "@/lib/dt/content/org-questions";
+import { hasPagePlan, readPagePlan, withEditedPagePlan } from "@/lib/dt/content/pipeline/page-plan";
 import {
   briefingPatchFor,
   planImprovementStructure,
@@ -1013,6 +1015,75 @@ export async function updateContentReviewStop(
   return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Einstellung konnte nicht gespeichert werden") } : { ok: true };
 }
 
+/**
+ * „Nach der Analyse zur Durchsicht anhalten“ for one page. Stored in `question_stop.analyse_stop`
+ * (no migration), read fresh like the review switch.
+ */
+export async function updateContentAnalyseStop(
+  service: SupabaseClient,
+  page: Pick<ContentPageRow, "id">,
+  enabled: boolean,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { data, error: readError } = await service.from("dt_content_pages").select("question_stop").eq("id", page.id).maybeSingle();
+  if (readError) return { ok: false, status: 500, error: contentDbErrorMessage(readError, "Einstellung konnte nicht gelesen werden") };
+  const stop = { ...(readQuestionStop((data as { question_stop?: unknown } | null)?.question_stop) as Record<string, unknown>) };
+  if (enabled) stop.analyse_stop = true;
+  else delete stop.analyse_stop;
+  const { error } = await service.from("dt_content_pages").update({ question_stop: stop }).eq("id", page.id);
+  return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Einstellung konnte nicht gespeichert werden") } : { ok: true };
+}
+
+/**
+ * Seitenkonzept and Themenplan changed in the page window: they replace the Analyse's in its
+ * step row, which every later step reads (`page-plan.ts`). Only once the Analyse has run, and not
+ * while the page runs (a step in flight would not see the change, or the Analyse would overwrite it).
+ */
+export async function updateContentPagePlan(
+  service: SupabaseClient,
+  page: Pick<ContentPageRow, "id" | "state">,
+  edit: { seitenkonzept?: unknown; themenplan?: unknown },
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  if (page.state === "laeuft") {
+    return { ok: false, status: 409, error: "Die Seite läuft gerade. Bitte warten, bis der Schritt fertig ist, oder „Stoppen“; dann lässt sich das Seitenkonzept ändern." };
+  }
+  const { data, error: readError } = await service
+    .from("dt_content_steps")
+    .select("status, output")
+    .eq("page_id", page.id)
+    .eq("step", CONTENT_STEP_ANALYSE)
+    .maybeSingle();
+  if (readError) return { ok: false, status: 500, error: contentDbErrorMessage(readError, "Analyse konnte nicht gelesen werden") };
+  const row = data as { status?: string; output?: unknown } | null;
+  if (!row || (row.status !== "done" && row.status !== "waiting")) {
+    return { ok: false, status: 409, error: "Seitenkonzept und Themenplan entstehen in der Analyse. Bitte die Seite zuerst bis nach Schritt 1 laufen lassen." };
+  }
+  const { error } = await service
+    .from("dt_content_steps")
+    .update({ output: withEditedPagePlan(row.output, edit) })
+    .eq("page_id", page.id)
+    .eq("step", CONTENT_STEP_ANALYSE);
+  return error ? { ok: false, status: 500, error: contentDbErrorMessage(error, "Seitenkonzept konnte nicht gespeichert werden") } : { ok: true };
+}
+
+/** What the page window shows of the Analyse's plan, and whether it can be changed now. */
+export function reviewPagePlan(page: Pick<ContentPageRow, "state" | "step" | "question_stop">, steps: readonly ContentStepRow[]): ContentReview["page_plan"] {
+  const row = steps.find((s) => s.step === CONTENT_STEP_ANALYSE);
+  const ran = Boolean(row && (row.status === "done" || row.status === "waiting"));
+  const plan = ran ? readPagePlan(row!.output) : null;
+  const seoRan = steps.some((s) => s.step === CONTENT_STEP_SEO && (s.status === "done" || s.status === "skipped"));
+  return {
+    stop_enabled: page.question_stop.analyse_stop === true,
+    waiting: page.state === "braucht_sie" && page.step === CONTENT_STEP_ANALYSE,
+    available: hasPagePlan(plan),
+    analysed: ran,
+    editable: ran && page.state !== "laeuft",
+    edited: plan?.edited === true,
+    text_written: seoRan,
+    seitenkonzept: plan?.seitenkonzept ?? null,
+    themenplan: plan?.themenplan ?? [],
+  };
+}
+
 export type ContentOutlinePage = Pick<
   ContentPageRow,
   "slug" | "name" | "path" | "level" | "source" | "page_role" | "page_type" | "pillar_name" | "main_keyword" | "keywords"
@@ -1433,6 +1504,9 @@ export function pageDetail(page: ContentPageRow, extra: ContentPageExtra = {}): 
     case "laeuft":
       return describeRunningPage(page, extra.steps ?? null, extra.verdict ?? null);
     case "braucht_sie":
+      if (page.step === CONTENT_STEP_ANALYSE) {
+        return "Analyse fertig – Seitenkonzept und Themenplan prüfen, dann „Freigeben“";
+      }
       if (page.question_stop.review?.status === "waiting" && page.question_stop.status !== "waiting") {
         return "Zur Durchsicht – Abschnitte prüfen und überarbeiten, dann „Freigeben und fertigstellen“";
       }
@@ -1709,6 +1783,7 @@ export function buildReview(
       .map((q) => ({ id: q.id, question: q.question, placeholder: q.placeholder, status: q.status, answer: q.answer, pages: q.page_slugs.length })),
     freshness: reviewFreshness(page.freshness),
     skip_steps: page.skip_steps,
+    page_plan: reviewPagePlan(page, steps),
     steps: stepList(steps, page),
     page_facts: reviewPageFacts(steps),
     actions: pageActions(page),

@@ -345,7 +345,7 @@ export type StepPatchCurrent = {
   /** The Endabnahme: paragraphs this text shares with other pages (`duplicateFindingsForPage`), listed for the release. */
   duplicateFindings?: readonly ContentFinding[];
   /** The page's stop; its `kept` points („So lassen“) are never listed again. */
-  question_stop?: Pick<ContentQuestionStop, "kept">;
+  question_stop?: Pick<ContentQuestionStop, "kept"> & Partial<Pick<ContentQuestionStop, "analyse_stop">>;
 };
 
 /**
@@ -373,6 +373,13 @@ export function stepPatchFor(
     case CONTENT_STEP_ANALYSE: {
       const out = output as AnalyseOutput;
       if (out.main_keyword) pagePatch.main_keyword = out.main_keyword;
+      // „Nach der Analyse zur Durchsicht anhalten“: the editors read (and change) Seitenkonzept and
+      // Themenplan before SEO writes. „Freigeben“ at step 1 lets the page go on.
+      if (current.question_stop?.analyse_stop) {
+        pagePatch.state = "braucht_sie";
+        pagePatch.job_id = null;
+        stop();
+      }
       break;
     }
     case CONTENT_STEP_FAKTENCHECK: {

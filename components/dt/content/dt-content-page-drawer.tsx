@@ -63,6 +63,8 @@ import type {
   ContentStep,
 } from "@/lib/dt/content/types";
 import { contentKeywordOriginLabel } from "@/lib/dt/content/types";
+import { DtContentPagePlan } from "@/components/dt/content/dt-content-page-plan";
+import type { ContentSeitenkonzept, ContentThema } from "@/lib/dt/content/pipeline/page-plan";
 
 const textareaClass =
   "min-h-[120px] w-full resize-y rounded-dt border border-sbkm-navy/15 bg-white/80 px-3 py-2.5 text-sm leading-relaxed text-sbkm-navy shadow-[0_1px_2px_rgba(0,0,0,0.04)] outline-none transition duration-150 placeholder:text-sbkm-ink-500 focus-visible:border-sbkm-mint/40 focus-visible:ring-2 focus-visible:ring-sbkm-mint/30 disabled:opacity-50 dark:border-white/15 dark:bg-white/10 dark:text-white dark:placeholder:text-white/40";
@@ -542,6 +544,35 @@ export function DtContentPageDrawer(props: {
     }
     setReview(res.data.review);
     toast.success(enabled ? "Hält vor der Watermark zur Durchsicht an" : "Läuft ohne Durchsicht bis zum Ende");
+  }
+
+  /** „Nach der Analyse zur Durchsicht anhalten“ for this page. */
+  async function toggleAnalyseStop(enabled: boolean) {
+    if (!base) return;
+    setBusy("analyse_stop");
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, { method: "PATCH", body: { organisationId, analyse_stop: enabled, overview: false } });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    setReview(res.data.review);
+    toast.success(enabled ? "Hält nach der Analyse zur Durchsicht an" : "Läuft nach der Analyse weiter");
+  }
+
+  /** Seitenkonzept and Themenplan changed in the page window; true when saved. */
+  async function savePagePlan(plan: { seitenkonzept: ContentSeitenkonzept; themenplan: ContentThema[] }): Promise<boolean> {
+    if (!base) return false;
+    setBusy("page_plan");
+    const res = await contentApi<ContentPagePatchResult>(`${base}`, { method: "PATCH", body: { organisationId, page_plan: plan, overview: false } });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message);
+      return false;
+    }
+    setReview(res.data.review);
+    toast.success("Seitenkonzept und Themenplan gespeichert", { description: "Gilt ab dem nächsten Schritt dieser Seite." });
+    return true;
   }
 
   async function runStepAction(
@@ -1297,6 +1328,21 @@ export function DtContentPageDrawer(props: {
                             label={review.review_stop.enabled ? "Ohne Durchsicht durchlaufen" : "Vor der Watermark anhalten"}
                           />
                         </div>
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span
+                            className="text-sbkm-navy dark:text-white/85"
+                            title="Die Seite wartet nach Schritt 1, bis jemand Seitenkonzept und Themenplan gelesen und freigegeben hat. Erst danach wird geschrieben."
+                          >
+                            Nach der Analyse zur Durchsicht anhalten
+                          </span>
+                          <DtAgentStatusToggle
+                            compact
+                            enabled={review.page_plan.stop_enabled}
+                            disabled={Boolean(busy) || Boolean(jobId)}
+                            onChange={(on) => void toggleAnalyseStop(on)}
+                            label={review.page_plan.stop_enabled ? "Nach der Analyse durchlaufen" : "Nach der Analyse anhalten"}
+                          />
+                        </div>
                         {contentSkipWarnings(review.skip_steps, review.briefing.source).map((warning) => (
                           <p
                             key={warning}
@@ -1456,6 +1502,8 @@ export function DtContentPageDrawer(props: {
                         ) : null}
                       </dl>
                     </section>
+
+                    <DtContentPagePlan plan={review.page_plan} busy={busy === "page_plan" || Boolean(jobId)} onSave={savePagePlan} />
 
                     <section className="grid gap-2.5 rounded-dt border border-sbkm-navy/10 bg-white p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <h3 className={sectionTitleClass}>

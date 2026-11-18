@@ -5,6 +5,7 @@
 
 import type { ContentZielgruppen } from "@/lib/dt/content/zielgruppen";
 import type { ContentPageFact } from "@/lib/dt/content/pipeline/page-facts-model";
+import type { ContentSeitenkonzept, ContentThema } from "@/lib/dt/content/pipeline/page-plan";
 import type { ContactFieldKey, ContactSource, OrgContactData } from "@/lib/dt/contact-data";
 import type { ContentModelSource, ContentModelTier } from "@/lib/dt/content/model-config";
 import type { ContentTextSettings } from "@/lib/dt/content/mapping";
@@ -385,6 +386,26 @@ export type ContentReview = {
     pass_cost: string | null;
   };
   /** „Zur Durchsicht“ before the Watermark Entfernung: the page's switch and where the page is. */
+  /**
+   * Seitenkonzept und Themenplan of the page (made by the Analyse, `page-plan.ts`) and the switch
+   * „Nach der Analyse zur Durchsicht anhalten“.
+   */
+  page_plan: {
+    /** The page's switch (default off). */
+    stop_enabled: boolean;
+    /** The page waits after the Analyse for „Freigeben“. */
+    waiting: boolean;
+    /** The Analyse has run and made a plan (older analyses made none). */
+    available: boolean;
+    analysed: boolean;
+    /** The plan can be changed now (Analyse done, page not running). */
+    editable: boolean;
+    edited: boolean;
+    /** SEO has written already: a change reaches only the steps that still run. */
+    text_written: boolean;
+    seitenkonzept: ContentSeitenkonzept | null;
+    themenplan: ContentThema[];
+  };
   review_stop: {
     enabled: boolean;
     status: "none" | "waiting" | "done";
