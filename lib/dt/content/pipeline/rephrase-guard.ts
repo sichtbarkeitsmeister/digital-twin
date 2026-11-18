@@ -2,7 +2,8 @@
  * The code check after the Watermark Entfernung, per Abschnitt: what Grok must not lose or add.
  * Every number of the old text (with €, %, years and dates) stays, no number comes in, every
  * placeholder stays, and so do the protected names: the company, the Ansprechpartner, street and
- * town from the Kontaktdaten, the page's main and secondary keywords, and brand-like words of the
+ * town from the Kontaktdaten, the page's main and secondary keywords (hyphen, space and capitals
+ * do not count: „Antiquitäten Ankauf“ = „Antiquitäten-Ankauf“), and brand-like words of the
  * old text (all capitals like „IWC“, a capital inside the word like „iPhone“). A section that
  * fails keeps its previous wording and becomes the open point „Umformulierung verworfen: …“.
  *
@@ -25,6 +26,18 @@ function plain(block: Pick<ContentTextBlock, "html">): string {
 
 function norm(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * A name or keyword as it is compared: capitals, hyphens and spaces do not count, so
+ * „Antiquitäten Ankauf“, „Antiquitäten-Ankauf“, „antiquitäten ankauf“ and „Antiquitätenankauf“ are
+ * the same keyword. Grok may write any of them; the keyword is still there. Soft hyphens go too.
+ */
+export function termKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\u00ad/g, "")
+    .replace(/[\s\u00a0\-\u2010\u2011\u2012\u2013\u2014]+/g, "");
 }
 
 function markers(text: string): string[] {
@@ -69,8 +82,8 @@ export function rephraseKeywords(context: KeywordSource): string[] {
  * the chunk's text (a keyword the sections do not have is no order to work it in).
  */
 export function rephraseChunkKeywords(context: KeywordSource, chunk: ReadonlyArray<Pick<ContentTextBlock, "html">>): string[] {
-  const text = norm(chunk.map((b) => plain(b)).join(" "));
-  return rephraseKeywords(context).filter((k) => text.includes(norm(k)));
+  const text = termKey(chunk.map((b) => plain(b)).join(" "));
+  return rephraseKeywords(context).filter((k) => text.includes(termKey(k)));
 }
 
 /** The protected names of a Texte page: Kontaktdaten (company, person, street, town) and the keywords. */
@@ -109,9 +122,10 @@ export function rephraseLosses(before: Pick<ContentTextBlock, "html">, after: Pi
   const lostMarkers = [...new Set(markers(was))].filter((m) => !nowMarkers.includes(m));
   if (lostMarkers.length > 0) losses.push(`Platzhalter ${lostMarkers.join(", ")}`);
 
-  const nowNorm = norm(now);
-  const wasNorm = norm(was);
-  const lostTerms = terms.filter((t) => wasNorm.includes(norm(t)) && !nowNorm.includes(norm(t)));
+  // Names and keywords: spelled with a hyphen, a space or together, in any case (`termKey`).
+  const nowKey = termKey(now);
+  const wasKey = termKey(was);
+  const lostTerms = terms.filter((t) => termKey(t).length >= 2 && wasKey.includes(termKey(t)) && !nowKey.includes(termKey(t)));
   const lostBrands = brands(was).filter((b) => !now.includes(b) && !lostTerms.some((t) => norm(t).includes(norm(b))));
   const names = [...lostTerms, ...lostBrands];
   if (names.length > 0) losses.push(`Name oder Keyword ${names.map((n) => `„${n}“`).join(", ")}`);

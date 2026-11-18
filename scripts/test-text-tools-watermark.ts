@@ -24,7 +24,7 @@ import {
   rephrasedBlocks,
   type RephraseProgress,
 } from "../lib/dt/content/pipeline/rephrase";
-import { rephraseChunkKeywords, rephraseKeywords, rephraseLosses, rephraseProtectedTerms, rephraseRejectedFindings } from "../lib/dt/content/pipeline/rephrase-guard";
+import { rephraseChunkKeywords, rephraseKeywords, rephraseLosses, rephraseProtectedTerms, rephraseRejectedFindings, termKey } from "../lib/dt/content/pipeline/rephrase-guard";
 import { runRephraseOnBlocks, type RephraseRunOptions } from "../lib/dt/content/pipeline/rephrase-runner";
 import { XAI_MISSING_KEY_MESSAGE, XaiEmptyAnswerError, XaiTimeoutError, callXaiText, type XaiTextCall } from "../lib/dt/content/pipeline/xai";
 import { renderBlocksHtml, type ContentTextBlock } from "../lib/dt/content/render";
@@ -614,6 +614,16 @@ async function testGuard() {
     "Name oder Keyword „Antikankauf Krause“, „Peter Krause“, „Luxusuhren Ankauf Düsseldorf“, „eBay“",
   ]);
   assert.deepEqual(rephraseLosses({ html: "<p>Drei Schritte.</p>" }, { html: "<p>3 Schritte.</p>" }, []), ["neue Zahl 3"], "written-out numbers count strictly");
+  // Keywords: hyphen, space and capitals do not count („Antiquitäten Ankauf“ = „Antiquitäten-Ankauf“).
+  const kw = ["Antiquitäten Ankauf"];
+  const kwBefore = { html: "<p>Unser Antiquitäten Ankauf in Köln ist kostenlos.</p>" };
+  for (const variant of ["Antiquitäten-Ankauf", "antiquitäten ankauf", "Antiquitäten\u00a0Ankauf", "Antiquitätenankauf", "Antiquitäten\u2011Ankauf"]) {
+    assert.deepEqual(rephraseLosses(kwBefore, { html: `<p>Der ${variant} in Köln kostet Sie nichts.</p>` }, kw), [], `„${variant}“ is the same keyword`);
+  }
+  assert.deepEqual(rephraseLosses({ html: "<p>Der Antiquitäten-Ankauf ist kostenlos.</p>" }, { html: "<p>Der Antiquitäten Ankauf kostet nichts.</p>" }, ["Antiquitäten-Ankauf"]), [], "and the other way round");
+  assert.deepEqual(rephraseLosses(kwBefore, { html: "<p>Wir kaufen alte Möbel in Köln kostenlos an.</p>" }, kw), ["Name oder Keyword „Antiquitäten Ankauf“"], "a keyword that is really gone is still a loss");
+  assert.equal(termKey("Antiquitäten-Ankauf"), termKey("antiquitäten  ankauf"));
+  assert.deepEqual(rephraseChunkKeywords({ page: { keywords: { main: { text: "Antiquitäten Ankauf" }, secondary: [] } } }, [{ html: "<p>Der Antiquitäten-Ankauf in Köln.</p>" }]), ["Antiquitäten Ankauf"], "Grok is told the keyword also when the text spells it with a hyphen");
 
   // In the runner: a failing section keeps its wording and is listed; the standalone tool has no guard.
   const blocks: ContentTextBlock[] = [
