@@ -27,6 +27,7 @@ import {
   settingsBlock,
   type ContentPipelineContext,
 } from "@/lib/dt/content/pipeline/prompts";
+import { contentCoreRulesBlock } from "@/lib/dt/content/core-rules";
 import { DEFAULT_TEXTER_PROMPT } from "@/lib/dt/content/texter-prompt";
 import { ContentTextLimitError, blocksToPromptText, htmlToPlainText, normalizeBlocks, type ContentTextBlock } from "@/lib/dt/content/render";
 import type { ContentFinding } from "@/lib/dt/content/types";
@@ -110,6 +111,7 @@ export function revisionPrompt(context: ContentPipelineContext, target: ContentT
   return {
     system: joinPromptParts([
       REVISE_RULES,
+      contentCoreRulesBlock(context.coreRules),
       BASE_RULES,
       `Allgemeine Regeln (jeder Seitentyp):\n${general}`,
       `Seitentyp-Vorlage (gilt bei Widerspruch vor den allgemeinen Regeln):\n${pageTypeRules(context)}`,
