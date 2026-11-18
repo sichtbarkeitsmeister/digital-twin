@@ -26,7 +26,7 @@ export async function POST(req: Request, context: { params: Promise<{ slug: stri
       loadContentSteps(gate.service, page.id),
       loadOrgQuestions(gate.service, gate.organisationId),
     ]);
-    return contentOk({ review: buildReview(fresh ?? page, steps, null, { orgQuestions: pool }), marked: result.marked, inserted_in: result.inserted_in });
+    return contentOk({ review: buildReview(fresh ?? page, steps, null, { orgQuestions: pool }), marked: result.marked, inserted_in: result.inserted_in, structural: result.structural });
   } catch (error) {
     return contentError(error instanceof Error ? error.message : "Offener Punkt konnte nicht gespeichert werden.", 500);
   }

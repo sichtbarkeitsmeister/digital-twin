@@ -58,7 +58,7 @@ import {
 } from "@/lib/dt/content/pipeline/aktualitaet";
 import { ContentLlmError, callContentResearch, callContentTool } from "@/lib/dt/content/pipeline/llm";
 import { extractBlockedStatements } from "@/lib/dt/content/pipeline/blocked";
-import { keepPendingPlaceholders } from "@/lib/dt/content/pipeline/kunde-prueft";
+import { dropStructuralPlaceholders, keepPendingPlaceholders } from "@/lib/dt/content/pipeline/kunde-prueft";
 import { PAGE_FACTS_USAGE_MODE, emptyPageFacts, evaluationSkipReason, pageFactsFromCall, pageFactsPrompt } from "@/lib/dt/content/pipeline/page-facts";
 import { readPageFacts, withoutPageFacts, type ContentPageFacts } from "@/lib/dt/content/pipeline/page-facts-model";
 import {
@@ -366,11 +366,15 @@ async function settleQuestionPlan(
   return patch.questionPlan ? { ...stored, question_plan: patch.questionPlan } : stored;
 }
 
-/** A text step's output with every „KUNDE PRÜFT“ placeholder of the previous text still in it. */
+/** A text step's output with every „KUNDE PRÜFT“ placeholder of a real open question of the previous text still in it. */
 function keepPending(output: unknown, context: ContentPipelineContext): unknown {
   const blocks = (output as { blocks?: unknown } | null)?.blocks;
-  if (!Array.isArray(blocks) || !context.pendingChecks?.length) return output;
-  const kept = keepPendingPlaceholders(blocks as ContentTextBlock[], context.blocks, context.pendingChecks);
+  if (!Array.isArray(blocks)) return output;
+  // A paragraph that is only a placeholder made from a Struktur-Befund („Quelle fehlt“) goes: it is no question.
+  const cleaned = dropStructuralPlaceholders(blocks as ContentTextBlock[]);
+  if (cleaned.dropped.length > 0) console.warn("[content] Struktur-Platzhalter entfernt:", cleaned.dropped);
+  if (!context.pendingChecks?.length) return cleaned.dropped.length > 0 ? { ...(output as Record<string, unknown>), blocks: cleaned.blocks } : output;
+  const kept = keepPendingPlaceholders(cleaned.blocks, context.blocks, context.pendingChecks);
   if (kept.restored.length > 0) console.warn("[content] KUNDE-PRÜFT-Platzhalter wiederhergestellt:", kept.restored);
   return { ...(output as Record<string, unknown>), blocks: kept.blocks };
 }
