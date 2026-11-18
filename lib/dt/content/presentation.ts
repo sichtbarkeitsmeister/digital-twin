@@ -60,11 +60,12 @@ export function contentStopReasonLabel(stopReason: string | null | undefined): s
 }
 
 /**
- * The step's log line under its name: output tokens and why the model stopped
- * („6.412 Ausgabe-Tokens · vollständig (tool_use)“). Empty when the step has not run.
+ * The step's log line under its name: input and output tokens and why the model stopped
+ * („48.210 Eingabe-Tokens · 6.412 Ausgabe-Tokens · vollständig (tool_use)“). Empty when the step has not run.
  */
-export function contentStepLogLine(step: { output_tokens: number; stop_reason: string | null }): string {
+export function contentStepLogLine(step: { input_tokens?: number; output_tokens: number; stop_reason: string | null }): string {
   const parts: string[] = [];
+  if ((step.input_tokens ?? 0) > 0) parts.push(`${step.input_tokens!.toLocaleString("de-DE")} Eingabe-Tokens`);
   if (step.output_tokens > 0) parts.push(`${step.output_tokens.toLocaleString("de-DE")} Ausgabe-Tokens`);
   const label = contentStopReasonLabel(step.stop_reason);
   if (label) parts.push(label === step.stop_reason ? label : `${label} (${step.stop_reason})`);

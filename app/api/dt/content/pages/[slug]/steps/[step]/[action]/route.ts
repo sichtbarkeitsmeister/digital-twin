@@ -14,7 +14,8 @@ import {
   parseContentStep,
   readJsonBody,
 } from "@/lib/dt/content/route-helpers";
-import { loadContentPage } from "@/lib/dt/content/store";
+import { contentStepText } from "@/lib/dt/content/step-text";
+import { loadContentPage, loadContentSteps } from "@/lib/dt/content/store";
 import { kickJobsWorker } from "@/lib/jobs/kick-worker";
 
 export const maxDuration = 300;
@@ -36,6 +37,33 @@ type StepAction = keyof typeof bodySchemas;
 
 function isStepAction(v: string): v is StepAction {
   return v in bodySchemas;
+}
+
+/**
+ * `GET …/steps/{n}/text?org=…`: the text as it was after step n („Zwischenstand“), from the step's
+ * row, with the Abschnitte that changed against the text step before it. Read only, no model.
+ */
+export async function GET(
+  req: Request,
+  context: { params: Promise<{ slug: string; step: string; action: string }> },
+) {
+  const { slug, step: rawStep, action } = await context.params;
+  const step = parseContentStep(rawStep);
+  if (!isValidContentSlug(slug) || step == null || action !== "text") return contentError("Unbekannte Aktion.", 404);
+  const gated = await gateContentRoute(new URL(req.url).searchParams.get("org"));
+  if (!gated.ok) return gated.response;
+  const { gate } = gated;
+  try {
+    const page = await loadContentPage(gate.service, gate.organisationId, slug);
+    if (!page) return contentError("Seite nicht gefunden.", 404);
+    const text = contentStepText(await loadContentSteps(gate.service, page.id), step);
+    if (!text) {
+      return contentError("Zu diesem Schritt ist kein Text gespeichert (der Schritt schreibt keinen Text, lief noch nicht oder wurde zurückgesetzt).", 404);
+    }
+    return contentOk(text);
+  } catch (error) {
+    return contentError(error instanceof Error ? error.message : "Der Text des Schritts konnte nicht geladen werden.", 500);
+  }
 }
 
 /** approve | edit | run for one step; the acting user is always the signed-in one. */

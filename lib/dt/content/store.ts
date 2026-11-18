@@ -55,6 +55,7 @@ import {
 import { CONTENT_ACTION_LABELS, formatEur } from "@/lib/dt/content/presentation";
 import { slugify } from "@/lib/dt/content/render";
 import type { ContentOrgQuestionRow } from "@/lib/dt/content/org-questions";
+import { stepHasText } from "@/lib/dt/content/step-text";
 import {
   briefingPatchFor,
   planImprovementStructure,
@@ -1626,7 +1627,9 @@ export function stepList(
       live_text: tookExistingText(row, "live_text"),
       upload_text: tookExistingText(row, "upload_text"),
       // The log of the step's last run; a row waiting to run again shows nothing stale.
+      input_tokens: ran ? Math.max(0, Math.round(num(row?.input_tokens))) : 0,
       output_tokens: ran ? Math.max(0, Math.round(num(row?.output_tokens))) : 0,
+      has_text: stepHasText(steps, def.step),
       stop_reason: ran ? row?.stop_reason ?? null : null,
       model: ran ? row?.model ?? null : null,
       error: status === "error" || status === "pending" ? row?.error ?? null : null,
