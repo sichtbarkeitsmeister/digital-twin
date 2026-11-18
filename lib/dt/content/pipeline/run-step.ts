@@ -84,6 +84,7 @@ import {
   CONTENT_STEP_ANALYSE,
   CONTENT_STEP_ENDABNAHME,
   CONTENT_STEP_FAKTENCHECK,
+  CONTENT_STEP_SEO,
   contentStepDefinition,
   contentStepSkippable,
   type ContentStepDefinition,
@@ -96,6 +97,7 @@ import {
   isMissingStopReasonColumnError,
   loadContentPageOutline,
   loadContentSettings,
+  loadContentTexts,
   num,
   resetContentStepsFrom,
   settingsFromRow,
@@ -103,6 +105,7 @@ import {
   type ContentStepRow,
 } from "@/lib/dt/content/store";
 import { loadContentCoreRules } from "@/lib/dt/content/core-rules";
+import { usedElsewhere, type ContentPageUsage } from "@/lib/dt/content/pipeline/used-elsewhere";
 import { loadContentStepPrompts } from "@/lib/dt/content/step-prompts";
 import { loadTexterPrompt } from "@/lib/dt/content/texter-prompt";
 import { loadContentTypePromptsForRun } from "@/lib/dt/content/type-prompts-db";
@@ -436,6 +439,16 @@ export function audienceBudgetError(context: Pick<ContentPipelineContext, "audie
   return budget.over ? new ContentLlmError(audienceBudgetMessage(budget), false) : null;
 }
 
+/** The register of the other pages for the SEO step; empty when their texts cannot be read. */
+export async function loadUsedElsewhere(service: SupabaseClient, page: Pick<ContentPageRow, "organisation_id" | "slug">): Promise<ContentPageUsage[]> {
+  try {
+    return usedElsewhere(await loadContentTexts(service, page.organisation_id), page.slug);
+  } catch (error) {
+    console.warn("[content] register of the other pages skipped:", error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
 export async function runContentStep(
   service: SupabaseClient,
   page: ContentPageRow,
@@ -485,6 +498,10 @@ export async function runContentStep(
   if (def.step === CONTENT_STEP_ANALYSE && !context.pageFacts) {
     // First the Faktenauszug from the conversations; the Analyse itself follows in the next turn.
     return runPageFactsPart({ service, page, def, context, avatarId, models: models[def.tier], timeoutMs });
+  }
+  if (def.step === CONTENT_STEP_SEO) {
+    // Kontext über Seiten hinweg: what the organisation's other texts already use. Never stops the step.
+    context.usedElsewhere = await loadUsedElsewhere(service, page);
   }
   const spec = contentStepSpec(step, context);
   const { output, calls } = await callStep(spec, context, models[def.tier], timeoutMs);
