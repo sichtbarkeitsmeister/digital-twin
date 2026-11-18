@@ -13,6 +13,7 @@ const bodySchema = z.object({
   block_id: z.string().min(1).max(80),
   instruction: z.string().max(REVISE_INSTRUCTION_MAX).optional().nullable(),
   info: z.string().max(REVISE_INSTRUCTION_MAX).optional().nullable(),
+  info_kind: z.enum(["fakt", "anweisung"]).optional().nullable(),
   finding_key: z.string().max(4_000).optional().nullable(),
 });
 

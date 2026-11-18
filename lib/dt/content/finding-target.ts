@@ -102,3 +102,17 @@ export function markNewSentences(beforeText: string, afterText: string): Array<{
   const before = new Set(sentences(beforeText).map(sentenceKey));
   return sentences(afterText).map((text) => ({ text, isNew: !before.has(sentenceKey(text)) }));
 }
+
+/**
+ * Whether an „Eigene Angabe“ reads like an instruction to the editors' tool rather than a fact
+ * about the business: no number, short, and it ends in what should happen („Platzhalter drin
+ * lassen“, „Satz streichen“, „bitte kürzen“). The page window warns then; as a fact its wording
+ * would be worked into the text.
+ */
+export function looksLikeInstruction(text: string | null | undefined): boolean {
+  const value = (text ?? "").replace(/\s+/g, " ").trim();
+  if (!value || value.length > 160 || /\d/.test(value)) return false;
+  const folded = value.toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").replace(/[.!…\s]+$/, "");
+  if (/^bitte\b/.test(folded)) return true;
+  return /(?:\b(?:drin|drinnen|stehen|so|weg|raus|offen|unveraendert)\s?lassen|\bweglassen|\bentfernen|\bstreichen|\bloeschen|\bkuerzen|\bumformulieren|\bumschreiben|\bumstellen|\brausnehmen|\bersetzen|\bnicht (?:aendern|erwaehnen|nennen))$/.test(folded);
+}

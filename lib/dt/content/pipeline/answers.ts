@@ -12,7 +12,8 @@
  *     Abschnitt is restored exactly; H1, hero, headings, levels and ids stay; every marker that
  *     was not answered stays; the answered placeholder is gone; no number that is neither in the
  *     Abschnitt before nor in an answer. A version that breaks a rule is replaced by the stored
- *     Abschnitt with the placeholder swapped for the answer (`fillPlaceholder`).
+ *     Abschnitt, placeholder included: an answer never goes into the text without the model's
+ *     sentence (an editor's free text like „Platzhalter drin lassen“ would stand there verbatim).
  */
 
 import type Anthropic from "@anthropic-ai/sdk";
@@ -99,28 +100,6 @@ export function removeSentenceWith(block: ContentTextBlock, needle: string): Con
   return null;
 }
 
-/** The stored block with the placeholder swapped for the answer: the safe fallback for an answer. */
-export function fillPlaceholder(block: ContentTextBlock, placeholder: string, answer: string): ContentTextBlock {
-  const safe = escapeHtml(answer.trim());
-  return {
-    ...block,
-    heading: block.heading?.includes(placeholder) ? block.heading.replace(placeholder, answer.trim()) : block.heading,
-    html: block.html.split(placeholder).join(safe).split(escapeHtml(placeholder)).join(safe),
-  };
-}
-
-/**
- * Whether an answer can stand in the text in place of its placeholder as it is: a value („120 €“,
- * „Mo–Fr 9–17 Uhr“), not a confirmation („Ja, das stimmt so.“) or several sentences. Only such an
- * answer is swapped in by code; any other needs the model's sentence, or the placeholder stays.
- */
-export function isLiteralAnswer(answer: string): boolean {
-  const a = answer.trim();
-  if (!a || a.length > 160) return false;
-  if (/^(?:ja|nein|jein|stimmt|korrekt|richtig|genau|passt|so ist es|trifft zu|trifft nicht zu)\b/iu.test(a)) return false;
-  return !/[.!?]\s+\p{Lu}/u.test(a);
-}
-
 /** Every number in `after` is in `before` or in an answer: the pass adds no facts of its own. */
 export function noNewNumbers(before: string, after: string, answers: readonly string[]): boolean {
   const allowed = new Set([before, ...answers].flatMap((t) => t.match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(/[.,]/g, "")));
@@ -186,17 +165,15 @@ export function normalizeAnswersOutput(
     const items = (input.targets.get(block.id) ?? []).filter((h) => h.action === "drop" || h.answer);
     if (items.length === 0) return block;
     const proposed = fromModel.get(block.id);
+    // Without a usable version of the model: „Ohne Angabe“ still removes its sentence in code; an
+    // answer is never pasted in place of its placeholder, the placeholder stays open.
     const filledInCode = () => {
       fallback.push(block.id);
       return items.reduce((b, h) => {
         if (!isTextPlaceholder(h.placeholder)) return b;
         if (h.action === "drop") return removeSentenceWith(b, h.placeholder!) ?? b;
-        if (!isLiteralAnswer(h.answer!)) {
-          // „Ja, das stimmt so.“ in place of the placeholder would be nonsense: it stays an open placeholder.
-          rejected.push({ block_id: block.id, reason: `Antwort nicht als Wert einsetzbar, Platzhalter bleibt: ${h.placeholder}` });
-          return b;
-        }
-        return fillPlaceholder(b, h.placeholder!, h.answer!);
+        rejected.push({ block_id: block.id, reason: `Antwort nicht eingearbeitet, Platzhalter bleibt: ${h.placeholder}` });
+        return b;
       }, block);
     };
     if (!proposed) {

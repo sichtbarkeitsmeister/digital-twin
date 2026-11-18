@@ -39,6 +39,11 @@ export const REVISE_INSTRUCTION_MAX = 2_000;
 export type ContentRevisionRequest = {
   instruction?: string | null;
   info?: string | null;
+  /**
+   * „Eigene Angabe“ as an instruction („Platzhalter drin lassen“, „Satz streichen“): it is carried
+   * out, and its wording never goes into the text. `info` is the other kind, a fact that is worked in.
+   */
+  directive?: string | null;
   /** The open point the request is about („Vorschlag umsetzen“, „Eigene Angabe“). */
   finding?: Pick<ContentFinding, "title" | "problem" | "proposal"> | null;
   /** Several open points on the same Abschnitt, all of whose proposals are worked in at once („Jetzt umsetzen“). */
@@ -56,6 +61,7 @@ export const REVISE_RULES = `Du überarbeitest genau einen Abschnitt eines ferti
 - Ändere nur, was der Auftrag verlangt. Alles andere im Abschnitt bleibt wörtlich, auch Platzhalter und Marker ([BITTE PRÜFEN: …], [LINK: …], [DATUM], [FOTO: …]), außer der Auftrag löst einen Platzhalter ausdrücklich auf.
 - Überschrift und Text darfst du ändern, wenn der Auftrag es verlangt. Die Regeln des Text-Prompts und der Seitentyp-Vorlage für diesen Abschnitt gelten weiter (z. B. Länge einer Hero-Überschrift).
 - Eine „Angabe der Redaktion“ ist ein bestätigter Fakt: Zahlen, Namen, Preise, Fristen und Orte übernimmst du genau so, wie sie dort stehen. Du formulierst nur den Satz so, dass er grammatisch und im Ton passt. Lautet sie „KUNDE PRÜFT“ (auch sinngemäß), setzt du an der passenden Stelle den genannten Platzhalter und nie diese Worte.
+- Eine „Anweisung der Redaktion“ ist kein Fakt und kein Text für die Seite: Du führst sie aus (etwas stehen lassen, streichen, kürzen, umstellen, anders formulieren). Ihr Wortlaut kommt nie in den Text, auch nicht sinngemäß als Satz über die Redaktion. Verlangt sie, dass etwas bleibt, wie es ist, gibst du den Abschnitt unverändert zurück.
 - Keine neue Aussage über den Anbieter (was er tut, verlangt, anbietet, ankauft, akzeptiert), die nicht in den Anbieterfakten, dem Faktenauszug, den Antworten des Kunden, den Kontaktdaten, den Anmerkungen oder dem Auftrag steht. Auch keine Ausnahme, Bedingung oder Alternative, die dort nicht steht. Allgemeines Fachwissen ersetzt keine Angabe über den Anbieter.
 - Bei einem offenen Punkt änderst du nur die Sätze, die er nennt oder betrifft; jeder andere Satz bleibt wörtlich. Fehlt eine Angabe, die der Vorschlag bräuchte, schwächst du die Aussage ab oder lässt sie weg, statt etwas zu ergänzen.
 - Was im Block „Gesperrt“ steht, kommt nicht in den Text.`;
@@ -90,7 +96,11 @@ export function revisionOrder(request: ContentRevisionRequest): string {
   if (f) {
     lines.push(`Offener Punkt: ${clean(f.title, 200)}`);
     if (f.problem) lines.push(`Problem: ${clean(f.problem, 1_000)}`);
-    if (f.proposal && !request.info) lines.push(`Vorschlag (umsetzen): ${clean(f.proposal, 1_000)}`);
+    if (f.proposal && !request.info && !request.directive) lines.push(`Vorschlag (umsetzen): ${clean(f.proposal, 1_000)}`);
+    if (f.proposal && request.directive) lines.push(`Vorschlag der Prüfung (nur zur Einordnung; es gilt die Anweisung der Redaktion): ${clean(f.proposal, 1_000)}`);
+  }
+  if (request.directive) {
+    lines.push(`Anweisung der Redaktion (ausführen; ihr Wortlaut kommt nie in den Text): ${clean(request.directive)}`);
   }
   if (request.info) {
     const info = clean(request.info);
@@ -149,6 +159,11 @@ function numbers(text: string): string[] {
   return (text.match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(/[.,]/g, ""));
 }
 
+/** A text reduced to its words, for „does this wording stand in the text“. */
+function wordingKey(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
 export type RevisionCheck = { ok: true; block: ContentTextBlock } | { ok: false; reasons: string[] };
 
 /**
@@ -190,6 +205,11 @@ export function checkRevision(json: unknown, before: ContentTextBlock, request: 
   }
   if (added.length > 0) reasons.push(`Neuer Platzhalter oder Marker: ${added.join(", ")}`);
   if (/kunde\s+pr(?:ü|ue)ft/i.test(plain(after)) && !/kunde\s+pr(?:ü|ue)ft/i.test(plain(before))) reasons.push("„KUNDE PRÜFT“ steht im Text");
+  // An instruction is carried out, never quoted: its wording must not appear in the text.
+  const wording = wordingKey(request.directive ?? "");
+  if (wording.length >= 10 && wordingKey(plain(after)).includes(wording) && !wordingKey(plain(before)).includes(wording)) {
+    reasons.push("Wortlaut der Anweisung steht im Text");
+  }
 
   // Numbers and links only from the Abschnitt, the order or the facts.
   const source = new Set(numbers(`${plain(before)}\n${order}\n${allowed}`));
@@ -224,6 +244,10 @@ export function revisionNote(target: Pick<ContentTextBlock, "id" | "heading">, r
       ? `Zu „${clean(request.finding.title, 200)}“: KUNDE PRÜFT – Platzhalter bleibt.`
       : `Angabe der Redaktion zu „${clean(request.finding.title, 200)}“ (Abschnitt ${name}): ${clean(request.info)}`;
   }
+  if (request.directive && request.finding) {
+    return `Anweisung der Redaktion zu „${clean(request.finding.title, 200)}“ (Abschnitt ${name}; ausgeführt, kein Text für die Seite): ${clean(request.directive)}`;
+  }
+  if (request.directive) return `Anweisung der Redaktion (Abschnitt ${name}; ausgeführt, kein Text für die Seite): ${clean(request.directive)}`;
   const several = requestFindings(request);
   if (several.length > 1) {
     const titles = several.map((p) => `„${clean(p.title, 120)}“`).join(", ");
@@ -234,4 +258,4 @@ export function revisionNote(target: Pick<ContentTextBlock, "id" | "heading">, r
   return `Abschnitt ${name} überarbeitet: ${clean(request.instruction, 600)}`;
 }
 
-export { findingKey, findingTargetBlock, withoutFinding } from "@/lib/dt/content/finding-target";
+export { findingKey, findingTargetBlock, looksLikeInstruction, withoutFinding } from "@/lib/dt/content/finding-target";

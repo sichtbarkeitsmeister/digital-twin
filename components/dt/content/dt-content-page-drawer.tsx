@@ -34,7 +34,7 @@ import { DtContentTextFrame, type TextFrameEdit } from "@/components/dt/content/
 import { DtContentZielgruppenPanel, type ContentZielgruppeOption } from "@/components/dt/content/dt-content-zielgruppen-panel";
 import { CLIENT_WISHES_TEXT_MAX } from "@/lib/dt/content/client-wishes";
 import { createLatestWinsQueue } from "@/lib/dt/content/latest-wins-queue";
-import { findingKey, findingTargetBlock, findingTargetBlocks, markNewSentences } from "@/lib/dt/content/finding-target";
+import { findingKey, findingTargetBlock, findingTargetBlocks, looksLikeInstruction, markNewSentences } from "@/lib/dt/content/finding-target";
 import { freshnessSendBackLine, freshnessSourceLabel, isWebUrl } from "@/lib/dt/content/freshness";
 import { countContentWords, htmlToPlainText, parseBlocksFromHtml } from "@/lib/dt/content/render";
 import {
@@ -171,6 +171,8 @@ export function DtContentPageDrawer(props: {
   const [blockText, setBlockText] = useState("");
   const [note, setNote] = useState("");
   const [reviseText, setReviseText] = useState("");
+  /** „Eigene Angabe“: a fact that is worked in, or an instruction that is carried out and never written into the text. */
+  const [infoKind, setInfoKind] = useState<"fakt" | "anweisung">("fakt");
   const [revisePreview, setRevisePreview] = useState<RevisionPreviewData | null>(null);
   /** „Vorschlag übernehmen“: the open points (by key) whose proposals „Jetzt umsetzen“ works in together. */
   const [chosen, setChosen] = useState<string[]>([]);
@@ -347,6 +349,7 @@ export function DtContentPageDrawer(props: {
     const target = finding ? findingTargetBlock(finding, parsed) : null;
     setBlockId(target ?? highlightIds[0] ?? blocks[0]?.id ?? "");
     setReviseText(text);
+    setInfoKind("fakt");
     setRevisePreview(null);
     setMode({ kind: "revise", finding, ask });
   }
@@ -363,6 +366,7 @@ export function DtContentPageDrawer(props: {
         block_id: blockId,
         finding_key: mode.finding ? findingKey(mode.finding) : null,
         info: mode.ask === "info" ? text : null,
+        info_kind: mode.ask === "info" ? infoKind : null,
         instruction: mode.ask === "info" ? null : text || null,
       },
     });
@@ -387,6 +391,7 @@ export function DtContentPageDrawer(props: {
         after: { heading: revisePreview.after.heading, html: revisePreview.after.html },
         finding_key: mode.finding ? findingKey(mode.finding) : null,
         info: mode.ask === "info" ? text : null,
+        info_kind: mode.ask === "info" ? infoKind : null,
         instruction: mode.ask === "info" ? null : text || null,
       },
     });
@@ -1701,6 +1706,43 @@ export function DtContentPageDrawer(props: {
                       side="top"
                       fullWidth
                     />
+                    {mode.ask === "info" ? (
+                      <div className="grid gap-1.5">
+                        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Art der Angabe">
+                          {(
+                            [
+                              ["fakt", "Fakt", "Wird in den Text eingearbeitet"],
+                              ["anweisung", "Anweisung", "Wird umgesetzt, steht nie im Text"],
+                            ] as const
+                          ).map(([kind, label, hint]) => (
+                            <button
+                              key={kind}
+                              type="button"
+                              role="radio"
+                              aria-checked={infoKind === kind}
+                              className={cn(
+                                "rounded-full border px-3 py-1 text-xs transition-colors",
+                                infoKind === kind
+                                  ? "border-sbkm-navy bg-sbkm-navy font-semibold text-white dark:border-white dark:bg-white dark:text-sbkm-navy"
+                                  : "border-sbkm-navy/15 text-sbkm-ink-600 hover:border-sbkm-navy/40 dark:border-white/15 dark:text-white/70",
+                              )}
+                              onClick={() => {
+                                setInfoKind(kind);
+                                setRevisePreview(null);
+                              }}
+                            >
+                              {label}
+                              <span className="ml-1.5 font-normal opacity-75">{hint}</span>
+                            </button>
+                          ))}
+                        </div>
+                        {infoKind === "fakt" && looksLikeInstruction(reviseText) ? (
+                          <p className="rounded-lg border border-yellow-400/70 bg-yellow-100 px-2.5 py-1.5 text-xs text-sbkm-navy dark:bg-yellow-300/20 dark:text-white">
+                            Das liest sich wie eine Anweisung. Als Fakt würde der Wortlaut in den Text eingearbeitet. Wenn das nicht gemeint ist, bitte „Anweisung“ wählen.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <DtContentDictationField
                       className={textareaClass}
                       value={reviseText}
@@ -1710,12 +1752,14 @@ export function DtContentPageDrawer(props: {
                       }}
                       placeholder={
                         mode.ask === "info"
-                          ? "Ihre Angabe, z. B. „Ja, pro Uhr gibt es eine schriftliche Aufstellung.“ Zahlen, Namen und Fristen werden genau so übernommen. „KUNDE PRÜFT“ setzt einen Platzhalter."
+                          ? infoKind === "anweisung"
+                            ? "Ihre Anweisung, z. B. „Den zweiten Satz streichen.“ oder „Kürzer und ohne Aufzählung.“ Sie wird umgesetzt und steht nie wörtlich im Text."
+                            : "Ihre Angabe, z. B. „Ja, pro Uhr gibt es eine schriftliche Aufstellung.“ Zahlen, Namen und Fristen werden genau so übernommen. „KUNDE PRÜFT“ setzt einen Platzhalter."
                           : mode.ask === "proposal"
                             ? "Optional: zusätzlicher Hinweis zum Vorschlag"
                             : "Was soll anders werden? z. B. „Hero-Überschrift kürzer und mehr auf Erben zugeschnitten.“"
                       }
-                      ariaLabel={mode.ask === "info" ? "Ihre Angabe" : "Auftrag für den Abschnitt"}
+                      ariaLabel={mode.ask === "info" ? (infoKind === "anweisung" ? "Ihre Anweisung" : "Ihre Angabe") : "Auftrag für den Abschnitt"}
                       onSubmit={() => {
                         if (!blockId || busy || (mode.ask !== "proposal" && !reviseText.trim())) return;
                         void requestRevision();
