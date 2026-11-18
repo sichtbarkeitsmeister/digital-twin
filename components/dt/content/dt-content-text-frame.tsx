@@ -36,6 +36,7 @@ export function restoreKundePrueft(html: string): string {
  */
 export function serializeEditedSection(section: HTMLElement): { heading: string | null; html: string } {
   const clone = section.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(".dt-tools").forEach((el) => el.remove()); // the hover buttons are no text
   const headingEl = clone.querySelector(":scope > h1, :scope > h2, :scope > h3, :scope > h4");
   const heading = headingEl ? (headingEl.textContent ?? "").replace(/\s+/g, " ").trim() : null;
   headingEl?.remove();
@@ -76,6 +77,13 @@ function buildSrcDoc(html: string, highlightBlockIds: string[], options: { headi
     [data-block-id]:hover{background:rgba(94,234,176,.07);border-left-color:rgba(94,234,176,.55)}
     [data-block-id]:focus{outline:none;background:rgba(94,234,176,.10);border-left-color:#34d399}
     [data-block-id][contenteditable="false"]{opacity:.6;cursor:progress}
+    [data-block-id]{position:relative}
+    .dt-tools{position:absolute;top:-2px;right:0;display:none;gap:6px;font:600 11px/1 'Poppins',-apple-system,sans-serif;z-index:2;user-select:none}
+    [data-block-id]:hover>.dt-tools,[data-block-id]:focus-within>.dt-tools{display:flex}
+    .dt-tools button{all:unset;cursor:pointer;padding:5px 10px;border-radius:999px;border:1px solid rgba(46,46,80,.2);background:#fff;color:#2E2E50;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+    .dt-tools button:hover{background:rgba(94,234,176,.28)}
+    .dt-tools button.dt-danger{color:#b91c1c;border-color:rgba(185,28,28,.3)}
+    .dt-tools button.dt-danger:hover{background:rgba(254,226,226,.9)}
   `
     : "";
   const css = `
@@ -116,6 +124,9 @@ export function DtContentTextFrame(props: {
   /** Click into the text to change it. */
   editable?: boolean;
   onEditBlock?: (edit: TextFrameEdit) => Promise<{ ok: boolean }>;
+  /** Buttons on each Abschnitt (hover): „Abschnitt darunter einfügen“ and „Löschen“ (not on the H1). */
+  onAddBlock?: (afterBlockId: string) => void;
+  onDeleteBlock?: (blockId: string, heading: string | null) => void;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(480);
@@ -124,6 +135,10 @@ export function DtContentTextFrame(props: {
   const editable = Boolean(props.editable && props.onEditBlock);
   const onEditRef = useRef(props.onEditBlock);
   onEditRef.current = props.onEditBlock;
+  const onAddRef = useRef(props.onAddBlock);
+  onAddRef.current = props.onAddBlock;
+  const onDeleteRef = useRef(props.onDeleteBlock);
+  onDeleteRef.current = props.onDeleteBlock;
   const srcDoc = useMemo(
     () =>
       buildSrcDoc(
@@ -144,10 +159,43 @@ export function DtContentTextFrame(props: {
   const attachEditing = useCallback(
     (doc: Document) => {
       const sections = Array.from(doc.querySelectorAll<HTMLElement>("section[data-block-id]"));
-      for (const section of sections) {
+      for (const [i, section] of sections.entries()) {
         section.contentEditable = "true";
         section.spellcheck = true;
+        // Hover buttons; they are plain markup in the section (not text), handled by one listener below.
+        if (onAddRef.current || onDeleteRef.current) {
+          const tools = doc.createElement("div");
+          tools.className = "dt-tools";
+          tools.contentEditable = "false";
+          const isH1 = i === 0 && Boolean(section.querySelector(":scope > h1"));
+          const button = (action: string, label: string, danger = false) => {
+            const b = doc.createElement("button");
+            b.type = "button";
+            b.tabIndex = -1;
+            b.setAttribute("data-dt-action", action);
+            b.textContent = label;
+            if (danger) b.className = "dt-danger";
+            return b;
+          };
+          if (onAddRef.current) tools.append(button("add", "+ Abschnitt darunter"));
+          if (onDeleteRef.current && !isH1) tools.append(button("delete", "Löschen", true));
+          section.prepend(tools);
+        }
       }
+      // The buttons keep the caret where it is (no focus change, so no save before the click is handled).
+      doc.addEventListener("mousedown", (e) => {
+        if ((e.target as Element | null)?.closest?.("[data-dt-action]")) e.preventDefault();
+      });
+      doc.addEventListener("click", (e) => {
+        const target = (e.target as Element | null)?.closest?.("[data-dt-action]") as HTMLElement | null;
+        if (!target) return;
+        e.preventDefault();
+        const section = target.closest("section[data-block-id]") as HTMLElement | null;
+        const id = section?.getAttribute("data-block-id");
+        if (!section || !id) return;
+        if (target.getAttribute("data-dt-action") === "add") onAddRef.current?.(id);
+        else onDeleteRef.current?.(id, (section.querySelector(":scope > h1, :scope > h2, :scope > h3, :scope > h4")?.textContent ?? "").trim() || null);
+      });
       let current: { el: HTMLElement; snapshot: string } | null = null;
 
       // The frame is another document: its nodes are not `instanceof Element` of this page, so ask by shape.

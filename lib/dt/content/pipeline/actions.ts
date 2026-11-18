@@ -18,7 +18,7 @@ import {
   CONTENT_STEP_LEKTORAT,
   contentStepSkippedByUser,
 } from "@/lib/dt/content/pipeline/steps";
-import { CONTENT_MAX_BLOCK_HTML, ContentBlockSizeError, htmlToMarkdown, replaceBlockContent, replaceBlockText } from "@/lib/dt/content/render";
+import { CONTENT_MAX_BLOCK_HTML, CONTENT_MAX_BLOCKS, ContentBlockSizeError, htmlToMarkdown, insertBlockAfter, removeBlock, replaceBlockContent, replaceBlockText } from "@/lib/dt/content/render";
 import {
   CONTENT_SKIPPED_RERUN_MESSAGE,
   rerunStepFor,
@@ -285,6 +285,72 @@ export async function editContentMeta(
     return { ok: false, status: 400, message: "Title oder Meta-Description ist viel zu lang." };
   }
   const { error } = await service.from("dt_content_pages").update(patch).eq("id", page.id).neq("state", "laeuft");
+  if (error) return { ok: false, status: 500, message: error.message };
+  return { ok: true, jobId: null };
+}
+
+const NEW_BLOCK_MESSAGES = {
+  heading: "Bitte eine Überschrift für den neuen Abschnitt eingeben.",
+  body: "Bitte einen Text für den neuen Abschnitt eingeben.",
+  limit: `Der Text hat schon ${CONTENT_MAX_BLOCKS} Abschnitte, mehr sind nicht möglich.`,
+  size: "Der Text des neuen Abschnitts ist zu lang.",
+  missing: "Der Abschnitt, nach dem eingefügt werden soll, ist nicht mehr da. Bitte die Seite neu laden.",
+} as const;
+
+/**
+ * Own Abschnitt in the page window: a new Abschnitt with its own heading (H2–H4) and text after the given
+ * one. Same states as editing the text. Never writes into a page that started running meanwhile.
+ */
+export async function addContentBlock(
+  service: SupabaseClient,
+  page: ContentPageRow,
+  input: { afterBlockId: string; heading: string; level: number; text: string },
+): Promise<ActionResult & { blockId?: string }> {
+  if (!canEdit(page)) {
+    return { ok: false, status: 409, message: "Der Text kann in diesem Zustand nicht geändert werden." };
+  }
+  const level = input.level === 3 || input.level === 4 ? input.level : 2;
+  const inserted = insertBlockAfter(page.html, input.afterBlockId, { heading: input.heading, level, text: input.text });
+  if ("error" in inserted) return { ok: false, status: inserted.error === "missing" ? 404 : 400, message: NEW_BLOCK_MESSAGES[inserted.error] };
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({ html: inserted.html, markdown: htmlToMarkdown(inserted.html) })
+    .eq("id", page.id)
+    .neq("state", "laeuft");
+  if (error) return { ok: false, status: 500, message: error.message };
+  return { ok: true, jobId: null, blockId: inserted.block.id };
+}
+
+/**
+ * Deletes an Abschnitt in the page window. Open points and questions of that Abschnitt go with it. The H1
+ * and the last remaining Abschnitt cannot be deleted.
+ */
+export async function deleteContentBlock(service: SupabaseClient, page: ContentPageRow, blockId: string): Promise<ActionResult> {
+  if (!canEdit(page)) {
+    return { ok: false, status: 409, message: "Der Text kann in diesem Zustand nicht geändert werden." };
+  }
+  const removed = removeBlock(page.html, blockId);
+  if ("error" in removed) {
+    const message = {
+      missing: "Abschnitt nicht gefunden.",
+      h1: "Die H1 lässt sich nicht löschen. Sie können sie direkt im Text ändern.",
+      last: "Der letzte Abschnitt lässt sich nicht löschen.",
+    }[removed.error];
+    return { ok: false, status: removed.error === "missing" ? 404 : 400, message };
+  }
+  const drop = <T extends { block_id?: string | null }>(list: T[]) => list.filter((f) => f.block_id !== blockId);
+  const { error } = await service
+    .from("dt_content_pages")
+    .update({
+      html: removed.html,
+      markdown: htmlToMarkdown(removed.html),
+      findings: drop(page.findings),
+      final_findings: drop(page.final_findings),
+      unresolved: drop(page.unresolved),
+      questions: drop(page.questions),
+    })
+    .eq("id", page.id)
+    .neq("state", "laeuft");
   if (error) return { ok: false, status: 500, message: error.message };
   return { ok: true, jobId: null };
 }

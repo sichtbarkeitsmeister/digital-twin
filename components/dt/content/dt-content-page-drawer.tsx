@@ -126,6 +126,8 @@ type Mode =
   | { kind: "rerun"; action: ContentAction }
   /** „Abschnitt überarbeiten lassen“, or an open point's „Vorschlag umsetzen“ / „Eigene Angabe“. */
   | { kind: "revise"; finding: ContentFinding | null; ask: "instruction" | "proposal" | "info" }
+  /** „Abschnitt einfügen“: an own Abschnitt with heading and text (`blockId` is the one it goes after). */
+  | { kind: "add" }
   | null;
 
 /** A revised Abschnitt waiting for „Übernehmen“. */
@@ -169,6 +171,9 @@ export function DtContentPageDrawer(props: {
   const [mode, setMode] = useState<Mode>(null);
   const [blockId, setBlockId] = useState("");
   const [blockText, setBlockText] = useState("");
+  const [newHeading, setNewHeading] = useState("");
+  const [newLevel, setNewLevel] = useState<2 | 3 | 4>(2);
+  const [newText, setNewText] = useState("");
   const [note, setNote] = useState("");
   const [reviseText, setReviseText] = useState("");
   const [revisePreview, setRevisePreview] = useState<RevisionPreviewData | null>(null);
@@ -339,6 +344,46 @@ export function DtContentPageDrawer(props: {
     setBlockId(first);
     setBlockText(blocks.find((b) => b.id === first)?.text ?? "");
     setMode({ kind: "edit", action });
+  }
+
+  /** „Abschnitt einfügen“: the form for an own Abschnitt after the given one (default: the last). */
+  function startAdd(afterId?: string) {
+    setBlockId(afterId ?? blocks[blocks.length - 1]?.id ?? "");
+    setNewHeading("");
+    setNewLevel(2);
+    setNewText("");
+    setMode({ kind: "add" });
+  }
+
+  async function submitAdd() {
+    if (!base || mode?.kind !== "add" || !blockId || !newHeading.trim() || !newText.trim()) return;
+    setBusy("add_block");
+    const res = await contentApi<{ review: ContentReview; block_id: string | null }>(`${base}/blocks`, {
+      method: "POST",
+      body: { organisationId, after_block_id: blockId, heading: newHeading, level: newLevel, text: newText },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.message, { duration: 10_000 });
+      return;
+    }
+    if (baseRef.current === base) setReview(res.data.review);
+    setMode(null);
+    toast.success("Abschnitt eingefügt");
+    onChangedRef.current();
+  }
+
+  async function deleteBlock(id: string, heading: string | null) {
+    if (!base) return;
+    if (!window.confirm(`Abschnitt „${heading ?? id}“ wirklich löschen? Offene Punkte zu diesem Abschnitt gehen mit.`)) return;
+    const res = await contentApi<{ review: ContentReview }>(`${base}/blocks`, { method: "DELETE", body: { organisationId, block_id: id } });
+    if (!res.ok) {
+      toast.error(res.message, { duration: 10_000 });
+      return;
+    }
+    if (baseRef.current === base) setReview(res.data.review);
+    toast.success("Abschnitt gelöscht");
+    onChangedRef.current();
   }
 
   /** „Abschnitt überarbeiten lassen“; from an open point with its Abschnitt chosen when the point names one. */
@@ -1014,9 +1059,14 @@ export function DtContentPageDrawer(props: {
                           onSave={saveMeta}
                         />
                         {textEditable ? (
-                          <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
-                            Den Text direkt anklicken und ändern: gespeichert wird, wenn Sie den Abschnitt verlassen (Strg+Enter), Esc nimmt die Änderung zurück.
-                          </p>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[11px] leading-snug text-sbkm-ink-500 dark:text-white/45">
+                              Den Text direkt anklicken und ändern: gespeichert wird, wenn Sie den Abschnitt verlassen (Strg+Enter), Esc nimmt die Änderung zurück. Beim Überfahren eines Abschnitts erscheinen „+ Abschnitt darunter“ und „Löschen“.
+                            </p>
+                            <DtPillButton size="sm" variant="outline" className="h-7 px-3 text-xs" disabled={Boolean(busy)} onClick={() => startAdd()}>
+                              + Abschnitt einfügen
+                            </DtPillButton>
+                          </div>
                         ) : null}
                         <DtContentTextFrame
                           html={review.html}
@@ -1026,6 +1076,8 @@ export function DtContentPageDrawer(props: {
                           kundePrueft={review.kunde_prueft}
                           editable={textEditable}
                           onEditBlock={saveTextEdit}
+                          onAddBlock={(id) => startAdd(id)}
+                          onDeleteBlock={(id, heading) => void deleteBlock(id, heading)}
                         />
                       </>
                     ) : (
@@ -1672,6 +1724,65 @@ export function DtContentPageDrawer(props: {
                       >
                         {busy === "edit" ? <Loader2 className="size-3.5 animate-spin" /> : null}
                         Abschnitt speichern
+                      </DtPillButton>
+                      <DtPillButton size="sm" variant="ghost" onClick={() => setMode(null)}>
+                        Abbrechen
+                      </DtPillButton>
+                    </div>
+                  </div>
+                ) : null}
+
+                {mode?.kind === "add" ? (
+                  <div className="mb-3 grid gap-2">
+                    <DtSelect
+                      label="Einfügen nach Abschnitt"
+                      value={blockId}
+                      onValueChange={setBlockId}
+                      options={blockOptions}
+                      elevated
+                      side="top"
+                      fullWidth
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={newHeading}
+                        onChange={(e) => setNewHeading(e.target.value)}
+                        maxLength={300}
+                        placeholder="Überschrift des neuen Abschnitts"
+                        aria-label="Überschrift des neuen Abschnitts"
+                        className={cn(textareaClass, "min-h-0 min-w-[16rem] flex-1 py-2")}
+                      />
+                      <div className="flex items-center gap-1" role="group" aria-label="Überschriftsebene">
+                        {([2, 3, 4] as const).map((level) => (
+                          <button
+                            key={level}
+                            type="button"
+                            aria-pressed={newLevel === level}
+                            onClick={() => setNewLevel(level)}
+                            className={cn(
+                              "h-8 rounded-pill border px-3 text-xs font-bold transition",
+                              newLevel === level
+                                ? "border-sbkm-navy bg-sbkm-navy text-white dark:border-white dark:bg-white dark:text-sbkm-navy"
+                                : "border-sbkm-navy/15 text-sbkm-navy hover:bg-sbkm-mint/20 dark:border-white/15 dark:text-white",
+                            )}
+                          >
+                            H{level}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <DtContentDictationField
+                      className={textareaClass}
+                      value={newText}
+                      onChange={setNewText}
+                      placeholder="Text des Abschnitts. Eine Leerzeile beginnt einen neuen Absatz, „- “ am Zeilenanfang macht eine Liste."
+                      ariaLabel="Text des neuen Abschnitts"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <DtPillButton size="sm" disabled={!blockId || !newHeading.trim() || !newText.trim() || Boolean(busy)} onClick={() => void submitAdd()}>
+                        {busy === "add_block" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                        Abschnitt einfügen
                       </DtPillButton>
                       <DtPillButton size="sm" variant="ghost" onClick={() => setMode(null)}>
                         Abbrechen
