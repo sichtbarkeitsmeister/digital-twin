@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { DtGlassCard } from "@/components/dt/dt-glass-card";
 import { DtPillButton } from "@/components/dt/dt-pill-button";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_TEXTER_PROMPT, TEXTER_PROMPT_HREF } from "@/lib/dt/content/texter-prompt";
+import { DtPromptLimitNotice, promptOverLimit } from "@/components/dt/content/dt-prompt-limit-notice";
+import { DEFAULT_TEXTER_PROMPT, TEXTER_PROMPT_HREF, TEXTER_PROMPT_MAX_CHARS } from "@/lib/dt/content/texter-prompt";
 
 const ENDPOINT = "/api/dt/platform-settings/texter-prompt";
 
@@ -69,6 +70,8 @@ export function DtTexterPromptCard(props: { placement: "texte" | "global" }) {
   }, [apply]);
 
   const dirty = draft.trim() !== saved.trim();
+  // The server refuses a longer prompt; the field says so before the click instead of after.
+  const tooLong = promptOverLimit(draft.trim().length, TEXTER_PROMPT_MAX_CHARS) > 0;
 
   async function save(next?: string) {
     if (busy || !persisted) return;
@@ -81,7 +84,10 @@ export function DtTexterPromptCard(props: { placement: "texte" | "global" }) {
       });
       const json = (await res.json().catch(() => null)) as TexterResponse | null;
       if (!json?.ok || typeof json.prompt !== "string") {
-        toast.error(json?.message ?? "Text-Prompt konnte nicht gespeichert werden.");
+        toast.error("Text-Prompt nicht gespeichert", {
+          description: json?.message ?? "Die Änderung wurde nicht übernommen. Es gilt weiter die zuletzt gespeicherte Fassung.",
+          duration: 15_000,
+        });
         return;
       }
       apply(json);
@@ -152,10 +158,18 @@ export function DtTexterPromptCard(props: { placement: "texte" | "global" }) {
         onChange={(event) => setDraft(event.target.value)}
         className="min-h-[320px] font-mono text-sm leading-relaxed"
       />
+      <DtPromptLimitNotice label="Der Text-Prompt" length={draft.trim().length} max={TEXTER_PROMPT_MAX_CHARS} />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs tabular-nums text-sbkm-ink-500 dark:text-white/45">
+        <p
+          className={
+            tooLong
+              ? "text-xs font-semibold tabular-nums text-red-700 dark:text-red-300"
+              : "text-xs tabular-nums text-sbkm-ink-500 dark:text-white/45"
+          }
+        >
           {isDefault && !dirty ? "Standard · " : ""}
-          {draft.length.toLocaleString("de-DE")} Zeichen
+          {draft.trim().length.toLocaleString("de-DE")} / {TEXTER_PROMPT_MAX_CHARS.toLocaleString("de-DE")} Zeichen
+          {dirty ? " · nicht gespeichert" : ""}
         </p>
         <div className="flex flex-wrap gap-2">
           <DtPillButton
@@ -171,7 +185,7 @@ export function DtTexterPromptCard(props: { placement: "texte" | "global" }) {
             {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <RotateCcw className="size-3.5" aria-hidden />}
             Auf Standard zurücksetzen
           </DtPillButton>
-          <DtPillButton type="button" size="sm" disabled={loading || busy || !persisted || !dirty} onClick={() => void save()}>
+          <DtPillButton type="button" size="sm" disabled={loading || busy || !persisted || !dirty || tooLong} onClick={() => void save()}>
             {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Save className="size-3.5" aria-hidden />}
             Text-Prompt speichern
           </DtPillButton>
