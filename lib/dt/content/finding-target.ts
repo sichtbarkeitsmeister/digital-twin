@@ -73,7 +73,42 @@ export function findingTargetBlocks(f: Pick<ContentFinding, "block_id" | "proble
   }
   const out: string[] = [];
   for (const h of hits.sort((a, b) => a.at - b.at)) if (!out.includes(h.id)) out.push(h.id);
+  // An open point about a word or phrase that is used too often is about every Abschnitt that uses it,
+  // even when the model pinned it to one (the H1, where the word first appears) or to none.
+  if (out.length === 0 || REPETITION_RE.test(text)) {
+    const used = blocksUsingNamedTerm(text, blocks);
+    if (used.length > 0) return blocks.map((b) => b.id).filter((id) => out.includes(id) || used.includes(id));
+  }
   return out;
+}
+
+/** Cues that a point is about a word or phrase used too often. */
+const REPETITION_RE = /zu\s+(?:oft|häufig|viel)|mehrfach|wiederhol|häufung|überstrapaz|-?mal\b|\bmal\s+vor|doppelt|dopplung/i;
+
+/** The most Abschnitte a point about a word may reach; a word in more of them is too common to follow. */
+export const TERM_TARGET_MAX = 12;
+
+/**
+ * The word an open point is about, when it names one: a short quote („Darmsanierung“) or the word after
+ * „Wort“, „Begriff“, „Ausdruck“, „Formulierung“, „Phrase“. The first one that sits in one to
+ * `TERM_TARGET_MAX` Abschnitte decides; their ids in text order, or none.
+ */
+export function blocksUsingNamedTerm(text: string, blocks: readonly Pick<ContentTextBlock, "id" | "heading" | "html">[]): string[] {
+  const terms: string[] = [];
+  for (const m of text.matchAll(/(?:Wort|Wortes|Begriff|Begriffs|Begriffe|Ausdruck|Formulierung|Phrase)\s+(?:„)?([\p{L}][\p{L}\-]{2,39})/gu)) terms.push(m[1]!);
+  for (const m of text.matchAll(/„([^“]{3,40})“/g)) terms.push(m[1]!);
+  const seen = new Set<string>();
+  const plains = blocks.map((b) => ({ id: b.id, text: plain(b).toLowerCase() }));
+  for (const raw of terms) {
+    const term = raw.replace(/\s+/g, " ").trim().replace(/[.,;:!?]+$/, "");
+    const key = term.toLowerCase();
+    if (term.length < 3 || seen.has(key)) continue;
+    seen.add(key);
+    const pattern = new RegExp(`(?<![\\p{L}\\d])${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\d])`, "u");
+    const ids = plains.filter((b) => pattern.test(b.text)).map((b) => b.id);
+    if (ids.length >= 1 && ids.length <= TERM_TARGET_MAX) return ids;
+  }
+  return [];
 }
 
 /** The first Abschnitt an open point is about (see `findingTargetBlocks`); null when none. */
