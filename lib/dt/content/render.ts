@@ -207,6 +207,90 @@ export function renderBlocksHtml(blocks: readonly ContentTextBlock[], options: {
 }
 
 /**
+ * Typed or dictated text → the HTML of an Abschnitt: a blank line starts a paragraph, lines that start
+ * with „- “, „• “ or „* “ make a list, lines that start with „1. “ or „1) “ a numbered one. Everything else
+ * is escaped; the result is already clean (`sanitizeBlockHtml` leaves it as it is).
+ */
+export function plainTextToBlockHtml(text: string): string {
+  const parts: string[] = [];
+  let paragraph: string[] = [];
+  let list: { tag: "ul" | "ol"; items: string[] } | null = null;
+  const flushParagraph = () => {
+    if (paragraph.length > 0) parts.push(`<p>${paragraph.map(escapeHtml).join("<br>")}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (list) parts.push(`<${list.tag}>${list.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</${list.tag}>`);
+    list = null;
+  };
+  for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
+    const line = raw.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+    const bullet = line.match(/^[-•*]\s+(.+)$/);
+    const numbered = line.match(/^\d+[.)]\s+(.+)$/);
+    if (bullet || numbered) {
+      flushParagraph();
+      const tag = bullet ? "ul" : "ol";
+      if (list && list.tag !== tag) flushList();
+      list = list ?? { tag, items: [] };
+      list.items.push((bullet ?? numbered)![1]!.trim());
+      continue;
+    }
+    flushList();
+    paragraph.push(line);
+  }
+  flushParagraph();
+  flushList();
+  return parts.join("\n");
+}
+
+/** What a new Abschnitt may not be: no heading, an empty body, a level other than H2–H4, or too many Abschnitte. */
+export type NewBlockError = "heading" | "body" | "limit" | "size" | "missing";
+
+/**
+ * A new Abschnitt after the given one (own heading, level H2–H4, body as plain text). Its id comes from the
+ * heading and is unique. Returns the new HTML and the block, or why not (`missing`: no such Abschnitt to
+ * insert after).
+ */
+export function insertBlockAfter(
+  html: string,
+  afterBlockId: string,
+  input: { heading: string; level: 2 | 3 | 4; text: string },
+): { html: string; block: ContentTextBlock } | { error: NewBlockError } {
+  const blocks = parseBlocksFromHtml(html);
+  const index = blocks.findIndex((b) => b.id === afterBlockId);
+  if (index < 0) return { error: "missing" };
+  const heading = input.heading.replace(/\s+/g, " ").trim();
+  if (!heading) return { error: "heading" };
+  const body = sanitizeBlockHtml(plainTextToBlockHtml(input.text));
+  if (!body) return { error: "body" };
+  if (body.length > CONTENT_MAX_BLOCK_HTML) return { error: "size" };
+  if (blocks.length >= CONTENT_MAX_BLOCKS) return { error: "limit" };
+  const level = input.level === 3 || input.level === 4 ? input.level : 2;
+  const block: ContentTextBlock = { id: uniqueId(heading, new Set(blocks.map((b) => b.id))), heading, level, html: body };
+  blocks.splice(index + 1, 0, block);
+  return { html: renderBlocksHtml(blocks), block };
+}
+
+/**
+ * Removes an Abschnitt. The H1 (the first Abschnitt, level 1) and the last remaining Abschnitt stay.
+ * Returns the new HTML, or why not.
+ */
+export function removeBlock(html: string, blockId: string): { html: string } | { error: "missing" | "h1" | "last" } {
+  const blocks = parseBlocksFromHtml(html);
+  const index = blocks.findIndex((b) => b.id === blockId);
+  if (index < 0) return { error: "missing" };
+  if (index === 0 && blocks[0]!.level === 1) return { error: "h1" };
+  if (blocks.length <= 1) return { error: "last" };
+  blocks.splice(index, 1);
+  return { html: renderBlocksHtml(blocks) };
+}
+
+/**
  * Direct editing in the page window: the Abschnitt's body becomes the given HTML (cleaned like model
  * output: paragraphs, lists and emphasis only), and its heading the given text. The heading's level
  * and the Abschnitt's id stay. An empty heading or none given keeps the old one. Null: no such
