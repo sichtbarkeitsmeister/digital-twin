@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 
 import { createPdfFromText } from "@/lib/dt/chat-file-pdf";
+import { looksLikeMarkdown, markdownToHtml } from "@/lib/shared/markdown-lite";
 import { sanitizeStorageFileSegment } from "@/lib/ai/chat-attachments";
 
 export const DT_MAX_CREATED_FILES = 4;
@@ -51,6 +52,7 @@ Wenn der Nutzer eine Datei anhängt, steht der Inhalt im User-Text unter „--- 
 Wenn der Nutzer eine Datei zum Anschauen oder Herunterladen braucht, erzeuge sie mit dem Werkzeug create_file — nicht nur als Codeblock in der Chat-Antwort. Behaupte nie, du könntest keine Dateien erstellen.
 
 Formate: html (Vorschau im Chat, z. B. Landingpage oder Tabelle), pdf (druckbares Dokument), xlsx (Excel), csv, markdown, text, json.
+Für pdf und für html aus Fließtext schreibe den Inhalt als Markdown (# Überschrift, ## Zwischenüberschrift, **fett**, Listen mit „- “ oder „1. “, Tabellen mit „|“): Daraus entsteht ein sauber formatiertes Dokument mit echten Überschriften, ohne sichtbare Markdown-Zeichen. Schreibe dort keine „##“ als Dekoration und kein rohes HTML in ein pdf.
 HTML gehört in create_file, nicht als rohes HTML in die Chat-Nachricht.
 Nach dem Erzeugen kurz sagen, welche Datei bereitliegt; der Nutzer öffnet und lädt sie in der Karte unter der Nachricht.`;
 
@@ -188,7 +190,9 @@ export async function buildCreatedChatFile(input: {
 
   let bytes: Uint8Array;
   if (format === "html") {
-    bytes = utf8Bytes(wrapHtmlDocument(content, title));
+    // Text that is Markdown (no tags in it) becomes real headings and lists instead of showing „##“.
+    const asHtml = !/<[a-z][\s\S]*?>/i.test(content) && looksLikeMarkdown(content) ? markdownToHtml(content) : content;
+    bytes = utf8Bytes(wrapHtmlDocument(asHtml, title));
   } else if (format === "pdf") {
     bytes = await createPdfFromText({ text: content, title });
   } else if (format === "xlsx") {
