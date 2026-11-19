@@ -4,7 +4,9 @@ import { useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Download, FileImage, FileSpreadsheet, FileText, FileType } from "lucide-react";
 
+import { DtChatCopyButton } from "@/components/dt/chat/dt-chat-copy-button";
 import { DtChatMarkdown } from "@/components/dt/chat/dt-chat-markdown";
+import { handleChatCopyEvent } from "@/lib/dt/chat-clipboard";
 import { DtSeoChatTaskProposals } from "@/components/dt/seo/dt-seo-chat-task-proposals";
 import { cn } from "@/components/dt/cn";
 import type { DtChatPreviewFile } from "@/components/dt/chat/dt-chat-file-preview";
@@ -321,8 +323,16 @@ export function DtChatMessage(props: {
         {isUser ? (
           <p className="whitespace-pre-wrap">{displayContent}</p>
         ) : (
-          <DtChatMarkdown content={displayContent} />
+          // Selecting and copying gives clean headings and tables too (the chat draws them smaller than they are).
+          <div onCopy={(e) => void handleChatCopyEvent(e.nativeEvent)}>
+            <DtChatMarkdown content={displayContent} />
+          </div>
         )}
+        {!isUser && displayContent.trim() ? (
+          <div className="mt-2 flex justify-end">
+            <DtChatCopyButton markdown={displayContent} />
+          </div>
+        ) : null}
         <AttachmentRow isUser={isUser} items={attachItems} onPreview={onPreview} />
         {!isUser && taskProposals.length > 0 && props.onSaveTaskProposal ? (
           <DtSeoChatTaskProposals
