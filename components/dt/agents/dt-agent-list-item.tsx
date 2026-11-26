@@ -411,7 +411,8 @@ export function DtAgentListItem(props: {
           </p>
         ) : null}
         <div className="mt-4 grid gap-3">
-          {props.canDirectlyEdit && !viewOnly ? (
+          {/* Only for legacy questionnaire-based agents; transcript-based ones have no source survey. */}
+          {props.canDirectlyEdit && !viewOnly && agent.source_survey_id ? (
             <DtAgentSurveyCoverageCheck
               agentId={agent.id}
               agentName={agent.name}
