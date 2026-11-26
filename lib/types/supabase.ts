@@ -1092,8 +1092,16 @@ export type Database = {
         Args: { p_answers: Json; p_mark_completed?: boolean; p_slug: string }
         Returns: undefined
       }
+      clear_organisation_owner: {
+        Args: { org_id: string }
+        Returns: undefined
+      }
       transfer_organisation_ownership: {
-        Args: { new_owner_user_id: string; org_id: string }
+        Args: {
+          new_owner_user_id: string
+          org_id: string
+          remove_previous_owner?: boolean
+        }
         Returns: undefined
       }
       upsert_public_field_remark: {
